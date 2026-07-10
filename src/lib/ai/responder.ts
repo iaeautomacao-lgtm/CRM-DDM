@@ -255,8 +255,9 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
     const inst = ddmData.instituicao || ddmData.institution || "Cruzeiro";
     const debt = ddmData.valor_divida || ddmData.valor || "0,00";
     const sistema = ddmData.sistema || "";
+    const hasActiveDebt = debt && debt !== "0,00" && debt !== "0" && debt !== 0;
 
-    if (inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") {
+    if ((inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") && hasActiveDebt) {
       systemPromptWithKb = `Você é Sabrina, Representante Financeiro da Universidade Cruzeiro do Sul, atuando como analista financeira consultiva da assessoria DDM.
 
 === DADOS DO CLIENTE (DDM API) ===
@@ -284,8 +285,19 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
    - NUNCA feche ou formalize o acordo sem a confirmação explícita e inequívoca do cliente (ex: "sim", "quero fechar", "fechado").
    - Antes de formalizar, confirme obrigatoriamente: E-mail, Número de celular, Forma de pagamento e Condições do acordo.
    - Quando o acordo for confirmado de forma explícita, retorne a tag especial #ACORDOFORMALIZADO ao final do resumo.
-5. **Tratamento de Recusas:**
+5. **Tratamento de Recusas e Solicitação de Atendente:**
+   - Se o cliente solicitar falar com um atendente humano, transferir ou disser que prefere falar com uma pessoa, diga que está transferindo o atendimento e termine a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
    - Se o cliente recusar, argumente gentilmente até 3 vezes lembrando-o das consequências (acúmulo de juros, ações de cobrança e órgãos de proteção de crédito) antes de desistir. Caso ele mantenha a recusa após as 3 tentativas, retorne #RECUSA no final da mensagem.`;
+    } else if (!hasActiveDebt) {
+      systemPromptWithKb = `${systemPromptWithKb}
+
+=== INFORMAÇÕES DE CONSULTA (DDM API) ===
+O cliente informou o CPF e foi localizado na DDM sob a instituição: ${inst}, porém o valor de seus débitos ativos está ZERADO ou não há pendências ativas.
+
+=== INSTRUÇÃO DE DEVOLUÇÃO (SEM DÍVIDA ATIVA) ===
+Você é o(a) Aleh. Como o cadastro do cliente na instituição ${inst} não possui dívidas ativas:
+- Analise o histórico recente da conversa. Se você já fez a pergunta sobre transferência e o cliente respondeu "Sim", "Quero", ou solicitou falar com um atendente, você deve APENAS dizer que está transferindo o atendimento e terminar a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
+- Caso contrário, informe de maneira simpática e educada que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira em aberto para a instituição ${inst} no momento. Em seguida, pergunte se ele deseja ser transferido para um atendente humano para verificar detalhadamente.`;
     } else {
       systemPromptWithKb = `${systemPromptWithKb}
 
