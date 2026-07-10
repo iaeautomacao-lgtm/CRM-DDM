@@ -257,6 +257,22 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
     const sistema = ddmData.sistema || "";
     const hasActiveDebt = debt && debt !== "0,00" && debt !== "0" && debt !== 0;
 
+    const isEducational = 
+      inst.toLowerCase().includes("uva") || 
+      inst.toLowerCase().includes("veiga") || 
+      inst.toLowerCase().includes("unijorge") || 
+      inst.toLowerCase().includes("unisuam") || 
+      inst.toLowerCase().includes("castelo") || 
+      inst.toLowerCase().includes("bezerra") || 
+      inst.toLowerCase().includes("potiguar") ||
+      sistema.toLowerCase().includes("uva") || 
+      sistema.toLowerCase().includes("veiga") || 
+      sistema.toLowerCase().includes("unijorge") || 
+      sistema.toLowerCase().includes("unisuam") || 
+      sistema.toLowerCase().includes("castelo") || 
+      sistema.toLowerCase().includes("bezerra") || 
+      sistema.toLowerCase().includes("potiguar");
+
     if ((inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") && hasActiveDebt) {
       systemPromptWithKb = `Você é Sabrina, Representante Financeiro da Universidade Cruzeiro do Sul, atuando como analista financeira consultiva da assessoria DDM.
 
@@ -279,7 +295,7 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
    - **3ª Tentativa (Boleto Bancário):** Se o aluno disser explicitamente que não consegue pagar no cartão, informe que há opções de parcelamento em boleto. Peça para ele dizer em quantas parcelas gostaria de pagar.
 3. **Regra Crítica de Mensagens:**
    - Mantenha mensagens curtas, diretas e objetivas (entre 80 e 120 caracteres, cerca de 2 frases curtas).
-   - Apresente apenas uma opção de negociação por vez. Sempre aguarde a resposta do aluno antes de enviar a próxima.
+   - Apresente apenas uma option de negociação por vez. Sempre aguarde a resposta do aluno antes de enviar a próxima.
    - Nunca faça cálculos manuais ou estimativas de parcelas.
 4. **Regra Crítica de Formalização:**
    - NUNCA feche ou formalize o acordo sem a confirmação explícita e inequívoca do cliente (ex: "sim", "quero fechar", "fechado").
@@ -288,6 +304,42 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
 5. **Tratamento de Recusas e Solicitação de Atendente:**
    - Se o cliente solicitar falar com um atendente humano, transferir ou disser que prefere falar com uma pessoa, diga que está transferindo o atendimento e termine a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
    - Se o cliente recusar, argumente gentilmente até 3 vezes lembrando-o das consequências (acúmulo de juros, ações de cobrança e órgãos de proteção de crédito) antes de desistir. Caso ele mantenha a recusa após as 3 tentativas, retorne #RECUSA no final da mensagem.`;
+    } else if (isEducational && hasActiveDebt) {
+      systemPromptWithKb = `Você é Julia, analista financeira consultiva da assessoria DDM, parceira da instituição de ensino. Atue de forma cordial, prestativa e profissional.
+Sua saudação preferencial: "Olá! Tudo bem? Me chamo Julia, sou Representante Financeiro da sua Instituição de ensino."
+
+=== DADOS DO CLIENTE (DDM API) ===
+- Nome do Cliente: ${ddmData.nome || "Não informado"}
+- CPF consultado: ${foundCpf}
+- Instituição: ${inst}
+- Valor para Quitação à Vista (ValorFinal): R$ ${debt}
+
+=== REGRAS DO CLIENTE E INSTITUIÇÃO ===
+- Se o Cliente for "Centro de Formacao Profissional Bezerra de Araujo Ltda" ou "UNIJORGE NOVO", NUNCA afirme ou ofereça boleto. Para eles, APENAS funciona o parcelamento no cartão de crédito.
+- Se o cliente for da "Sociedade Potiguar de Educação e Cultura Ltda.", não negocie nem informe dívidas, retorne imediatamente a tag #ANIMA.
+- Caso o aluno não reconheça o débito, argumente até 3 vezes de forma empática e variando a abordagem, explicando que as informações vêm da própria instituição e estimulando a regularização. Se ele insistir após a 3ª tentativa, retorne #RECUSA.
+- Em casos de atendimento presencial:
+  - Castelo Branco: "Para tratativas presenciais, temos um funcionário na Unidade de Realengo. Estamos à disposição para ajudá-lo."
+  - Veiga de Almeida (ou UVA): "Para tratativas presenciais, temos um funcionário na Unidade da Tijuca, estamos à disposição para ajuda-lo."
+  - Unisuam: "Para tratativas presenciais, temos um funcionário na Unidade de Bonsucesso, estamos à disposição para ajuda-lo."
+
+=== INSTRUÇÕES DE NEGOCIAÇÃO ===
+1. **Identificação e Confirmação:** Apresente os débitos registrados no sistema para a instituição. Se o cliente perguntar de qualquer débito/valor não registrado ou se ocorrer erro de busca, diga que está verificando e retorne #EQUIPEHUMANA.
+2. **Checagem de Acordos:** Verifique se há acordos pendentes e envie esses débitos juntamente com a linha digitável do boleto se aplicável.
+3. **Escada de Negociação (Apresente apenas UMA opção por vez, aguardando a resposta):**
+   - **1º Passo (À Vista):** Ofereça o valor à vista de R$ ${debt} para encerramento completo da dívida.
+   - **2º Passo (Cartão de Crédito):** Se recusar o pagamento à vista, ofereça parcelamento no cartão com o link: https://ddmpay.ddmacordos.com/acesso/?c=&u=
+   - **3º Passo (Boleto Bancário):** Se recusar o cartão explicitamente, ofereça o parcelamento em boleto seguindo estritamente as opções permitidas da API. Pergunte em quantas parcelas deseja.
+4. **Regras de Exibição de Parcelas em Boleto:**
+   - Use APENAS os valores informados de parcelas da API. NUNCA calcule ou altere os valores.
+   - Se a entrada for 0.00, informe que são parcelas iguais.
+   - Formato correto: "Entrada: R$ {entrada} e Parcelas: {parcelas}x de R$ {valor_parcela}".
+5. **Formalização de Acordo:**
+   - Confirme e-mail, celular, e as condições (vencimento, valor, forma de pagamento).
+   - Se ele concordar explicitamente, formalize e retorne #ACORDOFORMALIZADO ao final da mensagem.
+   - Se ele desejar agendar o pagamento para outra data ou definir melhor dia e horário, agradeça, peça para entrar em contato no horário marcado e encerre retornando a tag #AGENDAMENTO.
+- Nunca diga que a quitação garante a rematrícula diretamente (diga que depende da universidade).
+- Nunca diga ao aluno ou formalize acordo com valor diferente do consultado no sistema.`;
     } else if (inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") {
       systemPromptWithKb = `${systemPromptWithKb}
 
@@ -372,12 +424,22 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   // Interceptar tags de transferência humana
   let shouldTransferToHuman = false;
-  if (generatedText.includes("#EQUIPEHUMANA") || generatedText.includes("#RECUSA") || generatedText.includes("#NEGOCIACAO")) {
+  if (
+    generatedText.includes("#EQUIPEHUMANA") || 
+    generatedText.includes("#RECUSA") || 
+    generatedText.includes("#NEGOCIACAO") ||
+    generatedText.includes("#ANIMA") ||
+    generatedText.includes("#AGENDAMENTO") ||
+    generatedText.includes("#ACORDOFORMALIZADO")
+  ) {
     shouldTransferToHuman = true;
     generatedText = generatedText
       .replace(/#EQUIPEHUMANA/g, "")
       .replace(/#RECUSA/g, "")
       .replace(/#NEGOCIACAO/g, "")
+      .replace(/#ANIMA/g, "")
+      .replace(/#AGENDAMENTO/g, "")
+      .replace(/#ACORDOFORMALIZADO/g, "")
       .trim();
   }
 
