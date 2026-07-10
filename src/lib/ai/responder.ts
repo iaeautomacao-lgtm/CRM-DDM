@@ -18,6 +18,53 @@ const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
   }
 });
 
+interface DdmCpfResponse {
+  instituicao?: string;
+  valor_divida?: number | string;
+  [key: string]: any;
+}
+
+async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
+  const apiUrl = process.env.DDM_API_URL;
+  const apiKey = process.env.DDM_API_KEY;
+
+  if (!apiUrl) {
+    console.warn("[AI Agent] DDM_API_URL is not configured.");
+    return null;
+  }
+
+  try {
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { "Authorization": `Bearer ${apiKey}`, "x-api-key": apiKey } : {}),
+      },
+      body: JSON.stringify({ cpf }),
+    });
+
+    if (!res.ok) {
+      console.warn(`[AI Agent] DDM API request failed with status: ${res.status}`);
+      // Try GET as a fallback if the POST request returns an error
+      const getUrl = new URL(apiUrl);
+      getUrl.searchParams.set("cpf", cpf);
+      const resGet = await fetch(getUrl.toString(), {
+        method: "GET",
+        headers: apiKey ? { "Authorization": `Bearer ${apiKey}`, "x-api-key": apiKey } : {},
+      });
+      if (resGet.ok) {
+        return await resGet.json();
+      }
+      return null;
+    }
+
+    return await res.json();
+  } catch (err) {
+    console.error("[AI Agent] DDM API fetch error:", err);
+    return null;
+  }
+}
+
 export async function handleAiAutoResponse(
   accountId: string,
   contactId: string,
@@ -152,6 +199,59 @@ ${kbContext}
 === FIM DA BASE DE CONHECIMENTO ===
 
 Use as informações da base de conhecimento acima para responder às dúvidas do cliente com a maior precisão possível. Se a informação não estiver na base, aja de acordo com suas instruções normais.`;
+  }
+
+  // 4b. Orquestrador de Agentes (Lógica Gojenier com API DDM)
+  const cpfRegex = /\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/;
+  let foundCpf: string | null = null;
+
+  for (let idx = history.length - 1; idx >= 0; idx--) {
+    const textToSearch = history[idx].content_text || "";
+    const m = textToSearch.match(cpfRegex);
+    if (m) {
+      foundCpf = m[0].replace(/\D/g, "");
+      break;
+    }
+  }
+
+  let ddmData: DdmCpfResponse | null = null;
+  if (foundCpf && foundCpf.length === 11) {
+    console.log(`[AI Agent] Found CPF ${foundCpf} in conversation. Calling DDM API...`);
+    ddmData = await fetchDdmCpfDetails(foundCpf);
+  }
+
+  if (ddmData) {
+    const inst = ddmData.instituicao || ddmData.institution;
+    if (inst) {
+      const debt = ddmData.valor_divida || ddmData.valor || "0,00";
+      systemPromptWithKb = `${systemPromptWithKb}
+
+=== INFORMAÇÕES DE CONSULTA (DDM API) ===
+O cliente informou o CPF e possui uma dívida ativa localizada na DDM.
+- Instituição Responsável: ${inst}
+- Valor da Dívida: R$ ${debt}
+
+=== REGRAS DE ATENDIMENTO DA INSTITUIÇÃO (${inst}) ===
+Você agora é um atendente oficial da instituição ${inst}.
+1. Confirme para o cliente que localizou a pendência referente à instituição ${inst}.
+2. Informe o valor da dívida de R$ ${debt} de forma clara e amigável.
+3. Pergunte se ele gostaria de ver as opções de acordo para quitar essa pendência.
+4. Siga estritamente as regras de negociação da instituição ${inst}.`;
+    } else {
+      systemPromptWithKb = `${systemPromptWithKb}
+
+=== INFORMAÇÕES DE CONSULTA (DDM API) ===
+O cliente informou o CPF, mas a consulta na API da DDM não retornou nenhuma pendência ativa ou instituição vinculada.
+Instrução: Informe educadamente que você realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira no momento.`;
+    }
+  } else {
+    systemPromptWithKb = `${systemPromptWithKb}
+
+=== INFORMAÇÃO OBRIGATÓRIA ANTES DE INICIAR ===
+Você é o orquestrador geral de atendimento.
+Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acordos até que o cliente forneça o CPF.
+1. Se o cliente ainda não enviou o CPF dele nesta conversa, peça-o educadamente e de forma natural (ex: "Para que eu possa consultar suas pendências, poderia me informar o seu CPF?").
+2. Não invente nenhuma informação ou simulação antes de receber o CPF.`;
   }
 
   // 5. Generate response using chosen LLM API
