@@ -290,17 +290,25 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
       systemPromptWithKb = `${systemPromptWithKb}
 
 === INFORMAÇÕES DE CONSULTA (DDM API) ===
-O cliente informou o CPF e possui uma dívida ativa localizada na DDM.
-- Instituição Responsável: ${inst}
-- Valor da Dívida: R$ ${debt}
+O cliente informou o CPF e foi localizado na DDM, porém na instituição: ${inst}.
+O valor da dívida cadastrado é R$ ${debt}.
 
-=== REGRAS DE ATENDIMENTO DA INSTITUIÇÃO (${inst}) ===
-Você agora é um atendente oficial da instituição ${inst}.
-1. Confirme para o cliente que localizou a pendência referente à instituição ${inst}.
-2. Informe o valor da dívida de R$ ${debt} de forma clara e amigável.
-3. Pergunte se ele gostaria de ver as opções de acordo para quitar essa pendência.
-4. Siga estritamente as regras de negociação da instituição ${inst}.`;
+=== INSTRUÇÃO OBRIGATÓRIA DE DIRECIONAMENTO ===
+Você é o(a) Aleh. Como o cliente pertence à instituição ${inst} (e você é especializado na Cruzeiro do Sul), você deve:
+1. Informar educadamente que localizou o cadastro dele na instituição ${inst}.
+2. Explicar de forma simpática que, como você é especializado no atendimento da Cruzeiro do Sul, você irá transferi-lo agora mesmo para a equipe de atendimento humano especializada na ${inst} para ajudá-lo com os débitos.
+3. Finalizar a sua resposta obrigatoriamente retornando a tag #EQUIPEHUMANA.`;
     }
+  } else if (foundCpf) {
+    systemPromptWithKb = `${systemPromptWithKb}
+
+=== INFORMAÇÕES DE CONSULTA (DDM API) ===
+O cliente informou o CPF (${foundCpf}), mas a pesquisa na API da DDM retornou que não há registros ou pendências ativas.
+
+=== INSTRUÇÃO DE DEVOLUÇÃO ===
+Você é o(a) Aleh. Você deve:
+1. Informar educadamente que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira no momento.
+2. Perguntar se ele deseja ser transferido para um atendente humano para verificar detalhadamente. Caso o cliente queira, diga que vai transferir e encerre com a tag #EQUIPEHUMANA.`;
   } else {
     systemPromptWithKb = `${systemPromptWithKb}
 
