@@ -25,42 +25,61 @@ interface DdmCpfResponse {
 }
 
 async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
-  const apiUrl = process.env.DDM_API_URL;
-  const token = process.env.DDM_TOKEN || process.env.DDM_API_KEY;
-
-  if (!apiUrl) {
-    console.warn("[AI Agent] DDM_API_URL is not configured.");
-    return null;
-  }
+  const token = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "2e30b68c0feda298f9d6d40ab36c1a09";
 
   try {
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { "Authorization": `Bearer ${token}`, "x-api-key": token } : {}),
-      },
-      body: JSON.stringify({ cpf }),
-    });
-
-    if (!res.ok) {
-      console.warn(`[AI Agent] DDM API request failed with status: ${res.status}`);
-      // Try GET as a fallback if the POST request returns an error
-      const getUrl = new URL(apiUrl);
-      getUrl.searchParams.set("cpf", cpf);
-      const resGet = await fetch(getUrl.toString(), {
-        method: "GET",
-        headers: token ? { "Authorization": `Bearer ${token}`, "x-api-key": token } : {},
-      });
-      if (resGet.ok) {
-        return await resGet.json();
-      }
+    // Passo 1: Localizar devedor por CPF no localiza_dev.php
+    const localizaUrl = `https://www.ddmacordos.com/calc/localiza_dev.php?tk=${token}&cpf=${cpf}`;
+    const resLocaliza = await fetch(localizaUrl);
+    if (!resLocaliza.ok) {
+      console.warn(`[AI Agent] DDM localiza_dev failed with status: ${resLocaliza.status}`);
       return null;
     }
 
-    return await res.json();
+    const localizaData = await resLocaliza.json();
+    if (!Array.isArray(localizaData) || localizaData.length === 0) {
+      console.log(`[AI Agent] No debtor found for CPF ${cpf}`);
+      return null;
+    }
+
+    const debtor = localizaData[0];
+    const iddev = debtor.iddev;
+    const sistema = debtor.sistema; // ex: 'cruzeiro'
+    const instituicao = debtor.instituicao || "Cruzeiro";
+    const nome = debtor.nome || "";
+
+    if (!iddev || !sistema) {
+      console.warn("[AI Agent] Missing iddev or sistema in debtor localiza data");
+      return { nome, instituicao };
+    }
+
+    // Passo 2: Buscar detalhes de cálculo da dívida com desconto de 40%
+    const calcUrl = `https://ddmacordos.com/calc/?tk=${token}&idDev=${iddev}&cli=${sistema}&Desconto=40`;
+    const resCalc = await fetch(calcUrl);
+    if (!resCalc.ok) {
+      console.warn(`[AI Agent] DDM calc failed with status: ${resCalc.status}`);
+      return { nome, instituicao };
+    }
+
+    const calcData = await resCalc.json();
+    let valor_divida = "0,00";
+
+    if (Array.isArray(calcData)) {
+      const pgtoAvista = calcData.find((obj: any) => obj.PgtoAvista);
+      if (pgtoAvista && pgtoAvista.PgtoAvista && pgtoAvista.PgtoAvista.ValorFinal) {
+        valor_divida = pgtoAvista.PgtoAvista.ValorFinal;
+      }
+    }
+
+    return {
+      nome,
+      instituicao,
+      valor_divida,
+      iddev,
+      sistema
+    };
   } catch (err) {
-    console.error("[AI Agent] DDM API fetch error:", err);
+    console.error("[AI Agent] DDM API sequence error:", err);
     return null;
   }
 }
