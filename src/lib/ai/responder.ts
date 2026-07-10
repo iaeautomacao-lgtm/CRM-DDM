@@ -424,13 +424,19 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   // Interceptar tags de transferência humana
   let shouldTransferToHuman = false;
+  let hasAgreedAcordo = false;
+
+  if (generatedText.includes("#ACORDOFORMALIZADO")) {
+    hasAgreedAcordo = true;
+  }
+
   if (
     generatedText.includes("#EQUIPEHUMANA") || 
     generatedText.includes("#RECUSA") || 
     generatedText.includes("#NEGOCIACAO") ||
     generatedText.includes("#ANIMA") ||
     generatedText.includes("#AGENDAMENTO") ||
-    generatedText.includes("#ACORDOFORMALIZADO")
+    hasAgreedAcordo
   ) {
     shouldTransferToHuman = true;
     generatedText = generatedText
@@ -441,6 +447,30 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       .replace(/#AGENDAMENTO/g, "")
       .replace(/#ACORDOFORMALIZADO/g, "")
       .trim();
+  }
+
+  if (hasAgreedAcordo && foundCpf) {
+    console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${foundCpf}...`);
+    try {
+      const activeKey = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "2e30b68c0feda298f9d6d40ab36c1a09";
+      const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=1&TipoAcordo=1&Doc=${foundCpf}`;
+      const resFormalize = await fetch(formalizeUrl);
+      if (resFormalize.ok) {
+        const resText = await resFormalize.text();
+        console.log(`[AI Agent] DDM formalize success. Response payload: ${resText}`);
+        
+        // Se a resposta contiver um link (HTTP), podemos tentar extraí-lo para mandar pro cliente
+        const match = resText.match(/https?:\/\/[^\s"']+/i);
+        if (match) {
+          const link = match[0];
+          generatedText = `${generatedText}\n\nSegue o link para acesso: ${link}`;
+        }
+      } else {
+        console.warn(`[AI Agent] DDM formalize failed with status: ${resFormalize.status}`);
+      }
+    } catch (err) {
+      console.error("[AI Agent] DDM formalize error:", err);
+    }
   }
 
   if (shouldTransferToHuman) {
