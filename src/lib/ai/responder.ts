@@ -340,17 +340,17 @@ Sua saudação preferencial: "Olá! Tudo bem? Me chamo Julia, sou Representante 
    - Se ele desejar agendar o pagamento para outra data ou definir melhor dia e horário, agradeça, peça para entrar em contato no horário marcado e encerre retornando a tag #AGENDAMENTO.
 - Nunca diga que a quitação garante a rematrícula diretamente (diga que depende da universidade).
 - Nunca diga ao aluno ou formalize acordo com valor diferente do consultado no sistema.`;
-    } else if (inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") {
+    } else if (!hasActiveDebt) {
       systemPromptWithKb = `${systemPromptWithKb}
 
 === INFORMAÇÕES DE CONSULTA (DDM API) ===
-O cliente informou o CPF e possui cadastro na Cruzeiro do Sul, porém NÃO foram localizadas dívidas ativas (valor zerado ou sem pendências).
+O cliente informou o CPF e possui cadastro na instituição ${inst}, porém NÃO foram localizadas dívidas ativas (valor de débitos em aberto é de R$ 0,00 ou sem pendências).
 
-=== INSTRUÇÃO DE ATENDIMENTO (CRUZEIRO SEM DÍVIDA) ===
+=== INSTRUÇÃO DE ATENDIMENTO (SEM DÍVIDA ATIVA) ===
 Você é o(a) Aleh.
-1. Informe educadamente que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira em aberto para a Universidade Cruzeiro do Sul no momento.
+1. Informe de maneira simpática e educada que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira em aberto para a instituição ${inst} no momento.
 2. Pergunte de forma simpática se pode ajudá-lo em mais alguma coisa.
-3. Não fale sobre acordos ou cobranças.
+3. Não fale sobre acordos, cobranças ou valores pendentes.
 4. Caso o cliente solicite falar com um atendente ou transferir para um humano, transfira e retorne a tag #EQUIPEHUMANA.`;
     } else {
       systemPromptWithKb = `${systemPromptWithKb}
