@@ -26,7 +26,7 @@ interface DdmCpfResponse {
 
 async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
   const apiUrl = process.env.DDM_API_URL;
-  const apiKey = process.env.DDM_API_KEY;
+  const token = process.env.DDM_TOKEN || process.env.DDM_API_KEY;
 
   if (!apiUrl) {
     console.warn("[AI Agent] DDM_API_URL is not configured.");
@@ -38,7 +38,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(apiKey ? { "Authorization": `Bearer ${apiKey}`, "x-api-key": apiKey } : {}),
+        ...(token ? { "Authorization": `Bearer ${token}`, "x-api-key": token } : {}),
       },
       body: JSON.stringify({ cpf }),
     });
@@ -50,7 +50,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
       getUrl.searchParams.set("cpf", cpf);
       const resGet = await fetch(getUrl.toString(), {
         method: "GET",
-        headers: apiKey ? { "Authorization": `Bearer ${apiKey}`, "x-api-key": apiKey } : {},
+        headers: token ? { "Authorization": `Bearer ${token}`, "x-api-key": token } : {},
       });
       if (resGet.ok) {
         return await resGet.json();
