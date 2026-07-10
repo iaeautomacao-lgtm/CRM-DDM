@@ -79,16 +79,10 @@ export async function analyzeConversationSentimentAndTags(
 
   const prompt = `Você é um analista de CRM inteligente para WhatsApp. Analise o histórico da conversa abaixo e extraia:
 1. O sentimento predominante do cliente (positive, neutral, negative ou mixed).
-2. As tags aplicáveis a este contato.
-
-Tags existentes no sistema:
-${JSON.stringify(tagsList.map((t) => t.name))}
 
 Sua resposta deve ser um objeto JSON válido, sem qualquer texto explicativo antes ou depois, sem aspas de bloco de código (\`\`\`), contendo a seguinte estrutura:
 {
-  "sentiment": "positive" | "neutral" | "negative" | "mixed",
-  "tags_to_add": ["nome da tag existente que se aplica perfeitamente à conversa"],
-  "tags_to_create": ["nova tag curta e útil baseada no interesse do cliente (ex: Interessado em Curso, Suporte Técnico, Reclamação) apenas se não houver tag existente correspondente"]
+  "sentiment": "positive" | "neutral" | "negative" | "mixed"
 }
 
 Histórico da Conversa:
@@ -112,8 +106,6 @@ ${historyText}
 
     const data = JSON.parse(cleanJson);
     const sentiment = data.sentiment;
-    const tagsToAdd: string[] = Array.isArray(data.tags_to_add) ? data.tags_to_add : [];
-    const tagsToCreate: string[] = Array.isArray(data.tags_to_create) ? data.tags_to_create : [];
 
     // Update conversation sentiment
     if (["positive", "neutral", "negative", "mixed"].includes(sentiment)) {
@@ -121,75 +113,6 @@ ${historyText}
         .from("conversations")
         .update({ sentiment })
         .eq("id", conversationId);
-    }
-
-    // Get a valid user_id to assign as tag owner/creator
-    const { data: firstProfile } = await db
-      .from("profiles")
-      .select("user_id")
-      .eq("account_id", accountId)
-      .limit(1)
-      .maybeSingle();
-
-    const userId = firstProfile?.user_id;
-    if (!userId) return;
-
-    const tagIdsToLink: string[] = [];
-
-    // Match tags to add
-    for (const tagName of tagsToAdd) {
-      const match = tagsList.find((t) => t.name.toLowerCase() === tagName.toLowerCase());
-      if (match) {
-        tagIdsToLink.push(match.id);
-      }
-    }
-
-    // Match or create new tags
-    for (const tagName of tagsToCreate) {
-      const cleanTagName = tagName.trim();
-      if (!cleanTagName) continue;
-
-      const existingMatch = tagsList.find(
-        (t) => t.name.toLowerCase() === cleanTagName.toLowerCase()
-      );
-
-      if (existingMatch) {
-        tagIdsToLink.push(existingMatch.id);
-      } else {
-        const { data: newTag, error: createTagErr } = await db
-          .from("tags")
-          .insert({
-            account_id: accountId,
-            user_id: userId,
-            name: cleanTagName,
-            color: "#3b82f6",
-          })
-          .select("id")
-          .maybeSingle();
-
-        if (newTag?.id) {
-          tagIdsToLink.push(newTag.id);
-        } else if (createTagErr) {
-          console.error("[Sentiment & Tags] error creating tag:", createTagErr);
-        }
-      }
-    }
-
-    // Link resolved tags to the contact
-    for (const tagId of tagIdsToLink) {
-      const { data: existingLink } = await db
-        .from("contact_tags")
-        .select("*")
-        .eq("contact_id", contactId)
-        .eq("tag_id", tagId)
-        .maybeSingle();
-
-      if (!existingLink) {
-        await db.from("contact_tags").insert({
-          contact_id: contactId,
-          tag_id: tagId,
-        });
-      }
     }
   } catch (err) {
     console.error("[Sentiment & Tags Analysis] Error processing LLM response:", err);
