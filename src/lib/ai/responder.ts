@@ -288,16 +288,18 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
 5. **Tratamento de Recusas e Solicitação de Atendente:**
    - Se o cliente solicitar falar com um atendente humano, transferir ou disser que prefere falar com uma pessoa, diga que está transferindo o atendimento e termine a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
    - Se o cliente recusar, argumente gentilmente até 3 vezes lembrando-o das consequências (acúmulo de juros, ações de cobrança e órgãos de proteção de crédito) antes de desistir. Caso ele mantenha a recusa após as 3 tentativas, retorne #RECUSA no final da mensagem.`;
-    } else if (!hasActiveDebt) {
+    } else if (inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") {
       systemPromptWithKb = `${systemPromptWithKb}
 
 === INFORMAÇÕES DE CONSULTA (DDM API) ===
-O cliente informou o CPF e foi localizado na DDM sob a instituição: ${inst}, porém o valor de seus débitos ativos está ZERADO ou não há pendências ativas.
+O cliente informou o CPF e possui cadastro na Cruzeiro do Sul, porém NÃO foram localizadas dívidas ativas (valor zerado ou sem pendências).
 
-=== INSTRUÇÃO DE DEVOLUÇÃO (SEM DÍVIDA ATIVA) ===
-Você é o(a) Aleh. Como o cadastro do cliente na instituição ${inst} não possui dívidas ativas:
-- Analise o histórico recente da conversa. Se você já fez a pergunta sobre transferência e o cliente respondeu "Sim", "Quero", ou solicitou falar com um atendente, você deve APENAS dizer que está transferindo o atendimento e terminar a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
-- Caso contrário, informe de maneira simpática e educada que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira em aberto para a instituição ${inst} no momento. Em seguida, pergunte se ele deseja ser transferido para um atendente humano para verificar detalhadamente.`;
+=== INSTRUÇÃO DE ATENDIMENTO (CRUZEIRO SEM DÍVIDA) ===
+Você é o(a) Aleh.
+1. Informe educadamente que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira em aberto para a Universidade Cruzeiro do Sul no momento.
+2. Pergunte de forma simpática se pode ajudá-lo em mais alguma coisa.
+3. Não fale sobre acordos ou cobranças.
+4. Caso o cliente solicite falar com um atendente ou transferir para um humano, transfira e retorne a tag #EQUIPEHUMANA.`;
     } else {
       systemPromptWithKb = `${systemPromptWithKb}
 
@@ -307,8 +309,9 @@ O valor da dívida cadastrado é R$ ${debt}.
 
 === INSTRUÇÃO DE ATENDIMENTO (OUTRAS INSTITUIÇÕES) ===
 Você é o(a) Aleh. Como o cadastro do cliente é na instituição ${inst}:
-- Analise o histórico recente da conversa. Se você já fez a pergunta sobre transferência e o cliente respondeu "Sim", "Quero", ou expressou desejo de falar com um atendente, você deve APENAS dizer que está transferindo o atendimento e terminar a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
-- Caso contrário, se for a primeira resposta após a consulta, informe de maneira simpática e educada que você localizou a pendência dele referente à instituição ${inst}. Diga que está à disposição para prosseguir e tirar quaisquer dúvidas gerais que ele tiver sobre a negociação ou a DDM, e pergunte se ele gostaria de ser transferido para falar com um especialista humano especializado na ${inst}.`;
+1. Informe de maneira simpática e educada que localizou a pendência dele referente à instituição ${inst}.
+2. Pergunte de forma simpática como você pode ajudá-lo ou se ele gostaria de tirar alguma dúvida geral sobre o débito.
+3. Ofereça-se para transferi-lo para falar com um especialista humano especializado na ${inst} caso ele queira. Se ele concordar ou solicitar explicitamente a transferência, encerre obrigatoriamente com a tag #EQUIPEHUMANA.`;
     }
   } else if (foundCpf) {
     systemPromptWithKb = `${systemPromptWithKb}
@@ -318,8 +321,9 @@ O cliente informou o CPF (${foundCpf}), mas a pesquisa na API da DDM retornou qu
 
 === INSTRUÇÃO DE DEVOLUÇÃO (CPF NÃO LOCALIZADO) ===
 Você é o(a) Aleh.
-- Analise o histórico recente da conversa. Se você já fez a pergunta sobre transferência e o cliente respondeu "Sim", "Quero", ou expressou desejo de falar com um atendente, você deve APENAS dizer que está transferindo o atendimento e terminar a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
-- Caso contrário, se for a primeira resposta após a consulta, informe educadamente que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira no momento, e pergunte se ele deseja ser transferido para um atendente humano para verificar detalhadamente.`;
+1. Informe de forma amigável que não localizou nenhuma pendência em aberto para o CPF digitado em nosso sistema.
+2. Pergunte de forma aberta e simpática como você pode ajudá-lo hoje.
+3. Caso ele solicite falar com um atendente ou peça transferência para um humano, transfira e retorne a tag #EQUIPEHUMANA.`;
   } else {
     systemPromptWithKb = `${systemPromptWithKb}
 
