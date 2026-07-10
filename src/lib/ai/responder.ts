@@ -295,10 +295,8 @@ O valor da dívida cadastrado é R$ ${debt}.
 
 === INSTRUÇÃO DE ATENDIMENTO (OUTRAS INSTITUIÇÕES) ===
 Você é o(a) Aleh. Como o cadastro do cliente é na instituição ${inst}:
-1. Informe de maneira simpática e educada que você localizou a pendência dele referente à instituição ${inst}.
-2. Diga que está à disposição para prosseguir e tirar quaisquer dúvidas gerais que ele tiver sobre a negociação ou sobre a assessoria DDM.
-3. Deixe claro que, se ele preferir, você pode transferi-lo a qualquer momento para falar diretamente com um especialista humano especializado na ${inst}.
-4. Caso o cliente solicite explicitamente para falar com um atendente ou transferir para um humano, transfira e retorne a tag #EQUIPEHUMANA. Caso contrário, continue ajudando e respondendo suas dúvidas.`;
+- Analise o histórico recente da conversa. Se você já fez a pergunta sobre transferência e o cliente respondeu "Sim", "Quero", ou expressou desejo de falar com um atendente, você deve APENAS dizer que está transferindo o atendimento e terminar a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
+- Caso contrário, se for a primeira resposta após a consulta, informe de maneira simpática e educada que você localizou a pendência dele referente à instituição ${inst}. Diga que está à disposição para prosseguir e tirar quaisquer dúvidas gerais que ele tiver sobre a negociação ou a DDM, e pergunte se ele gostaria de ser transferido para falar com um especialista humano especializado na ${inst}.`;
     }
   } else if (foundCpf) {
     systemPromptWithKb = `${systemPromptWithKb}
@@ -306,10 +304,10 @@ Você é o(a) Aleh. Como o cadastro do cliente é na instituição ${inst}:
 === INFORMAÇÕES DE CONSULTA (DDM API) ===
 O cliente informou o CPF (${foundCpf}), mas a pesquisa na API da DDM retornou que não há registros ou pendências ativas.
 
-=== INSTRUÇÃO DE DEVOLUÇÃO ===
-Você é o(a) Aleh. Você deve:
-1. Informar educadamente que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira no momento.
-2. Perguntar se ele deseja ser transferido para um atendente humano para verificar detalhadamente. Caso o cliente queira, diga que vai transferir e encerre com a tag #EQUIPEHUMANA.`;
+=== INSTRUÇÃO DE DEVOLUÇÃO (CPF NÃO LOCALIZADO) ===
+Você é o(a) Aleh.
+- Analise o histórico recente da conversa. Se você já fez a pergunta sobre transferência e o cliente respondeu "Sim", "Quero", ou expressou desejo de falar com um atendente, você deve APENAS dizer que está transferindo o atendimento e terminar a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
+- Caso contrário, se for a primeira resposta após a consulta, informe educadamente que realizou a consulta baseada no CPF enviado e não localizou nenhuma pendência financeira no momento, e pergunte se ele deseja ser transferido para um atendente humano para verificar detalhadamente.`;
   } else {
     systemPromptWithKb = `${systemPromptWithKb}
 
@@ -355,6 +353,36 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   generatedText = generatedText.trim();
   if (!generatedText) return;
+
+  // Interceptar tags de transferência humana
+  let shouldTransferToHuman = false;
+  if (generatedText.includes("#EQUIPEHUMANA") || generatedText.includes("#RECUSA") || generatedText.includes("#NEGOCIACAO")) {
+    shouldTransferToHuman = true;
+    generatedText = generatedText
+      .replace(/#EQUIPEHUMANA/g, "")
+      .replace(/#RECUSA/g, "")
+      .replace(/#NEGOCIACAO/g, "")
+      .trim();
+  }
+
+  if (shouldTransferToHuman) {
+    console.log(`[AI Agent] Intercepted transfer tag. Assigning conversation ${conversationId} to human agent...`);
+    const { data: convData } = await db
+      .from("conversations")
+      .select("user_id")
+      .eq("id", conversationId)
+      .single();
+
+    if (convData?.user_id) {
+      await db
+        .from("conversations")
+        .update({
+          assigned_agent_id: convData.user_id,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", conversationId);
+    }
+  }
 
   // 6. Voice Reply Generation (ElevenLabs)
   let voiceMediaUrl = "";
