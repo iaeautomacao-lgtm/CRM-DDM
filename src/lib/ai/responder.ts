@@ -526,7 +526,6 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   const { error: newMsgErr } = await db
     .from("messages")
     .insert({
-      account_id: accountId,
       conversation_id: conversationId,
       message_id: sentMessageId,
       content_type: voiceMediaUrl ? "audio" : "text",
