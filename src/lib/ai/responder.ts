@@ -293,11 +293,12 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
 O cliente informou o CPF e foi localizado na DDM, porém na instituição: ${inst}.
 O valor da dívida cadastrado é R$ ${debt}.
 
-=== INSTRUÇÃO OBRIGATÓRIA DE DIRECIONAMENTO ===
-Você é o(a) Aleh. Como o cliente pertence à instituição ${inst} (e você é especializado na Cruzeiro do Sul), você deve:
-1. Informar educadamente que localizou o cadastro dele na instituição ${inst}.
-2. Explicar de forma simpática que, como você é especializado no atendimento da Cruzeiro do Sul, você irá transferi-lo agora mesmo para a equipe de atendimento humano especializada na ${inst} para ajudá-lo com os débitos.
-3. Finalizar a sua resposta obrigatoriamente retornando a tag #EQUIPEHUMANA.`;
+=== INSTRUÇÃO DE ATENDIMENTO (OUTRAS INSTITUIÇÕES) ===
+Você é o(a) Aleh. Como o cadastro do cliente é na instituição ${inst}:
+1. Informe de maneira simpática e educada que você localizou a pendência dele referente à instituição ${inst}.
+2. Diga que está à disposição para prosseguir e tirar quaisquer dúvidas gerais que ele tiver sobre a negociação ou sobre a assessoria DDM.
+3. Deixe claro que, se ele preferir, você pode transferi-lo a qualquer momento para falar diretamente com um especialista humano especializado na ${inst}.
+4. Caso o cliente solicite explicitamente para falar com um atendente ou transferir para um humano, transfira e retorne a tag #EQUIPEHUMANA. Caso contrário, continue ajudando e respondendo suas dúvidas.`;
     }
   } else if (foundCpf) {
     systemPromptWithKb = `${systemPromptWithKb}
