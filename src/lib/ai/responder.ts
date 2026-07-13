@@ -574,7 +574,23 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     try {
       const activeKey = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
       
-      // 1. Localiza o iddev do cliente pelo CPF
+      // 1. Formaliza o acordo no sistema da DDM chamando o endpoint de registro primeiro
+      const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=1&TipoAcordo=1&Doc=${foundCpf}`;
+      const resFormalize = await fetch(formalizeUrl);
+      if (resFormalize.ok) {
+        const resText = await resFormalize.text();
+        console.log(`[AI Agent] DDM formalize success. Response payload: ${resText}`);
+        
+        // Pega link retornado pelo CalculaDebitos caso o calc detalhado falhe
+        const match = resText.match(/https?:\/\/[^\s"']+/i);
+        if (match) {
+          payBoletoUrl = match[0];
+        }
+      } else {
+        console.warn(`[AI Agent] DDM formalize failed with status: ${resFormalize.status}`);
+      }
+
+      // 2. Agora que o acordo está registrado, busca o iddev e os links reais de boleto e Pix no /calc/
       const localizaUrl = `https://ddmacordos.com/calc/localiza_dev.php?tk=${activeKey}&cpf=${foundCpf.replace(/\D/g, "")}`;
       const resLocaliza = await fetch(localizaUrl);
       if (resLocaliza.ok) {
@@ -582,7 +598,6 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         const iddev = localizaData?.[0]?.iddev;
         
         if (iddev) {
-          // 2. Consulta o acordo detalhado
           const cli = (localizaData?.[0]?.sistema || "").trim().toLowerCase() === "cruzeirodosul" ? "cruzeiro" : "ddm";
           const calcUrl = `https://ddmacordos.com/calc/?tk=${activeKey}&idDev=${iddev}&cli=${cli}`;
           const resCalc = await fetch(calcUrl);
@@ -591,32 +606,19 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
             const rawCalc = await resCalc.json();
             const calcArray = Array.isArray(rawCalc) ? rawCalc : [rawCalc];
             
-            // Procura o acordo_pagamento na resposta
+            // Extrai links reais do boleto e Pix gerados pós-formalização
             for (const item of calcArray) {
               if (item?.Acordos) {
                 const flatAcordos = Array.isArray(item.Acordos) ? item.Acordos.flat() : [item.Acordos];
                 const pagObj = flatAcordos.find((o: any) => o && o.acordo_pagamento)?.acordo_pagamento;
                 
                 if (pagObj) {
-                  payBoletoUrl = pagObj.boleto || "";
-                  payPixUrl = pagObj.pix || "";
+                  if (pagObj.boleto) payBoletoUrl = pagObj.boleto;
+                  if (pagObj.pix) payPixUrl = pagObj.pix;
                   break;
                 }
               }
             }
-          }
-        }
-      }
-
-      // Fallback: se não extraiu pelos endpoints do calc, tenta bater no CalculaDebitos padrão
-      if (!payBoletoUrl) {
-        const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=1&TipoAcordo=1&Doc=${foundCpf}`;
-        const resFormalize = await fetch(formalizeUrl);
-        if (resFormalize.ok) {
-          const resText = await resFormalize.text();
-          const match = resText.match(/https?:\/\/[^\s"']+/i);
-          if (match) {
-            payBoletoUrl = match[0];
           }
         }
       }
