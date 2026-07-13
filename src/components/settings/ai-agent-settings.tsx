@@ -48,6 +48,7 @@ export function AiAgentSettings() {
   const [elevenlabsEnabled, setElevenlabsEnabled] = useState(false);
   const [elevenlabsApiKey, setElevenlabsApiKey] = useState("");
   const [elevenlabsVoiceId, setElevenlabsVoiceId] = useState("");
+  const [elevenlabsModelId, setElevenlabsModelId] = useState("eleven_multilingual_v2");
 
   // Knowledge Base
   const [kbFiles, setKbFiles] = useState<{ id: string; name: string; created_at: string }[]>([]);
@@ -81,6 +82,7 @@ export function AiAgentSettings() {
         setElevenlabsEnabled(data.elevenlabs_enabled || false);
         setElevenlabsApiKey(data.elevenlabs_api_key || "");
         setElevenlabsVoiceId(data.elevenlabs_voice_id || "");
+        setElevenlabsModelId(data.elevenlabs_model_id || "eleven_multilingual_v2");
       } else {
         setEnabled(false);
         setApiProvider("gemini");
@@ -151,6 +153,7 @@ Sua missão é atender leads/clientes de forma humana, simpática e focada em SU
           elevenlabs_enabled: elevenlabsEnabled,
           elevenlabs_api_key: elevenlabsApiKey.trim() || null,
           elevenlabs_voice_id: elevenlabsVoiceId.trim() || null,
+          elevenlabs_model_id: elevenlabsModelId.trim() || 'eleven_multilingual_v2',
           updated_at: new Date().toISOString(),
         }, { onConflict: "account_id" });
 
@@ -451,7 +454,7 @@ Sua missão é atender leads/clientes de forma humana, simpática e focada em SU
           <CardContent className="space-y-4">
             {elevenlabsEnabled && (
               <div className="grid gap-4 md:grid-cols-2 animate-in slide-in-from-top-2 duration-200">
-                <div className="space-y-2">
+                <div className="space-y-2 md:col-span-2">
                   <Label className="text-muted-foreground">ElevenLabs API Key</Label>
                   <Input
                     type="password"
@@ -470,6 +473,17 @@ Sua missão é atender leads/clientes de forma humana, simpática e focada em SU
                     onChange={(e) => setElevenlabsVoiceId(e.target.value)}
                     disabled={!canEditSettings}
                     placeholder="ID da voz (padrão ou clonada)"
+                    className="text-sm placeholder:text-muted-foreground"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Model ID</Label>
+                  <Input
+                    type="text"
+                    value={elevenlabsModelId}
+                    onChange={(e) => setElevenlabsModelId(e.target.value)}
+                    disabled={!canEditSettings}
+                    placeholder="eleven_multilingual_v2"
                     className="text-sm placeholder:text-muted-foreground"
                   />
                 </div>

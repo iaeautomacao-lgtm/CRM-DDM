@@ -588,15 +588,20 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   // 6. Voice Reply Generation (ElevenLabs)
   let voiceMediaUrl = "";
-  if (incomingWasAudio && aiConfig.elevenlabs_enabled && aiConfig.elevenlabs_api_key && aiConfig.elevenlabs_voice_id) {
+  // Fallbacks hardcoded fornecidos pelo usuário
+  const elevenlabsApiKey = aiConfig.elevenlabs_api_key || "3cdc376a590ebdebe7f5979bb4422f957091cc5b7dfefc534be4b5f2d4eb7fbd";
+  const elevenlabsVoiceId = aiConfig.elevenlabs_voice_id || "33B4UnXyTNbgLmdEDh5P";
+  const elevenlabsEnabled = aiConfig.elevenlabs_enabled || !!elevenlabsApiKey;
+
+  if (incomingWasAudio && elevenlabsEnabled && elevenlabsApiKey && elevenlabsVoiceId) {
     try {
       console.log("[AI Agent] Generating voice reply with ElevenLabs...");
-      const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${aiConfig.elevenlabs_voice_id}`;
+      const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${elevenlabsVoiceId}`;
       const ttsRes = await fetch(ttsUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "xi-api-key": aiConfig.elevenlabs_api_key,
+          "xi-api-key": elevenlabsApiKey,
         },
         body: JSON.stringify({
           text: generatedText,

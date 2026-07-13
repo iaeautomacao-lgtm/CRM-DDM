@@ -3964,6 +3964,12 @@ AFTER INSERT OR UPDATE OF assigned_agent_id ON wacrm.conversations
 FOR EACH ROW
 EXECUTE FUNCTION wacrm.auto_manage_chat_tags();
 
+-- ============================================================
+-- ELEVENLABS MODEL ID COLUMN
+-- ============================================================
+ALTER TABLE wacrm.ai_config 
+  ADD COLUMN IF NOT EXISTS elevenlabs_model_id TEXT DEFAULT 'eleven_multilingual_v2';
+
 
 
 
