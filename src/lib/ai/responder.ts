@@ -540,6 +540,8 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   if (!generatedText) return;
 
   let payBoletoUrl = "";
+  let shouldTransferToHuman = false;
+  let hasAgreedAcordo = false;
 
   // Autodetecção preventiva caso a IA esqueça de adicionar a tag #ACORDOFORMALIZADO
   const lowercaseGenerated = generatedText.toLowerCase();
