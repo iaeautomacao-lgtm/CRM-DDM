@@ -116,6 +116,37 @@ export async function handleAiAutoResponse(
     return;
   }
 
+  // --- ANTI-LOOP GUARD ---
+  // Se as últimas 6 mensagens ocorreram em um intervalo menor que 12 segundos,
+  // assumimos que é um loop de bots conversando. Silenciamos o bot e atribuímos ao humano.
+  if (messages && messages.length >= 6) {
+    const recentMsgs = messages.slice(0, 6);
+    const newestTime = new Date(recentMsgs[0].created_at).getTime();
+    const oldestTime = new Date(recentMsgs[5].created_at).getTime();
+    const diffSeconds = (newestTime - oldestTime) / 1000;
+
+    if (diffSeconds > 0 && diffSeconds < 12) {
+      console.warn(`[AI Agent] Bot loop detected on conversation ${conversationId}. Time diff for last 6 messages: ${diffSeconds}s. Transferring to human.`);
+      
+      const { data: convData } = await db
+        .from("conversations")
+        .select("user_id")
+        .eq("id", conversationId)
+        .single();
+
+      if (convData?.user_id) {
+        await db
+          .from("conversations")
+          .update({
+            assigned_agent_id: convData.user_id,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", conversationId);
+      }
+      return; // Interrompe a resposta automática da IA
+    }
+  }
+
   // Order chronologically for the LLM
   const history = (messages || []).reverse();
 
