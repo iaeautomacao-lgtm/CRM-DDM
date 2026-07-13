@@ -25,7 +25,7 @@ interface DdmCpfResponse {
 }
 
 async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
-  const token = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "2e30b68c0feda298f9d6d40ab36c1a09";
+  const token = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
 
   try {
     // Passo 1: Localizar devedor por CPF no localiza_dev.php
@@ -445,7 +445,7 @@ Sua saudação preferencial: "Olá! Tudo bem? Me chamo Julia, sou Representante 
 2. **Checagem de Acordos:** Verifique se há acordos pendentes e envie esses débitos juntamente com a linha digitável do boleto se aplicável.
 3. **Escada de Negociação (Apresente apenas UMA opção por vez, aguardando a resposta):**
    - **1º Passo (À Vista):** Ofereça o valor à vista de R$ ${debt} para encerramento completo da dívida.
-   - **2º Passo (Cartão de Crédito):** Se recusar o pagamento à vista, ofereça parcelamento no cartão com o link: https://ddmpay.ddmacordos.com/acesso/?c=&u=
+   - **2º Passo (Cartão de Crédito):** Se recusar o pagamento à vista, ofereça parcelamento no cartão de crédito fornecendo exatamente este link de acesso para o pagamento dele: https://ddmpay.ddmacordos.com/acesso/?c=${ddmData.iddev || ""}&u=
    - **3º Passo (Boleto Bancário):** Se recusar o cartão explicitamente, ofereça o parcelamento em boleto seguindo estritamente as opções permitidas da API. Pergunte em quantas parcelas deseja.
 4. **Regras de Exibição de Parcelas em Boleto:**
    - Use APENAS os valores informados de parcelas da API. NUNCA calcule ou altere os valores.
