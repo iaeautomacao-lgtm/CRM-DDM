@@ -600,7 +600,6 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
             const rawCalc = await resCalc.json();
             const calcArray = Array.isArray(rawCalc) ? rawCalc : [rawCalc];
             
-            // Procura o CalculoID (idcalc ou CalculoID) no nó Dados
             const dadosObj = calcArray.find((item: any) => item?.Dados)?.Dados;
             if (dadosObj) {
               calculoId = dadosObj.CalculoID || dadosObj.idcalc || "";
@@ -608,6 +607,9 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
           }
         }
       }
+
+      // Aguarda 3 segundos para garantir que a DDM limpou sessões de consulta anteriores
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       // 2. Registra e formaliza o acordo na DDM enviando o CalculoID
       const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=1&TipoAcordo=1&Doc=${foundCpf}${calculoId ? `&idcalc=${calculoId}` : ""}`;
@@ -622,7 +624,10 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         }
       }
 
-      // 3. Monta o link do ddmpay real caso o CalculaDebitos retorne uma URL vazia
+      // Aguarda mais 3 segundos para dar tempo ao sistema da DDM gerar a linha digitável e o PDF pós-registro
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+
+      // 3. Monta o link do ddmpay real caso o CalculaDebitos retorne uma URL vazia ou se quisermos forçar o link dinâmico
       if (!payBoletoUrl && calculoId) {
         payBoletoUrl = `https://ddmpay.ddmacordos.com/acesso/?c=${calculoId}&u=`;
       }
