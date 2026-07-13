@@ -566,27 +566,70 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       .trim();
   }
 
+  let payBoletoUrl = "";
+  let payPixUrl = "";
+
   if (hasAgreedAcordo && foundCpf) {
     console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${foundCpf}...`);
     try {
-      const activeKey = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "2e30b68c0feda298f9d6d40ab36c1a09";
-      const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=1&TipoAcordo=1&Doc=${foundCpf}`;
-      const resFormalize = await fetch(formalizeUrl);
-      if (resFormalize.ok) {
-        const resText = await resFormalize.text();
-        console.log(`[AI Agent] DDM formalize success. Response payload: ${resText}`);
+      const activeKey = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
+      
+      // 1. Localiza o iddev do cliente pelo CPF
+      const localizaUrl = `https://ddmacordos.com/calc/localiza_dev.php?tk=${activeKey}&cpf=${foundCpf.replace(/\D/g, "")}`;
+      const resLocaliza = await fetch(localizaUrl);
+      if (resLocaliza.ok) {
+        const localizaData = await resLocaliza.json();
+        const iddev = localizaData?.[0]?.iddev;
         
-        // Se a resposta contiver um link (HTTP), podemos tentar extraí-lo para mandar pro cliente
-        const match = resText.match(/https?:\/\/[^\s"']+/i);
-        if (match) {
-          const link = match[0];
-          generatedText = `${generatedText}\n\nSegue o link para acesso: ${link}`;
+        if (iddev) {
+          // 2. Consulta o acordo detalhado
+          const cli = (localizaData?.[0]?.sistema || "").trim().toLowerCase() === "cruzeirodosul" ? "cruzeiro" : "ddm";
+          const calcUrl = `https://ddmacordos.com/calc/?tk=${activeKey}&idDev=${iddev}&cli=${cli}`;
+          const resCalc = await fetch(calcUrl);
+          
+          if (resCalc.ok) {
+            const rawCalc = await resCalc.json();
+            const calcArray = Array.isArray(rawCalc) ? rawCalc : [rawCalc];
+            
+            // Procura o acordo_pagamento na resposta
+            for (const item of calcArray) {
+              if (item?.Acordos) {
+                const flatAcordos = Array.isArray(item.Acordos) ? item.Acordos.flat() : [item.Acordos];
+                const pagObj = flatAcordos.find((o: any) => o && o.acordo_pagamento)?.acordo_pagamento;
+                
+                if (pagObj) {
+                  payBoletoUrl = pagObj.boleto || "";
+                  payPixUrl = pagObj.pix || "";
+                  break;
+                }
+              }
+            }
+          }
         }
-      } else {
-        console.warn(`[AI Agent] DDM formalize failed with status: ${resFormalize.status}`);
+      }
+
+      // Fallback: se não extraiu pelos endpoints do calc, tenta bater no CalculaDebitos padrão
+      if (!payBoletoUrl) {
+        const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=1&TipoAcordo=1&Doc=${foundCpf}`;
+        const resFormalize = await fetch(formalizeUrl);
+        if (resFormalize.ok) {
+          const resText = await resFormalize.text();
+          const match = resText.match(/https?:\/\/[^\s"']+/i);
+          if (match) {
+            payBoletoUrl = match[0];
+          }
+        }
+      }
+
+      // Adiciona as informações extraídas à mensagem gerada pela IA
+      if (payBoletoUrl) {
+        generatedText = `${generatedText}\n\nSegue o seu boleto para pagamento: ${payBoletoUrl}`;
+      }
+      if (payPixUrl) {
+        generatedText = `${generatedText}\nCódigo Pix para pagamento: ${payPixUrl}`;
       }
     } catch (err) {
-      console.error("[AI Agent] DDM formalize error:", err);
+      console.error("[AI Agent] DDM formalize and boleto fetch error:", err);
     }
   }
 
@@ -727,6 +770,16 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
           const result = await sendWahaTextMessage(wahaConfig!, variant, generatedText);
           sentMessageId = result.messageId;
         }
+        
+        // Se houver boleto PDF, envia ele em seguida como documento anexo
+        if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
+          try {
+            console.log(`[AI Agent] Sending PDF document to client...`);
+            await sendWahaMediaMessage(wahaConfig!, variant, payBoletoUrl, "document", "Boleto-Acordo.pdf");
+          } catch (pdfErr) {
+            console.error("[AI Agent] Failed to send PDF document via WAHA:", pdfErr);
+          }
+        }
       } else {
         if (voiceMediaUrl) {
           const result = await sendMediaMessage({
@@ -745,6 +798,23 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
             text: generatedText,
           });
           sentMessageId = result.messageId;
+        }
+        
+        // Se houver boleto PDF, envia pelo Meta Cloud API
+        if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
+          try {
+            console.log(`[AI Agent] Sending PDF document via Meta to client...`);
+            await sendMediaMessage({
+              phoneNumberId: config.phone_number_id,
+              accessToken,
+              to: variant,
+              kind: "document",
+              link: payBoletoUrl,
+              filename: "Boleto-Acordo.pdf"
+            });
+          } catch (pdfErr) {
+            console.error("[AI Agent] Failed to send PDF document via Meta:", pdfErr);
+          }
         }
       }
       workingPhone = variant;
