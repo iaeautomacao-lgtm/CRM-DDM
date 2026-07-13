@@ -3902,6 +3902,68 @@ CREATE POLICY "Users can manage own AI config" ON wacrm.ai_config FOR ALL
 ALTER TABLE wacrm.conversations 
   ADD COLUMN IF NOT EXISTS sentiment TEXT CHECK (sentiment IN ('positive', 'neutral', 'negative', 'mixed', 'unknown')) DEFAULT 'unknown';
 
+-- ============================================================
+-- AUTOMATIC CHAT TAGS MANAGEMENT
+-- ============================================================
+CREATE OR REPLACE FUNCTION wacrm.auto_manage_chat_tags()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_ia_tag_id UUID;
+  v_humano_tag_id UUID;
+  v_account_id UUID;
+  v_user_id UUID;
+BEGIN
+  v_account_id := NEW.account_id;
+  v_user_id := NEW.user_id;
+
+  SELECT id INTO v_ia_tag_id 
+  FROM wacrm.tags 
+  WHERE name = 'IA Conversando' AND account_id = v_account_id 
+  LIMIT 1;
+
+  IF v_ia_tag_id IS NULL THEN
+    INSERT INTO wacrm.tags (account_id, user_id, name, color)
+    VALUES (v_account_id, v_user_id, 'IA Conversando', '#3b82f6')
+    RETURNING id INTO v_ia_tag_id;
+  END IF;
+
+  SELECT id INTO v_humano_tag_id 
+  FROM wacrm.tags 
+  WHERE name = 'Atendimento Humano' AND account_id = v_account_id 
+  LIMIT 1;
+
+  IF v_humano_tag_id IS NULL THEN
+    INSERT INTO wacrm.tags (account_id, user_id, name, color)
+    VALUES (v_account_id, v_user_id, 'Atendimento Humano', '#10b981')
+    RETURNING id INTO v_humano_tag_id;
+  END IF;
+
+  IF NEW.assigned_agent_id IS NULL THEN
+    INSERT INTO wacrm.contact_tags (contact_id, tag_id)
+    VALUES (NEW.contact_id, v_ia_tag_id)
+    ON CONFLICT (contact_id, tag_id) DO NOTHING;
+
+    DELETE FROM wacrm.contact_tags 
+    WHERE contact_id = NEW.contact_id AND tag_id = v_humano_tag_id;
+  ELSE
+    DELETE FROM wacrm.contact_tags 
+    WHERE contact_id = NEW.contact_id AND tag_id = v_ia_tag_id;
+
+    INSERT INTO wacrm.contact_tags (contact_id, tag_id)
+    VALUES (NEW.contact_id, v_humano_tag_id)
+    ON CONFLICT (contact_id, tag_id) DO NOTHING;
+  END IF;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_auto_manage_chat_tags ON wacrm.conversations;
+CREATE TRIGGER trigger_auto_manage_chat_tags
+AFTER INSERT OR UPDATE OF assigned_agent_id ON wacrm.conversations
+FOR EACH ROW
+EXECUTE FUNCTION wacrm.auto_manage_chat_tags();
+
 
 
 

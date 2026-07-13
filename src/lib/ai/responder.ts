@@ -103,6 +103,31 @@ export async function handleAiAutoResponse(
     return; // AI disabled or not configured
   }
 
+  // --- DEBOUNCE E DELAY DE DIGITAÇÃO ---
+  // Aguarda 4 segundos antes de prosseguir. Se uma nova mensagem chegar durante esse intervalo,
+  // a execução anterior é interrompida porque o histórico de mensagens mudará e haverá um novo gatilho.
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+
+  // Recarrega as últimas mensagens para ver se o cliente enviou algo novo depois do gatilho inicial.
+  // Se a última mensagem não for a que disparou esta execução, encerramos esta chamada para deixar a mais recente responder.
+  const { data: latestCheckMsg } = await db
+    .from("messages")
+    .select("id, content_text, created_at, sender_type")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestCheckMsg && latestCheckMsg.sender_type === "customer") {
+    // Se o cliente mandou mais mensagens, esse webhook antigo cancela para o novo responder com todo o contexto junto.
+    const lastCheckTime = new Date(latestCheckMsg.created_at).getTime();
+    // Adiciona uma tolerância de 500ms para evitar falsos cancelamentos
+    if (Date.now() - lastCheckTime < 3800) {
+      console.log(`[AI Agent] Debounce triggered on conversation ${conversationId}. Cancelling old execution.`);
+      return;
+    }
+  }
+
   // 2. Load recent conversation history (last 10 messages)
   const { data: messages, error: messagesError } = await db
     .from("messages")
@@ -620,6 +645,9 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   const accessToken = isWaha ? "" : decrypt(config.access_token);
 
   // 8. Send message via WAHA or Meta
+  // Simulação de digitação: aguarda 2 segundos adicionais antes de enviar a mensagem de fato
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
   for (const variant of variants) {
     try {
       if (isWaha) {
