@@ -399,10 +399,11 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
 }
 
 export async function loadAiAnalytics(db: DB): Promise<AiAnalyticsData> {
-  const [convs, msgs, deals] = await Promise.all([
+  const [convs, msgs, deals, profiles] = await Promise.all([
     db.from('conversations').select('sentiment'),
     db.from('messages').select('sender_type').in('sender_type', ['agent', 'bot']),
-    db.from('deals').select('status')
+    db.from('deals').select('status, value, user_id'),
+    db.from('profiles').select('user_id, full_name, email')
   ]);
 
   const sentiment = { positive: 0, neutral: 0, negative: 0, mixed: 0, total: 0 };
@@ -423,18 +424,57 @@ export async function loadAiAnalytics(db: DB): Promise<AiAnalyticsData> {
   messagesRatio.total = messagesRatio.bot + messagesRatio.human;
 
   const conversion = { won: 0, lost: 0, open: 0, total: 0, rate: 0 };
-  for (const row of (deals.data ?? []) as { status: string }[]) {
-    if (row.status === 'won') conversion.won++;
-    else if (row.status === 'lost') conversion.lost++;
-    else conversion.open++; // Fallback for 'active' or any other open status
+  let totalWonValue = 0;
+  let totalOpenValue = 0;
+  
+  // Agrupa ranking de vendas por operador
+  const operatorMap = new Map<string, { totalWon: number; dealCount: number }>();
+
+  for (const row of (deals.data ?? []) as { status: string; value: number; user_id: string }[]) {
+    const val = Number(row.value) || 0;
+    if (row.status === 'won') {
+      conversion.won++;
+      totalWonValue += val;
+      if (row.user_id) {
+        const cur = operatorMap.get(row.user_id) || { totalWon: 0, dealCount: 0 };
+        operatorMap.set(row.user_id, {
+          totalWon: cur.totalWon + val,
+          dealCount: cur.dealCount + 1
+        });
+      }
+    } else if (row.status === 'lost') {
+      conversion.lost++;
+    } else {
+      conversion.open++;
+      totalOpenValue += val;
+    }
   }
   conversion.total = conversion.won + conversion.lost + conversion.open;
   const closedCount = conversion.won + conversion.lost;
   conversion.rate = closedCount > 0 ? Math.round((conversion.won / closedCount) * 100) : 0;
 
+  const ticketMedio = conversion.won > 0 ? Math.round(totalWonValue / conversion.won) : 0;
+
+  // Mapeia nomes dos perfis de operador
+  const operators = Array.from(operatorMap.entries()).map(([userId, stats]) => {
+    const prof = (profiles.data ?? []).find((p: any) => p.user_id === userId);
+    return {
+      userId,
+      userName: prof?.full_name || prof?.email || 'Operador',
+      totalWon: stats.totalWon,
+      dealCount: stats.dealCount
+    };
+  }).sort((a, b) => b.totalWon - a.totalWon);
+
   return {
     sentiment,
     messagesRatio,
-    conversion
+    conversion,
+    financials: {
+      totalWonValue,
+      totalOpenValue,
+      ticketMedio,
+      operators
+    }
   };
 }

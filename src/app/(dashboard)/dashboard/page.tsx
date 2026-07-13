@@ -35,6 +35,7 @@ import { ConversationsStatusDonut } from '@/components/dashboard/conversations-s
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 import { AiPerformance } from '@/components/dashboard/ai-performance'
+import { FinancialPerformance } from '@/components/dashboard/financial-performance'
 
 type RangeDays = 7 | 30 | 90
 
@@ -179,6 +180,12 @@ export default function DashboardPage() {
 
       {/* Quick actions */}
       <QuickActions />
+
+      {/* Recuperação Financeira e Metas */}
+      <div className="space-y-1.5">
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Recuperação Financeira</h3>
+        <FinancialPerformance data={aiPerformance} loading={aiPerformanceLoading} />
+      </div>
 
       {/* Desempenho da IA e Vendas */}
       <div className="space-y-1.5">

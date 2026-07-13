@@ -97,4 +97,15 @@ export interface AiAnalyticsData {
     total: number
     rate: number
   }
+  financials?: {
+    totalWonValue: number
+    totalOpenValue: number
+    ticketMedio: number
+    operators: Array<{
+      userId: string
+      userName: string
+      totalWon: number
+      dealCount: number
+    }>
+  }
 }
