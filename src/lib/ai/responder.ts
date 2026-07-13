@@ -141,6 +141,56 @@ export async function handleAiAutoResponse(
     return;
   }
 
+  // --- TRAVA DE MENSAGENS INADEQUADAS OU SACANAGEM (ANTI-SCAM) ---
+  // Impede gasto desnecessário de tokens se o cliente estiver xingando, mandando piadas ou tentando "quebrar" o bot.
+  const lowerMsg = (incomingText || "").toLowerCase().trim();
+  const blacklistedKeywords = [
+    "fudido", "corno", "puta", "viado", "caralho", "bosta", "merda", "vsf", "vtnc",
+    "chatgpt", "gemini", "prompt", "sistema", "jailbreak", "ignorar instruções", "ignore instructions",
+    "sacanagem", "otario", "otário", "imbecil", "idiota", "palhaço", "palhaco",
+    "robô", "robo", "bot", "inteligencia artificial", "máquina", "maquina"
+  ];
+
+  const containsBlacklisted = blacklistedKeywords.some(keyword => lowerMsg.includes(keyword));
+
+  if (containsBlacklisted) {
+    console.warn(`[AI Agent] Anti-scam triggered on conversation ${conversationId}. Suspicious input: "${incomingText}". Transferring to human.`);
+    
+    // Busca o agente para transferir
+    const { data: convData } = await db
+      .from("conversations")
+      .select("user_id")
+      .eq("id", conversationId)
+      .single();
+
+    let targetAgentId = convData?.user_id;
+
+    if (!targetAgentId) {
+      const { data: wahaCfg } = await db
+        .from("whatsapp_config")
+        .select("user_id")
+        .eq("account_id", accountId)
+        .maybeSingle();
+      if (wahaCfg?.user_id) {
+        targetAgentId = wahaCfg.user_id;
+      }
+    }
+
+    if (targetAgentId) {
+      // Atribui o chat ao atendente e atualiza
+      await db
+        .from("conversations")
+        .update({
+          assigned_agent_id: targetAgentId,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", conversationId);
+        
+      // Opcional: envia um alerta ou tag de humano no comando no banco
+      return; // Interrompe a geração da IA imediatamente sem gastar tokens
+    }
+  }
+
   // --- ANTI-LOOP GUARD ---
   // Se as últimas 6 mensagens ocorreram em um intervalo menor que 12 segundos,
   // assumimos que é um loop de bots conversando. Silenciamos o bot e atribuímos ao humano.
@@ -497,26 +547,13 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     hasAgreedAcordo = true;
   }
 
-  // Autodetecção de despedida para transferência silenciosa caso a IA esqueça a tag
-  const lowercaseGenerated = generatedText.toLowerCase();
-  const hasDespedida = 
-    lowercaseGenerated.includes("bem-vindo") || 
-    lowercaseGenerated.includes("ate mais") || 
-    lowercaseGenerated.includes("até mais") || 
-    lowercaseGenerated.includes("tenha um excelente") || 
-    lowercaseGenerated.includes("tenha um ótimo") || 
-    lowercaseGenerated.includes("tenha um bom") || 
-    lowercaseGenerated.includes("fico à disposição") || 
-    lowercaseGenerated.includes("fico a disposição");
-
   if (
     generatedText.includes("#EQUIPEHUMANA") || 
     generatedText.includes("#RECUSA") || 
     generatedText.includes("#NEGOCIACAO") ||
     generatedText.includes("#ANIMA") ||
     generatedText.includes("#AGENDAMENTO") ||
-    hasAgreedAcordo ||
-    hasDespedida
+    hasAgreedAcordo
   ) {
     shouldTransferToHuman = true;
     generatedText = generatedText
