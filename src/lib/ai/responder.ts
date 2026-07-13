@@ -134,11 +134,22 @@ export async function handleAiAutoResponse(
         .eq("id", conversationId)
         .single();
 
-      if (convData?.user_id) {
+      // Fallback: se a conversa não tiver user_id (contato novo), busca o user_id configurador do whatsapp
+      let targetUserId = convData?.user_id;
+      if (!targetUserId) {
+        const { data: configData } = await db
+          .from("whatsapp_config")
+          .select("user_id")
+          .eq("account_id", accountId)
+          .maybeSingle();
+        targetUserId = configData?.user_id;
+      }
+
+      if (targetUserId) {
         await db
           .from("conversations")
           .update({
-            assigned_agent_id: convData.user_id,
+            assigned_agent_id: targetUserId,
             updated_at: new Date().toISOString()
           })
           .eq("id", conversationId);
