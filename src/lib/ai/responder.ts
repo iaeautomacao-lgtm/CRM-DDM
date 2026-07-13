@@ -322,19 +322,22 @@ export async function handleAiAutoResponse(
     .select("name, content")
     .eq("account_id", accountId);
 
-  let systemPromptWithKb = aiConfig.system_prompt || `Você é o(a) Aleh, assistente comercial especializado do Grupo DDM.
-Sua missão é atender leads/clientes de forma humana, simpática e focada em SUPORTE.
+  let systemPromptWithKb = aiConfig.system_prompt || `Você é o(a) Aleh, assistente de atendimento inteligente do Grupo DDM.
+Sua missão é ajudar os clientes de forma prática, direta e simpática.
+
+=== SAUDAÇÃO INICIAL ===
+Se o cliente estiver iniciando a conversa (primeiro contato ou saudação simples como "oi", "olá"), responda com simpatia e apresente este menu simples de opções para ele escolher e facilitar a triagem:
+"Olá! Tudo bem? Me chamo Aleh, assistente virtual do Grupo DDM. Como posso te ajudar hoje? 😊
+
+Escolha uma das opções para começarmos:
+1️⃣ Quero negociar uma dívida
+2️⃣ Segunda via de boleto/Pix"
 
 ### DIRETRIZES DE ESTILO:
 1. Seja sempre breve e vá direto ao ponto. No WhatsApp, mensagens muito longas são ignoradas.
 2. Use quebras de linha para facilitar a leitura.
-3. Use emojis de forma moderada (apenas 1 ou 2 por mensagem) para parecer amigável.
-4. Nunca use termos robóticos como "Em que posso ser útil hoje?". Em vez disso, prefira "Como posso te ajudar?" ou "Como posso te apoiar?".
-5. Jamais invente informações. Se não souber de algo (como preços ou detalhes técnicos que não estão na Base de Conhecimento), diga gentilmente que vai verificar com a equipe humana.
-
-### FLUXO DO DIÁLOGO:
-- Entenda a necessidade do cliente fazendo perguntas curtas.
-- Apresente a solução de forma consultiva.`;
+3. Use emojis de forma moderada (apenas 1 ou 2 por mensagem).
+4. Nunca use termos robóticos. Prefira linguagem humana e acolhedora.`;
   if (kbFiles && kbFiles.length > 0) {
     const kbContext = kbFiles
       .map((file) => `[ARQUIVO: ${file.name}]\n${file.content}\n---`)
@@ -416,7 +419,7 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
    - Nunca faça cálculos manuais ou estimativas de parcelas.
 4. **Regra Crítica de Formalização:**
    - NUNCA feche ou formalize o acordo sem a confirmação explícita e inequívoca do cliente (ex: "sim", "quero fechar", "fechado").
-   - Antes de formalizar, confirme obrigatoriamente: E-mail, Número de celular, Forma de pagamento e Condições do acordo.
+   - Antes de formalizar, confirme apenas as condições do acordo (vencimento, valor, forma de pagamento). Você NÃO deve pedir e-mail e nem número de celular do cliente, pois você já está conversando com ele diretamente por aqui.
    - Quando o acordo for confirmado de forma explícita, retorne a tag especial #ACORDOFORMALIZADO ao final do resumo.
 5. **Tratamento de Recusas e Solicitação de Atendente:**
    - Se o cliente solicitar falar com um atendente humano, transferir ou disser que prefere falar com uma pessoa, diga que está transferindo o atendimento e termine a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
@@ -452,7 +455,7 @@ Sua saudação preferencial: "Olá! Tudo bem? Me chamo Julia, sou Representante 
    - Se a entrada for 0.00, informe que são parcelas iguais.
    - Formato correto: "Entrada: R$ {entrada} e Parcelas: {parcelas}x de R$ {valor_parcela}".
 5. **Formalização de Acordo:**
-   - Confirme e-mail, celular, e as condições (vencimento, valor, forma de pagamento).
+   - Confirme apenas as condições do acordo (vencimento, valor, forma de pagamento). Você NÃO deve pedir e-mail e nem número de celular do cliente, pois você já está conversando com ele por aqui.
    - Se ele concordar explicitamente, formalize e retorne #ACORDOFORMALIZADO ao final da mensagem.
    - Se ele desejar agendar o pagamento para outra data ou definir melhor dia e horário, agradeça, peça para entrar em contato no horário marcado e encerre retornando a tag #AGENDAMENTO.
 - Nunca diga que a quitação garante a rematrícula diretamente (diga que depende da universidade).
@@ -981,13 +984,22 @@ async function generateOpenAiResponse(
         fetchUrl = publicUrlData.publicUrl;
       }
 
-      messages.push({
-        role: isCustomer ? "user" : "assistant",
-        content: [
-          { type: "text", text: msg.content_text || "O que está nesta imagem?" },
-          { type: "image_url", image_url: { url: fetchUrl } }
-        ]
-      });
+      // Tratamento preventivo: Se for WebP ou falhar no download do bucket público, enviamos apenas o texto para evitar erro 400 da OpenAI
+      const isWebp = fetchUrl.toLowerCase().includes(".webp");
+      if (isWebp) {
+        messages.push({
+          role: isCustomer ? "user" : "assistant",
+          content: msg.content_text || "[Imagem enviada]"
+        });
+      } else {
+        messages.push({
+          role: isCustomer ? "user" : "assistant",
+          content: [
+            { type: "text", text: msg.content_text || "O que está nesta imagem?" },
+            { type: "image_url", image_url: { url: fetchUrl } }
+          ]
+        });
+      }
     } else {
       messages.push({
         role: isCustomer ? "user" : "assistant",
