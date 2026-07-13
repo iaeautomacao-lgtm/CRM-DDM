@@ -19,8 +19,8 @@ export function FieldsAndTagsPanel() {
   return (
     <section className="max-w-3xl animate-in fade-in-50 space-y-4 duration-200">
       <SettingsPanelHead
-        title="Fields & tags"
-        description="Two ways to organize contacts: colour-coded tags for quick grouping, and custom fields for structured data."
+        title="Campos e tags"
+        description="Configure campos personalizados para guardar variáveis estruturadas e gerencie etiquetas de controle manual."
       />
       <TagManager />
       {canEditSettings ? <CustomFieldsSettings /> : null}

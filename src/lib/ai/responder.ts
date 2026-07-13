@@ -497,13 +497,26 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     hasAgreedAcordo = true;
   }
 
+  // Autodetecção de despedida para transferência silenciosa caso a IA esqueça a tag
+  const lowercaseGenerated = generatedText.toLowerCase();
+  const hasDespedida = 
+    lowercaseGenerated.includes("bem-vindo") || 
+    lowercaseGenerated.includes("ate mais") || 
+    lowercaseGenerated.includes("até mais") || 
+    lowercaseGenerated.includes("tenha um excelente") || 
+    lowercaseGenerated.includes("tenha um ótimo") || 
+    lowercaseGenerated.includes("tenha um bom") || 
+    lowercaseGenerated.includes("fico à disposição") || 
+    lowercaseGenerated.includes("fico a disposição");
+
   if (
     generatedText.includes("#EQUIPEHUMANA") || 
     generatedText.includes("#RECUSA") || 
     generatedText.includes("#NEGOCIACAO") ||
     generatedText.includes("#ANIMA") ||
     generatedText.includes("#AGENDAMENTO") ||
-    hasAgreedAcordo
+    hasAgreedAcordo ||
+    hasDespedida
   ) {
     shouldTransferToHuman = true;
     generatedText = generatedText
@@ -541,18 +554,32 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   }
 
   if (shouldTransferToHuman) {
-    console.log(`[AI Agent] Intercepted transfer tag. Assigning conversation ${conversationId} to human agent...`);
+    console.log(`[AI Agent] Intercepted transfer/closing event. Assigning conversation ${conversationId} to human agent...`);
     const { data: convData } = await db
       .from("conversations")
       .select("user_id")
       .eq("id", conversationId)
       .single();
 
-    if (convData?.user_id) {
+    let targetAgentId = convData?.user_id;
+
+    // Fallback: se a conversa não tiver user_id, pega o dono do whatsapp_config correspondente
+    if (!targetAgentId) {
+      const { data: wahaCfg } = await db
+        .from("whatsapp_config")
+        .select("user_id")
+        .eq("account_id", accountId)
+        .maybeSingle();
+      if (wahaCfg?.user_id) {
+        targetAgentId = wahaCfg.user_id;
+      }
+    }
+
+    if (targetAgentId) {
       await db
         .from("conversations")
         .update({
-          assigned_agent_id: convData.user_id,
+          assigned_agent_id: targetAgentId,
           updated_at: new Date().toISOString()
         })
         .eq("id", conversationId);
