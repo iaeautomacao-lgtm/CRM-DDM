@@ -63,11 +63,52 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
 
     const calcData = await resCalc.json();
     let valor_divida = "0,00";
+    let opcoes_cartao = "";
+    let campanha = "2025.1";
 
     if (Array.isArray(calcData)) {
       const pgtoAvista = calcData.find((obj: any) => obj.PgtoAvista);
       if (pgtoAvista && pgtoAvista.PgtoAvista && pgtoAvista.PgtoAvista.ValorFinal) {
         valor_divida = pgtoAvista.PgtoAvista.ValorFinal;
+      }
+
+      // Extrai os débitos para analisar o ano de cada parcela
+      const calculosObj = calcData.find((obj: any) => obj.Calculos);
+      const calculosList = calculosObj?.Calculos || [];
+
+      let temDebitoAte2019 = false;
+      for (const calc of calculosList) {
+        const dataParc = calc?.debitos?.data_parcela; // YYYY-MM-DD
+        if (dataParc) {
+          const ano = parseInt(dataParc.split("-")[0]);
+          if (ano <= 2019) {
+            temDebitoAte2019 = true;
+          }
+        }
+      }
+
+      let maxParcelas = 6;
+      let parcelaMinima = 150.0;
+      if (temDebitoAte2019) {
+        campanha = "Até 2019";
+        maxParcelas = 10;
+        parcelaMinima = 100.0;
+      } else {
+        campanha = "2025.1";
+      }
+
+      const cleanVal = valor_divida.replace(/\./g, "").replace(",", ".");
+      const totalFloat = parseFloat(cleanVal);
+
+      if (!isNaN(totalFloat) && totalFloat > 0) {
+        const validParcels = [];
+        for (let p = 1; p <= maxParcelas; p++) {
+          const valParcela = totalFloat / p;
+          if (p === 1 || valParcela >= parcelaMinima) {
+            validParcels.push(`${p}x de R$ ${valParcela.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+          }
+        }
+        opcoes_cartao = validParcels.join(", ");
       }
     }
 
@@ -76,7 +117,9 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
       instituicao,
       valor_divida,
       iddev,
-      sistema
+      sistema,
+      opcoes_cartao,
+      campanha
     };
   } catch (err) {
     console.error("[AI Agent] DDM API sequence error:", err);
@@ -394,7 +437,15 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
       sistema.toLowerCase().includes("potiguar");
 
     if ((inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") && hasActiveDebt) {
-      systemPromptWithKb = `Você é Sabrina, Representante Financeiro da Universidade Cruzeiro do Sul, atuando como analista financeira consultiva da assessoria DDM.
+      systemPromptWithKb = aiConfig.system_prompt 
+        ? `${aiConfig.system_prompt}
+
+=== DADOS DO CLIENTE (DDM API) ===
+- Nome do Cliente: ${ddmData.nome || "Não informado"}
+- CPF consultado: ${foundCpf}
+- Instituição: Cruzeiro do Sul
+- Valor para Quitação à Vista (ValorFinal): R$ ${debt}`
+        : `Você é Sabrina, Representante Financeiro da Universidade Cruzeiro do Sul, atuando como analista financeira consultiva da assessoria DDM.
 
 === DADOS DO CLIENTE (DDM API) ===
 - Nome do Cliente: ${ddmData.nome || "Não informado"}
@@ -425,7 +476,17 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
    - Se o cliente solicitar falar com um atendente humano, transferir ou disser que prefere falar com uma pessoa, diga que está transferindo o atendimento e termine a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
    - Se o cliente recusar, argumente gentilmente até 3 vezes lembrando-o das consequências (acúmulo de juros, ações de cobrança e órgãos de proteção de crédito) antes de desistir. Caso ele mantenha a recusa após as 3 tentativas, retorne #RECUSA no final da mensagem.`;
     } else if (isEducational && hasActiveDebt) {
-      systemPromptWithKb = `Você é Julia, analista financeira consultiva da assessoria DDM, parceira da instituição de ensino. Atue de forma cordial, prestativa e profissional.
+      systemPromptWithKb = aiConfig.system_prompt 
+        ? `${aiConfig.system_prompt}
+
+=== DADOS DO CLIENTE (DDM API) ===
+- Nome do Cliente: ${ddmData.nome || "Não informado"}
+- CPF consultado: ${foundCpf}
+- Instituição: ${inst}
+- Valor para Quitação à Vista (ValorFinal): R$ ${debt}
+- Campanha Identificada: ${ddmData.campanha || "2025.1"}
+- Opções de Parcelamento no Cartão (Exclusivo): ${ddmData.opcoes_cartao || "Não disponível"}`
+        : `Você é Julia, analista financeira consultiva da assessoria DDM, parceira da instituição de ensino. Atue de forma cordial, prestativa e profissional.
 Sua saudação preferencial: "Olá! Tudo bem? Me chamo Julia, sou Representante Financeiro da sua Instituição de ensino."
 
 === DADOS DO CLIENTE (DDM API) ===
@@ -433,6 +494,8 @@ Sua saudação preferencial: "Olá! Tudo bem? Me chamo Julia, sou Representante 
 - CPF consultado: ${foundCpf}
 - Instituição: ${inst}
 - Valor para Quitação à Vista (ValorFinal): R$ ${debt}
+- Campanha Identificada: ${ddmData.campanha || "2025.1"}
+- Opções de Parcelamento no Cartão (Exclusivo): ${ddmData.opcoes_cartao || "Não disponível"}
 
 === REGRAS DO CLIENTE E INSTITUIÇÃO ===
 - Se o Cliente for "Centro de Formacao Profissional Bezerra de Araujo Ltda" ou "UNIJORGE NOVO", NUNCA afirme ou ofereça boleto. Para eles, APENAS funciona o parcelamento no cartão de crédito.
@@ -457,7 +520,7 @@ Sua saudação preferencial: "Olá! Tudo bem? Me chamo Julia, sou Representante 
 5. **Formalização de Acordo:**
    - Confirme apenas as condições do acordo (vencimento, valor, forma de pagamento). Você NÃO deve pedir e-mail e nem número de celular do cliente, pois você já está conversando com ele por aqui.
    - Se ele concordar explicitamente, formalize e retorne #ACORDOFORMALIZADO ao final da mensagem.
-   - Se ele desejar agendar o pagamento para outra data ou definir melhor dia e horário, agradeça, peça para entrar em contato no horário marcado e encerre retornando a tag #AGENDAMENTO.
+  - Se ele desejar agendar o pagamento para outra data ou definir melhor dia e horário, agradeça, peça para entrar em contato no horário marcado e encerre retornando a tag #AGENDAMENTO.
 - Nunca diga que a quitação garante a rematrícula diretamente (diga que depende da universidade).
 - Nunca diga ao aluno ou formalize acordo com valor diferente do consultado no sistema.`;
     } else if (!hasActiveDebt) {
