@@ -51,6 +51,24 @@ export async function getWahaSessionStatus(
   }
 }
 
+export async function getWahaSessionInfo(
+  config: WahaConfig
+): Promise<any> {
+  try {
+    const res = await wahaFetch(config, `/api/sessions/${config.waha_session}`);
+    if (res.status === 404) {
+      return null;
+    }
+    if (!res.ok) {
+      throw new Error(`WAHA API error: ${res.status}`);
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('[waha-api] getWahaSessionInfo error:', err);
+    return null;
+  }
+}
+
 export async function startWahaSession(config: WahaConfig, webhookUrl?: string): Promise<void> {
   // If webhookUrl is provided, we stop and delete the session first to recreate it with the webhook config
   if (webhookUrl) {

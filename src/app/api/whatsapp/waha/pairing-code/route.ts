@@ -27,21 +27,30 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { phoneNumber } = body
+    const { phoneNumber, session: targetSession, configId: targetId } = body
 
     if (!phoneNumber) {
       return NextResponse.json({ error: 'Phone number is required.' }, { status: 400 })
     }
 
-    const { data: config, error: configError } = await supabase
+    let query = supabase
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', profile.account_id)
-      .maybeSingle()
 
-    if (configError || !config || config.provider !== 'waha') {
+    if (targetId) {
+      query = query.eq('id', targetId)
+    } else if (targetSession) {
+      query = query.eq('waha_session', targetSession)
+    }
+
+    const { data: configs, error: configError } = await query
+
+    if (configError || !configs || configs.length === 0 || configs[0].provider !== 'waha') {
       return NextResponse.json({ error: 'WAHA is not configured.' }, { status: 400 })
     }
+
+    const config = configs[0]
 
     const wahaConfig = {
       waha_url: config.waha_url,

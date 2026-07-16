@@ -49,7 +49,11 @@ export function WhatsAppConfig() {
   const [testing, setTesting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [showToken, setShowToken] = useState(false);
+  
+  const [configs, setConfigs] = useState<any[]>([]);
+  const [activeConfigId, setActiveConfigId] = useState<string | null>(null);
   const [config, setConfig] = useState<WhatsAppConfigType | null>(null);
+  
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unknown');
   const [resetReason, setResetReason] = useState<ResetReason>(null);
   const [statusMessage, setStatusMessage] = useState<string>('');
@@ -129,7 +133,11 @@ export function WhatsAppConfig() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ phoneNumber: phoneCleaned }),
+        body: JSON.stringify({
+          phoneNumber: phoneCleaned,
+          session: wahaSession,
+          configId: activeConfigId
+        }),
       });
 
       const data = await res.json();
@@ -147,14 +155,57 @@ export function WhatsAppConfig() {
     }
   };
 
+  const selectConfig = useCallback((c: any) => {
+    if (c) {
+      setActiveConfigId(c.id);
+      setConfig(c);
+      setProvider(c.provider || 'meta');
+
+      if (c.provider === 'meta') {
+        setPhoneNumberId(c.phone_number_id || '');
+        setWabaId(c.waba_id || '');
+        setAccessToken(MASKED_TOKEN);
+        setVerifyToken('');
+        setPin('');
+        setTokenEdited(false);
+      } else {
+        setWahaUrl(c.waha_url || '');
+        setWahaSession(c.waha_session || '');
+        setWahaApiKey(c.waha_api_key ? MASKED_TOKEN : '');
+        setWahaApiKeyEdited(false);
+        setSessionStatus(c.session_status || 'STOPPED');
+      }
+      setConnectionStatus(c.connected ? 'connected' : 'disconnected');
+    } else {
+      setActiveConfigId(null);
+      setConfig(null);
+      setProvider('meta');
+      setPhoneNumberId('');
+      setWabaId('');
+      setAccessToken('');
+      setVerifyToken('');
+      setPin('');
+      setTokenEdited(false);
+
+      setWahaUrl('');
+      setWahaSession('');
+      setWahaApiKey('');
+      setWahaApiKeyEdited(false);
+      setSessionStatus('STOPPED');
+      setConnectionStatus('disconnected');
+    }
+  }, []);
+
   const checkWahaStatus = useCallback(async () => {
-    if (!accountId) return;
+    if (!accountId || !wahaSession) return;
     try {
       const res = await fetch('/api/whatsapp/config');
       const data = await res.json();
-      if (data.provider === 'waha') {
-        setSessionStatus(data.session_status || 'STOPPED');
-        if (data.connected) {
+      const list = data.configs || [];
+      const current = list.find((c: any) => c.waha_session === wahaSession);
+      if (current) {
+        setSessionStatus(current.session_status || 'STOPPED');
+        if (current.connected) {
           setConnectionStatus('connected');
         } else {
           setConnectionStatus('disconnected');
@@ -163,98 +214,32 @@ export function WhatsAppConfig() {
     } catch (err) {
       console.error('Failed to query WAHA status:', err);
     }
-  }, [accountId]);
+  }, [accountId, wahaSession]);
 
   const fetchConfig = useCallback(async (acctId: string) => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', acctId)
-        .maybeSingle();
+      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      const payload = await res.json();
+      
+      const list = payload.configs || [];
+      setConfigs(list);
 
-      if (error) {
-        console.error('Failed to load config row:', error);
+      // Keep active configuration selected, or select the first one, or leave empty/new if none exist
+      let selected = null;
+      if (list.length > 0) {
+        selected = list.find((c: any) => c.id === activeConfigId) || list[0];
       }
-
-      if (data) {
-        setConfig(data);
-        const currentProvider = data.provider || 'meta';
-        setProvider(currentProvider);
-
-        if (currentProvider === 'meta') {
-          setPhoneNumberId(data.phone_number_id || '');
-          setWabaId(data.waba_id || '');
-          setAccessToken(MASKED_TOKEN);
-          setVerifyToken('');
-          setPin('');
-          setTokenEdited(false);
-        } else {
-          setWahaUrl(data.waha_url || '');
-          setWahaSession(data.waha_session || '');
-          setWahaApiKey(data.waha_api_key ? MASKED_TOKEN : '');
-          setWahaApiKeyEdited(false);
-          setSessionStatus(data.status || 'STOPPED');
-        }
-      } else {
-        setConfig(null);
-        setProvider('meta');
-        setPhoneNumberId('');
-        setWabaId('');
-        setAccessToken('');
-        setVerifyToken('');
-        setPin('');
-        setTokenEdited(false);
-
-        setWahaUrl('');
-        setWahaSession('');
-        setWahaApiKey('');
-        setWahaApiKeyEdited(false);
-        setSessionStatus('STOPPED');
-      }
-
+      
+      selectConfig(selected);
       setRegistrationProbe(null);
-
-      // Verify health/connection status
-      if (data) {
-        try {
-          const res = await fetch('/api/whatsapp/config', { method: 'GET' });
-          const payload = await res.json();
-
-          if (payload.connected) {
-            setConnectionStatus('connected');
-            setResetReason(null);
-            setStatusMessage('');
-            if (payload.provider === 'waha') {
-              setSessionStatus(payload.session_status || 'WORKING');
-            }
-          } else {
-            setConnectionStatus('disconnected');
-            if (payload.provider === 'waha') {
-              setSessionStatus(payload.session_status || 'STOPPED');
-              setStatusMessage(payload.message || '');
-            } else {
-              setResetReason(payload.needs_reset ? 'token_corrupted' : payload.reason === 'meta_api_error' ? 'meta_api_error' : null);
-              setStatusMessage(payload.message || '');
-            }
-          }
-        } catch (err) {
-          console.error('Health check failed:', err);
-          setConnectionStatus('disconnected');
-        }
-      } else {
-        setConnectionStatus('disconnected');
-        setResetReason(null);
-        setStatusMessage('');
-      }
     } catch (err) {
       console.error('fetchConfig error:', err);
-      toast.error('Failed to load WhatsApp configuration');
+      toast.error('Failed to load WhatsApp configurations');
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, [activeConfigId, selectConfig]);
 
   // Hook for polling WAHA session status when needed
   useEffect(() => {
@@ -388,9 +373,14 @@ export function WhatsAppConfig() {
 
   // WAHA session actions
   async function handleWahaStart() {
+    if (!wahaSession) return;
     setWahaConnecting(true);
     try {
-      const res = await fetch('/api/whatsapp/waha/start', { method: 'POST' });
+      const res = await fetch('/api/whatsapp/waha/start', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: wahaSession, id: activeConfigId })
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to start session');
       toast.success('WAHA session start requested.');
@@ -403,9 +393,14 @@ export function WhatsAppConfig() {
   }
 
   async function handleWahaStop() {
+    if (!wahaSession) return;
     setWahaConnecting(true);
     try {
-      const res = await fetch('/api/whatsapp/waha/stop', { method: 'POST' });
+      const res = await fetch('/api/whatsapp/waha/stop', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: wahaSession, id: activeConfigId })
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to stop session');
       toast.success('WAHA session stop requested.');
@@ -436,6 +431,9 @@ export function WhatsAppConfig() {
           waha_session: wahaSession.trim(),
           waha_api_key: wahaApiKeyEdited ? wahaApiKey.trim() : MASKED_TOKEN,
         };
+        if (activeConfigId) {
+          payload.id = activeConfigId;
+        }
 
         const res = await fetch('/api/whatsapp/config', {
           method: 'POST',
@@ -478,6 +476,9 @@ export function WhatsAppConfig() {
         verify_token: verifyToken.trim() || null,
         pin: pin.trim() || null,
       };
+      if (activeConfigId) {
+        payload.id = activeConfigId;
+      }
 
       if (tokenEdited && accessToken !== MASKED_TOKEN && accessToken.trim()) {
         payload.access_token = accessToken.trim();
@@ -520,7 +521,7 @@ export function WhatsAppConfig() {
         setResetReason(null);
         toast.success(
           provider === 'waha'
-            ? 'Successfully connected to WAHA session!'
+            ? 'Successfully connected to WhatsApp (WAHA)!'
             : 'Successfully connected to Meta Cloud API!'
         );
       } else {
@@ -536,23 +537,28 @@ export function WhatsAppConfig() {
   }
 
   async function handleReset() {
-    if (!confirm('Are you sure you want to clear your saved WhatsApp configuration?')) {
+    if (!confirm('Are you sure you want to clear this WhatsApp configuration?')) {
       return;
     }
 
     try {
       setResetting(true);
-      const res = await fetch('/api/whatsapp/config', { method: 'DELETE' });
+      const url = activeConfigId 
+        ? `/api/whatsapp/config?id=${activeConfigId}`
+        : '/api/whatsapp/config';
+      
+      const res = await fetch(url, { method: 'DELETE' });
       if (!res.ok) {
         const payload = await res.json();
         throw new Error(payload.error || 'Failed to delete configuration');
       }
 
-      toast.success('Configuration reset successfully');
+      toast.success('Configuration cleared successfully');
+      setActiveConfigId(null);
       if (accountId) fetchConfig(accountId);
     } catch (err: any) {
       console.error('Reset config error:', err);
-      toast.error(err.message || 'Failed to reset configuration');
+      toast.error(err.message || 'Failed to clear configuration');
     } finally {
       setResetting(false);
     }
@@ -610,6 +616,105 @@ export function WhatsAppConfig() {
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
         {/* Main config form */}
         <div className="space-y-6">
+          {/* Configured Lines List */}
+          <Card className="border-border bg-card">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3 flex-wrap gap-2">
+              <div>
+                <CardTitle className="text-foreground">Canais de Atendimento (Linhas)</CardTitle>
+                <CardDescription className="text-muted-foreground font-light">
+                  Lista de números do WhatsApp conectados a esta conta do CRM.
+                </CardDescription>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => selectConfig(null)}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold h-8"
+              >
+                + Conectar Nova Linha
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {configs.length === 0 ? (
+                <div className="text-center py-6 border border-dashed border-border rounded-lg bg-muted/10">
+                  <p className="text-sm text-muted-foreground">Nenhuma linha conectada ainda.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border border border-border rounded-lg overflow-hidden bg-muted/10">
+                  {configs.map((c) => {
+                    const isActive = c.id === activeConfigId;
+                    return (
+                      <div
+                        key={c.id}
+                        className={`flex items-center justify-between p-3.5 transition-colors hover:bg-muted/40 ${
+                          isActive ? 'bg-muted/50 border-l-2 border-primary' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {/* Status Dot */}
+                          <span className="relative flex h-2.5 w-2.5">
+                            {c.connected && (
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            )}
+                            <span
+                              className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                                c.connected ? 'bg-emerald-500' : 'bg-red-500'
+                              }`}
+                            ></span>
+                          </span>
+
+                          <div className="flex flex-col">
+                            <span className="text-sm font-semibold text-foreground">
+                              {c.phone_info?.display_phone_number || c.waha_session || c.phone_number_id}
+                            </span>
+                            <span className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                              <span className="font-medium capitalize text-primary/80 bg-primary/10 px-1.5 py-0.5 rounded text-[10px]">
+                                {c.provider === 'waha' ? 'WAHA' : 'Meta API'}
+                              </span>
+                              {c.phone_info?.verified_name && (
+                                <span className="truncate max-w-[220px]">{c.phone_info.verified_name}</span>
+                              )}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant={isActive ? 'default' : 'outline'}
+                            onClick={() => selectConfig(c)}
+                            className="text-xs h-7 font-medium"
+                          >
+                            Gerenciar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              if (confirm('Tem certeza que deseja remover esta linha do WhatsApp?')) {
+                                try {
+                                  const res = await fetch(`/api/whatsapp/config?id=${c.id}`, { method: 'DELETE' });
+                                  if (!res.ok) throw new Error('Erro ao deletar linha');
+                                  toast.success('Linha removida com sucesso!');
+                                  if (isActive) setActiveConfigId(null);
+                                  if (accountId) fetchConfig(accountId);
+                                } catch (err: any) {
+                                  toast.error(err.message || 'Erro ao deletar linha');
+                                }
+                              }
+                            }}
+                            className="text-xs h-7 font-medium border-red-900/50 text-red-400 hover:bg-red-950/20 hover:text-red-300"
+                          >
+                            Remover
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Corrupted-token reset banner (Meta only) */}
           {provider === 'meta' && showResetBanner && (
             <Alert className="bg-amber-950/40 border-amber-600/40">
@@ -747,7 +852,7 @@ export function WhatsAppConfig() {
                       <div className="bg-white p-3 rounded-md">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={`/api/whatsapp/waha/qr?t=${qrTrigger}`}
+                          src={`/api/whatsapp/waha/qr?session=${encodeURIComponent(wahaSession)}&id=${encodeURIComponent(activeConfigId || '')}&t=${qrTrigger}`}
                           alt="WhatsApp WAHA QR Code"
                           className="w-48 h-48"
                         />
@@ -981,12 +1086,14 @@ export function WhatsAppConfig() {
           <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle className="text-foreground">
-                {provider === 'waha' ? 'WAHA Server Settings' : 'Meta API Credentials'}
+                {activeConfigId 
+                  ? (provider === 'waha' ? 'Editar Servidor WAHA' : 'Editar Credenciais Meta') 
+                  : (provider === 'waha' ? 'Configurar Nova Linha WAHA' : 'Configurar Nova Linha Meta')}
               </CardTitle>
               <CardDescription className="text-muted-foreground font-light">
                 {provider === 'waha'
-                  ? 'Provide your self-hosted WhatsApp HTTP API server details.'
-                  : 'Enter your Meta WhatsApp Business API credentials.'}
+                  ? 'Forneça os detalhes do seu servidor WAHA auto-hospedado.'
+                  : 'Insira as credenciais do seu aplicativo Meta Cloud API.'}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

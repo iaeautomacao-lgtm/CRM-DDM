@@ -270,6 +270,7 @@ export async function POST(request: Request) {
         .select('id, unread_count, assigned_agent_id')
         .eq('account_id', accountId)
         .eq('contact_id', contactId!)
+        .eq('waha_session', session)
 
       if (convFetchError) {
         console.error('[waha/webhook] Error fetching conversations:', convFetchError)
@@ -289,6 +290,7 @@ export async function POST(request: Request) {
             status: 'open',
             unread_count: 0,
             user_id: config.user_id,
+            waha_session: session,
           })
           .select('id')
           .single()
@@ -459,6 +461,7 @@ export async function POST(request: Request) {
           media_url: mediaUrl,
           status: direction === 'inbound' ? 'read' : 'sent',
           created_at: messageDate,
+          waha_session: session,
         })
 
       if (msgInsertError) {

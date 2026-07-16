@@ -157,6 +157,7 @@ export interface Conversation {
   created_at: string;
   updated_at: string;
   contact?: Contact;
+  waha_session?: string;
 }
 
 export type SenderType = 'customer' | 'agent' | 'bot';
@@ -168,7 +169,6 @@ export type ContentType =
   | 'video'
   | 'location'
   | 'template'
-  /** Customer tapped a reply button or list row on a message we sent. */
   | 'interactive'
   | 'sticker'
   | 'poll'
@@ -189,13 +189,8 @@ export interface Message {
   status: MessageStatus;
   created_at: string;
   reply_to_message_id?: string;
-  /**
-   * Only set when `content_type === 'interactive'` — the stable id of
-   * the button or list row the customer tapped. The Flows engine uses
-   * this to route the next node; the inbox bubble uses it as a styling
-   * cue (renders with a "↩ button reply" affordance).
-   */
   interactive_reply_id?: string;
+  waha_session?: string;
 }
 
 export type ReactionActor = 'customer' | 'agent';

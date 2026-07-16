@@ -26,15 +26,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No account linked to user.' }, { status: 403 })
     }
 
-    const { data: config, error: configError } = await supabase
+    const body = await request.json().catch(() => ({}))
+    const { session: targetSession, id: targetId } = body
+
+    let query = supabase
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', profile.account_id)
-      .maybeSingle()
 
-    if (configError || !config || config.provider !== 'waha') {
+    if (targetId) {
+      query = query.eq('id', targetId)
+    } else if (targetSession) {
+      query = query.eq('waha_session', targetSession)
+    }
+
+    const { data: configs, error: configError } = await query
+
+    if (configError || !configs || configs.length === 0 || configs[0].provider !== 'waha') {
       return NextResponse.json({ error: 'WAHA is not configured.' }, { status: 400 })
     }
+
+    const config = configs[0]
 
     const wahaConfig = {
       waha_url: config.waha_url,

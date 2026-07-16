@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getWahaQrCode } from '@/lib/whatsapp/waha-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const supabase = await createClient()
 
@@ -25,15 +25,28 @@ export async function GET() {
       return new Response('Forbidden', { status: 403 })
     }
 
-    const { data: config, error: configError } = await supabase
+    const { searchParams } = new URL(request.url)
+    const targetSession = searchParams.get('session')
+    const targetId = searchParams.get('id')
+
+    let query = supabase
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', profile.account_id)
-      .maybeSingle()
 
-    if (configError || !config || config.provider !== 'waha') {
+    if (targetId) {
+      query = query.eq('id', targetId)
+    } else if (targetSession) {
+      query = query.eq('waha_session', targetSession)
+    }
+
+    const { data: configs, error: configError } = await query
+
+    if (configError || !configs || configs.length === 0 || configs[0].provider !== 'waha') {
       return new Response('WAHA not configured', { status: 400 })
     }
+
+    const config = configs[0]
 
     const wahaConfig = {
       waha_url: config.waha_url,

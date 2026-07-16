@@ -9,6 +9,7 @@ import {
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
 import {
   getWahaSessionStatus,
+  getWahaSessionInfo,
   startWahaSession,
 } from '@/lib/whatsapp/waha-api'
 
@@ -60,14 +61,8 @@ function supabaseAdmin() {
  * GET /api/whatsapp/config
  *
  * Used by the "Test API Connection" button and by the page to check
- * whether the saved config is healthy. Returns 200 in all non-auth cases
+ * whether the saved configs are healthy. Returns 200 in all non-auth cases
  * so the UI can render an appropriate message rather than show a 500.
- *
- * Response shape:
- *   { connected: true,  phone_info: {...} }
- *   { connected: false, reason: 'no_config',        message: '...' }
- *   { connected: false, reason: 'token_corrupted',  message: '...', needs_reset: true }
- *   { connected: false, reason: 'meta_api_error',   message: '...' }
  */
 export async function GET() {
   try {
@@ -94,11 +89,10 @@ export async function GET() {
       )
     }
 
-    const { data: config, error: configError } = await supabase
+    const { data: configs, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', accountId)
-      .maybeSingle()
 
     if (configError) {
       console.error('Error fetching whatsapp_config:', configError)
@@ -108,7 +102,7 @@ export async function GET() {
       )
     }
 
-    if (!config) {
+    if (!configs || configs.length === 0) {
       return NextResponse.json(
         {
           connected: false,
@@ -119,83 +113,112 @@ export async function GET() {
       )
     }
 
-    if (config.provider === 'waha') {
-      const wahaConfig = {
-        waha_url: config.waha_url,
-        waha_session: config.waha_session,
-        waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
-      }
-      try {
-        const status = await getWahaSessionStatus(wahaConfig)
-        if (status === 'WORKING') {
-          return NextResponse.json({
-            connected: true,
-            provider: 'waha',
-            session_status: status,
-            phone_info: {
-              id: config.waha_session,
-              display_phone_number: config.waha_session,
-              verified_name: `WAHA: ${config.waha_session}`
+    const configsWithStatus = await Promise.all(
+      configs.map(async (config: any) => {
+        if (config.provider === 'waha') {
+          const wahaConfig = {
+            waha_url: config.waha_url,
+            waha_session: config.waha_session,
+            waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
+          }
+          try {
+            const wahaSession = await getWahaSessionInfo(wahaConfig)
+            const status = wahaSession ? wahaSession.status : 'STOPPED'
+            
+            let displayPhone = config.waha_session
+            let pushName = ''
+            
+            if (wahaSession?.me?.id) {
+              const raw = wahaSession.me.id.replace('@c.us', '').replace('@lid', '')
+              displayPhone = `+${raw}`
+              pushName = wahaSession.me.pushName || ''
             }
-          })
+
+            const connected = status === 'WORKING'
+            return {
+              id: config.id,
+              connected,
+              provider: 'waha',
+              session_status: status,
+              waha_session: config.waha_session,
+              waha_url: config.waha_url,
+              phone_info: {
+                id: config.waha_session,
+                display_phone_number: displayPhone,
+                verified_name: pushName ? `WAHA: ${pushName} (${config.waha_session})` : `WAHA: ${config.waha_session}`
+              }
+            }
+          } catch (err: any) {
+            return {
+              id: config.id,
+              connected: false,
+              provider: 'waha',
+              session_status: 'UNKNOWN',
+              waha_session: config.waha_session,
+              waha_url: config.waha_url,
+              reason: 'waha_api_error',
+              message: `Could not connect to WAHA server at ${config.waha_url}: ${err.message}`,
+              phone_info: {
+                id: config.waha_session,
+                display_phone_number: config.waha_session,
+                verified_name: `WAHA: ${config.waha_session} (Error)`
+              }
+            }
+          }
         } else {
-          return NextResponse.json({
-            connected: false,
-            provider: 'waha',
-            session_status: status,
-            reason: 'waha_not_working',
-            message: `WAHA Session is not connected (Current Status: ${status}). Go to settings to scan the QR Code.`,
-          })
+          // Meta provider
+          let accessToken: string
+          try {
+            accessToken = decrypt(config.access_token)
+          } catch (err) {
+            return {
+              id: config.id,
+              connected: false,
+              provider: 'meta',
+              reason: 'token_corrupted',
+              needs_reset: true,
+              message: 'The stored access token cannot be decrypted.'
+            }
+          }
+
+          try {
+            const phoneInfo = await verifyPhoneNumber({
+              phoneNumberId: config.phone_number_id,
+              accessToken,
+            })
+            return {
+              id: config.id,
+              connected: true,
+              provider: 'meta',
+              phone_info: phoneInfo
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'Unknown Meta API error'
+            return {
+              id: config.id,
+              connected: false,
+              provider: 'meta',
+              reason: 'meta_api_error',
+              message: `Meta API rejected credentials: ${message}`
+            }
+          }
         }
-      } catch (err: any) {
-        return NextResponse.json({
-          connected: false,
-          provider: 'waha',
-          session_status: 'UNKNOWN',
-          reason: 'waha_api_error',
-          message: `Could not connect to WAHA server at ${config.waha_url}: ${err.message}`,
-        })
-      }
-    }
-
-    // Try to decrypt the stored token with the current ENCRYPTION_KEY.
-    // If this fails, the key changed (or was never consistent across envs).
-    let accessToken: string
-    try {
-      accessToken = decrypt(config.access_token)
-    } catch (err) {
-      console.error('[whatsapp/config GET] Token decryption failed:', err)
-      return NextResponse.json(
-        {
-          connected: false,
-          reason: 'token_corrupted',
-          needs_reset: true,
-          message:
-            'The stored access token cannot be decrypted with the current ENCRYPTION_KEY. This usually means the key changed, or it differs between environments (local vs Hostinger vs Vercel). Click "Reset Configuration" below, then re-save.',
-        },
-        { status: 200 }
-      )
-    }
-
-    // Validate credentials against Meta
-    try {
-      const phoneInfo = await verifyPhoneNumber({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
       })
-      return NextResponse.json({ connected: true, phone_info: phoneInfo })
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown Meta API error'
-      console.error('[whatsapp/config GET] Meta API verification failed:', message)
-      return NextResponse.json(
-        {
-          connected: false,
-          reason: 'meta_api_error',
-          message: `Meta API rejected the credentials: ${message}`,
-        },
-        { status: 200 }
-      )
-    }
+    )
+
+    const isAnyConnected = configsWithStatus.some(c => c.connected)
+    const primary = configsWithStatus[0]
+
+    return NextResponse.json({
+      connected: isAnyConnected,
+      configs: configsWithStatus,
+      provider: primary.provider,
+      session_status: (primary as any).session_status || undefined,
+      phone_info: primary.phone_info,
+      reason: !isAnyConnected ? (primary as any).reason || 'disconnected' : undefined,
+      message: !isAnyConnected ? (primary as any).message || 'Not connected' : undefined
+    })
+
   } catch (error) {
     console.error('Error in WhatsApp config GET:', error)
     return NextResponse.json(
@@ -233,7 +256,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { id: configId, provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, verify_token, pin } = body
 
     const MASKED_TOKEN = '••••••••••••••••'
 
@@ -297,11 +320,24 @@ export async function POST(request: Request) {
         user_id: user.id
       }
 
-      const { data: existing } = await supabase
-        .from('whatsapp_config')
-        .select('id, waha_api_key')
-        .eq('account_id', accountId)
-        .maybeSingle()
+      let existing = null
+      if (configId) {
+        const { data } = await supabase
+          .from('whatsapp_config')
+          .select('id, waha_api_key')
+          .eq('id', configId)
+          .eq('account_id', accountId)
+          .maybeSingle()
+        existing = data
+      } else {
+        const { data } = await supabase
+          .from('whatsapp_config')
+          .select('id, waha_api_key')
+          .eq('account_id', accountId)
+          .eq('waha_session', waha_session)
+          .maybeSingle()
+        existing = data
+      }
 
       if (existing) {
         if (waha_api_key === MASKED_TOKEN) {
@@ -438,11 +474,24 @@ export async function POST(request: Request) {
     // Look up any pre-existing row for this account so we know whether
     // this number is already registered with Meta — if so we can skip
     // /register when the user didn't provide a PIN this time around.
-    const { data: existing } = await supabase
-      .from('whatsapp_config')
-      .select('id, registered_at, phone_number_id')
-      .eq('account_id', accountId)
-      .maybeSingle()
+    let existing = null
+    if (configId) {
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, registered_at, phone_number_id')
+        .eq('id', configId)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      existing = data
+    } else {
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, registered_at, phone_number_id')
+        .eq('account_id', accountId)
+        .eq('phone_number_id', phone_number_id)
+        .maybeSingle()
+      existing = data
+    }
 
     const sameNumber =
       existing?.phone_number_id === phone_number_id &&
@@ -536,7 +585,7 @@ export async function POST(request: Request) {
       const { error: updateError } = await supabase
         .from('whatsapp_config')
         .update(baseRow)
-        .eq('account_id', accountId)
+        .eq('id', existing.id)
 
       if (updateError) {
         console.error('Error updating whatsapp_config:', updateError)
@@ -601,10 +650,9 @@ export async function POST(request: Request) {
  * DELETE /api/whatsapp/config
  *
  * Removes the authenticated user's WhatsApp configuration row.
- * Used by the "Reset Configuration" button to recover from a corrupted
- * encrypted token (mismatched ENCRYPTION_KEY across environments).
+ * If target ID is specified in query string, deletes that specific line.
  */
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
     const supabase = await createClient()
 
@@ -625,10 +673,19 @@ export async function DELETE() {
       )
     }
 
-    const { error: deleteError } = await supabase
+    const { searchParams } = new URL(request.url)
+    const targetId = searchParams.get('id')
+
+    const query = supabase
       .from('whatsapp_config')
       .delete()
       .eq('account_id', accountId)
+
+    if (targetId) {
+      query.eq('id', targetId)
+    }
+
+    const { error: deleteError } = await query
 
     if (deleteError) {
       console.error('Error deleting whatsapp_config:', deleteError)

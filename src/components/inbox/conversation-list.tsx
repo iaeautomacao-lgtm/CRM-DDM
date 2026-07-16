@@ -55,7 +55,22 @@ export function ConversationList({
 }: ConversationListProps) {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
+  const [selectedLine, setSelectedLine] = useState<string>("all");
+  const [configs, setConfigs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Fetch configured lines for dropdown filter
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/whatsapp/config");
+        const data = await res.json();
+        setConfigs(data.configs || []);
+      } catch (err) {
+        console.error("Failed to load configs for filters:", err);
+      }
+    })();
+  }, []);
 
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
@@ -126,6 +141,10 @@ export function ConversationList({
       result = result.filter((c) => c.status === filter);
     }
 
+    if (selectedLine !== "all") {
+      result = result.filter((c) => c.waha_session === selectedLine);
+    }
+
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter((c) => {
@@ -137,7 +156,7 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, search]);
+  }, [conversations, filter, selectedLine, search]);
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -172,31 +191,68 @@ export function ConversationList({
           />
         </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted">
-              {activeFilter?.label ?? "All"}
-              <ChevronDown className="h-3 w-3" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="border-border bg-popover"
-          >
-            {FILTER_OPTIONS.map((opt) => (
-              <DropdownMenuItem
-                key={opt.value}
-                onClick={() => setFilter(opt.value)}
-                className={cn(
-                  "text-sm",
-                  filter === opt.value
-                    ? "text-primary"
-                    : "text-popover-foreground"
-                )}
+        <div className="flex gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted">
+                Status: {activeFilter?.label ?? "All"}
+                <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="border-border bg-popover"
+            >
+              {FILTER_OPTIONS.map((opt) => (
+                <DropdownMenuItem
+                  key={opt.value}
+                  onClick={() => setFilter(opt.value)}
+                  className={cn(
+                    "text-sm",
+                    filter === opt.value
+                      ? "text-primary"
+                      : "text-popover-foreground"
+                  )}
+                >
+                  {opt.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {configs.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted truncate max-w-[150px]">
+                  Linha: {selectedLine === "all" ? "Todas" : (configs.find(c => c.waha_session === selectedLine)?.phone_info?.display_phone_number || selectedLine)}
+                  <ChevronDown className="h-3 w-3" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="border-border bg-popover"
               >
-                {opt.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+                <DropdownMenuItem
+                  onClick={() => setSelectedLine("all")}
+                  className={cn(
+                    "text-sm",
+                    selectedLine === "all" ? "text-primary" : "text-popover-foreground"
+                  )}
+                >
+                  Todas as Linhas
+                </DropdownMenuItem>
+                {configs.map((c) => (
+                  <DropdownMenuItem
+                    key={c.id}
+                    onClick={() => setSelectedLine(c.waha_session)}
+                    className={cn(
+                      "text-sm",
+                      selectedLine === c.waha_session ? "text-primary" : "text-popover-foreground"
+                    )}
+                  >
+                    {c.phone_info?.display_phone_number || c.waha_session}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
 
       {/* Conversation Items.
@@ -299,6 +355,15 @@ function ConversationItem({
           </span>
           <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
         </div>
+
+        {/* Line badge */}
+        {(conversation as any).waha_session && (
+          <div className="mt-0.5">
+            <span className="inline-block text-[9px] font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20 leading-none select-none">
+              {(conversation as any).waha_session}
+            </span>
+          </div>
+        )}
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <p className="truncate text-xs text-muted-foreground">
             {conversation.last_message_text || "Nenhuma mensagem ainda"}
