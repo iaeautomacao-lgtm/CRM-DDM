@@ -68,9 +68,16 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
     let resumo_parcelamento: any[] = [];
     let acordos: any[] = [];
 
+    let calculoId = "";
+
     const calcArray = Array.isArray(calcData) ? calcData : [calcData];
 
     if (calcArray.length > 0) {
+      const dadosObj = calcArray.find((obj: any) => obj.Dados);
+      if (dadosObj && dadosObj.Dados) {
+        calculoId = String(dadosObj.Dados.CalculoID || dadosObj.Dados.idcalc || "");
+      }
+
       const pgtoAvista = calcArray.find((obj: any) => obj.PgtoAvista);
       if (pgtoAvista && pgtoAvista.PgtoAvista && pgtoAvista.PgtoAvista.ValorFinal) {
         valor_divida = pgtoAvista.PgtoAvista.ValorFinal;
@@ -153,7 +160,8 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
       opcoes_cartao,
       campanha,
       resumo_parcelamento,
-      acordos
+      acordos,
+      calculoId
     };
   } catch (err) {
     console.error("[AI Agent] DDM API sequence error:", err);
@@ -599,11 +607,16 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
       const formattedAcordos = JSON.stringify(ddmData.acordos || []);
       const currentDate = new Date().toLocaleDateString("pt-BR");
 
+      const cardPayUrl = ddmData.calculoId 
+        ? `https://ddmpay.ddmacordos.com/acesso/?c=${ddmData.calculoId}&u=` 
+        : `https://ddmpay.ddmacordos.com/acesso/?c=&u=`;
+
       let customPrompt = aiConfig.system_prompt || "";
       if (customPrompt) {
         customPrompt = customPrompt
           .replace(/\{\{valor_final\}\}/g, `R$ ${debt}`)
-          .replace(/\{\{resumo_parcelamento\}\}/g, formattedBoleto);
+          .replace(/\{\{resumo_parcelamento\}\}/g, formattedBoleto)
+          .replace(/c=&u=/g, `c=${ddmData.calculoId || ""}&u=`);
       }
 
       systemPromptWithKb = customPrompt
@@ -662,7 +675,7 @@ Você precisa descobrir mais sobre as necessidades e desafios que o cliente est�
     - Fluxo de negociação:
       1. Primeiro apresente apenas o pagamento à vista utilizando: R$ ${debt}
       2. Caso o aluno informe que não consegue pagar à vista ou solicite parcelamento:
-         - Primeiro ofereça parcelamento no cartão de crédito com o link original do portal: https://ddmpay.ddmacordos.com/acesso/?c=&u=
+         - Primeiro ofereça parcelamento no cartão de crédito com o link original do portal: ${cardPayUrl}
       3. Somente se o aluno disser explicitamente que não consegue pagar no cartão, utilize as opções disponíveis em: resumo_parcelamento
       4. Apresente apenas UMA opção por vez seguindo a ordem de parcelas.
     - REGRA CRÍTICA SOBRE PARCELAS:
@@ -909,11 +922,12 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${foundCpf}...`);
     try {
       const activeKey = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
-      let calculoId = "";
+      let calculoId = ddmData?.calculoId || "";
       
-      // 1. Busca os débitos/cálculos no localiza_dev.php para pegar o CalculoID ativo
-      const localizaUrl = `https://ddmacordos.com/calc/localiza_dev.php?tk=${activeKey}&cpf=${foundCpf.replace(/\D/g, "")}`;
-      const resLocaliza = await fetch(localizaUrl);
+      if (!calculoId) {
+        // 1. Busca os débitos/cálculos no localiza_dev.php para pegar o CalculoID ativo
+        const localizaUrl = `https://ddmacordos.com/calc/localiza_dev.php?tk=${activeKey}&cpf=${foundCpf.replace(/\D/g, "")}`;
+        const resLocaliza = await fetch(localizaUrl);
       if (resLocaliza.ok) {
         const localizaData = await resLocaliza.json();
         const iddev = localizaData?.[0]?.iddev;
@@ -934,6 +948,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
           }
         }
       }
+    }
 
       // Aguarda 3 segundos para garantir que a DDM limpou sessões de consulta anteriores
       await new Promise((resolve) => setTimeout(resolve, 3000));
