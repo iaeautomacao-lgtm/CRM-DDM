@@ -28,9 +28,9 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
   const token = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
 
   try {
-    // Passo 1: Localizar devedor por CPF no localiza_dev.php
+    // Passo 1: Localizar devedor por CPF no localiza_dev.php com timeout de 10s
     const localizaUrl = `https://www.ddmacordos.com/calc/localiza_dev.php?tk=${token}&cpf=${cpf}`;
-    const resLocaliza = await fetch(localizaUrl);
+    const resLocaliza = await fetch(localizaUrl, { signal: AbortSignal.timeout(10000) });
     if (!resLocaliza.ok) {
       console.warn(`[AI Agent] DDM localiza_dev failed with status: ${resLocaliza.status}`);
       return null;
@@ -53,9 +53,9 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
       return { nome, instituicao };
     }
 
-    // Passo 2: Buscar detalhes de cálculo da dívida com desconto de 40%
+    // Passo 2: Buscar detalhes de cálculo com timeout de 10s
     const calcUrl = `https://ddmacordos.com/calc/?tk=${token}&idDev=${iddev}&cli=${sistema}&Desconto=40`;
-    const resCalc = await fetch(calcUrl);
+    const resCalc = await fetch(calcUrl, { signal: AbortSignal.timeout(10000) });
     if (!resCalc.ok) {
       console.warn(`[AI Agent] DDM calc failed with status: ${resCalc.status}`);
       return { nome, instituicao };
@@ -76,15 +76,18 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
         valor_divida = pgtoAvista.PgtoAvista.ValorFinal;
       }
 
-      // Extract agreements
-      const acordosObj = calcArray.find((obj: any) => obj.acordos);
-      if (acordosObj && Array.isArray(acordosObj.acordos)) {
-        acordos = acordosObj.acordos;
+      // Extract agreements (case-insensitive key handling)
+      const acordosObj = calcArray.find((obj: any) => obj.acordos || obj.Acordos);
+      if (acordosObj) {
+        const rawAcordos = acordosObj.acordos || acordosObj.Acordos;
+        if (Array.isArray(rawAcordos)) {
+          acordos = rawAcordos;
+        }
       }
 
-      // Extract boleto installments
-      const pgtoBoletoObj = calcArray.find((obj: any) => obj.PgtoParceladoBoleto || obj.resumo_parcelamento);
-      const rawBoleto = pgtoBoletoObj?.PgtoParceladoBoleto || pgtoBoletoObj?.resumo_parcelamento;
+      // Extract boleto installments (case-insensitive key handling)
+      const pgtoBoletoObj = calcArray.find((obj: any) => obj.PgtoParceladoBoleto || obj.pgtoParceladoBoleto || obj.resumo_parcelamento);
+      const rawBoleto = pgtoBoletoObj?.PgtoParceladoBoleto || pgtoBoletoObj?.pgtoParceladoBoleto || pgtoBoletoObj?.resumo_parcelamento;
       if (rawBoleto) {
         if (Array.isArray(rawBoleto)) {
           resumo_parcelamento = rawBoleto.map((item: any) => ({
@@ -126,7 +129,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
         campanha = "2025.1";
       }
 
-      const cleanVal = valor_divida.replace(/\./g, "").replace(",", ".");
+      const cleanVal = String(valor_divida).replace(/\./g, "").replace(",", ".");
       const totalFloat = parseFloat(cleanVal);
 
       if (!isNaN(totalFloat) && totalFloat > 0) {
@@ -159,7 +162,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
 }
 
 function extractInstallmentsFromHistory(history: any[]): number {
-  for (let idx = 0; idx < history.length; idx++) {
+  for (let idx = history.length - 1; idx >= 0; idx--) {
     const text = (history[idx].content_text || "").toLowerCase();
     const sender = history[idx].sender_type;
 
