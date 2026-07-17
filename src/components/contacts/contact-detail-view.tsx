@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
@@ -38,6 +39,7 @@ import {
   X,
   DollarSign,
   LayoutTemplate,
+  MessageSquare,
 } from 'lucide-react';
 
 interface ContactDetailViewProps {
@@ -54,7 +56,8 @@ export function ContactDetailView({
   onUpdated,
 }: ContactDetailViewProps) {
   const supabase = createClient();
-  const { accountId, defaultCurrency } = useAuth();
+  const router = useRouter();
+  const { accountId, defaultCurrency, user } = useAuth();
 
   const [contact, setContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,6 +68,68 @@ export function ContactDetailView({
   // find-or-creates the conversation, so no inbound message is required.
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [sendingTemplate, setSendingTemplate] = useState(false);
+  const [loadingChat, setLoadingChat] = useState(false);
+
+  const handleGoToChat = async () => {
+    if (!contact || !accountId) return;
+    setLoadingChat(true);
+    try {
+      // 1. Check if a conversation already exists
+      const { data: existing, error: fetchErr } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('account_id', accountId)
+        .eq('contact_id', contact.id)
+        .maybeSingle();
+
+      if (fetchErr) throw fetchErr;
+
+      if (existing) {
+        router.push(`/inbox?c=${existing.id}`);
+        onOpenChange(false);
+        return;
+      }
+
+      // 2. If it does not exist, check if there is an active WAHA session configured
+      const { data: configs } = await supabase
+        .from('whatsapp_config')
+        .select('provider, waha_session')
+        .eq('account_id', accountId);
+
+      const wahaConfig = configs?.find((c) => c.provider === 'waha');
+
+      // 3. Create a new conversation
+      const insertData: Record<string, any> = {
+        account_id: accountId,
+        contact_id: contact.id,
+        status: 'open',
+        unread_count: 0,
+        user_id: user?.id || null,
+      };
+
+      if (wahaConfig?.waha_session) {
+        insertData.waha_session = wahaConfig.waha_session;
+      }
+
+      const { data: created, error: createErr } = await supabase
+        .from('conversations')
+        .insert(insertData)
+        .select('id')
+        .single();
+
+      if (createErr) throw createErr;
+
+      if (created) {
+        router.push(`/inbox?c=${created.id}`);
+        onOpenChange(false);
+      }
+    } catch (err: any) {
+      console.error('Error going to chat:', err);
+      toast.error('Erro ao abrir conversa: ' + (err.message || err));
+    } finally {
+      setLoadingChat(false);
+    }
+  };
 
   // Details tab
   const [editName, setEditName] = useState('');
@@ -436,11 +501,11 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3 flex items-center gap-2">
                 <Button
                   size="sm"
                   onClick={() => setTemplatePickerOpen(true)}
-                  disabled={sendingTemplate}
+                  disabled={sendingTemplate || loadingChat}
                   className="bg-primary text-primary-foreground hover:bg-primary/90"
                 >
                   {sendingTemplate ? (
@@ -449,6 +514,21 @@ export function ContactDetailView({
                     <LayoutTemplate className="size-4" />
                   )}
                   Enviar template
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleGoToChat}
+                  disabled={sendingTemplate || loadingChat}
+                  className="border-border text-foreground hover:bg-muted"
+                >
+                  {loadingChat ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <MessageSquare className="size-4" />
+                  )}
+                  Ir para o chat
                 </Button>
               </div>
             </SheetHeader>

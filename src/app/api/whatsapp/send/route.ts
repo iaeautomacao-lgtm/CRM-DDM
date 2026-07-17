@@ -518,6 +518,10 @@ export async function POST(request: Request) {
       updated_at: new Date().toISOString(),
     }
 
+    if (config.provider === 'waha' && !(conversation as any).waha_session) {
+      convUpdate.waha_session = config.waha_session
+    }
+
     if (!(conversation as any).assigned_agent_id) {
       convUpdate.assigned_agent_id = user.id
     }

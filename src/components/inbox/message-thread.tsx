@@ -271,8 +271,8 @@ export function MessageThread({
   const sessionInfo = useMemo(() => {
     if (!messages.length) return { expired: false, remaining: "" };
 
-    // If the provider is waha, the session never expires
-    if (whatsappProvider === "waha") {
+    // If the provider is waha, or the conversation is associated with a WAHA session, the session never expires
+    if (whatsappProvider === "waha" || !!conversation?.waha_session) {
       return { expired: false, remaining: "" };
     }
 
@@ -297,7 +297,7 @@ export function MessageThread({
         : `${Math.floor(hoursLeft * 60)}m restantes`;
 
     return { expired, remaining };
-  }, [messages]);
+  }, [messages, whatsappProvider, conversation?.waha_session]);
 
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
