@@ -220,8 +220,22 @@ export async function POST(request: Request) {
 
 function checkWithinWindow(inicio: string, fim: string): boolean {
   const now = new Date();
-  const [hInicio, mInicio] = inicio.split(":").map(Number);
-  const [hFim, mFim] = fim.split(":").map(Number);
-  const nowMinutes = now.getHours() * 60 + now.getMinutes();
-  return nowMinutes >= hInicio * 60 + mInicio && nowMinutes <= hFim * 60 + mFim;
+  try {
+    const brTimeStr = now.toLocaleTimeString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    });
+    const [brHour, brMinute] = brTimeStr.split(":").map(Number);
+    const nowMinutes = brHour * 60 + brMinute;
+    const [hInicio, mInicio] = inicio.split(":").map(Number);
+    const [hFim, mFim] = fim.split(":").map(Number);
+    return nowMinutes >= hInicio * 60 + mInicio && nowMinutes <= hFim * 60 + mFim;
+  } catch (e) {
+    const [hInicio, mInicio] = inicio.split(":").map(Number);
+    const [hFim, mFim] = fim.split(":").map(Number);
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return nowMinutes >= hInicio * 60 + mInicio && nowMinutes <= hFim * 60 + mFim;
+  }
 }
