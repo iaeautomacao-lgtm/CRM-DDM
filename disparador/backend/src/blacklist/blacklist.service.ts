@@ -31,7 +31,7 @@ export class BlacklistService {
 
     // Cancela mensagens pendentes
     await this.supabase.db
-      .from('message_queue')
+      .from('disp_message_queue')
       .update({ status: 'cancelado' })
       .eq('status', 'pendente')
       .in('contact_id',

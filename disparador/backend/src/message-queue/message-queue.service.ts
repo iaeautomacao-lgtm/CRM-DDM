@@ -97,7 +97,7 @@ export class MessageQueueService {
           : msg.conteudo || '';
 
         const { data: queueItem, error: insertError } = await this.supabase.db
-          .from('message_queue')
+          .from('disp_message_queue')
           .insert({
             campaign_id: campaignId,
             contact_id: contact.id,
@@ -139,7 +139,7 @@ export class MessageQueueService {
 
   async cancelCampaignQueue(campaignId: string) {
     await this.supabase.db
-      .from('message_queue')
+      .from('disp_message_queue')
       .update({ status: 'cancelado' })
       .eq('campaign_id', campaignId)
       .in('status', ['pendente', 'agendado']);
@@ -147,7 +147,7 @@ export class MessageQueueService {
 
   async getQueueStatus(campaignId: string) {
     const { data } = await this.supabase.db
-      .from('message_queue')
+      .from('disp_message_queue')
       .select('status')
       .eq('campaign_id', campaignId)
       .neq('status', 'cancelado');
@@ -160,7 +160,7 @@ export class MessageQueueService {
 
   async getQueueDetails(campaignId: string) {
     const { data } = await this.supabase.db
-      .from('message_queue')
+      .from('disp_message_queue')
       .select('id, status, tipo, mensagem_final, scheduled_at, sent_at, erro, tentativas, contact_id, contacts(nome, telefone_normalizado)')
       .eq('campaign_id', campaignId)
       .neq('status', 'cancelado')

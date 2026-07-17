@@ -73,7 +73,7 @@ export class DashboardService {
     const today = new Date().toISOString().slice(0, 10);
 
     const { data } = await this.supabase.db
-      .from('message_queue')
+      .from('disp_message_queue')
       .select('status')
       .gte('created_at', today);
 
@@ -101,7 +101,7 @@ export class DashboardService {
       this.supabase.db.from('campaigns').select('*').eq('id', campaignId).single(),
       this.supabase.db.from('campaign_metrics').select('*').eq('campaign_id', campaignId).single(),
       this.supabase.db.from('risk_events').select('*').eq('campaign_id', campaignId).order('created_at', { ascending: false }).limit(20),
-      this.supabase.db.from('message_queue').select('status').eq('campaign_id', campaignId),
+      this.supabase.db.from('disp_message_queue').select('status').eq('campaign_id', campaignId),
     ]);
 
     const queueSummary = (queueStatus.data || []).reduce((acc: any, row) => {

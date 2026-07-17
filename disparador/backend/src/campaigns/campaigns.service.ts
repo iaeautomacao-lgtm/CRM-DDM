@@ -122,7 +122,7 @@ export class CampaignsService {
 
     // Remove itens pendentes/agendados/erro para evitar duplicatas
     await this.supabase.db
-      .from('message_queue')
+      .from('disp_message_queue')
       .delete()
       .eq('campaign_id', id)
       .in('status', ['pendente', 'agendado', 'erro']);
@@ -141,7 +141,7 @@ export class CampaignsService {
   async stop(id: string) {
     await this.update(id, { status: 'encerrada' });
     await this.supabase.db
-      .from('message_queue')
+      .from('disp_message_queue')
       .update({ status: 'cancelado' })
       .eq('campaign_id', id)
       .in('status', ['pendente', 'agendado']);
@@ -174,7 +174,7 @@ export class CampaignsService {
 
     // 1. Busca todos os IDs da fila desta campanha
     const { data: queueItems } = await this.supabase.db
-      .from('message_queue').select('id').eq('campaign_id', id);
+      .from('disp_message_queue').select('id').eq('campaign_id', id);
     const queueIds = (queueItems || []).map((q: any) => q.id);
     this.logger.log(`Queue items encontrados: ${queueIds.length}`);
 
@@ -189,7 +189,7 @@ export class CampaignsService {
     await this.supabase.db.from('message_logs').update({ campaign_id: null }).eq('campaign_id', id);
 
     // 4. Deleta fila
-    const { error: mqErr } = await this.supabase.db.from('message_queue').delete().eq('campaign_id', id);
+    const { error: mqErr } = await this.supabase.db.from('disp_message_queue').delete().eq('campaign_id', id);
     if (mqErr) this.logger.warn(`message_queue delete: ${mqErr.message}`);
 
     // 5. Anula campaign_id nas demais tabelas
