@@ -14,7 +14,8 @@ import {
   ArrowRight,
   TrendingUp,
   Inbox,
-  AlertTriangle
+  AlertTriangle,
+  FileSpreadsheet
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -128,6 +129,11 @@ export default function DisparadorDashboardPage() {
           <Link href="/disparador/blacklist">
             <Button variant="outline" className="gap-1.5 text-xs h-9">
               <ShieldAlert className="h-4 w-4 text-red-500" /> Blacklist
+            </Button>
+          </Link>
+          <Link href="/disparador/contatos">
+            <Button variant="outline" className="gap-1.5 text-xs h-9">
+              <FileSpreadsheet className="h-4 w-4 text-primary" /> Importar Contatos
             </Button>
           </Link>
           <Link href="/disparador/campanhas">
