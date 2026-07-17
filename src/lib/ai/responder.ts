@@ -45,7 +45,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
     const debtor = localizaData[0];
     const iddev = debtor.iddev;
     const sistema = debtor.sistema; // ex: 'cruzeiro'
-    const instituicao = debtor.instituicao || "Cruzeiro";
+    const instituicao = debtor.apelido || debtor.Apelido || debtor.instituicao || "Cruzeiro";
     const nome = debtor.nome || "";
 
     if (!iddev || !sistema) {
@@ -978,9 +978,9 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         payBoletoUrl = `https://ddmpay.ddmacordos.com/acesso/?c=${calculoId}&u=`;
       }
 
-      // Adiciona o link do boleto gerado à mensagem enviada pela IA no WhatsApp
+      // Adiciona o link do boleto/pagamento gerado à mensagem enviada pela IA no WhatsApp
       if (payBoletoUrl) {
-        generatedText = `${generatedText}\n\nSegue o link do seu boleto oficial para pagamento: ${payBoletoUrl}`;
+        generatedText = `${generatedText}\n\nSegue o link oficial para pagamento: ${payBoletoUrl}`;
       }
     } catch (err) {
       console.error("[AI Agent] DDM formalize and boleto fetch error:", err);
