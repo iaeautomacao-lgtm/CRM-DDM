@@ -3,6 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
+import { isUniqueViolation, normalizeKey } from "@/lib/contacts/dedupe";
+import {
+  resolveImportTagIds,
+  assignImportedContactTags,
+  type ContactTagAssignment,
+} from "@/lib/contacts/resolve-import-tags";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -21,11 +27,25 @@ function formatBrazilianPhone(raw: string): string {
 
 export async function POST(request: Request) {
   try {
-    // 1. Authenticate user
+    // 1. Authenticate user and resolve their account
     const supabase = await createServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("account_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const accountId = profile?.account_id;
+    if (!accountId) {
+      return NextResponse.json(
+        { error: "Seu perfil não está vinculado a uma conta." },
+        { status: 400 }
+      );
     }
 
     // 2. Parse request FormData
@@ -68,10 +88,39 @@ export async function POST(request: Request) {
 
     // 3. Process imported rows
     const results = { importados: 0, duplicados: 0, invalidos: 0, blacklisted: 0, erros: [] as string[] };
-    
-    // Fetch current blacklist
+
+    // Blacklist has no account_id column in the disparador schema — it's a
+    // single shared list across every account on this instance, not scoped
+    // per-tenant. Left unfiltered here; scoping it requires a migration.
     const { data: blacklist } = await supabaseAdmin.from("blacklist").select("telefone");
     const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
+
+    // Existing contacts for this account, keyed by normalized phone. Used
+    // instead of a DB-level upsert because the real unique constraint,
+    // idx_contacts_account_phone_normalized, is a *partial* index (WHERE
+    // phone_normalized <> ''), which Postgres won't infer as an ON CONFLICT
+    // arbiter from a bare column list — the same reason the main contacts
+    // CSV importer (import-modal.tsx) pre-checks and inserts rather than
+    // upserts.
+    const { data: existingRows } = await supabaseAdmin
+      .from("contacts")
+      .select("phone_normalized")
+      .eq("account_id", accountId);
+    const existingPhones = new Set(
+      (existingRows ?? [])
+        .map((r: { phone_normalized: string | null }) => r.phone_normalized)
+        .filter((p): p is string => !!p)
+    );
+
+    type PendingContact = {
+      phone: string;
+      name: string | null;
+      email: string | null;
+      company: string | null;
+      tagsArray: string[];
+    };
+    const pending: PendingContact[] = [];
+    const seenInFile = new Set<string>();
 
     for (const row of rows) {
       const rawPhone = row.telefone || row.phone;
@@ -92,63 +141,97 @@ export async function POST(request: Request) {
         continue;
       }
 
+      const key = normalizeKey(normalized);
+      if (existingPhones.has(key) || seenInFile.has(key)) {
+        results.duplicados++;
+        continue;
+      }
+      seenInFile.add(key);
+
       const rawTags: string = row.tags || "";
       const tagsArray = rawTags ? rawTags.split(",").map((t) => t.trim()).filter(Boolean) : [];
 
-      // Upsert contact
-      const contactData = {
-        user_id: user.id,
+      pending.push({
         phone: normalized,
         name: row.nome || row.name || null,
         email: row.email || null,
         company: row.origem || row.company || null,
-      };
+        tagsArray,
+      });
+    }
 
-      const { data: contact, error: upsertError } = await supabaseAdmin
+    // 4. Resolve tag names -> ids up front, scoped to this account
+    const allTagNames = pending.flatMap((p) => p.tagsArray);
+    let tagIdByKey = new Map<string, string>();
+    if (allTagNames.length > 0) {
+      ({ tagIdByKey } = await resolveImportTagIds(supabaseAdmin, {
+        accountId,
+        userId: user.id,
+        tagNames: allTagNames,
+        canCreateTags: true,
+      }));
+    }
+
+    // 5. Insert contacts in chunks; a chunk failure retries row-by-row so
+    // one bad/duplicate row doesn't sink the whole batch.
+    const tagAssignments: ContactTagAssignment[] = [];
+    const chunkSize = 50;
+
+    for (let i = 0; i < pending.length; i += chunkSize) {
+      const chunk = pending.slice(i, i + chunkSize);
+      const insertRows = chunk.map((p) => ({
+        user_id: user.id,
+        account_id: accountId,
+        phone: p.phone,
+        name: p.name,
+        email: p.email,
+        company: p.company,
+      }));
+
+      const { data, error } = await supabaseAdmin
         .from("contacts")
-        .upsert(contactData, { onConflict: "phone" })
-        .select("id")
-        .single();
+        .insert(insertRows)
+        .select("id");
 
-      if (upsertError) {
-        results.erros.push(`${normalized}: ${upsertError.message}`);
-        continue;
-      }
+      if (error) {
+        for (let j = 0; j < insertRows.length; j++) {
+          const source = chunk[j];
+          const { data: singleData, error: singleErr } = await supabaseAdmin
+            .from("contacts")
+            .insert(insertRows[j])
+            .select("id")
+            .single();
 
-      if (contact && tagsArray.length > 0) {
-        // Tag association
-        for (const tagName of tagsArray) {
-          try {
-            // Find or create tag for this user
-            let { data: tag } = await supabaseAdmin
-              .from("tags")
-              .select("id")
-              .eq("user_id", user.id)
-              .eq("name", tagName)
-              .maybeSingle();
-
-            if (!tag) {
-              const { data: newTag, error: tagErr } = await supabaseAdmin
-                .from("tags")
-                .insert({ user_id: user.id, name: tagName })
-                .select("id")
-                .single();
-              if (tagErr) throw tagErr;
-              tag = newTag;
+          if (!singleErr && singleData) {
+            results.importados++;
+            if (source.tagsArray.length > 0) {
+              tagAssignments.push({ contactId: singleData.id, tagNames: source.tagsArray });
             }
-
-            if (tag) {
-              await supabaseAdmin
-                .from("contact_tags")
-                .upsert({ contact_id: contact.id, tag_id: tag.id }, { onConflict: "contact_id,tag_id" });
-            }
-          } catch (err: any) {
-            console.error(`Failed to assign tag ${tagName} to contact ${contact.id}:`, err);
+          } else if (isUniqueViolation(singleErr)) {
+            results.duplicados++;
+          } else {
+            results.erros.push(`${source.phone}: ${singleErr?.message}`);
           }
         }
+      } else {
+        const inserted = data ?? [];
+        results.importados += inserted.length;
+        for (let j = 0; j < inserted.length; j++) {
+          const source = chunk[j];
+          if (!source || source.tagsArray.length === 0) continue;
+          tagAssignments.push({ contactId: inserted[j].id, tagNames: source.tagsArray });
+        }
       }
+    }
 
-      results.importados++;
+    // 6. Wire tags onto the contacts we just created. Failure here must not
+    // mask a successful contact import.
+    if (tagAssignments.length > 0) {
+      try {
+        await assignImportedContactTags(supabaseAdmin, tagAssignments, tagIdByKey);
+      } catch (err) {
+        console.error("[Contacts Import] Failed to assign tags:", err);
+      }
     }
 
     return NextResponse.json({ success: true, results });
