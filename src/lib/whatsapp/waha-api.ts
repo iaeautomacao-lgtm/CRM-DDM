@@ -187,8 +187,6 @@ export async function startWahaSession(config: WahaConfig, webhookUrl?: string):
 
   if (!createRes.ok) {
     console.warn(`[waha-api] Failed to create session with config (status ${createRes.status}), retrying with name-only body`);
-    console.warn('[TEMP DEBUG] Payload enviado:', JSON.stringify(sessionPayload));
-    console.warn('[TEMP DEBUG] Resposta do WAHA:', await createRes.clone().text());
     createRes = await wahaFetch(config, '/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
