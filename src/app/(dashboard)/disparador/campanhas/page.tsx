@@ -191,11 +191,21 @@ export default function CampanhasPage() {
   };
 
   // Delete Campaign
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (campaign: Campaign) => {
+    // disp_message_queue.campaign_id is ON DELETE CASCADE, so deleting a
+    // running campaign silently wipes its in-flight queue mid-send.
+    // Require pausing/stopping first instead of deleting straight out of
+    // em_execucao.
+    if (campaign.status === "em_execucao") {
+      toast.error(
+        "Não é possível deletar uma campanha em execução. Pause ou encerre a campanha primeiro."
+      );
+      return;
+    }
     if (!confirm("Tem certeza que deseja deletar esta campanha permanentemente?")) return;
     try {
       const supabase = createClient();
-      const { error } = await supabase.from("campaigns").delete().eq("id", id);
+      const { error } = await supabase.from("campaigns").delete().eq("id", campaign.id);
       if (error) throw error;
       toast.success("Campanha deletada.");
       loadData();
@@ -361,7 +371,7 @@ export default function CampanhasPage() {
                       </Button>
                     ) : null}
                   </div>
-                  <Button size="icon" variant="ghost" onClick={() => handleDelete(c.id)} className="h-8 w-8 text-red-500 hover:text-red-600">
+                  <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} className="h-8 w-8 text-red-500 hover:text-red-600">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
