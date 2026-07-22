@@ -222,6 +222,16 @@ export default function CampanhasPage() {
 
     try {
       const supabase = createClient();
+
+      // created_by is required for the ownership check in the
+      // start/stop routes (campaign.created_by !== user.id) — without
+      // it, every campaign is unowned and that check always rejects.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error("Não autenticado");
+
       const campaignData = {
         nome,
         descricao,
@@ -234,6 +244,7 @@ export default function CampanhasPage() {
         janela_inicio: janelaInicio,
         janela_fim: janelaFim,
         status: "rascunho",
+        created_by: user.id,
       };
 
       const { error } = await supabase.from("campaigns").insert(campaignData);
