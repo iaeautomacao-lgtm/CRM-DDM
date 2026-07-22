@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     // 1. Fetch the next scheduled item from queue
     const { data: item, error: queryError } = await supabaseAdmin
       .from("disp_message_queue")
-      .select("*, contacts(nome, telefone)")
+      .select("*, contacts(name, phone)")
       .eq("status", "agendado")
       .lte("scheduled_at", now)
       .order("scheduled_at", { ascending: true })
@@ -97,7 +97,7 @@ export async function POST(request: Request) {
     }
 
     // 5. Check if contact is blacklisted
-    const telefone = item.contacts?.telefone || item.mensagem_final;
+    const telefone = item.contacts?.phone || item.mensagem_final;
     const { data: blacklisted } = await supabaseAdmin
       .from("blacklist")
       .select("id")
@@ -151,7 +151,7 @@ export async function POST(request: Request) {
             },
             {
               role: "user",
-              content: `Contato: nome=${item.contacts?.nome || ""}. Prompt: ${messageText}`,
+              content: `Contato: nome=${item.contacts?.name || ""}. Prompt: ${messageText}`,
             },
           ],
           max_tokens: 500,
