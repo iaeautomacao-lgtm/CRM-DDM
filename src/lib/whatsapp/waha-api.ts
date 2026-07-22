@@ -1,4 +1,6 @@
 import type { MediaKind } from './meta-api';
+import { isIP } from 'node:net';
+import { lookup } from 'node:dns/promises';
 
 interface WahaConfig {
   waha_url: string;
@@ -6,11 +8,96 @@ interface WahaConfig {
   waha_api_key?: string | null;
 }
 
+/** Thrown by assertWahaUrlIsSafe; message is safe to show to the caller. */
+export class WahaUrlBlockedError extends Error {
+  constructor() {
+    super('WAHA server URL is not allowed.');
+    this.name = 'WahaUrlBlockedError';
+  }
+}
+
+function stripBrackets(host: string): string {
+  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1) : host;
+}
+
+function isPrivateOrReservedIPv4(ip: string): boolean {
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) {
+    return false;
+  }
+  const [a, b] = parts;
+  if (a === 10) return true; // 10.0.0.0/8
+  if (a === 127) return true; // 127.0.0.0/8 (loopback)
+  if (a === 169 && b === 254) return true; // 169.254.0.0/16 (link-local)
+  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // 192.168.0.0/16
+  if (a === 0) return true; // 0.0.0.0/8
+  return false;
+}
+
+function isPrivateOrReservedIP(ip: string): boolean {
+  if (isIP(ip) === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === '::1' || lower === '::') return true; // loopback / unspecified
+    if (lower.startsWith('fc') || lower.startsWith('fd')) return true; // fc00::/7 unique local
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true; // fe80::/10 link-local
+    const v4Mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (v4Mapped) return isPrivateOrReservedIPv4(v4Mapped[1]);
+    return false;
+  }
+  return isPrivateOrReservedIPv4(ip);
+}
+
+/**
+ * Blocks the WAHA server URL from pointing at private/reserved network
+ * ranges or localhost, so a malicious `waha_url` can't be used to probe
+ * or reach internal services (SSRF). Resolves DNS for non-IP hosts
+ * rather than only checking the literal hostname, so a public domain
+ * that resolves to an internal address is blocked too. There's no
+ * practical domain allowlist here — waha_url is a per-account,
+ * self-hosted WAHA instance, so the host isn't known in advance.
+ */
+export async function assertWahaUrlIsSafe(rawUrl: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new WahaUrlBlockedError();
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new WahaUrlBlockedError();
+  }
+
+  const hostname = stripBrackets(parsed.hostname).toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+    throw new WahaUrlBlockedError();
+  }
+
+  if (isIP(hostname)) {
+    if (isPrivateOrReservedIP(hostname)) throw new WahaUrlBlockedError();
+    return;
+  }
+
+  try {
+    const results = await lookup(hostname, { all: true });
+    if (results.some((r) => isPrivateOrReservedIP(r.address))) {
+      throw new WahaUrlBlockedError();
+    }
+  } catch (err) {
+    if (err instanceof WahaUrlBlockedError) throw err;
+    // Unresolvable host — let the actual fetch fail with its own error
+    // rather than treating a DNS hiccup as a security block.
+  }
+}
+
 async function wahaFetch(
   config: WahaConfig,
   path: string,
   options: RequestInit = {}
 ): Promise<Response> {
+  await assertWahaUrlIsSafe(config.waha_url);
+
   const baseUrl = config.waha_url.replace(/\/$/, '');
   const url = `${baseUrl}${path}`;
   const headers = new Headers(options.headers || {});

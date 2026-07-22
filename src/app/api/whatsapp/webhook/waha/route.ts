@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
 
 export async function POST(request: Request) {
   try {
@@ -322,6 +323,8 @@ export async function POST(request: Request) {
         }
         if (fileKey) {
           try {
+            await assertWahaUrlIsSafe(config.waha_url)
+
             const apiKey = config.waha_api_key ? decrypt(config.waha_api_key) : null
             const headers: Record<string, string> = {}
             if (apiKey) {

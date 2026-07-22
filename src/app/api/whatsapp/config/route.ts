@@ -149,6 +149,10 @@ export async function GET() {
               }
             }
           } catch (err: any) {
+            // Log the real error server-side only — the client-facing
+            // message must not echo the internal connection error (host
+            // reachability, refused ports, etc. can be an SSRF oracle).
+            console.error(`WAHA connection check failed for config ${config.id}:`, err)
             return {
               id: config.id,
               connected: false,
@@ -157,7 +161,7 @@ export async function GET() {
               waha_session: config.waha_session,
               waha_url: config.waha_url,
               reason: 'waha_api_error',
-              message: `Could not connect to WAHA server at ${config.waha_url}: ${err.message}`,
+              message: 'Could not connect to the WAHA server. Please check the configured URL and try again.',
               phone_info: {
                 id: config.waha_session,
                 display_phone_number: config.waha_session,
