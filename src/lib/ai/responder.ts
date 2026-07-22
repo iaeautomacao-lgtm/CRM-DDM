@@ -1087,10 +1087,16 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     return;
   }
 
+  // Scoped by account_id for defense in depth, matching the same
+  // rationale used in automations/engine.ts, automations/meta-send.ts,
+  // flows/engine.ts, flows/meta-send.ts, and whatsapp/send/route.ts —
+  // a future caller that skips the entry-point guard still can't read
+  // across tenants via the service-role client.
   const { data: contact } = await db
     .from("contacts")
     .select("phone")
     .eq("id", contactId)
+    .eq("account_id", accountId)
     .single();
 
   if (!contact?.phone) return;
