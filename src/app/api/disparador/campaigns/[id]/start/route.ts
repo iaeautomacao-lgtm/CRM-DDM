@@ -65,6 +65,25 @@ export async function POST(
       );
     }
 
+    // Only "rascunho" (never started) and "pausada" (resuming) are valid
+    // starting points — the only 4 statuses this table ever uses are
+    // rascunho/em_execucao/pausada/encerrada (see STATUS_LABELS in
+    // campanhas/page.tsx). Enforced here, not just disabled in the UI,
+    // so a direct call to this route can't re-run a campaign that's
+    // already sending or restart one that's already closed.
+    const STARTABLE_STATUSES = ["rascunho", "pausada"];
+    if (!STARTABLE_STATUSES.includes(campaign.status)) {
+      return NextResponse.json(
+        {
+          error:
+            campaign.status === "em_execucao"
+              ? "Esta campanha já está em execução."
+              : "Esta campanha está encerrada e não pode ser reiniciada.",
+        },
+        { status: 409 }
+      );
+    }
+
     const mensagens = Array.isArray(campaign.mensagens) ? campaign.mensagens : [];
     if (mensagens.length === 0) {
       return NextResponse.json(
