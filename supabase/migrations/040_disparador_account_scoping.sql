@@ -1,7 +1,34 @@
 -- ============================================================
 -- 040_disparador_account_scoping
 --
--- PENDING MANUAL REVIEW — DO NOT RUN until reviewed with the team.
+-- ██ DO NOT APPLY THIS MIGRATION until BOTH of the following are true: ██
+--
+--   1. The app's INSERT code paths for wacrm.campaigns,
+--      wacrm.blacklist, and wacrm.disp_message_queue (and wherever
+--      wacrm.campaign_metrics rows get created) set account_id
+--      directly at insert time. As of this writing, only
+--      disparador/campanhas/page.tsx sets created_by (commit
+--      8d5a89a) — that is NOT enough on its own: the INSERT policies
+--      added in step 3 below check the account_id column, not
+--      created_by, so a campaign insert that sets created_by but not
+--      account_id would still be rejected by RLS the moment this
+--      migration is applied. blacklist's insert page and the
+--      disp_message_queue inserts in the campaign start route /
+--      cron route don't set either field yet.
+--   2. Whether wacrm.blacklist should become per-account at all has
+--      been decided WITH CAIO. This is a product decision, not a
+--      technical detail this migration can resolve on its own —
+--      blacklist is currently a single shared list across every
+--      account on the instance; scoping it per-account means a number
+--      one account blocks would no longer block sends from a
+--      *different* account on the same instance. See the blacklist
+--      bullet under "KNOWN DATA ISSUE" below before deciding. Do not
+--      apply the blacklist portion of this migration (or apply it at
+--      all) until that call is made.
+--
+-- Neither of the above has happened yet. This file is written for
+-- review only.
+--
 -- Written in response to a security finding: wacrm.campaigns,
 -- wacrm.blacklist, wacrm.disp_message_queue, and wacrm.campaign_metrics
 -- have no account_id column and had RLS explicitly disabled by
@@ -34,34 +61,37 @@
 -- KNOWN DATA ISSUE (found while writing this migration, via a
 -- read-only count against the live database on 2026-07-22):
 --   - BOTH existing rows in wacrm.campaigns have created_by = NULL.
---     campaigns.created_by is declared on the table but the app's
---     campaign-creation code (disparador/campanhas/page.tsx) never
---     sets it on INSERT, so every campaign ever created through the
---     UI has no creator to backfill from. The backfill step below
---     will leave both existing campaigns (and everything that hangs
---     off them: all 72 existing disp_message_queue rows and both
---     campaign_metrics rows) with account_id = NULL.
---   - This is also why the "add auth + tenant ownership check" fix
---     applied in commit 9ee19e5 (checking campaign.created_by !==
---     user.id in the start/stop routes) does not actually work for
---     any campaign created so far — created_by is NULL for all of
---     them, so that check currently 403s every legitimate start/stop
---     call. That code fix and this migration both need to be revisited
---     together: the app needs to start setting created_by (or
---     account_id directly) on campaign creation before either the
---     ownership check or this migration's RLS policies are safe to
---     rely on going forward.
+--     campaigns.created_by is now set on new inserts (commit 8d5a89a,
+--     disparador/campanhas/page.tsx), but that only fixes campaigns
+--     created from now on — these 2 pre-existing rows (and everything
+--     that hangs off them: all 72 existing disp_message_queue rows and
+--     both campaign_metrics rows) still have no creator to backfill
+--     from, and are NOT touched by this migration. A separate,
+--     not-yet-run script — disparador/database/003_manual_fix_campaign_created_by.sql —
+--     has placeholders to set created_by on those 2 rows once the
+--     team confirms who actually owns each one. Run that script (with
+--     real UUIDs filled in) BEFORE this migration if you want those 2
+--     campaigns to survive the backfill with a real account_id instead
+--     of being left NULL.
+--   - Setting created_by is also not sufficient by itself to satisfy
+--     the INSERT policies added in step 3 below — see the "DO NOT
+--     APPLY" checklist at the top of this file. account_id must be set
+--     directly at insert time for campaigns/blacklist/disp_message_queue,
+--     which the app does not do yet.
 --   - wacrm.blacklist currently has 0 rows on the live database, so
 --     the backfill orphans nothing today. But blacklist.campaign_id
 --     has no FK constraint and is optional by design (a number can be
 --     blacklisted from a reply/opt-out with no campaign in play), so
 --     backfilling it via campaign_id will structurally orphan any
 --     blacklist entry that isn't tied to a campaign — which may be
---     most of them once the table is actually used. Worth deciding
---     with the team whether blacklist should even become per-account
---     (a number blacklisted by one account would then no longer block
---     sends from a *different* account on the same instance — a
---     product decision, not just a security one).
+--     most of them once the table is actually used. Whether blacklist
+--     should even become per-account is a PRODUCT decision pending
+--     confirmation with Caio (see the checklist at the top of this
+--     file) — a number blacklisted by one account would then no
+--     longer block sends from a *different* account on the same
+--     instance. This migration does not decide that question; it only
+--     implements the per-account schema so the decision can be
+--     acted on once made.
 --
 -- IMPORTANT — read before running this file:
 --   - account_id is left NULLABLE on purpose. Once RLS is enabled
