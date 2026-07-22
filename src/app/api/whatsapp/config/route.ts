@@ -272,6 +272,16 @@ export async function POST(request: Request) {
         )
       }
 
+      // The client normalizes waha_session to this same format, but that's
+      // only a UX nicety — a caller hitting this API directly could send
+      // anything, and the value is later interpolated into WAHA URL paths.
+      if (!/^[a-z0-9_-]+$/.test(waha_session)) {
+        return NextResponse.json(
+          { error: 'waha_session must match ^[a-z0-9_-]+$' },
+          { status: 400 }
+        )
+      }
+
       // Check if another account has already claimed this waha_session
       const { data: claimed, error: claimedError } = await supabaseAdmin()
         .from('whatsapp_config')

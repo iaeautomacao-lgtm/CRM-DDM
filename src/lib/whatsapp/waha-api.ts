@@ -123,7 +123,7 @@ export async function getWahaSessionStatus(
   config: WahaConfig
 ): Promise<WahaSessionInfo['status']> {
   try {
-    const res = await wahaFetch(config, `/api/sessions/${config.waha_session}`);
+    const res = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}`);
     if (res.status === 404) {
       return 'STOPPED';
     }
@@ -142,7 +142,7 @@ export async function getWahaSessionInfo(
   config: WahaConfig
 ): Promise<any> {
   try {
-    const res = await wahaFetch(config, `/api/sessions/${config.waha_session}`);
+    const res = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}`);
     if (res.status === 404) {
       return null;
     }
@@ -160,10 +160,10 @@ export async function startWahaSession(config: WahaConfig, webhookUrl?: string):
   // If webhookUrl is provided, we stop and delete the session first to recreate it with the webhook config
   if (webhookUrl) {
     try {
-      await wahaFetch(config, `/api/sessions/${config.waha_session}/stop`, { method: 'POST' });
+      await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/stop`, { method: 'POST' });
     } catch (e) {}
     try {
-      await wahaFetch(config, `/api/sessions/${config.waha_session}`, { method: 'DELETE' });
+      await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}`, { method: 'DELETE' });
     } catch (e) {}
   }
 
@@ -198,7 +198,7 @@ export async function startWahaSession(config: WahaConfig, webhookUrl?: string):
 
   if (!createRes.ok) {
     // If creation fails (e.g. session already exists and shouldn't be deleted), try to start it directly
-    const startRes = await wahaFetch(config, `/api/sessions/${config.waha_session}/start`, {
+    const startRes = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/start`, {
       method: 'POST',
     });
     if (!startRes.ok) {
@@ -207,7 +207,7 @@ export async function startWahaSession(config: WahaConfig, webhookUrl?: string):
     return;
   }
 
-  const startRes = await wahaFetch(config, `/api/sessions/${config.waha_session}/start`, {
+  const startRes = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/start`, {
     method: 'POST',
   });
   if (!startRes.ok) {
@@ -217,7 +217,7 @@ export async function startWahaSession(config: WahaConfig, webhookUrl?: string):
 
 export async function stopWahaSession(config: WahaConfig): Promise<void> {
   // Try path-based stop endpoint
-  const res = await wahaFetch(config, `/api/sessions/${config.waha_session}/stop`, {
+  const res = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/stop`, {
     method: 'POST',
   });
   if (!res.ok) {
@@ -235,7 +235,7 @@ export async function stopWahaSession(config: WahaConfig): Promise<void> {
 
 export async function getWahaQrCode(config: WahaConfig): Promise<Response> {
   // Try the new auth/qr endpoint first
-  const res = await wahaFetch(config, `/api/${config.waha_session}/auth/qr?format=image`, {
+  const res = await wahaFetch(config, `/api/${encodeURIComponent(config.waha_session)}/auth/qr?format=image`, {
     headers: {
       'Accept': 'image/png',
     }
@@ -243,7 +243,7 @@ export async function getWahaQrCode(config: WahaConfig): Promise<Response> {
   if (res.ok) return res;
 
   // Fall back to /api/sessions/{session}/qr if the session version requires it
-  const fallback = await wahaFetch(config, `/api/sessions/${config.waha_session}/qr`);
+  const fallback = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/qr`);
   if (!fallback.ok) {
     throw new Error(`Failed to fetch QR code: ${fallback.status}`);
   }
@@ -356,7 +356,7 @@ export async function requestWahaPairingCode(
 ): Promise<{ code: string }> {
   const res = await wahaFetch(
     config,
-    `/api/${config.waha_session}/auth/request-code`,
+    `/api/${encodeURIComponent(config.waha_session)}/auth/request-code`,
     {
       method: 'POST',
       headers: {
@@ -404,7 +404,7 @@ export async function startWacallsCall(
   config: WahaConfig,
   phone: string
 ): Promise<{ callId: string }> {
-  const res = await wahaFetch(config, `/api/sessions/${config.waha_session}/calls`, {
+  const res = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/calls`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -428,7 +428,7 @@ export async function playWacallsAudio(
   callId: string,
   url: string
 ): Promise<void> {
-  const res = await wahaFetch(config, `/api/sessions/${config.waha_session}/calls/${callId}/play`, {
+  const res = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/calls/${callId}/play`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -446,7 +446,7 @@ export async function getWacallsCallStatus(
   config: WahaConfig,
   callId: string
 ): Promise<{ status: string; ended: boolean }> {
-  const res = await wahaFetch(config, `/api/sessions/${config.waha_session}/calls/${callId}`, {
+  const res = await wahaFetch(config, `/api/sessions/${encodeURIComponent(config.waha_session)}/calls/${callId}`, {
     method: 'GET',
   });
 
