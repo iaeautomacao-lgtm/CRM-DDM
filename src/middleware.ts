@@ -88,6 +88,15 @@ export async function middleware(request: NextRequest) {
     )
   }
 
+  // Disparador routes need auth too, except /cron which is triggered by an
+  // external scheduler authenticating via CRON_SECRET, not a user session.
+  if (!user && request.nextUrl.pathname.startsWith('/api/disparador/') &&
+      !request.nextUrl.pathname.includes('/cron')) {
+    return withRefreshedCookies(
+      NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    )
+  }
+
   return supabaseResponse
 }
 
