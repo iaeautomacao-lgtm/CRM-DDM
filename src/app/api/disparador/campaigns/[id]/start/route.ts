@@ -24,6 +24,23 @@ export async function POST(
       return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
+    // wacrm.campaigns has no account_id column yet (see migration 040,
+    // not yet applied), so resolve the caller's account_id from their
+    // profile to scope the contacts query below.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("account_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const accountId = profile?.account_id;
+    if (!accountId) {
+      return NextResponse.json(
+        { error: "Seu perfil não está vinculado a uma conta." },
+        { status: 400 }
+      );
+    }
+
     ensureQueueWorkerRunning();
     const { id: campaignId } = await params;
     const now = new Date().toISOString();
@@ -71,10 +88,12 @@ export async function POST(
       .eq("campaign_id", campaignId)
       .in("status", ["pendente", "agendado", "erro"]);
 
-    // 3. Load active contacts
+    // 3. Load active contacts — scoped to the caller's account so a
+    // campaign never sends to another account's contacts.
     const { data: allContacts, error: contactsError } = await supabaseAdmin
       .from("contacts")
-      .select("id, name, phone");
+      .select("id, name, phone")
+      .eq("account_id", accountId);
 
     if (contactsError) {
       throw new Error(`Erro ao carregar contatos: ${contactsError.message}`);
