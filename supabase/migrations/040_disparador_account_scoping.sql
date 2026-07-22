@@ -1,7 +1,7 @@
 -- ============================================================
 -- 040_disparador_account_scoping
 --
--- ██ DO NOT APPLY THIS MIGRATION until BOTH of the following are true: ██
+-- ██ DO NOT APPLY THIS MIGRATION until the following is true: ██
 --
 --   1. The app's INSERT code paths for wacrm.campaigns,
 --      wacrm.blacklist, and wacrm.disp_message_queue (and wherever
@@ -15,19 +15,18 @@
 --      migration is applied. blacklist's insert page and the
 --      disp_message_queue inserts in the campaign start route /
 --      cron route don't set either field yet.
---   2. Whether wacrm.blacklist should become per-account at all has
---      been decided WITH CAIO. This is a product decision, not a
---      technical detail this migration can resolve on its own —
---      blacklist is currently a single shared list across every
---      account on the instance; scoping it per-account means a number
---      one account blocks would no longer block sends from a
---      *different* account on the same instance. See the blacklist
---      bullet under "KNOWN DATA ISSUE" below before deciding. Do not
---      apply the blacklist portion of this migration (or apply it at
---      all) until that call is made.
 --
--- Neither of the above has happened yet. This file is written for
--- review only.
+-- DECIDED (2026-07-22, confirmed with Caio): wacrm.blacklist becomes
+-- per-account, same as the other three tables. Today it's a single
+-- list shared across every account on the instance; going forward, a
+-- number one account blocks will no longer block sends from a
+-- *different* account on the same instance — that trade-off has been
+-- accepted, it is not still open. The DDL below already implements
+-- this (it did before this note was added; only the documentation
+-- changed) — no per-table opt-out or partial-apply path is provided,
+-- so run this migration as one unit once item 1 above is done.
+--
+-- This file has not been executed. It is written for review only.
 --
 -- Written in response to a security finding: wacrm.campaigns,
 -- wacrm.blacklist, wacrm.disp_message_queue, and wacrm.campaign_metrics
@@ -84,14 +83,13 @@
 --     blacklisted from a reply/opt-out with no campaign in play), so
 --     backfilling it via campaign_id will structurally orphan any
 --     blacklist entry that isn't tied to a campaign — which may be
---     most of them once the table is actually used. Whether blacklist
---     should even become per-account is a PRODUCT decision pending
---     confirmation with Caio (see the checklist at the top of this
---     file) — a number blacklisted by one account would then no
---     longer block sends from a *different* account on the same
---     instance. This migration does not decide that question; it only
---     implements the per-account schema so the decision can be
---     acted on once made.
+--     most of them once the table is actually used, going forward.
+--     Making blacklist per-account is a confirmed decision (see the
+--     top of this file), not an open question — this note is just
+--     flagging that most future blacklist entries will need
+--     account_id set some other way than the campaign_id backfill
+--     path (e.g. set directly at insert time, same as the other three
+--     tables), since campaign_id won't be populated for most of them.
 --
 -- IMPORTANT — read before running this file:
 --   - account_id is left NULLABLE on purpose. Once RLS is enabled
@@ -114,8 +112,9 @@
 --     contact import blacklist checks, and queue processing will
 --     start failing.
 --   - This file has not been executed. Review the counts reported
---     alongside this migration, decide on the blacklist scoping
---     question, and patch the INSERT call sites first.
+--     alongside this migration and patch the INSERT call sites first
+--     (the blacklist scoping question itself is already decided — see
+--     the top of this file).
 -- ============================================================
 
 -- ------------------------------------------------------------
