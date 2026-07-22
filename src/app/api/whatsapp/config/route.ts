@@ -277,7 +277,12 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (claimedError) {
-        console.error('Error checking waha_session ownership:', claimedError)
+        console.error('[TEMP DEBUG] Error checking waha_session ownership. Query: whatsapp_config.select(account_id).eq(waha_session=' + JSON.stringify(waha_session) + ').neq(account_id=' + accountId + ')')
+        console.error('[TEMP DEBUG] claimedError.message:', claimedError.message)
+        console.error('[TEMP DEBUG] claimedError.code:', (claimedError as any).code)
+        console.error('[TEMP DEBUG] claimedError.details:', (claimedError as any).details)
+        console.error('[TEMP DEBUG] claimedError.hint:', (claimedError as any).hint)
+        console.error('[TEMP DEBUG] full error object:', JSON.stringify(claimedError, null, 2))
         return NextResponse.json(
           { error: 'Failed to validate configuration' },
           { status: 500 }

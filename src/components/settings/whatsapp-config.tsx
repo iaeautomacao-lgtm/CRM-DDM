@@ -40,6 +40,13 @@ const MASKED_TOKEN = '••••••••••••••••';
 type ConnectionStatus = 'connected' | 'disconnected' | 'unknown';
 type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
 
+function normalizeSessionName(input: string): string {
+  return input
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .toLowerCase()
+    .replace(/\s+/g, '_')                              // espacos -> underscore
+    .replace(/[^a-z0-9_-]/g, '');                       // remove qualquer coisa que nao seja permitido
+}
 export function WhatsAppConfig() {
   const supabase = createClient();
   const { user, accountId, loading: authLoading, profileLoading } = useAuth();
@@ -1117,7 +1124,7 @@ export function WhatsAppConfig() {
                     <Input
                       placeholder="e.g. default"
                       value={wahaSession}
-                      onChange={(e) => setWahaSession(e.target.value)}
+                      onChange={(e) => setWahaSession(normalizeSessionName(e.target.value))}
                       className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
                     />
                     <p className="text-xs text-muted-foreground">
