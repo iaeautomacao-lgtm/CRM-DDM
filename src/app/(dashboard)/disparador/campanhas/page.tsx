@@ -216,13 +216,18 @@ export default function CampanhasPage() {
     }
     if (!confirm("Tem certeza que deseja deletar esta campanha permanentemente?")) return;
     try {
-      const supabase = createClient();
-      const { error } = await supabase.from("campaigns").delete().eq("id", campaign.id);
-      if (error) throw error;
+      // Deletion is scoped server-side (ownership + status re-checked)
+      // instead of a direct client delete, since wacrm.campaigns has no
+      // RLS yet — see src/app/api/disparador/campaigns/[id]/route.ts.
+      const res = await fetch(`/api/disparador/campaigns/${campaign.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Erro ao deletar campanha");
+      }
       toast.success("Campanha deletada.");
       loadData();
     } catch (err: any) {
-      toast.error("Erro ao deletar campanha.");
+      toast.error(err.message || "Erro ao deletar campanha.");
     }
   };
 
