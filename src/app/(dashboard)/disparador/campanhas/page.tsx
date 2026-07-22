@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
+import { getDisparadorScope } from "@/lib/disparador/scope";
 
 interface Campaign {
   id: string;
@@ -99,9 +100,14 @@ export default function CampanhasPage() {
     const interval = setInterval(async () => {
       try {
         const supabase = createClient();
+        // wacrm.campaigns has no account_id yet (migration 040 not
+        // applied), so scope by the caller's account via created_by —
+        // see getDisparadorScope.
+        const { userIds } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
           .select("*")
+          .in("created_by", userIds)
           .order("created_at", { ascending: false });
         if (campaignList) {
           setCampaigns(campaignList);
@@ -119,10 +125,16 @@ export default function CampanhasPage() {
     try {
       const supabase = createClient();
 
+      // wacrm.campaigns has no account_id yet (migration 040 not
+      // applied), so scope by the caller's account via created_by —
+      // see getDisparadorScope.
+      const { userIds } = await getDisparadorScope(supabase);
+
       // Load Campaigns
       const { data: campaignList } = await supabase
         .from("campaigns")
         .select("*")
+        .in("created_by", userIds)
         .order("created_at", { ascending: false });
       setCampaigns(campaignList ?? []);
 

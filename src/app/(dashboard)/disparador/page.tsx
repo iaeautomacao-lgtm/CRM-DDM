@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getDisparadorScope } from "@/lib/disparador/scope";
 import { 
   Megaphone, 
   Clock, 
@@ -52,6 +53,18 @@ export default function DisparadorDashboardPage() {
     try {
       const supabase = createClient();
 
+      // wacrm.disp_message_queue has no account_id yet (migration 040 not
+      // applied), so scope it through the caller's account's campaigns
+      // instead of reading the whole table — see getDisparadorScope.
+      const { campaignIds } = await getDisparadorScope(supabase);
+
+      if (campaignIds.length === 0) {
+        setQueue([]);
+        setStats({ scheduled: 0, sending: 0, success: 0, failed: 0 });
+        setLoading(false);
+        return;
+      }
+
       // Fetch last 15 queue logs with contact and campaign info
       const { data, error } = await supabase
         .from("disp_message_queue")
@@ -66,6 +79,7 @@ export default function DisparadorDashboardPage() {
           contacts:contact_id ( name, phone ),
           campaigns:campaign_id ( nome )
         `)
+        .in("campaign_id", campaignIds)
         .order("scheduled_at", { ascending: false })
         .limit(15);
 
@@ -88,7 +102,8 @@ export default function DisparadorDashboardPage() {
       // Fetch Queue Stats
       const { data: countData } = await supabase
         .from("disp_message_queue")
-        .select("status");
+        .select("status")
+        .in("campaign_id", campaignIds);
 
       if (countData) {
         const counts = { scheduled: 0, sending: 0, success: 0, failed: 0 };
