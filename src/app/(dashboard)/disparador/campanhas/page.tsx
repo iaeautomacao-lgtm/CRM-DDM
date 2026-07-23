@@ -55,6 +55,13 @@ interface WahaSession {
   phone_info?: { id: string };
 }
 
+interface CampaignMessage {
+  tipo: "texto" | "ia" | "imagem" | "audio" | "ligacao";
+  conteudo?: string;
+  prompt?: string;
+  url?: string;
+}
+
 const STATUS_COLORS: Record<string, string> = {
   rascunho: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
   em_execucao: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
@@ -85,7 +92,7 @@ interface CampaignDraft {
   intervaloMax: number;
   janelaInicio: string;
   janelaFim: string;
-  mensagens: any[];
+  mensagens: CampaignMessage[];
 }
 
 function isDraftEmpty(draft: CampaignDraft): boolean {

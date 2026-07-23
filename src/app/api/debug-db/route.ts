@@ -42,7 +42,7 @@ export async function GET() {
 
     // messages has no account_id column of its own — it's scoped through
     // conversation_id, so count only messages under this account's conversations.
-    const conversationIds = (conversations || []).map((c: any) => c.id)
+    const conversationIds = (conversations || []).map((c: { id: string }) => c.id)
     let msgsCount = 0
     if (conversationIds.length > 0) {
       const { count } = await admin
