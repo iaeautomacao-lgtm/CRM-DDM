@@ -19,7 +19,7 @@ export interface ResolveImportTagsResult {
  * auto-create missing tag definitions for admin+ callers.
  */
 export async function resolveImportTagIds(
-  supabase: SupabaseClient<any, any, any>,
+  supabase: Pick<SupabaseClient, 'from'>,
   params: {
     accountId: string;
     userId: string;
@@ -105,7 +105,7 @@ export interface ContactTagAssignment {
  * exist without changing the returned count.
  */
 export async function assignImportedContactTags(
-  supabase: SupabaseClient<any, any, any>,
+  supabase: Pick<SupabaseClient, 'from'>,
   assignments: ContactTagAssignment[],
   tagIdByKey: Map<string, string>
 ): Promise<number> {
