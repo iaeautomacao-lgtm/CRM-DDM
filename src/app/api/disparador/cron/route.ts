@@ -164,7 +164,7 @@ export async function POST(request: Request) {
     }
 
     // Substitute {{variavel}} template vars, then the legacy {nome} placeholder
-    const cleanText = applyTemplateVars(messageText, item.contacts).replace(/{nome}/g, item.contacts?.nome || "Cliente");
+    const cleanText = applyTemplateVars(messageText, item.contacts).replace(/{nome}/g, item.contacts?.name || "Cliente");
     const normalizedPhone = telefone.replace("+", "");
 
     // 8. Trigger sending via WAHA
