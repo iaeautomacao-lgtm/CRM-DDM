@@ -197,15 +197,17 @@ export async function POST(
         const msgDelay = contactDelay + j * intraDelay;
         const scheduledAt = new Date(Date.now() + msgDelay).toISOString();
 
-        // Interpolate message variables
+        // Store the raw template text — {{variavel}} and legacy {nome}
+        // placeholders are resolved at send time (worker.ts / cron/route.ts)
+        // via applyTemplateVars, not here, so they reflect the contact's
+        // current data and today's date rather than a snapshot from enqueue.
         const rawText = msg.conteudo || msg.prompt || "";
-        const interpolatedText = rawText.replace(/{nome}/g, contact.name || "Cliente");
 
         queueRows.push({
           campaign_id: campaignId,
           contact_id: contact.id,
           session_id: sessionId,
-          mensagem_final: interpolatedText,
+          mensagem_final: rawText,
           status: "agendado",
           tipo: msg.tipo || "texto",
           media_url: msg.url || null,
