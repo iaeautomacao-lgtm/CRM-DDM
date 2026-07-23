@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { 
   Plus, 
@@ -61,6 +61,15 @@ interface CampaignMessage {
   prompt?: string;
   url?: string;
 }
+
+// Kept in sync with the placeholders resolved by applyTemplateVars
+// (src/lib/disparador/template-vars.ts) at send time.
+const TEMPLATE_VARS = [
+  { label: "Nome", value: "{{nome}}" },
+  { label: "Primeiro nome", value: "{{primeiro_nome}}" },
+  { label: "Empresa", value: "{{empresa}}" },
+  { label: "Data de hoje", value: "{{data_hoje}}" },
+];
 
 const STATUS_COLORS: Record<string, string> = {
   rascunho: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
@@ -127,6 +136,26 @@ export default function CampanhasPage() {
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
+  const varFieldRefs = useRef<Record<string, HTMLTextAreaElement | HTMLInputElement | null>>({});
+
+  // Inserts a {{variavel}} placeholder at the current cursor position of the
+  // given field (rather than always appending), so the user can click a
+  // variable button mid-sentence instead of copy/pasting it in manually.
+  const insertTemplateVar = (key: string, i: number, field: "conteudo" | "prompt", variable: string) => {
+    const el = varFieldRefs.current[key];
+    const current: string = mensagens[i]?.[field] || "";
+    const start = el?.selectionStart ?? current.length;
+    const end = el?.selectionEnd ?? current.length;
+    const updatedValue = current.slice(0, start) + variable + current.slice(end);
+    const updated = [...mensagens];
+    updated[i] = { ...updated[i], [field]: updatedValue };
+    setMensagens(updated);
+    const cursorPos = start + variable.length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(cursorPos, cursorPos);
+    });
+  };
 
   // Draft found in localStorage when the creation modal was opened, still
   // awaiting the user's "Restaurar" / "Descartar" decision.
@@ -749,11 +778,8 @@ export default function CampanhasPage() {
                   <Layers className="h-3.5 w-3.5" /> Mensagens Sequenciais
                 </h4>
                 <p className="text-[11px] text-muted-foreground">
-                  Variáveis disponíveis: <code className="font-mono">{"{{nome}}"}</code>,{" "}
-                  <code className="font-mono">{"{{primeiro_nome}}"}</code>,{" "}
-                  <code className="font-mono">{"{{empresa}}"}</code>,{" "}
-                  <code className="font-mono">{"{{data_hoje}}"}</code> — substituídas pelos dados do
-                  contato no momento do envio.
+                  Clique em uma variável abaixo do campo de texto para inseri-la na posição do
+                  cursor — elas são substituídas pelos dados do contato no momento do envio.
                 </p>
 
                 {mensagens.map((msg, i) => (
@@ -832,29 +858,50 @@ export default function CampanhasPage() {
                     </div>
 
                     {msg.tipo === "texto" && (
-                      <textarea
-                        value={msg.conteudo}
-                        onChange={(e) => {
-                          const updated = [...mensagens];
-                          updated[i].conteudo = e.target.value;
-                          setMensagens(updated);
-                        }}
-                        placeholder="Escreva a mensagem..."
-                        className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none resize-none"
-                      />
+                      <div className="space-y-1.5">
+                        <textarea
+                          ref={(el) => { varFieldRefs.current[`conteudo-${i}`] = el; }}
+                          value={msg.conteudo}
+                          onChange={(e) => {
+                            const updated = [...mensagens];
+                            updated[i].conteudo = e.target.value;
+                            setMensagens(updated);
+                          }}
+                          placeholder="Escreva a mensagem..."
+                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none resize-none"
+                        />
+                        <div className="flex flex-wrap gap-1">
+                          {TEMPLATE_VARS.map((v) => (
+                            <button
+                              key={v.value}
+                              type="button"
+                              onClick={() => insertTemplateVar(`conteudo-${i}`, i, "conteudo", v.value)}
+                              className="px-2 py-0.5 rounded-full border border-border bg-card text-[10px] font-medium text-muted-foreground hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors"
+                            >
+                              {v.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     )}
 
                     {msg.tipo === "ia" && (
-                      <textarea
-                        value={msg.prompt}
-                        onChange={(e) => {
-                          const updated = [...mensagens];
-                          updated[i].prompt = e.target.value;
-                          setMensagens(updated);
-                        }}
-                        placeholder="Escreva o prompt da IA... Ex: Peça para comprar o curso X com tom consultivo."
-                        className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none resize-none"
-                      />
+                      <div className="space-y-1.5">
+                        <textarea
+                          value={msg.prompt}
+                          onChange={(e) => {
+                            const updated = [...mensagens];
+                            updated[i].prompt = e.target.value;
+                            setMensagens(updated);
+                          }}
+                          placeholder="Escreva o prompt da IA... Ex: Peça para comprar o curso X com tom consultivo."
+                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none resize-none"
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          O nome do contato já é enviado automaticamente para a IA — as variáveis
+                          {" "}<code className="font-mono">{"{{ }}"}</code> não se aplicam aqui.
+                        </p>
+                      </div>
                     )}
 
                     {msg.tipo === "imagem" && (
@@ -905,6 +952,7 @@ export default function CampanhasPage() {
                         </div>
                         <input
                           type="text"
+                          ref={(el) => { varFieldRefs.current[`legenda-${i}`] = el; }}
                           value={msg.conteudo}
                           onChange={(e) => {
                             const updated = [...mensagens];
@@ -914,6 +962,18 @@ export default function CampanhasPage() {
                           placeholder="Legenda da imagem (Opcional)..."
                           className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none"
                         />
+                        <div className="flex flex-wrap gap-1">
+                          {TEMPLATE_VARS.map((v) => (
+                            <button
+                              key={v.value}
+                              type="button"
+                              onClick={() => insertTemplateVar(`legenda-${i}`, i, "conteudo", v.value)}
+                              className="px-2 py-0.5 rounded-full border border-border bg-card text-[10px] font-medium text-muted-foreground hover:bg-primary hover:text-primary-foreground hover:border-primary transition-colors"
+                            >
+                              {v.label}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     )}
 
