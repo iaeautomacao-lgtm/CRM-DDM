@@ -18,7 +18,8 @@ import {
   Calendar,
   X,
   FileText,
-  ArrowLeft
+  ArrowLeft,
+  Pencil
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -76,6 +77,7 @@ export default function CampanhasPage() {
 
   // Form Modal States
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [nome, setNome] = useState("");
   const [descricao, setDescricao] = useState("");
   const [objetivo, setObjetivo] = useState("");
@@ -202,6 +204,31 @@ export default function CampanhasPage() {
     }
   };
 
+  // Open the modal pre-filled with an existing draft campaign's data
+  const handleEditClick = (campaign: Campaign) => {
+    setEditingId(campaign.id);
+    setNome(campaign.nome);
+    setDescricao(campaign.descricao || "");
+    setObjetivo(campaign.objetivo || "");
+    setSelectedSessions(campaign.session_ids || []);
+    setSelectedTags(campaign.tags_filtro || []);
+    setIntervaloMin(campaign.intervalo_min);
+    setIntervaloMax(campaign.intervalo_max);
+    setJanelaInicio(campaign.janela_inicio);
+    setJanelaFim(campaign.janela_fim);
+    setMensagens(
+      campaign.mensagens && campaign.mensagens.length > 0
+        ? campaign.mensagens
+        : [{ tipo: "texto", conteudo: "" }]
+    );
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingId(null);
+  };
+
   // Delete Campaign
   const handleDelete = async (campaign: Campaign) => {
     // disp_message_queue.campaign_id is ON DELETE CASCADE, so deleting a
@@ -248,41 +275,71 @@ export default function CampanhasPage() {
     }
 
     try {
-      const supabase = createClient();
+      if (editingId) {
+        // Editing goes through a server route so ownership + the
+        // "rascunho" status lock are re-checked there (see
+        // /api/disparador/campaigns/[id] PATCH) instead of trusting a
+        // direct client-side update.
+        const res = await fetch(`/api/disparador/campaigns/${editingId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nome,
+            descricao,
+            objetivo,
+            session_ids: selectedSessions,
+            tags_filtro: selectedTags,
+            mensagens,
+            intervalo_min: intervaloMin,
+            intervalo_max: intervaloMax,
+            janela_inicio: janelaInicio,
+            janela_fim: janelaFim,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Erro ao atualizar campanha");
+        }
+        toast.success("Campanha atualizada!");
+      } else {
+        const supabase = createClient();
 
-      // created_by is required for the ownership check in the
-      // start/stop routes (campaign.created_by !== user.id) — without
-      // it, every campaign is unowned and that check always rejects.
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) throw new Error("Não autenticado");
+        // created_by is required for the ownership check in the
+        // start/stop routes (campaign.created_by !== user.id) — without
+        // it, every campaign is unowned and that check always rejects.
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user;
+        if (!user) throw new Error("Não autenticado");
 
-      const campaignData = {
-        nome,
-        descricao,
-        objetivo,
-        session_ids: selectedSessions,
-        tags_filtro: selectedTags,
-        mensagens,
-        intervalo_min: intervaloMin,
-        intervalo_max: intervaloMax,
-        janela_inicio: janelaInicio,
-        janela_fim: janelaFim,
-        status: "rascunho",
-        created_by: user.id,
-      };
+        const campaignData = {
+          nome,
+          descricao,
+          objetivo,
+          session_ids: selectedSessions,
+          tags_filtro: selectedTags,
+          mensagens,
+          intervalo_min: intervaloMin,
+          intervalo_max: intervaloMax,
+          janela_inicio: janelaInicio,
+          janela_fim: janelaFim,
+          status: "rascunho",
+          created_by: user.id,
+        };
 
-      const { error } = await supabase.from("campaigns").insert(campaignData);
-      if (error) throw error;
+        const { error } = await supabase.from("campaigns").insert(campaignData);
+        if (error) throw error;
 
-      toast.success("Campanha criada!");
+        toast.success("Campanha criada!");
+      }
+
       setShowModal(false);
+      setEditingId(null);
       resetForm();
       loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao criar campanha");
+      toast.error(err.message || "Erro ao salvar campanha");
     }
   };
 
@@ -321,7 +378,14 @@ export default function CampanhasPage() {
             Gerencie disparos agendados em lote e acompanhe o processamento no servidor.
           </p>
         </div>
-        <Button onClick={() => setShowModal(true)} className="gap-1.5 self-start">
+        <Button
+          onClick={() => {
+            setEditingId(null);
+            resetForm();
+            setShowModal(true);
+          }}
+          className="gap-1.5 self-start"
+        >
           <Plus className="h-4 w-4" /> Nova Campanha
         </Button>
       </div>
@@ -388,9 +452,16 @@ export default function CampanhasPage() {
                       </Button>
                     ) : null}
                   </div>
-                  <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} className="h-8 w-8 text-red-500 hover:text-red-600">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1">
+                    {c.status === "rascunho" && (
+                      <Button size="icon" variant="ghost" onClick={() => handleEditClick(c)} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} className="h-8 w-8 text-red-500 hover:text-red-600">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -403,8 +474,10 @@ export default function CampanhasPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
             <header className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/20">
-              <h3 className="font-bold text-foreground">Nova Campanha de Disparo</h3>
-              <Button size="icon" variant="ghost" onClick={() => setShowModal(false)} className="h-8 w-8 text-muted-foreground">
+              <h3 className="font-bold text-foreground">
+                {editingId ? "Editar Campanha" : "Nova Campanha de Disparo"}
+              </h3>
+              <Button size="icon" variant="ghost" onClick={closeModal} className="h-8 w-8 text-muted-foreground">
                 <X className="h-5 w-5" />
               </Button>
             </header>
@@ -763,8 +836,8 @@ export default function CampanhasPage() {
               </div>
 
               <footer className="pt-4 border-t border-border flex justify-end gap-3 bg-muted/10 p-4 rounded-b-xl -mx-6 -mb-6">
-                <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancelar</Button>
-                <Button type="submit">Criar Campanha</Button>
+                <Button type="button" variant="outline" onClick={closeModal}>Cancelar</Button>
+                <Button type="submit">{editingId ? "Salvar Alterações" : "Criar Campanha"}</Button>
               </footer>
             </form>
           </div>
