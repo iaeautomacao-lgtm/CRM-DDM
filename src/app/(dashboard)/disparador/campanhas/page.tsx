@@ -18,7 +18,8 @@ import {
   Calendar,
   X,
   FileText,
-  ArrowLeft
+  ArrowLeft,
+  Pencil
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -54,6 +55,13 @@ interface WahaSession {
   phone_info?: { id: string };
 }
 
+interface CampaignMessage {
+  tipo: "texto" | "ia" | "imagem" | "audio" | "ligacao";
+  conteudo?: string;
+  prompt?: string;
+  url?: string;
+}
+
 const STATUS_COLORS: Record<string, string> = {
   rascunho: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
   em_execucao: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
@@ -68,6 +76,38 @@ const STATUS_LABELS: Record<string, string> = {
   encerrada: "Encerrada",
 };
 
+// Fixed single-slot key — a browser-local safety net against an
+// accidentally closed creation modal, not a per-campaign or per-user
+// store. Never touched by edit mode (see editingId guards below), so
+// editing a real campaign can't clobber or be clobbered by this.
+const DRAFT_STORAGE_KEY = "disparador:campaign-draft";
+
+interface CampaignDraft {
+  nome: string;
+  descricao: string;
+  objetivo: string;
+  selectedSessions: string[];
+  selectedTags: string[];
+  intervaloMin: number;
+  intervaloMax: number;
+  janelaInicio: string;
+  janelaFim: string;
+  mensagens: CampaignMessage[];
+}
+
+function isDraftEmpty(draft: CampaignDraft): boolean {
+  return (
+    !draft.nome.trim() &&
+    !draft.descricao.trim() &&
+    !draft.objetivo.trim() &&
+    draft.selectedSessions.length === 0 &&
+    draft.selectedTags.length === 0 &&
+    draft.mensagens.length <= 1 &&
+    !draft.mensagens[0]?.conteudo?.trim() &&
+    !draft.mensagens[0]?.prompt?.trim()
+  );
+}
+
 export default function CampanhasPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -76,6 +116,7 @@ export default function CampanhasPage() {
 
   // Form Modal States
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [nome, setNome] = useState("");
   const [descricao, setDescricao] = useState("");
   const [objetivo, setObjetivo] = useState("");
@@ -86,6 +127,50 @@ export default function CampanhasPage() {
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
+
+  // Draft found in localStorage when the creation modal was opened, still
+  // awaiting the user's "Restaurar" / "Descartar" decision.
+  const [pendingDraft, setPendingDraft] = useState<CampaignDraft | null>(null);
+
+  // Auto-save the in-progress form to localStorage — creation mode only.
+  // Skipped while a restore decision is pending so we don't overwrite the
+  // saved draft with the blank fields the modal opened with.
+  useEffect(() => {
+    if (!showModal || editingId || pendingDraft) return;
+
+    const draft: CampaignDraft = {
+      nome,
+      descricao,
+      objetivo,
+      selectedSessions,
+      selectedTags,
+      intervaloMin,
+      intervaloMax,
+      janelaInicio,
+      janelaFim,
+      mensagens,
+    };
+
+    if (isDraftEmpty(draft)) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } else {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    }
+  }, [
+    showModal,
+    editingId,
+    pendingDraft,
+    nome,
+    descricao,
+    objetivo,
+    selectedSessions,
+    selectedTags,
+    intervaloMin,
+    intervaloMax,
+    janelaInicio,
+    janelaFim,
+    mensagens,
+  ]);
 
   // Load Data on Mount
   useEffect(() => {
@@ -202,6 +287,75 @@ export default function CampanhasPage() {
     }
   };
 
+  // Open the modal pre-filled with an existing draft campaign's data.
+  // Always sources from the real campaign row, never from the
+  // localStorage creation-draft — clear any pending restore prompt so it
+  // can't bleed into an edit session.
+  const handleEditClick = (campaign: Campaign) => {
+    setPendingDraft(null);
+    setEditingId(campaign.id);
+    setNome(campaign.nome);
+    setDescricao(campaign.descricao || "");
+    setObjetivo(campaign.objetivo || "");
+    setSelectedSessions(campaign.session_ids || []);
+    setSelectedTags(campaign.tags_filtro || []);
+    setIntervaloMin(campaign.intervalo_min);
+    setIntervaloMax(campaign.intervalo_max);
+    setJanelaInicio(campaign.janela_inicio);
+    setJanelaFim(campaign.janela_fim);
+    setMensagens(
+      campaign.mensagens && campaign.mensagens.length > 0
+        ? campaign.mensagens
+        : [{ tipo: "texto", conteudo: "" }]
+    );
+    setShowModal(true);
+  };
+
+  // Open the modal for a brand new campaign. If a draft was left behind
+  // by an accidentally closed modal, surface it for the user to decide
+  // on rather than restoring it silently.
+  const openCreateModal = () => {
+    setEditingId(null);
+    resetForm();
+
+    let draft: CampaignDraft | null = null;
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+      draft = raw ? JSON.parse(raw) : null;
+    } catch {
+      draft = null;
+    }
+    setPendingDraft(draft);
+
+    setShowModal(true);
+  };
+
+  const restoreDraft = () => {
+    if (!pendingDraft) return;
+    setNome(pendingDraft.nome);
+    setDescricao(pendingDraft.descricao);
+    setObjetivo(pendingDraft.objetivo);
+    setSelectedSessions(pendingDraft.selectedSessions);
+    setSelectedTags(pendingDraft.selectedTags);
+    setIntervaloMin(pendingDraft.intervaloMin);
+    setIntervaloMax(pendingDraft.intervaloMax);
+    setJanelaInicio(pendingDraft.janelaInicio);
+    setJanelaFim(pendingDraft.janelaFim);
+    setMensagens(pendingDraft.mensagens);
+    setPendingDraft(null);
+  };
+
+  const discardDraft = () => {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    setPendingDraft(null);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingId(null);
+    setPendingDraft(null);
+  };
+
   // Delete Campaign
   const handleDelete = async (campaign: Campaign) => {
     // disp_message_queue.campaign_id is ON DELETE CASCADE, so deleting a
@@ -248,41 +402,73 @@ export default function CampanhasPage() {
     }
 
     try {
-      const supabase = createClient();
+      if (editingId) {
+        // Editing goes through a server route so ownership + the
+        // "rascunho" status lock are re-checked there (see
+        // /api/disparador/campaigns/[id] PATCH) instead of trusting a
+        // direct client-side update.
+        const res = await fetch(`/api/disparador/campaigns/${editingId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nome,
+            descricao,
+            objetivo,
+            session_ids: selectedSessions,
+            tags_filtro: selectedTags,
+            mensagens,
+            intervalo_min: intervaloMin,
+            intervalo_max: intervaloMax,
+            janela_inicio: janelaInicio,
+            janela_fim: janelaFim,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Erro ao atualizar campanha");
+        }
+        toast.success("Campanha atualizada!");
+      } else {
+        const supabase = createClient();
 
-      // created_by is required for the ownership check in the
-      // start/stop routes (campaign.created_by !== user.id) — without
-      // it, every campaign is unowned and that check always rejects.
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) throw new Error("Não autenticado");
+        // created_by is required for the ownership check in the
+        // start/stop routes (campaign.created_by !== user.id) — without
+        // it, every campaign is unowned and that check always rejects.
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user;
+        if (!user) throw new Error("Não autenticado");
 
-      const campaignData = {
-        nome,
-        descricao,
-        objetivo,
-        session_ids: selectedSessions,
-        tags_filtro: selectedTags,
-        mensagens,
-        intervalo_min: intervaloMin,
-        intervalo_max: intervaloMax,
-        janela_inicio: janelaInicio,
-        janela_fim: janelaFim,
-        status: "rascunho",
-        created_by: user.id,
-      };
+        const campaignData = {
+          nome,
+          descricao,
+          objetivo,
+          session_ids: selectedSessions,
+          tags_filtro: selectedTags,
+          mensagens,
+          intervalo_min: intervaloMin,
+          intervalo_max: intervaloMax,
+          janela_inicio: janelaInicio,
+          janela_fim: janelaFim,
+          status: "rascunho",
+          created_by: user.id,
+        };
 
-      const { error } = await supabase.from("campaigns").insert(campaignData);
-      if (error) throw error;
+        const { error } = await supabase.from("campaigns").insert(campaignData);
+        if (error) throw error;
 
-      toast.success("Campanha criada!");
+        localStorage.removeItem(DRAFT_STORAGE_KEY);
+        toast.success("Campanha criada!");
+      }
+
       setShowModal(false);
+      setEditingId(null);
+      setPendingDraft(null);
       resetForm();
       loadData();
     } catch (err: any) {
-      toast.error(err.message || "Erro ao criar campanha");
+      toast.error(err.message || "Erro ao salvar campanha");
     }
   };
 
@@ -321,7 +507,7 @@ export default function CampanhasPage() {
             Gerencie disparos agendados em lote e acompanhe o processamento no servidor.
           </p>
         </div>
-        <Button onClick={() => setShowModal(true)} className="gap-1.5 self-start">
+        <Button onClick={openCreateModal} className="gap-1.5 self-start">
           <Plus className="h-4 w-4" /> Nova Campanha
         </Button>
       </div>
@@ -388,9 +574,16 @@ export default function CampanhasPage() {
                       </Button>
                     ) : null}
                   </div>
-                  <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} className="h-8 w-8 text-red-500 hover:text-red-600">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1">
+                    {c.status === "rascunho" && (
+                      <Button size="icon" variant="ghost" onClick={() => handleEditClick(c)} className="h-8 w-8 text-muted-foreground hover:text-foreground">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} className="h-8 w-8 text-red-500 hover:text-red-600">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -403,11 +596,27 @@ export default function CampanhasPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
             <header className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/20">
-              <h3 className="font-bold text-foreground">Nova Campanha de Disparo</h3>
-              <Button size="icon" variant="ghost" onClick={() => setShowModal(false)} className="h-8 w-8 text-muted-foreground">
+              <h3 className="font-bold text-foreground">
+                {editingId ? "Editar Campanha" : "Nova Campanha de Disparo"}
+              </h3>
+              <Button size="icon" variant="ghost" onClick={closeModal} className="h-8 w-8 text-muted-foreground">
                 <X className="h-5 w-5" />
               </Button>
             </header>
+
+            {pendingDraft && !editingId && (
+              <div className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-600 dark:text-amber-400">
+                <span>Rascunho anterior encontrado.</span>
+                <div className="flex gap-2 shrink-0">
+                  <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={discardDraft}>
+                    Descartar
+                  </Button>
+                  <Button type="button" size="sm" className="h-7 text-xs" onClick={restoreDraft}>
+                    Restaurar
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -539,7 +748,14 @@ export default function CampanhasPage() {
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                   <Layers className="h-3.5 w-3.5" /> Mensagens Sequenciais
                 </h4>
-                
+                <p className="text-[11px] text-muted-foreground">
+                  Variáveis disponíveis: <code className="font-mono">{"{{nome}}"}</code>,{" "}
+                  <code className="font-mono">{"{{primeiro_nome}}"}</code>,{" "}
+                  <code className="font-mono">{"{{empresa}}"}</code>,{" "}
+                  <code className="font-mono">{"{{data_hoje}}"}</code> — substituídas pelos dados do
+                  contato no momento do envio.
+                </p>
+
                 {mensagens.map((msg, i) => (
                   <div key={i} className="rounded-lg border border-border p-4 bg-muted/20 relative space-y-3">
                     <div className="flex justify-between items-center">
@@ -763,8 +979,8 @@ export default function CampanhasPage() {
               </div>
 
               <footer className="pt-4 border-t border-border flex justify-end gap-3 bg-muted/10 p-4 rounded-b-xl -mx-6 -mb-6">
-                <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancelar</Button>
-                <Button type="submit">Criar Campanha</Button>
+                <Button type="button" variant="outline" onClick={closeModal}>Cancelar</Button>
+                <Button type="submit">{editingId ? "Salvar Alterações" : "Criar Campanha"}</Button>
               </footer>
             </form>
           </div>

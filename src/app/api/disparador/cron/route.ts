@@ -6,6 +6,7 @@ import {
   sendWahaMediaMessage,
 } from "@/lib/whatsapp/waha-api";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
+import { applyTemplateVars } from "@/lib/disparador/template-vars";
 
 // Create a Supabase admin client to bypass RLS for background worker processes
 const supabaseAdmin = createClient(
@@ -14,6 +15,12 @@ const supabaseAdmin = createClient(
   { db: { schema: "wacrm" } }
 );
 
+// This endpoint and worker.ts's setInterval both race for the same
+// disp_message_queue rows against the same Supabase project as production
+// — see the KNOWN LOCAL-TEST RISK note on ensureQueueWorkerRunning in
+// worker.ts. A row can be claimed by whichever deployment (this one or
+// production's) polls first, so a local test hitting this route doesn't
+// guarantee this route's code is what actually processed a given send.
 export async function POST(request: Request) {
   try {
     // Fail-closed: without CRON_SECRET configured, refuse rather than
@@ -33,7 +40,7 @@ export async function POST(request: Request) {
     // 1. Fetch the next scheduled item from queue
     const { data: item, error: queryError } = await supabaseAdmin
       .from("disp_message_queue")
-      .select("*, contacts(name, phone)")
+      .select("*, contacts(name, phone, company)")
       .eq("status", "agendado")
       .lte("scheduled_at", now)
       .order("scheduled_at", { ascending: true })
@@ -162,8 +169,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Substitute name variable
-    const cleanText = messageText.replace(/{nome}/g, item.contacts?.nome || "Cliente");
+    // Substitute {{variavel}} template vars, then the legacy {nome} placeholder
+    const cleanText = applyTemplateVars(messageText, item.contacts).replace(/{nome}/g, item.contacts?.name || "Cliente");
     const normalizedPhone = telefone.replace("+", "");
 
     // 8. Trigger sending via WAHA

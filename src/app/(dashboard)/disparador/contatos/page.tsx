@@ -7,9 +7,10 @@ import {
   Download, 
   CheckCircle2, 
   AlertTriangle, 
-  AlertCircle, 
-  Loader2, 
-  FileSpreadsheet 
+  AlertCircle,
+  Loader2,
+  FileSpreadsheet,
+  Users
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -150,8 +151,15 @@ export default function ImportarContatosPage() {
         {/* Results Card */}
         {results && (
           <div className="rounded-xl border border-border bg-card p-6 space-y-6 shadow-sm">
-            <h3 className="font-semibold text-foreground">Resumo da Importação</h3>
-            
+            <div className="flex items-center justify-between gap-4">
+              <h3 className="font-semibold text-foreground">Resumo da Importação</h3>
+              <Link href="/contacts">
+                <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
+                  <Users className="h-3.5 w-3.5" /> Ver Contatos
+                </Button>
+              </Link>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-lg border border-border p-3.5 space-y-1.5 bg-emerald-500/5">
                 <span className="text-[10px] font-bold text-emerald-500 uppercase">Importados</span>
