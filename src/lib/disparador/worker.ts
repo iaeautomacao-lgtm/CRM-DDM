@@ -8,6 +8,7 @@ import {
   getWacallsCallStatus
 } from "@/lib/whatsapp/waha-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
+import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import OpenAI from "openai";
 
 const supabaseAdmin = createClient(
@@ -59,7 +60,7 @@ export function ensureQueueWorkerRunning() {
           const now = new Date().toISOString();
           const { data: item, error: queryError } = await supabaseAdmin
             .from("disp_message_queue")
-            .select("*, contacts(name, phone)")
+            .select("*, contacts(name, phone, company)")
             .eq("campaign_id", campaign.id)
             .eq("status", "agendado")
             .lte("scheduled_at", now)
@@ -162,8 +163,8 @@ export function ensureQueueWorkerRunning() {
             }
           }
 
-          // Substitute name variable
-          const cleanText = messageText.replace(/{nome}/g, item.contacts?.name || "Cliente");
+          // Substitute {{variavel}} template vars, then the legacy {nome} placeholder
+          const cleanText = applyTemplateVars(messageText, item.contacts).replace(/{nome}/g, item.contacts?.name || "Cliente");
           const normalizedPhone = phone.replace("+", "");
 
           // Trigger sending via WAHA or WaCalls

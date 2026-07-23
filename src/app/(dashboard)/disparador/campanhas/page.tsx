@@ -741,7 +741,14 @@ export default function CampanhasPage() {
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                   <Layers className="h-3.5 w-3.5" /> Mensagens Sequenciais
                 </h4>
-                
+                <p className="text-[11px] text-muted-foreground">
+                  Variáveis disponíveis: <code className="font-mono">{"{{nome}}"}</code>,{" "}
+                  <code className="font-mono">{"{{primeiro_nome}}"}</code>,{" "}
+                  <code className="font-mono">{"{{empresa}}"}</code>,{" "}
+                  <code className="font-mono">{"{{data_hoje}}"}</code> — substituídas pelos dados do
+                  contato no momento do envio.
+                </p>
+
                 {mensagens.map((msg, i) => (
                   <div key={i} className="rounded-lg border border-border p-4 bg-muted/20 relative space-y-3">
                     <div className="flex justify-between items-center">

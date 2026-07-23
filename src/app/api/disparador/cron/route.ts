@@ -6,6 +6,7 @@ import {
   sendWahaMediaMessage,
 } from "@/lib/whatsapp/waha-api";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
+import { applyTemplateVars } from "@/lib/disparador/template-vars";
 
 // Create a Supabase admin client to bypass RLS for background worker processes
 const supabaseAdmin = createClient(
@@ -33,7 +34,7 @@ export async function POST(request: Request) {
     // 1. Fetch the next scheduled item from queue
     const { data: item, error: queryError } = await supabaseAdmin
       .from("disp_message_queue")
-      .select("*, contacts(name, phone)")
+      .select("*, contacts(name, phone, company)")
       .eq("status", "agendado")
       .lte("scheduled_at", now)
       .order("scheduled_at", { ascending: true })
@@ -162,8 +163,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Substitute name variable
-    const cleanText = messageText.replace(/{nome}/g, item.contacts?.nome || "Cliente");
+    // Substitute {{variavel}} template vars, then the legacy {nome} placeholder
+    const cleanText = applyTemplateVars(messageText, item.contacts).replace(/{nome}/g, item.contacts?.nome || "Cliente");
     const normalizedPhone = telefone.replace("+", "");
 
     // 8. Trigger sending via WAHA
