@@ -15,6 +15,12 @@ const supabaseAdmin = createClient(
   { db: { schema: "wacrm" } }
 );
 
+// This endpoint and worker.ts's setInterval both race for the same
+// disp_message_queue rows against the same Supabase project as production
+// — see the KNOWN LOCAL-TEST RISK note on ensureQueueWorkerRunning in
+// worker.ts. A row can be claimed by whichever deployment (this one or
+// production's) polls first, so a local test hitting this route doesn't
+// guarantee this route's code is what actually processed a given send.
 export async function POST(request: Request) {
   try {
     // Fail-closed: without CRON_SECRET configured, refuse rather than

@@ -20,6 +20,20 @@ const supabaseAdmin = createClient(
 let isWorkerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
+// KNOWN LOCAL-TEST RISK: production runs its own always-on deployment of
+// this same worker (branch `main`) against the same Supabase project as
+// local dev. Both poll `disp_message_queue` for "agendado" rows every 5s
+// (see the interval below), so a row created by a local test campaign can
+// be claimed and sent by the production worker before this local one gets
+// to it — silently running whatever code is live on `main`, not whatever
+// is on your local branch/working tree. Confirmed 2026-07-23: a local test
+// of the {{variavel}} template feature was sent unsubstituted because
+// production's (older) worker won that race, not because of a bug in the
+// local code. Bottom line: a local send test only proves the local code
+// path works if you can confirm (e.g. via the "[Queue Worker] Processing
+// scheduled item ..." log line in this process's own console) that *this*
+// process actually handled the item. Otherwise treat local send-test
+// results as unconfirmed until the change is merged/deployed to main.
 export function ensureQueueWorkerRunning() {
   if (isWorkerRunning) {
     return;
