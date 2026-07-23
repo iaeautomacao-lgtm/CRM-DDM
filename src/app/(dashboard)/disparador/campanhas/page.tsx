@@ -69,6 +69,38 @@ const STATUS_LABELS: Record<string, string> = {
   encerrada: "Encerrada",
 };
 
+// Fixed single-slot key — a browser-local safety net against an
+// accidentally closed creation modal, not a per-campaign or per-user
+// store. Never touched by edit mode (see editingId guards below), so
+// editing a real campaign can't clobber or be clobbered by this.
+const DRAFT_STORAGE_KEY = "disparador:campaign-draft";
+
+interface CampaignDraft {
+  nome: string;
+  descricao: string;
+  objetivo: string;
+  selectedSessions: string[];
+  selectedTags: string[];
+  intervaloMin: number;
+  intervaloMax: number;
+  janelaInicio: string;
+  janelaFim: string;
+  mensagens: any[];
+}
+
+function isDraftEmpty(draft: CampaignDraft): boolean {
+  return (
+    !draft.nome.trim() &&
+    !draft.descricao.trim() &&
+    !draft.objetivo.trim() &&
+    draft.selectedSessions.length === 0 &&
+    draft.selectedTags.length === 0 &&
+    draft.mensagens.length <= 1 &&
+    !draft.mensagens[0]?.conteudo?.trim() &&
+    !draft.mensagens[0]?.prompt?.trim()
+  );
+}
+
 export default function CampanhasPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,6 +120,50 @@ export default function CampanhasPage() {
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
+
+  // Draft found in localStorage when the creation modal was opened, still
+  // awaiting the user's "Restaurar" / "Descartar" decision.
+  const [pendingDraft, setPendingDraft] = useState<CampaignDraft | null>(null);
+
+  // Auto-save the in-progress form to localStorage — creation mode only.
+  // Skipped while a restore decision is pending so we don't overwrite the
+  // saved draft with the blank fields the modal opened with.
+  useEffect(() => {
+    if (!showModal || editingId || pendingDraft) return;
+
+    const draft: CampaignDraft = {
+      nome,
+      descricao,
+      objetivo,
+      selectedSessions,
+      selectedTags,
+      intervaloMin,
+      intervaloMax,
+      janelaInicio,
+      janelaFim,
+      mensagens,
+    };
+
+    if (isDraftEmpty(draft)) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } else {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    }
+  }, [
+    showModal,
+    editingId,
+    pendingDraft,
+    nome,
+    descricao,
+    objetivo,
+    selectedSessions,
+    selectedTags,
+    intervaloMin,
+    intervaloMax,
+    janelaInicio,
+    janelaFim,
+    mensagens,
+  ]);
 
   // Load Data on Mount
   useEffect(() => {
@@ -204,8 +280,12 @@ export default function CampanhasPage() {
     }
   };
 
-  // Open the modal pre-filled with an existing draft campaign's data
+  // Open the modal pre-filled with an existing draft campaign's data.
+  // Always sources from the real campaign row, never from the
+  // localStorage creation-draft — clear any pending restore prompt so it
+  // can't bleed into an edit session.
   const handleEditClick = (campaign: Campaign) => {
+    setPendingDraft(null);
     setEditingId(campaign.id);
     setNome(campaign.nome);
     setDescricao(campaign.descricao || "");
@@ -224,9 +304,49 @@ export default function CampanhasPage() {
     setShowModal(true);
   };
 
+  // Open the modal for a brand new campaign. If a draft was left behind
+  // by an accidentally closed modal, surface it for the user to decide
+  // on rather than restoring it silently.
+  const openCreateModal = () => {
+    setEditingId(null);
+    resetForm();
+
+    let draft: CampaignDraft | null = null;
+    try {
+      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+      draft = raw ? JSON.parse(raw) : null;
+    } catch {
+      draft = null;
+    }
+    setPendingDraft(draft);
+
+    setShowModal(true);
+  };
+
+  const restoreDraft = () => {
+    if (!pendingDraft) return;
+    setNome(pendingDraft.nome);
+    setDescricao(pendingDraft.descricao);
+    setObjetivo(pendingDraft.objetivo);
+    setSelectedSessions(pendingDraft.selectedSessions);
+    setSelectedTags(pendingDraft.selectedTags);
+    setIntervaloMin(pendingDraft.intervaloMin);
+    setIntervaloMax(pendingDraft.intervaloMax);
+    setJanelaInicio(pendingDraft.janelaInicio);
+    setJanelaFim(pendingDraft.janelaFim);
+    setMensagens(pendingDraft.mensagens);
+    setPendingDraft(null);
+  };
+
+  const discardDraft = () => {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    setPendingDraft(null);
+  };
+
   const closeModal = () => {
     setShowModal(false);
     setEditingId(null);
+    setPendingDraft(null);
   };
 
   // Delete Campaign
@@ -331,11 +451,13 @@ export default function CampanhasPage() {
         const { error } = await supabase.from("campaigns").insert(campaignData);
         if (error) throw error;
 
+        localStorage.removeItem(DRAFT_STORAGE_KEY);
         toast.success("Campanha criada!");
       }
 
       setShowModal(false);
       setEditingId(null);
+      setPendingDraft(null);
       resetForm();
       loadData();
     } catch (err: any) {
@@ -378,14 +500,7 @@ export default function CampanhasPage() {
             Gerencie disparos agendados em lote e acompanhe o processamento no servidor.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setEditingId(null);
-            resetForm();
-            setShowModal(true);
-          }}
-          className="gap-1.5 self-start"
-        >
+        <Button onClick={openCreateModal} className="gap-1.5 self-start">
           <Plus className="h-4 w-4" /> Nova Campanha
         </Button>
       </div>
@@ -481,6 +596,20 @@ export default function CampanhasPage() {
                 <X className="h-5 w-5" />
               </Button>
             </header>
+
+            {pendingDraft && !editingId && (
+              <div className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-600 dark:text-amber-400">
+                <span>Rascunho anterior encontrado.</span>
+                <div className="flex gap-2 shrink-0">
+                  <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={discardDraft}>
+                    Descartar
+                  </Button>
+                  <Button type="button" size="sm" className="h-7 text-xs" onClick={restoreDraft}>
+                    Restaurar
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
