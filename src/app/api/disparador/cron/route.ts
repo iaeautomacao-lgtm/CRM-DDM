@@ -16,20 +16,24 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: Request) {
   try {
-    ensureQueueWorkerRunning();
-    // Basic authorization check (e.g. check for a CRON_SECRET or run anyway)
-    const url = new URL(request.url);
-    const secret = url.searchParams.get("secret");
-    if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
+    // Fail-closed: without CRON_SECRET configured, refuse rather than
+    // run unauthenticated (this endpoint enqueues real WhatsApp sends).
+    const expected = process.env.CRON_SECRET;
+    if (!expected) {
+      return NextResponse.json({ error: "cron not configured" }, { status: 503 });
+    }
+    const supplied = request.headers.get("x-cron-secret");
+    if (supplied !== expected) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    ensureQueueWorkerRunning();
     const now = new Date().toISOString();
 
     // 1. Fetch the next scheduled item from queue
     const { data: item, error: queryError } = await supabaseAdmin
       .from("disp_message_queue")
-      .select("*, contacts(nome, telefone)")
+      .select("*, contacts(name, phone)")
       .eq("status", "agendado")
       .lte("scheduled_at", now)
       .order("scheduled_at", { ascending: true })
@@ -93,7 +97,7 @@ export async function POST(request: Request) {
     }
 
     // 5. Check if contact is blacklisted
-    const telefone = item.contacts?.telefone || item.mensagem_final;
+    const telefone = item.contacts?.phone || item.mensagem_final;
     const { data: blacklisted } = await supabaseAdmin
       .from("blacklist")
       .select("id")
@@ -147,7 +151,7 @@ export async function POST(request: Request) {
             },
             {
               role: "user",
-              content: `Contato: nome=${item.contacts?.nome || ""}. Prompt: ${messageText}`,
+              content: `Contato: nome=${item.contacts?.name || ""}. Prompt: ${messageText}`,
             },
           ],
           max_tokens: 500,

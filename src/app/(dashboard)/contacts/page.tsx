@@ -159,8 +159,15 @@ export default function ContactsPage() {
         .range(from, to);
 
       if (term) {
-        const like = `%${term}%`;
-        query = query.or(`name.ilike.${like},phone.ilike.${like},email.ilike.${like}`);
+        // PostgREST's .or() filter string treats "," "(" ")" as syntax
+        // delimiters, so a raw search term could break out of the intended
+        // ilike clauses and inject extra filter conditions. Wrapping the
+        // value in double quotes (PostgREST's quoted-value syntax) makes
+        // those characters literal — only a `"` or `\` inside the term
+        // needs escaping first.
+        const escaped = term.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        const like = `%${escaped}%`;
+        query = query.or(`name.ilike."${like}",phone.ilike."${like}",email.ilike."${like}"`);
       }
 
       const { data, count: exactCount, error } = await query;

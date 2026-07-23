@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { createClient as createServerClient } from "@/lib/supabase/server";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
 
 // Use admin client to write to the queue bypassing RLS
@@ -14,6 +15,32 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const supabase = await createServerClient();
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    }
+
+    // wacrm.campaigns has no account_id column yet (see migration 040,
+    // not yet applied), so resolve the caller's account_id from their
+    // profile to scope the contacts query below.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("account_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    const accountId = profile?.account_id;
+    if (!accountId) {
+      return NextResponse.json(
+        { error: "Seu perfil não está vinculado a uma conta." },
+        { status: 400 }
+      );
+    }
+
     ensureQueueWorkerRunning();
     const { id: campaignId } = await params;
     const now = new Date().toISOString();
@@ -27,6 +54,34 @@ export async function POST(
 
     if (campaignError || !campaign) {
       return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
+    }
+
+    // wacrm.campaigns has no account_id column (only created_by), so
+    // ownership is checked per-user rather than per-account for now.
+    if (campaign.created_by !== user.id) {
+      return NextResponse.json(
+        { error: "Você não tem permissão para executar esta campanha." },
+        { status: 403 }
+      );
+    }
+
+    // Only "rascunho" (never started) and "pausada" (resuming) are valid
+    // starting points — the only 4 statuses this table ever uses are
+    // rascunho/em_execucao/pausada/encerrada (see STATUS_LABELS in
+    // campanhas/page.tsx). Enforced here, not just disabled in the UI,
+    // so a direct call to this route can't re-run a campaign that's
+    // already sending or restart one that's already closed.
+    const STARTABLE_STATUSES = ["rascunho", "pausada"];
+    if (!STARTABLE_STATUSES.includes(campaign.status)) {
+      return NextResponse.json(
+        {
+          error:
+            campaign.status === "em_execucao"
+              ? "Esta campanha já está em execução."
+              : "Esta campanha está encerrada e não pode ser reiniciada.",
+        },
+        { status: 409 }
+      );
     }
 
     const mensagens = Array.isArray(campaign.mensagens) ? campaign.mensagens : [];
@@ -52,10 +107,12 @@ export async function POST(
       .eq("campaign_id", campaignId)
       .in("status", ["pendente", "agendado", "erro"]);
 
-    // 3. Load active contacts
+    // 3. Load active contacts — scoped to the caller's account so a
+    // campaign never sends to another account's contacts.
     const { data: allContacts, error: contactsError } = await supabaseAdmin
       .from("contacts")
-      .select("id, name, phone");
+      .select("id, name, phone")
+      .eq("account_id", accountId);
 
     if (contactsError) {
       throw new Error(`Erro ao carregar contatos: ${contactsError.message}`);

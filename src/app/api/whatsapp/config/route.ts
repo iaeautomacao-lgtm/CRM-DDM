@@ -149,6 +149,10 @@ export async function GET() {
               }
             }
           } catch (err: any) {
+            // Log the real error server-side only — the client-facing
+            // message must not echo the internal connection error (host
+            // reachability, refused ports, etc. can be an SSRF oracle).
+            console.error(`WAHA connection check failed for config ${config.id}:`, err)
             return {
               id: config.id,
               connected: false,
@@ -157,7 +161,7 @@ export async function GET() {
               waha_session: config.waha_session,
               waha_url: config.waha_url,
               reason: 'waha_api_error',
-              message: `Could not connect to WAHA server at ${config.waha_url}: ${err.message}`,
+              message: 'Could not connect to the WAHA server. Please check the configured URL and try again.',
               phone_info: {
                 id: config.waha_session,
                 display_phone_number: config.waha_session,
@@ -268,6 +272,16 @@ export async function POST(request: Request) {
         )
       }
 
+      // The client normalizes waha_session to this same format, but that's
+      // only a UX nicety — a caller hitting this API directly could send
+      // anything, and the value is later interpolated into WAHA URL paths.
+      if (!/^[a-z0-9_-]+$/.test(waha_session)) {
+        return NextResponse.json(
+          { error: 'waha_session must match ^[a-z0-9_-]+$' },
+          { status: 400 }
+        )
+      }
+
       // Check if another account has already claimed this waha_session
       const { data: claimed, error: claimedError } = await supabaseAdmin()
         .from('whatsapp_config')
@@ -277,7 +291,7 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (claimedError) {
-        console.error('Error checking waha_session ownership:', claimedError)
+        console.error('Error checking waha_session ownership:', claimedError.message)
         return NextResponse.json(
           { error: 'Failed to validate configuration' },
           { status: 500 }

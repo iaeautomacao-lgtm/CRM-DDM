@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
+import { getDisparadorScope } from "@/lib/disparador/scope";
 
 interface Campaign {
   id: string;
@@ -99,9 +100,14 @@ export default function CampanhasPage() {
     const interval = setInterval(async () => {
       try {
         const supabase = createClient();
+        // wacrm.campaigns has no account_id yet (migration 040 not
+        // applied), so scope by the caller's account via created_by —
+        // see getDisparadorScope.
+        const { userIds } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
           .select("*")
+          .in("created_by", userIds)
           .order("created_at", { ascending: false });
         if (campaignList) {
           setCampaigns(campaignList);
@@ -119,10 +125,16 @@ export default function CampanhasPage() {
     try {
       const supabase = createClient();
 
+      // wacrm.campaigns has no account_id yet (migration 040 not
+      // applied), so scope by the caller's account via created_by —
+      // see getDisparadorScope.
+      const { userIds } = await getDisparadorScope(supabase);
+
       // Load Campaigns
       const { data: campaignList } = await supabase
         .from("campaigns")
         .select("*")
+        .in("created_by", userIds)
         .order("created_at", { ascending: false });
       setCampaigns(campaignList ?? []);
 
@@ -191,16 +203,31 @@ export default function CampanhasPage() {
   };
 
   // Delete Campaign
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (campaign: Campaign) => {
+    // disp_message_queue.campaign_id is ON DELETE CASCADE, so deleting a
+    // running campaign silently wipes its in-flight queue mid-send.
+    // Require pausing/stopping first instead of deleting straight out of
+    // em_execucao.
+    if (campaign.status === "em_execucao") {
+      toast.error(
+        "Não é possível deletar uma campanha em execução. Pause ou encerre a campanha primeiro."
+      );
+      return;
+    }
     if (!confirm("Tem certeza que deseja deletar esta campanha permanentemente?")) return;
     try {
-      const supabase = createClient();
-      const { error } = await supabase.from("campaigns").delete().eq("id", id);
-      if (error) throw error;
+      // Deletion is scoped server-side (ownership + status re-checked)
+      // instead of a direct client delete, since wacrm.campaigns has no
+      // RLS yet — see src/app/api/disparador/campaigns/[id]/route.ts.
+      const res = await fetch(`/api/disparador/campaigns/${campaign.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Erro ao deletar campanha");
+      }
       toast.success("Campanha deletada.");
       loadData();
     } catch (err: any) {
-      toast.error("Erro ao deletar campanha.");
+      toast.error(err.message || "Erro ao deletar campanha.");
     }
   };
 
@@ -222,6 +249,16 @@ export default function CampanhasPage() {
 
     try {
       const supabase = createClient();
+
+      // created_by is required for the ownership check in the
+      // start/stop routes (campaign.created_by !== user.id) — without
+      // it, every campaign is unowned and that check always rejects.
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user) throw new Error("Não autenticado");
+
       const campaignData = {
         nome,
         descricao,
@@ -234,6 +271,7 @@ export default function CampanhasPage() {
         janela_inicio: janelaInicio,
         janela_fim: janelaFim,
         status: "rascunho",
+        created_by: user.id,
       };
 
       const { error } = await supabase.from("campaigns").insert(campaignData);
@@ -350,7 +388,7 @@ export default function CampanhasPage() {
                       </Button>
                     ) : null}
                   </div>
-                  <Button size="icon" variant="ghost" onClick={() => handleDelete(c.id)} className="h-8 w-8 text-red-500 hover:text-red-600">
+                  <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} className="h-8 w-8 text-red-500 hover:text-red-600">
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>

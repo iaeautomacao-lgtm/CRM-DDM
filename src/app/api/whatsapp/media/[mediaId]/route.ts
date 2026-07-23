@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { assertWahaUrlIsSafe, WahaUrlBlockedError } from '@/lib/whatsapp/waha-api'
 
 export async function GET(
   request: Request,
@@ -73,6 +74,15 @@ export async function GET(
           { error: 'WAHA not configured' },
           { status: 400 }
         )
+      }
+
+      try {
+        await assertWahaUrlIsSafe(wahaConfig.waha_url)
+      } catch (err) {
+        if (err instanceof WahaUrlBlockedError) {
+          return NextResponse.json({ error: 'WAHA server URL is not allowed.' }, { status: 400 })
+        }
+        throw err
       }
 
       const apiKey = wahaConfig.waha_api_key ? decrypt(wahaConfig.waha_api_key) : null

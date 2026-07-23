@@ -3,6 +3,11 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 export async function GET() {
+  // Debug-only introspection route — never expose it in production.
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
   try {
     const supabase = await createClient()
     const admin = supabaseAdmin()
@@ -20,16 +25,32 @@ export async function GET() {
       .eq('user_id', user.id)
       .maybeSingle()
 
-    // 3. Count tables using admin (bypassing RLS)
-    const { count: contactsCount } = await admin.from('contacts').select('*', { count: 'exact', head: true })
-    const { count: convsCount } = await admin.from('conversations').select('*', { count: 'exact', head: true })
-    const { count: msgsCount } = await admin.from('messages').select('*', { count: 'exact', head: true })
-    const { count: configCount } = await admin.from('whatsapp_config').select('*', { count: 'exact', head: true })
+    const accountId = profile?.account_id
+    if (!accountId) {
+      return NextResponse.json({ error: 'Profile has no account_id' }, { status: 400 })
+    }
 
-    // 4. Fetch the configs and first few conversations
-    const { data: configs } = await admin.from('whatsapp_config').select('*')
-    const { data: conversations } = await admin.from('conversations').select('*')
-    const { data: contacts } = await admin.from('contacts').select('*')
+    // 3. Count tables using admin (bypassing RLS), scoped to the caller's account
+    const { count: contactsCount } = await admin.from('contacts').select('*', { count: 'exact', head: true }).eq('account_id', accountId)
+    const { count: convsCount } = await admin.from('conversations').select('*', { count: 'exact', head: true }).eq('account_id', accountId)
+    const { count: configCount } = await admin.from('whatsapp_config').select('*', { count: 'exact', head: true }).eq('account_id', accountId)
+
+    // 4. Fetch the configs and conversations/contacts for this account only
+    const { data: configs } = await admin.from('whatsapp_config').select('*').eq('account_id', accountId)
+    const { data: conversations } = await admin.from('conversations').select('*').eq('account_id', accountId)
+    const { data: contacts } = await admin.from('contacts').select('*').eq('account_id', accountId)
+
+    // messages has no account_id column of its own — it's scoped through
+    // conversation_id, so count only messages under this account's conversations.
+    const conversationIds = (conversations || []).map((c: any) => c.id)
+    let msgsCount = 0
+    if (conversationIds.length > 0) {
+      const { count } = await admin
+        .from('messages')
+        .select('*', { count: 'exact', head: true })
+        .in('conversation_id', conversationIds)
+      msgsCount = count || 0
+    }
 
     return NextResponse.json({
       auth: {
