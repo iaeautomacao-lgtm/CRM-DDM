@@ -39,6 +39,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Claude Code local settings (per-user permission allowlist, not project config)
+.claude/settings.local.json
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
