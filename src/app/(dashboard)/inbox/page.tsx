@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Conversation, Message, Contact, ConversationStatus } from "@/types";
+import type { Conversation, Message, Contact, ConversationStatus, Tag } from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
@@ -119,7 +119,7 @@ export default function InboxPage() {
       const supabase = createClient();
       const { data, error } = await supabase
         .from("conversations")
-        .select("*, contact:contacts(*)")
+        .select("*, contact:contacts(*), outcome_tag:tags!outcome_tag_id(*)")
         .eq("id", convId)
         .maybeSingle();
       if (error) {
@@ -508,12 +508,19 @@ export default function InboxPage() {
   );
 
   const handleStatusChange = useCallback(
-    (conversationId: string, status: ConversationStatus) => {
+    (conversationId: string, status: ConversationStatus, outcomeTag?: Tag) => {
+      const outcomeUpdates = outcomeTag
+        ? { outcome_tag_id: outcomeTag.id, outcome_tag: outcomeTag }
+        : {};
       setConversations((prev) =>
-        prev.map((c) => (c.id === conversationId ? { ...c, status } : c))
+        prev.map((c) =>
+          c.id === conversationId ? { ...c, status, ...outcomeUpdates } : c
+        )
       );
       if (activeConversation?.id === conversationId) {
-        setActiveConversation((prev) => (prev ? { ...prev, status } : prev));
+        setActiveConversation((prev) =>
+          prev ? { ...prev, status, ...outcomeUpdates } : prev
+        );
       }
     },
     [activeConversation]

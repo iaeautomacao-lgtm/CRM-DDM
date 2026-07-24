@@ -154,9 +154,16 @@ export function ensureQueueWorkerRunning() {
           const tipo = item.tipo || "texto";
           let messageText = item.mensagem_final;
 
-          if (tipo === "ia" && process.env.OPENAI_API_KEY) {
+          // Separate key from the AI agent's OPENAI_API_KEY so spend on
+          // disparador-generated messages shows up under its own OpenAI
+          // Project in the usage dashboard. Falls back to OPENAI_API_KEY
+          // in environments where the dedicated key isn't set yet.
+          const disparadorOpenAiKey =
+            process.env.DISPARADOR_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
+          if (tipo === "ia" && disparadorOpenAiKey) {
             try {
-              const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+              const openai = new OpenAI({ apiKey: disparadorOpenAiKey });
               const completion = await openai.chat.completions.create({
                 model: "gpt-4o-mini",
                 messages: [

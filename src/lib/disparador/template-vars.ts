@@ -3,6 +3,14 @@ export interface TemplateVarsContact {
   company?: string | null;
 }
 
+/** UI-facing list of the placeholders applyTemplateVars resolves at send time. */
+export const TEMPLATE_VARS = [
+  { label: "Nome", value: "{{nome}}" },
+  { label: "Primeiro nome", value: "{{primeiro_nome}}" },
+  { label: "Empresa", value: "{{empresa}}" },
+  { label: "Data de hoje", value: "{{data_hoje}}" },
+];
+
 /**
  * Resolves {{variavel}} placeholders in a campaign message at send time
  * (not at creation/enqueue time), so the text always reflects the

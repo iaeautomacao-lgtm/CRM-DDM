@@ -222,17 +222,25 @@ export async function handleAiAutoResponse(
 
   // Recarrega as últimas mensagens para ver se o cliente enviou algo novo depois do gatilho inicial.
   // Se a última mensagem não for a que disparou esta execução, encerramos esta chamada para deixar a mais recente responder.
+  //
+  // Compara contra received_at (marcado por NOW() no INSERT, isto é,
+  // o relógio do nosso servidor), não created_at (o timestamp que o
+  // WAHA/Meta manda no payload). created_at reflete o relógio do
+  // provedor — qualquer atraso de entrega/fila entre o provedor gerar
+  // aquele timestamp e nosso webhook inserir a linha invalidava essa
+  // conta de tempo decorrido, deixando duas mensagens rápidas do
+  // cliente gerarem duas respostas da IA.
   const { data: latestCheckMsg } = await db
     .from("messages")
-    .select("id, content_text, created_at, sender_type")
+    .select("id, content_text, received_at, sender_type")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: false })
+    .order("received_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   if (latestCheckMsg && latestCheckMsg.sender_type === "customer") {
     // Se o cliente mandou mais mensagens, esse webhook antigo cancela para o novo responder com todo o contexto junto.
-    const lastCheckTime = new Date(latestCheckMsg.created_at).getTime();
+    const lastCheckTime = new Date(latestCheckMsg.received_at).getTime();
     // Adiciona uma tolerância de 500ms para evitar falsos cancelamentos
     if (Date.now() - lastCheckTime < 3800) {
       console.log(`[AI Agent] Debounce triggered on conversation ${conversationId}. Cancelling old execution.`);

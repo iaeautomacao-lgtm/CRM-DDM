@@ -15,6 +15,7 @@ import type {
   ConversationStatus,
   MessageTemplate,
   Profile,
+  Tag,
 } from "@/types";
 import {
   MessageSquare,
@@ -51,6 +52,7 @@ import {
 } from "./message-composer";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
+import { OutcomeTagPicker } from "./outcome-tag-picker";
 import { buildReplyPreview } from "./reply-quote";
 import { toast } from "sonner";
 
@@ -74,7 +76,11 @@ interface MessageThreadProps {
   onMessagesLoaded: (messages: Message[]) => void;
   onNewMessage: (message: Message) => void;
   onUpdateMessage: (id: string, updates: Partial<Message>) => void;
-  onStatusChange: (conversationId: string, status: ConversationStatus) => void;
+  onStatusChange: (
+    conversationId: string,
+    status: ConversationStatus,
+    outcomeTag?: Tag,
+  ) => void;
   onAssignChange: (
     conversationId: string,
     assignedAgentId: string | null,
@@ -205,6 +211,7 @@ export function MessageThread({
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [outcomeTagPickerOpen, setOutcomeTagPickerOpen] = useState(false);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [reactions, setReactions] = useState<MessageReaction[]>([]);
   // Purely visual spin state for the manual-refresh button. The actual
@@ -615,18 +622,42 @@ export function MessageThread({
   );
 
   const handleStatusChange = useCallback(
-    async (status: ConversationStatus) => {
+    async (status: ConversationStatus, outcomeTag?: Tag) => {
       if (!conversation) return;
 
-      const supabase = createClient();
-      await supabase
-        .from("conversations")
-        .update({ status })
-        .eq("id", conversation.id);
+      const updates: { status: ConversationStatus; outcome_tag_id?: string } = {
+        status,
+      };
+      if (outcomeTag) updates.outcome_tag_id = outcomeTag.id;
 
-      onStatusChange(conversation.id, status);
+      const supabase = createClient();
+      await supabase.from("conversations").update(updates).eq("id", conversation.id);
+
+      onStatusChange(conversation.id, status, outcomeTag);
     },
     [conversation, onStatusChange]
+  );
+
+  // Closing a conversation requires picking an outcome tag first — the
+  // status update itself only happens once a tag is chosen (or the
+  // status is anything other than "closed").
+  const handleStatusOptionClick = useCallback(
+    (status: ConversationStatus) => {
+      if (status === "closed") {
+        setOutcomeTagPickerOpen(true);
+        return;
+      }
+      void handleStatusChange(status);
+    },
+    [handleStatusChange]
+  );
+
+  const handleOutcomeTagSelect = useCallback(
+    (tag: Tag) => {
+      setOutcomeTagPickerOpen(false);
+      void handleStatusChange("closed", tag);
+    },
+    [handleStatusChange]
   );
 
   const handleOpenTemplates = useCallback(() => {
@@ -1056,7 +1087,7 @@ export function MessageThread({
               {STATUS_OPTIONS.map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
-                  onClick={() => handleStatusChange(opt.value)}
+                  onClick={() => handleStatusOptionClick(opt.value)}
                   className={cn("text-sm", opt.color)}
                 >
                   {opt.label}
@@ -1064,6 +1095,18 @@ export function MessageThread({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {conversation.status === "closed" && conversation.outcome_tag && (
+            <Badge
+              className="border-0 text-[10px]"
+              style={{
+                backgroundColor: `${conversation.outcome_tag.color}26`,
+                color: conversation.outcome_tag.color,
+              }}
+            >
+              {conversation.outcome_tag.name}
+            </Badge>
+          )}
 
           {/* Assign dropdown */}
           <DropdownMenu>
@@ -1220,6 +1263,12 @@ export function MessageThread({
         open={templateModalOpen}
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
+      />
+
+      <OutcomeTagPicker
+        open={outcomeTagPickerOpen}
+        onOpenChange={setOutcomeTagPickerOpen}
+        onSelect={handleOutcomeTagSelect}
       />
 
       {/* Real-time VoIP Call Popup Overlay */}

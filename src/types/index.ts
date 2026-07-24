@@ -107,6 +107,10 @@ export interface Tag {
   user_id: string;
   name: string;
   color: string;
+  /** 'contact' = profile attribute (default); 'outcome' = conversation-closure tabulação. */
+  kind: 'contact' | 'outcome';
+  /** Tabulação code, for the future Olos integration. */
+  codigo_tabulacao?: number;
   created_at: string;
 }
 
@@ -154,6 +158,9 @@ export interface Conversation {
   last_message_at?: string;
   unread_count: number;
   sentiment?: 'positive' | 'neutral' | 'negative' | 'mixed' | 'unknown';
+  /** Outcome tag applied when the conversation is closed (tabulação). */
+  outcome_tag_id?: string;
+  outcome_tag?: Tag;
   created_at: string;
   updated_at: string;
   contact?: Contact;
@@ -188,6 +195,8 @@ export interface Message {
   message_id?: string;
   status: MessageStatus;
   created_at: string;
+  /** Server-local INSERT timestamp (NOW()) — used for debounce timing, unlike created_at which mirrors the provider's own timestamp. */
+  received_at?: string;
   reply_to_message_id?: string;
   interactive_reply_id?: string;
   waha_session?: string;
@@ -545,4 +554,17 @@ export interface AutomationLog {
   error_message?: string | null;
   created_at: string;
   contact?: Contact;
+}
+
+/**
+ * A reusable campaign message template (Gerenciador de Campanhas).
+ * Not to be confused with `MessageTemplate` — that's the Meta WhatsApp
+ * Business pre-approved HSM catalog, a different concept.
+ */
+export interface DisparadorMessageTemplate {
+  id: string;
+  account_id: string;
+  nome: string;
+  conteudo: string;
+  created_at: string;
 }
