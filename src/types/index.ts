@@ -553,3 +553,16 @@ export interface AutomationLog {
   created_at: string;
   contact?: Contact;
 }
+
+/**
+ * A reusable campaign message template (Gerenciador de Campanhas).
+ * Not to be confused with `MessageTemplate` — that's the Meta WhatsApp
+ * Business pre-approved HSM catalog, a different concept.
+ */
+export interface DisparadorMessageTemplate {
+  id: string;
+  account_id: string;
+  nome: string;
+  conteudo: string;
+  created_at: string;
+}

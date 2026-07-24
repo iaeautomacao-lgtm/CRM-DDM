@@ -26,6 +26,8 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
 import { getDisparadorScope } from "@/lib/disparador/scope";
+import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
+import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
 
 interface Campaign {
   id: string;
@@ -61,15 +63,6 @@ interface CampaignMessage {
   prompt?: string;
   url?: string;
 }
-
-// Kept in sync with the placeholders resolved by applyTemplateVars
-// (src/lib/disparador/template-vars.ts) at send time.
-const TEMPLATE_VARS = [
-  { label: "Nome", value: "{{nome}}" },
-  { label: "Primeiro nome", value: "{{primeiro_nome}}" },
-  { label: "Empresa", value: "{{empresa}}" },
-  { label: "Data de hoje", value: "{{data_hoje}}" },
-];
 
 const STATUS_COLORS: Record<string, string> = {
   rascunho: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
@@ -137,6 +130,9 @@ export default function CampanhasPage() {
   const [janelaFim, setJanelaFim] = useState("18:00");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
   const varFieldRefs = useRef<Record<string, HTMLTextAreaElement | HTMLInputElement | null>>({});
+  // Index of the message ("conteudo") field waiting for a template
+  // selection, or null when the picker is closed.
+  const [templatePickerIndex, setTemplatePickerIndex] = useState<number | null>(null);
 
   // Inserts a {{variavel}} placeholder at the current cursor position of the
   // given field (rather than always appending), so the user can click a
@@ -870,7 +866,7 @@ export default function CampanhasPage() {
                           placeholder="Escreva a mensagem..."
                           className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none resize-none"
                         />
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap items-center gap-1">
                           {TEMPLATE_VARS.map((v) => (
                             <button
                               key={v.value}
@@ -881,6 +877,14 @@ export default function CampanhasPage() {
                               {v.label}
                             </button>
                           ))}
+                          <button
+                            type="button"
+                            onClick={() => setTemplatePickerIndex(i)}
+                            className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-full border border-dashed border-border bg-card text-[10px] font-medium text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                          >
+                            <FileText className="h-3 w-3" />
+                            Carregar de um Template
+                          </button>
                         </div>
                       </div>
                     )}
@@ -1046,6 +1050,23 @@ export default function CampanhasPage() {
           </div>
         </div>
       )}
+
+      <MessageTemplatePicker
+        open={templatePickerIndex !== null}
+        onOpenChange={(next) => {
+          if (!next) setTemplatePickerIndex(null);
+        }}
+        onSelect={(template) => {
+          if (templatePickerIndex === null) return;
+          const updated = [...mensagens];
+          updated[templatePickerIndex] = {
+            ...updated[templatePickerIndex],
+            conteudo: template.conteudo,
+          };
+          setMensagens(updated);
+          setTemplatePickerIndex(null);
+        }}
+      />
     </div>
   );
 }
