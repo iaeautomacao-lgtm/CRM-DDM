@@ -195,6 +195,8 @@ export interface Message {
   message_id?: string;
   status: MessageStatus;
   created_at: string;
+  /** Server-local INSERT timestamp (NOW()) — used for debounce timing, unlike created_at which mirrors the provider's own timestamp. */
+  received_at?: string;
   reply_to_message_id?: string;
   interactive_reply_id?: string;
   waha_session?: string;
