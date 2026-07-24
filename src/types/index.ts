@@ -578,4 +578,5 @@ export interface DisparadorMessageTemplate {
   nome: string;
   conteudo: string;
   created_at: string;
+  updated_at: string;
 }
