@@ -40,6 +40,7 @@ export function OutcomeTagPicker({
       const { data, error } = await supabase
         .from("tags")
         .select("*")
+        .eq("kind", "outcome")
         .order("name");
 
       if (cancelled) return;

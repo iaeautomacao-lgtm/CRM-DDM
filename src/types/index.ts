@@ -107,8 +107,10 @@ export interface Tag {
   user_id: string;
   name: string;
   color: string;
-  /** Reference code for the Olos integration, when this tag mirrors an Olos "tabulação". */
-  codigo_olos?: number;
+  /** 'contact' = profile attribute (default); 'outcome' = conversation-closure tabulação. */
+  kind: 'contact' | 'outcome';
+  /** Tabulação code, for the future Olos integration. */
+  codigo_tabulacao?: number;
   created_at: string;
 }
 
