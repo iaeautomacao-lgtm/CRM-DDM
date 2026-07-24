@@ -107,6 +107,8 @@ export interface Tag {
   user_id: string;
   name: string;
   color: string;
+  /** Reference code for the Olos integration, when this tag mirrors an Olos "tabulação". */
+  codigo_olos?: number;
   created_at: string;
 }
 
@@ -154,6 +156,9 @@ export interface Conversation {
   last_message_at?: string;
   unread_count: number;
   sentiment?: 'positive' | 'neutral' | 'negative' | 'mixed' | 'unknown';
+  /** Outcome tag applied when the conversation is closed (tabulação). */
+  outcome_tag_id?: string;
+  outcome_tag?: Tag;
   created_at: string;
   updated_at: string;
   contact?: Contact;
