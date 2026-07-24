@@ -133,7 +133,9 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
       }
       break
     case 'close_conversation':
-      // No config required.
+      // outcome_tag_id is optional — the engine falls back to the
+      // account's "Sem Tabulação" tag when unset, so automations saved
+      // before this field existed still validate and run fine.
       break
     default:
       issues.push({ path, message: `unknown step type: ${step.step_type}` })

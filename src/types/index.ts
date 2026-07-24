@@ -492,6 +492,16 @@ export interface SendWebhookStepConfig {
   body_template?: string;
 }
 
+export interface CloseConversationStepConfig {
+  /**
+   * Outcome tag (tags.kind = 'outcome') applied when this step closes the
+   * conversation. Optional so automations created before this field
+   * existed keep working — the engine falls back to the account's
+   * codigo_tabulacao = 16 ("Sem Tabulação") tag when unset.
+   */
+  outcome_tag_id?: string;
+}
+
 export type AutomationStepConfig =
   | SendMessageStepConfig
   | SendTemplateStepConfig
@@ -502,6 +512,7 @@ export type AutomationStepConfig =
   | WaitStepConfig
   | ConditionStepConfig
   | SendWebhookStepConfig
+  | CloseConversationStepConfig
   | Record<string, never>
   | Record<string, unknown>;
 

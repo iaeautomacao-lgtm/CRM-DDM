@@ -13,6 +13,7 @@ import type {
   WaitStepConfig,
   CreateDealStepConfig,
   AssignConversationStepConfig,
+  CloseConversationStepConfig,
 } from '@/types'
 import { supabaseAdmin } from './admin-client'
 import { engineSendText, engineSendTemplate } from './meta-send'
@@ -539,9 +540,41 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
 
     case 'close_conversation': {
       if (!args.contactId) throw new Error('close_conversation needs a contact')
+      const cfg = step.step_config as CloseConversationStepConfig
+
+      let outcomeTagId = cfg.outcome_tag_id || null
+
+      if (!outcomeTagId) {
+        // No tag configured on this step — fall back to the account's
+        // "Sem Tabulação" tag (codigo_tabulacao = 16) so an
+        // automation-driven close still records an outcome, matching
+        // the requirement enforced in the inbox UI (message-thread.tsx).
+        const { data: fallbackTag, error: fallbackErr } = await db
+          .from('tags')
+          .select('id')
+          .eq('account_id', args.automation.account_id)
+          .eq('kind', 'outcome')
+          .eq('codigo_tabulacao', 16)
+          .maybeSingle()
+
+        if (fallbackErr || !fallbackTag) {
+          console.warn(
+            '[automations] close_conversation: no outcome_tag_id configured and fallback tag (codigo_tabulacao=16) not found for account',
+            args.automation.account_id,
+            fallbackErr
+          )
+        } else {
+          outcomeTagId = fallbackTag.id
+        }
+      }
+
       await db
         .from('conversations')
-        .update({ status: 'closed', updated_at: new Date().toISOString() })
+        .update({
+          status: 'closed',
+          outcome_tag_id: outcomeTagId,
+          updated_at: new Date().toISOString(),
+        })
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId)
       return 'conversation closed'

@@ -254,16 +254,22 @@ const SELECT_CLASS =
   "w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"
 
 /** Tag dropdown by name + color, storing the tag's id. Falls back to a
- *  raw id input when no tags exist yet. */
+ *  raw id input when no tags of the given kind exist yet.
+ *  `kind` scopes the list to `tags.kind` — 'contact' (default) for
+ *  profile-attribute tags (tag_added trigger, add_tag step), 'outcome'
+ *  for tabulação tags (close_conversation step). */
 function TagSelect({
   value,
   onChange,
+  kind = "contact",
 }: {
   value: string
   onChange: (v: string) => void
+  kind?: "contact" | "outcome"
 }) {
   const { tags } = useResources()
-  if (tags.length === 0) {
+  const scopedTags = tags.filter((t) => t.kind === kind)
+  if (scopedTags.length === 0) {
     return (
       <Input
         placeholder="Tag id"
@@ -273,7 +279,7 @@ function TagSelect({
       />
     )
   }
-  const selected = tags.find((t) => t.id === value)
+  const selected = scopedTags.find((t) => t.id === value)
   return (
     <div className="flex items-center gap-2">
       <span
@@ -287,7 +293,7 @@ function TagSelect({
         className={SELECT_CLASS}
       >
         <option value="">Select a tag…</option>
-        {tags.map((t) => (
+        {scopedTags.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}
           </option>
@@ -1244,9 +1250,18 @@ function StepEditor({
       )
     case "close_conversation":
       return (
-        <p className="text-xs text-muted-foreground">
-          Sets the conversation status to &quot;closed&quot;. No configuration needed.
-        </p>
+        <FieldBlock label="Outcome tag (tabulação)">
+          <TagSelect
+            value={(cfg.outcome_tag_id as string) ?? ""}
+            onChange={(v) => set({ outcome_tag_id: v })}
+            kind="outcome"
+          />
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Sets the conversation status to &quot;closed&quot; and applies this
+            tag. Leave unset to fall back to the account&apos;s
+            &quot;Sem Tabulação&quot; tag.
+          </p>
+        </FieldBlock>
       )
     default:
       return null
