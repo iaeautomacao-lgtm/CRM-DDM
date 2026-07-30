@@ -21,6 +21,7 @@ import {
   ChevronRight,
   LayoutTemplate,
   Loader2,
+  Pencil,
   Plus,
   Trash2,
   Upload,
@@ -44,6 +45,7 @@ export function MessageTemplatePicker({
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<Mode>("list");
   const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [nome, setNome] = useState("");
   const [conteudo, setConteudo] = useState("");
   const [saving, setSaving] = useState(false);
@@ -76,6 +78,7 @@ export function MessageTemplatePicker({
   }, [open]);
 
   function resetCreateForm() {
+    setEditingId(null);
     setNome("");
     setConteudo("");
   }
@@ -83,6 +86,13 @@ export function MessageTemplatePicker({
   function handleOpenChange(next: boolean) {
     if (!next) resetCreateForm();
     onOpenChange(next);
+  }
+
+  function handleEditClick(template: DisparadorMessageTemplate) {
+    setEditingId(template.id);
+    setNome(template.nome);
+    setConteudo(template.conteudo);
+    setMode("create");
   }
 
   function insertVar(variable: string) {
@@ -144,14 +154,19 @@ export function MessageTemplatePicker({
     setSaving(true);
     try {
       const supabase = createClient();
-      const { error } = await supabase.from("disparador_message_templates").insert({
-        account_id: accountId,
-        nome: nome.trim(),
-        conteudo: conteudo.trim(),
-      });
+      const { error } = editingId
+        ? await supabase
+            .from("disparador_message_templates")
+            .update({ nome: nome.trim(), conteudo: conteudo.trim() })
+            .eq("id", editingId)
+        : await supabase.from("disparador_message_templates").insert({
+            account_id: accountId,
+            nome: nome.trim(),
+            conteudo: conteudo.trim(),
+          });
       if (error) throw error;
 
-      toast.success("Template criado");
+      toast.success(editingId ? "Template atualizado" : "Template criado");
       resetCreateForm();
       setMode("list");
       await loadTemplates();
@@ -190,7 +205,7 @@ export function MessageTemplatePicker({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-popover-foreground">
             <LayoutTemplate className="h-4 w-4 text-primary" />
-            {mode === "create" ? "Novo template" : "Templates de mensagem"}
+            {mode === "create" ? (editingId ? "Editar template" : "Novo template") : "Templates de mensagem"}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
             {mode === "create"
@@ -252,6 +267,15 @@ export function MessageTemplatePicker({
                         {t.conteudo}
                       </p>
                     </button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                      onClick={() => handleEditClick(t)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                     <Button
                       type="button"
                       variant="ghost"
@@ -351,7 +375,7 @@ export function MessageTemplatePicker({
                 className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Salvar template
+                {editingId ? "Salvar alterações" : "Salvar template"}
               </Button>
             </DialogFooter>
           </div>
