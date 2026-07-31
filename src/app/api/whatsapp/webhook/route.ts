@@ -669,6 +669,10 @@ async function processMessage(
   const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
   void analyzeConversationSentimentAndTags(accountId, contactRecord.id, conversation.id)
 
+  // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
+  const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
+  void autoTagAcordoRealizado(accountId, contactRecord.id, conversation.id)
+
   // If this contact was a recent broadcast recipient, flag the reply
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
