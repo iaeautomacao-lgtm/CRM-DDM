@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -41,6 +41,13 @@ import {
   LayoutTemplate,
   MessageSquare,
 } from 'lucide-react';
+import { normalizeForSearch } from '@/lib/utils';
+import {
+  TagPickerBox,
+  useTagButtonRefs,
+  focusFirstTagButton,
+  makeTagButtonKeyDownHandler,
+} from '@/components/contacts/tag-picker-box';
 
 interface ContactDetailViewProps {
   open: boolean;
@@ -142,6 +149,14 @@ export function ContactDetailView({
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [contactTagIds, setContactTagIds] = useState<string[]>([]);
   const [savingTags, setSavingTags] = useState(false);
+  const [tagQuery, setTagQuery] = useState('');
+  const tagSearchRef = useRef<HTMLInputElement>(null);
+  const tagButtonRefs = useTagButtonRefs();
+  const filteredTags = useMemo(() => {
+    const q = normalizeForSearch(tagQuery.trim());
+    if (!q) return allTags;
+    return allTags.filter((tag) => normalizeForSearch(tag.name).includes(q));
+  }, [allTags, tagQuery]);
 
   // Notes tab
   const [notes, setNotes] = useState<ContactNote[]>([]);
@@ -249,6 +264,7 @@ export function ContactDetailView({
       fetchNotes();
       fetchCustomFields();
       fetchDeals();
+      setTagQuery('');
     }
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
 
@@ -632,14 +648,28 @@ export function ContactDetailView({
                       Nenhuma etiqueta disponível. Crie etiquetas nas Configurações.
                     </p>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {allTags.map((tag) => {
+                    <TagPickerBox
+                      searchRef={tagSearchRef}
+                      query={tagQuery}
+                      onQueryChange={setTagQuery}
+                      onSearchArrowDown={() => focusFirstTagButton(tagButtonRefs)}
+                      autoFocus
+                      searchLabel="Buscar etiquetas"
+                      isEmpty={filteredTags.length === 0}
+                    >
+                      {filteredTags.map((tag, index) => {
                         const selected = contactTagIds.includes(tag.id);
                         return (
                           <button
                             key={tag.id}
+                            ref={(el) => {
+                              tagButtonRefs.current[index] = el;
+                            }}
+                            type="button"
                             onClick={() => toggleTag(tag.id)}
+                            onKeyDown={makeTagButtonKeyDownHandler(index, tagButtonRefs, tagSearchRef)}
                             disabled={savingTags}
+                            aria-pressed={selected}
                             className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
                               selected
                                 ? 'ring-2 ring-primary ring-offset-1 ring-offset-border'
@@ -655,7 +685,7 @@ export function ContactDetailView({
                           </button>
                         );
                       })}
-                    </div>
+                    </TagPickerBox>
                   )}
                 </div>
               </TabsContent>

@@ -81,7 +81,7 @@ const PICKER_ACCEPT: Record<"image" | "video" | "document", string> = {
     "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain",
 };
 
-interface MediaDraft {
+export interface MediaDraft {
   kind: ComposerMediaKind;
   mediaUrl: string;
   /** Storage path — used to GC the object if the draft is discarded. */
@@ -89,6 +89,16 @@ interface MediaDraft {
   filename: string;
   caption: string;
 }
+
+/**
+ * Handed back by the Undo-Send "Editar" action so the composer can restore
+ * what the agent typed/attached. Each recall carries an `id` purely so a new
+ * recall (even one with identical content) is a distinct object reference —
+ * the composer's effect keys off that to apply it exactly once.
+ */
+export type RecallDraft =
+  | { id: string; text: string }
+  | { id: string; media: MediaDraft };
 
 interface MessageComposerProps {
   conversationId: string;
@@ -98,6 +108,11 @@ interface MessageComposerProps {
   onOpenTemplates: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
+  /** Set by the parent when an Undo-Send "Editar" click recalls a pending
+   *  message back into the composer. */
+  recall?: RecallDraft | null;
+  /** Fired once the recall above has been applied, so the parent can clear it. */
+  onRecallHandled?: () => void;
 }
 
 function formatDuration(seconds: number): string {
@@ -119,6 +134,8 @@ export function MessageComposer({
   onOpenTemplates,
   replyTo,
   onClearReply,
+  recall,
+  onRecallHandled,
 }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -233,6 +250,25 @@ export function MessageComposer({
       setText("");
     }
   }, [conversationId, adjustHeight]);
+
+  // Undo-Send "Editar" recall — restores the text or the staged media draft
+  // that was pulled back from a pending (not-yet-sent) message. Runs once
+  // per recall: `onRecallHandled` clears it on the parent, which flips this
+  // effect's `recall` dependency back to null and stops it from reapplying.
+  useEffect(() => {
+    if (!recall) return;
+    if ("text" in recall) {
+      setText(recall.text);
+      requestAnimationFrame(() => {
+        adjustHeight();
+        textareaRef.current?.focus();
+      });
+    } else {
+      removeStaged(draftRef.current?.path);
+      setDraft(recall.media);
+    }
+    onRecallHandled?.();
+  }, [recall, adjustHeight, onRecallHandled, removeStaged]);
 
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {

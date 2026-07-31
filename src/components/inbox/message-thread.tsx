@@ -49,7 +49,10 @@ import {
   MessageComposer,
   CHAT_MEDIA_BUCKET,
   type SendMediaPayload,
+  type RecallDraft,
 } from "./message-composer";
+import { PendingSendBubble, type PendingSendData } from "./pending-send-bubble";
+import { createPendingSendQueue } from "@/lib/inbox/pending-send-queue";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { TemplatePicker } from "./template-picker";
 import { OutcomeTagPicker } from "./outcome-tag-picker";
@@ -60,6 +63,18 @@ interface ReplyDraft {
   id: string;
   authorLabel: string;
   preview: string;
+}
+
+/** Gmail-style "Undo Send" delay: an outgoing message sits in a cancellable
+ *  pending state for this long before the real WAHA request fires. */
+const UNDO_SEND_DELAY_MS = 10_000;
+
+/** A queued-but-not-yet-sent message, plus the timers driving its countdown. */
+interface PendingSend {
+  id: string;
+  conversation: Conversation;
+  data: PendingSendData;
+  secondsLeft: number;
 }
 
 function renderTemplateBody(body: string, params: string[]): string {
@@ -498,32 +513,46 @@ export function MessageThread({
     }
   }, [messages]);
 
-  const handleSend = useCallback(
-    async (text: string, replyToId?: string) => {
-      if (!conversation) return;
+  // ---- Undo-Send: commit helpers ------------------------------------
+  //
+  // These perform the real WAHA request. They're parameterized on a
+  // *snapshotted* conversation (captured when the message was queued,
+  // not read from the `conversation` prop) so a flush that fires after
+  // the agent has switched threads still targets the right conversation.
+  // `silent` skips the optimistic-bubble bookkeeping for that case: the
+  // shared `messages` list only ever holds the currently-open thread's
+  // rows, so touching it for a conversation the agent already navigated
+  // away from would leak a foreign message into the new thread's view.
 
-      const tempId = `temp-${Date.now()}`;
+  const commitTextSend = useCallback(
+    async (
+      conv: Conversation,
+      text: string,
+      replyToId: string | undefined,
+      opts: { silent: boolean },
+    ) => {
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      // Optimistic update — shows the message immediately with "sending" status
-      const optimisticMsg: Message = {
-        id: tempId,
-        conversation_id: conversation.id,
-        sender_type: "agent",
-        content_type: "text",
-        content_text: text,
-        status: "sending",
-        created_at: new Date().toISOString(),
-        reply_to_message_id: replyToId,
-      };
-      onNewMessage(optimisticMsg);
-      setReplyTo(null);
+      if (!opts.silent) {
+        const optimisticMsg: Message = {
+          id: tempId,
+          conversation_id: conv.id,
+          sender_type: "agent",
+          content_type: "text",
+          content_text: text,
+          status: "sending",
+          created_at: new Date().toISOString(),
+          reply_to_message_id: replyToId,
+        };
+        onNewMessage(optimisticMsg);
+      }
 
       try {
         const res = await fetch("/api/whatsapp/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            conversation_id: conversation.id,
+            conversation_id: conv.id,
             message_type: "text",
             content_text: text,
             reply_to_message_id: replyToId,
@@ -536,29 +565,26 @@ export function MessageThread({
           const reason = payload?.error || `HTTP ${res.status}`;
           console.error("Failed to send message:", reason);
           toast.error(`Falha ao enviar: ${reason}`);
-          // Mark the optimistic bubble as failed so the user sees what happened
-          onUpdateMessage(tempId, { status: "failed" });
+          if (!opts.silent) onUpdateMessage(tempId, { status: "failed" });
           return;
         }
 
         // Success — the realtime INSERT event will replace the temp bubble
         // with the real DB row. If realtime hasn't arrived yet, at least
         // flip status to 'sent' so the UI stops showing "sending".
-        onUpdateMessage(tempId, { status: "sent" });
+        if (!opts.silent) onUpdateMessage(tempId, { status: "sent" });
       } catch (err) {
         console.error("Failed to send message:", err);
         const reason = err instanceof Error ? err.message : "erro de rede";
         toast.error(`Falha ao enviar: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
+        if (!opts.silent) onUpdateMessage(tempId, { status: "failed" });
       }
     },
-    [conversation, onNewMessage, onUpdateMessage]
+    [onNewMessage, onUpdateMessage],
   );
 
-  const handleSendMedia = useCallback(
-    async (payload: SendMediaPayload) => {
-      if (!conversation) return;
-
+  const commitMediaSend = useCallback(
+    async (conv: Conversation, payload: SendMediaPayload, opts: { silent: boolean }) => {
       // Documents show their filename in our own bubble (and to the
       // recipient as the Meta caption when no caption was typed); other
       // kinds use the caption as-is. Audio carries no caption.
@@ -567,27 +593,29 @@ export function MessageThread({
           ? payload.caption || payload.filename || "Document"
           : payload.caption;
 
-      const tempId = `temp-${Date.now()}`;
-      const optimisticMsg: Message = {
-        id: tempId,
-        conversation_id: conversation.id,
-        sender_type: "agent",
-        content_type: payload.kind,
-        content_text: contentText,
-        media_url: payload.mediaUrl,
-        status: "sending",
-        created_at: new Date().toISOString(),
-        reply_to_message_id: payload.replyToId,
-      };
-      onNewMessage(optimisticMsg);
-      setReplyTo(null);
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+      if (!opts.silent) {
+        const optimisticMsg: Message = {
+          id: tempId,
+          conversation_id: conv.id,
+          sender_type: "agent",
+          content_type: payload.kind,
+          content_text: contentText,
+          media_url: payload.mediaUrl,
+          status: "sending",
+          created_at: new Date().toISOString(),
+          reply_to_message_id: payload.replyToId,
+        };
+        onNewMessage(optimisticMsg);
+      }
 
       try {
         const res = await fetch("/api/whatsapp/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            conversation_id: conversation.id,
+            conversation_id: conv.id,
             message_type: payload.kind,
             media_url: payload.mediaUrl,
             content_text: contentText,
@@ -602,23 +630,23 @@ export function MessageThread({
           const reason = data?.error || `HTTP ${res.status}`;
           console.error("Failed to send media:", reason);
           toast.error(`Falha ao enviar: ${reason}`);
-          onUpdateMessage(tempId, { status: "failed" });
+          if (!opts.silent) onUpdateMessage(tempId, { status: "failed" });
           // The upload never reached the recipient — GC the orphaned
           // object rather than leaving it in the public bucket forever.
           void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
           return;
         }
 
-        onUpdateMessage(tempId, { status: "sent" });
+        if (!opts.silent) onUpdateMessage(tempId, { status: "sent" });
       } catch (err) {
         console.error("Failed to send media:", err);
         const reason = err instanceof Error ? err.message : "erro de rede";
         toast.error(`Falha ao enviar: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
+        if (!opts.silent) onUpdateMessage(tempId, { status: "failed" });
         void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
       }
     },
-    [conversation, onNewMessage, onUpdateMessage],
+    [onNewMessage, onUpdateMessage],
   );
 
   const handleStatusChange = useCallback(
@@ -775,6 +803,173 @@ export function MessageThread({
       });
     },
     [authorLabelFor],
+  );
+
+  // ---- Undo-Send: pending queue ---------------------------------------
+  //
+  // `pendingSends` drives the countdown bubbles' render; `pendingSendsRef`
+  // mirrors it synchronously (updated inside the same setState call, not a
+  // follow-up effect) so lookups from the queue's callbacks — which fire
+  // from outside React's render cycle — always read the current list
+  // instead of a stale one from the last completed render. The actual
+  // timers (and the double-commit guard) live in `pendingQueueRef`, a
+  // framework-agnostic scheduler unit-tested on its own — see
+  // src/lib/inbox/pending-send-queue.test.ts.
+  const [pendingSends, setPendingSends] = useState<PendingSend[]>([]);
+  const pendingSendsRef = useRef<PendingSend[]>([]);
+  const pendingQueueRef = useRef(createPendingSendQueue({ delayMs: UNDO_SEND_DELAY_MS }));
+  const [recall, setRecall] = useState<RecallDraft | null>(null);
+
+  const updatePendingSends = useCallback(
+    (updater: (prev: PendingSend[]) => PendingSend[]) => {
+      setPendingSends((prev) => {
+        const next = updater(prev);
+        pendingSendsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
+
+  // Fires when a pending item's delay elapses, or when it's flushed early
+  // (conversation switch / unmount). `silent` skips the optimistic-bubble
+  // bookkeeping on flush — see the comment on `commitTextSend` above.
+  const commitPendingById = useCallback(
+    (id: string, opts?: { silent?: boolean }) => {
+      const entry = pendingSendsRef.current.find((p) => p.id === id);
+      updatePendingSends((prev) => prev.filter((p) => p.id !== id));
+      if (!entry) return;
+      if (entry.data.kind === "text") {
+        void commitTextSend(entry.conversation, entry.data.text, entry.data.replyToId, {
+          silent: !!opts?.silent,
+        });
+      } else {
+        void commitMediaSend(entry.conversation, entry.data.payload, {
+          silent: !!opts?.silent,
+        });
+      }
+    },
+    [updatePendingSends, commitTextSend, commitMediaSend],
+  );
+
+  const enqueuePending = useCallback(
+    (conv: Conversation, data: PendingSendData) => {
+      const id = `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const entry: PendingSend = {
+        id,
+        conversation: conv,
+        data,
+        secondsLeft: Math.ceil(UNDO_SEND_DELAY_MS / 1000),
+      };
+      updatePendingSends((prev) => [...prev, entry]);
+
+      pendingQueueRef.current.schedule(id, {
+        onTick: (secondsLeft) => {
+          updatePendingSends((prev) =>
+            prev.map((p) => (p.id === id ? { ...p, secondsLeft } : p)),
+          );
+        },
+        onCommit: (reason) => commitPendingById(id, { silent: reason === "flush" }),
+      });
+    },
+    [updatePendingSends, commitPendingById],
+  );
+
+  // "Desfazer" — drop the pending message, GC any staged (unsent) media.
+  const cancelPending = useCallback(
+    (id: string) => {
+      const entry = pendingSendsRef.current.find((p) => p.id === id);
+      pendingQueueRef.current.cancel(id);
+      updatePendingSends((prev) => prev.filter((p) => p.id !== id));
+      if (entry?.data.kind === "media") {
+        void deleteAccountMedia(CHAT_MEDIA_BUCKET, entry.data.payload.path).catch(() => {});
+      }
+    },
+    [updatePendingSends],
+  );
+
+  // "Editar" — drop the pending message and hand its content back to the
+  // composer (and restore the reply-quote context, if any) instead of
+  // sending it.
+  const editPending = useCallback(
+    (id: string) => {
+      const entry = pendingSendsRef.current.find((p) => p.id === id);
+      if (!entry) return;
+      pendingQueueRef.current.cancel(id);
+      updatePendingSends((prev) => prev.filter((p) => p.id !== id));
+
+      const replyToId =
+        entry.data.kind === "text" ? entry.data.replyToId : entry.data.payload.replyToId;
+      if (replyToId) {
+        const parent = messagesById.get(replyToId);
+        if (parent) {
+          setReplyTo({
+            id: parent.id,
+            authorLabel: authorLabelFor(parent),
+            preview: buildReplyPreview(parent),
+          });
+        }
+      }
+
+      if (entry.data.kind === "text") {
+        setRecall({ id, text: entry.data.text });
+      } else {
+        const { payload } = entry.data;
+        setRecall({
+          id,
+          media: {
+            kind: payload.kind,
+            mediaUrl: payload.mediaUrl,
+            path: payload.path,
+            filename: payload.filename ?? "",
+            caption: payload.caption ?? "",
+          },
+        });
+      }
+    },
+    [updatePendingSends, messagesById, authorLabelFor],
+  );
+
+  const handleRecallHandled = useCallback(() => setRecall(null), []);
+
+  // Flush when the agent switches to a different conversation — the timers
+  // would otherwise keep running against a thread that's no longer visible
+  // (and, worse, get GC'd if the agent later closes the tab). `conversationId`
+  // already exists above (the fetch-messages effect depends on it); this
+  // effect only cares about the transition, not the initial mount.
+  const prevConversationIdRef = useRef(conversationId);
+  useEffect(() => {
+    if (prevConversationIdRef.current !== conversationId) {
+      pendingQueueRef.current.flushAll();
+      prevConversationIdRef.current = conversationId;
+    }
+  }, [conversationId]);
+
+  // Flush on unmount (navigating away from the Inbox entirely) — the worst
+  // case becomes "sent a little early," never "silently lost."
+  useEffect(() => {
+    const queue = pendingQueueRef.current;
+    return () => {
+      queue.flushAll();
+    };
+  }, []);
+
+  const handleSend = useCallback(
+    (text: string, replyToId?: string) => {
+      if (!conversation) return;
+      setReplyTo(null);
+      enqueuePending(conversation, { kind: "text", text, replyToId });
+    },
+    [conversation, enqueuePending],
+  );
+
+  const handleSendMedia = useCallback(
+    (payload: SendMediaPayload) => {
+      if (!conversation) return;
+      setReplyTo(null);
+      enqueuePending(conversation, { kind: "media", payload });
+    },
+    [conversation, enqueuePending],
   );
 
   // Single reaction-set primitive. emoji === "" removes; otherwise adds/swaps.
@@ -1181,7 +1376,7 @@ export function MessageThread({
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && pendingSends.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12">
             <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
             <p className="text-xs text-muted-foreground">
@@ -1244,6 +1439,19 @@ export function MessageThread({
                 </div>
               </div>
             ))}
+            {pendingSends.length > 0 && (
+              <div className="space-y-2">
+                {pendingSends.map((p) => (
+                  <PendingSendBubble
+                    key={p.id}
+                    data={p.data}
+                    secondsLeft={p.secondsLeft}
+                    onUndo={() => cancelPending(p.id)}
+                    onEdit={() => editPending(p.id)}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1257,6 +1465,8 @@ export function MessageThread({
         onOpenTemplates={handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
+        recall={recall}
+        onRecallHandled={handleRecallHandled}
       />
 
       <TemplatePicker

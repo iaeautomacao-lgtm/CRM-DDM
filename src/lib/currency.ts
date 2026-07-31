@@ -11,7 +11,7 @@
  */
 
 /** App-wide fallback when no account/deal currency is available. */
-export const DEFAULT_CURRENCY = "USD";
+export const DEFAULT_CURRENCY = "BRL";
 
 export interface CurrencyOption {
   /** ISO-4217 code, e.g. "USD". Stored verbatim in the DB. */
@@ -47,8 +47,12 @@ export const CURRENCIES: CurrencyOption[] = [
 /**
  * Format a deal value as a currency string. Whole-number output
  * (no minor units) — deal values are tracked to the dollar across
- * the app. `currency` defaults to USD so callers with nothing better
+ * the app. `currency` defaults to BRL so callers with nothing better
  * stay safe, but pass the account/deal currency wherever known.
+ *
+ * Locale is pinned to pt-BR (not the ambient runtime locale) — this
+ * is a Brazil-only app, so grouping/symbol placement should be
+ * consistent regardless of the server/browser's locale.
  *
  * Total by design: `Intl.NumberFormat` throws a RangeError on a
  * structurally invalid currency code, and `deals.currency` carries
@@ -64,7 +68,7 @@ export function formatCurrency(
   const code = (currency || DEFAULT_CURRENCY).trim();
   const amount = Number(value) || 0;
   try {
-    return new Intl.NumberFormat(undefined, {
+    return new Intl.NumberFormat("pt-BR", {
       style: "currency",
       currency: code,
       minimumFractionDigits: 0,
@@ -73,7 +77,7 @@ export function formatCurrency(
   } catch {
     // Invalid ISO code — show the raw code + grouped number so the
     // value is still legible instead of throwing.
-    return `${code} ${new Intl.NumberFormat(undefined, {
+    return `${code} ${new Intl.NumberFormat("pt-BR", {
       maximumFractionDigits: 0,
     }).format(amount)}`;
   }

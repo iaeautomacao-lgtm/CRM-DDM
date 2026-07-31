@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { normalizeForSearch } from '@/lib/utils';
 import type { Contact, Tag, ContactTag } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -75,6 +76,7 @@ export default function ContactsPage() {
   const [totalCount, setTotalCount] = useState(0);
   // Tag filter — contacts shown must have ANY of these tags (OR).
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
+  const [tagFilterQuery, setTagFilterQuery] = useState('');
 
   // Modals
   const [formOpen, setFormOpen] = useState(false);
@@ -328,6 +330,11 @@ export default function ContactsPage() {
   const allTags = Object.values(tagsMap).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
+  const filteredAllTags = useMemo(() => {
+    const q = normalizeForSearch(tagFilterQuery.trim());
+    if (!q) return allTags;
+    return allTags.filter((tag) => normalizeForSearch(tag.name).includes(q));
+  }, [allTags, tagFilterQuery]);
   const hasActiveFilters = search.trim().length > 0 || selectedTagIds.length > 0;
 
   function toggleTagFilter(tagId: string) {
@@ -405,7 +412,7 @@ export default function ContactsPage() {
             />
           </div>
 
-          <Popover>
+          <Popover onOpenChange={(next) => { if (!next) setTagFilterQuery(''); }}>
             <PopoverTrigger
               render={
                 <Button
@@ -441,27 +448,48 @@ export default function ContactsPage() {
                   Nenhuma tag ainda.
                 </p>
               ) : (
-                <div className="max-h-64 overflow-y-auto py-1">
-                  {allTags.map((tag) => (
-                    <label
-                      key={tag.id}
-                      className="flex items-center gap-2.5 px-3 py-1.5 cursor-pointer hover:bg-muted/50"
-                    >
-                      <Checkbox
-                        checked={selectedTagIds.includes(tag.id)}
-                        onCheckedChange={() => toggleTagFilter(tag.id)}
-                        aria-label={`Filter by ${tag.name}`}
+                <>
+                  <div className="border-b border-border p-2">
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={tagFilterQuery}
+                        onChange={(e) => setTagFilterQuery(e.target.value)}
+                        autoFocus
+                        placeholder="Buscar tags..."
+                        aria-label="Buscar tags"
+                        className="h-8 border-border bg-muted pl-8 text-sm text-foreground placeholder:text-muted-foreground"
                       />
-                      <span
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: tag.color }}
-                      />
-                      <span className="text-sm text-popover-foreground truncate">
-                        {tag.name}
-                      </span>
-                    </label>
-                  ))}
-                </div>
+                    </div>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto py-1">
+                    {filteredAllTags.length === 0 ? (
+                      <p className="px-3 py-4 text-sm text-muted-foreground text-center">
+                        Nenhuma tag encontrada
+                      </p>
+                    ) : (
+                      filteredAllTags.map((tag) => (
+                        <label
+                          key={tag.id}
+                          className="flex items-center gap-2.5 px-3 py-1.5 cursor-pointer hover:bg-muted/50"
+                        >
+                          <Checkbox
+                            checked={selectedTagIds.includes(tag.id)}
+                            onCheckedChange={() => toggleTagFilter(tag.id)}
+                            aria-label={`Filter by ${tag.name}`}
+                          />
+                          <span
+                            className="size-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                          />
+                          <span className="text-sm text-popover-foreground truncate">
+                            {tag.name}
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </>
               )}
             </PopoverContent>
           </Popover>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { toast } from 'sonner';
@@ -24,6 +24,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, AlertTriangle } from 'lucide-react';
+import { normalizeForSearch } from '@/lib/utils';
+import {
+  TagPickerBox,
+  useTagButtonRefs,
+  focusFirstTagButton,
+  makeTagButtonKeyDownHandler,
+} from '@/components/contacts/tag-picker-box';
 
 interface ContactFormProps {
   open: boolean;
@@ -66,6 +73,15 @@ export function ContactForm({
   const [tags, setTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
+  const [tagQuery, setTagQuery] = useState('');
+  const tagSearchRef = useRef<HTMLInputElement>(null);
+  const tagButtonRefs = useTagButtonRefs();
+
+  const filteredTags = useMemo(() => {
+    const q = normalizeForSearch(tagQuery.trim());
+    if (!q) return tags;
+    return tags.filter((tag) => normalizeForSearch(tag.name).includes(q));
+  }, [tags, tagQuery]);
 
   useEffect(() => {
     if (open) {
@@ -75,6 +91,7 @@ export function ContactForm({
       setCompany(contact?.company ?? '');
       setSelectedTagIds(contactTags.map((ct) => ct.tag_id));
       setDupMatch(null);
+      setTagQuery('');
       fetchTags();
     }
   }, [open, contact]);
@@ -223,7 +240,7 @@ export function ContactForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-popover border-border text-popover-foreground sm:max-w-md">
+      <DialogContent className="flex max-h-[85vh] flex-col bg-popover border-border text-popover-foreground sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-popover-foreground">
             {isEdit ? 'Editar Contato' : 'Adicionar Contato'}
@@ -235,7 +252,8 @@ export function ContactForm({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="-mx-4 min-h-0 flex-1 space-y-4 overflow-y-auto px-4">
           <div className="space-y-2">
             <Label htmlFor="cf-name" className="text-muted-foreground">
               Nome
@@ -324,7 +342,7 @@ export function ContactForm({
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-2 pb-4">
             <Label className="text-muted-foreground">Tags</Label>
             {loadingTags ? (
               <div className="flex items-center gap-2 text-muted-foreground text-sm">
@@ -336,14 +354,26 @@ export function ContactForm({
                 Nenhuma tag disponível. Crie tags em Configurações.
               </p>
             ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {tags.map((tag) => {
+              <TagPickerBox
+                searchRef={tagSearchRef}
+                query={tagQuery}
+                onQueryChange={setTagQuery}
+                onSearchArrowDown={() => focusFirstTagButton(tagButtonRefs)}
+                searchLabel="Buscar tags"
+                isEmpty={filteredTags.length === 0}
+              >
+                {filteredTags.map((tag, index) => {
                   const selected = selectedTagIds.includes(tag.id);
                   return (
                     <button
                       key={tag.id}
+                      ref={(el) => {
+                        tagButtonRefs.current[index] = el;
+                      }}
                       type="button"
                       onClick={() => toggleTag(tag.id)}
+                      onKeyDown={makeTagButtonKeyDownHandler(index, tagButtonRefs, tagSearchRef)}
+                      aria-pressed={selected}
                       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors cursor-pointer ${
                         selected
                           ? 'ring-2 ring-primary ring-offset-1 ring-offset-border'
@@ -359,9 +389,10 @@ export function ContactForm({
                     </button>
                   );
                 })}
-              </div>
+              </TagPickerBox>
             )}
           </div>
+        </div>
 
           <DialogFooter className="bg-popover border-border">
             <Button
