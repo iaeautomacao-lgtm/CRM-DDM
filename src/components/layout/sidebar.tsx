@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import {
+  Activity,
   Crown,
   GitBranch,
   Globe,
@@ -89,6 +90,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/monitoramento", label: "Monitoramento", icon: Activity },
   { href: "/inbox", label: "Conversas", icon: MessageSquare },
   { href: "/contacts", label: "Contatos", icon: Users },
   { href: "/pipelines", label: "Funis", icon: GitBranch },

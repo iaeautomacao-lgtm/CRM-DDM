@@ -54,6 +54,7 @@ import {
 import { PendingSendBubble, type PendingSendData } from "./pending-send-bubble";
 import { createPendingSendQueue } from "@/lib/inbox/pending-send-queue";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
+import { assignConversationAgent } from "@/lib/conversations/actions";
 import { TemplatePicker } from "./template-picker";
 import { OutcomeTagPicker } from "./outcome-tag-picker";
 import { buildReplyPreview } from "./reply-quote";
@@ -1041,10 +1042,13 @@ export function MessageThread({
       if (!conversation) return;
 
       const supabase = createClient();
-      const { error } = await supabase
-        .from("conversations")
-        .update({ assigned_agent_id: agentId })
-        .eq("id", conversation.id);
+      const assignedAgent = agentId ? profiles.find((p) => p.user_id === agentId) : undefined;
+      const { error } = await assignConversationAgent(
+        supabase,
+        conversation.id,
+        agentId,
+        assignedAgent?.full_name,
+      );
 
       if (error) {
         console.error("Failed to update assignment:", error);
@@ -1053,29 +1057,6 @@ export function MessageThread({
       }
 
       onAssignChange(conversation.id, agentId);
-
-      // Send a takeover message to the customer on WhatsApp if an agent was assigned
-      if (agentId) {
-        const assignedAgent = profiles.find((p) => p.user_id === agentId);
-        if (assignedAgent) {
-          const agentName = assignedAgent.full_name || "Atendente";
-          const takeoverText = `Olá, aqui é o atendente ${agentName} e agora vou dar continuidade ao seu atendimento.`;
-          
-          try {
-            await fetch("/api/whatsapp/send", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                conversation_id: conversation.id,
-                message_type: "text",
-                content_text: takeoverText,
-              }),
-            });
-          } catch (sendErr) {
-            console.error("Failed to send takeover message:", sendErr);
-          }
-        }
-      }
     },
     [conversation, onAssignChange, profiles],
   );

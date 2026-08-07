@@ -65,6 +65,25 @@ export interface AccountMember {
   avatar_url: string | null;
   role: AccountRole;
   joined_at: string;
+  /** Team this member belongs to (migration 049). Null = unassigned.
+   *  One team per agent — not a join table. */
+  team_id: string | null;
+}
+
+/**
+ * A routing team (migration 049 — schema/CRUD only for now).
+ * `session_timeout_minutes` and `overflow_team_id` are configurable
+ * here but unused until later phases implement the automatic
+ * assignment (Automations action) and overflow behaviour.
+ */
+export interface Team {
+  id: string;
+  account_id: string;
+  name: string;
+  session_timeout_minutes: number | null;
+  overflow_team_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /**
@@ -154,6 +173,9 @@ export interface Conversation {
   contact_id: string;
   status: ConversationStatus;
   assigned_agent_id?: string;
+  /** Team this conversation is routed to (migration 049). Null/undefined
+   *  until phase 3b's automation action starts setting it. */
+  team_id?: string | null;
   last_message_text?: string;
   last_message_at?: string;
   unread_count: number;
