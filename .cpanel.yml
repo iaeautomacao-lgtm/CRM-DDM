@@ -1,11 +1,9 @@
 ---
 deployment:
   tasks:
-    - export DEPLOYPATH=/home/grpia/apps/crm-ddm
     - export NVM_DIR=$HOME/.nvm
-    - '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"'
+    - source $NVM_DIR/nvm.sh
     - nvm use 20.19.0
-    - cd $DEPLOYPATH && git pull origin main
-    - cd $DEPLOYPATH && npx npm@10 ci
-    - cd $DEPLOYPATH && npx npm@10 run build
-    - mkdir -p $DEPLOYPATH/tmp && touch $DEPLOYPATH/tmp/restart.txt
+    - npx npm@10 ci
+    - npx npm@10 run build
+    - mkdir -p tmp && touch tmp/restart.txt
