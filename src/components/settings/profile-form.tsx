@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/avatar';
 import { Card, CardContent } from '@/components/ui/card';
 import { SettingsPanelHead } from './settings-panel-head';
+import { RedeemInviteCodeCard } from './redeem-invite-code-card';
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
 const ALLOWED_MIME = new Set([
@@ -348,6 +349,10 @@ export function ProfileForm() {
           </Button>
         </div>
       </form>
+
+      <div className="mt-6">
+        <RedeemInviteCodeCard />
+      </div>
     </section>
   );
 }

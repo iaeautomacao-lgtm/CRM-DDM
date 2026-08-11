@@ -23,7 +23,7 @@
 // ('base64url')` lands at 43 characters; hex would be 64.
 // ============================================================
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 
 /** Default invite link lifetime if the caller doesn't specify. */
 export const DEFAULT_INVITE_EXPIRY_DAYS = 7;
@@ -98,4 +98,63 @@ export function clampExpiryDays(expiresInDays: number | undefined): number {
     return DEFAULT_INVITE_EXPIRY_DAYS;
   }
   return Math.min(Math.floor(expiresInDays), MAX_INVITE_EXPIRY_DAYS);
+}
+
+// ============================================================
+// Short invite codes — an alternative to the link above for the
+// same `account_invitations` row / `token_hash` column /
+// `redeem_invitation` RPC. Same one-time-plaintext model, different
+// plaintext shape: short enough to read aloud or type by hand instead
+// of pasting a URL.
+//
+// Why this alphabet
+// ------------------
+// Uppercase-only, and 0/O, 1/I, L are excluded — the letters/digits
+// people most often mistype or misread out loud or in handwriting.
+// 31 symbols remain.
+//
+// Why 8 characters
+// -----------------
+// 31^8 ≈ 8.5×10^11 combinations ≈ 39.6 bits of entropy. Far below the
+// link token's 256 bits, which is exactly why redeem-by-code is rate
+// limited far tighter than redeem-by-link (see
+// RATE_LIMITS.invitationRedeemByCode in rate-limit.ts) — the code
+// alone isn't the safety margin, code + rate limit is.
+// ============================================================
+
+const INVITE_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const INVITE_CODE_LENGTH = 8;
+
+export interface GeneratedCode {
+  /** Plaintext code, formatted for display/sharing, e.g. "A3F9-K2XQ". */
+  code: string;
+  /** SHA-256 hex digest of the NORMALIZED code — same shape, same
+   *  column (`account_invitations.token_hash`) as a link token's hash. */
+  hash: string;
+}
+
+/**
+ * Generate a fresh short invite code + its hash. `redeem_invitation`
+ * doesn't need to know or care whether a hash came from here or from
+ * `generateInviteToken` — both land in the same `token_hash` column.
+ */
+export function generateInviteCode(): GeneratedCode {
+  let raw = "";
+  for (let i = 0; i < INVITE_CODE_LENGTH; i++) {
+    raw += INVITE_CODE_ALPHABET[randomInt(INVITE_CODE_ALPHABET.length)];
+  }
+  const code = `${raw.slice(0, 4)}-${raw.slice(4)}`;
+  return { code, hash: hashInviteToken(normalizeInviteCode(code)) };
+}
+
+/**
+ * Canonicalizes user-entered code text before hashing/lookup: strips
+ * whitespace and separators (the display hyphen, or one a user adds
+ * or omits themselves) and uppercases. Run on both sides — at
+ * generation (before hashing) and at redemption (before hashing the
+ * typed input) — so "a3f9k2xq", "A3F9-K2XQ", and " a3f9 k2xq " all
+ * hash identically.
+ */
+export function normalizeInviteCode(input: string): string {
+  return input.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }

@@ -8,6 +8,7 @@ import {
   Shield,
   Tags,
   User,
+  Users,
   UsersRound,
   Bot,
   type LucideIcon,
@@ -31,6 +32,7 @@ export const SETTINGS_SECTIONS = [
   'fields',
   'deals',
   'members',
+  'teams',
   'api',
   'ai',
 ] as const;
@@ -57,6 +59,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace' },
   deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace' },
   members: { id: 'members', label: 'Membros da equipe', icon: UsersRound, group: 'workspace' },
+  teams: { id: 'teams', label: 'Equipes', icon: Users, group: 'workspace' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace' },
   ai: { id: 'ai', label: 'Agente de IA', icon: Bot, group: 'workspace' },
 };

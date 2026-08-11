@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   clampExpiryDays,
   DEFAULT_INVITE_EXPIRY_DAYS,
+  generateInviteCode,
   generateInviteToken,
   hashInviteToken,
   inviteExpiresAt,
   inviteUrl,
   MAX_INVITE_EXPIRY_DAYS,
+  normalizeInviteCode,
 } from "./invitations";
 
 describe("generateInviteToken", () => {
@@ -114,6 +116,63 @@ describe("clampExpiryDays", () => {
 
   it("floors fractional days", () => {
     expect(clampExpiryDays(7.9)).toBe(7);
+  });
+});
+
+describe("generateInviteCode", () => {
+  it("returns an 8-character code formatted as XXXX-XXXX", () => {
+    const { code } = generateInviteCode();
+    expect(code).toHaveLength(9); // 8 chars + 1 hyphen
+    expect(code).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+  });
+
+  it("never contains ambiguous glyphs (0, O, 1, I, L)", () => {
+    // Run enough draws that a missing exclusion would show up.
+    for (let i = 0; i < 500; i++) {
+      const { code } = generateInviteCode();
+      expect(code).not.toMatch(/[01ILO]/);
+    }
+  });
+
+  it("returns a 64-char hex hash of the normalized code", () => {
+    const { code, hash } = generateInviteCode();
+    expect(hash).toHaveLength(64);
+    expect(hash).toMatch(/^[0-9a-f]+$/);
+    expect(hash).toBe(hashInviteToken(normalizeInviteCode(code)));
+  });
+
+  it("produces distinct codes across calls", () => {
+    // 31^8 ≈ 8.5×10^11 combinations — a collision in 1000 draws would
+    // be a thermodynamic miracle, same sanity guard as the token test.
+    const seen = new Set<string>();
+    for (let i = 0; i < 1000; i++) {
+      seen.add(generateInviteCode().code);
+    }
+    expect(seen.size).toBe(1000);
+  });
+});
+
+describe("normalizeInviteCode", () => {
+  it("uppercases", () => {
+    expect(normalizeInviteCode("a3f9-k2xq")).toBe("A3F9K2XQ");
+  });
+
+  it("strips the display hyphen", () => {
+    expect(normalizeInviteCode("A3F9-K2XQ")).toBe("A3F9K2XQ");
+  });
+
+  it("strips whitespace", () => {
+    expect(normalizeInviteCode(" A3F9 K2XQ ")).toBe("A3F9K2XQ");
+  });
+
+  it("is a no-op on an already-normalized code", () => {
+    expect(normalizeInviteCode("A3F9K2XQ")).toBe("A3F9K2XQ");
+  });
+
+  it("hashes identically regardless of casing, spacing, or hyphenation", () => {
+    const variants = ["a3f9-k2xq", "A3F9K2XQ", " a3f9 k2xq ", "A3F9-K2XQ"];
+    const hashes = variants.map((v) => hashInviteToken(normalizeInviteCode(v)));
+    expect(new Set(hashes).size).toBe(1);
   });
 });
 
