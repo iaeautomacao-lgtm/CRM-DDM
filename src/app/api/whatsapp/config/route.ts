@@ -142,6 +142,9 @@ export async function GET() {
               session_status: status,
               waha_session: config.waha_session,
               waha_url: config.waha_url,
+              flow_id: config.flow_id,
+              receptivo: config.receptivo,
+              habilitado: config.habilitado,
               phone_info: {
                 id: config.waha_session,
                 display_phone_number: displayPhone,
@@ -160,6 +163,9 @@ export async function GET() {
               session_status: 'UNKNOWN',
               waha_session: config.waha_session,
               waha_url: config.waha_url,
+              flow_id: config.flow_id,
+              receptivo: config.receptivo,
+              habilitado: config.habilitado,
               reason: 'waha_api_error',
               message: 'Could not connect to the WAHA server. Please check the configured URL and try again.',
               phone_info: {
@@ -179,6 +185,9 @@ export async function GET() {
               id: config.id,
               connected: false,
               provider: 'meta',
+              flow_id: config.flow_id,
+              receptivo: config.receptivo,
+              habilitado: config.habilitado,
               reason: 'token_corrupted',
               needs_reset: true,
               message: 'The stored access token cannot be decrypted.'
@@ -194,6 +203,9 @@ export async function GET() {
               id: config.id,
               connected: true,
               provider: 'meta',
+              flow_id: config.flow_id,
+              receptivo: config.receptivo,
+              habilitado: config.habilitado,
               phone_info: phoneInfo
             }
           } catch (err) {
@@ -202,6 +214,9 @@ export async function GET() {
               id: config.id,
               connected: false,
               provider: 'meta',
+              flow_id: config.flow_id,
+              receptivo: config.receptivo,
+              habilitado: config.habilitado,
               reason: 'meta_api_error',
               message: `Meta API rejected credentials: ${message}`
             }
@@ -712,6 +727,102 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error in WhatsApp config DELETE:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+}
+
+/**
+ * PATCH /api/whatsapp/config
+ *
+ * Partial update for the /canais table's inline toggles (flow_id,
+ * receptivo, habilitado) — added alongside those columns (migration
+ * 056). There is no PUT on this route, and reusing POST for a toggle
+ * isn't viable: POST always requires access_token/phone_number_id for
+ * Meta, and the client never holds the plaintext token to resend (it
+ * only ever sees the masked placeholder). This handler only ever
+ * touches the three settings columns, never the provider credentials.
+ */
+export async function PATCH(request: Request) {
+  try {
+    const supabase = await createClient()
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const accountId = await resolveAccountId(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'Your profile is not linked to an account.' },
+        { status: 403 },
+      )
+    }
+
+    const body = await request.json()
+    const { id, flow_id, receptivo, habilitado } = body
+
+    if (!id) {
+      return NextResponse.json({ error: 'id is required' }, { status: 400 })
+    }
+
+    const update: Record<string, unknown> = {}
+    if (flow_id !== undefined) update.flow_id = flow_id
+    if (receptivo !== undefined) update.receptivo = receptivo
+    if (habilitado !== undefined) update.habilitado = habilitado
+
+    if (Object.keys(update).length === 0) {
+      return NextResponse.json(
+        { error: 'At least one of flow_id, receptivo, habilitado is required' },
+        { status: 400 },
+      )
+    }
+
+    if (typeof update.receptivo !== 'undefined' && typeof update.receptivo !== 'boolean') {
+      return NextResponse.json({ error: 'receptivo must be a boolean' }, { status: 400 })
+    }
+    if (typeof update.habilitado !== 'undefined' && typeof update.habilitado !== 'boolean') {
+      return NextResponse.json({ error: 'habilitado must be a boolean' }, { status: 400 })
+    }
+
+    // flow_id, when set (not null), must belong to the caller's own
+    // account — otherwise a channel could be pointed at another
+    // account's flow, which whatever eventually consumes flow_id
+    // would then execute cross-account.
+    if (update.flow_id) {
+      const { data: flow, error: flowError } = await supabase
+        .from('flows')
+        .select('id')
+        .eq('id', update.flow_id)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      if (flowError) {
+        console.error('Error validating flow_id ownership:', flowError)
+        return NextResponse.json({ error: 'Failed to validate flow' }, { status: 500 })
+      }
+      if (!flow) {
+        return NextResponse.json({ error: 'Flow not found in your account' }, { status: 404 })
+      }
+    }
+
+    const { error: updateError } = await supabase
+      .from('whatsapp_config')
+      .update(update)
+      .eq('id', id)
+      .eq('account_id', accountId)
+
+    if (updateError) {
+      console.error('Error updating whatsapp_config (PATCH):', updateError)
+      return NextResponse.json({ error: 'Failed to update configuration' }, { status: 500 })
+    }
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('Error in WhatsApp config PATCH:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
