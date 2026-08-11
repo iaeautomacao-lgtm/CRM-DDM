@@ -382,7 +382,7 @@ export async function handleAiAutoResponse(
 
   if (lastMsg && lastMsg.content_type === "audio" && lastMsg.media_url && aiConfig.multimodal_enabled) {
     incomingWasAudio = true;
-    let whisperKey = aiConfig.api_provider === "openai" ? activeKey : (process.env.OPENAI_API_KEY || "");
+    const whisperKey = aiConfig.api_provider === "openai" ? activeKey : (process.env.OPENAI_API_KEY || "");
 
     if (whisperKey) {
       try {

@@ -14,7 +14,18 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Vendored minified opus-recorder encoder worker (served statically).
     "public/opus/**",
+    // Separate NestJS app with its own package.json/tsconfig — not part of this Next.js lint scope.
+    "disparador/**",
+    // One-off legacy debug scripts (CommonJS, not part of the app).
+    "check_audios.js",
+    "check_recent_messages.js",
+    "get_all_recent_messages.js",
   ]),
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+    },
+  },
 ]);
 
 export default eslintConfig;

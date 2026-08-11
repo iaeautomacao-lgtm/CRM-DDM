@@ -45,21 +45,25 @@ export interface ParseContactCsvResult {
  * - Always returns normalized E.164 with '+' prefix.
  */
 export function smartNormalizePhone(phone: string): string {
+  const alreadyHasCountryCode = phone.trim().startsWith('+');
   let cleaned = phone.replace(/\D/g, '');
   if (!cleaned) return '';
-  
+
   if (cleaned.startsWith('00')) {
     cleaned = cleaned.slice(2);
   }
-  
+
   // If it is 10 or 11 digits, and starts with a valid Brazilian DDD (11 to 99)
-  if (cleaned.length === 10 || cleaned.length === 11) {
+  // — but only when the original number had no explicit country code, since
+  // an 11-digit number like +1 555 123 4567 would otherwise be misread as a
+  // Brazilian DDD and get '55' prepended on top of its real country code.
+  if (!alreadyHasCountryCode && (cleaned.length === 10 || cleaned.length === 11)) {
     const ddd = parseInt(cleaned.slice(0, 2), 10);
     if (ddd >= 11 && ddd <= 99) {
       cleaned = '55' + cleaned;
     }
   }
-  
+
   return '+' + cleaned;
 }
 

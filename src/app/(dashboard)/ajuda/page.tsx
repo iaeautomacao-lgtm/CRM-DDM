@@ -159,7 +159,7 @@ export default function HelpPage() {
                 <div className="space-y-1 flex-1">
                   <h4 className="text-xs font-bold text-foreground">3. Transcrição de Áudio (Whisper)</h4>
                   <p className="text-[11px] leading-relaxed text-muted-foreground">
-                    Ative o recurso **"Interpretar Mídia (Áudio e Imagem)"**. Isso permite que o robô de IA ouça e transcreva as mensagens de áudio que os clientes te mandam, gerando respostas em texto normais.
+                    Ative o recurso **&quot;Interpretar Mídia (Áudio e Imagem)&quot;**. Isso permite que o robô de IA ouça e transcreva as mensagens de áudio que os clientes te mandam, gerando respostas em texto normais.
                   </p>
                 </div>
               </div>
@@ -267,7 +267,7 @@ export default function HelpPage() {
               <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-1.5">
                 <h4 className="text-xs font-bold text-foreground">❓ A Inteligência Artificial parou de responder, o que fazer?</h4>
                 <p className="text-[11px] leading-relaxed text-muted-foreground">
-                  Verifique se o interruptor **"Ativo"** na página do Agente de IA está ligado. Também confirme se o seu WhatsApp está conectado com o ícone verde de sucesso no menu superior. Se a conexão cair, a IA não consegue responder.
+                  Verifique se o interruptor **&quot;Ativo&quot;** na página do Agente de IA está ligado. Também confirme se o seu WhatsApp está conectado com o ícone verde de sucesso no menu superior. Se a conexão cair, a IA não consegue responder.
                 </p>
               </div>
 

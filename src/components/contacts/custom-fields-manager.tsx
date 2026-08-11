@@ -39,7 +39,7 @@ export function CustomFieldsManager({
           <DialogDescription className="text-muted-foreground">
             Defina campos extras para contatos (ex.: CEP, origem do lead). Eles
             aparecem em todos os contatos e na ação de automação
-            "Atualizar Campo do Contato".
+            &quot;Atualizar Campo do Contato&quot;.
           </DialogDescription>
         </DialogHeader>
         <CustomFieldsPanel />
