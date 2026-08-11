@@ -134,6 +134,16 @@ export const RATE_LIMITS = {
    *  successful redemption mutates two profiles and an invite row, so
    *  the abuse surface is "spam join attempts." */
   invitationRedeem: { limit: 10, windowMs: 60_000 },
+  /** Invitation redeem BY SHORT CODE (authed, per-user). Codes are
+   *  8 chars from a 31-symbol alphabet (~40 bits — see
+   *  generateInviteCode in lib/auth/invitations.ts), far below a link
+   *  token's 256 bits, so guessing is a real concern in a way it isn't
+   *  for links. Keyed by the caller's user id rather than IP: redeeming
+   *  requires a signed-in session, and spinning up a fresh account per
+   *  guess is real friction an IP-hop doesn't have to pay. At 5 tries
+   *  per 5 minutes, even a bot left running indefinitely only ever
+   *  covers a vanishing fraction of the ~8.5×10^11 possible codes. */
+  invitationRedeemByCode: { limit: 5, windowMs: 5 * 60_000 },
   /** Admin-only account / member-management actions: create/revoke
    *  invitation, rename account, change member role, remove member,
    *  transfer ownership. 30/min per user is comfortably above any
