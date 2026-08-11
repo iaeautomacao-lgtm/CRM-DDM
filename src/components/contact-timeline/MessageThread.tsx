@@ -89,19 +89,19 @@ export function MessageThread({
 
             <div className={cn("flex max-w-[75%] flex-col", !isCustomer && "items-end")}>
               {!isCustomer && (
-                <span className="mb-0.5 text-[11px] font-medium text-muted-foreground">
+                <span className="mb-0.5 text-[11px] font-medium text-[#6B7280]">
                   {isBot ? "Automação" : agentName || "Atendente"}
                 </span>
               )}
               <div
                 className={cn(
                   "rounded-lg px-3 py-2 text-sm break-words",
-                  isCustomer ? "bg-muted text-foreground" : "bg-[#DCFCE7] text-foreground",
+                  isCustomer ? "bg-[#E2E8F0] text-[#1A1A2E]" : "bg-[#DCFCE7] text-[#14532D]",
                 )}
               >
                 {text}
               </div>
-              <span className="mt-0.5 text-[12px] text-muted-foreground">
+              <span className="mt-0.5 text-[11px] text-[#9CA3AF]">
                 {format(new Date(message.created_at), "dd/MM/yy HH:mm", { locale: ptBR })}
               </span>
             </div>
