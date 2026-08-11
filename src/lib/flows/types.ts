@@ -279,6 +279,13 @@ export interface FlowRunRow {
   last_advanced_at: string;
   ended_at: string | null;
   end_reason: string | null;
+  /**
+   * wacrm.whatsapp_config the run started on (migration 057). NULL for
+   * runs started before this migration, or when the webhook didn't
+   * pass a configId (Meta). The engine's send wrappers use this to
+   * pick Meta vs WAHA and, for WAHA, which line.
+   */
+  config_id: string | null;
 }
 
 // ============================================================
@@ -319,6 +326,13 @@ export type ParsedInbound =
       text: string;
       /** Meta's `messages[0].id` — used for idempotency. */
       meta_message_id: string;
+      /**
+       * Generic alias of `meta_message_id`, added for the WAHA webhook
+       * (whose message ids aren't from Meta). The engine reads
+       * `message_id ?? meta_message_id`; Meta's own webhook only ever
+       * sets `meta_message_id`.
+       */
+      message_id?: string;
     }
   | {
       kind: "interactive_reply";
@@ -327,6 +341,8 @@ export type ParsedInbound =
       /** The visible title of the tapped option (for logging). */
       reply_title: string;
       meta_message_id: string;
+      /** See the `text` variant's `message_id` for why this exists. */
+      message_id?: string;
     };
 
 export interface DispatchInboundInput {
@@ -339,6 +355,15 @@ export interface DispatchInboundInput {
   contactId: string;
   conversationId: string;
   message: ParsedInbound;
+  /**
+   * The wacrm.whatsapp_config row this inbound arrived on. Optional —
+   * Meta's webhook doesn't pass it (an account has at most one Meta
+   * config, resolved by meta-send.ts the same way it always has); the
+   * WAHA webhook always passes it, since an account can have several
+   * WAHA lines. Drives provider selection (getConfigProvider) and
+   * per-channel flow binding (findEntryFlow) — see engine.ts.
+   */
+  configId?: string;
 }
 
 export interface DispatchInboundResult {

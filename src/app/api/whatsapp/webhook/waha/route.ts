@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
+import { dispatchInboundToFlows } from '@/lib/flows/engine'
 
 export async function POST(request: Request) {
   try {
@@ -492,20 +493,61 @@ export async function POST(request: Request) {
         console.error('[waha/webhook] Failed to update conversation values:', convUpdateError)
       }
 
-      // Trigger AI Auto Response if the message is inbound and conversation is unassigned
-      if (direction === 'inbound' && !conversation?.assigned_agent_id && contactId && conversationId) {
-        const { handleAiAutoResponse } = await import('@/lib/ai/responder')
-        void handleAiAutoResponse(accountId, contactId, conversationId, textBody || '')
+      // ============================================================
+      // Flow runner dispatch. Mirrors src/app/api/whatsapp/webhook/route.ts
+      // (Meta) — inbound only; an outbound (fromMe) sync echo never
+      // starts/advances a run. isFirstInboundMessage uses `<= 1`, not
+      // `=== 0`: unlike the Meta webhook (which counts BEFORE inserting
+      // the inbound message), this message was already inserted above,
+      // so the count already includes it — 1 means "this is the only
+      // customer message so far", i.e. the first one.
+      // ============================================================
+      let flowConsumed = false
+      if (direction === 'inbound' && contactId && conversationId) {
+        const { count: custCount } = await db
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', conversationId)
+          .eq('sender_type', 'customer')
+        const isFirstInboundMessage = (custCount ?? 0) <= 1
+
+        const flowResult = await dispatchInboundToFlows({
+          accountId,
+          userId: config.user_id,
+          contactId,
+          conversationId,
+          configId: config.id,
+          message: {
+            kind: 'text',
+            text: contentText ?? '',
+            meta_message_id: messageId,
+            message_id: messageId,
+          },
+          isFirstInboundMessage,
+        })
+        flowConsumed = flowResult.consumed
       }
 
-      // Trigger Sentiment and Auto-Tagging Analysis
-      if (direction === 'inbound' && contactId && conversationId) {
-        const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
-        void analyzeConversationSentimentAndTags(accountId, contactId, conversationId)
+      // Suppress AI auto-response / sentiment / auto-tagging when the
+      // flow runner already handled this inbound — same precedence
+      // rule as the Meta webhook (the customer is navigating the bot
+      // menu, not sending something those should react to).
+      if (!flowConsumed) {
+        // Trigger AI Auto Response if the message is inbound and conversation is unassigned
+        if (direction === 'inbound' && !conversation?.assigned_agent_id && contactId && conversationId) {
+          const { handleAiAutoResponse } = await import('@/lib/ai/responder')
+          void handleAiAutoResponse(accountId, contactId, conversationId, textBody || '')
+        }
 
-        // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
-        const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
-        void autoTagAcordoRealizado(accountId, contactId, conversationId)
+        // Trigger Sentiment and Auto-Tagging Analysis
+        if (direction === 'inbound' && contactId && conversationId) {
+          const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
+          void analyzeConversationSentimentAndTags(accountId, contactId, conversationId)
+
+          // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
+          const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
+          void autoTagAcordoRealizado(accountId, contactId, conversationId)
+        }
       }
 
       return NextResponse.json({ success: true })

@@ -39,6 +39,12 @@ import {
   engineSendMedia,
   engineSendText,
 } from "./meta-send";
+import {
+  engineWahaSendButtons,
+  engineWahaSendList,
+  engineWahaSendMedia,
+  engineWahaSendText,
+} from "./waha-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
   type CollectInputNodeConfig,
@@ -132,6 +138,17 @@ export function isSuspending(node_type: string): boolean {
 /** Nodes that end the run. */
 export function isTerminal(node_type: string): boolean {
   return node_type === "handoff" || node_type === "end";
+}
+
+/**
+ * Canonical inbound message id, regardless of provider. Meta's
+ * webhook only ever sets `meta_message_id`; the WAHA webhook sets
+ * both (message_id mirrors meta_message_id) — this is the one place
+ * that decides which one wins so idempotency/logging don't need to
+ * know about providers at all.
+ */
+export function inboundMessageId(message: ParsedInbound): string {
+  return message.message_id ?? message.meta_message_id;
 }
 
 /**
@@ -313,10 +330,31 @@ async function findEntryFlow(
   accountId: string,
   message: ParsedInbound,
   isFirstInbound: boolean,
+  configId?: string,
 ): Promise<FlowRow | null> {
   // Only text messages can match an entry trigger. Interactive replies
   // are responses to existing prompts; they never start a new flow.
   if (message.kind !== "text") return null;
+
+  // A channel with a bound flow_id (set via /canais — migration 056)
+  // always starts that one flow on any inbound text, bypassing
+  // keyword/first-inbound trigger matching entirely — the binding IS
+  // the trigger. flow_id set but not active → no match (don't fall
+  // through to the account-wide scan; a paused/archived binding
+  // should not silently reroute to some other flow).
+  if (configId) {
+    const { data: config } = await db
+      .from("whatsapp_config")
+      .select("flow_id")
+      .eq("id", configId)
+      .maybeSingle();
+    const boundFlowId = (config as { flow_id: string | null } | null)?.flow_id ?? null;
+    if (boundFlowId) {
+      const flow = await loadFlow(db, boundFlowId);
+      return flow && flow.status === "active" ? flow : null;
+    }
+    // flow_id null → fall through to the account-wide scan below.
+  }
 
   // Pull all active flows for this account. Active set is bounded
   // (the builder discourages double-trigger overlap; partial index
@@ -347,6 +385,181 @@ async function findEntryFlow(
 }
 
 // ============================================================
+// Provider dispatch — every outbound send from the runner goes
+// through one of these four, which pick Meta or WAHA based on the
+// run's own config_id (migration 057) and, for buttons/lists,
+// persist the WAHA numbered-reply map onto flow_runs.vars so the
+// customer's next text reply can be matched back to a button tap
+// (see handleReplyForActiveRun's __waha_button_map check).
+//
+// getConfigProvider is a single, uncached lookup per call — a run's
+// provider can't change mid-flight (config_id is fixed at start), so
+// caching would only save one indexed SELECT per send; not worth the
+// staleness risk if a channel is ever repointed.
+// ============================================================
+
+async function getConfigProvider(
+  configId: string,
+): Promise<"meta" | "waha" | null> {
+  const db = supabaseAdmin();
+  const { data, error } = await db
+    .from("whatsapp_config")
+    .select("provider")
+    .eq("id", configId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (data as { provider: "meta" | "waha" }).provider;
+}
+
+async function sendTextViaProvider(
+  run: FlowRunRow,
+  args: { text: string },
+): Promise<{ whatsapp_message_id: string }> {
+  const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
+  if (provider === "waha") {
+    return engineWahaSendText({
+      accountId: run.account_id,
+      configId: run.config_id!,
+      conversationId: run.conversation_id!,
+      contactId: run.contact_id!,
+      text: args.text,
+    });
+  }
+  return engineSendText({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    text: args.text,
+    configId: run.config_id ?? undefined,
+  });
+}
+
+async function sendMediaViaProvider(
+  run: FlowRunRow,
+  args: {
+    kind: SendMediaNodeConfig["media_type"];
+    link: string;
+    caption?: string;
+    filename?: string;
+  },
+): Promise<{ whatsapp_message_id: string }> {
+  const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
+  if (provider === "waha") {
+    return engineWahaSendMedia({
+      accountId: run.account_id,
+      configId: run.config_id!,
+      conversationId: run.conversation_id!,
+      contactId: run.contact_id!,
+      mediaUrl: args.link,
+      caption: args.caption,
+    });
+  }
+  return engineSendMedia({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    kind: args.kind,
+    link: args.link,
+    caption: args.caption,
+    filename: args.filename,
+    configId: run.config_id ?? undefined,
+  });
+}
+
+async function sendButtonsViaProvider(
+  db: AdminClient,
+  run: FlowRunRow,
+  cfg: SendButtonsNodeConfig,
+): Promise<{ whatsapp_message_id: string }> {
+  const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
+  if (provider === "waha") {
+    const { whatsapp_message_id, buttonMap } = await engineWahaSendButtons({
+      accountId: run.account_id,
+      configId: run.config_id!,
+      conversationId: run.conversation_id!,
+      contactId: run.contact_id!,
+      body: cfg.text,
+      buttons: cfg.buttons.map((b) => ({ id: b.reply_id, title: b.title })),
+    });
+    const newVars = { ...run.vars, __waha_button_map: buttonMap };
+    const { error } = await db
+      .from("flow_runs")
+      .update({ vars: newVars })
+      .eq("id", run.id);
+    if (!error) run.vars = newVars;
+    return { whatsapp_message_id };
+  }
+  return engineSendInteractiveButtons({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    bodyText: cfg.text,
+    headerText: cfg.header_text,
+    footerText: cfg.footer_text,
+    buttons: cfg.buttons.map((b) => ({ id: b.reply_id, title: b.title })),
+    configId: run.config_id ?? undefined,
+  });
+}
+
+async function sendListViaProvider(
+  db: AdminClient,
+  run: FlowRunRow,
+  cfg: SendListNodeConfig,
+): Promise<{ whatsapp_message_id: string }> {
+  const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
+  // waha-send.ts has no separate "list" primitive — WAHA gets the same
+  // numbered-plain-text treatment as buttons, just flattened across
+  // sections (engineWahaSendList, not a nonexistent
+  // engineWahaInteractiveList).
+  if (provider === "waha") {
+    const { whatsapp_message_id, buttonMap } = await engineWahaSendList({
+      accountId: run.account_id,
+      configId: run.config_id!,
+      conversationId: run.conversation_id!,
+      contactId: run.contact_id!,
+      body: cfg.text,
+      sections: cfg.sections.map((s) => ({
+        title: s.title,
+        rows: s.rows.map((r) => ({
+          id: r.reply_id,
+          title: r.title,
+          description: r.description,
+        })),
+      })),
+    });
+    const newVars = { ...run.vars, __waha_button_map: buttonMap };
+    const { error } = await db
+      .from("flow_runs")
+      .update({ vars: newVars })
+      .eq("id", run.id);
+    if (!error) run.vars = newVars;
+    return { whatsapp_message_id };
+  }
+  return engineSendInteractiveList({
+    accountId: run.account_id,
+    userId: run.user_id,
+    conversationId: run.conversation_id!,
+    contactId: run.contact_id!,
+    bodyText: cfg.text,
+    buttonLabel: cfg.button_label,
+    headerText: cfg.header_text,
+    footerText: cfg.footer_text,
+    sections: cfg.sections.map((s) => ({
+      title: s.title,
+      rows: s.rows.map((r) => ({
+        id: r.reply_id,
+        title: r.title,
+        description: r.description,
+      })),
+    })),
+    configId: run.config_id ?? undefined,
+  });
+}
+
+// ============================================================
 // Node executors — each handles ONE node type. send_buttons and
 // send_list also persist `last_prompt_message_id` so the inbox
 // thread can quote the prompt the customer is replying to.
@@ -358,16 +571,7 @@ async function sendButtonsAndSuspend(
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
   const cfg = node.config as unknown as SendButtonsNodeConfig;
-  const { whatsapp_message_id } = await engineSendInteractiveButtons({
-    accountId: run.account_id,
-    userId: run.user_id,
-    conversationId: run.conversation_id!,
-    contactId: run.contact_id!,
-    bodyText: cfg.text,
-    headerText: cfg.header_text,
-    footerText: cfg.footer_text,
-    buttons: cfg.buttons.map((b) => ({ id: b.reply_id, title: b.title })),
-  });
+  const { whatsapp_message_id } = await sendButtonsViaProvider(db, run, cfg);
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_buttons",
     whatsapp_message_id,
@@ -394,24 +598,7 @@ async function sendListAndSuspend(
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
   const cfg = node.config as unknown as SendListNodeConfig;
-  const { whatsapp_message_id } = await engineSendInteractiveList({
-    accountId: run.account_id,
-    userId: run.user_id,
-    conversationId: run.conversation_id!,
-    contactId: run.contact_id!,
-    bodyText: cfg.text,
-    buttonLabel: cfg.button_label,
-    headerText: cfg.header_text,
-    footerText: cfg.footer_text,
-    sections: cfg.sections.map((s) => ({
-      title: s.title,
-      rows: s.rows.map((r) => ({
-        id: r.reply_id,
-        title: r.title,
-        description: r.description,
-      })),
-    })),
-  });
+  const { whatsapp_message_id } = await sendListViaProvider(db, run, cfg);
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_list",
     whatsapp_message_id,
@@ -580,11 +767,7 @@ async function advanceFromNodeKey(
     if (node.node_type === "send_message") {
       const cfg = node.config as unknown as SendMessageNodeConfig;
       try {
-        const { whatsapp_message_id } = await engineSendText({
-          accountId: run.account_id,
-    userId: run.user_id,
-          conversationId: run.conversation_id!,
-          contactId: run.contact_id!,
+        const { whatsapp_message_id } = await sendTextViaProvider(run, {
           text: interpolateVars(cfg.text, run.vars),
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
@@ -605,11 +788,7 @@ async function advanceFromNodeKey(
     if (node.node_type === "send_media") {
       const cfg = node.config as unknown as SendMediaNodeConfig;
       try {
-        const { whatsapp_message_id } = await engineSendMedia({
-          accountId: run.account_id,
-    userId: run.user_id,
-          conversationId: run.conversation_id!,
-          contactId: run.contact_id!,
+        const { whatsapp_message_id } = await sendMediaViaProvider(run, {
           kind: cfg.media_type,
           link: cfg.media_url,
           caption: cfg.caption
@@ -638,11 +817,7 @@ async function advanceFromNodeKey(
       // wake us up via handleReplyForActiveRun's collect_input branch.
       const cfg = node.config as unknown as CollectInputNodeConfig;
       try {
-        const { whatsapp_message_id } = await engineSendText({
-          accountId: run.account_id,
-    userId: run.user_id,
-          conversationId: run.conversation_id!,
-          contactId: run.contact_id!,
+        const { whatsapp_message_id } = await sendTextViaProvider(run, {
           text: interpolateVars(cfg.prompt_text, run.vars),
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
@@ -845,7 +1020,7 @@ export async function dispatchInboundToFlows(
         db,
         input.accountId,
         input.contactId,
-        input.message.meta_message_id,
+        inboundMessageId(input.message),
       );
       if (dupe) {
         return {
@@ -866,6 +1041,7 @@ export async function dispatchInboundToFlows(
       input.accountId,
       input.message,
       input.isFirstInboundMessage,
+      input.configId,
     );
     if (!flow || !flow.entry_node_id) {
       return { consumed: false, outcome: "no_match" };
@@ -895,7 +1071,7 @@ async function handleReplyForActiveRun(
   // for the captured value itself, the `node_entered` event already
   // records `captured_key` + `captured_length` after the var is stored.
   await logEvent(db, run.id, "reply_received", run.current_node_key, {
-    meta_message_id: message.meta_message_id,
+    meta_message_id: inboundMessageId(message),
     reply_kind: message.kind,
     reply_id: message.kind === "interactive_reply" ? message.reply_id : null,
     text_length: message.kind === "text" ? message.text.length : null,
@@ -918,6 +1094,40 @@ async function handleReplyForActiveRun(
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
+  // WAHA has no native interactive reply — a send_buttons/send_list
+  // node sent over WAHA (sendButtonsViaProvider/sendListViaProvider)
+  // instead sends a numbered plain-text list and stashes a
+  // { "1": reply_id, ... } map on run.vars.__waha_button_map. If the
+  // customer's plain-text reply matches an entry in that map AND we're
+  // actually sitting on a send_buttons/send_list node right now,
+  // translate it into the same interactive_reply shape a real Meta tap
+  // would produce, so the matching logic below never needs to know
+  // WAHA is involved.
+  //
+  // The node_type guard matters: without it, a stale map left over
+  // from an earlier send_buttons/send_list node would misfire against
+  // an unrelated later collect_input node — e.g. a customer legitimately
+  // typing "1" as a free-text answer would otherwise be mis-routed as
+  // a button tap instead of captured as their actual reply.
+  const wahaButtonMap = run.vars?.__waha_button_map as Record<string, string> | undefined;
+  let effectiveMessage: ParsedInbound = message;
+  if (
+    wahaButtonMap &&
+    message.kind === "text" &&
+    (currentNode.node_type === "send_buttons" || currentNode.node_type === "send_list")
+  ) {
+    const mappedReplyId = wahaButtonMap[message.text.trim()];
+    if (mappedReplyId) {
+      effectiveMessage = {
+        kind: "interactive_reply",
+        reply_id: mappedReplyId,
+        reply_title: message.text.trim(),
+        meta_message_id: message.meta_message_id,
+        message_id: message.message_id,
+      };
+    }
+  }
+
   // Two ways a reply can advance:
   //   1. Interactive button/list tap on a send_buttons/send_list node.
   //   2. Text reply on a collect_input node — capture into vars.
@@ -925,17 +1135,17 @@ async function handleReplyForActiveRun(
   // Everything else falls through to the fallback policy below.
   let matched: string | null = null;
   if (
-    message.kind === "interactive_reply" &&
+    effectiveMessage.kind === "interactive_reply" &&
     (currentNode.node_type === "send_buttons" ||
       currentNode.node_type === "send_list")
   ) {
-    matched = matchReplyId(currentNode, message.reply_id);
+    matched = matchReplyId(currentNode, effectiveMessage.reply_id);
   } else if (
-    message.kind === "text" &&
+    effectiveMessage.kind === "text" &&
     currentNode.node_type === "collect_input"
   ) {
     const cfg = currentNode.config as unknown as CollectInputNodeConfig;
-    const captured = message.text.trim();
+    const captured = effectiveMessage.text.trim();
     if (captured.length > 0 && cfg.var_key) {
       // Persist captured value + reset reprompt count atomically.
       const newVars = { ...run.vars, [cfg.var_key]: captured };
@@ -1014,11 +1224,7 @@ async function handleReplyForActiveRun(
       // or var_key missing — rare). Re-send the prompt so they try again.
       const cfg = currentNode.config as unknown as CollectInputNodeConfig;
       try {
-        await engineSendText({
-          accountId: run.account_id,
-    userId: run.user_id,
-          conversationId: run.conversation_id!,
-          contactId: run.contact_id!,
+        await sendTextViaProvider(run, {
           text: interpolateVars(cfg.prompt_text, run.vars),
         });
       } catch (err) {
@@ -1071,6 +1277,13 @@ async function startNewRun(
       user_id: flow.user_id,
       contact_id: input.contactId,
       conversation_id: input.conversationId,
+      // Which channel this run started on (migration 057) — NULL for
+      // Meta (meta-send.ts still resolves "the account's Meta config"
+      // on its own) or when the caller didn't pass one. Fixed for the
+      // life of the run; a later reply on a different channel still
+      // sends back through this one (see handleReplyForActiveRun,
+      // which never re-reads input.configId).
+      config_id: input.configId ?? null,
       status: "active",
       current_node_key: flow.entry_node_id,
     })
@@ -1089,7 +1302,7 @@ async function startNewRun(
   await logEvent(db, run.id, "started", flow.entry_node_id, {
     flow_id: flow.id,
     trigger_type: flow.trigger_type,
-    meta_message_id: input.message.meta_message_id,
+    meta_message_id: inboundMessageId(input.message),
   });
   // Bump the flow's execution counter — used by the builder UI to
   // surface "X runs since activation" on the flow card.

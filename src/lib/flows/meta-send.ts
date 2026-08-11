@@ -43,6 +43,11 @@ interface SendTextEngineArgs {
   conversationId: string
   contactId: string
   text: string
+  /** Which wacrm.whatsapp_config row to send through, when the caller
+   *  already knows (the flow run's own config_id — migration 057).
+   *  Omitted falls back to "the account's Meta config", same as
+   *  before this field existed. */
+  configId?: string
 }
 
 /**
@@ -77,11 +82,19 @@ export async function engineSendText(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
+  // An account can have several whatsapp_config rows now (WAHA lines +
+  // Meta — migration 039). Scoped to provider='meta' since this
+  // sender only ever speaks Meta's API; `configId`, when the caller
+  // has it, pins the exact row instead of "whichever Meta row comes
+  // back first" for an account that somehow has more than one.
+  let configQuery = db
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', args.accountId)
-    .single()
+    .eq('provider', 'meta')
+  if (args.configId) configQuery = configQuery.eq('id', args.configId)
+  else configQuery = configQuery.limit(1)
+  const { data: config, error: configErr } = await configQuery.single()
   if (configErr || !config) {
     throw new Error('WhatsApp not configured for this account')
   }
@@ -155,6 +168,8 @@ interface SendMediaEngineArgs {
   caption?: string
   /** Document-only; ignored by Meta for image/video. */
   filename?: string
+  /** See SendTextEngineArgs.configId. */
+  configId?: string
 }
 
 /**
@@ -186,11 +201,14 @@ export async function engineSendMedia(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
+  let configQuery = db
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', args.accountId)
-    .single()
+    .eq('provider', 'meta')
+  if (args.configId) configQuery = configQuery.eq('id', args.configId)
+  else configQuery = configQuery.limit(1)
+  const { data: config, error: configErr } = await configQuery.single()
   if (configErr || !config) {
     throw new Error('WhatsApp not configured for this account')
   }
@@ -270,6 +288,8 @@ interface SendInteractiveButtonsEngineArgs {
   buttons: InteractiveButton[]
   headerText?: string
   footerText?: string
+  /** See SendTextEngineArgs.configId. */
+  configId?: string
 }
 
 interface SendInteractiveListEngineArgs {
@@ -282,6 +302,8 @@ interface SendInteractiveListEngineArgs {
   sections: InteractiveListSection[]
   headerText?: string
   footerText?: string
+  /** See SendTextEngineArgs.configId. */
+  configId?: string
 }
 
 /**
@@ -338,11 +360,14 @@ async function sendInteractiveViaMeta(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
+  let configQuery = db
     .from('whatsapp_config')
     .select('*')
     .eq('account_id', input.accountId)
-    .single()
+    .eq('provider', 'meta')
+  if (input.configId) configQuery = configQuery.eq('id', input.configId)
+  else configQuery = configQuery.limit(1)
+  const { data: config, error: configErr } = await configQuery.single()
   if (configErr || !config) {
     throw new Error('WhatsApp not configured for this account')
   }
