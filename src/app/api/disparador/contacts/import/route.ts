@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { isUniqueViolation, normalizeKey } from "@/lib/contacts/dedupe";
@@ -9,12 +9,6 @@ import {
   assignImportedContactTags,
   type ContactTagAssignment,
 } from "@/lib/contacts/resolve-import-tags";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  { db: { schema: "wacrm" } }
-);
 
 function formatBrazilianPhone(raw: string): string {
   if (!raw) return "";
@@ -92,7 +86,7 @@ export async function POST(request: Request) {
     // Blacklist has no account_id column in the disparador schema — it's a
     // single shared list across every account on this instance, not scoped
     // per-tenant. Left unfiltered here; scoping it requires a migration.
-    const { data: blacklist } = await supabaseAdmin.from("blacklist").select("telefone");
+    const { data: blacklist } = await supabaseAdmin().from("blacklist").select("telefone");
     const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
 
     // Existing contacts for this account, keyed by normalized phone. Used
@@ -102,7 +96,7 @@ export async function POST(request: Request) {
     // arbiter from a bare column list — the same reason the main contacts
     // CSV importer (import-modal.tsx) pre-checks and inserts rather than
     // upserts.
-    const { data: existingRows } = await supabaseAdmin
+    const { data: existingRows } = await supabaseAdmin()
       .from("contacts")
       .select("phone_normalized")
       .eq("account_id", accountId);
@@ -164,7 +158,7 @@ export async function POST(request: Request) {
     const allTagNames = pending.flatMap((p) => p.tagsArray);
     let tagIdByKey = new Map<string, string>();
     if (allTagNames.length > 0) {
-      ({ tagIdByKey } = await resolveImportTagIds(supabaseAdmin, {
+      ({ tagIdByKey } = await resolveImportTagIds(supabaseAdmin(), {
         accountId,
         userId: user.id,
         tagNames: allTagNames,
@@ -188,7 +182,7 @@ export async function POST(request: Request) {
         company: p.company,
       }));
 
-      const { data, error } = await supabaseAdmin
+      const { data, error } = await supabaseAdmin()
         .from("contacts")
         .insert(insertRows)
         .select("id");
@@ -196,7 +190,7 @@ export async function POST(request: Request) {
       if (error) {
         for (let j = 0; j < insertRows.length; j++) {
           const source = chunk[j];
-          const { data: singleData, error: singleErr } = await supabaseAdmin
+          const { data: singleData, error: singleErr } = await supabaseAdmin()
             .from("contacts")
             .insert(insertRows[j])
             .select("id")
@@ -228,7 +222,7 @@ export async function POST(request: Request) {
     // mask a successful contact import.
     if (tagAssignments.length > 0) {
       try {
-        await assignImportedContactTags(supabaseAdmin, tagAssignments, tagIdByKey);
+        await assignImportedContactTags(supabaseAdmin(), tagAssignments, tagIdByKey);
       } catch (err) {
         console.error("[Contacts Import] Failed to assign tags:", err);
       }

@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  { db: { schema: "wacrm" } }
-);
 
 const EDITABLE_FIELDS = [
   "nome",
@@ -44,7 +38,7 @@ export async function PATCH(
     // — same as the DELETE route above and the campanhas list reads.
     const { userIds } = await getDisparadorScope(supabase);
 
-    const { data: campaign, error: campaignError } = await supabaseAdmin
+    const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("id, created_by, status")
       .eq("id", campaignId)
@@ -83,7 +77,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Nenhum campo para atualizar." }, { status: 400 });
     }
 
-    const { error: updateError } = await supabaseAdmin
+    const { error: updateError } = await supabaseAdmin()
       .from("campaigns")
       .update(updates)
       .eq("id", campaignId);
@@ -121,7 +115,7 @@ export async function DELETE(
     // — same as the campanhas/disparador list reads (see getDisparadorScope).
     const { userIds } = await getDisparadorScope(supabase);
 
-    const { data: campaign, error: campaignError } = await supabaseAdmin
+    const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("id, created_by, status")
       .eq("id", campaignId)
@@ -149,7 +143,7 @@ export async function DELETE(
       );
     }
 
-    const { error: deleteError } = await supabaseAdmin
+    const { error: deleteError } = await supabaseAdmin()
       .from("campaigns")
       .delete()
       .eq("id", campaignId);

@@ -1,12 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  { db: { schema: "wacrm" } }
-);
+import { supabaseAdmin } from "@/lib/disparador/admin-client";
 
 export async function POST(
   request: Request,
@@ -26,7 +20,7 @@ export async function POST(
 
     // wacrm.campaigns has no account_id column (only created_by), so
     // ownership is checked per-user rather than per-account for now.
-    const { data: campaign, error: campaignError } = await supabaseAdmin
+    const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("id, created_by")
       .eq("id", campaignId)
@@ -48,13 +42,13 @@ export async function POST(
 
     if (action === "pause") {
       // 1. Update status to 'pausada' (Paused)
-      await supabaseAdmin
+      await supabaseAdmin()
         .from("campaigns")
         .update({ status: "pausada" })
         .eq("id", campaignId);
 
       // 2. Pause scheduled items in the queue (set status to 'pausado')
-      await supabaseAdmin
+      await supabaseAdmin()
         .from("disp_message_queue")
         .update({ status: "pausado" })
         .eq("campaign_id", campaignId)
@@ -63,13 +57,13 @@ export async function POST(
       return NextResponse.json({ success: true, status: "pausada" });
     } else {
       // 1. Update status to 'encerrada' (Closed)
-      await supabaseAdmin
+      await supabaseAdmin()
         .from("campaigns")
         .update({ status: "encerrada" })
         .eq("id", campaignId);
 
       // 2. Cancel scheduled items in the queue (set status to 'cancelado')
-      await supabaseAdmin
+      await supabaseAdmin()
         .from("disp_message_queue")
         .update({ status: "cancelado" })
         .eq("campaign_id", campaignId)

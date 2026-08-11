@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { createClient as createServerClient } from "@/lib/supabase/server";
+import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
-
-// Use admin client to write to the queue bypassing RLS
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  { db: { schema: "wacrm" } }
-);
 
 export async function POST(
   request: Request,
@@ -46,7 +39,7 @@ export async function POST(
     const now = new Date().toISOString();
 
     // 1. Fetch Campaign configuration
-    const { data: campaign, error: campaignError } = await supabaseAdmin
+    const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("*")
       .eq("id", campaignId)
@@ -101,7 +94,7 @@ export async function POST(
     }
 
     // 2. Remove previously scheduled/pending items to prevent duplication
-    await supabaseAdmin
+    await supabaseAdmin()
       .from("disp_message_queue")
       .delete()
       .eq("campaign_id", campaignId)
@@ -109,7 +102,7 @@ export async function POST(
 
     // 3. Load active contacts — scoped to the caller's account so a
     // campaign never sends to another account's contacts.
-    const { data: allContacts, error: contactsError } = await supabaseAdmin
+    const { data: allContacts, error: contactsError } = await supabaseAdmin()
       .from("contacts")
       .select("id, name, phone")
       .eq("account_id", accountId);
@@ -126,7 +119,7 @@ export async function POST(
     }
 
     // Load contact tags relation
-    const { data: tagsList } = await supabaseAdmin
+    const { data: tagsList } = await supabaseAdmin()
       .from("contact_tags")
       .select("contact_id, tags:tag_id(name)");
 
@@ -167,7 +160,7 @@ export async function POST(
     }
 
     // Fetch Blacklist to skip
-    const { data: blacklist } = await supabaseAdmin.from("blacklist").select("telefone");
+    const { data: blacklist } = await supabaseAdmin().from("blacklist").select("telefone");
     const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
 
     // 4. Scheduling queue generation loop
@@ -225,7 +218,7 @@ export async function POST(
       const chunkSize = 500;
       for (let k = 0; k < queueRows.length; k += chunkSize) {
         const chunk = queueRows.slice(k, k + chunkSize);
-        const { error: insertError } = await supabaseAdmin
+        const { error: insertError } = await supabaseAdmin()
           .from("disp_message_queue")
           .insert(chunk);
         if (insertError) throw insertError;
@@ -233,13 +226,13 @@ export async function POST(
     }
 
     // 5. Update campaign status to 'em_execucao' (In execution)
-    await supabaseAdmin
+    await supabaseAdmin()
       .from("campaigns")
       .update({ status: "em_execucao", agendamento: now })
       .eq("id", campaignId);
 
     // Update Metrics
-    await supabaseAdmin
+    await supabaseAdmin()
       .from("campaign_metrics")
       .upsert({
         campaign_id: campaignId,

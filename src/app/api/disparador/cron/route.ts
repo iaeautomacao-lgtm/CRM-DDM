@@ -1,19 +1,12 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 import {
   sendWahaTextMessage,
   sendWahaMediaMessage,
 } from "@/lib/whatsapp/waha-api";
+import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
-
-// Create a Supabase admin client to bypass RLS for background worker processes
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  { db: { schema: "wacrm" } }
-);
 
 // This endpoint and worker.ts's setInterval both race for the same
 // disp_message_queue rows against the same Supabase project as production
@@ -38,7 +31,7 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
 
     // 1. Fetch the next scheduled item from queue
-    const { data: item, error: queryError } = await supabaseAdmin
+    const { data: item, error: queryError } = await supabaseAdmin()
       .from("disp_message_queue")
       .select("*, contacts(name, phone, company)")
       .eq("status", "agendado")
@@ -59,20 +52,20 @@ export async function POST(request: Request) {
     console.log(`[Disparador Worker] Processing item ${item.id} for campaign ${item.campaign_id}`);
 
     // 2. Lock item to prevent concurrent process
-    await supabaseAdmin
+    await supabaseAdmin()
       .from("disp_message_queue")
       .update({ status: "enviando" })
       .eq("id", item.id);
 
     // 3. Fetch Campaign to verify status and sending window
-    const { data: campaign } = await supabaseAdmin
+    const { data: campaign } = await supabaseAdmin()
       .from("campaigns")
       .select("status, janela_inicio, janela_fim, created_by")
       .eq("id", item.campaign_id)
       .single();
 
     if (!campaign || campaign.status !== "em_execucao") {
-      await supabaseAdmin
+      await supabaseAdmin()
         .from("disp_message_queue")
         .update({ status: "cancelado" })
         .eq("id", item.id);
@@ -94,7 +87,7 @@ export async function POST(request: Request) {
         const [h, m] = campaign.janela_inicio.split(":");
         tomorrow.setHours(parseInt(h, 10), parseInt(m, 10), 0, 0);
 
-        await supabaseAdmin
+        await supabaseAdmin()
           .from("disp_message_queue")
           .update({ status: "agendado", scheduled_at: tomorrow.toISOString() })
           .eq("id", item.id);
@@ -105,14 +98,14 @@ export async function POST(request: Request) {
 
     // 5. Check if contact is blacklisted
     const telefone = item.contacts?.phone || item.mensagem_final;
-    const { data: blacklisted } = await supabaseAdmin
+    const { data: blacklisted } = await supabaseAdmin()
       .from("blacklist")
       .select("id")
       .eq("telefone", telefone)
       .maybeSingle();
 
     if (blacklisted) {
-      await supabaseAdmin
+      await supabaseAdmin()
         .from("disp_message_queue")
         .update({ status: "bloqueado", erro: "Número na Blacklist" })
         .eq("id", item.id);
@@ -120,7 +113,7 @@ export async function POST(request: Request) {
     }
 
     // 6. Fetch profiles to resolve Account ID and active WhatsApp config
-    const { data: profile } = await supabaseAdmin
+    const { data: profile } = await supabaseAdmin()
       .from("profiles")
       .select("account_id")
       .eq("user_id", campaign.created_by)
@@ -131,7 +124,7 @@ export async function POST(request: Request) {
       throw new Error("Campaign creator is not associated with an account");
     }
 
-    const { data: config } = await supabaseAdmin
+    const { data: config } = await supabaseAdmin()
       .from("whatsapp_config")
       .select("*")
       .eq("account_id", accountId)
@@ -201,7 +194,7 @@ export async function POST(request: Request) {
     }
 
     // 9. Update queue item status to success
-    await supabaseAdmin
+    await supabaseAdmin()
       .from("disp_message_queue")
       .update({
         status: "enviado",
@@ -212,7 +205,7 @@ export async function POST(request: Request) {
       .eq("id", item.id);
 
     // 10. Log in message logs
-    await supabaseAdmin.from("message_logs").insert({
+    await supabaseAdmin().from("message_logs").insert({
       queue_id: item.id,
       campaign_id: item.campaign_id,
       contact_id: item.contact_id,
@@ -224,7 +217,7 @@ export async function POST(request: Request) {
     });
 
     // 11. Increment campaign statistics
-    await supabaseAdmin.rpc("increment_campaign_metric", {
+    await supabaseAdmin().rpc("increment_campaign_metric", {
       p_campaign_id: item.campaign_id,
       p_field: "total_enviados",
     });

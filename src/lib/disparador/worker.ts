@@ -1,4 +1,3 @@
-import { createClient } from "@supabase/supabase-js";
 import {
   sendWahaTextMessage,
   sendWahaMediaMessage,
@@ -9,13 +8,8 @@ import {
 } from "@/lib/whatsapp/waha-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
+import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import OpenAI from "openai";
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "",
-  { db: { schema: "wacrm" } }
-);
 
 let isWorkerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
@@ -45,7 +39,7 @@ export function ensureQueueWorkerRunning() {
   intervalId = setInterval(async () => {
     try {
       // 1. Fetch campaigns that are in execution
-      const { data: activeCampaigns } = await supabaseAdmin
+      const { data: activeCampaigns } = await supabaseAdmin()
         .from("campaigns")
         .select("id, status, created_by, janela_inicio, janela_fim")
         .eq("status", "em_execucao");
@@ -72,7 +66,7 @@ export function ensureQueueWorkerRunning() {
 
           // Fetch the next scheduled item from queue for this campaign
           const now = new Date().toISOString();
-          const { data: item, error: queryError } = await supabaseAdmin
+          const { data: item, error: queryError } = await supabaseAdmin()
             .from("disp_message_queue")
             .select("*, contacts(name, phone, company)")
             .eq("campaign_id", campaign.id)
@@ -89,7 +83,7 @@ export function ensureQueueWorkerRunning() {
 
           // If queue is empty for this campaign, check if we should set status to completed
           if (!item) {
-            const { count } = await supabaseAdmin
+            const { count } = await supabaseAdmin()
               .from("disp_message_queue")
               .select("*", { count: "exact", head: true })
               .eq("campaign_id", campaign.id)
@@ -97,7 +91,7 @@ export function ensureQueueWorkerRunning() {
 
             if (count === 0) {
               console.log(`[Queue Worker] Campaign ${campaign.id} completed. Updating status to encerrada.`);
-              await supabaseAdmin
+              await supabaseAdmin()
                 .from("campaigns")
                 .update({ status: "encerrada" })
                 .eq("id", campaign.id);
@@ -108,7 +102,7 @@ export function ensureQueueWorkerRunning() {
           currentItem = item;
 
           // Lock item to prevent concurrent process
-          await supabaseAdmin
+          await supabaseAdmin()
             .from("disp_message_queue")
             .update({ status: "enviando" })
             .eq("id", item.id);
@@ -117,14 +111,14 @@ export function ensureQueueWorkerRunning() {
 
           // Check if contact is blacklisted
           const phone = item.contacts?.phone || item.mensagem_final;
-          const { data: blacklisted } = await supabaseAdmin
+          const { data: blacklisted } = await supabaseAdmin()
             .from("blacklist")
             .select("id")
             .eq("telefone", phone)
             .maybeSingle();
 
           if (blacklisted) {
-            await supabaseAdmin
+            await supabaseAdmin()
               .from("disp_message_queue")
               .update({ status: "bloqueado", erro: "Número na Blacklist" })
               .eq("id", item.id);
@@ -132,7 +126,7 @@ export function ensureQueueWorkerRunning() {
           }
 
           // Fetch WAHA config directly using session_id
-          const { data: config } = await supabaseAdmin
+          const { data: config } = await supabaseAdmin()
             .from("whatsapp_config")
             .select("*")
             .eq("id", item.session_id)
@@ -244,7 +238,7 @@ export function ensureQueueWorkerRunning() {
           }
 
           // Update queue item status to success
-          await supabaseAdmin
+          await supabaseAdmin()
             .from("disp_message_queue")
             .update({
               status: "enviado",
@@ -255,7 +249,7 @@ export function ensureQueueWorkerRunning() {
             .eq("id", item.id);
 
           // Log in message logs
-          await supabaseAdmin.from("message_logs").insert({
+          await supabaseAdmin().from("message_logs").insert({
             queue_id: item.id,
             campaign_id: item.campaign_id,
             contact_id: item.contact_id,
@@ -267,14 +261,14 @@ export function ensureQueueWorkerRunning() {
           });
 
           // Increment campaign statistics
-          await supabaseAdmin.rpc("increment_campaign_metric", {
+          await supabaseAdmin().rpc("increment_campaign_metric", {
             p_campaign_id: item.campaign_id,
             p_field: "total_enviados",
           });
         } catch (itemErr: any) {
           console.error(`[Queue Worker] Error processing item for campaign ${campaign.id}:`, itemErr);
           if (currentItem) {
-            await supabaseAdmin
+            await supabaseAdmin()
               .from("disp_message_queue")
               .update({
                 status: "erro",
