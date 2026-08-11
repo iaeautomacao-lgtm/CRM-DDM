@@ -116,11 +116,11 @@ describe("deriveCanvasEdges — condition (true/false branches)", () => {
     expect(edges).toHaveLength(2);
     expect(edges.find((e) => e.sourceHandle === "true")).toMatchObject({
       target: "t",
-      label: "true",
+      label: "verdadeiro",
     });
     expect(edges.find((e) => e.sourceHandle === "false")).toMatchObject({
       target: "f",
-      label: "false",
+      label: "falso",
     });
   });
 
@@ -319,7 +319,7 @@ describe("outgoingSlots", () => {
       config: {},
     });
     expect(slots.map((s) => s.id)).toEqual(["true", "false"]);
-    expect(slots.map((s) => s.label)).toEqual(["true", "false"]);
+    expect(slots.map((s) => s.label)).toEqual(["verdadeiro", "falso"]);
   });
 
   it("returns one slot per button, labelled with the title", () => {
