@@ -81,9 +81,9 @@ export type NodeCategory = 'messaging' | 'logic' | 'flow';
 
 /** Category labels + the order they render in the add-step menu. */
 export const NODE_CATEGORIES: { id: NodeCategory; label: string }[] = [
-  { id: 'messaging', label: 'Messaging' },
-  { id: 'logic', label: 'Logic & data' },
-  { id: 'flow', label: 'Flow control' },
+  { id: 'messaging', label: 'Mensagens' },
+  { id: 'logic', label: 'Lógica e dados' },
+  { id: 'flow', label: 'Controle de fluxo' },
 ];
 
 export const NODE_META: Record<
@@ -97,73 +97,73 @@ export const NODE_META: Record<
   }
 > = {
   start: {
-    label: 'Start',
+    label: 'Início',
     icon: PlayCircle,
     color: 'text-emerald-400',
-    blurb: 'Entry point of the flow',
+    blurb: 'Ponto de entrada do fluxo',
     category: 'flow',
   },
   send_message: {
-    label: 'Send message',
+    label: 'Enviar mensagem',
     icon: MessageCircle,
     color: 'text-sky-400',
-    blurb: 'Sends a WhatsApp text message',
+    blurb: 'Envia uma mensagem de texto no WhatsApp',
     category: 'messaging',
   },
   send_buttons: {
-    label: 'Send buttons',
+    label: 'Enviar botões',
     icon: ListChecks,
     color: 'text-primary',
-    blurb: 'Sends quick-reply buttons',
+    blurb: 'Envia botões de resposta rápida',
     category: 'messaging',
   },
   send_list: {
-    label: 'Send list',
+    label: 'Enviar lista',
     icon: ListPlus,
     color: 'text-indigo-400',
-    blurb: 'Sends a tappable list of options',
+    blurb: 'Envia uma lista de opções para o cliente tocar',
     category: 'messaging',
   },
   send_media: {
-    label: 'Send media',
+    label: 'Enviar mídia',
     icon: Paperclip,
     color: 'text-cyan-400',
-    blurb: 'Sends an image, video, or document',
+    blurb: 'Envia uma imagem, vídeo ou documento',
     category: 'messaging',
   },
   collect_input: {
-    label: 'Collect input',
+    label: 'Coletar resposta',
     icon: Inbox,
     color: 'text-teal-400',
-    blurb: 'Asks a question, saves the reply',
+    blurb: 'Faz uma pergunta e salva a resposta',
     category: 'logic',
   },
   condition: {
-    label: 'If / else',
+    label: 'Se / senão',
     icon: GitFork,
     color: 'text-fuchsia-400',
-    blurb: 'Branches on a rule',
+    blurb: 'Ramifica com base em uma regra',
     category: 'logic',
   },
   set_tag: {
-    label: 'Tag contact',
+    label: 'Marcar contato',
     icon: Tag,
     color: 'text-pink-400',
-    blurb: 'Adds or removes a contact tag',
+    blurb: 'Adiciona ou remove uma tag do contato',
     category: 'logic',
   },
   handoff: {
-    label: 'Handoff to agent',
+    label: 'Transferir para agente',
     icon: UserPlus,
     color: 'text-amber-400',
-    blurb: 'Hands the conversation to a human',
+    blurb: 'Transfere a conversa para um humano',
     category: 'flow',
   },
   end: {
-    label: 'End',
+    label: 'Fim',
     icon: Flag,
     color: 'text-muted-foreground',
-    blurb: 'Ends the flow',
+    blurb: 'Encerra o fluxo',
     category: 'flow',
   },
 };
@@ -342,11 +342,11 @@ export function summarizeNode(node: BuilderNode): string | null {
       }, 0);
       if (text.length > 0) {
         return rowCount > 0
-          ? `${truncate(text, 50)} · ${rowCount} option${rowCount === 1 ? '' : 's'}`
+          ? `${truncate(text, 50)} · ${rowCount} ${rowCount === 1 ? 'opção' : 'opções'}`
           : truncate(text);
       }
       return rowCount > 0
-        ? `${rowCount} option${rowCount === 1 ? '' : 's'} across ${sections.length} section${sections.length === 1 ? '' : 's'}`
+        ? `${rowCount} ${rowCount === 1 ? 'opção' : 'opções'} em ${sections.length} ${sections.length === 1 ? 'seção' : 'seções'}`
         : null;
     }
     case 'send_media': {
@@ -355,11 +355,14 @@ export function summarizeNode(node: BuilderNode): string | null {
       const filename = typeof cfg.filename === 'string' ? cfg.filename : '';
       const url = typeof cfg.media_url === 'string' ? cfg.media_url : '';
       const caption = typeof cfg.caption === 'string' ? cfg.caption : '';
-      const label = mediaType
-        ? mediaType.charAt(0).toUpperCase() + mediaType.slice(1)
-        : 'Media';
-      if (!url) return `${label} (no file uploaded)`;
-      const name = filename || url.split('/').pop() || 'file';
+      const MEDIA_TYPE_LABEL: Record<string, string> = {
+        image: 'Imagem',
+        video: 'Vídeo',
+        document: 'Documento',
+      };
+      const label = mediaType ? MEDIA_TYPE_LABEL[mediaType] ?? 'Mídia' : 'Mídia';
+      if (!url) return `${label} (nenhum arquivo enviado)`;
+      const name = filename || url.split('/').pop() || 'arquivo';
       return caption
         ? `${label}: ${truncate(name, 30)} · ${truncate(caption, 40)}`
         : `${label}: ${truncate(name, 60)}`;
@@ -386,17 +389,17 @@ export function summarizeNode(node: BuilderNode): string | null {
             : 'var';
       const subjectStr =
         subject === 'tag'
-          ? `has tag ${truncate(subjectKey, 24)}`
+          ? `tem a tag ${truncate(subjectKey, 24)}`
           : `${subject}.${subjectKey}`;
       const op =
         cfg.operator === 'equals'
           ? '=='
           : cfg.operator === 'contains'
-            ? 'contains'
+            ? 'contém'
             : cfg.operator === 'present'
-              ? 'exists'
+              ? 'existe'
               : cfg.operator === 'absent'
-                ? 'missing'
+                ? 'ausente'
                 : '';
       const value = typeof cfg.value === 'string' ? cfg.value : '';
       const valStr =
@@ -406,14 +409,14 @@ export function summarizeNode(node: BuilderNode): string | null {
       return subject === 'tag' ? subjectStr : `${subjectStr} ${op}${valStr}`;
     }
     case 'set_tag': {
-      const mode = cfg.mode === 'remove' ? 'Remove' : 'Add';
+      const mode = cfg.mode === 'remove' ? 'Remover' : 'Adicionar';
       const tagId = typeof cfg.tag_id === 'string' ? cfg.tag_id : '';
       // No tag name available without an async lookup here; show a
       // short prefix of the UUID so users can disambiguate between
       // multiple set_tag nodes at a glance.
       return tagId
         ? `${mode} tag ${tagId.slice(0, 8)}…`
-        : `${mode} tag (none picked)`;
+        : `${mode} tag (nenhuma selecionada)`;
     }
     case 'handoff': {
       const note = typeof cfg.note === 'string' ? cfg.note : '';
