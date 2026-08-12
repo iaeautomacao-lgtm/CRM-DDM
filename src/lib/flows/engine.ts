@@ -34,6 +34,7 @@
 
 import { supabaseAdmin } from "./admin-client";
 import {
+  engineMetaSendTemplate,
   engineSendInteractiveButtons,
   engineSendInteractiveList,
   engineSendMedia,
@@ -47,6 +48,8 @@ import {
 } from "./waha-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
+  type AddNoteNodeConfig,
+  type AnchorNodeConfig,
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
   type DispatchInboundInput,
@@ -54,15 +57,25 @@ import {
   type FlowNodeRow,
   type FlowRow,
   type FlowRunRow,
+  type GoToFlowNodeConfig,
+  type GoToNodeConfig,
+  type HttpFetchNodeConfig,
   type ParsedInbound,
+  type ReceiveAttachmentNodeConfig,
   type SendButtonsNodeConfig,
   type SendListNodeConfig,
   type SendMediaNodeConfig,
   type SendMessageNodeConfig,
+  type SendTemplateNodeConfig,
   type SetTagNodeConfig,
+  type SetVariableNodeConfig,
+  type SmartDelayNodeConfig,
   type StartNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
+
+/** go_to's jump cap — catches cyclical anchor chains without spinning forever. */
+const MAX_HOPS = 50;
 
 // ============================================================
 // Pure helpers — extracted so engine.test.ts can exercise them
@@ -242,7 +255,7 @@ async function loadFlow(
  * cleanly (every subsequent .get() returns undefined → the run
  * fails with node_not_found, same as the old per-node lookup).
  */
-async function loadAllNodes(
+export async function loadAllNodes(
   db: AdminClient,
   flowId: string,
 ): Promise<Map<string, FlowNodeRow>> {
@@ -622,12 +635,13 @@ async function executeHandoff(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<void> {
-  const cfg = node.config as { assign_to?: string; note?: string };
+  const cfg = node.config as { assign_to?: string; team_id?: string; note?: string };
   const convUpdate: Record<string, unknown> = {
     status: "pending",
     updated_at: new Date().toISOString(),
   };
   if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
+  if (cfg.team_id) convUpdate.team_id = cfg.team_id;
   if (run.conversation_id) {
     await db
       .from("conversations")
@@ -637,6 +651,7 @@ async function executeHandoff(
   await logEvent(db, run.id, "handoff", node.node_key, {
     note: cfg.note ?? null,
     assigned_to: cfg.assign_to ?? null,
+    team_id: cfg.team_id ?? null,
   });
   await endRun(db, run.id, "handed_off", "handoff_node");
 }
@@ -708,10 +723,46 @@ function interpolateVars(template: string, vars: Record<string, unknown>): strin
   });
 }
 
+/**
+ * Merge `patch` into `run.vars`, persist, and mirror the merge back
+ * onto the in-memory `run` — same "write once, keep the local copy in
+ * sync" pattern as the collect_input capture and the WAHA button-map
+ * writes in sendButtonsViaProvider/sendListViaProvider.
+ */
+async function updateRunVars(
+  db: AdminClient,
+  run: FlowRunRow,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const newVars = { ...run.vars, ...patch };
+  const { error } = await db
+    .from("flow_runs")
+    .update({ vars: newVars })
+    .eq("id", run.id);
+  if (!error) run.vars = newVars;
+}
+
+/** Classify a MIME type into receive_attachment's allowed_types buckets. */
+function mimeToAttachmentKind(
+  mime: string,
+): "image" | "video" | "audio" | "document" | null {
+  if (!mime) return null;
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
 async function endRun(
   db: AdminClient,
   runId: string,
-  status: "completed" | "handed_off" | "timed_out" | "failed",
+  status:
+    | "completed"
+    | "handed_off"
+    | "timed_out"
+    | "failed"
+    | "error"
+    | "transferred",
   reason: string,
 ): Promise<void> {
   await db
@@ -731,12 +782,12 @@ async function endRun(
 // new current_node_key before returning.
 // ============================================================
 
-async function advanceFromNodeKey(
+export async function advanceFromNodeKey(
   db: AdminClient,
   run: FlowRunRow,
   startNodeKey: string,
   nodes: Map<string, FlowNodeRow>,
-): Promise<{ outcome: "advanced" | "completed" | "handed_off" }> {
+): Promise<{ outcome: "advanced" | "completed" | "handed_off" | "transferred" }> {
   let currentKey: string | null = startNodeKey;
   // Defensive cap — if a flow has a cycle (which the validator
   // SHOULD catch but doesn't yet in v1), we bail rather than loop.
@@ -947,6 +998,225 @@ async function advanceFromNodeKey(
       await endRun(db, run.id, "completed", "end_node");
       return { outcome: "completed" };
     }
+    if (node.node_type === "http_fetch") {
+      const cfg = node.config as unknown as HttpFetchNodeConfig;
+      const url = interpolateVars(cfg.url, run.vars);
+      const timeoutMs = (cfg.timeout_seconds ?? 10) * 1000;
+      try {
+        const res = await fetch(url, {
+          method: cfg.method,
+          headers: cfg.headers,
+          body:
+            cfg.method === "GET" || !cfg.body_template
+              ? undefined
+              : interpolateVars(cfg.body_template, run.vars),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (cfg.response_var) {
+          let parsed: unknown;
+          try {
+            parsed = await res.clone().json();
+          } catch {
+            parsed = await res.text();
+          }
+          await updateRunVars(db, run, { [cfg.response_var]: parsed });
+        }
+        // Status code only — never the response body, which may carry
+        // tokens/PII from whatever third-party API this points at.
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          node_type: "http_fetch",
+          status: res.status,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "http_fetch_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "set_variable") {
+      const cfg = node.config as unknown as SetVariableNodeConfig;
+      const patch: Record<string, unknown> = {};
+      for (const a of cfg.assignments ?? []) {
+        if (!a.variable) continue;
+        patch[a.variable] = interpolateVars(a.value, run.vars);
+      }
+      await updateRunVars(db, run, patch);
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "smart_delay") {
+      const cfg = node.config as unknown as SmartDelayNodeConfig;
+      if (cfg.message) {
+        try {
+          await sendTextViaProvider(run, {
+            text: interpolateVars(cfg.message, run.vars),
+          });
+          await logEvent(db, run.id, "message_sent", node.node_key, {
+            node_type: "smart_delay",
+          });
+        } catch (err) {
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "smart_delay_message_failed",
+            detail: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      const advanced = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (advanced) {
+        const wakeAt = new Date(
+          Date.now() + cfg.delay_seconds * 1000,
+        ).toISOString();
+        await db
+          .from("flow_runs")
+          .update({ status: "delayed", wake_at: wakeAt })
+          .eq("id", run.id);
+      } else {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
+    }
+    if (node.node_type === "anchor") {
+      const cfg = node.config as unknown as AnchorNodeConfig;
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "go_to") {
+      const cfg = node.config as unknown as GoToNodeConfig;
+      if (run.hops_count >= MAX_HOPS) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "go_to_hop_limit_exceeded",
+        });
+        await endRun(db, run.id, "error", "go_to_hop_limit_exceeded");
+        return { outcome: "completed" };
+      }
+      run.hops_count += 1;
+      await db
+        .from("flow_runs")
+        .update({ hops_count: run.hops_count })
+        .eq("id", run.id);
+      currentKey = cfg.target_node_key;
+      continue;
+    }
+    if (node.node_type === "go_to_flow") {
+      const cfg = node.config as unknown as GoToFlowNodeConfig;
+      const targetFlow = await loadFlow(db, cfg.flow_id);
+      if (
+        !targetFlow ||
+        targetFlow.account_id !== run.account_id ||
+        targetFlow.status !== "active" ||
+        !targetFlow.entry_node_id
+      ) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "go_to_flow_invalid_target",
+          flow_id: cfg.flow_id,
+        });
+        await endRun(db, run.id, "error", "go_to_flow_invalid_target");
+        return { outcome: "completed" };
+      }
+      await endRun(db, run.id, "transferred", "go_to_flow");
+      const targetNodes = await loadAllNodes(db, targetFlow.id);
+      await startTransferredRun(db, targetFlow, run, cfg.pass_vars, targetNodes);
+      return { outcome: "transferred" };
+    }
+    if (node.node_type === "send_template") {
+      const cfg = node.config as unknown as SendTemplateNodeConfig;
+      try {
+        const provider = run.config_id
+          ? await getConfigProvider(run.config_id)
+          : "meta";
+        if (provider === "waha") {
+          if (cfg.fallback_text) {
+            await sendTextViaProvider(run, {
+              text: interpolateVars(cfg.fallback_text, run.vars),
+            });
+          }
+        } else {
+          await engineMetaSendTemplate({
+            accountId: run.account_id,
+            configId: run.config_id ?? undefined,
+            conversationId: run.conversation_id!,
+            contactId: run.contact_id!,
+            templateName: cfg.template_name,
+            languageCode: cfg.language_code,
+            components: cfg.components,
+          });
+        }
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_template",
+          template_name: cfg.template_name,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_template_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "send_template_failed");
+        return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "add_note") {
+      const cfg = node.config as unknown as AddNoteNodeConfig;
+      try {
+        await db.from("contact_notes").insert({
+          contact_id: run.contact_id!,
+          user_id: run.user_id,
+          note_text: interpolateVars(cfg.note_text, run.vars),
+        });
+      } catch (err) {
+        // Non-fatal — a note-write failure shouldn't strand the customer.
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "add_note_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "receive_attachment") {
+      const cfg = node.config as unknown as ReceiveAttachmentNodeConfig;
+      if (cfg.prompt_text) {
+        try {
+          const { whatsapp_message_id } = await sendTextViaProvider(run, {
+            text: interpolateVars(cfg.prompt_text, run.vars),
+          });
+          await logEvent(db, run.id, "message_sent", node.node_key, {
+            node_type: "receive_attachment",
+            whatsapp_message_id,
+          });
+        } catch (err) {
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "receive_attachment_prompt_failed",
+            detail: err instanceof Error ? err.message : String(err),
+          });
+          await endRun(db, run.id, "failed", "receive_attachment_prompt_failed");
+          return { outcome: "completed" };
+        }
+      }
+      const advanced = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (!advanced) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
+    }
     // Unknown node type — shouldn't happen given the CHECK constraint.
     await logEvent(db, run.id, "error", node.node_key, {
       reason: `unknown_node_type:${node.node_type}`,
@@ -1141,6 +1411,22 @@ async function handleReplyForActiveRun(
   ) {
     matched = matchReplyId(currentNode, effectiveMessage.reply_id);
   } else if (
+    effectiveMessage.kind === "attachment" &&
+    currentNode.node_type === "receive_attachment"
+  ) {
+    const cfg = currentNode.config as unknown as ReceiveAttachmentNodeConfig;
+    const kind = mimeToAttachmentKind(effectiveMessage.mime_type);
+    if (!cfg.allowed_types?.length || (kind && cfg.allowed_types.includes(kind))) {
+      await updateRunVars(db, run, { [cfg.var_name]: effectiveMessage.url });
+      await logEvent(db, run.id, "node_entered", currentNode.node_key, {
+        captured_key: cfg.var_name,
+        mime_type: effectiveMessage.mime_type,
+      });
+      matched = cfg.next_node_key;
+    }
+    // else: attachment type not allowed — falls through to the
+    // fallback policy below, same as an unmatched collect_input reply.
+  } else if (
     effectiveMessage.kind === "text" &&
     currentNode.node_type === "collect_input"
   ) {
@@ -1327,4 +1613,60 @@ async function startNewRun(
     flow_run_id: run.id,
     outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
   };
+}
+
+/**
+ * go_to_flow's run-creation path. Mirrors startNewRun's INSERT, but
+ * there's no inbound ParsedInbound to log — the transfer is
+ * engine-driven, not a fresh customer message — and it optionally
+ * seeds the new run's vars from the source run (`pass_vars`). Caller
+ * (the go_to_flow branch in advanceFromNodeKey) has already ended the
+ * source run with status='transferred' before calling this, so the
+ * partial unique index `idx_one_active_run_per_contact` never sees
+ * two active rows for the same contact.
+ */
+async function startTransferredRun(
+  db: AdminClient,
+  targetFlow: FlowRow,
+  sourceRun: FlowRunRow,
+  passVars: boolean,
+  nodes: Map<string, FlowNodeRow>,
+): Promise<void> {
+  const { data: inserted, error: insErr } = await db
+    .from("flow_runs")
+    .insert({
+      flow_id: targetFlow.id,
+      account_id: targetFlow.account_id,
+      user_id: targetFlow.user_id,
+      contact_id: sourceRun.contact_id,
+      conversation_id: sourceRun.conversation_id,
+      config_id: sourceRun.config_id,
+      status: "active",
+      current_node_key: targetFlow.entry_node_id,
+      vars: passVars ? sourceRun.vars : {},
+    })
+    .select("*")
+    .maybeSingle();
+  if (insErr) {
+    // 23505 = unique_violation — same race as startNewRun; the contact
+    // already has an active run (started by a parallel webhook), so
+    // this transfer is a no-op rather than a hard failure.
+    const msg = insErr.message ?? "";
+    if (msg.includes("23505") || msg.includes("duplicate key")) return;
+    console.error("[flows] startTransferredRun insert error:", insErr.message);
+    return;
+  }
+  const newRun = inserted as FlowRunRow;
+  await logEvent(db, newRun.id, "started", targetFlow.entry_node_id, {
+    flow_id: targetFlow.id,
+    trigger_type: "go_to_flow",
+    transferred_from_run_id: sourceRun.id,
+  });
+  const { error: incErr } = await db.rpc("increment_flow_execution_count", {
+    p_flow_id: targetFlow.id,
+  });
+  if (incErr) {
+    console.error("[flows] execution_count rpc error:", incErr.message);
+  }
+  await advanceFromNodeKey(db, newRun, targetFlow.entry_node_id!, nodes);
 }

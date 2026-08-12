@@ -105,6 +105,13 @@ export interface HandoffNodeConfig {
    * node fires. Leave unset to flip the status without assignment.
    */
   assign_to?: string;
+  /**
+   * Optional team id to route the conversation to when this node
+   * fires. Independent of `assign_to` — either, both, or neither can
+   * be set (same "agent and team are independent fields" model as
+   * the Monitoramento transfer dialog).
+   */
+  team_id?: string;
 }
 
 /**
@@ -177,6 +184,112 @@ export interface SetTagNodeConfig {
 export type EndNodeConfig = Record<string, never>;
 
 /**
+ * Calls an external HTTP endpoint and (optionally) stores the response
+ * in `flow_runs.vars`. `url` and `body_template` support the same
+ * `{{vars.X}}` interpolation as send_message. Errors are logged (status
+ * code only — never the response body, which may carry tokens/PII) and
+ * the run advances to `next_node_key` regardless of success/failure, so
+ * a flaky third-party API never strands a customer mid-flow.
+ */
+export interface HttpFetchNodeConfig {
+  url: string;
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  headers?: Record<string, string>;
+  body_template?: string;
+  /** Key under which the parsed response is stored in flow_runs.vars. */
+  response_var?: string;
+  /** Defaults to 10s when unset; builder caps this at 30s. */
+  timeout_seconds?: number;
+  next_node_key: string;
+}
+
+/**
+ * Writes one or more literal/interpolated values into `flow_runs.vars`
+ * without waiting on customer input. Each `value` supports
+ * `{{vars.X}}` interpolation against the vars captured so far.
+ */
+export interface SetVariableNodeConfig {
+  assignments: Array<{ variable: string; value: string }>;
+  next_node_key: string;
+}
+
+/**
+ * Suspends the run for `delay_seconds`, optionally sending a message
+ * first. The cron sweep (flows/cron route) wakes runs whose `wake_at`
+ * has passed and resumes at `next_node_key`.
+ */
+export interface SmartDelayNodeConfig {
+  delay_seconds: number;
+  message?: string;
+  next_node_key: string;
+}
+
+/**
+ * A no-op passthrough node. Exists so `go_to` has a stable, human-named
+ * landing target instead of pointing at an arbitrary mid-flow node key
+ * that might get reshuffled as the flow is edited.
+ */
+export interface AnchorNodeConfig {
+  label: string;
+  next_node_key: string;
+}
+
+/**
+ * Unconditional jump to another node in the SAME flow (typically an
+ * `anchor`). Guarded by `flow_runs.hops_count` (MAX 50) so a cyclical
+ * go_to chain fails the run instead of looping forever.
+ */
+export interface GoToNodeConfig {
+  target_node_key: string;
+}
+
+/**
+ * Ends the current run with status='transferred' and starts a new run
+ * on `flow_id` for the same contact/conversation. `pass_vars` copies
+ * the current run's `vars` into the new run's initial vars.
+ */
+export interface GoToFlowNodeConfig {
+  flow_id: string;
+  pass_vars: boolean;
+}
+
+/**
+ * Sends a Meta HSM template. WAHA has no template concept — when the
+ * run's provider is WAHA, `fallback_text` is sent as plain text instead
+ * (if set; otherwise the node is a no-op send and just advances).
+ */
+export interface SendTemplateNodeConfig {
+  template_name: string;
+  language_code: string;
+  components?: unknown[];
+  fallback_text?: string;
+  next_node_key: string;
+}
+
+/**
+ * Writes an internal note (not delivered to the customer) onto the
+ * conversation, e.g. for agents picking up a handoff later. Supports
+ * `{{vars.X}}` interpolation.
+ */
+export interface AddNoteNodeConfig {
+  note_text: string;
+  next_node_key: string;
+}
+
+/**
+ * Suspends awaiting a media message from the customer. Optionally
+ * prompts first. `var_name` is where the attachment URL lands in
+ * `flow_runs.vars`; `allowed_types` restricts which media kinds are
+ * accepted (unset = any).
+ */
+export interface ReceiveAttachmentNodeConfig {
+  prompt_text?: string;
+  var_name: string;
+  allowed_types?: Array<"image" | "video" | "audio" | "document">;
+  next_node_key: string;
+}
+
+/**
  * Total union — every concrete node_type the v1 engine understands.
  * Add new node types here and the engine's switch will flag missing
  * cases via TypeScript's exhaustiveness check.
@@ -194,7 +307,16 @@ export type FlowNodeConfig =
   | { node_type: "condition"; config: ConditionNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
-  | { node_type: "end"; config: EndNodeConfig };
+  | { node_type: "end"; config: EndNodeConfig }
+  | { node_type: "http_fetch"; config: HttpFetchNodeConfig }
+  | { node_type: "set_variable"; config: SetVariableNodeConfig }
+  | { node_type: "smart_delay"; config: SmartDelayNodeConfig }
+  | { node_type: "anchor"; config: AnchorNodeConfig }
+  | { node_type: "go_to"; config: GoToNodeConfig }
+  | { node_type: "go_to_flow"; config: GoToFlowNodeConfig }
+  | { node_type: "send_template"; config: SendTemplateNodeConfig }
+  | { node_type: "add_note"; config: AddNoteNodeConfig }
+  | { node_type: "receive_attachment"; config: ReceiveAttachmentNodeConfig };
 
 export type FlowNodeType = FlowNodeConfig["node_type"];
 
@@ -270,7 +392,13 @@ export interface FlowRunRow {
     | "handed_off"
     | "timed_out"
     | "paused_by_agent"
-    | "failed";
+    | "failed"
+    /** go_to hit MAX_HOPS (50) without reaching a stopping node. */
+    | "error"
+    /** Ended via go_to_flow — a new run was started on another flow. */
+    | "transferred"
+    /** Suspended by a smart_delay node; wake_at holds the resume time. */
+    | "delayed";
   current_node_key: string | null;
   last_prompt_message_id: string | null;
   vars: Record<string, unknown>;
@@ -286,6 +414,10 @@ export interface FlowRunRow {
    * pick Meta vs WAHA and, for WAHA, which line.
    */
   config_id: string | null;
+  /** When status='delayed', the time the cron should resume this run (migration 058). */
+  wake_at: string | null;
+  /** go_to jump counter (migration 058) — capped at MAX_HOPS (50) to catch cycles. */
+  hops_count: number;
 }
 
 // ============================================================
@@ -343,6 +475,14 @@ export type ParsedInbound =
       meta_message_id: string;
       /** See the `text` variant's `message_id` for why this exists. */
       message_id?: string;
+    }
+  | {
+      kind: "attachment";
+      /** Public URL the runner can hand to a receive_attachment node. */
+      url: string;
+      mime_type: string;
+      message_id: string;
+      meta_message_id: string;
     };
 
 export interface DispatchInboundInput {
@@ -383,7 +523,9 @@ export interface DispatchInboundResult {
     | "handed_off"
     | "fallback_fired"
     | "duplicate_inbound_ignored"
-    | "no_match";
+    | "no_match"
+    /** Ended via go_to_flow — a new run was started on another flow. */
+    | "transferred";
 }
 
 // ============================================================

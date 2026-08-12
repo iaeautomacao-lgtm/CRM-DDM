@@ -36,6 +36,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -44,8 +45,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
+import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
 
@@ -190,12 +195,7 @@ export function NodeConfigForm({
 
     case "handoff":
       return (
-        <TextRow
-          label="Nota interna (para o agente que assumir)"
-          value={(cfg as { note?: string }).note ?? ""}
-          onChange={(v) => onUpdateConfig({ note: v })}
-          rows={2}
-        />
+        <HandoffForm cfg={cfg as HandoffCfg} onUpdateConfig={onUpdateConfig} />
       );
 
     case "end":
@@ -204,6 +204,124 @@ export function NodeConfigForm({
           Nó terminal. Quando o motor chega a este nó, a execução é marcada
           como concluída. Não precisa de configuração.
         </p>
+      );
+
+    case "http_fetch":
+      return (
+        <HttpFetchForm
+          cfg={cfg as HttpFetchCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "set_variable":
+      return (
+        <SetVariableForm
+          cfg={cfg as SetVariableCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "smart_delay":
+      return (
+        <SmartDelayForm
+          cfg={cfg as SmartDelayCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "anchor":
+      return (
+        <>
+          <TextRow
+            label="Nome da âncora"
+            value={(cfg as { label?: string }).label ?? ""}
+            onChange={(v) => onUpdateConfig({ label: v })}
+          />
+          <NextNodeRow
+            value={(cfg as { next_node_key?: string }).next_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={node.node_key}
+            onChange={(v) => onUpdateConfig({ next_node_key: v })}
+            label="Avança para"
+          />
+        </>
+      );
+
+    case "go_to": {
+      const anchors = allNodes.filter((n) => n.node_type === "anchor");
+      return (
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Ir para âncora
+          </label>
+          <NodeKeySelect
+            value={(cfg as { target_node_key?: string }).target_node_key || null}
+            nodes={anchors}
+            excludeKey={node.node_key}
+            onChange={(v) => onUpdateConfig({ target_node_key: v ?? "" })}
+            placeholder="Escolha uma âncora…"
+          />
+          {anchors.length === 0 && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              Nenhuma âncora neste fluxo ainda — adicione um nó &quot;Âncora&quot; primeiro.
+            </p>
+          )}
+        </div>
+      );
+    }
+
+    case "go_to_flow":
+      return (
+        <GoToFlowForm
+          cfg={cfg as GoToFlowCfg}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "send_template":
+      return (
+        <SendTemplateForm
+          cfg={cfg as SendTemplateCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "add_note":
+      return (
+        <>
+          <TextRow
+            label="Texto da nota (interna — o cliente não vê)"
+            value={(cfg as { note_text?: string }).note_text ?? ""}
+            onChange={(v) => onUpdateConfig({ note_text: v })}
+            rows={3}
+          />
+          <NextNodeRow
+            value={(cfg as { next_node_key?: string }).next_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={node.node_key}
+            onChange={(v) => onUpdateConfig({ next_node_key: v })}
+            label="Avança para"
+          />
+        </>
+      );
+
+    case "receive_attachment":
+      return (
+        <ReceiveAttachmentForm
+          cfg={cfg as ReceiveAttachmentCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
       );
   }
 }
@@ -849,6 +967,193 @@ function useUserTags(): UserTag[] {
 }
 
 // ============================================================
+// handoff
+// ============================================================
+
+interface HandoffCfg {
+  note?: string;
+  assign_to?: string;
+  team_id?: string;
+}
+
+interface HandoffTeamOption {
+  id: string;
+  name: string;
+}
+
+interface HandoffAgentOption {
+  user_id: string;
+  full_name: string;
+  team_id: string | null;
+}
+
+const HANDOFF_ANY_TEAM = "__any_team__";
+const HANDOFF_ANY_AGENT = "__any_agent__";
+
+/**
+ * Loads the account's teams + agents for the handoff node's Selects.
+ * Both `teams` and `profiles` allow any account member to SELECT
+ * (migrations 049 / 017), so this queries Supabase directly — same
+ * pattern as MembersTab's team roster load — no dedicated API route.
+ */
+function useHandoffOptions(): {
+  teams: HandoffTeamOption[];
+  agents: HandoffAgentOption[];
+  loading: boolean;
+} {
+  const { accountId } = useAuth();
+  const [teams, setTeams] = useState<HandoffTeamOption[]>([]);
+  const [agents, setAgents] = useState<HandoffAgentOption[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!accountId) return;
+    let cancelled = false;
+    const supabase = createClient();
+    (async () => {
+      setLoading(true);
+      const [tRes, aRes] = await Promise.all([
+        supabase
+          .from("teams")
+          .select("id, name")
+          .eq("account_id", accountId)
+          .order("name"),
+        supabase
+          .from("profiles")
+          .select("user_id, full_name, team_id")
+          .eq("account_id", accountId)
+          .order("full_name"),
+      ]);
+      if (cancelled) return;
+      if (tRes.error) {
+        console.error("[HandoffForm] teams load error:", tRes.error);
+      } else {
+        setTeams((tRes.data ?? []) as HandoffTeamOption[]);
+      }
+      if (aRes.error) {
+        console.error("[HandoffForm] agents load error:", aRes.error);
+      } else {
+        setAgents(
+          (aRes.data ?? []).map((row) => ({
+            user_id: (row as { user_id: string }).user_id,
+            full_name: (row as { full_name: string | null }).full_name || "Sem nome",
+            team_id: (row as { team_id: string | null }).team_id,
+          })),
+        );
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
+
+  return { teams, agents, loading };
+}
+
+function HandoffForm({
+  cfg,
+  onUpdateConfig,
+}: {
+  cfg: HandoffCfg;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const { teams, agents, loading } = useHandoffOptions();
+  const teamId = cfg.team_id ?? "";
+  const agentId = cfg.assign_to ?? "";
+  const agentOptions = teamId
+    ? agents.filter((a) => a.team_id === teamId)
+    : agents;
+
+  // Precomputed as plain strings (not a SelectValue render-prop) so the
+  // trigger's closed-state text is always the resolved name, never the
+  // raw id — SelectValue's own store-driven label resolution is what
+  // was leaking the UUID.
+  const teamLabel = teamId
+    ? teams.find((t) => t.id === teamId)?.name ?? "Qualquer equipe"
+    : "Qualquer equipe";
+  const agentLabel = agentId
+    ? agents.find((a) => a.user_id === agentId)?.full_name ??
+      "Qualquer agente disponível"
+    : "Qualquer agente disponível";
+
+  return (
+    <>
+      <div className="flex flex-col gap-3">
+        <div className="w-full">
+          <label className="mb-1 block text-xs text-muted-foreground">Equipe</label>
+          <Select
+            value={teamId || HANDOFF_ANY_TEAM}
+            onValueChange={(v) => {
+              const nextTeamId = v === HANDOFF_ANY_TEAM ? undefined : v;
+              // Switching team drops an agent pick that no longer
+              // belongs to it, same UX as the Monitoramento transfer
+              // dialog's independent-but-filtered fields.
+              const patch: Record<string, unknown> = { team_id: nextTeamId };
+              if (
+                nextTeamId &&
+                agentId &&
+                agents.find((a) => a.user_id === agentId)?.team_id !== nextTeamId
+              ) {
+                patch.assign_to = undefined;
+              }
+              onUpdateConfig(patch);
+            }}
+            disabled={loading}
+          >
+            <SelectTrigger className="w-full bg-muted">
+              <SelectValue placeholder="Qualquer equipe">
+                {loading ? "Carregando…" : teamLabel}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={HANDOFF_ANY_TEAM}>Qualquer equipe</SelectItem>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="w-full">
+          <label className="mb-1 block text-xs text-muted-foreground">Agente</label>
+          <Select
+            value={agentId || HANDOFF_ANY_AGENT}
+            onValueChange={(v) =>
+              onUpdateConfig({ assign_to: v === HANDOFF_ANY_AGENT ? undefined : v })
+            }
+            disabled={loading}
+          >
+            <SelectTrigger className="w-full bg-muted">
+              <SelectValue placeholder="Qualquer agente disponível">
+                {loading ? "Carregando…" : agentLabel}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={HANDOFF_ANY_AGENT}>
+                Qualquer agente disponível
+              </SelectItem>
+              {agentOptions.map((a) => (
+                <SelectItem key={a.user_id} value={a.user_id}>
+                  {a.full_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <TextRow
+        label="Nota interna (para o agente que assumir)"
+        value={cfg.note ?? ""}
+        onChange={(v) => onUpdateConfig({ note: v })}
+        rows={2}
+      />
+    </>
+  );
+}
+
+// ============================================================
 // send_media
 // ============================================================
 
@@ -1042,6 +1347,595 @@ function SendMediaForm({
         currentKey={currentKey}
         onChange={(v) => onUpdateConfig({ next_node_key: v })}
         label="Depois de enviar, avança para"
+      />
+    </>
+  );
+}
+
+// ============================================================
+// http_fetch
+// ============================================================
+
+interface HttpFetchCfg {
+  url?: string;
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  headers?: Record<string, string>;
+  body_template?: string;
+  response_var?: string;
+  timeout_seconds?: number;
+  next_node_key?: string;
+}
+
+function HttpFetchForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: HttpFetchCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const method = cfg.method ?? "GET";
+  // Headers are edited as raw JSON text — buffered in local state so
+  // an in-progress edit (temporarily invalid JSON) doesn't get
+  // clobbered by re-deriving from cfg.headers on every keystroke.
+  const [headersText, setHeadersText] = useState(() =>
+    JSON.stringify(cfg.headers ?? {}, null, 2),
+  );
+  const [headersError, setHeadersError] = useState<string | null>(null);
+
+  return (
+    <>
+      <TextRow
+        label="URL"
+        value={cfg.url ?? ""}
+        onChange={(v) => onUpdateConfig({ url: v })}
+      />
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Método</label>
+          <Select
+            value={method}
+            onValueChange={(v) =>
+              onUpdateConfig({ method: v as HttpFetchCfg["method"] })
+            }
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="GET">GET</SelectItem>
+              <SelectItem value="POST">POST</SelectItem>
+              <SelectItem value="PUT">PUT</SelectItem>
+              <SelectItem value="PATCH">PATCH</SelectItem>
+              <SelectItem value="DELETE">DELETE</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Timeout (segundos)
+          </label>
+          <Input
+            type="number"
+            min={1}
+            max={30}
+            value={cfg.timeout_seconds ?? 10}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              onUpdateConfig({
+                timeout_seconds: Number.isFinite(n) ? Math.min(30, Math.max(1, n)) : 10,
+              });
+            }}
+            className="bg-muted"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Cabeçalhos (JSON, opcional)
+        </label>
+        <Textarea
+          value={headersText}
+          onChange={(e) => {
+            const text = e.target.value;
+            setHeadersText(text);
+            if (!text.trim()) {
+              setHeadersError(null);
+              onUpdateConfig({ headers: {} });
+              return;
+            }
+            try {
+              const parsed = JSON.parse(text);
+              setHeadersError(null);
+              onUpdateConfig({ headers: parsed });
+            } catch {
+              setHeadersError("JSON inválido — corrija antes de ativar o fluxo.");
+            }
+          }}
+          rows={3}
+          className="bg-muted font-mono text-xs"
+        />
+        {headersError && (
+          <p className="mt-1 text-[10px] text-red-400">{headersError}</p>
+        )}
+      </div>
+      {method !== "GET" && (
+        <TextRow
+          label="Corpo (aceita {{vars.X}})"
+          value={cfg.body_template ?? ""}
+          onChange={(v) => onUpdateConfig({ body_template: v })}
+          rows={3}
+        />
+      )}
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Variável para guardar a resposta (opcional)
+        </label>
+        <Input
+          value={cfg.response_var ?? ""}
+          onChange={(e) =>
+            onUpdateConfig({
+              response_var: e.target.value.replace(/[^a-zA-Z0-9_]/g, ""),
+            })
+          }
+          placeholder="ex.: resposta_api"
+          className="bg-muted font-mono text-xs"
+        />
+      </div>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Depois da chamada, avança para"
+      />
+    </>
+  );
+}
+
+// ============================================================
+// set_variable
+// ============================================================
+
+interface SetVariableCfg {
+  assignments?: Array<{ variable: string; value: string }>;
+  next_node_key?: string;
+}
+
+function SetVariableForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: SetVariableCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const assignments = cfg.assignments ?? [];
+  const updateAssignment = (
+    idx: number,
+    patch: Partial<{ variable: string; value: string }>,
+  ) => {
+    onUpdateConfig({
+      assignments: assignments.map((a, i) => (i === idx ? { ...a, ...patch } : a)),
+    });
+  };
+  const addAssignment = () =>
+    onUpdateConfig({
+      assignments: [...assignments, { variable: "", value: "" }],
+    });
+  const removeAssignment = (idx: number) =>
+    onUpdateConfig({ assignments: assignments.filter((_, i) => i !== idx) });
+
+  return (
+    <>
+      <div>
+        <label className="mb-2 block text-xs text-muted-foreground">
+          Variáveis a gravar em flow_runs.vars (o valor aceita {"{{vars.X}}"})
+        </label>
+        <div className="flex flex-col gap-2">
+          {assignments.map((a, i) => (
+            <div
+              key={i}
+              className="grid grid-cols-1 gap-2 rounded-md border border-border bg-muted/40 p-3 md:grid-cols-[1fr_2fr_auto]"
+            >
+              <Input
+                value={a.variable}
+                onChange={(e) =>
+                  updateAssignment(i, {
+                    variable: e.target.value.replace(/[^a-zA-Z0-9_]/g, ""),
+                  })
+                }
+                placeholder="variável"
+                className="bg-muted font-mono text-xs"
+              />
+              <Input
+                value={a.value}
+                onChange={(e) => updateAssignment(i, { value: e.target.value })}
+                placeholder="valor"
+                className="bg-muted"
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeAssignment(i)}
+                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+        <Button variant="ghost" size="sm" onClick={addAssignment} className="mt-2">
+          <Plus className="h-3.5 w-3.5" />
+          Adicionar variável
+        </Button>
+      </div>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Avança para"
+      />
+    </>
+  );
+}
+
+// ============================================================
+// smart_delay
+// ============================================================
+
+type DelayUnit = "seconds" | "minutes" | "hours";
+const DELAY_UNIT_SECONDS: Record<DelayUnit, number> = {
+  seconds: 1,
+  minutes: 60,
+  hours: 3600,
+};
+
+function guessDelayUnit(totalSeconds: number): DelayUnit {
+  if (totalSeconds > 0 && totalSeconds % 3600 === 0) return "hours";
+  if (totalSeconds > 0 && totalSeconds % 60 === 0) return "minutes";
+  return "seconds";
+}
+
+interface SmartDelayCfg {
+  delay_seconds?: number;
+  message?: string;
+  next_node_key?: string;
+}
+
+function SmartDelayForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: SmartDelayCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const totalSeconds = cfg.delay_seconds ?? 60;
+  // Local-only display unit — the config only ever stores delay_seconds.
+  const [unit, setUnit] = useState<DelayUnit>(() => guessDelayUnit(totalSeconds));
+  const displayValue = Math.max(1, Math.round(totalSeconds / DELAY_UNIT_SECONDS[unit]));
+
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Esperar</label>
+          <Input
+            type="number"
+            min={1}
+            value={displayValue}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              if (Number.isFinite(n) && n > 0) {
+                onUpdateConfig({
+                  delay_seconds: Math.min(86400, Math.round(n * DELAY_UNIT_SECONDS[unit])),
+                });
+              }
+            }}
+            className="bg-muted"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Unidade</label>
+          <Select
+            value={unit}
+            onValueChange={(v) => {
+              const nextUnit = v as DelayUnit;
+              setUnit(nextUnit);
+              onUpdateConfig({
+                delay_seconds: Math.min(
+                  86400,
+                  Math.round(displayValue * DELAY_UNIT_SECONDS[nextUnit]),
+                ),
+              });
+            }}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="seconds">Segundos</SelectItem>
+              <SelectItem value="minutes">Minutos</SelectItem>
+              <SelectItem value="hours">Horas</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="text-[10px] text-muted-foreground">Máximo de 24 horas (86400s).</p>
+      <TextRow
+        label="Mensagem antes de esperar (opcional)"
+        value={cfg.message ?? ""}
+        onChange={(v) => onUpdateConfig({ message: v })}
+        rows={2}
+      />
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Depois de esperar, avança para"
+      />
+    </>
+  );
+}
+
+// ============================================================
+// go_to_flow
+// ============================================================
+
+interface GoToFlowCfg {
+  flow_id?: string;
+  pass_vars?: boolean;
+}
+
+interface ActiveFlowOption {
+  id: string;
+  name: string;
+}
+
+/** Active flows the current account can transfer into via go_to_flow. */
+function useActiveFlows(): ActiveFlowOption[] {
+  const [flows, setFlows] = useState<ActiveFlowOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/flows").catch(() => null);
+        if (!res || !res.ok) return;
+        const json = (await res.json()) as {
+          flows?: Array<{ id: string; name: string; status: string }>;
+        };
+        const active = (json.flows ?? [])
+          .filter((f) => f.status === "active")
+          .map((f) => ({ id: f.id, name: f.name }));
+        if (!cancelled) setFlows(active);
+      } catch {
+        // Leave the picker empty — the raw-id fallback below still works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return flows;
+}
+
+function GoToFlowForm({
+  cfg,
+  onUpdateConfig,
+}: {
+  cfg: GoToFlowCfg;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const flows = useActiveFlows();
+
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Fluxo de destino
+        </label>
+        {flows.length > 0 ? (
+          <Select
+            value={cfg.flow_id ?? ""}
+            onValueChange={(v) => onUpdateConfig({ flow_id: v })}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue placeholder="Escolha um fluxo ativo…" />
+            </SelectTrigger>
+            <SelectContent>
+              {flows.map((f) => (
+                <SelectItem key={f.id} value={f.id}>
+                  {f.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Input
+            value={cfg.flow_id ?? ""}
+            onChange={(e) => onUpdateConfig({ flow_id: e.target.value })}
+            placeholder="UUID do fluxo de destino"
+            className="bg-muted font-mono text-xs"
+          />
+        )}
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Só fluxos com status &quot;ativo&quot; podem ser escolhidos aqui.
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch
+          checked={cfg.pass_vars ?? true}
+          onCheckedChange={(checked) => onUpdateConfig({ pass_vars: checked })}
+        />
+        <label className="text-xs text-muted-foreground">
+          Transferir variáveis capturadas para o novo fluxo
+        </label>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// send_template
+// ============================================================
+
+interface SendTemplateCfg {
+  template_name?: string;
+  language_code?: string;
+  fallback_text?: string;
+  next_node_key?: string;
+}
+
+function SendTemplateForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: SendTemplateCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  return (
+    <>
+      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-400">
+        Templates (HSM) só funcionam em canais Meta. Em canais WAHA, o texto
+        de fallback abaixo é enviado como mensagem comum.
+      </p>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <TextRow
+          label="Nome do template"
+          value={cfg.template_name ?? ""}
+          onChange={(v) => onUpdateConfig({ template_name: v })}
+        />
+        <TextRow
+          label="Código de idioma"
+          value={cfg.language_code ?? "pt_BR"}
+          onChange={(v) => onUpdateConfig({ language_code: v })}
+        />
+      </div>
+      <TextRow
+        label="Texto de fallback para WAHA (opcional)"
+        value={cfg.fallback_text ?? ""}
+        onChange={(v) => onUpdateConfig({ fallback_text: v })}
+        rows={2}
+      />
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Depois de enviar, avança para"
+      />
+    </>
+  );
+}
+
+// ============================================================
+// receive_attachment
+// ============================================================
+
+const ATTACHMENT_TYPE_OPTIONS: Array<{
+  value: "image" | "video" | "audio" | "document";
+  label: string;
+}> = [
+  { value: "image", label: "Imagem" },
+  { value: "video", label: "Vídeo" },
+  { value: "audio", label: "Áudio" },
+  { value: "document", label: "Documento" },
+];
+
+interface ReceiveAttachmentCfg {
+  prompt_text?: string;
+  var_name?: string;
+  allowed_types?: Array<"image" | "video" | "audio" | "document">;
+  next_node_key?: string;
+}
+
+function ReceiveAttachmentForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: ReceiveAttachmentCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const allowed = cfg.allowed_types ?? [];
+  const toggleType = (
+    type: "image" | "video" | "audio" | "document",
+    checked: boolean,
+  ) => {
+    onUpdateConfig({
+      allowed_types: checked
+        ? [...allowed, type]
+        : allowed.filter((t) => t !== type),
+    });
+  };
+
+  return (
+    <>
+      <TextRow
+        label="Mensagem de solicitação (opcional)"
+        value={cfg.prompt_text ?? ""}
+        onChange={(v) => onUpdateConfig({ prompt_text: v })}
+        rows={2}
+      />
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Nome da variável (guarda a URL do arquivo em flow_runs.vars)
+        </label>
+        <Input
+          value={cfg.var_name ?? ""}
+          onChange={(e) =>
+            onUpdateConfig({
+              var_name: e.target.value.replace(/[^a-zA-Z0-9_]/g, ""),
+            })
+          }
+          placeholder="ex.: comprovante"
+          className="bg-muted font-mono text-xs"
+        />
+      </div>
+      <div>
+        <label className="mb-2 block text-xs text-muted-foreground">
+          Tipos aceitos (nenhum selecionado = qualquer tipo)
+        </label>
+        <div className="flex flex-wrap gap-3">
+          {ATTACHMENT_TYPE_OPTIONS.map((opt) => (
+            <label
+              key={opt.value}
+              className="flex items-center gap-1.5 text-xs text-foreground"
+            >
+              <Checkbox
+                checked={allowed.includes(opt.value)}
+                onCheckedChange={(checked) => toggleType(opt.value, checked === true)}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Depois de receber, avança para"
       />
     </>
   );

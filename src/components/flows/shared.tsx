@@ -17,16 +17,25 @@
  */
 
 import {
+  Anchor as AnchorIcon,
+  Clock,
+  CornerDownRight,
+  FileDown,
+  FileText,
   Flag,
+  GitBranch,
   GitFork,
+  Globe,
   Inbox,
   ListChecks,
   ListPlus,
   MessageCircle,
   Paperclip,
   PlayCircle,
+  StickyNote,
   Tag,
   UserPlus,
+  Variable,
   Workflow,
 } from 'lucide-react';
 
@@ -50,7 +59,16 @@ export type NodeType =
   | 'condition'
   | 'set_tag'
   | 'handoff'
-  | 'end';
+  | 'end'
+  | 'http_fetch'
+  | 'set_variable'
+  | 'smart_delay'
+  | 'anchor'
+  | 'go_to'
+  | 'go_to_flow'
+  | 'send_template'
+  | 'add_note'
+  | 'receive_attachment';
 
 export interface BuilderNode {
   node_key: string;
@@ -166,6 +184,69 @@ export const NODE_META: Record<
     blurb: 'Encerra o fluxo',
     category: 'flow',
   },
+  http_fetch: {
+    label: 'Requisição HTTP',
+    icon: Globe,
+    color: 'text-amber-400',
+    blurb: 'Chama uma API externa e opcionalmente guarda a resposta',
+    category: 'logic',
+  },
+  set_variable: {
+    label: 'Definir variável',
+    icon: Variable,
+    color: 'text-purple-400',
+    blurb: 'Grava um ou mais valores em flow_runs.vars',
+    category: 'logic',
+  },
+  smart_delay: {
+    label: 'Aguardar',
+    icon: Clock,
+    color: 'text-slate-400',
+    blurb: 'Pausa o fluxo por um tempo antes de continuar',
+    category: 'flow',
+  },
+  anchor: {
+    label: 'Âncora',
+    icon: AnchorIcon,
+    color: 'text-lime-400',
+    blurb: 'Ponto de referência nomeado para o nó "Ir para"',
+    category: 'flow',
+  },
+  go_to: {
+    label: 'Ir para',
+    icon: CornerDownRight,
+    color: 'text-green-400',
+    blurb: 'Salta para uma âncora do mesmo fluxo',
+    category: 'flow',
+  },
+  go_to_flow: {
+    label: 'Ir para fluxo',
+    icon: GitBranch,
+    color: 'text-blue-400',
+    blurb: 'Transfere a conversa para outro fluxo',
+    category: 'flow',
+  },
+  send_template: {
+    label: 'Modelo de mensagem',
+    icon: FileText,
+    color: 'text-emerald-500',
+    blurb: 'Envia um template aprovado pela Meta (HSM)',
+    category: 'messaging',
+  },
+  add_note: {
+    label: 'Nota de atendimento',
+    icon: StickyNote,
+    color: 'text-orange-400',
+    blurb: 'Registra uma nota interna no contato',
+    category: 'logic',
+  },
+  receive_attachment: {
+    label: 'Receber anexo',
+    icon: FileDown,
+    color: 'text-fuchsia-400',
+    blurb: 'Espera o cliente enviar uma imagem, vídeo, áudio ou documento',
+    category: 'messaging',
+  },
 };
 
 /**
@@ -207,6 +288,15 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
   end: { l: 0.55, c: 0.01, h: 260 }, // neutral grey — terminal
+  http_fetch: { l: 0.68, c: 0.15, h: 50 }, // amber-gold — external call
+  set_variable: { l: 0.62, c: 0.16, h: 305 }, // purple — data write
+  smart_delay: { l: 0.55, c: 0.04, h: 240 }, // muted blue-grey — a pause, not a color
+  anchor: { l: 0.68, c: 0.13, h: 100 }, // yellow-green — a landing spot
+  go_to: { l: 0.65, c: 0.14, h: 125 }, // green — jumps to an anchor
+  go_to_flow: { l: 0.62, c: 0.15, h: 232 }, // blue — leaves to another flow
+  send_template: { l: 0.65, c: 0.14, h: 148 }, // green-emerald — an approved send
+  add_note: { l: 0.68, c: 0.16, h: 38 }, // orange — a flag for humans
+  receive_attachment: { l: 0.65, c: 0.17, h: 335 }, // magenta-pink — inbound media
 };
 
 export interface NodeColors {
@@ -420,7 +510,66 @@ export function summarizeNode(node: BuilderNode): string | null {
     }
     case 'handoff': {
       const note = typeof cfg.note === 'string' ? cfg.note : '';
-      return note.length > 0 ? truncate(note) : null;
+      const assignTo = typeof cfg.assign_to === 'string' ? cfg.assign_to : '';
+      const teamId = typeof cfg.team_id === 'string' ? cfg.team_id : '';
+      // No agent/team name available without an async lookup here —
+      // same tradeoff as set_tag above — so show a short id prefix.
+      const target = [
+        teamId ? `equipe ${teamId.slice(0, 8)}…` : '',
+        assignTo ? `agente ${assignTo.slice(0, 8)}…` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      if (note.length > 0) return target ? `${truncate(note, 40)} (${target})` : truncate(note);
+      return target || null;
+    }
+    case 'http_fetch': {
+      const method = typeof cfg.method === 'string' ? cfg.method : '';
+      const url = typeof cfg.url === 'string' ? cfg.url : '';
+      if (!url) return null;
+      return method ? `${method} ${truncate(url, 60)}` : truncate(url);
+    }
+    case 'set_variable': {
+      const assignments = Array.isArray(cfg.assignments)
+        ? (cfg.assignments as Array<Record<string, unknown>>)
+        : [];
+      const names = assignments
+        .map((a) => (typeof a.variable === 'string' ? a.variable : ''))
+        .filter(Boolean);
+      return names.length > 0 ? truncate(names.join(', ')) : null;
+    }
+    case 'smart_delay': {
+      const seconds =
+        typeof cfg.delay_seconds === 'number' ? cfg.delay_seconds : null;
+      if (seconds === null) return null;
+      return seconds % 60 === 0
+        ? `Aguarda ${seconds / 60} min`
+        : `Aguarda ${seconds}s`;
+    }
+    case 'anchor': {
+      const label = typeof cfg.label === 'string' ? cfg.label : '';
+      return label.length > 0 ? truncate(label) : null;
+    }
+    case 'go_to': {
+      const target =
+        typeof cfg.target_node_key === 'string' ? cfg.target_node_key : '';
+      return target ? `→ ${truncate(target, 40)}` : null;
+    }
+    case 'go_to_flow': {
+      const flowId = typeof cfg.flow_id === 'string' ? cfg.flow_id : '';
+      return flowId ? `Transfere para fluxo ${flowId.slice(0, 8)}…` : null;
+    }
+    case 'send_template': {
+      const name = typeof cfg.template_name === 'string' ? cfg.template_name : '';
+      return name.length > 0 ? truncate(name) : null;
+    }
+    case 'add_note': {
+      const text = typeof cfg.note_text === 'string' ? cfg.note_text : '';
+      return text.length > 0 ? truncate(text) : null;
+    }
+    case 'receive_attachment': {
+      const varName = typeof cfg.var_name === 'string' ? cfg.var_name : '';
+      return varName ? `→ vars.${varName}` : null;
     }
   }
 }
