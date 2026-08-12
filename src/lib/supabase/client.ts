@@ -9,6 +9,11 @@ let browserClient: SupabaseClient | undefined
 export function createClient(): SupabaseClient {
   if (browserClient) return browserClient
 
+  if (typeof window !== "undefined") {
+    console.log("[createClient] NEXT_PUBLIC_SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+    console.log("[createClient] NEXT_PUBLIC_SUPABASE_ANON_KEY present:", !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  }
+
   browserClient = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

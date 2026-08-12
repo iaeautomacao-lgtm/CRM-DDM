@@ -228,6 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const init = async () => {
       try {
+        console.log("[AuthProvider] init: calling getSession()");
         const {
           data: { session },
           error,
@@ -235,11 +236,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error) console.error("[AuthProvider] getSession error:", error.message);
 
+        console.log("[AuthProvider] init: session resolved:", session ? "Session exists!" : "No session");
         if (!mounted) return;
         const currentUser = session?.user ?? null;
         setUser(currentUser);
 
         if (currentUser) {
+          console.log("[AuthProvider] init: user ID is:", currentUser.id);
           // Don't block session loading on profile fetch — chrome
           // (header, sidebar) can render from the user object alone,
           // profile enriches async. Callers that need to branch on
@@ -263,7 +266,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("[AuthProvider] onAuthStateChange event:", event, "session exists:", !!session);
       if (!mounted) return;
       const currentUser = session?.user ?? null;
       setUser(currentUser);
