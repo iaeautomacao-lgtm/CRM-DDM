@@ -4,7 +4,7 @@ deployment:
     - export NVM_DIR=$HOME/.nvm
     - source $NVM_DIR/nvm.sh
     - nvm use 20.19.0
-    - npx npm@10 ci
-    - npx npm@10 run build
+    - npm ci
+    - npm run build
     - rsync -a --delete .next/ $HOME/apps/omnichannel/.next/
     - mkdir -p $HOME/apps/omnichannel/tmp && touch $HOME/apps/omnichannel/tmp/restart.txt
