@@ -48,13 +48,33 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
       case "send_message":
       case "send_media":
       case "collect_input":
-      case "set_tag": {
+      case "set_tag":
+      case "http_fetch":
+      case "set_variable":
+      case "smart_delay":
+      case "anchor":
+      case "send_template":
+      case "add_note":
+      case "receive_attachment": {
         const next = (cfg as { next_node_key?: string }).next_node_key;
         if (next && knownKeys.has(next)) {
           edges.push({
             id: `${node.node_key}--next--${next}`,
             source: node.node_key,
             target: next,
+            sourceHandle: "next",
+          });
+        }
+        break;
+      }
+
+      case "go_to": {
+        const target = (cfg as { target_node_key?: string }).target_node_key;
+        if (target && knownKeys.has(target)) {
+          edges.push({
+            id: `${node.node_key}--next--${target}`,
+            source: node.node_key,
+            target,
             sourceHandle: "next",
           });
         }
@@ -140,7 +160,10 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
 
       case "handoff":
       case "end":
-        // Terminal nodes — no outgoing edges.
+      case "go_to_flow":
+        // Terminal within this flow's graph — handoff/end stop the
+        // run, go_to_flow transfers to a DIFFERENT flow (its target
+        // is a flow_id, not a node_key in this graph).
         break;
     }
   }
@@ -179,6 +202,14 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     case "send_media":
     case "collect_input":
     case "set_tag":
+    case "http_fetch":
+    case "set_variable":
+    case "smart_delay":
+    case "anchor":
+    case "go_to":
+    case "send_template":
+    case "add_note":
+    case "receive_attachment":
       return [{ id: "next", label: "Próximo" }];
 
     case "condition":
@@ -228,6 +259,7 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
 
     case "handoff":
     case "end":
+    case "go_to_flow":
       return [];
   }
 }
@@ -253,7 +285,18 @@ export function applyEdgeConnection(
     case "send_media":
     case "collect_input":
     case "set_tag":
+    case "http_fetch":
+    case "set_variable":
+    case "smart_delay":
+    case "anchor":
+    case "send_template":
+    case "add_note":
+    case "receive_attachment":
       if (sourceHandle === "next") return { next_node_key: targetKey };
+      return null;
+
+    case "go_to":
+      if (sourceHandle === "next") return { target_node_key: targetKey };
       return null;
 
     case "condition":
@@ -312,6 +355,7 @@ export function applyEdgeConnection(
 
     case "handoff":
     case "end":
+    case "go_to_flow":
       return null;
   }
 }
@@ -346,10 +390,23 @@ function patchedConfigWithoutKey(
     case "send_message":
     case "send_media":
     case "collect_input":
-    case "set_tag": {
+    case "set_tag":
+    case "http_fetch":
+    case "set_variable":
+    case "smart_delay":
+    case "anchor":
+    case "send_template":
+    case "add_note":
+    case "receive_attachment": {
       const next = (cfg as { next_node_key?: string }).next_node_key;
       if (next !== deletedKey) return null;
       return { ...cfg, next_node_key: "" };
+    }
+
+    case "go_to": {
+      const target = (cfg as { target_node_key?: string }).target_node_key;
+      if (target !== deletedKey) return null;
+      return { ...cfg, target_node_key: "" };
     }
 
     case "condition": {
@@ -406,6 +463,7 @@ function patchedConfigWithoutKey(
 
     case "handoff":
     case "end":
+    case "go_to_flow":
       return null;
   }
 }

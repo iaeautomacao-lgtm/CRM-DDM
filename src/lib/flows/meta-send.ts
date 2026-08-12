@@ -2,6 +2,7 @@ import {
   sendInteractiveButtons,
   sendInteractiveList,
   sendMediaMessage,
+  sendTemplateMessage,
   sendTextMessage,
   type InteractiveButton,
   type InteractiveListSection,
@@ -331,6 +332,127 @@ export async function engineSendInteractiveList(
   args: SendInteractiveListEngineArgs,
 ): Promise<{ whatsapp_message_id: string }> {
   return sendInteractiveViaMeta({ ...args, kind: 'list' })
+}
+
+interface SendTemplateEngineArgs {
+  accountId: string
+  /** See SendTextEngineArgs.configId. */
+  configId?: string
+  conversationId: string
+  contactId: string
+  templateName: string
+  languageCode: string
+  /**
+   * Reserved for v2 — Meta's raw `components` array (media headers,
+   * URL buttons). Wiring this through requires the same
+   * `MessageTemplate` row + `buildSendComponents` machinery
+   * automations/meta-send.ts's engineSendTemplate also doesn't use;
+   * the v1 send_template node only sends the template's approved body
+   * as-is (no per-send variables), same as automations' template
+   * sender today.
+   */
+  components?: unknown[]
+}
+
+/**
+ * Send a pre-approved Meta HSM template from the Flows engine.
+ *
+ * Used by the `send_template` node when the run's provider is Meta
+ * (WAHA has no template concept — the node falls back to
+ * `fallback_text` as plain text on that provider instead). Mirrors
+ * `engineSendText`'s configId-aware config lookup + phone-variant
+ * retry; the actual Meta call is the same simple `params`-less path
+ * `src/lib/automations/meta-send.ts`'s `engineSendTemplate` uses.
+ */
+export async function engineMetaSendTemplate(
+  args: SendTemplateEngineArgs,
+): Promise<{ whatsapp_message_id: string }> {
+  const db = supabaseAdmin()
+
+  const { data: contact, error: contactErr } = await db
+    .from('contacts')
+    .select('id, phone')
+    .eq('id', args.contactId)
+    .eq('account_id', args.accountId)
+    .maybeSingle()
+  if (contactErr || !contact?.phone) {
+    throw new Error('contact not found for this account')
+  }
+
+  const sanitized = sanitizePhoneForMeta(contact.phone)
+  if (!isValidE164(sanitized)) {
+    throw new Error(`contact phone invalid: ${contact.phone}`)
+  }
+
+  let configQuery = db
+    .from('whatsapp_config')
+    .select('*')
+    .eq('account_id', args.accountId)
+    .eq('provider', 'meta')
+  if (args.configId) configQuery = configQuery.eq('id', args.configId)
+  else configQuery = configQuery.limit(1)
+  const { data: config, error: configErr } = await configQuery.single()
+  if (configErr || !config) {
+    throw new Error('WhatsApp not configured for this account')
+  }
+
+  const accessToken = decrypt(config.access_token)
+
+  const attempt = async (phone: string): Promise<string> => {
+    const r = await sendTemplateMessage({
+      phoneNumberId: config.phone_number_id,
+      accessToken,
+      to: phone,
+      templateName: args.templateName,
+      language: args.languageCode,
+    })
+    return r.messageId
+  }
+
+  const variants = phoneVariants(sanitized)
+  let workingPhone = sanitized
+  let waMessageId = ''
+  let lastError: unknown = null
+  for (const v of variants) {
+    try {
+      waMessageId = await attempt(v)
+      workingPhone = v
+      lastError = null
+      break
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (!isRecipientNotAllowedError(msg)) throw err
+      lastError = err
+    }
+  }
+  if (lastError) throw lastError
+
+  if (workingPhone !== sanitized) {
+    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+  }
+
+  const { error: msgErr } = await db.from('messages').insert({
+    conversation_id: args.conversationId,
+    sender_type: 'bot',
+    content_type: 'template',
+    content_text: `[template: ${args.templateName}]`,
+    message_id: waMessageId,
+    status: 'sent',
+  })
+  if (msgErr) {
+    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: `[template: ${args.templateName}]`,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', args.conversationId)
+
+  return { whatsapp_message_id: waMessageId }
 }
 
 type SendInput =

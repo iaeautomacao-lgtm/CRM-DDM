@@ -2,6 +2,8 @@ import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
+import { advanceFromNodeKey, loadAllNodes } from '@/lib/flows/engine'
+import type { FlowRunRow, SmartDelayNodeConfig } from '@/lib/flows/types'
 
 /**
  * Sweep abandoned active flow runs.
@@ -108,5 +110,59 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ swept })
+  // ------------------------------------------------------------
+  // Wake smart_delay runs whose wait has elapsed. Bounded to 20 per
+  // sweep (same cadence as the timeout sweep above) — a run that
+  // misses this tick just gets picked up on the next one, a few
+  // minutes late at worst.
+  // ------------------------------------------------------------
+  const { data: delayedRuns, error: delayedErr } = await admin
+    .from('flow_runs')
+    .select('*')
+    .eq('status', 'delayed')
+    .lte('wake_at', now.toISOString())
+    .limit(20)
+
+  if (delayedErr) {
+    console.error('[flows-cron] delayed-run scan failed:', delayedErr.message)
+  }
+
+  let woken = 0
+  for (const run of (delayedRuns ?? []) as FlowRunRow[]) {
+    // Optimistic guard: only the sweep that actually flips
+    // status='delayed' → 'active' gets to resume the run — protects
+    // against two overlapping cron invocations waking the same run
+    // twice.
+    const { data: claimed } = await admin
+      .from('flow_runs')
+      .update({ status: 'active', wake_at: null })
+      .eq('id', run.id)
+      .eq('status', 'delayed')
+      .select('id')
+    if (!Array.isArray(claimed) || claimed.length === 0) continue
+
+    if (!run.current_node_key) {
+      console.error(`[flows-cron] delayed run ${run.id} has no current_node_key`)
+      continue
+    }
+    const nodes = await loadAllNodes(admin, run.flow_id)
+    // The run suspended AT the smart_delay node itself (same pattern
+    // as collect_input/send_buttons/send_list) — resume from ITS
+    // next_node_key, not by re-entering smart_delay (which would just
+    // re-send the message and re-suspend forever).
+    const delayNode = nodes.get(run.current_node_key)
+    const nextKey = delayNode
+      ? (delayNode.config as unknown as SmartDelayNodeConfig).next_node_key
+      : null
+    if (!nextKey) {
+      console.error(
+        `[flows-cron] delayed run ${run.id}: smart_delay node ${run.current_node_key} missing next_node_key`,
+      )
+      continue
+    }
+    await advanceFromNodeKey(admin, { ...run, status: 'active', wake_at: null }, nextKey, nodes)
+    woken += 1
+  }
+
+  return NextResponse.json({ swept, woken })
 }

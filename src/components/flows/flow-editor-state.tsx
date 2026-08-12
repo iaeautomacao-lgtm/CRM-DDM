@@ -186,6 +186,40 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
       return { note: "" };
     case "end":
       return {};
+    case "http_fetch":
+      return {
+        url: "",
+        method: "GET",
+        headers: {},
+        body_template: "",
+        response_var: "",
+        timeout_seconds: 10,
+        next_node_key: "",
+      };
+    case "set_variable":
+      return {
+        assignments: [{ variable: "", value: "" }],
+        next_node_key: "",
+      };
+    case "smart_delay":
+      return { delay_seconds: 60, message: "", next_node_key: "" };
+    case "anchor":
+      return { label: "", next_node_key: "" };
+    case "go_to":
+      return { target_node_key: "" };
+    case "go_to_flow":
+      return { flow_id: "", pass_vars: true };
+    case "send_template":
+      return {
+        template_name: "",
+        language_code: "pt_BR",
+        fallback_text: "",
+        next_node_key: "",
+      };
+    case "add_note":
+      return { note_text: "", next_node_key: "" };
+    case "receive_attachment":
+      return { prompt_text: "", var_name: "anexo", next_node_key: "" };
   }
 }
 

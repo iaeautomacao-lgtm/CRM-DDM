@@ -182,6 +182,46 @@ function validateTrigger(
 // Per-node
 // ============================================================
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Shared next_node_key check for the 7 new auto-advancing/suspending
+ * node types (http_fetch, set_variable, smart_delay, anchor,
+ * send_template, add_note, receive_attachment) — same "missing or
+ * dangling" rule the older node types each inline individually.
+ */
+function validateNextNodeKey(
+  node: NodeInput,
+  nextNodeKey: string | undefined,
+  knownKeys: Set<string>,
+  label: string,
+): ValidationIssue[] {
+  if (!nextNodeKey) {
+    return [
+      {
+        severity: "error",
+        scope: "node",
+        node_key: node.node_key,
+        field: "next_node_key",
+        message: `${label} precisa apontar para um próximo nó.`,
+      },
+    ];
+  }
+  if (!knownKeys.has(nextNodeKey)) {
+    return [
+      {
+        severity: "error",
+        scope: "node",
+        node_key: node.node_key,
+        field: "next_node_key",
+        message: `${label} aponta para um nó inexistente "${nextNodeKey}".`,
+      },
+    ];
+  }
+  return [];
+}
+
 function validateNode(
   node: NodeInput,
   knownKeys: Set<string>,
@@ -707,6 +747,203 @@ function validateNode(
       // beyond their existence.
       break;
 
+    case "http_fetch": {
+      const cfg = node.config as {
+        url?: string;
+        method?: string;
+        next_node_key?: string;
+      };
+      if (!cfg.url?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "url",
+          message: "A requisição HTTP precisa de uma URL.",
+        });
+      }
+      if (!cfg.method || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(cfg.method)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "method",
+          message: "A requisição HTTP precisa de um método (GET, POST, PUT, PATCH ou DELETE).",
+        });
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "A requisição HTTP"));
+      break;
+    }
+
+    case "set_variable": {
+      const cfg = node.config as {
+        assignments?: Array<{ variable?: string; value?: string }>;
+        next_node_key?: string;
+      };
+      const assignments = cfg.assignments ?? [];
+      if (!assignments.some((a) => a.variable?.trim())) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "assignments",
+          message: "Definir variável precisa de pelo menos uma variável com nome preenchido.",
+        });
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "Definir variável"));
+      break;
+    }
+
+    case "smart_delay": {
+      const cfg = node.config as {
+        delay_seconds?: number;
+        next_node_key?: string;
+      };
+      if (
+        typeof cfg.delay_seconds !== "number" ||
+        cfg.delay_seconds < 1 ||
+        cfg.delay_seconds > 86400
+      ) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "delay_seconds",
+          message: "Aguardar precisa de um tempo de espera entre 1 segundo e 24 horas (86400s).",
+        });
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "Aguardar"));
+      break;
+    }
+
+    case "anchor": {
+      const cfg = node.config as { label?: string; next_node_key?: string };
+      if (!cfg.label?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "label",
+          message: "A âncora precisa de um nome.",
+        });
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "A âncora"));
+      break;
+    }
+
+    case "go_to": {
+      const cfg = node.config as { target_node_key?: string };
+      if (!cfg.target_node_key) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "target_node_key",
+          message: '"Ir para" precisa de uma âncora de destino.',
+        });
+      } else if (!knownKeys.has(cfg.target_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "target_node_key",
+          message: `"Ir para" aponta para um nó inexistente "${cfg.target_node_key}".`,
+        });
+      }
+      break;
+    }
+
+    case "go_to_flow": {
+      const cfg = node.config as { flow_id?: string; pass_vars?: boolean };
+      if (!cfg.flow_id?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "flow_id",
+          message: '"Ir para fluxo" precisa de um fluxo de destino.',
+        });
+      } else if (!UUID_RE.test(cfg.flow_id)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "flow_id",
+          message: `"${cfg.flow_id}" não é um id de fluxo válido.`,
+        });
+      }
+      break;
+    }
+
+    case "send_template": {
+      const cfg = node.config as {
+        template_name?: string;
+        language_code?: string;
+        next_node_key?: string;
+      };
+      if (!cfg.template_name?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "template_name",
+          message: "Modelo de mensagem precisa do nome do template.",
+        });
+      }
+      if (!cfg.language_code?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "language_code",
+          message: "Modelo de mensagem precisa do código de idioma (ex.: pt_BR).",
+        });
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "Modelo de mensagem"));
+      break;
+    }
+
+    case "add_note": {
+      const cfg = node.config as { note_text?: string; next_node_key?: string };
+      if (!cfg.note_text?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "note_text",
+          message: "Nota de atendimento precisa de um texto.",
+        });
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "Nota de atendimento"));
+      break;
+    }
+
+    case "receive_attachment": {
+      const cfg = node.config as {
+        var_name?: string;
+        next_node_key?: string;
+      };
+      if (!cfg.var_name?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "var_name",
+          message: "Receber anexo precisa de um nome de variável para guardar o arquivo.",
+        });
+      } else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(cfg.var_name)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "var_name",
+          message: `O nome de variável "${cfg.var_name}" deve conter apenas letras, números e underscore, e começar com letra ou underscore.`,
+        });
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "Receber anexo"));
+      break;
+    }
+
     default:
       issues.push({
         severity: "error",
@@ -751,9 +988,20 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_message":
     case "send_media":
     case "collect_input":
-    case "set_tag": {
+    case "set_tag":
+    case "http_fetch":
+    case "set_variable":
+    case "smart_delay":
+    case "anchor":
+    case "send_template":
+    case "add_note":
+    case "receive_attachment": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
+    }
+    case "go_to": {
+      const cfg = node.config as { target_node_key?: string };
+      return cfg.target_node_key ? [cfg.target_node_key] : [];
     }
     case "condition": {
       const cfg = node.config as {
