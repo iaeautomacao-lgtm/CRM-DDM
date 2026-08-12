@@ -6,5 +6,5 @@ deployment:
     - nvm use 20.19.0
     - npx npm@10 ci
     - npx npm@10 run build
-    - rsync -a --delete .next/ $HOME/apps/crm-ddm/.next/
-    - mkdir -p $HOME/apps/crm-ddm/tmp && touch $HOME/apps/crm-ddm/tmp/restart.txt
+    - rsync -a --delete .next/ $HOME/apps/omnichannel/.next/
+    - mkdir -p $HOME/apps/omnichannel/tmp && touch $HOME/apps/omnichannel/tmp/restart.txt
