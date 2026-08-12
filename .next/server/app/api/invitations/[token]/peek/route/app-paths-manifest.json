@@ -1,0 +1,3 @@
+{
+  "/api/invitations/[token]/peek/route": "app/api/invitations/[token]/peek/route.js"
+}

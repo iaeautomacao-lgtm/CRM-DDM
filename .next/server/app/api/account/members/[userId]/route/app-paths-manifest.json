@@ -1,0 +1,3 @@
+{
+  "/api/account/members/[userId]/route": "app/api/account/members/[userId]/route.js"
+}

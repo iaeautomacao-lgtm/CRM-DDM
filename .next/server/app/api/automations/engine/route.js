@@ -1,0 +1,11 @@
+var R=require("../../../../chunks/[turbopack]_runtime.js")("server/app/api/automations/engine/route.js")
+R.c("server/chunks/src_lib_whatsapp_meta-api_ts_0dip0p~._.js")
+R.c("server/chunks/src_lib_automations_engine_ts_0lgzmm0._.js")
+R.c("server/chunks/[root-of-the-server]__0sbwttc._.js")
+R.c("server/chunks/[root-of-the-server]__0p3fo6l._.js")
+R.c("server/chunks/node_modules_next_11synfn._.js")
+R.c("server/chunks/node_modules_@supabase_supabase-js_dist_index_mjs_0hp37pu._.js")
+R.c("server/chunks/node_modules_06shfce._.js")
+R.c("server/chunks/_next-internal_server_app_api_automations_engine_route_actions_0~iuivs.js")
+R.m(345008)
+module.exports=R.m(345008).exports

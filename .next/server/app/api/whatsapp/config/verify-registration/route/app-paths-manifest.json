@@ -1,0 +1,3 @@
+{
+  "/api/whatsapp/config/verify-registration/route": "app/api/whatsapp/config/verify-registration/route.js"
+}

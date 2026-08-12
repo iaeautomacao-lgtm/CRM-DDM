@@ -1,0 +1,3 @@
+{
+  "/(dashboard)/flows/page": "app/(dashboard)/flows/page.js"
+}

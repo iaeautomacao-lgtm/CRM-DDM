@@ -1,0 +1,9 @@
+var R=require("../../../../../chunks/[turbopack]_runtime.js")("server/app/api/conversations/[id]/sentiment/route.js")
+R.c("server/chunks/[root-of-the-server]__0kipisd._.js")
+R.c("server/chunks/node_modules_next_11synfn._.js")
+R.c("server/chunks/node_modules_@supabase_supabase-js_dist_index_mjs_0hp37pu._.js")
+R.c("server/chunks/[root-of-the-server]__0p3fo6l._.js")
+R.c("server/chunks/node_modules_06shfce._.js")
+R.c("server/chunks/_next-internal_server_app_api_conversations_[id]_sentiment_route_actions_0.a-ede.js")
+R.m(496556)
+module.exports=R.m(496556).exports

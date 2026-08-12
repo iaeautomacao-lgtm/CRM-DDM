@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "functions": {
+    "/api/whatsapp/webhook": {
+      "maxDuration": 60
+    },
+    "/icon": {}
+  }
+}

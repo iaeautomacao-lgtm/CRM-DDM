@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/(dashboard)/layout,_N_T_/(dashboard)/disparador/layout,_N_T_/(dashboard)/disparador/blacklist/layout,_N_T_/(dashboard)/disparador/blacklist/page,_N_T_/disparador/blacklist"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/!KGRhc2hib2FyZCk/disparador/blacklist/__PAGE__",
+    "/!KGRhc2hib2FyZCk/disparador/blacklist",
+    "/!KGRhc2hib2FyZCk/disparador",
+    "/!KGRhc2hib2FyZCk",
+    "/_index",
+    "/_head"
+  ]
+}

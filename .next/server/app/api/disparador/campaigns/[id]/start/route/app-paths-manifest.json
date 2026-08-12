@@ -1,0 +1,3 @@
+{
+  "/api/disparador/campaigns/[id]/start/route": "app/api/disparador/campaigns/[id]/start/route.js"
+}

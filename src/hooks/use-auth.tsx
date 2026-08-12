@@ -228,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const init = async () => {
       try {
-        console.log("[AuthProvider] init: calling getSession()");
+        console.log("[AuthProvider] init: calling getUser()");
         const {
           data: { user: currentUser },
           error,
@@ -236,7 +236,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error) console.error("[AuthProvider] getUser error:", error.message);
 
-        console.log("[AuthProvider] init: session resolved:", session ? "Session exists!" : "No session");
+        console.log("[AuthProvider] init: user resolved:", currentUser ? "User exists!" : "No user");
         if (!mounted) return;
         setUser(currentUser);
 

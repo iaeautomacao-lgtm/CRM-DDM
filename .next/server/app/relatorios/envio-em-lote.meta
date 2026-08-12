@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/(dashboard)/layout,_N_T_/(dashboard)/relatorios/layout,_N_T_/(dashboard)/relatorios/envio-em-lote/layout,_N_T_/(dashboard)/relatorios/envio-em-lote/page,_N_T_/relatorios/envio-em-lote"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/!KGRhc2hib2FyZCk/relatorios/envio-em-lote/__PAGE__",
+    "/!KGRhc2hib2FyZCk/relatorios/envio-em-lote",
+    "/!KGRhc2hib2FyZCk/relatorios",
+    "/!KGRhc2hib2FyZCk",
+    "/_index",
+    "/_head"
+  ]
+}

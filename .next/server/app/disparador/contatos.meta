@@ -1,0 +1,17 @@
+{
+  "headers": {
+    "x-nextjs-stale-time": "300",
+    "x-nextjs-prerender": "1",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/(dashboard)/layout,_N_T_/(dashboard)/disparador/layout,_N_T_/(dashboard)/disparador/contatos/layout,_N_T_/(dashboard)/disparador/contatos/page,_N_T_/disparador/contatos"
+  },
+  "segmentPaths": [
+    "/_tree",
+    "/_full",
+    "/!KGRhc2hib2FyZCk/disparador/contatos/__PAGE__",
+    "/!KGRhc2hib2FyZCk/disparador/contatos",
+    "/!KGRhc2hib2FyZCk/disparador",
+    "/!KGRhc2hib2FyZCk",
+    "/_index",
+    "/_head"
+  ]
+}
