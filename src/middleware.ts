@@ -26,7 +26,17 @@ export async function middleware(request: NextRequest) {
     }
   ) as any
 
-  const { data: { user } } = await supabase.auth.getUser()
+  let user = null;
+  let authError = null;
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    user = data?.user || null;
+    if (error) {
+      authError = error.message;
+    }
+  } catch (err: any) {
+    authError = err.message || "Unknown auth error";
+  }
 
   // getUser() transparently refreshes an expired access token, which
   // ROTATES the refresh token and writes the new cookies onto
@@ -77,6 +87,19 @@ export async function middleware(request: NextRequest) {
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    
+    // Add debugging parameters to help trace authentication issues on the server/cPanel
+    url.searchParams.set('auth_failed', 'true')
+    if (authError) {
+      url.searchParams.set('auth_err', authError)
+    }
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      url.searchParams.set('missing_env_url', 'true')
+    }
+    if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+      url.searchParams.set('missing_env_key', 'true')
+    }
+    
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 
