@@ -83,7 +83,21 @@ export async function middleware(request: NextRequest) {
   }
 
   // Protected pages - redirect to login if not authenticated
-  const protectedPaths = ['/dashboard', '/inbox', '/contacts', '/pipelines', '/broadcasts', '/automations', '/settings']
+  const protectedPaths = [
+    '/dashboard',
+    '/conversas',
+    '/contatos',
+    '/funis',
+    '/fluxos',
+    '/canais',
+    '/relatorios',
+    '/monitoramento',
+    '/disparador',
+    '/agente-de-ia',
+    '/configuracoes',
+    '/automacoes',
+    '/settings',
+  ]
   if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
