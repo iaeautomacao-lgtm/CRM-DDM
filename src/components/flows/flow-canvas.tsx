@@ -95,6 +95,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useFlowEditor } from './flow-editor-state';
 import { NodeConfigForm } from './forms/node-config-form';
+import { DeletableEdge } from './deletable-edge';
 
 // React-Flow node `data` payload — the bits our custom renderer needs.
 interface NodeData extends Record<string, unknown> {
@@ -250,6 +251,7 @@ function FlowNodeCard({ data, selected }: NodeProps) {
 }
 
 const NODE_TYPES = { flow: FlowNodeCard };
+const EDGE_TYPES = { default: DeletableEdge };
 
 // ============================================================
 // Root canvas
@@ -358,18 +360,15 @@ function FlowCanvasInner() {
 
     // sourceHandle is now wired up — the FlowNodeCard renders a Handle
     // per slot whose id matches the scheme in edges.ts, so React-Flow
-    // can hang the arrow off the right place on each card.
+    // can hang the arrow off the right place on each card. Label
+    // chrome (background, color) is rendered by DeletableEdge itself
+    // via Tailwind tokens, so it doesn't need to travel through here.
     const rfEdges: RfEdge[] = canvasEdges.map((e) => ({
       id: e.id,
       source: e.source,
       target: e.target,
       sourceHandle: e.sourceHandle,
       label: e.label,
-      // Mode-aware via CSS tokens so edge chrome flips with light/dark.
-      labelStyle: { fill: 'var(--muted-foreground)', fontSize: 11 },
-      labelBgStyle: { fill: 'var(--card)' },
-      labelBgPadding: [4, 2] as [number, number],
-      labelBgBorderRadius: 4,
       style: { stroke: 'var(--border)', strokeWidth: 1.5 },
     }));
 
@@ -521,6 +520,7 @@ function FlowCanvasInner() {
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={NODE_TYPES}
+          edgeTypes={EDGE_TYPES}
           fitView
           fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           proOptions={{ hideAttribution: true }}
@@ -691,6 +691,7 @@ const ADD_NODE_TYPES: NodeType[] = [
   'send_media',
   'send_template',
   'receive_attachment',
+  'ai_agent',
   'collect_input',
   'condition',
   'set_tag',

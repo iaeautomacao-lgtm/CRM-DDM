@@ -37,7 +37,7 @@ export interface ValidationIssue {
 
 interface FlowInput {
   name: string;
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: "keyword" | "first_inbound_message" | "manual" | "called_by_flow";
   trigger_config: Record<string, unknown>;
   entry_node_id: string | null;
 }
@@ -944,6 +944,42 @@ function validateNode(
       break;
     }
 
+    case "ai_agent": {
+      const cfg = node.config as {
+        mode?: "once" | "loop" | "takeover";
+        next_node_key?: string;
+        max_turns?: number;
+      };
+      if (!cfg.mode || !["once", "loop", "takeover"].includes(cfg.mode)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "mode",
+          message: "O agente de IA precisa de um modo (responder uma vez, loop ou assumir conversa).",
+        });
+      }
+      if (cfg.mode === "once" || cfg.mode === "loop") {
+        issues.push(
+          ...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "O agente de IA"),
+        );
+      }
+      if (
+        cfg.mode === "loop" &&
+        cfg.max_turns !== undefined &&
+        (typeof cfg.max_turns !== "number" || cfg.max_turns < 1)
+      ) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "max_turns",
+          message: "O limite de turnos do loop precisa ser um número maior que zero.",
+        });
+      }
+      break;
+    }
+
     default:
       issues.push({
         severity: "error",
@@ -1032,6 +1068,11 @@ function outgoingEdges(node: NodeInput): string[] {
         }
       }
       return out;
+    }
+    case "ai_agent": {
+      const cfg = node.config as { mode?: string; next_node_key?: string };
+      if (cfg.mode === "takeover") return [];
+      return cfg.next_node_key ? [cfg.next_node_key] : [];
     }
     case "handoff":
     case "end":

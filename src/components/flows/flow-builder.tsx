@@ -258,6 +258,17 @@ function KeywordsInput({
 // Trigger panel
 // ============================================================
 
+// Mirrors the SelectItem labels below — Select.Value has no built-in
+// value → label lookup (unlike the shadcn/Radix Select it replaced),
+// so the trigger's closed-state text has to be resolved here or it
+// falls back to rendering the raw stored value (e.g. "called_by_flow").
+const TRIGGER_TYPE_LABELS: Record<BuilderState['trigger_type'], string> = {
+  keyword: 'Uma mensagem contém uma palavra-chave',
+  first_inbound_message: 'Primeira mensagem recebida do cliente',
+  manual: 'Somente manual (sem disparo automático)',
+  called_by_flow: 'Chamado por outro fluxo (go_to_flow)',
+};
+
 function TriggerPanel({
   state,
   setState,
@@ -281,15 +292,20 @@ function TriggerPanel({
               setState((s) => ({
                 ...s,
                 trigger_type: v as BuilderState['trigger_type'],
-                trigger_config:
-                  v === 'keyword' ? { keywords: [] } : v === 'manual' ? {} : {},
+                // Only `keyword` carries config (the keyword list) — every
+                // other trigger type starts from an empty config object.
+                trigger_config: v === 'keyword' ? { keywords: [] } : {},
               }))
             }
           >
             <SelectTrigger className="bg-muted">
-              <SelectValue />
+              <SelectValue>{TRIGGER_TYPE_LABELS[state.trigger_type]}</SelectValue>
             </SelectTrigger>
-            <SelectContent>
+            {/* min-w overrides the default anchor-width sizing (which
+                clips to the trigger's own width) so the longer option
+                labels below don't get cut off by the popup's
+                overflow-x-hidden. */}
+            <SelectContent className="min-w-[22rem]">
               <SelectItem value="keyword">
                 Uma mensagem contém uma palavra-chave
               </SelectItem>
@@ -298,6 +314,9 @@ function TriggerPanel({
               </SelectItem>
               <SelectItem value="manual">
                 Somente manual (sem disparo automático)
+              </SelectItem>
+              <SelectItem value="called_by_flow">
+                Chamado por outro fluxo (go_to_flow)
               </SelectItem>
             </SelectContent>
           </Select>
@@ -576,6 +595,7 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
     'send_media',
     'send_template',
     'receive_attachment',
+    'ai_agent',
     'collect_input',
     'condition',
     'set_tag',

@@ -290,6 +290,30 @@ export interface ReceiveAttachmentNodeConfig {
 }
 
 /**
+ * Invokes `handleAiAutoResponse` (src/lib/ai/responder.ts) against the
+ * account's `ai_config`, using the customer's latest inbound message as
+ * input. Three operating modes:
+ *   - `once`: answers a single time, then advances to `next_node_key`.
+ *   - `loop`: answers, then suspends on THIS node again — each new
+ *     customer reply re-enters the node instead of advancing. Guarded
+ *     by `max_turns` (default 20); once hit, advances to
+ *     `next_node_key` regardless of what the customer said.
+ *   - `takeover`: answers once, then ends the run with
+ *     status='handed_off' — the AI's reply is the last thing the bot
+ *     says before a human (or the standalone AI auto-responder) takes
+ *     over the conversation. No `next_node_key`; nothing to advance to.
+ */
+export interface AiAgentNodeConfig {
+  mode: "once" | "loop" | "takeover";
+  /** Overrides ai_config.system_prompt for this node's call, when set. */
+  system_prompt_override?: string;
+  /** Required for `once` and `loop`; ignored for `takeover`. */
+  next_node_key?: string;
+  /** Safety cap for `loop` mode. Defaults to 20 when unset. */
+  max_turns?: number;
+}
+
+/**
  * Total union — every concrete node_type the v1 engine understands.
  * Add new node types here and the engine's switch will flag missing
  * cases via TypeScript's exhaustiveness check.
@@ -316,7 +340,8 @@ export type FlowNodeConfig =
   | { node_type: "go_to_flow"; config: GoToFlowNodeConfig }
   | { node_type: "send_template"; config: SendTemplateNodeConfig }
   | { node_type: "add_note"; config: AddNoteNodeConfig }
-  | { node_type: "receive_attachment"; config: ReceiveAttachmentNodeConfig };
+  | { node_type: "receive_attachment"; config: ReceiveAttachmentNodeConfig }
+  | { node_type: "ai_agent"; config: AiAgentNodeConfig };
 
 export type FlowNodeType = FlowNodeConfig["node_type"];
 
@@ -336,10 +361,18 @@ export interface KeywordTriggerConfig {
 // the no-empty-object-type lint rule.
 export type FirstInboundTriggerConfig = Record<string, never>;
 
+/**
+ * No knobs — a flow with this trigger never auto-starts from an
+ * inbound message (mirrors `manual` in the engine's dispatch switch).
+ * It's only ever entered via another flow's `go_to_flow` node.
+ */
+export type CalledByFlowTriggerConfig = Record<string, never>;
+
 export type FlowTriggerConfig =
   | { trigger_type: "keyword"; config: KeywordTriggerConfig }
   | { trigger_type: "first_inbound_message"; config: FirstInboundTriggerConfig }
-  | { trigger_type: "manual"; config: Record<string, never> };
+  | { trigger_type: "manual"; config: Record<string, never> }
+  | { trigger_type: "called_by_flow"; config: CalledByFlowTriggerConfig };
 
 // ============================================================
 // DB-row shapes (read by the engine via supabaseAdmin)
@@ -356,7 +389,7 @@ export interface FlowRow {
   name: string;
   description: string | null;
   status: "draft" | "active" | "archived";
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: "keyword" | "first_inbound_message" | "manual" | "called_by_flow";
   trigger_config: KeywordTriggerConfig | FirstInboundTriggerConfig | Record<string, unknown>;
   entry_node_id: string | null;
   fallback_policy: FlowFallbackPolicy;

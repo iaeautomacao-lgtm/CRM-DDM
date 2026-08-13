@@ -105,30 +105,43 @@ export function NodeKeySelect({
   className?: string;
 }) {
   const options = nodes.filter((n) => n.node_key !== excludeKey);
+  const selected = value ? options.find((n) => n.node_key === value) : undefined;
+
   return (
     <Select
       value={value ?? "__none__"}
       onValueChange={(v) => onChange(v === "__none__" ? null : v)}
     >
       <SelectTrigger className={cn("bg-muted", className)}>
-        <SelectValue placeholder={placeholder ?? "—"} />
+        {/* Select.Value has no built-in value → label lookup, so without
+            this children render it shows the raw stored value
+            ("__none__") instead of the matching SelectItem's text. */}
+        <SelectValue placeholder={placeholder ?? "— Selecione —"}>
+          {selected ? (
+            <NodeKeyLabel node={selected} />
+          ) : (
+            "— Nenhum —"
+          )}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="__none__">— Nenhum —</SelectItem>
-        {options.map((n) => {
-          const Icon = NODE_META[n.node_type].icon;
-          return (
-            <SelectItem key={n.node_key} value={n.node_key}>
-              <span className="inline-flex items-center gap-1.5">
-                <Icon
-                  className={cn("h-3 w-3", NODE_META[n.node_type].color)}
-                />
-                {n.node_key}
-              </span>
-            </SelectItem>
-          );
-        })}
+        {options.map((n) => (
+          <SelectItem key={n.node_key} value={n.node_key}>
+            <NodeKeyLabel node={n} />
+          </SelectItem>
+        ))}
       </SelectContent>
     </Select>
+  );
+}
+
+function NodeKeyLabel({ node }: { node: BuilderNode }) {
+  const Icon = NODE_META[node.node_type].icon;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <Icon className={cn("h-3 w-3", NODE_META[node.node_type].color)} />
+      {node.node_key}
+    </span>
   );
 }
