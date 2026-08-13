@@ -534,13 +534,15 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
       inst.toLowerCase().includes("castelo") || 
       inst.toLowerCase().includes("bezerra") || 
       inst.toLowerCase().includes("potiguar") ||
+      inst.toLowerCase().includes("multivix") ||
       sistema.toLowerCase().includes("uva") || 
       sistema.toLowerCase().includes("veiga") || 
       sistema.toLowerCase().includes("unijorge") || 
       sistema.toLowerCase().includes("unisuam") || 
       sistema.toLowerCase().includes("castelo") || 
       sistema.toLowerCase().includes("bezerra") || 
-      sistema.toLowerCase().includes("potiguar");
+      sistema.toLowerCase().includes("potiguar") ||
+      sistema.toLowerCase().includes("multivix");
 
     if (isEducational) {
       const acordosList = ddmData.acordos || [];
