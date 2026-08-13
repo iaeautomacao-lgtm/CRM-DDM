@@ -1,6 +1,0 @@
-# DO NOT REMOVE OR MODIFY THIS SECTION
-PassengerEnabled on
-PassengerAppEnv production
-PassengerAppType node
-PassengerStartupFile server.js
-# DO NOT REMOVE OR MODIFY THIS SECTION
