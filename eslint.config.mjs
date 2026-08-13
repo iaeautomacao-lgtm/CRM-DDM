@@ -20,6 +20,8 @@ const eslintConfig = defineConfig([
     "check_audios.js",
     "check_recent_messages.js",
     "get_all_recent_messages.js",
+    // Passenger entry point (CommonJS — committed by server setup).
+    "app.js",
   ]),
   {
     rules: {
