@@ -19,6 +19,23 @@ function formatBrazilianPhone(raw: string): string {
   return `+55${cleaned}`;
 }
 
+// Looks up a value in `row` by trying each of `keys` against the row's
+// keys lowercased/trimmed, so CSV/XLSX headers can vary in case, spacing,
+// or naming (e.g. "Telefone", "celular", "whatsapp") without breaking import.
+function getField(row: Record<string, any>, ...keys: string[]): string | undefined {
+  const normalizedRow: Record<string, any> = {};
+  for (const rawKey of Object.keys(row)) {
+    normalizedRow[rawKey.trim().toLowerCase()] = row[rawKey];
+  }
+  for (const key of keys) {
+    const value = normalizedRow[key.toLowerCase()];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 export async function POST(request: Request) {
   try {
     // 1. Authenticate user and resolve their account
@@ -117,7 +134,18 @@ export async function POST(request: Request) {
     const seenInFile = new Set<string>();
 
     for (const row of rows) {
-      const rawPhone = row.telefone || row.phone;
+      const rawPhone = getField(
+        row,
+        "telefone",
+        "phone",
+        "celular",
+        "tel",
+        "fone",
+        "whatsapp",
+        "número",
+        "numero",
+        "cell"
+      );
       if (!rawPhone) {
         results.invalidos++;
         continue;
@@ -142,14 +170,25 @@ export async function POST(request: Request) {
       }
       seenInFile.add(key);
 
-      const rawTags: string = row.tags || "";
+      const rawTags = getField(row, "tags", "tag", "etiquetas", "categorias") || "";
       const tagsArray = rawTags ? rawTags.split(",").map((t) => t.trim()).filter(Boolean) : [];
 
       pending.push({
         phone: normalized,
-        name: row.nome || row.name || null,
-        email: row.email || null,
-        company: row.origem || row.company || null,
+        name:
+          getField(row, "nome", "name", "nome completo", "full name", "cliente", "contato") ||
+          null,
+        email: getField(row, "email", "e-mail", "emaill", "correio") || null,
+        company:
+          getField(
+            row,
+            "origem",
+            "company",
+            "empresa",
+            "organização",
+            "organizacao",
+            "institution"
+          ) || null,
         tagsArray,
       });
     }
