@@ -1,3 +1,6 @@
+const path = require('path')
+require('dotenv').config({ path: path.resolve(__dirname, '.env') })
+
 const { createServer } = require('http')
 const { parse } = require('url')
 const next = require('next')
