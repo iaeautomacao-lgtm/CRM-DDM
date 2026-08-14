@@ -29,7 +29,9 @@ import {
   Mail,
   MailX,
   Plus,
+  Search,
   Trash2,
+  Upload,
   UsersRound,
 } from 'lucide-react';
 
@@ -47,6 +49,7 @@ import {
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -71,6 +74,7 @@ import {
   PRESENCE_DOT_CLASS,
   PresenceDot,
 } from '@/components/presence/presence-dot';
+import { BulkImportMembersDialog } from './bulk-import-members-dialog';
 import { InviteMemberDialog } from './invite-member-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
@@ -93,11 +97,19 @@ interface Invitation {
 }
 
 // Editable roles in the inline dropdown. Owner is never an option —
-// promotions go through the (deferred) Transfer Ownership flow.
-const EDITABLE_ROLES: { value: AccountRole; label: string; hint: string }[] = [
-  { value: 'admin', label: 'Admin', hint: 'Manage members + everything' },
-  { value: 'agent', label: 'Agent', hint: 'Use features; no settings' },
-  { value: 'viewer', label: 'Viewer', hint: 'Read-only across the app' },
+// promotions go through the (deferred) Transfer Ownership flow. Labels
+// come from ROLE_META so this dropdown can't drift from the roster
+// chips / invite dialog.
+const EDITABLE_ROLES: AccountRole[] = ['admin', 'agent', 'viewer'];
+
+// Role filter options for the roster search bar. 'all' is a UI-only
+// sentinel, not an AccountRole.
+const ROLE_FILTER_OPTIONS: { value: 'all' | AccountRole; label: string }[] = [
+  { value: 'all', label: 'Todos os papéis' },
+  { value: 'agent', label: ROLE_META.agent.label },
+  { value: 'admin', label: ROLE_META.admin.label },
+  { value: 'owner', label: ROLE_META.owner.label },
+  { value: 'viewer', label: ROLE_META.viewer.label },
 ];
 
 // Per-role chip metadata (icon / label / colour) lives in the shared
@@ -117,11 +129,11 @@ function fmtDate(iso: string): string {
 
 function fmtExpiresIn(iso: string): string {
   const ms = new Date(iso).getTime() - Date.now();
-  if (ms <= 0) return 'expired';
+  if (ms <= 0) return 'expirado';
   const days = Math.floor(ms / (24 * 60 * 60 * 1000));
-  if (days >= 1) return `expires in ${days} day${days === 1 ? '' : 's'}`;
+  if (days >= 1) return `expira em ${days} dia${days === 1 ? '' : 's'}`;
   const hours = Math.max(1, Math.floor(ms / (60 * 60 * 1000)));
-  return `expires in ${hours} hour${hours === 1 ? '' : 's'}`;
+  return `expira em ${hours} hora${hours === 1 ? '' : 's'}`;
 }
 
 export function MembersTab() {
@@ -133,10 +145,14 @@ export function MembersTab() {
   const [loading, setLoading] = useState(true);
 
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<'all' | AccountRole>('all');
 
   const loadEverything = useCallback(async () => {
     try {
@@ -149,7 +165,7 @@ export function MembersTab() {
 
       if (!mres.ok) {
         const payload = await mres.json().catch(() => ({}));
-        toast.error(payload.error || 'Failed to load members');
+        toast.error(payload.error || 'Falha ao carregar membros');
         return;
       }
       const mdata = (await mres.json()) as { members: Member[] };
@@ -158,7 +174,7 @@ export function MembersTab() {
       if (ires) {
         if (!ires.ok) {
           const payload = await ires.json().catch(() => ({}));
-          toast.error(payload.error || 'Failed to load invitations');
+          toast.error(payload.error || 'Falha ao carregar convites');
           return;
         }
         const idata = (await ires.json()) as { invitations: Invitation[] };
@@ -168,7 +184,7 @@ export function MembersTab() {
       }
     } catch (err) {
       console.error('[MembersTab] load error:', err);
-      toast.error('Could not reach the server');
+      toast.error('Não foi possível conectar ao servidor');
     } finally {
       setLoading(false);
     }
@@ -208,10 +224,12 @@ export function MembersTab() {
           ),
         );
         const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Failed to update role');
+        toast.error(payload.error || 'Falha ao atualizar papel');
         return;
       }
-      toast.success(`Updated ${member.full_name || 'member'} to ${nextRole}`);
+      toast.success(
+        `${member.full_name || 'Membro'} atualizado para ${ROLE_META[nextRole].label}`,
+      );
     } catch (err) {
       // Same revert on network failure.
       setMembers((prev) =>
@@ -220,7 +238,7 @@ export function MembersTab() {
         ),
       );
       console.error('[MembersTab] role change error:', err);
-      toast.error('Could not reach the server');
+      toast.error('Não foi possível conectar ao servidor');
     } finally {
       setPendingMemberAction(null);
     }
@@ -236,17 +254,17 @@ export function MembersTab() {
       );
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Failed to remove member');
+        toast.error(payload.error || 'Falha ao remover membro');
         return;
       }
-      toast.success(`Removed ${removingMember.full_name || 'member'}`);
+      toast.success(`${removingMember.full_name || 'Membro'} removido`);
       setMembers((prev) =>
         prev.filter((m) => m.user_id !== removingMember.user_id),
       );
       setRemovingMember(null);
     } catch (err) {
       console.error('[MembersTab] remove error:', err);
-      toast.error('Could not reach the server');
+      toast.error('Não foi possível conectar ao servidor');
     } finally {
       setPendingMemberAction(null);
     }
@@ -259,16 +277,26 @@ export function MembersTab() {
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Failed to revoke invitation');
+        toast.error(payload.error || 'Falha ao revogar convite');
         return;
       }
-      toast.success('Invitation revoked');
+      toast.success('Convite revogado');
       setInvitations((prev) => prev.filter((i) => i.id !== invite.id));
     } catch (err) {
       console.error('[MembersTab] revoke error:', err);
-      toast.error('Could not reach the server');
+      toast.error('Não foi possível conectar ao servidor');
     }
   }
+
+  const filteredMembers = members.filter((member) => {
+    if (roleFilter !== 'all' && member.role !== roleFilter) return false;
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      (member.full_name || '').toLowerCase().includes(q) ||
+      (member.email || '').toLowerCase().includes(q)
+    );
+  });
 
   if (loading) {
     return (
@@ -281,14 +309,24 @@ export function MembersTab() {
   return (
     <section className="animate-in fade-in-50 space-y-6 duration-200">
       <SettingsPanelHead
-        title="Team members"
-        description="People with access to this account. Roles control what each teammate can do."
+        title="Membros da equipe"
+        description="Pessoas com acesso a esta conta. Os papéis controlam o que cada membro pode fazer."
         action={
           <RequireRole min="admin">
-            <Button onClick={() => setInviteOpen(true)}>
-              <Plus className="size-4" />
-              Invite member
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setBulkImportOpen(true)}
+                className="border-border text-muted-foreground hover:bg-muted"
+              >
+                <Upload className="size-4" />
+                Importar membros
+              </Button>
+              <Button onClick={() => setInviteOpen(true)}>
+                <Plus className="size-4" />
+                Convidar membro
+              </Button>
+            </div>
           </RequireRole>
         }
       />
@@ -306,24 +344,67 @@ export function MembersTab() {
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <PresenceDot status="away" />
-                {counts.away} away
+                {counts.away} ausente{counts.away === 1 ? '' : 's'}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <PresenceDot status="offline" />
                 {counts.offline} offline
               </span>
               <span className="text-muted-foreground/70">
-                · {members.length} member{members.length === 1 ? '' : 's'}
+                · {members.length} membro{members.length === 1 ? '' : 's'}
               </span>
             </div>
           );
         })()}
 
+      {/* Search + role filter. Both apply together against `members`
+          client-side — the roster is already fully loaded, so there's
+          no need for a server round-trip per keystroke. */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar por nome ou e-mail"
+            className="bg-muted border-border pl-8 text-foreground placeholder:text-muted-foreground"
+          />
+        </div>
+        <Select
+          value={roleFilter}
+          onValueChange={(v) => v && setRoleFilter(v as 'all' | AccountRole)}
+        >
+          <SelectTrigger className="w-full sm:w-48 bg-muted border-border text-foreground">
+            <SelectValue>
+              {(value: 'all' | AccountRole | null) =>
+                ROLE_FILTER_OPTIONS.find((opt) => opt.value === value)?.label ??
+                'Todos os papéis'
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {ROLE_FILTER_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Roster */}
       <Card>
         <CardContent className="p-0">
+          {filteredMembers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <UsersRound className="size-6 text-muted-foreground" />
+              <p className="mt-2 text-sm text-muted-foreground">
+                Nenhum membro encontrado.
+              </p>
+            </div>
+          ) : (
           <ul className="divide-y divide-border">
-            {members.map((member) => {
+            {filteredMembers.map((member) => {
               const roleMeta = ROLE_META[member.role];
               const RoleIcon = roleMeta.icon;
               const isSelf = member.user_id === user?.id;
@@ -355,7 +436,7 @@ export function MembersTab() {
                             {member.avatar_url ? (
                               <AvatarImage
                                 src={member.avatar_url}
-                                alt={member.full_name || 'Member'}
+                                alt={member.full_name || 'Membro'}
                               />
                             ) : null}
                             <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
@@ -381,11 +462,11 @@ export function MembersTab() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-sm font-medium text-foreground">
-                          {member.full_name || 'Unnamed'}
+                          {member.full_name || 'Sem nome'}
                         </span>
                         {isSelf && (
                           <Badge className="bg-muted text-muted-foreground border-border text-[10px] uppercase tracking-wide">
-                            You
+                            Você
                           </Badge>
                         )}
                       </div>
@@ -400,7 +481,7 @@ export function MembersTab() {
                   {/* Joined date stays desktop-only. The mobile row's
                       vertical density makes the joined date noise. */}
                   <div className="hidden sm:block text-right text-xs text-muted-foreground">
-                    Joined {fmtDate(member.joined_at)}
+                    Entrou em {fmtDate(member.joined_at)}
                   </div>
 
                   {/* Actions cluster. On mobile this is its own row
@@ -426,12 +507,16 @@ export function MembersTab() {
                           className="w-32 bg-muted border-border text-foreground"
                           disabled={isBusy}
                         >
-                          <SelectValue />
+                          <SelectValue>
+                            {(value: AccountRole | null) =>
+                              value ? ROLE_META[value].label : ''
+                            }
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {EDITABLE_ROLES.map((r) => (
-                            <SelectItem key={r.value} value={r.value}>
-                              {r.label}
+                            <SelectItem key={r} value={r}>
+                              {ROLE_META[r].label}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -468,6 +553,7 @@ export function MembersTab() {
               );
             })}
           </ul>
+          )}
         </CardContent>
       </Card>
 
@@ -477,7 +563,7 @@ export function MembersTab() {
           <div className="mb-2 flex items-center gap-2">
             <UsersRound className="size-4 text-muted-foreground" />
             <h3 className="text-sm font-semibold text-foreground">
-              Pending invitations
+              Convites pendentes
             </h3>
             <Badge className="bg-muted text-muted-foreground border-border">
               {invitations.length}
@@ -490,9 +576,9 @@ export function MembersTab() {
               looking for a button) keeps it from feeling like a bug. */}
           {invitations.length > 0 ? (
             <p className="mb-3 text-xs text-muted-foreground">
-              The plaintext invite URL is only shown once at creation
-              for security — to re-share, revoke the invite below and
-              create a new one.
+              A URL de convite em texto simples só é exibida uma vez, na
+              criação, por motivos de segurança — para compartilhar
+              novamente, revogue o convite abaixo e crie um novo.
             </p>
           ) : null}
 
@@ -501,11 +587,11 @@ export function MembersTab() {
               <CardContent className="flex flex-col items-center justify-center py-8 text-center">
                 <Mail className="size-6 text-muted-foreground" />
                 <p className="mt-2 text-sm text-muted-foreground">
-                  No pending invitations.
+                  Nenhum convite pendente.
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Click <span className="text-muted-foreground">Invite member</span>{' '}
-                  above to generate a shareable link.
+                  Clique em <span className="text-muted-foreground">Convidar membro</span>{' '}
+                  acima para gerar um link compartilhável.
                 </p>
               </CardContent>
             </Card>
@@ -524,7 +610,7 @@ export function MembersTab() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-foreground">
-                            {inv.label || 'Untitled invite'}
+                            {inv.label || 'Convite sem título'}
                           </span>
                           <span
                             className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium ${inviteRoleMeta.className}`}
@@ -534,7 +620,7 @@ export function MembersTab() {
                           </span>
                         </div>
                         <p className="mt-0.5 text-xs text-muted-foreground">
-                          Created {fmtDate(inv.created_at)} · {fmtExpiresIn(inv.expires_at)}
+                          Criado em {fmtDate(inv.created_at)} · {fmtExpiresIn(inv.expires_at)}
                         </p>
                       </div>
 
@@ -549,7 +635,7 @@ export function MembersTab() {
                         className="border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:border-red-500/60 hover:text-red-200"
                       >
                         <MailX className="size-4" />
-                        Revoke
+                        Revogar
                       </Button>
                     </li>
                     );
@@ -567,6 +653,12 @@ export function MembersTab() {
         onCreated={loadEverything}
       />
 
+      <BulkImportMembersDialog
+        open={bulkImportOpen}
+        onOpenChange={setBulkImportOpen}
+        onImported={loadEverything}
+      />
+
       <Dialog
         open={removingMember !== null}
         onOpenChange={(open) => {
@@ -577,16 +669,16 @@ export function MembersTab() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-popover-foreground">
               <AlertTriangle className="size-4 text-amber-400" />
-              Remove member
+              Remover membro
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
-              Remove{' '}
+              Remover{' '}
               <span className="font-medium text-muted-foreground">
-                {removingMember?.full_name || 'this teammate'}
+                {removingMember?.full_name || 'este membro'}
               </span>{' '}
-              from the account? They&apos;ll be signed out of this account
-              and given a fresh personal account on their next sign-in. Their
-              login isn&apos;t deleted.
+              da conta? A pessoa será desconectada desta conta e receberá
+              uma nova conta pessoal no próximo login. O login dela não
+              será excluído.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="bg-popover border-border">
@@ -595,7 +687,7 @@ export function MembersTab() {
               onClick={() => setRemovingMember(null)}
               className="border-border text-muted-foreground hover:bg-muted"
             >
-              Cancel
+              Cancelar
             </Button>
             <Button
               onClick={handleRemove}
@@ -605,10 +697,10 @@ export function MembersTab() {
               {pendingMemberAction ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  Removing...
+                  Removendo...
                 </>
               ) : (
-                'Remove member'
+                'Remover membro'
               )}
             </Button>
           </DialogFooter>
