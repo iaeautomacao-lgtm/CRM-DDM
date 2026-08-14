@@ -158,6 +158,22 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
         break;
       }
 
+      case "ai_agent": {
+        const c = cfg as { mode?: string; next_node_key?: string };
+        // 'takeover' ends the run — no outgoing edge to render.
+        if (c.mode === "takeover") break;
+        const next = c.next_node_key;
+        if (next && knownKeys.has(next)) {
+          edges.push({
+            id: `${node.node_key}--next--${next}`,
+            source: node.node_key,
+            target: next,
+            sourceHandle: "next",
+          });
+        }
+        break;
+      }
+
       case "handoff":
       case "end":
       case "go_to_flow":
@@ -257,6 +273,11 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
       return slots;
     }
 
+    case "ai_agent": {
+      const mode = (cfg as { mode?: string }).mode;
+      return mode === "takeover" ? [] : [{ id: "next", label: "Próximo" }];
+    }
+
     case "handoff":
     case "end":
     case "go_to_flow":
@@ -297,6 +318,10 @@ export function applyEdgeConnection(
 
     case "go_to":
       if (sourceHandle === "next") return { target_node_key: targetKey };
+      return null;
+
+    case "ai_agent":
+      if (sourceHandle === "next") return { next_node_key: targetKey };
       return null;
 
     case "condition":
@@ -407,6 +432,12 @@ function patchedConfigWithoutKey(
       const target = (cfg as { target_node_key?: string }).target_node_key;
       if (target !== deletedKey) return null;
       return { ...cfg, target_node_key: "" };
+    }
+
+    case "ai_agent": {
+      const next = (cfg as { next_node_key?: string }).next_node_key;
+      if (next !== deletedKey) return null;
+      return { ...cfg, next_node_key: "" };
     }
 
     case "condition": {

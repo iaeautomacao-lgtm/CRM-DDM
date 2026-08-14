@@ -18,6 +18,7 @@
 
 import {
   Anchor as AnchorIcon,
+  Bot,
   Clock,
   CornerDownRight,
   FileDown,
@@ -68,7 +69,8 @@ export type NodeType =
   | 'go_to_flow'
   | 'send_template'
   | 'add_note'
-  | 'receive_attachment';
+  | 'receive_attachment'
+  | 'ai_agent';
 
 export interface BuilderNode {
   node_key: string;
@@ -247,6 +249,14 @@ export const NODE_META: Record<
     blurb: 'Espera o cliente enviar uma imagem, vídeo, áudio ou documento',
     category: 'messaging',
   },
+  ai_agent: {
+    label: 'Agente de IA',
+    icon: Bot,
+    // DDM brand orange (#FF5706).
+    color: 'text-orange-500',
+    blurb: 'Aciona o agente de IA para responder ao cliente',
+    category: 'messaging',
+  },
 };
 
 /**
@@ -297,6 +307,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   send_template: { l: 0.65, c: 0.14, h: 148 }, // green-emerald — an approved send
   add_note: { l: 0.68, c: 0.16, h: 38 }, // orange — a flag for humans
   receive_attachment: { l: 0.65, c: 0.17, h: 335 }, // magenta-pink — inbound media
+  ai_agent: { l: 0.65, c: 0.2, h: 32 }, // DDM brand orange (#FF5706) — the AI speaks
 };
 
 export interface NodeColors {
@@ -570,6 +581,21 @@ export function summarizeNode(node: BuilderNode): string | null {
     case 'receive_attachment': {
       const varName = typeof cfg.var_name === 'string' ? cfg.var_name : '';
       return varName ? `→ vars.${varName}` : null;
+    }
+    case 'ai_agent': {
+      const mode = typeof cfg.mode === 'string' ? cfg.mode : '';
+      const MODE_LABEL: Record<string, string> = {
+        once: 'Responde uma vez',
+        loop: 'Loop até',
+        takeover: 'Assume a conversa',
+      };
+      const label = MODE_LABEL[mode] ?? 'Agente de IA';
+      if (mode === 'loop') {
+        const maxTurns =
+          typeof cfg.max_turns === 'number' ? cfg.max_turns : 20;
+        return `${label} ${maxTurns} turnos`;
+      }
+      return label;
     }
   }
 }

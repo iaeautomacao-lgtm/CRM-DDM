@@ -73,7 +73,7 @@ export async function POST(
     const issues = validateFlowForActivation(
       flow as {
         name: string
-        trigger_type: 'keyword' | 'first_inbound_message' | 'manual'
+        trigger_type: 'keyword' | 'first_inbound_message' | 'manual' | 'called_by_flow'
         trigger_config: Record<string, unknown>
         entry_node_id: string | null
       },

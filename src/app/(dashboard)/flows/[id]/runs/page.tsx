@@ -11,8 +11,10 @@ import {
   UserPlus,
   PlayCircle,
   PauseCircle,
+  ArrowRightLeft,
   ChevronDown,
   ChevronRight,
+  Timer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
@@ -23,11 +25,12 @@ import { cn } from "@/lib/utils";
 /**
  * Run history viewer.
  *
- * Lists the 50 most recent runs for a flow, newest first. Each row
- * collapses to a one-liner (contact + status + time); expanding shows
- * the full `flow_run_events` timeline for that run — useful for
- * debugging "why didn't my flow advance?" by surfacing the engine's
- * own log.
+ * Lists the 50 most recent runs for a flow, newest first. Expanding a
+ * row lazily fetches (`?run_id=`) and shows that run's
+ * `flow_run_events` timeline — the engine's own step-by-step log
+ * (migration 061 added node_completed/node_error/run_started/
+ * run_completed/run_error on top of the pre-existing events), useful
+ * for debugging "why didn't my flow advance?".
  */
 
 interface RunRow {
@@ -38,7 +41,10 @@ interface RunRow {
     | "handed_off"
     | "timed_out"
     | "paused_by_agent"
-    | "failed";
+    | "failed"
+    | "error"
+    | "transferred"
+    | "delayed";
   current_node_key: string | null;
   started_at: string;
   last_advanced_at: string;
@@ -46,6 +52,7 @@ interface RunRow {
   end_reason: string | null;
   vars: Record<string, unknown>;
   reprompt_count: number;
+  hops_count: number;
   contact: { id: string; name: string | null; phone: string } | null;
 }
 
@@ -53,28 +60,42 @@ interface EventRow {
   flow_run_id: string;
   event_type: string;
   node_key: string | null;
+  node_type: string | null;
+  status: "success" | "error" | "skipped" | null;
+  error_message: string | null;
+  duration_ms: number | null;
   payload: Record<string, unknown>;
   created_at: string;
 }
 
+// Badge colors per the spec: green = completed, yellow = handed_off /
+// delayed, red = error / failed, blue = active. The remaining statuses
+// (timed_out, paused_by_agent, transferred) aren't called out in the
+// spec — kept neutral/muted so they don't compete visually with the
+// four called-out states.
 const STATUS_META: Record<
   RunRow["status"],
   { label: string; classes: string; icon: typeof Clock }
 > = {
   active: {
     label: "Ativo",
-    classes: "border-emerald-600/40 bg-emerald-500/10 text-emerald-300",
+    classes: "border-sky-600/40 bg-sky-500/10 text-sky-300",
     icon: PlayCircle,
   },
   completed: {
     label: "Concluído",
-    classes: "border-border bg-muted text-muted-foreground",
+    classes: "border-emerald-600/40 bg-emerald-500/10 text-emerald-300",
     icon: CircleCheck,
   },
   handed_off: {
     label: "Transferido",
     classes: "border-amber-600/40 bg-amber-500/10 text-amber-300",
     icon: UserPlus,
+  },
+  delayed: {
+    label: "Aguardando",
+    classes: "border-amber-600/40 bg-amber-500/10 text-amber-300",
+    icon: Clock,
   },
   timed_out: {
     label: "Expirado",
@@ -91,6 +112,16 @@ const STATUS_META: Record<
     classes: "border-red-600/40 bg-red-500/10 text-red-300",
     icon: CircleAlert,
   },
+  error: {
+    label: "Erro",
+    classes: "border-red-600/40 bg-red-500/10 text-red-300",
+    icon: CircleAlert,
+  },
+  transferred: {
+    label: "Encaminhado a outro fluxo",
+    classes: "border-border bg-muted text-muted-foreground",
+    icon: ArrowRightLeft,
+  },
 };
 
 export default function FlowRunsPage() {
@@ -99,10 +130,12 @@ export default function FlowRunsPage() {
 
   const [flow, setFlow] = useState<{ id: string; name: string } | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
-  const [events, setEvents] = useState<EventRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [notFound, setNotFound] = useState(false);
+
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [eventsByRun, setEventsByRun] = useState<Record<string, EventRow[]>>({});
+  const [loadingEvents, setLoadingEvents] = useState<string | null>(null);
 
   useEffect(() => {
     if (!params.id) return;
@@ -118,12 +151,10 @@ export default function FlowRunsPage() {
         const json = (await res.json()) as {
           flow: { id: string; name: string };
           runs: RunRow[];
-          events: EventRow[];
         };
         if (!cancelled) {
           setFlow(json.flow);
           setRuns(json.runs ?? []);
-          setEvents(json.events ?? []);
         }
       } catch (err) {
         if (!cancelled) {
@@ -139,13 +170,25 @@ export default function FlowRunsPage() {
     };
   }, [params.id]);
 
-  function toggle(runId: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(runId)) next.delete(runId);
-      else next.add(runId);
-      return next;
-    });
+  async function toggle(runId: string) {
+    if (expanded === runId) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(runId);
+    if (eventsByRun[runId]) return;
+    setLoadingEvents(runId);
+    try {
+      const res = await fetch(`/api/flows/${params.id}/runs?run_id=${runId}`);
+      if (!res.ok) throw new Error(`Failed: ${res.status}`);
+      const json = (await res.json()) as { events: EventRow[] };
+      setEventsByRun((prev) => ({ ...prev, [runId]: json.events ?? [] }));
+    } catch (err) {
+      console.error(err);
+      toast.error("Não foi possível carregar o log desta execução.");
+    } finally {
+      setLoadingEvents(null);
+    }
   }
 
   if (loading) {
@@ -182,7 +225,7 @@ export default function FlowRunsPage() {
       </button>
       <h1 className="text-xl font-semibold text-foreground">Execuções</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        As 50 execuções mais recentes deste fluxo. Expanda uma linha para ver
+        As 50 execuções mais recentes deste fluxo. Clique em uma linha para ver
         o log passo a passo do motor.
       </p>
 
@@ -197,9 +240,10 @@ export default function FlowRunsPage() {
             <RunCard
               key={run.id}
               run={run}
-              events={events.filter((e) => e.flow_run_id === run.id)}
-              expanded={expanded.has(run.id)}
-              onToggle={() => toggle(run.id)}
+              events={eventsByRun[run.id] ?? null}
+              loadingEvents={loadingEvents === run.id}
+              expanded={expanded === run.id}
+              onToggle={() => void toggle(run.id)}
             />
           ))}
         </div>
@@ -211,11 +255,13 @@ export default function FlowRunsPage() {
 function RunCard({
   run,
   events,
+  loadingEvents,
   expanded,
   onToggle,
 }: {
   run: RunRow;
-  events: EventRow[];
+  events: EventRow[] | null;
+  loadingEvents: boolean;
   expanded: boolean;
   onToggle: () => void;
 }) {
@@ -257,6 +303,9 @@ function RunCard({
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
             <span>Iniciado em {format(new Date(run.started_at), "PP p")}</span>
+            <span>
+              · {run.hops_count} {run.hops_count === 1 ? "nó executado" : "nós executados"}
+            </span>
             {run.reprompt_count > 0 && (
               <span>· {run.reprompt_count} repergunta{run.reprompt_count === 1 ? "" : "s"}</span>
             )}
@@ -276,52 +325,94 @@ function RunCard({
               </pre>
             </details>
           )}
-          <div className="flex flex-col gap-1">
-            {events.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                Nenhum evento registrado para esta execução.
-              </p>
-            ) : (
-              events.map((ev, ix) => <EventLine key={ix} ev={ev} />)
-            )}
-          </div>
+          {loadingEvents ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              {!events || events.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Nenhum evento registrado para esta execução.
+                </p>
+              ) : (
+                events.map((ev, ix) => <EventLine key={ix} ev={ev} />)
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+const EVENT_ICON: Record<string, typeof Clock> = {
+  started: PlayCircle,
+  run_started: PlayCircle,
+  node_entered: ChevronRight,
+  node_completed: CircleCheck,
+  message_sent: CircleCheck,
+  reply_received: ChevronRight,
+  fallback_fired: Clock,
+  handoff: UserPlus,
+  timeout: Clock,
+  error: CircleAlert,
+  node_error: CircleAlert,
+  completed: CircleCheck,
+  run_completed: CircleCheck,
+  run_error: CircleAlert,
+};
+
 const EVENT_COLOR: Record<string, string> = {
   started: "text-emerald-300",
+  run_started: "text-emerald-300",
   node_entered: "text-muted-foreground",
+  node_completed: "text-emerald-300",
   message_sent: "text-sky-300",
   reply_received: "text-primary",
   fallback_fired: "text-amber-300",
   handoff: "text-amber-300",
   timeout: "text-muted-foreground",
   error: "text-red-300",
+  node_error: "text-red-300",
   completed: "text-emerald-300",
+  run_completed: "text-emerald-300",
+  run_error: "text-red-300",
 };
 
 function EventLine({ ev }: { ev: EventRow }) {
   const cls = EVENT_COLOR[ev.event_type] ?? "text-muted-foreground";
+  const Icon = EVENT_ICON[ev.event_type] ?? ChevronRight;
+  const isError = ev.event_type === "node_error" || ev.event_type === "run_error";
   return (
-    <div className="flex items-start gap-2 rounded-md px-2 py-1 text-xs">
-      <span className="w-32 shrink-0 text-[10px] text-muted-foreground">
-        {format(new Date(ev.created_at), "HH:mm:ss")}
-      </span>
-      <span className={cn("w-32 shrink-0 font-mono text-[10px]", cls)}>
-        {ev.event_type}
-      </span>
-      {ev.node_key && (
-        <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
-          {ev.node_key}
-        </code>
-      )}
-      {Object.keys(ev.payload).length > 0 && (
-        <span className="min-w-0 truncate text-[10px] text-muted-foreground">
-          {summarizePayload(ev.payload)}
+    <div className="flex flex-col gap-0.5 rounded-md px-2 py-1 text-xs">
+      <div className="flex items-start gap-2">
+        <Icon className={cn("mt-0.5 h-3 w-3 shrink-0", cls)} />
+        <span className="w-28 shrink-0 text-[10px] text-muted-foreground">
+          {format(new Date(ev.created_at), "HH:mm:ss")}
         </span>
+        <span className={cn("w-32 shrink-0 font-mono text-[10px]", cls)}>
+          {ev.event_type}
+        </span>
+        {ev.node_key && (
+          <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+            {ev.node_type ? `${ev.node_key} (${ev.node_type})` : ev.node_key}
+          </code>
+        )}
+        {typeof ev.duration_ms === "number" && (
+          <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-muted-foreground">
+            <Timer className="h-2.5 w-2.5" />
+            {ev.duration_ms}ms
+          </span>
+        )}
+        {!isError && Object.keys(ev.payload).length > 0 && (
+          <span className="min-w-0 truncate text-[10px] text-muted-foreground">
+            {summarizePayload(ev.payload)}
+          </span>
+        )}
+      </div>
+      {isError && ev.error_message && (
+        <p className="ml-9 text-[10px] text-red-400">{ev.error_message}</p>
       )}
     </div>
   );

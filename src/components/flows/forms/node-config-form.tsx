@@ -323,6 +323,16 @@ export function NodeConfigForm({
           onUpdateConfig={onUpdateConfig}
         />
       );
+
+    case "ai_agent":
+      return (
+        <AiAgentForm
+          cfg={cfg as AiAgentCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
   }
 }
 
@@ -1705,11 +1715,13 @@ interface ActiveFlowOption {
 }
 
 /** Active flows the current account can transfer into via go_to_flow. */
-function useActiveFlows(): ActiveFlowOption[] {
+function useActiveFlows(): { flows: ActiveFlowOption[]; loading: boolean } {
   const [flows, setFlows] = useState<ActiveFlowOption[]>([]);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
         const res = await fetch("/api/flows").catch(() => null);
         if (!res || !res.ok) return;
@@ -1721,14 +1733,16 @@ function useActiveFlows(): ActiveFlowOption[] {
           .map((f) => ({ id: f.id, name: f.name }));
         if (!cancelled) setFlows(active);
       } catch {
-        // Leave the picker empty — the raw-id fallback below still works.
+        // Leave the picker empty — the empty state below still shows.
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
-  return flows;
+  return { flows, loading };
 }
 
 function GoToFlowForm({
@@ -1738,7 +1752,10 @@ function GoToFlowForm({
   cfg: GoToFlowCfg;
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
-  const flows = useActiveFlows();
+  const { flows, loading } = useActiveFlows();
+  const selectedLabel = cfg.flow_id
+    ? flows.find((f) => f.id === cfg.flow_id)?.name ?? cfg.flow_id
+    : undefined;
 
   return (
     <>
@@ -1746,30 +1763,34 @@ function GoToFlowForm({
         <label className="mb-1 block text-xs text-muted-foreground">
           Fluxo de destino
         </label>
-        {flows.length > 0 ? (
-          <Select
-            value={cfg.flow_id ?? ""}
-            onValueChange={(v) => onUpdateConfig({ flow_id: v })}
-          >
-            <SelectTrigger className="bg-muted">
-              <SelectValue placeholder="Escolha um fluxo ativo…" />
-            </SelectTrigger>
-            <SelectContent>
-              {flows.map((f) => (
+        <Select
+          value={cfg.flow_id ?? ""}
+          onValueChange={(v) => onUpdateConfig({ flow_id: v })}
+          disabled={loading}
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue placeholder="Escolha um fluxo ativo…">
+              {loading ? "Carregando…" : selectedLabel}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {loading ? (
+              <SelectItem value="__loading__" disabled>
+                Carregando…
+              </SelectItem>
+            ) : flows.length === 0 ? (
+              <SelectItem value="__empty__" disabled>
+                Nenhum fluxo ativo encontrado
+              </SelectItem>
+            ) : (
+              flows.map((f) => (
                 <SelectItem key={f.id} value={f.id}>
                   {f.name}
                 </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <Input
-            value={cfg.flow_id ?? ""}
-            onChange={(e) => onUpdateConfig({ flow_id: e.target.value })}
-            placeholder="UUID do fluxo de destino"
-            className="bg-muted font-mono text-xs"
-          />
-        )}
+              ))
+            )}
+          </SelectContent>
+        </Select>
         <p className="mt-1 text-[10px] text-muted-foreground">
           Só fluxos com status &quot;ativo&quot; podem ser escolhidos aqui.
         </p>
@@ -1937,6 +1958,121 @@ function ReceiveAttachmentForm({
         onChange={(v) => onUpdateConfig({ next_node_key: v })}
         label="Depois de receber, avança para"
       />
+    </>
+  );
+}
+
+// ============================================================
+// ai_agent
+// ============================================================
+
+interface AiAgentCfg {
+  mode?: "once" | "loop" | "takeover";
+  system_prompt_override?: string;
+  next_node_key?: string;
+  max_turns?: number;
+}
+
+const AI_AGENT_MODE_OPTIONS: Array<{
+  value: NonNullable<AiAgentCfg["mode"]>;
+  label: string;
+}> = [
+  { value: "once", label: "Responder uma vez" },
+  { value: "loop", label: "Loop (responde cada mensagem)" },
+  { value: "takeover", label: "Assumir conversa" },
+];
+
+function AiAgentForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: AiAgentCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const mode = cfg.mode ?? "once";
+
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">Modo</label>
+        <Select
+          value={mode}
+          onValueChange={(v) =>
+            onUpdateConfig({ mode: v as AiAgentCfg["mode"] })
+          }
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {AI_AGENT_MODE_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {mode === "once" &&
+            "Chama o agente de IA uma vez para responder à última mensagem do cliente, depois avança."}
+          {mode === "loop" &&
+            "Chama o agente de IA a cada nova mensagem do cliente, sem sair deste nó, até o limite de turnos."}
+          {mode === "takeover" &&
+            "Chama o agente de IA uma última vez e encerra o fluxo, transferindo a conversa (handed_off)."}
+        </p>
+      </div>
+
+      <TextRow
+        label="System prompt override (opcional)"
+        value={cfg.system_prompt_override ?? ""}
+        onChange={(v) => onUpdateConfig({ system_prompt_override: v })}
+        rows={4}
+      />
+      <p className="-mt-2 text-[10px] text-muted-foreground">
+        Deixe vazio para usar o prompt da configuração de IA
+      </p>
+
+      {mode === "loop" && (
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">
+            Limite de turnos (segurança)
+          </label>
+          <Input
+            type="number"
+            min={1}
+            value={cfg.max_turns ?? 20}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              onUpdateConfig({
+                max_turns: Number.isFinite(n) && n > 0 ? Math.round(n) : 20,
+              });
+            }}
+            className="bg-muted"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Após esse número de respostas neste nó, o fluxo avança
+            automaticamente para o próximo nó.
+          </p>
+        </div>
+      )}
+
+      {mode !== "takeover" && (
+        <NextNodeRow
+          value={cfg.next_node_key ?? ""}
+          allNodes={allNodes}
+          currentKey={currentKey}
+          onChange={(v) => onUpdateConfig({ next_node_key: v })}
+          label={
+            mode === "loop"
+              ? "Ao atingir o limite de turnos, avança para"
+              : "Depois de responder, avança para"
+          }
+        />
+      )}
     </>
   );
 }

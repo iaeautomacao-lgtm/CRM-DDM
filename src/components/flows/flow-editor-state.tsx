@@ -60,7 +60,7 @@ import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
 export interface BuilderState {
   name: string;
   description: string;
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: "keyword" | "first_inbound_message" | "manual" | "called_by_flow";
   trigger_config: Record<string, unknown>;
   entry_node_id: string | null;
   status: FlowRow["status"];
@@ -103,7 +103,7 @@ export interface FlowEditorContextValue {
   removeNode: (key: string) => void;
 
   // Actions
-  save: () => Promise<void>;
+  save: (opts?: { silent?: boolean }) => Promise<void>;
   setStatus: (status: BuilderState["status"]) => Promise<void>;
   deleteFlow: () => Promise<void>;
 
@@ -220,6 +220,13 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
       return { note_text: "", next_node_key: "" };
     case "receive_attachment":
       return { prompt_text: "", var_name: "anexo", next_node_key: "" };
+    case "ai_agent":
+      return {
+        mode: "once",
+        system_prompt_override: "",
+        next_node_key: "",
+        max_turns: 20,
+      };
   }
 }
 
@@ -324,22 +331,35 @@ export function FlowEditorProvider({
     [],
   );
 
-  // Browser-level reload / tab-close / external-link guard. SPA
-  // navigation (sidebar links, back button) isn't covered — Next 16
-  // routes through the App Router and beforeunload doesn't fire on
-  // client-side route changes. That's a follow-up; this catches the
-  // accidental refresh / closed-window class of data loss.
+  // Browser-level reload / tab-close / external-link guard. Fires a
+  // best-effort save instead of blocking with a confirm prompt —
+  // `keepalive` tells the browser to finish the request even after the
+  // page is gone. SPA navigation (sidebar links, back button) isn't
+  // covered here — Next's App Router doesn't fire beforeunload on
+  // client-side route changes — but the 2s debounce autosave below
+  // means there's rarely more than a couple seconds of edits at risk,
+  // and the editor's own nav actions (see header.tsx) save explicitly
+  // before navigating.
   useEffect(() => {
     if (!dirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Modern browsers ignore the return value but require something
-      // truthy to actually show the native prompt.
-      e.returnValue = "";
+    const handler = () => {
+      void fetch(`/api/flows/${initialFlow.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: state.name,
+          description: state.description || null,
+          trigger_type: state.trigger_type,
+          trigger_config: state.trigger_config,
+          entry_node_id: state.entry_node_id,
+          nodes: state.nodes,
+        }),
+        keepalive: true,
+      });
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [dirty]);
+  }, [dirty, state, initialFlow.id]);
 
   // ---- Validation ----
   const issues = useMemo<ValidationIssue[]>(
@@ -361,34 +381,56 @@ export function FlowEditorProvider({
   );
 
   // ---- Save (PUT) ----
-  const save = useCallback(async () => {
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/flows/${initialFlow.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: state.name,
-          description: state.description || null,
-          trigger_type: state.trigger_type,
-          trigger_config: state.trigger_config,
-          entry_node_id: state.entry_node_id,
-          nodes: state.nodes,
-        }),
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error ?? `Falha ao salvar: ${res.status}`);
+  // `silent` skips the success toast — used by the debounce autosave so
+  // it doesn't pop a toast on every 2s tick while the user keeps typing.
+  const isSavingRef = useRef(false);
+  const save = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (isSavingRef.current) return;
+      isSavingRef.current = true;
+      setSaving(true);
+      try {
+        const res = await fetch(`/api/flows/${initialFlow.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: state.name,
+            description: state.description || null,
+            trigger_type: state.trigger_type,
+            trigger_config: state.trigger_config,
+            entry_node_id: state.entry_node_id,
+            nodes: state.nodes,
+          }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          throw new Error(json.error ?? `Falha ao salvar: ${res.status}`);
+        }
+        setDirty(false);
+        if (!opts?.silent) toast.success("Salvo.");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Falha ao salvar";
+        toast.error(msg);
+      } finally {
+        setSaving(false);
+        isSavingRef.current = false;
       }
-      setDirty(false);
-      toast.success("Salvo.");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Falha ao salvar";
-      toast.error(msg);
-    } finally {
-      setSaving(false);
-    }
-  }, [initialFlow.id, state]);
+    },
+    [initialFlow.id, state],
+  );
+
+  // ---- Debounced autosave ----
+  // `save`'s identity changes on every edit (it closes over `state`),
+  // so depending on it here doubles as "reset the timer on every
+  // change" — no separate change-tracking needed. Clears itself once
+  // `dirty` flips back to false after a successful save.
+  useEffect(() => {
+    if (!dirty) return;
+    const timeout = window.setTimeout(() => {
+      void save({ silent: true });
+    }, 2000);
+    return () => window.clearTimeout(timeout);
+  }, [dirty, save]);
 
   // ---- Activate / Pause / Archive ----
   const setStatus = useCallback(

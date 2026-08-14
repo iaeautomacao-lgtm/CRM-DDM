@@ -25,6 +25,7 @@
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  Check,
   CircleDot,
   History,
   Loader2,
@@ -57,13 +58,23 @@ export function EditorHeader() {
     deleteFlow,
   } = useFlowEditor();
 
+  // Best-effort save before leaving the editor via its own nav actions
+  // (back / view runs). Fires and lets the navigation proceed either
+  // way — SPA route changes don't fire beforeunload, so this is the
+  // only chance to persist edits made in the last <2s before the
+  // debounce autosave would have caught them.
+  const navigateAway = (href: string) => {
+    if (dirty) void save({ silent: true });
+    router.push(href);
+  };
+
   return (
     <div className="flex flex-col gap-1.5 px-6 pt-5">
       <div className="flex flex-wrap items-center gap-3">
         {/* ---- left: back · icon · name · status · edited ---- */}
         <button
           type="button"
-          onClick={() => router.push("/flows")}
+          onClick={() => navigateAway("/flows")}
           title="Voltar para Fluxos"
           aria-label="Voltar para Fluxos"
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -82,23 +93,13 @@ export function EditorHeader() {
           className="min-w-[120px] max-w-[340px] rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-bold leading-tight tracking-tight text-foreground outline-none transition-colors hover:bg-muted focus:border-primary focus:bg-transparent focus:shadow-[0_0_0_3px_var(--primary-soft)]"
         />
         <StatusChip status={state.status} />
-        {dirty && (
-          <span
-            className="inline-flex shrink-0 items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-amber-300"
-            title="Alterações não salvas — clique em Salvar para persistir"
-            aria-live="polite"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
-            Editado
-          </span>
-        )}
 
         {/* ---- right: runs · delete · activate · save ---- */}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.push(`/flows/${flow.id}/runs`)}
+            onClick={() => navigateAway(`/flows/${flow.id}/runs`)}
           >
             <History className="h-3.5 w-3.5" />
             Execuções
@@ -149,13 +150,34 @@ export function EditorHeader() {
               Ativar
             </Button>
           )}
-          <Button onClick={() => void save()} disabled={saving} size="sm">
+          <Button
+            onClick={() => void save()}
+            disabled={saving}
+            size="sm"
+            variant={dirty ? "default" : "outline"}
+            className={
+              dirty
+                ? "bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
+                : undefined
+            }
+            aria-live="polite"
+          >
             {saving ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Salvando...
+              </>
+            ) : dirty ? (
+              <>
+                <Save className="h-3.5 w-3.5" />
+                Salvar
+              </>
             ) : (
-              <Save className="h-3.5 w-3.5" />
+              <>
+                <Check className="h-3.5 w-3.5" />
+                Salvo
+              </>
             )}
-            Salvar
           </Button>
         </div>
       </div>

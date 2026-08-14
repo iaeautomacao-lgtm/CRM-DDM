@@ -32,6 +32,7 @@
  *     INSERT raises 23505 and the runner catches & exits.
  */
 
+import { handleAiAutoResponse } from "@/lib/ai/responder";
 import { supabaseAdmin } from "./admin-client";
 import {
   engineMetaSendTemplate,
@@ -49,6 +50,7 @@ import {
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
   type AddNoteNodeConfig,
+  type AiAgentNodeConfig,
   type AnchorNodeConfig,
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -303,6 +305,53 @@ async function logEvent(
 }
 
 /**
+ * Richer sibling of `logEvent` (migration 061) — used for the
+ * run-history viewer (`/flows/[id]/runs`), not the idempotency /
+ * fallback bookkeeping `logEvent` exists for. Carries flow_id/
+ * account_id so the viewer's API can query without joining back
+ * through flow_runs, plus node_type/status/duration_ms/error_message
+ * for the per-node timeline. Never carries message content — only
+ * node_key, node_type, status, timing (no PII).
+ */
+async function logRunEvent(
+  db: AdminClient,
+  event: {
+    run_id: string;
+    flow_id: string;
+    account_id: string;
+    node_key?: string | null;
+    node_type?: string | null;
+    event_type:
+      | "run_started"
+      | "node_completed"
+      | "node_error"
+      | "run_completed"
+      | "run_error";
+    status?: "success" | "error" | "skipped" | null;
+    payload?: Record<string, unknown>;
+    error_message?: string | null;
+    duration_ms?: number | null;
+  },
+): Promise<void> {
+  const { error } = await db.from("flow_run_events").insert({
+    flow_run_id: event.run_id,
+    flow_id: event.flow_id,
+    account_id: event.account_id,
+    node_key: event.node_key ?? null,
+    node_type: event.node_type ?? null,
+    event_type: event.event_type,
+    status: event.status ?? null,
+    payload: event.payload ?? {},
+    error_message: event.error_message ?? null,
+    duration_ms: event.duration_ms ?? null,
+  });
+  if (error) {
+    // Logging failure is non-fatal — surface but don't throw.
+    console.error("[flows] logRunEvent error:", error.message);
+  }
+}
+
+/**
  * Idempotency check — has a `reply_received` event with this Meta
  * message_id already been recorded for any of the contact's flow
  * runs? If yes, the inbound is a duplicate (Meta retry) and we
@@ -392,7 +441,8 @@ async function findEntryFlow(
     } else if (flow.trigger_type === "first_inbound_message" && isFirstInbound) {
       return flow;
     }
-    // 'manual' triggers do not auto-start from inbound messages.
+    // 'manual' and 'called_by_flow' triggers do not auto-start from
+    // inbound messages — the latter only starts via go_to_flow.
   }
   return null;
 }
@@ -653,7 +703,16 @@ async function executeHandoff(
     assigned_to: cfg.assign_to ?? null,
     team_id: cfg.team_id ?? null,
   });
-  await endRun(db, run.id, "handed_off", "handoff_node");
+  await logRunEvent(db, {
+    run_id: run.id,
+    flow_id: run.flow_id,
+    account_id: run.account_id,
+    node_key: node.node_key,
+    node_type: node.node_type,
+    event_type: "node_completed",
+    status: "success",
+  });
+  await endRun(db, run, "handed_off", "handoff_node");
 }
 
 /**
@@ -753,9 +812,23 @@ function mimeToAttachmentKind(
   return "document";
 }
 
+/**
+ * Ends a run and, alongside the existing status update, emits the
+ * run-level `run_completed`/`run_error` event (migration 061) for the
+ * run-history viewer. Every `endRun` call site in this file already
+ * knows the run's outcome, so this single choke point is enough to
+ * cover "run_completed — quando o run termina" without instrumenting
+ * every caller separately.
+ *
+ * `errorContext`, when passed, means THIS run ended because a specific
+ * node threw/failed — logs a `node_error` event for that node in
+ * addition to the run-level event. Omit it for normal terminations
+ * (end node, handoff, fallback exhaustion, go_to_flow transfer) where
+ * nothing actually errored.
+ */
 async function endRun(
   db: AdminClient,
-  runId: string,
+  run: Pick<FlowRunRow, "id" | "flow_id" | "account_id">,
   status:
     | "completed"
     | "handed_off"
@@ -764,6 +837,11 @@ async function endRun(
     | "error"
     | "transferred",
   reason: string,
+  errorContext?: {
+    node_key: string | null;
+    node_type?: string | null;
+    error_message: string;
+  },
 ): Promise<void> {
   await db
     .from("flow_runs")
@@ -772,7 +850,32 @@ async function endRun(
       ended_at: new Date().toISOString(),
       end_reason: reason,
     })
-    .eq("id", runId);
+    .eq("id", run.id);
+
+  if (errorContext) {
+    await logRunEvent(db, {
+      run_id: run.id,
+      flow_id: run.flow_id,
+      account_id: run.account_id,
+      node_key: errorContext.node_key,
+      node_type: errorContext.node_type,
+      event_type: "node_error",
+      status: "error",
+      error_message: errorContext.error_message,
+      payload: { reason },
+    });
+  }
+
+  const isFailure = status === "failed" || status === "error" || status === "timed_out";
+  await logRunEvent(db, {
+    run_id: run.id,
+    flow_id: run.flow_id,
+    account_id: run.account_id,
+    event_type: isFailure ? "run_error" : "run_completed",
+    status: isFailure ? "error" : "success",
+    error_message: errorContext?.error_message ?? null,
+    payload: { end_reason: reason, run_status: status },
+  });
 }
 
 // ============================================================
@@ -796,7 +899,10 @@ export async function advanceFromNodeKey(
       await logEvent(db, run.id, "error", null, {
         reason: "next_node_key was null mid-advance",
       });
-      await endRun(db, run.id, "failed", "missing_next_node");
+      await endRun(db, run, "failed", "missing_next_node", {
+        node_key: null,
+        error_message: "next_node_key was null mid-advance",
+      });
       return { outcome: "completed" };
     }
     const node: FlowNodeRow | null = nodes.get(currentKey) ?? null;
@@ -804,15 +910,43 @@ export async function advanceFromNodeKey(
       await logEvent(db, run.id, "error", currentKey, {
         reason: "node_not_found",
       });
-      await endRun(db, run.id, "failed", "node_not_found");
+      await endRun(db, run, "failed", "node_not_found", {
+        node_key: currentKey,
+        error_message: "node_not_found",
+      });
       return { outcome: "completed" };
     }
     await logEvent(db, run.id, "node_entered", node.node_key, {
       node_type: node.node_type,
     });
+    const nodeStartedAt = Date.now();
+    const nodeCompleted = () =>
+      logRunEvent(db, {
+        run_id: run.id,
+        flow_id: run.flow_id,
+        account_id: run.account_id,
+        node_key: node.node_key,
+        node_type: node.node_type,
+        event_type: "node_completed",
+        status: "success",
+        duration_ms: Date.now() - nodeStartedAt,
+      });
+    const nodeError = (error_message: string) =>
+      logRunEvent(db, {
+        run_id: run.id,
+        flow_id: run.flow_id,
+        account_id: run.account_id,
+        node_key: node.node_key,
+        node_type: node.node_type,
+        event_type: "node_error",
+        status: "error",
+        error_message,
+        duration_ms: Date.now() - nodeStartedAt,
+      });
 
     if (node.node_type === "start") {
       currentKey = (node.config as unknown as StartNodeConfig).next_node_key;
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "send_message") {
@@ -826,14 +960,20 @@ export async function advanceFromNodeKey(
           whatsapp_message_id,
         });
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "send_text_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
-        await endRun(db, run.id, "failed", "send_text_failed");
+        await endRun(db, run, "failed", "send_text_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+        });
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "send_media") {
@@ -853,14 +993,20 @@ export async function advanceFromNodeKey(
           whatsapp_message_id,
         });
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "send_media_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
-        await endRun(db, run.id, "failed", "send_media_failed");
+        await endRun(db, run, "failed", "send_media_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+        });
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "collect_input") {
@@ -887,11 +1033,16 @@ export async function advanceFromNodeKey(
           })
           .eq("id", run.id);
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "collect_input_prompt_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
-        await endRun(db, run.id, "failed", "collect_input_prompt_failed");
+        await endRun(db, run, "failed", "collect_input_prompt_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+        });
         return { outcome: "completed" };
       }
       const advanced = await advanceCurrentNodeKey(
@@ -905,6 +1056,7 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      await nodeCompleted();
       return { outcome: "advanced" };
     }
     if (node.node_type === "condition") {
@@ -915,11 +1067,16 @@ export async function advanceFromNodeKey(
           ? "true"
           : "false";
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "condition_evaluation_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
-        await endRun(db, run.id, "failed", "condition_evaluation_failed");
+        await endRun(db, run, "failed", "condition_evaluation_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+        });
         return { outcome: "completed" };
       }
       currentKey =
@@ -928,6 +1085,7 @@ export async function advanceFromNodeKey(
         condition_result: branch,
         advancing_to: currentKey,
       });
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "set_tag") {
@@ -947,13 +1105,16 @@ export async function advanceFromNodeKey(
             .eq("contact_id", run.contact_id!)
             .eq("tag_id", cfg.tag_id);
         }
+        await nodeCompleted();
       } catch (err) {
         // Non-fatal — log + advance. A tag-write failure shouldn't
         // strand the customer mid-flow.
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "set_tag_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
+        await nodeError(detail);
       }
       currentKey = cfg.next_node_key;
       continue;
@@ -972,6 +1133,7 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      await nodeCompleted();
       return { outcome: "advanced" };
     }
     if (node.node_type === "send_list") {
@@ -987,6 +1149,7 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      await nodeCompleted();
       return { outcome: "advanced" };
     }
     if (node.node_type === "handoff") {
@@ -995,7 +1158,8 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "end") {
       await logEvent(db, run.id, "completed", node.node_key);
-      await endRun(db, run.id, "completed", "end_node");
+      await nodeCompleted();
+      await endRun(db, run, "completed", "end_node");
       return { outcome: "completed" };
     }
     if (node.node_type === "http_fetch") {
@@ -1027,11 +1191,14 @@ export async function advanceFromNodeKey(
           node_type: "http_fetch",
           status: res.status,
         });
+        await nodeCompleted();
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "http_fetch_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
+        await nodeError(detail);
       }
       currentKey = cfg.next_node_key;
       continue;
@@ -1045,6 +1212,7 @@ export async function advanceFromNodeKey(
       }
       await updateRunVars(db, run, patch);
       currentKey = cfg.next_node_key;
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "smart_delay") {
@@ -1058,10 +1226,12 @@ export async function advanceFromNodeKey(
             node_type: "smart_delay",
           });
         } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
           await logEvent(db, run.id, "error", node.node_key, {
             reason: "smart_delay_message_failed",
-            detail: err instanceof Error ? err.message : String(err),
+            detail,
           });
+          await nodeError(detail);
         }
       }
       const advanced = await advanceCurrentNodeKey(
@@ -1083,11 +1253,13 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      await nodeCompleted();
       return { outcome: "advanced" };
     }
     if (node.node_type === "anchor") {
       const cfg = node.config as unknown as AnchorNodeConfig;
       currentKey = cfg.next_node_key;
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "go_to") {
@@ -1096,7 +1268,11 @@ export async function advanceFromNodeKey(
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "go_to_hop_limit_exceeded",
         });
-        await endRun(db, run.id, "error", "go_to_hop_limit_exceeded");
+        await endRun(db, run, "error", "go_to_hop_limit_exceeded", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: "go_to hop limit exceeded",
+        });
         return { outcome: "completed" };
       }
       run.hops_count += 1;
@@ -1105,6 +1281,7 @@ export async function advanceFromNodeKey(
         .update({ hops_count: run.hops_count })
         .eq("id", run.id);
       currentKey = cfg.target_node_key;
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "go_to_flow") {
@@ -1120,10 +1297,15 @@ export async function advanceFromNodeKey(
           reason: "go_to_flow_invalid_target",
           flow_id: cfg.flow_id,
         });
-        await endRun(db, run.id, "error", "go_to_flow_invalid_target");
+        await endRun(db, run, "error", "go_to_flow_invalid_target", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: `go_to_flow_invalid_target:${cfg.flow_id}`,
+        });
         return { outcome: "completed" };
       }
-      await endRun(db, run.id, "transferred", "go_to_flow");
+      await nodeCompleted();
+      await endRun(db, run, "transferred", "go_to_flow");
       const targetNodes = await loadAllNodes(db, targetFlow.id);
       await startTransferredRun(db, targetFlow, run, cfg.pass_vars, targetNodes);
       return { outcome: "transferred" };
@@ -1156,14 +1338,20 @@ export async function advanceFromNodeKey(
           template_name: cfg.template_name,
         });
       } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "send_template_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
-        await endRun(db, run.id, "failed", "send_template_failed");
+        await endRun(db, run, "failed", "send_template_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+        });
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;
+      await nodeCompleted();
       continue;
     }
     if (node.node_type === "add_note") {
@@ -1174,12 +1362,15 @@ export async function advanceFromNodeKey(
           user_id: run.user_id,
           note_text: interpolateVars(cfg.note_text, run.vars),
         });
+        await nodeCompleted();
       } catch (err) {
         // Non-fatal — a note-write failure shouldn't strand the customer.
+        const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "add_note_failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail,
         });
+        await nodeError(detail);
       }
       currentKey = cfg.next_node_key;
       continue;
@@ -1196,11 +1387,16 @@ export async function advanceFromNodeKey(
             whatsapp_message_id,
           });
         } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
           await logEvent(db, run.id, "error", node.node_key, {
             reason: "receive_attachment_prompt_failed",
-            detail: err instanceof Error ? err.message : String(err),
+            detail,
           });
-          await endRun(db, run.id, "failed", "receive_attachment_prompt_failed");
+          await endRun(db, run, "failed", "receive_attachment_prompt_failed", {
+            node_key: node.node_key,
+            node_type: node.node_type,
+            error_message: detail,
+          });
           return { outcome: "completed" };
         }
       }
@@ -1215,20 +1411,114 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
+      await nodeCompleted();
       return { outcome: "advanced" };
+    }
+    if (node.node_type === "ai_agent") {
+      const cfg = node.config as unknown as AiAgentNodeConfig;
+      try {
+        // Last customer message is the AI's input — same "what does the
+        // customer want answered" the standalone auto-responder uses.
+        const { data: lastCustomerMsg } = await db
+          .from("messages")
+          .select("content_text")
+          .eq("conversation_id", run.conversation_id!)
+          .eq("sender_type", "customer")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const incomingText =
+          (lastCustomerMsg as { content_text: string | null } | null)
+            ?.content_text ?? "";
+
+        await handleAiAutoResponse(
+          run.account_id,
+          run.contact_id!,
+          run.conversation_id!,
+          incomingText,
+        );
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "ai_agent",
+          mode: cfg.mode,
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "ai_agent_failed",
+          detail,
+        });
+        await endRun(db, run, "failed", "ai_agent_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+        });
+        return { outcome: "completed" };
+      }
+
+      if (cfg.mode === "takeover") {
+        await logEvent(db, run.id, "handoff", node.node_key, {
+          reason: "ai_agent_takeover",
+        });
+        await nodeCompleted();
+        await endRun(db, run, "handed_off", "ai_agent_takeover");
+        return { outcome: "handed_off" };
+      }
+
+      if (cfg.mode === "loop") {
+        const maxTurns = cfg.max_turns ?? 20;
+        const priorTurns =
+          typeof run.vars.__ai_turns__ === "number"
+            ? (run.vars.__ai_turns__ as number)
+            : 0;
+        const turns = priorTurns + 1;
+        if (turns >= maxTurns) {
+          // Cap hit — reset the counter (in case this node is ever
+          // re-entered later via go_to) and fall through to advance.
+          await updateRunVars(db, run, { __ai_turns__: 0 });
+          currentKey = cfg.next_node_key ?? null;
+          await nodeCompleted();
+          continue;
+        }
+        await updateRunVars(db, run, { __ai_turns__: turns });
+        const advanced = await advanceCurrentNodeKey(
+          db,
+          run.id,
+          run.current_node_key,
+          node.node_key,
+        );
+        if (!advanced) {
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "lost_race_during_advance",
+          });
+        }
+        await nodeCompleted();
+        return { outcome: "advanced" };
+      }
+
+      // mode === "once"
+      currentKey = cfg.next_node_key ?? null;
+      await nodeCompleted();
+      continue;
     }
     // Unknown node type — shouldn't happen given the CHECK constraint.
     await logEvent(db, run.id, "error", node.node_key, {
       reason: `unknown_node_type:${node.node_type}`,
     });
-    await endRun(db, run.id, "failed", "unknown_node_type");
+    await endRun(db, run, "failed", "unknown_node_type", {
+      node_key: node.node_key,
+      node_type: node.node_type,
+      error_message: `unknown_node_type:${node.node_type}`,
+    });
     return { outcome: "completed" };
   }
   // Safety break — log + fail.
   await logEvent(db, run.id, "error", currentKey, {
     reason: "advance_loop_safety_break",
   });
-  await endRun(db, run.id, "failed", "advance_loop_overflow");
+  await endRun(db, run, "failed", "advance_loop_overflow", {
+    node_key: currentKey,
+    error_message: "advance_loop_safety_break",
+  });
   return { outcome: "completed" };
 }
 
@@ -1350,7 +1640,10 @@ async function handleReplyForActiveRun(
   if (!run.current_node_key) {
     // Defensive — a run with status='active' but no current node is
     // malformed. Fail the run rather than spin.
-    await endRun(db, run.id, "failed", "active_run_missing_current_node");
+    await endRun(db, run, "failed", "active_run_missing_current_node", {
+      node_key: null,
+      error_message: "active_run_missing_current_node",
+    });
     return {
       consumed: true,
       flow_run_id: run.id,
@@ -1360,7 +1653,10 @@ async function handleReplyForActiveRun(
 
   const currentNode = nodes.get(run.current_node_key) ?? null;
   if (!currentNode) {
-    await endRun(db, run.id, "failed", "current_node_not_found");
+    await endRun(db, run, "failed", "current_node_not_found", {
+      node_key: run.current_node_key,
+      error_message: "current_node_not_found",
+    });
     return { consumed: true, flow_run_id: run.id, outcome: "no_match" };
   }
 
@@ -1532,11 +1828,11 @@ async function handleReplyForActiveRun(
     await logEvent(db, run.id, "handoff", run.current_node_key, {
       reason: "fallback_exhausted",
     });
-    await endRun(db, run.id, "handed_off", "fallback_exhausted");
+    await endRun(db, run, "handed_off", "fallback_exhausted");
     return { consumed: true, flow_run_id: run.id, outcome: "handed_off" };
   }
   // action.type === 'end'
-  await endRun(db, run.id, "completed", "fallback_exhausted_end");
+  await endRun(db, run, "completed", "fallback_exhausted_end");
   return { consumed: true, flow_run_id: run.id, outcome: "completed" };
 }
 
@@ -1589,6 +1885,15 @@ async function startNewRun(
     flow_id: flow.id,
     trigger_type: flow.trigger_type,
     meta_message_id: inboundMessageId(input.message),
+  });
+  await logRunEvent(db, {
+    run_id: run.id,
+    flow_id: flow.id,
+    account_id: flow.account_id,
+    node_key: flow.entry_node_id,
+    event_type: "run_started",
+    status: "success",
+    payload: { trigger_type: flow.trigger_type },
   });
   // Bump the flow's execution counter — used by the builder UI to
   // surface "X runs since activation" on the flow card.
@@ -1661,6 +1966,15 @@ async function startTransferredRun(
     flow_id: targetFlow.id,
     trigger_type: "go_to_flow",
     transferred_from_run_id: sourceRun.id,
+  });
+  await logRunEvent(db, {
+    run_id: newRun.id,
+    flow_id: targetFlow.id,
+    account_id: targetFlow.account_id,
+    node_key: targetFlow.entry_node_id,
+    event_type: "run_started",
+    status: "success",
+    payload: { trigger_type: "go_to_flow", transferred_from_run_id: sourceRun.id },
   });
   const { error: incErr } = await db.rpc("increment_flow_execution_count", {
     p_flow_id: targetFlow.id,

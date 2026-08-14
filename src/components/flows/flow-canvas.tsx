@@ -95,6 +95,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useFlowEditor } from './flow-editor-state';
 import { NodeConfigForm } from './forms/node-config-form';
+// DeletableEdge (custom edge w/ inline trash button) is temporarily
+// disabled — it crashes @xyflow/react in production with "Cannot read
+// properties of undefined (reading '1')" inside the library's own edge
+// rendering. Falling back to the default edge type + delete-on-click
+// removes the crashing component from the tree entirely. Re-enable once
+// the root cause is confirmed fixed (check @xyflow/react changelog / open
+// an upstream issue) — see deletable-edge.tsx, left intact and unused.
+// import { DeletableEdge } from './deletable-edge';
 
 // React-Flow node `data` payload — the bits our custom renderer needs.
 interface NodeData extends Record<string, unknown> {
@@ -250,6 +258,9 @@ function FlowNodeCard({ data, selected }: NodeProps) {
 }
 
 const NODE_TYPES = { flow: FlowNodeCard };
+// No custom EDGE_TYPES — see the DeletableEdge import comment above.
+// ReactFlow's built-in "default" bezier edge renders `label` out of the
+// box, so the slot labels (Yes / No / row titles) are unaffected.
 
 // ============================================================
 // Root canvas
@@ -358,18 +369,15 @@ function FlowCanvasInner() {
 
     // sourceHandle is now wired up — the FlowNodeCard renders a Handle
     // per slot whose id matches the scheme in edges.ts, so React-Flow
-    // can hang the arrow off the right place on each card.
+    // can hang the arrow off the right place on each card. Using the
+    // default edge type (see EDGE_TYPES comment above), so no custom
+    // label chrome — `label` renders via the built-in EdgeText.
     const rfEdges: RfEdge[] = canvasEdges.map((e) => ({
       id: e.id,
       source: e.source,
       target: e.target,
       sourceHandle: e.sourceHandle,
       label: e.label,
-      // Mode-aware via CSS tokens so edge chrome flips with light/dark.
-      labelStyle: { fill: 'var(--muted-foreground)', fontSize: 11 },
-      labelBgStyle: { fill: 'var(--card)' },
-      labelBgPadding: [4, 2] as [number, number],
-      labelBgBorderRadius: 4,
       style: { stroke: 'var(--border)', strokeWidth: 1.5 },
     }));
 
@@ -484,6 +492,19 @@ function FlowCanvasInner() {
     [builderNodes, updateNodeConfig]
   );
 
+  // Click-to-delete: replaces the inline trash button DeletableEdge used
+  // to render (see EDGE_TYPES comment above). Keyboard delete
+  // (Backspace/Delete on a selected edge, via handleEdgesDelete) still
+  // works too — this just restores one-click removal without the
+  // custom edge component.
+  const handleEdgeClick = useCallback(
+    (event: React.MouseEvent, edge: RfEdge) => {
+      event.stopPropagation();
+      handleEdgesDelete([edge]);
+    },
+    [handleEdgesDelete]
+  );
+
   // Wrapped mutators that target the currently-selected node — pass to
   // the form so each keystroke goes through the editor context (which
   // flips `dirty` and feeds the validator).
@@ -530,6 +551,7 @@ function FlowCanvasInner() {
           onConnect={handleConnect}
           onNodesDelete={handleNodesDelete}
           onEdgesDelete={handleEdgesDelete}
+          onEdgeClick={handleEdgeClick}
           // Default is "Backspace" only — accept both so Mac users
           // hitting Delete (Fn+Backspace) get the same behavior.
           deleteKeyCode={['Backspace', 'Delete']}
@@ -691,6 +713,7 @@ const ADD_NODE_TYPES: NodeType[] = [
   'send_media',
   'send_template',
   'receive_attachment',
+  'ai_agent',
   'collect_input',
   'condition',
   'set_tag',
