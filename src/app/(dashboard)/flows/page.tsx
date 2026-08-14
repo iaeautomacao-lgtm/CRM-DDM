@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -16,6 +16,8 @@ import {
   HelpCircle,
   UserPlus,
   FileText,
+  Download,
+  Upload,
 } from "lucide-react";
 
 import { useCan } from "@/hooks/use-can";
@@ -90,6 +92,8 @@ export default function FlowsPage() {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +195,75 @@ export default function FlowsPage() {
     }
   }
 
+  async function handleExport(flow: FlowRow) {
+    try {
+      const res = await fetch(`/api/flows/${flow.id}/export`);
+      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition");
+      const match = disposition?.match(/filename="([^"]+)"/);
+      const filename = match?.[1] ?? `${flow.name}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      toast.error("Não foi possível exportar o fluxo.");
+    }
+  }
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    try {
+      const text = await file.text();
+      let json: unknown;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        throw new Error("Arquivo inválido: não é um JSON válido.");
+      }
+
+      const res = await fetch("/api/flows/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(json),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error ?? `Import failed: ${res.status}`);
+      }
+      const { flow_id } = (await res.json()) as { flow_id: string };
+
+      toast.success("Fluxo importado com sucesso.", {
+        action: {
+          label: "Editar",
+          onClick: () => router.push(`/flows/${flow_id}`),
+        },
+      });
+
+      const flowsRes = await fetch("/api/flows");
+      if (flowsRes.ok) {
+        const flowsJson = (await flowsRes.json()) as { flows: FlowRow[] };
+        setFlows(flowsJson.flows ?? []);
+      }
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Falha ao importar fluxo.";
+      toast.error(msg);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -214,14 +287,37 @@ export default function FlowsPage() {
             Ideal para menus, FAQs e triagem antes do atendimento humano.
           </p>
         </div>
-        <GatedButton
-          canAct={canCreate}
-          gateReason="create flows"
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          Novo fluxo
-        </GatedButton>
+        <div className="flex items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={handleImportFile}
+          />
+          <GatedButton
+            variant="outline"
+            canAct={canCreate}
+            gateReason="import flows"
+            disabled={importing}
+            onClick={() => importInputRef.current?.click()}
+          >
+            {importing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Upload className="h-4 w-4" />
+            )}
+            Importar fluxo
+          </GatedButton>
+          <GatedButton
+            canAct={canCreate}
+            gateReason="create flows"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            Novo fluxo
+          </GatedButton>
+        </div>
       </header>
 
       {flows.length === 0 ? (
@@ -236,6 +332,7 @@ export default function FlowsPage() {
               key={flow.id}
               flow={flow}
               onEdit={() => router.push(`/flows/${flow.id}`)}
+              onExport={() => handleExport(flow)}
               onDelete={() => handleDelete(flow)}
             />
           ))}
@@ -358,10 +455,12 @@ function EmptyState({
 function FlowCard({
   flow,
   onEdit,
+  onExport,
   onDelete,
 }: {
   flow: FlowRow;
   onEdit: () => void;
+  onExport: () => void;
   onDelete: () => void;
 }) {
   const triggerSummary = describeTrigger(flow);
@@ -407,6 +506,10 @@ function FlowCard({
         <Button variant="ghost" size="sm" onClick={onEdit}>
           <Pencil className="h-3.5 w-3.5" />
           Editar
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onExport}>
+          <Download className="h-3.5 w-3.5" />
+          Exportar
         </Button>
         <Button
           variant="ghost"
