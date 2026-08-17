@@ -3,12 +3,17 @@ import type { AccountRole } from "@/lib/auth/roles";
 // ============================================================
 // Route-level RBAC gating.
 //
-// This is a THIN, ADDITIVE layer on top of the existing capability
-// predicates in lib/auth/roles.ts (canManageMembers, canEditSettings,
+// Layers on top of the existing capability predicates in
+// lib/auth/roles.ts (canManageMembers, canEditSettings,
 // canSendMessages) — it does not replace them. Only the route
-// prefixes listed in ROUTE_ALLOWLIST are gated here; every other
-// route is left to whatever page-level capability checks already
-// exist. Adding a new gated route = one new ROUTE_ALLOWLIST entry.
+// prefixes listed in ROUTE_ALLOWLIST are gated here; a route
+// prefix with no entry is unrestricted by this table.
+//
+// `admin` is intentionally locked to exactly /dashboard,
+// /monitoramento and /inbox — every other nav-exposed route below
+// lists every role EXCEPT admin so that lockout is strict rather
+// than "admin happens to be omitted." Adding a new gated route =
+// one new ROUTE_ALLOWLIST entry.
 // ============================================================
 
 /** Alias of AccountRole — kept separate so route-gating call sites
@@ -17,8 +22,19 @@ export type UserRole = AccountRole;
 
 export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/dashboard": ["owner", "admin", "agent", "viewer"],
-  "/inbox": ["owner", "admin", "agent"],
   "/monitoramento": ["owner", "admin"],
+  "/inbox": ["owner", "admin", "agent"],
+
+  // admin excluded from everything below — strictly locked to the
+  // three routes above.
+  "/canais": ["owner", "agent", "viewer"],
+  "/contacts": ["owner", "agent", "viewer"],
+  "/pipelines": ["owner", "agent", "viewer"],
+  "/flows": ["owner", "agent", "viewer"],
+  "/disparador": ["owner", "agent", "viewer"],
+  "/settings": ["owner", "agent", "viewer"],
+  "/relatorios": ["owner", "agent", "viewer"],
+  "/ajuda": ["owner", "agent", "viewer"],
 };
 
 /** True if `pathname` matches a prefix this table restricts. Used to

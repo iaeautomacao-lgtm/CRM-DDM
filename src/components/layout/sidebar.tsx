@@ -303,52 +303,56 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               );
             })}
 
-            <li>
-              <button
-                type="button"
-                onClick={() => setReportsOpen((o) => !o)}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                  isReportsActive
-                    ? "text-primary"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            {visibleReportNavItems.length > 0 && (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setReportsOpen((o) => !o)}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                    isReportsActive
+                      ? "text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                  )}
+                >
+                  <BarChart2 className="h-4 w-4" />
+                  <span className="flex-1 text-left">Relatórios</span>
+                  {reportsOpen ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                </button>
+                {reportsOpen && (
+                  <ul className="mt-1 flex flex-col gap-1 pl-4">
+                    {visibleReportNavItems.map((item) => {
+                      const isActive = pathname.startsWith(item.href);
+                      return (
+                        <li key={item.href}>
+                          <Link
+                            href={item.href}
+                            className={cn(
+                              "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
+                              isActive
+                                ? "bg-primary/10 text-primary"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                            )}
+                          >
+                            <item.icon className="h-4 w-4" />
+                            {item.label}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
-              >
-                <BarChart2 className="h-4 w-4" />
-                <span className="flex-1 text-left">Relatórios</span>
-                {reportsOpen ? (
-                  <ChevronUp className="h-4 w-4" />
-                ) : (
-                  <ChevronDown className="h-4 w-4" />
-                )}
-              </button>
-              {reportsOpen && (
-                <ul className="mt-1 flex flex-col gap-1 pl-4">
-                  {visibleReportNavItems.map((item) => {
-                    const isActive = pathname.startsWith(item.href);
-                    return (
-                      <li key={item.href}>
-                        <Link
-                          href={item.href}
-                          className={cn(
-                            "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                            isActive
-                              ? "bg-primary/10 text-primary"
-                              : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                          )}
-                        >
-                          <item.icon className="h-4 w-4" />
-                          {item.label}
-                        </Link>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </li>
+              </li>
+            )}
           </ul>
 
-          <div className="my-4 border-t border-border" />
+          {visibleBottomNavItems.length > 0 && (
+            <div className="my-4 border-t border-border" />
+          )}
 
           <ul className="flex flex-col gap-1">
             {visibleBottomNavItems.map((item) => {
