@@ -53,13 +53,13 @@ const MIN_PASSWORD_LENGTH = 6;
 const MAX_ROWS = 200;
 
 // Client-side mirror of the server's alias map (bulk-invite/route.ts) —
-// used only to render a friendly role badge in the preview. 'owner'/
-// 'administrador' are deliberately absent: bulk-invite can never
-// create an owner, so the server always rejects those rows with
-// "Papel inválido" regardless of case — the preview badge should show
-// that same "Papel inválido" fallback here, not a misleading
-// "Administrador" chip for a row that will fail on import.
+// used only to render a friendly role badge in the preview. Bulk-invite
+// can create 'owner' rows now (owner-only route — see bulk-invite/
+// route.ts), so 'administrador' resolves to 'owner' here too, matching
+// the server exactly.
 const ROLE_ALIASES: Record<string, AccountRole> = {
+  owner: 'owner',
+  administrador: 'owner',
   admin: 'admin',
   supervisor: 'admin',
   agent: 'agent',
@@ -335,7 +335,7 @@ export function BulkImportMembersDialog({
               <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">
                 role
               </code>{' '}
-              (supervisor, operador ou visualizador — padrão: operador).
+              (administrador, supervisor, operador ou visualizador — padrão: operador).
               Cada linha recebe um login com a senha padrão abaixo.
             </DialogDescription>
           </DialogHeader>
