@@ -120,9 +120,22 @@ export function ContactSidebar({
         .eq("contact_id", contact.id),
     ]);
 
-    if (dealsRes.data) setDeals(dealsRes.data);
-    if (notesRes.data) setNotes(notesRes.data);
-    if (tagsRes.data) {
+    if (dealsRes.error) {
+      console.error("[ContactSidebar] failed to load deals:", dealsRes.error);
+    } else if (dealsRes.data) {
+      setDeals(dealsRes.data);
+    }
+
+    if (notesRes.error) {
+      console.error("[ContactSidebar] failed to load contact notes:", notesRes.error);
+      toast.error("Não foi possível carregar as notas do contato");
+    } else if (notesRes.data) {
+      setNotes(notesRes.data);
+    }
+
+    if (tagsRes.error) {
+      console.error("[ContactSidebar] failed to load tags:", tagsRes.error);
+    } else if (tagsRes.data) {
       const mapped = tagsRes.data
         .filter((ct: Record<string, unknown>) => ct.tags)
         .map((ct: Record<string, unknown>) => ({
@@ -172,7 +185,10 @@ export function ContactSidebar({
       .select()
       .single();
 
-    if (!error && data) {
+    if (error) {
+      console.error("[ContactSidebar] failed to add contact note:", error);
+      toast.error("Erro ao adicionar nota");
+    } else if (data) {
       setNotes((prev) => [data, ...prev]);
       setNewNote("");
     }
