@@ -20,7 +20,9 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -38,7 +40,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import type { Team } from '@/types';
+import type { AccountMember, Team } from '@/types';
 
 // Base UI's Select needs a real string value — there's no "no
 // selection" affordance, so an explicit sentinel stands in for
@@ -101,6 +103,97 @@ export function TeamFormDialog({
         : EMPTY_FORM,
     );
   }, [open, team]);
+
+  // ----------------------------------------------------------
+  // "Membros" section — edit mode only (a team needs a row in the DB
+  // before agents can be linked to it, so create mode never shows
+  // this). Loads the account's agents once + this team's current
+  // wacrm.team_members roster, then every checkbox toggle is an
+  // immediate POST/DELETE against /api/account/teams/[teamId]/members
+  // — no separate "save members" step, mirroring the toggle-is-the-
+  // save pattern already used for role changes in members-tab.tsx.
+  // ----------------------------------------------------------
+  const [agents, setAgents] = useState<AccountMember[]>([]);
+  const [memberUserIds, setMemberUserIds] = useState<Set<string>>(new Set());
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [pendingMemberId, setPendingMemberId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !team) {
+      setAgents([]);
+      setMemberUserIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    setMembersLoading(true);
+    (async () => {
+      try {
+        const [membersRes, teamMembersRes] = await Promise.all([
+          fetch('/api/account/members', { cache: 'no-store' }),
+          fetch(`/api/account/teams/${team.id}/members`, { cache: 'no-store' }),
+        ]);
+        if (cancelled) return;
+
+        if (membersRes.ok) {
+          const data = (await membersRes.json()) as { members?: AccountMember[] };
+          setAgents((data.members ?? []).filter((m) => m.role === 'agent'));
+        } else {
+          toast.error('Failed to load agents');
+        }
+
+        if (teamMembersRes.ok) {
+          const data = (await teamMembersRes.json()) as { userIds?: string[] };
+          setMemberUserIds(new Set(data.userIds ?? []));
+        } else {
+          toast.error('Failed to load team members');
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.error('[TeamFormDialog] members fetch error:', err);
+          toast.error('Could not reach the server');
+        }
+      } finally {
+        if (!cancelled) setMembersLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, team]);
+
+  async function handleToggleMember(agentId: string, checked: boolean) {
+    if (!team) return;
+    setPendingMemberId(agentId);
+    // Optimistic — revert below on failure.
+    setMemberUserIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(agentId);
+      else next.delete(agentId);
+      return next;
+    });
+    try {
+      const res = await fetch(`/api/account/teams/${team.id}/members`, {
+        method: checked ? 'POST' : 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: agentId }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || 'Failed to update team membership');
+      }
+    } catch (err) {
+      setMemberUserIds((prev) => {
+        const next = new Set(prev);
+        if (checked) next.delete(agentId);
+        else next.add(agentId);
+        return next;
+      });
+      console.error('[TeamFormDialog] toggle member error:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to update team membership');
+    } finally {
+      setPendingMemberId(null);
+    }
+  }
 
   async function handleSave() {
     const trimmedName = form.name.trim();
@@ -224,6 +317,59 @@ export function TeamFormDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Create mode has no team row yet to link agents against —
+              this section only renders once a team exists in the DB. */}
+          {team && (
+            <div className="space-y-2">
+              <Label>Membros</Label>
+              {membersLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : agents.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Nenhum agente na conta ainda.
+                </p>
+              ) : (
+                <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+                  {agents.map((agent) => {
+                    const checked = memberUserIds.has(agent.user_id);
+                    const isPending = pendingMemberId === agent.user_id;
+                    const displayName = agent.full_name || agent.email || 'Sem nome';
+                    return (
+                      <label
+                        key={agent.user_id}
+                        className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                      >
+                        <Checkbox
+                          checked={checked}
+                          disabled={isPending}
+                          onCheckedChange={(next) =>
+                            handleToggleMember(agent.user_id, next === true)
+                          }
+                        />
+                        <Avatar className="size-6 shrink-0">
+                          {agent.avatar_url ? (
+                            <AvatarImage src={agent.avatar_url} alt={displayName} />
+                          ) : null}
+                          <AvatarFallback className="bg-primary/10 text-[10px] font-medium text-primary">
+                            {displayName.charAt(0).toUpperCase()}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                          {displayName}
+                        </span>
+                        {isPending && (
+                          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
