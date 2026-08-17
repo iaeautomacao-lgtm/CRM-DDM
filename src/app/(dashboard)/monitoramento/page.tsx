@@ -379,11 +379,57 @@ export default function MonitoramentoPage() {
     };
   }, [fetchTeams]);
 
+  // Agent <-> team membership now lives in wacrm.team_members (a
+  // many-to-many join, migration 062) instead of the scalar
+  // profiles.team_id. There's no consolidated "all teams' members"
+  // endpoint, so fetch each team's roster individually and merge into
+  // one { teamId: userId[] } map — same "no realtime, refetch on
+  // save" treatment as `teams` itself, since membership changes are
+  // rare and go through the drag-and-drop handler below anyway.
+  const [teamMembersMap, setTeamMembersMap] = useState<Record<string, string[]>>({});
+  const [teamMembersLoading, setTeamMembersLoading] = useState(true);
+
+  const fetchTeamMembers = useCallback(async (teamList: Team[]) => {
+    if (teamList.length === 0) {
+      setTeamMembersMap({});
+      setTeamMembersLoading(false);
+      return;
+    }
+    setTeamMembersLoading(true);
+    try {
+      const entries = await Promise.all(
+        teamList.map(async (team) => {
+          try {
+            const res = await fetch(`/api/account/teams/${team.id}/members`, {
+              cache: "no-store",
+            });
+            if (!res.ok) return [team.id, [] as string[]] as const;
+            const data = (await res.json()) as { userIds?: string[] };
+            return [team.id, data.userIds ?? []] as const;
+          } catch (err) {
+            console.error(`[monitoramento] failed to load members of team ${team.id}:`, err);
+            return [team.id, [] as string[]] as const;
+          }
+        }),
+      );
+      setTeamMembersMap(Object.fromEntries(entries));
+    } finally {
+      setTeamMembersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchTeamMembers(teams);
+  }, [teams, fetchTeamMembers]);
+
   const byTeam = useMemo(
     () => groupConversationsByTeam(filteredConversations),
     [filteredConversations],
   );
-  const byTeamAgents = useMemo(() => groupMembersByTeam(members), [members]);
+  const byTeamAgents = useMemo(
+    () => groupMembersByTeam(members, teamMembersMap),
+    [members, teamMembersMap],
+  );
 
   // Name resolvers shared by every ConversationCardActions bundle below —
   // the card/column components only know ids, these turn them into the
@@ -474,14 +520,23 @@ export default function MonitoramentoPage() {
   // not the sortable package — this is "move between zones", not
   // "reorder a list", exactly like moving a deal between stages).
   //
-  // The actual write reuses set_member_team through the exact same
-  // PATCH /api/account/members/[userId] endpoint members-tab.tsx's
-  // Team Select calls — no new authorization/validation logic here,
-  // just a different UI triggering the same call. Optimistic update +
-  // manual revert-on-failure mirrors handleRoleChange in
-  // members-tab.tsx (not pipeline-board's refetch-on-error — the two
-  // existing patterns disagree, and the ask was explicitly to match
-  // handleRoleChange here).
+  // The write goes through wacrm.team_members now (migration 062) via
+  // POST/DELETE /api/account/teams/[teamId]/members instead of the
+  // old (broken — the route silently ignored `team_id`) PATCH
+  // /api/account/members/[userId] call. Optimistic update + manual
+  // revert-on-failure still mirrors handleRoleChange in
+  // members-tab.tsx.
+  //
+  // dnd-kit's draggable id is just the agent's user_id (AgentDragCard
+  // doesn't encode a source team), so "which team is this drag coming
+  // FROM" still falls back to the legacy `agent.team_id` scalar as a
+  // best-effort hint — it's no longer written anywhere, but
+  // /api/account/members still returns whatever value profiles.team_id
+  // last held, and this handler keeps it updated locally after each
+  // successful move so the next drag's source is inferred correctly
+  // within the session. A true agent-in-2-teams scenario would need
+  // AgentDragCard to carry its column's team id to disambiguate the
+  // source precisely — out of scope here (not touching that file).
   // ----------------------------------------------------------
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
 
@@ -491,37 +546,75 @@ export default function MonitoramentoPage() {
   );
 
   const handleAgentTeamChange = useCallback(
-    async (agent: AccountMember, nextTeamId: string) => {
-      const previousTeamId = agent.team_id;
+    async (agent: AccountMember, oldTeamId: string | null, nextTeamId: string | null) => {
+      if (oldTeamId === nextTeamId) return;
+
+      // Optimistic: patch the team_members map (drives byTeamAgents)
+      // and the legacy team_id hint used to infer the next drag's
+      // source team.
+      setTeamMembersMap((prev) => {
+        const next = { ...prev };
+        if (oldTeamId) {
+          next[oldTeamId] = (next[oldTeamId] ?? []).filter((id) => id !== agent.user_id);
+        }
+        if (nextTeamId) {
+          next[nextTeamId] = [...(next[nextTeamId] ?? []), agent.user_id];
+        }
+        return next;
+      });
       setMembers((prev) =>
         prev.map((m) => (m.user_id === agent.user_id ? { ...m, team_id: nextTeamId } : m)),
       );
-      try {
-        const res = await fetch(`/api/account/members/${agent.user_id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ team_id: nextTeamId }),
+
+      const revert = () => {
+        setTeamMembersMap((prev) => {
+          const next = { ...prev };
+          if (oldTeamId) {
+            next[oldTeamId] = [...(next[oldTeamId] ?? []), agent.user_id];
+          }
+          if (nextTeamId) {
+            next[nextTeamId] = (next[nextTeamId] ?? []).filter((id) => id !== agent.user_id);
+          }
+          return next;
         });
-        if (!res.ok) {
-          setMembers((prev) =>
-            prev.map((m) =>
-              m.user_id === agent.user_id ? { ...m, team_id: previousTeamId } : m,
-            ),
-          );
-          const payload = await res.json().catch(() => ({}));
-          toast.error(payload.error || "Failed to move agent");
-          return;
-        }
-        const teamName = teams.find((t) => t.id === nextTeamId)?.name;
-        toast.success(`Moved ${agent.full_name || "agent"} to ${teamName ?? "team"}`);
-      } catch (err) {
         setMembers((prev) =>
-          prev.map((m) =>
-            m.user_id === agent.user_id ? { ...m, team_id: previousTeamId } : m,
-          ),
+          prev.map((m) => (m.user_id === agent.user_id ? { ...m, team_id: oldTeamId } : m)),
         );
+      };
+
+      try {
+        if (oldTeamId) {
+          const res = await fetch(`/api/account/teams/${oldTeamId}/members`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: agent.user_id }),
+          });
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            throw new Error(payload.error || "Failed to remove agent from previous team");
+          }
+        }
+        if (nextTeamId) {
+          const res = await fetch(`/api/account/teams/${nextTeamId}/members`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: agent.user_id }),
+          });
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            throw new Error(payload.error || "Failed to add agent to team");
+          }
+        }
+        const teamName = nextTeamId ? teams.find((t) => t.id === nextTeamId)?.name : null;
+        toast.success(
+          nextTeamId
+            ? `Moved ${agent.full_name || "agent"} to ${teamName ?? "team"}`
+            : `Removed ${agent.full_name || "agent"} from team`,
+        );
+      } catch (err) {
+        revert();
         console.error("[monitoramento] agent team change error:", err);
-        toast.error("Could not reach the server");
+        toast.error(err instanceof Error ? err.message : "Could not reach the server");
       }
     },
     [teams],
@@ -540,7 +633,7 @@ export default function MonitoramentoPage() {
       const targetTeamId = String(over.id);
       const agent = members.find((m) => m.user_id === userId);
       if (!agent || agent.team_id === targetTeamId) return;
-      void handleAgentTeamChange(agent, targetTeamId);
+      void handleAgentTeamChange(agent, agent.team_id ?? null, targetTeamId);
     },
     [members, handleAgentTeamChange],
   );
@@ -658,7 +751,7 @@ export default function MonitoramentoPage() {
         </TabsContent>
 
         <TabsContent value="equipes" className="space-y-4">
-          {teamsLoading || membersLoading ? (
+          {teamsLoading || membersLoading || teamMembersLoading ? (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
                 <div key={i} className="h-64 animate-pulse rounded-xl border border-border bg-card" />
