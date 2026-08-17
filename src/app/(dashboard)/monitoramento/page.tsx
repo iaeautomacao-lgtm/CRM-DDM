@@ -762,7 +762,7 @@ export default function MonitoramentoPage() {
               <p>Nenhuma equipe criada ainda.</p>
               <RequireRole
                 min="admin"
-                fallback={<p>Peça a um admin para criar equipes em Configurações → Equipes.</p>}
+                fallback={<p>Peça a um administrador ou supervisor para criar equipes em Configurações → Equipes.</p>}
               >
                 <Button onClick={openCreateTeam}>
                   <Plus className="size-4" />

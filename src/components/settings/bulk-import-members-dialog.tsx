@@ -43,21 +43,25 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import type { AccountRole } from '@/lib/auth/roles';
 import { ROLE_META } from './role-meta';
 
 const TEMPLATE_CSV =
-  'nome,email,role\nMaria Silva,maria.silva@empresa.com,operador\nJoão Souza,joao.souza@empresa.com,administrador\n';
+  'nome,email,role\nMaria Silva,maria.silva@empresa.com,operador\nJoão Souza,joao.souza@empresa.com,supervisor\n';
 
 const MIN_PASSWORD_LENGTH = 6;
 const MAX_ROWS = 200;
 
 // Client-side mirror of the server's alias map (bulk-invite/route.ts) —
 // used only to render a friendly role badge in the preview. The server
-// re-validates everything; this is just so the preview doesn't show a
-// raw "operador" string next to properly-cased chips.
-const ROLE_ALIASES: Record<string, 'admin' | 'agent' | 'viewer'> = {
+// re-validates everything (and still rejects 'owner' rows — an import
+// can never create one); this map only decides what the preview badge
+// shows, so 'administrador' resolving to 'owner' here is harmless.
+const ROLE_ALIASES: Record<string, AccountRole> = {
+  owner: 'owner',
+  administrador: 'owner',
   admin: 'admin',
-  administrador: 'admin',
+  supervisor: 'admin',
   agent: 'agent',
   operador: 'agent',
   viewer: 'viewer',
@@ -331,7 +335,7 @@ export function BulkImportMembersDialog({
               <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">
                 role
               </code>{' '}
-              (administrador, operador ou visualizador — padrão: operador).
+              (administrador, supervisor, operador ou visualizador — padrão: operador).
               Cada linha recebe um login com a senha padrão abaixo.
             </DialogDescription>
           </DialogHeader>

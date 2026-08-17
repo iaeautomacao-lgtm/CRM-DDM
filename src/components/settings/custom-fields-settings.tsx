@@ -27,7 +27,7 @@ export function CustomFieldsSettings() {
           Custom fields
           <SettingsChip variant="admin" className="font-medium">
             <Shield />
-            Admin
+            Supervisor
           </SettingsChip>
         </CardTitle>
         <CardDescription className="text-muted-foreground">

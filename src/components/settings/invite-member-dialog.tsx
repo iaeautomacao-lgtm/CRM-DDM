@@ -42,11 +42,11 @@ interface InviteMemberDialogProps {
   onCreated: () => void;
 }
 
-// Order matches the requested UX: Operador, Administrador, Super
-// Administrador, Visualizador. 'owner' is included for label parity
-// with the rest of the settings UI, but the server rejects it — the
-// account can only ever have one owner, reassigned via Transfer
-// Ownership, never created here.
+// Order matches the requested UX: Operador, Supervisor, Administrador,
+// Visualizador. 'owner' is included for label parity with the rest of
+// the settings UI, but the server rejects it — the account can only
+// ever have one owner, reassigned via Transfer Ownership, never
+// created here.
 const INVITE_ROLES: AccountRole[] = ['agent', 'admin', 'owner', 'viewer'];
 
 const MIN_PASSWORD_LENGTH = 6;

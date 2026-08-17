@@ -11,7 +11,6 @@ import {
   BarChart2,
   ChevronDown,
   ChevronUp,
-  Crown,
   Download,
   GitBranch,
   Headphones,
@@ -25,7 +24,6 @@ import {
   Shield,
   User,
   UserCheck,
-  UserCog,
   Users,
   UsersRound,
   Wifi,
@@ -36,41 +34,8 @@ import {
 } from "lucide-react";
 import type { AccountRole } from "@/lib/auth/roles";
 import { canAccessRoute, isRouteGated } from "@/lib/role-utils";
+import { ROLE_META } from "@/components/settings/role-meta";
 import { DdmLogo } from "@/components/ui/ddm-logo";
-
-// Per-role chip metadata used in the sidebar's account strip + the
-// Members tab roster. Keeping this near both consumers in a single
-// place avoids drift between the two surfaces — when a designer
-// wants to recolour "agent" rows, this is the one diff.
-const ROLE_CHIP: Record<
-  AccountRole,
-  { icon: typeof Crown; label: string; className: string }
-> = {
-  owner: {
-    icon: Crown,
-    label: "Proprietário",
-    className:
-      "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  },
-  admin: {
-    icon: Shield,
-    label: "Administrador",
-    className:
-      "border-primary/40 bg-primary/10 text-primary",
-  },
-  agent: {
-    icon: UserCog,
-    label: "Agente",
-    className:
-      "border-border bg-muted text-foreground",
-  },
-  viewer: {
-    icon: User,
-    label: "Visualizador",
-    className:
-      "border-border bg-card text-muted-foreground",
-  },
-};
 import {
   Avatar,
   AvatarFallback,
@@ -403,7 +368,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 // from admins at a glance. Now everyone sees their
                 // role (with a colour cue) regardless of tier.
                 (() => {
-                  const meta = ROLE_CHIP[accountRole];
+                  const meta = ROLE_META[accountRole];
                   const Icon = meta.icon;
                   return (
                     <span

@@ -45,13 +45,19 @@ const MAX_MEMBERS_PER_IMPORT = 200;
 const MIN_PASSWORD_LENGTH = 6;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// The CSV/XLSX template and the new PT-BR role labels both use
-// friendlier names than the DB enum. Accept either so a spreadsheet
-// built from the "Baixar modelo" template or hand-edited with the
-// labels users see on-screen both work.
+// The CSV/XLSX template and the PT-BR role labels (role-meta.ts) both
+// use friendlier names than the DB enum. Accept either so a
+// spreadsheet built from the "Baixar modelo" template or hand-edited
+// with the labels users see on-screen both work. 'administrador' maps
+// to 'owner' now that the labels are owner=Administrador,
+// admin=Supervisor — the owner check below still rejects it (an
+// import can never create one), so this only changes which check
+// rejects the row, not whether it's rejected.
 const ROLE_ALIASES: Record<string, AccountRole> = {
+  owner: "owner",
+  administrador: "owner",
   admin: "admin",
-  administrador: "admin",
+  supervisor: "admin",
   agent: "agent",
   operador: "agent",
   viewer: "viewer",
@@ -148,7 +154,7 @@ export async function POST(request: Request) {
       if (!role || !isAccountRole(role) || role === "owner") {
         errors.push({
           email,
-          reason: "Papel inválido (use administrador, operador ou visualizador)",
+          reason: "Papel inválido (use administrador, supervisor, operador ou visualizador)",
         });
         continue;
       }

@@ -168,7 +168,7 @@ export function ApiKeysSettings() {
               </p>
             ) : (
               <p className="text-muted-foreground mt-1 text-xs">
-                Ask an admin to create one.
+                Ask an owner or supervisor to create one.
               </p>
             )}
           </CardContent>

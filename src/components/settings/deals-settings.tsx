@@ -237,7 +237,7 @@ export function DealsSettings() {
             </select>
             {!canEditSettings && (
               <p className="text-xs text-muted-foreground">
-                Apenas administradores podem alterar a moeda padrão.
+                Apenas administradores ou supervisores podem alterar a moeda padrão.
               </p>
             )}
           </div>

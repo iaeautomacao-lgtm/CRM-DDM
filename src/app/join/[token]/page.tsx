@@ -65,10 +65,15 @@ interface PeekFail {
 }
 type PeekResult = PeekOk | PeekFail;
 
+// PT-BR labels, matching the canonical mapping in role-meta.ts
+// (owner=Administrador, admin=Supervisor, agent=Operador,
+// viewer=Visualizador) even though the rest of this page is English —
+// this page has no AuthProvider to pull role-meta.ts's icon-bearing
+// ROLE_META from, so the three non-owner labels are duplicated here.
 const ROLE_LABEL: Record<PeekOk['role'], string> = {
-  admin: 'Admin',
-  agent: 'Agent',
-  viewer: 'Viewer',
+  admin: 'Supervisor',
+  agent: 'Operador',
+  viewer: 'Visualizador',
 };
 
 const FAIL_COPY: Record<PeekFail['reason'], { title: string; body: string }> = {
