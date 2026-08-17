@@ -5,17 +5,21 @@ import type { AccountRole } from "@/lib/auth/roles";
 //
 // Layers on top of the existing capability predicates in
 // lib/auth/roles.ts (canManageMembers, canEditSettings,
-// canSendMessages) — it does not replace them. Only the route
-// prefixes listed in ROUTE_ALLOWLIST are gated here; a route
-// prefix with no entry is unrestricted by this table.
+// canSendMessages) — it does not replace them. A route prefix with
+// no entry here would be unrestricted (see canAccessRoute) — but
+// every route the sidebar links to now has an explicit entry, so
+// isRouteGated is true for every nav path and that fallback never
+// actually applies today.
 //
-// `admin` is intentionally locked to exactly /dashboard,
-// /monitoramento, /inbox and /relatorios — every other nav-exposed
-// route below lists every role EXCEPT admin so that lockout is
-// strict rather than "admin happens to be omitted." `agent` has no
-// /dashboard access — its landing route is /inbox instead (see
-// getDefaultRoute). Adding a new gated route = one new
-// ROUTE_ALLOWLIST entry.
+// Per-role reach, owner aside (owner always passes in canAccessRoute
+// before this table is even consulted):
+//   admin  → /dashboard, /monitoramento, /inbox, /relatorios
+//   agent  → /inbox only
+//   viewer → /dashboard only
+// Routes no role above claims (/canais, /contacts, /pipelines,
+// /flows, /disparador, /settings, /ajuda) are owner-only. Adding a
+// new nav route = one new ROUTE_ALLOWLIST entry, or isRouteGated
+// silently stops covering it.
 // ============================================================
 
 /** Alias of AccountRole — kept separate so route-gating call sites
@@ -26,17 +30,16 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/dashboard": ["owner", "admin", "viewer"],
   "/monitoramento": ["owner", "admin"],
   "/inbox": ["owner", "admin", "agent"],
-  "/relatorios": ["owner", "admin", "agent", "viewer"],
+  "/relatorios": ["owner", "admin"],
 
-  // admin excluded from everything below — strictly locked to the
-  // four routes above.
-  "/canais": ["owner", "agent", "viewer"],
-  "/contacts": ["owner", "agent", "viewer"],
-  "/pipelines": ["owner", "agent", "viewer"],
-  "/flows": ["owner", "agent", "viewer"],
-  "/disparador": ["owner", "agent", "viewer"],
-  "/settings": ["owner", "agent", "viewer"],
-  "/ajuda": ["owner", "agent", "viewer"],
+  // Owner-only — no other role's route list above claims these.
+  "/canais": ["owner"],
+  "/contacts": ["owner"],
+  "/pipelines": ["owner"],
+  "/flows": ["owner"],
+  "/disparador": ["owner"],
+  "/settings": ["owner"],
+  "/ajuda": ["owner"],
 };
 
 /** True if `pathname` matches a prefix this table restricts. Used to
