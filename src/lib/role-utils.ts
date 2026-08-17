@@ -10,10 +10,12 @@ import type { AccountRole } from "@/lib/auth/roles";
 // prefix with no entry is unrestricted by this table.
 //
 // `admin` is intentionally locked to exactly /dashboard,
-// /monitoramento and /inbox — every other nav-exposed route below
-// lists every role EXCEPT admin so that lockout is strict rather
-// than "admin happens to be omitted." Adding a new gated route =
-// one new ROUTE_ALLOWLIST entry.
+// /monitoramento, /inbox and /relatorios — every other nav-exposed
+// route below lists every role EXCEPT admin so that lockout is
+// strict rather than "admin happens to be omitted." `agent` has no
+// /dashboard access — its landing route is /inbox instead (see
+// getDefaultRoute). Adding a new gated route = one new
+// ROUTE_ALLOWLIST entry.
 // ============================================================
 
 /** Alias of AccountRole — kept separate so route-gating call sites
@@ -21,19 +23,19 @@ import type { AccountRole } from "@/lib/auth/roles";
 export type UserRole = AccountRole;
 
 export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
-  "/dashboard": ["owner", "admin", "agent", "viewer"],
+  "/dashboard": ["owner", "admin", "viewer"],
   "/monitoramento": ["owner", "admin"],
   "/inbox": ["owner", "admin", "agent"],
+  "/relatorios": ["owner", "admin", "agent", "viewer"],
 
   // admin excluded from everything below — strictly locked to the
-  // three routes above.
+  // four routes above.
   "/canais": ["owner", "agent", "viewer"],
   "/contacts": ["owner", "agent", "viewer"],
   "/pipelines": ["owner", "agent", "viewer"],
   "/flows": ["owner", "agent", "viewer"],
   "/disparador": ["owner", "agent", "viewer"],
   "/settings": ["owner", "agent", "viewer"],
-  "/relatorios": ["owner", "agent", "viewer"],
   "/ajuda": ["owner", "agent", "viewer"],
 };
 
