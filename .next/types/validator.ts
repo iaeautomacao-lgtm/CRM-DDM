@@ -371,6 +371,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../src/app/unauthorized/page.tsx
+{
+  type __IsExpected<Specific extends AppPageConfig<"/unauthorized">> = Specific
+  const handler = {} as typeof import("../../src/app/unauthorized/page.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../src/app/api/account/api-keys/[id]/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/account/api-keys/[id]">> = Specific
@@ -411,6 +420,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/account/members/[userId]">> = Specific
   const handler = {} as typeof import("../../src/app/api/account/members/[userId]/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../src/app/api/account/members/bulk-invite/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/account/members/bulk-invite">> = Specific
+  const handler = {} as typeof import("../../src/app/api/account/members/bulk-invite/route.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check
@@ -560,6 +578,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
   type __Unused = __Check
 }
 
+// Validate ../../src/app/api/flows/[id]/export/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/flows/[id]/export">> = Specific
+  const handler = {} as typeof import("../../src/app/api/flows/[id]/export/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
 // Validate ../../src/app/api/flows/[id]/route.ts
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/flows/[id]">> = Specific
@@ -582,6 +609,15 @@ type RouteHandlerConfig<Route extends AppRouteHandlerRoutes = AppRouteHandlerRou
 {
   type __IsExpected<Specific extends RouteHandlerConfig<"/api/flows/cron">> = Specific
   const handler = {} as typeof import("../../src/app/api/flows/cron/route.js")
+  type __Check = __IsExpected<typeof handler>
+  // @ts-ignore
+  type __Unused = __Check
+}
+
+// Validate ../../src/app/api/flows/import/route.ts
+{
+  type __IsExpected<Specific extends RouteHandlerConfig<"/api/flows/import">> = Specific
+  const handler = {} as typeof import("../../src/app/api/flows/import/route.js")
   type __Check = __IsExpected<typeof handler>
   // @ts-ignore
   type __Unused = __Check

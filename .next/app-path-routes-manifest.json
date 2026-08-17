@@ -40,6 +40,7 @@
   "/api/account/invitations/[id]/route": "/api/account/invitations/[id]",
   "/api/account/invitations/route": "/api/account/invitations",
   "/api/account/members/[userId]/route": "/api/account/members/[userId]",
+  "/api/account/members/bulk-invite/route": "/api/account/members/bulk-invite",
   "/api/account/members/route": "/api/account/members",
   "/api/account/route": "/api/account",
   "/api/account/transfer-ownership/route": "/api/account/transfer-ownership",
@@ -56,9 +57,11 @@
   "/api/disparador/contacts/import/route": "/api/disparador/contacts/import",
   "/api/disparador/cron/route": "/api/disparador/cron",
   "/api/flows/[id]/activate/route": "/api/flows/[id]/activate",
+  "/api/flows/[id]/export/route": "/api/flows/[id]/export",
   "/api/flows/[id]/route": "/api/flows/[id]",
   "/api/flows/[id]/runs/route": "/api/flows/[id]/runs",
   "/api/flows/cron/route": "/api/flows/cron",
+  "/api/flows/import/route": "/api/flows/import",
   "/api/flows/route": "/api/flows",
   "/api/flows/templates/route": "/api/flows/templates",
   "/api/invitations/[token]/peek/route": "/api/invitations/[token]/peek",
@@ -86,5 +89,6 @@
   "/auth/callback/route": "/auth/callback",
   "/icon/route": "/icon",
   "/join/[token]/page": "/join/[token]",
-  "/page": "/"
+  "/page": "/",
+  "/unauthorized/page": "/unauthorized"
 }

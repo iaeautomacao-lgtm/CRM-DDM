@@ -104,7 +104,7 @@ self.__SERVER_FILES_MANIFEST={
         "transform": "lodash/{{member}}"
       }
     },
-    "outputFileTracingRoot": "C:\\Users\\caio.vicente\\Documents\\CRM-DDM",
+    "outputFileTracingRoot": "C:\\Users\\Joao.Mendes\\CRM-DDM",
     "cacheComponents": false,
     "cacheLife": {
       "default": {
@@ -304,7 +304,7 @@ self.__SERVER_FILES_MANIFEST={
     "bundlePagesRouterDependencies": false,
     "configFileName": "next.config.ts",
     "turbopack": {
-      "root": "C:\\Users\\caio.vicente\\Documents\\CRM-DDM"
+      "root": "C:\\Users\\Joao.Mendes\\CRM-DDM"
     },
     "distDirRoot": ".next",
     "_originalRewrites": {
@@ -322,7 +322,7 @@ self.__SERVER_FILES_MANIFEST={
       "fallback": []
     }
   },
-  "appDir": "C:\\Users\\caio.vicente\\Documents\\CRM-DDM",
+  "appDir": "C:\\Users\\Joao.Mendes\\CRM-DDM",
   "relativeAppDir": "",
   "files": [
     ".next\\routes-manifest.json",
