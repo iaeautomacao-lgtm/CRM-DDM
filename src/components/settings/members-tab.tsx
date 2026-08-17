@@ -25,9 +25,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
+  KeyRound,
   Loader2,
   Mail,
   MailX,
+  MoreVertical,
   Plus,
   Search,
   Trash2,
@@ -50,6 +52,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -58,6 +61,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -102,6 +111,8 @@ interface Invitation {
 // chips / invite dialog.
 const EDITABLE_ROLES: AccountRole[] = ['admin', 'agent', 'viewer'];
 
+const MIN_RESET_PASSWORD_LENGTH = 8;
+
 // Role filter options for the roster search bar. 'all' is a UI-only
 // sentinel, not an AccountRole.
 const ROLE_FILTER_OPTIONS: { value: 'all' | AccountRole; label: string }[] = [
@@ -137,7 +148,7 @@ function fmtExpiresIn(iso: string): string {
 }
 
 export function MembersTab() {
-  const { user, canManageMembers } = useAuth();
+  const { user, canManageMembers, isOwner } = useAuth();
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -147,6 +158,12 @@ export function MembersTab() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
+  const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(
+    null,
+  );
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resettingPassword, setResettingPassword] = useState(false);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
@@ -267,6 +284,48 @@ export function MembersTab() {
       toast.error('Não foi possível conectar ao servidor');
     } finally {
       setPendingMemberAction(null);
+    }
+  }
+
+  function closeResetPasswordDialog() {
+    setResetPasswordMember(null);
+    setNewPassword('');
+    setConfirmPassword('');
+  }
+
+  async function handleResetPassword() {
+    if (!resetPasswordMember) return;
+    if (newPassword.length < MIN_RESET_PASSWORD_LENGTH) {
+      toast.error(`A senha deve ter pelo menos ${MIN_RESET_PASSWORD_LENGTH} caracteres`);
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error('As senhas não coincidem');
+      return;
+    }
+
+    setResettingPassword(true);
+    try {
+      const res = await fetch(
+        `/api/account/members/${resetPasswordMember.user_id}/reset-password`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: newPassword }),
+        },
+      );
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(payload.error || 'Falha ao redefinir senha');
+        return;
+      }
+      toast.success(`Senha de ${resetPasswordMember.full_name || 'membro'} redefinida`);
+      closeResetPasswordDialog();
+    } catch (err) {
+      console.error('[MembersTab] reset password error:', err);
+      toast.error('Não foi possível conectar ao servidor');
+    } finally {
+      setResettingPassword(false);
     }
   }
 
@@ -548,6 +607,38 @@ export function MembersTab() {
                         <Trash2 className="size-4" />
                       </Button>
                     )}
+
+                    {/* Owner-only actions menu. Never shown on the
+                        caller's own row — resetting your own password
+                        belongs in your profile settings, not here. */}
+                    {isOwner && !isSelf && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isBusy}
+                              aria-label="Mais ações"
+                              className="border-border text-muted-foreground hover:bg-muted"
+                            >
+                              <MoreVertical className="size-4" />
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent
+                          align="end"
+                          className="bg-popover text-popover-foreground border-border"
+                        >
+                          <DropdownMenuItem
+                            onClick={() => setResetPasswordMember(member)}
+                          >
+                            <KeyRound className="size-4" />
+                            Redefinir senha
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 </li>
               );
@@ -701,6 +792,70 @@ export function MembersTab() {
                 </>
               ) : (
                 'Remover membro'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={resetPasswordMember !== null}
+        onOpenChange={(open) => {
+          if (!open) closeResetPasswordDialog();
+        }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-popover-foreground">
+              <KeyRound className="size-4 text-primary" />
+              Redefinir senha
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Defina uma nova senha para{' '}
+              <span className="font-medium text-muted-foreground">
+                {resetPasswordMember?.full_name || 'este membro'}
+              </span>
+              . A pessoa poderá usá-la a partir do próximo login.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Nova senha</Label>
+              <Input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder={`Mínimo ${MIN_RESET_PASSWORD_LENGTH} caracteres`}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Confirmar senha</Label>
+              <Input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Repita a senha"
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+            </div>
+          </div>
+          <DialogFooter className="bg-popover border-border">
+            <Button
+              variant="outline"
+              onClick={closeResetPasswordDialog}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleResetPassword} disabled={resettingPassword}>
+              {resettingPassword ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Redefinindo...
+                </>
+              ) : (
+                'Redefinir senha'
               )}
             </Button>
           </DialogFooter>
