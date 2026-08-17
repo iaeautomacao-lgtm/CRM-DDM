@@ -36,15 +36,28 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
   closed: "bg-muted-foreground",
 };
 
-type InboxFilter = ConversationStatus | "all" | "unread";
+// "open"/"pending" used to be selectable filters; they're now the two
+// fixed visual sections ("Em Atendimento" / "Em Espera") the default
+// "all" view groups conversations into, so they're no longer options
+// here. "closed" stays a real filter — closed conversations never
+// appear in the grouped view, this is the only way to see them.
+type InboxFilter = "all" | "unread" | "closed";
 
 const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
   { label: "Todos", value: "all" },
   { label: "Não lidos", value: "unread" },
-  { label: "Abertos", value: "open" },
-  { label: "Pendentes", value: "pending" },
   { label: "Fechados", value: "closed" },
 ];
+
+// Persisted independently per section so collapsing one doesn't touch
+// the other. Same "default true, reconcile from localStorage after
+// mount" pattern as inbox/page.tsx's contactPanelOpen — reading a
+// stored `false` synchronously in the initializer would produce a
+// hydration mismatch against the server-rendered `true`.
+const SECTION_STORAGE_KEY = {
+  open: "inbox-section-open",
+  pending: "inbox-section-pending",
+} as const;
 
 export function ConversationList({
   activeConversationId,
@@ -58,6 +71,46 @@ export function ConversationList({
   const [selectedLine, setSelectedLine] = useState<string>("all");
   const [configs, setConfigs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Section collapse state — defaults to expanded, reconciled from
+  // localStorage after mount (see SECTION_STORAGE_KEY comment above).
+  const [openSectionExpanded, setOpenSectionExpanded] = useState(true);
+  const [pendingSectionExpanded, setPendingSectionExpanded] = useState(true);
+
+  useEffect(() => {
+    try {
+      const storedOpen = localStorage.getItem(SECTION_STORAGE_KEY.open);
+      if (storedOpen !== null) setOpenSectionExpanded(storedOpen === "true");
+      const storedPending = localStorage.getItem(SECTION_STORAGE_KEY.pending);
+      if (storedPending !== null) setPendingSectionExpanded(storedPending === "true");
+    } catch {
+      // localStorage can throw in private-browsing / sandboxed contexts.
+    }
+  }, []);
+
+  const handleToggleOpenSection = useCallback(() => {
+    setOpenSectionExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SECTION_STORAGE_KEY.open, String(next));
+      } catch {
+        // Persistence is best-effort; ignore storage failures.
+      }
+      return next;
+    });
+  }, []);
+
+  const handleTogglePendingSection = useCallback(() => {
+    setPendingSectionExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SECTION_STORAGE_KEY.pending, String(next));
+      } catch {
+        // Persistence is best-effort; ignore storage failures.
+      }
+      return next;
+    });
+  }, []);
 
   // Fetch configured lines for dropdown filter
   useEffect(() => {
@@ -125,7 +178,9 @@ export function ConversationList({
     // up on any events sent while the WS was disconnected or throttled.
   }, [resyncToken]);
 
-  const filtered = useMemo(() => {
+  // Line + search + sort — shared by every filter mode and by both
+  // grouped sections. Status/unread narrowing happens below, per mode.
+  const baseFiltered = useMemo(() => {
     let result = [...conversations];
 
     // Sort by last_message_at descending (newest messages first)
@@ -134,12 +189,6 @@ export function ConversationList({
       const timeB = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
       return timeB - timeA;
     });
-
-    if (filter === "unread") {
-      result = result.filter((c) => c.unread_count > 0);
-    } else if (filter !== "all") {
-      result = result.filter((c) => c.status === filter);
-    }
 
     if (selectedLine !== "all") {
       result = result.filter((c) => c.waha_session === selectedLine);
@@ -156,7 +205,30 @@ export function ConversationList({
     }
 
     return result;
-  }, [conversations, filter, selectedLine, search]);
+  }, [conversations, selectedLine, search]);
+
+  // "Não lidos" / "Fechados" — flat lists, used only when `filter`
+  // picks one of them (compatibility mode, no grouping).
+  const unreadFiltered = useMemo(
+    () => baseFiltered.filter((c) => c.unread_count > 0),
+    [baseFiltered],
+  );
+  const closedFiltered = useMemo(
+    () => baseFiltered.filter((c) => c.status === "closed"),
+    [baseFiltered],
+  );
+
+  // "Todos" (default) — grouped into the two fixed sections. Closed
+  // conversations never appear here; "Fechados" above is the only way
+  // to see them.
+  const openGroup = useMemo(
+    () => baseFiltered.filter((c) => c.status === "open"),
+    [baseFiltered],
+  );
+  const pendingGroup = useMemo(
+    () => baseFiltered.filter((c) => c.status === "pending"),
+    [baseFiltered],
+  );
 
   const handleSearchChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -266,24 +338,125 @@ export function ConversationList({
           <div className="flex items-center justify-center py-12">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="px-4 py-12 text-center">
-            <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada</p>
-          </div>
+        ) : filter === "unread" || filter === "closed" ? (
+          // Compatibility mode — flat list, no sections.
+          (() => {
+            const flat = filter === "unread" ? unreadFiltered : closedFiltered;
+            return flat.length === 0 ? (
+              <div className="px-4 py-12 text-center">
+                <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada</p>
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                {flat.map((conv) => (
+                  <ConversationItem
+                    key={conv.id}
+                    conversation={conv}
+                    isActive={conv.id === activeConversationId}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </div>
+            );
+          })()
         ) : (
-          <div className="flex flex-col">
-            {filtered.map((conv) => (
-              <ConversationItem
-                key={conv.id}
-                conversation={conv}
-                isActive={conv.id === activeConversationId}
-                onSelect={handleSelect}
+          // "Todos" — grouped into the two fixed sections.
+          <div className="flex flex-col py-1">
+            <div>
+              <SectionHeader
+                label="Em Atendimento"
+                count={openGroup.length}
+                expanded={openSectionExpanded}
+                onToggle={handleToggleOpenSection}
               />
-            ))}
+              {openSectionExpanded && (
+                <div className="flex flex-col">
+                  {openGroup.length === 0 ? (
+                    <p className="px-4 pb-3 text-xs text-muted-foreground">
+                      Nenhuma conversa em atendimento
+                    </p>
+                  ) : (
+                    openGroup.map((conv) => (
+                      <ConversationItem
+                        key={conv.id}
+                        conversation={conv}
+                        isActive={conv.id === activeConversationId}
+                        onSelect={handleSelect}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-2">
+              <SectionHeader
+                label="Em Espera"
+                count={pendingGroup.length}
+                expanded={pendingSectionExpanded}
+                onToggle={handleTogglePendingSection}
+              />
+              {pendingSectionExpanded && (
+                <div className="flex flex-col">
+                  {pendingGroup.length === 0 ? (
+                    <p className="px-4 pb-3 text-xs text-muted-foreground">
+                      Nenhuma conversa em espera
+                    </p>
+                  ) : (
+                    pendingGroup.map((conv) => (
+                      <ConversationItem
+                        key={conv.id}
+                        conversation={conv}
+                        isActive={conv.id === activeConversationId}
+                        onSelect={handleSelect}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </ScrollArea>
     </div>
+  );
+}
+
+/** Collapsible header for a status section ("Em Atendimento" / "Em
+ *  Espera") in the default "Todos" view. Chevron rotates in place
+ *  rather than swapping icons — no separator, sections are told
+ *  apart by spacing alone (`mt-2` between them in the parent). */
+function SectionHeader({
+  label,
+  count,
+  expanded,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center justify-between px-3 py-2 text-left transition-colors hover:bg-muted/40"
+      aria-expanded={expanded}
+    >
+      <span className="flex items-center gap-1.5 text-[12px] font-medium tracking-wide text-muted-foreground uppercase">
+        {label}
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+          ({count})
+        </span>
+      </span>
+      <ChevronDown
+        className={cn(
+          "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+          !expanded && "-rotate-90",
+        )}
+      />
+    </button>
   );
 }
 
