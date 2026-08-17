@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { canAccessRoute, getDefaultRoute, type UserRole } from '@/lib/role-utils'
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -82,7 +83,9 @@ export async function middleware(request: NextRequest) {
     return withRefreshedCookies(NextResponse.redirect(url))
   }
 
-  // Protected pages - redirect to login if not authenticated
+  // Protected pages - redirect to login if not authenticated.
+  // '/unauthorized' is deliberately NOT in this list — it must stay
+  // reachable without looping back into the role gate below.
   const protectedPaths = [
     '/dashboard',
     '/conversas',
@@ -115,6 +118,35 @@ export async function middleware(request: NextRequest) {
     }
     
     return withRefreshedCookies(NextResponse.redirect(url))
+  }
+
+  // Role-based route gating (RBAC) — layered on top of the auth check
+  // above, not a replacement for it. Only runs for signed-in users on
+  // a protected path. The role lives on `profiles.account_role`
+  // (there is no separate account_members table); the `supabase`
+  // client above is already scoped to the `wacrm` schema.
+  if (user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
+    const { data: roleRow, error: roleError } = await supabase
+      .from('profiles')
+      .select('account_role')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    const role = (roleRow?.account_role ?? null) as UserRole | null
+
+    if (roleError || !role) {
+      const url = request.nextUrl.clone()
+      url.pathname = '/unauthorized'
+      url.search = ''
+      return withRefreshedCookies(NextResponse.redirect(url))
+    }
+
+    if (!canAccessRoute(role, request.nextUrl.pathname)) {
+      const url = request.nextUrl.clone()
+      url.pathname = getDefaultRoute(role)
+      url.search = ''
+      return withRefreshedCookies(NextResponse.redirect(url))
+    }
   }
 
   // API routes that need auth (not webhooks)
