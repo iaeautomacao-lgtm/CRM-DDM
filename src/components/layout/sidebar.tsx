@@ -35,6 +35,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import type { AccountRole } from "@/lib/auth/roles";
+import { canAccessRoute, isRouteGated } from "@/lib/role-utils";
 import { DdmLogo } from "@/components/ui/ddm-logo";
 
 // Per-role chip metadata used in the sidebar's account strip + the
@@ -123,6 +124,23 @@ const bottomNavItems = [
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
 
+// RBAC visibility for a single nav item's href (which may carry a
+// query string, e.g. "/settings?tab=ai"). Items whose path isn't in
+// ROUTE_ALLOWLIST are always shown — this only hides the handful of
+// routes that table actually restricts. While the role hasn't
+// resolved yet, gated items are hidden (fail-closed) rather than
+// flashing in and then disappearing.
+function isNavItemVisible(
+  href: string,
+  role: AccountRole | null,
+  roleLoading: boolean,
+): boolean {
+  const path = href.split("?")[0];
+  if (!isRouteGated(path)) return true;
+  if (roleLoading || !role) return false;
+  return canAccessRoute(role, path);
+}
+
 interface SidebarProps {
   /** Controlled on mobile by the Header's hamburger button. Ignored on lg+. */
   open?: boolean;
@@ -150,6 +168,18 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     !profileLoading &&
     !!account?.name &&
     account.name !== profile?.full_name;
+
+  // RBAC: hide the handful of routes ROUTE_ALLOWLIST restricts for the
+  // current role. Everything else passes through unfiltered.
+  const visibleNavItems = navItems.filter((item) =>
+    isNavItemVisible(item.href, accountRole, profileLoading),
+  );
+  const visibleReportNavItems = reportNavItems.filter((item) =>
+    isNavItemVisible(item.href, accountRole, profileLoading),
+  );
+  const visibleBottomNavItems = bottomNavItems.filter((item) =>
+    isNavItemVisible(item.href, accountRole, profileLoading),
+  );
 
   // Close the drawer when route changes — users opened it to navigate,
   // so once they pick a destination the drawer should get out of the way.
@@ -225,7 +255,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive =
                 item.href.includes("?tab=ai")
                   ? pathname === "/settings" && searchParams.get("tab") === "ai"
@@ -294,7 +324,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               </button>
               {reportsOpen && (
                 <ul className="mt-1 flex flex-col gap-1 pl-4">
-                  {reportNavItems.map((item) => {
+                  {visibleReportNavItems.map((item) => {
                     const isActive = pathname.startsWith(item.href);
                     return (
                       <li key={item.href}>
@@ -321,7 +351,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <div className="my-4 border-t border-border" />
 
           <ul className="flex flex-col gap-1">
-            {bottomNavItems.map((item) => {
+            {visibleBottomNavItems.map((item) => {
               const isActive =
                 item.href === "/settings"
                   ? pathname.startsWith(item.href) && searchParams.get("tab") !== "ai"
