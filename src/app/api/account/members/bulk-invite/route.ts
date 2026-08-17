@@ -1,10 +1,19 @@
 // ============================================================
 // POST /api/account/members/bulk-invite
 //
-// Admin+ only. Creates one Supabase Auth user per row of a bulk
+// Owner only. Creates one Supabase Auth user per row of a bulk
 // import (CSV/XLSX parsed client-side — the Bulk Import dialog
 // sends the parsed rows as JSON, not the raw file) and attaches
 // each new user to the caller's account with the given role.
+//
+// Bulk-invite can create 'owner'-role rows (confirmed product
+// decision — an account can end up with more than one owner-role
+// profile this way). Because of that, this route is gated at
+// requireRole("owner") rather than the admin+ every other
+// account/members route uses — letting a mere admin ('Supervisor')
+// self-grant 'owner' via a spreadsheet upload would be a privilege
+// escalation, since every other path to 'owner' (Transfer Ownership)
+// requires the existing owner's explicit action.
 //
 // Why this can't reuse `redeem_invitation`
 //   That RPC moves an EXISTING authenticated caller into an
@@ -48,23 +57,19 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // The CSV/XLSX template and the PT-BR role labels (role-meta.ts) both
 // use friendlier names than the DB enum. Accept either so a
 // spreadsheet built from the "Baixar modelo" template or hand-edited
-// with the labels users see on-screen both work.
-//
-// 'owner'/'administrador' are deliberately NOT aliased to anything
-// here — bulk-invite can never create an owner (an account only ever
-// has one, reassigned via Transfer Ownership), and since the labels
-// became owner=Administrador / admin=Supervisor, "administrador" no
-// longer means the admin tier. A row using either word falls through
-// to the same "Papel inválido" error as any other unrecognized value
-// below, which is why that error message only lists the three roles
-// bulk-invite can actually create.
+// with the labels users see on-screen both work. 'administrador' maps
+// to 'owner' — see the file header for why this route (alone, among
+// account/members routes) is allowed to produce 'owner' rows and why
+// it's gated at owner-only rather than admin+.
 //
 // Matching is case-insensitive and whitespace-trimmed (see
-// resolveRole) so "Supervisor", " SUPERVISOR ", "supervisor" etc. all
-// resolve the same way — the raw cell text from the spreadsheet is
-// sent as-is by the client (bulk-import-members-dialog.tsx), so this
-// is the only place casing/whitespace gets normalized.
+// resolveRole) so "Administrador", " SUPERVISOR ", "supervisor" etc.
+// all resolve the same way — the raw cell text from the spreadsheet
+// is sent as-is by the client (bulk-import-members-dialog.tsx), so
+// this is the only place casing/whitespace gets normalized.
 const ROLE_ALIASES: Record<string, AccountRole> = {
+  owner: "owner",
+  administrador: "owner",
   admin: "admin",
   supervisor: "admin",
   agent: "agent",
@@ -94,7 +99,7 @@ interface ImportError {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requireRole("owner");
 
     const limit = checkRateLimit(
       `admin:bulkInviteMembers:${ctx.userId}`,
@@ -160,10 +165,10 @@ export async function POST(request: Request) {
         continue;
       }
       const role = resolveRole(row.role);
-      if (!role || !isAccountRole(role) || role === "owner") {
+      if (!role || !isAccountRole(role)) {
         errors.push({
           email,
-          reason: "Papel inválido (use supervisor, operador ou visualizador)",
+          reason: "Papel inválido (use administrador, supervisor, operador ou visualizador)",
         });
         continue;
       }
