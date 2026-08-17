@@ -81,6 +81,13 @@ interface AuthContextValue {
   accountId: string | null;
   /** Role within that account. Null while loading. */
   accountRole: AccountRole | null;
+  /** Alias of `accountRole` for RBAC call sites (route gating in
+   *  role-utils.ts / sidebar.tsx) that expect a `role` field. Same
+   *  value, not a second fetch. */
+  role: AccountRole | null;
+  /** Alias of `profileLoading` for RBAC call sites that expect
+   *  `isLoading` — true until the role has resolved. */
+  isLoading: boolean;
   /** Lightweight account meta — id + name + default_currency. Null while loading. */
   account: AccountSummary | null;
   /** Account default deal currency. Falls back to DEFAULT_CURRENCY
@@ -333,6 +340,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refreshProfile,
         account,
         defaultCurrency: account?.default_currency ?? DEFAULT_CURRENCY,
+        role: derived.accountRole,
+        isLoading: profileLoading,
         ...derived,
       }}
     >
@@ -365,6 +374,8 @@ export function useAuth(): AuthContextValue {
       defaultCurrency: DEFAULT_CURRENCY,
       accountId: null,
       accountRole: null,
+      role: null,
+      isLoading: false,
       isOwner: false,
       isAdmin: false,
       isAgent: false,
