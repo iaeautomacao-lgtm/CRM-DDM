@@ -68,6 +68,52 @@ interface ParsedRow {
   name: string;
   email: string;
   role: string;
+  /** True when this email already belongs to an existing account
+   *  member. Purely informational (see the "Já existe" badge) — it
+   *  does NOT remove the row or block the import. */
+  existsInAccount?: boolean;
+}
+
+/**
+ * Drops rows whose email repeats earlier in the sheet, keeping the
+ * first occurrence. Rows with no email at all are never deduped
+ * against each other (nothing to key on) — they're left for the
+ * server-side validation that already handles missing emails.
+ */
+function dedupeRowsByEmail(rows: ParsedRow[]): { rows: ParsedRow[]; removed: number } {
+  const seen = new Set<string>();
+  const deduped: ParsedRow[] = [];
+  let removed = 0;
+  for (const row of rows) {
+    const key = row.email.trim().toLowerCase();
+    if (key) {
+      if (seen.has(key)) {
+        removed++;
+        continue;
+      }
+      seen.add(key);
+    }
+    deduped.push(row);
+  }
+  return { rows: deduped, removed };
+}
+
+/** Emails of every existing account member, normalized for lookup.
+ *  Fails open (empty set) on any error — this check is advisory only,
+ *  so a failed fetch should never block the preview from rendering. */
+async function fetchExistingMemberEmails(): Promise<Set<string>> {
+  try {
+    const res = await fetch('/api/account/members', { cache: 'no-store' });
+    if (!res.ok) return new Set();
+    const data = await res.json().catch(() => null) as { members?: { email: string | null }[] } | null;
+    const emails = (data?.members ?? [])
+      .map((m) => m.email?.trim().toLowerCase())
+      .filter((email): email is string => !!email);
+    return new Set(emails);
+  } catch (err) {
+    console.error('[BulkImportMembersDialog] fetchExistingMemberEmails error:', err);
+    return new Set();
+  }
 }
 
 interface BulkImportResult {
@@ -113,6 +159,8 @@ export function BulkImportMembersDialog({
 
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<ParsedRow[]>([]);
+  const [internalDuplicateCount, setInternalDuplicateCount] = useState(0);
+  const [existingDuplicateCount, setExistingDuplicateCount] = useState(0);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -121,6 +169,8 @@ export function BulkImportMembersDialog({
   function reset() {
     setFile(null);
     setRows([]);
+    setInternalDuplicateCount(0);
+    setExistingDuplicateCount(0);
     setPassword('');
     setShowPassword(false);
     setResult(null);
@@ -148,6 +198,8 @@ export function BulkImportMembersDialog({
 
     setFile(selected);
     setResult(null);
+    setInternalDuplicateCount(0);
+    setExistingDuplicateCount(0);
 
     const filename = selected.name.toLowerCase();
     let rawRows: Record<string, unknown>[] = [];
@@ -194,13 +246,23 @@ export function BulkImportMembersDialog({
       return;
     }
 
-    if (parsedRows.length > MAX_ROWS) {
+    const { rows: dedupedRows, removed: internalDuplicates } = dedupeRowsByEmail(parsedRows);
+
+    if (dedupedRows.length > MAX_ROWS) {
       toast.error(`Este arquivo tem mais de ${MAX_ROWS} linhas — o limite por importação.`);
       setRows([]);
       return;
     }
 
-    setRows(parsedRows);
+    const existingEmails = await fetchExistingMemberEmails();
+    const finalRows: ParsedRow[] = dedupedRows.map((row) => ({
+      ...row,
+      existsInAccount: row.email ? existingEmails.has(row.email.trim().toLowerCase()) : false,
+    }));
+
+    setInternalDuplicateCount(internalDuplicates);
+    setExistingDuplicateCount(finalRows.filter((row) => row.existsInAccount).length);
+    setRows(finalRows);
   }
 
   async function handleImport() {
@@ -377,13 +439,39 @@ export function BulkImportMembersDialog({
                     {rows.map((row, i) => (
                       <tr key={i} className="bg-popover/40 transition-colors hover:bg-muted/30">
                         <td className="px-3 py-2 text-popover-foreground">{row.name || '—'}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{row.email || '—'}</td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          <span className="inline-flex items-center gap-1.5">
+                            {row.email || '—'}
+                            {row.existsInAccount && (
+                              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap text-amber-400">
+                                Já existe
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td className="px-3 py-2 text-muted-foreground">{roleBadgeLabel(row.role)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+
+              {(internalDuplicateCount > 0 || existingDuplicateCount > 0) && (
+                <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                  {internalDuplicateCount > 0 && (
+                    <span>
+                      {internalDuplicateCount} duplicata{internalDuplicateCount !== 1 ? 's' : ''} removida
+                      {internalDuplicateCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {existingDuplicateCount > 0 && (
+                    <span>
+                      {existingDuplicateCount} membro{existingDuplicateCount !== 1 ? 's' : ''} já cadastrado
+                      {existingDuplicateCount !== 1 ? 's' : ''} ignorado{existingDuplicateCount !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
