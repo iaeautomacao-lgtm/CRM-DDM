@@ -48,14 +48,23 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // The CSV/XLSX template and the PT-BR role labels (role-meta.ts) both
 // use friendlier names than the DB enum. Accept either so a
 // spreadsheet built from the "Baixar modelo" template or hand-edited
-// with the labels users see on-screen both work. 'administrador' maps
-// to 'owner' now that the labels are owner=Administrador,
-// admin=Supervisor — the owner check below still rejects it (an
-// import can never create one), so this only changes which check
-// rejects the row, not whether it's rejected.
+// with the labels users see on-screen both work.
+//
+// 'owner'/'administrador' are deliberately NOT aliased to anything
+// here — bulk-invite can never create an owner (an account only ever
+// has one, reassigned via Transfer Ownership), and since the labels
+// became owner=Administrador / admin=Supervisor, "administrador" no
+// longer means the admin tier. A row using either word falls through
+// to the same "Papel inválido" error as any other unrecognized value
+// below, which is why that error message only lists the three roles
+// bulk-invite can actually create.
+//
+// Matching is case-insensitive and whitespace-trimmed (see
+// resolveRole) so "Supervisor", " SUPERVISOR ", "supervisor" etc. all
+// resolve the same way — the raw cell text from the spreadsheet is
+// sent as-is by the client (bulk-import-members-dialog.tsx), so this
+// is the only place casing/whitespace gets normalized.
 const ROLE_ALIASES: Record<string, AccountRole> = {
-  owner: "owner",
-  administrador: "owner",
   admin: "admin",
   supervisor: "admin",
   agent: "agent",
@@ -154,7 +163,7 @@ export async function POST(request: Request) {
       if (!role || !isAccountRole(role) || role === "owner") {
         errors.push({
           email,
-          reason: "Papel inválido (use administrador, supervisor, operador ou visualizador)",
+          reason: "Papel inválido (use supervisor, operador ou visualizador)",
         });
         continue;
       }
