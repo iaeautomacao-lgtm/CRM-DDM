@@ -200,8 +200,17 @@ export async function POST(request: Request) {
       whatsapp_message_id: waMessageId,
     });
 
-  } catch (err) {
-    return toApiErrorResponse(err);
+  } catch (err: any) {
+    console.error('[api/v1/whatsapp/send] Error:', err);
+    return NextResponse.json(
+      { 
+        error: { 
+          code: 'internal_detailed', 
+          message: err instanceof Error ? `${err.name}: ${err.message}` : String(err) 
+        } 
+      },
+      { status: 500 }
+    );
   }
 }
 
