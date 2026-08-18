@@ -17,12 +17,28 @@
  * concept). User can switch to List to address them.
  */
 
-import { CircleAlert, CircleCheck } from "lucide-react";
+import { CircleAlert, CircleCheck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ValidationIssue } from "@/lib/flows/validate";
 import { useFlowEditor } from "./flow-editor-state";
 
-export function ValidationPanel() {
+/** Small "X" button shared by both branches below — collapses the
+ *  panel via the shell's `onClose`, which persists the choice to
+ *  localStorage (see flow-editor-shell.tsx). */
+function CloseButton({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      aria-label="Fechar painel de validação"
+      className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+    >
+      <X className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+export function ValidationPanel({ onClose }: { onClose: () => void }) {
   const { issues, requestFlash } = useFlowEditor();
 
   if (issues.length === 0) {
@@ -32,7 +48,8 @@ export function ValidationPanel() {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-emerald-600/50 bg-background p-3 text-sm font-medium text-emerald-300">
         <CircleCheck className="h-4 w-4 shrink-0" />
-        Nenhum problema. Pronto para ativar.
+        <span className="flex-1">Nenhum problema. Pronto para ativar.</span>
+        <CloseButton onClose={onClose} />
       </div>
     );
   }
@@ -45,14 +62,17 @@ export function ValidationPanel() {
         errors.length > 0 ? "border-red-500/40" : "border-amber-500/40",
       )}
     >
-      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-        {errors.length > 0 ? (
-          <CircleAlert className="h-4 w-4 text-red-400" />
-        ) : (
-          <CircleAlert className="h-4 w-4 text-amber-400" />
-        )}
-        {errors.length} erro{errors.length === 1 ? "" : "s"},{" "}
-        {warnings.length} aviso{warnings.length === 1 ? "" : "s"}
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {errors.length > 0 ? (
+            <CircleAlert className="h-4 w-4 text-red-400" />
+          ) : (
+            <CircleAlert className="h-4 w-4 text-amber-400" />
+          )}
+          {errors.length} erro{errors.length === 1 ? "" : "s"},{" "}
+          {warnings.length} aviso{warnings.length === 1 ? "" : "s"}
+        </div>
+        <CloseButton onClose={onClose} />
       </div>
       <div className="flex flex-col gap-1">
         {issues.map((i, ix) => (
@@ -60,6 +80,47 @@ export function ValidationPanel() {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Floating reopen affordance — rendered over the stage (canvas/list)
+ * by flow-editor-shell.tsx when the panel above is collapsed. Reads
+ * `issues` from the same context so its counts never drift from the
+ * panel it reopens.
+ */
+export function ValidationPanelBadge({ onClick }: { onClick: () => void }) {
+  const { issues } = useFlowEditor();
+  const errors = issues.filter((i) => i.severity === "error").length;
+  const warnings = issues.filter((i) => i.severity === "warning").length;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Reabrir painel de validação"
+      className={cn(
+        "absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs font-medium shadow-md transition-colors hover:bg-muted",
+        errors > 0
+          ? "border-red-500/40 text-red-300"
+          : warnings > 0
+            ? "border-amber-500/40 text-amber-300"
+            : "border-emerald-600/50 text-emerald-300",
+      )}
+    >
+      {errors === 0 && warnings === 0 ? (
+        <CircleCheck className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <CircleAlert
+          className={cn(
+            "h-3.5 w-3.5 shrink-0",
+            errors > 0 ? "text-red-400" : "text-amber-400",
+          )}
+        />
+      )}
+      {errors} erro{errors === 1 ? "" : "s"}, {warnings} aviso
+      {warnings === 1 ? "" : "s"}
+    </button>
   );
 }
 

@@ -31,7 +31,7 @@ import { FlowBuilder } from "./flow-builder";
 import { FlowCanvas } from "./flow-canvas";
 import { FlowEditorProvider } from "./flow-editor-state";
 import { EditorHeader } from "./header";
-import { ValidationPanel } from "./validation-panel";
+import { ValidationPanel, ValidationPanelBadge } from "./validation-panel";
 import { NODE_META, nodeColors, type NodeType } from "./shared";
 import { cn } from "@/lib/utils";
 import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
@@ -47,6 +47,7 @@ const MOBILE_BREAKPOINT = "(max-width: 767px)";
 type View = "canvas" | "list";
 
 const STORAGE_KEY = "wacrm.flowEditor.view";
+const VALIDATION_PANEL_STORAGE_KEY = "flows-validation-panel-open";
 
 // Legend covers every node type, derived from NODE_META so a new type
 // can't silently go undocumented. NODE_META's key order already reads
@@ -85,6 +86,28 @@ export function FlowEditorShell({ initialFlow, initialNodes }: Props) {
     setView(next);
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Same "read in the useState initializer" rationale as `view` above
+  // — this subtree never renders during SSR, so there's no hydration
+  // mismatch to guard against. Defaults to open.
+  const [panelOpen, setPanelOpen] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem(VALIDATION_PANEL_STORAGE_KEY);
+      if (saved === "true" || saved === "false") return saved === "true";
+    } catch {
+      // Private browsing / disabled storage — fall through to default.
+    }
+    return true;
+  });
+
+  const setPanelOpenPersisted = (next: boolean) => {
+    setPanelOpen(next);
+    try {
+      window.localStorage.setItem(VALIDATION_PANEL_STORAGE_KEY, String(next));
     } catch {
       // ignore
     }
@@ -145,12 +168,20 @@ export function FlowEditorShell({ initialFlow, initialNodes }: Props) {
               <FlowBuilder />
             </div>
           )}
+          {/* Reopen affordance — only rendered while the bar below is
+              collapsed, in both views (the bar itself is shared across
+              views too, per its own header comment). */}
+          {!panelOpen && (
+            <ValidationPanelBadge onClick={() => setPanelOpenPersisted(true)} />
+          )}
         </div>
 
         {/* ---- validation / activate-readiness bar ---- */}
-        <div className="px-6 pb-5 pt-3">
-          <ValidationPanel />
-        </div>
+        {panelOpen && (
+          <div className="px-6 pb-5 pt-3">
+            <ValidationPanel onClose={() => setPanelOpenPersisted(false)} />
+          </div>
+        )}
       </div>
     </FlowEditorProvider>
   );
