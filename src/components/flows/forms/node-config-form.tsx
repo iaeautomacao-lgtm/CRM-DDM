@@ -183,6 +183,16 @@ export function NodeConfigForm({
         />
       );
 
+    case "switch":
+      return (
+        <SwitchForm
+          cfg={cfg as SwitchCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
     case "set_tag":
       return (
         <SetTagForm
@@ -865,6 +875,339 @@ function ConditionForm({
         />
       </div>
     </>
+  );
+}
+
+// ============================================================
+// switch
+//
+// Generalizes `condition`: N branches, each with its own set of
+// subject/operator/value predicates combined by AND or OR, evaluated
+// in order; a fixed non-removable "Senão" branch at the end carries
+// no conditions of its own — just a destination for when nothing
+// above matched.
+// ============================================================
+
+interface SwitchConditionCfg {
+  subject?: "var" | "tag" | "contact_field";
+  subject_key?: string;
+  operator?: "equals" | "contains" | "present" | "absent";
+  value?: string;
+}
+
+interface SwitchBranchCfg {
+  id: string;
+  label?: string;
+  combinator?: "and" | "or";
+  conditions?: SwitchConditionCfg[];
+  next_node_key?: string;
+}
+
+interface SwitchCfg {
+  branches?: SwitchBranchCfg[];
+  default_next?: string;
+}
+
+function newSwitchCondition(): SwitchConditionCfg {
+  return { subject: "var", subject_key: "", operator: "equals", value: "" };
+}
+
+function newSwitchBranch(index: number): SwitchBranchCfg {
+  return {
+    id: crypto.randomUUID(),
+    label: `Ramo ${index + 1}`,
+    combinator: "and",
+    conditions: [newSwitchCondition()],
+    next_node_key: "",
+  };
+}
+
+function SwitchForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: SwitchCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const tags = useUserTags();
+  const branches = cfg.branches ?? [];
+
+  const updateBranch = (idx: number, patch: Partial<SwitchBranchCfg>) => {
+    onUpdateConfig({
+      branches: branches.map((b, i) => (i === idx ? { ...b, ...patch } : b)),
+    });
+  };
+  const addBranch = () =>
+    onUpdateConfig({
+      branches: [...branches, newSwitchBranch(branches.length)],
+    });
+  const removeBranch = (idx: number) =>
+    onUpdateConfig({ branches: branches.filter((_, i) => i !== idx) });
+
+  const updateCondition = (
+    branchIdx: number,
+    condIdx: number,
+    patch: Partial<SwitchConditionCfg>,
+  ) => {
+    const conditions = branches[branchIdx].conditions ?? [];
+    updateBranch(branchIdx, {
+      conditions: conditions.map((c, i) =>
+        i === condIdx ? { ...c, ...patch } : c,
+      ),
+    });
+  };
+  const addCondition = (branchIdx: number) => {
+    const conditions = branches[branchIdx].conditions ?? [];
+    updateBranch(branchIdx, {
+      conditions: [...conditions, newSwitchCondition()],
+    });
+  };
+  const removeCondition = (branchIdx: number, condIdx: number) => {
+    const conditions = branches[branchIdx].conditions ?? [];
+    updateBranch(branchIdx, {
+      conditions: conditions.filter((_, i) => i !== condIdx),
+    });
+  };
+
+  return (
+    <>
+      <div className="flex flex-col gap-4">
+        {branches.map((branch, bIdx) => {
+          const conditions = branch.conditions ?? [];
+          return (
+            <div
+              key={branch.id}
+              className="rounded-md border border-border bg-muted/40 p-3"
+            >
+              <div className="mb-3 flex items-center gap-2">
+                <Input
+                  value={branch.label ?? ""}
+                  onChange={(e) =>
+                    updateBranch(bIdx, { label: e.target.value })
+                  }
+                  placeholder={`Ramo ${bIdx + 1}`}
+                  className="bg-muted text-sm font-medium"
+                />
+                {branches.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => removeBranch(bIdx)}
+                    className="shrink-0 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                    aria-label="Remover ramo"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+
+              {conditions.length > 1 && (
+                <div className="mb-2 max-w-48">
+                  <label className="mb-1 block text-xs text-muted-foreground">
+                    Combinar condições com
+                  </label>
+                  <Select
+                    value={branch.combinator ?? "and"}
+                    onValueChange={(v) =>
+                      updateBranch(bIdx, { combinator: v as "and" | "or" })
+                    }
+                  >
+                    <SelectTrigger className="bg-muted">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="and">E (todas as condições)</SelectItem>
+                      <SelectItem value="or">OU (qualquer uma)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                {conditions.map((cond, cIdx) => (
+                  <SwitchConditionRow
+                    key={cIdx}
+                    cond={cond}
+                    tags={tags}
+                    onChange={(patch) => updateCondition(bIdx, cIdx, patch)}
+                    onRemove={
+                      conditions.length > 1
+                        ? () => removeCondition(bIdx, cIdx)
+                        : undefined
+                    }
+                  />
+                ))}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => addCondition(bIdx)}
+                className="mt-1"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Adicionar condição
+              </Button>
+
+              <div className="mt-3">
+                <NextNodeRow
+                  value={branch.next_node_key ?? ""}
+                  allNodes={allNodes}
+                  currentKey={currentKey}
+                  onChange={(v) => updateBranch(bIdx, { next_node_key: v })}
+                  label="Se este ramo passar → avança para"
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <Button variant="outline" size="sm" onClick={addBranch} className="mt-3">
+        <Plus className="h-3.5 w-3.5" />
+        Adicionar ramo
+      </Button>
+
+      {/* Fixed "Senão" branch — no conditions of its own, not removable;
+          the validator requires this to be filled independently of the
+          branches above. */}
+      <div className="mt-3 rounded-md border border-border bg-muted/40 p-3">
+        <p className="mb-2 text-xs font-medium text-muted-foreground">
+          Senão
+        </p>
+        <NextNodeRow
+          value={cfg.default_next ?? ""}
+          allNodes={allNodes}
+          currentKey={currentKey}
+          onChange={(v) => onUpdateConfig({ default_next: v })}
+          label="Se nenhum ramo passar → avança para"
+        />
+      </div>
+    </>
+  );
+}
+
+function SwitchConditionRow({
+  cond,
+  tags,
+  onChange,
+  onRemove,
+}: {
+  cond: SwitchConditionCfg;
+  tags: UserTag[];
+  onChange: (patch: Partial<SwitchConditionCfg>) => void;
+  onRemove?: () => void;
+}) {
+  const subject = cond.subject ?? "var";
+  const operator = cond.operator ?? "equals";
+  const showValue = operator === "equals" || operator === "contains";
+
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-1 gap-2 rounded border border-border/60 bg-background/40 p-2",
+        showValue
+          ? "md:grid-cols-[1fr_1.4fr_1fr_1fr_auto]"
+          : "md:grid-cols-[1fr_1.4fr_1fr_auto]",
+      )}
+    >
+      <Select
+        value={subject}
+        onValueChange={(v) =>
+          onChange({ subject: v as SwitchConditionCfg["subject"] })
+        }
+      >
+        <SelectTrigger className="bg-muted">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="var">Variável</SelectItem>
+          <SelectItem value="tag">Tag</SelectItem>
+          <SelectItem value="contact_field">Campo</SelectItem>
+        </SelectContent>
+      </Select>
+
+      {subject === "tag" && tags.length > 0 ? (
+        <Select
+          value={cond.subject_key ?? ""}
+          onValueChange={(v) => onChange({ subject_key: v ?? "" })}
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue placeholder="Escolha uma tag…" />
+          </SelectTrigger>
+          <SelectContent>
+            {tags.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : subject === "contact_field" ? (
+        <Select
+          value={cond.subject_key ?? ""}
+          onValueChange={(v) => onChange({ subject_key: v ?? "" })}
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue placeholder="Escolha um campo…" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Nome</SelectItem>
+            <SelectItem value="email">E-mail</SelectItem>
+            <SelectItem value="phone">Telefone</SelectItem>
+            <SelectItem value="company">Empresa</SelectItem>
+          </SelectContent>
+        </Select>
+      ) : (
+        <Input
+          value={cond.subject_key ?? ""}
+          onChange={(e) => onChange({ subject_key: e.target.value })}
+          placeholder={subject === "var" ? "ex.: email" : "UUID da tag"}
+          className="bg-muted font-mono text-xs"
+        />
+      )}
+
+      <Select
+        value={operator}
+        onValueChange={(v) =>
+          onChange({ operator: v as SwitchConditionCfg["operator"] })
+        }
+      >
+        <SelectTrigger className="bg-muted">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="present">está presente</SelectItem>
+          <SelectItem value="absent">está ausente</SelectItem>
+          <SelectItem value="equals">é igual a</SelectItem>
+          <SelectItem value="contains">contém</SelectItem>
+        </SelectContent>
+      </Select>
+
+      {showValue && (
+        <Input
+          value={cond.value ?? ""}
+          onChange={(e) => onChange({ value: e.target.value })}
+          placeholder="Valor"
+          className="bg-muted"
+        />
+      )}
+
+      {onRemove && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onRemove}
+          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+          aria-label="Remover condição"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
   );
 }
 

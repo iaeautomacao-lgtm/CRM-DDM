@@ -598,6 +598,7 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
     'ai_agent',
     'collect_input',
     'condition',
+    'switch',
     'set_tag',
     'http_fetch',
     'set_variable',

@@ -58,6 +58,7 @@ export type NodeType =
   | 'send_media'
   | 'collect_input'
   | 'condition'
+  | 'switch'
   | 'set_tag'
   | 'handoff'
   | 'end'
@@ -163,6 +164,13 @@ export const NODE_META: Record<
     icon: GitFork,
     color: 'text-fuchsia-400',
     blurb: 'Ramifica com base em uma regra',
+    category: 'logic',
+  },
+  switch: {
+    label: 'Switch',
+    icon: GitBranch,
+    color: 'text-purple-400',
+    blurb: 'Ramifica em vários caminhos com condições combinadas (E/OU)',
     category: 'logic',
   },
   set_tag: {
@@ -295,6 +303,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   send_media: { l: 0.65, c: 0.12, h: 210 }, // sky
   collect_input: { l: 0.65, c: 0.1, h: 185 }, // teal — capture
   condition: { l: 0.72, c: 0.15, h: 65 }, // amber — a fork in the road
+  switch: { l: 0.63, c: 0.17, h: 288 }, // purple — many forks in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
   end: { l: 0.55, c: 0.01, h: 260 }, // neutral grey — terminal
@@ -508,6 +517,13 @@ export function summarizeNode(node: BuilderNode): string | null {
           ? ` "${truncate(value, 20)}"`
           : '';
       return subject === 'tag' ? subjectStr : `${subjectStr} ${op}${valStr}`;
+    }
+    case 'switch': {
+      const branches = Array.isArray(cfg.branches)
+        ? (cfg.branches as Array<Record<string, unknown>>)
+        : [];
+      if (branches.length === 0) return null;
+      return `${branches.length} ${branches.length === 1 ? 'ramo' : 'ramos'} + senão`;
     }
     case 'set_tag': {
       const mode = cfg.mode === 'remove' ? 'Remover' : 'Adicionar';

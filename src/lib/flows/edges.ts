@@ -105,6 +105,39 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
         break;
       }
 
+      case "switch": {
+        const branches = Array.isArray((cfg as { branches?: unknown }).branches)
+          ? ((cfg as { branches: Array<Record<string, unknown>> }).branches)
+          : [];
+        branches.forEach((branch, i) => {
+          const next =
+            typeof branch.next_node_key === "string"
+              ? branch.next_node_key
+              : null;
+          const label =
+            typeof branch.label === "string" ? branch.label : `Ramo ${i + 1}`;
+          if (!next || !knownKeys.has(next)) return;
+          edges.push({
+            id: `${node.node_key}--branch-${i}--${next}`,
+            source: node.node_key,
+            target: next,
+            sourceHandle: `branch-${i}`,
+            label,
+          });
+        });
+        const defaultNext = (cfg as { default_next?: string }).default_next;
+        if (defaultNext && knownKeys.has(defaultNext)) {
+          edges.push({
+            id: `${node.node_key}--default--${defaultNext}`,
+            source: node.node_key,
+            target: defaultNext,
+            sourceHandle: "default",
+            label: "Senão",
+          });
+        }
+        break;
+      }
+
       case "send_buttons": {
         const buttons = Array.isArray(
           (cfg as { buttons?: unknown }).buttons,
@@ -234,6 +267,21 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
         { id: "false", label: "falso" },
       ];
 
+    case "switch": {
+      const branches = Array.isArray((cfg as { branches?: unknown }).branches)
+        ? ((cfg as { branches: Array<Record<string, unknown>> }).branches)
+        : [];
+      const slots: OutgoingSlot[] = branches.map((branch, i) => ({
+        id: `branch-${i}`,
+        label:
+          typeof branch.label === "string" && branch.label
+            ? branch.label
+            : `Ramo ${i + 1}`,
+      }));
+      slots.push({ id: "default", label: "Senão" });
+      return slots;
+    }
+
     case "send_buttons": {
       const buttons = Array.isArray((cfg as { buttons?: unknown }).buttons)
         ? ((cfg as { buttons: Array<Record<string, unknown>> }).buttons)
@@ -328,6 +376,26 @@ export function applyEdgeConnection(
       if (sourceHandle === "true") return { true_next: targetKey };
       if (sourceHandle === "false") return { false_next: targetKey };
       return null;
+
+    case "switch": {
+      if (sourceHandle === "default") return { default_next: targetKey };
+      if (!sourceHandle.startsWith("branch-")) return null;
+      const idx = Number(sourceHandle.slice("branch-".length));
+      const branches = Array.isArray(
+        (node.config as { branches?: unknown }).branches,
+      )
+        ? (node.config as { branches: Array<Record<string, unknown>> })
+            .branches
+        : [];
+      if (!Number.isInteger(idx) || idx < 0 || idx >= branches.length) {
+        return null;
+      }
+      return {
+        branches: branches.map((b, i) =>
+          i === idx ? { ...b, next_node_key: targetKey } : b,
+        ),
+      };
+    }
 
     case "send_buttons": {
       if (!sourceHandle.startsWith("button:")) return null;
@@ -449,6 +517,24 @@ function patchedConfigWithoutKey(
         ...cfg,
         ...(trueMatch ? { true_next: "" } : {}),
         ...(falseMatch ? { false_next: "" } : {}),
+      };
+    }
+
+    case "switch": {
+      const c = cfg as {
+        branches?: Array<Record<string, unknown>>;
+        default_next?: string;
+      };
+      const branches = Array.isArray(c.branches) ? c.branches : [];
+      const defaultMatch = c.default_next === deletedKey;
+      const branchMatch = branches.some((b) => b.next_node_key === deletedKey);
+      if (!defaultMatch && !branchMatch) return null;
+      return {
+        ...cfg,
+        branches: branches.map((b) =>
+          b.next_node_key === deletedKey ? { ...b, next_node_key: "" } : b,
+        ),
+        ...(defaultMatch ? { default_next: "" } : {}),
       };
     }
 

@@ -697,6 +697,53 @@ function validateNode(
       break;
     }
 
+    case "switch": {
+      const cfg = node.config as {
+        branches?: Array<{
+          label?: string;
+          conditions?: Array<{ subject_key?: string }>;
+          next_node_key?: string;
+        }>;
+        default_next?: string;
+      };
+      const branches = cfg.branches ?? [];
+      if (branches.length === 0) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "branches",
+          message: "O switch precisa de pelo menos um ramo.",
+        });
+      }
+      branches.forEach((branch, i) => {
+        const field = `branches.${i}`;
+        const label = branch.label?.trim() || `Ramo ${i + 1}`;
+        const conditions = branch.conditions ?? [];
+        if (!conditions.some((c) => c.subject_key?.trim())) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: `${field}.conditions`,
+            message: `${label} precisa de pelo menos uma condição com um assunto preenchido.`,
+          });
+        }
+        issues.push(
+          ...validateNextNodeKey(node, branch.next_node_key, knownKeys, label),
+        );
+      });
+      issues.push(
+        ...validateNextNodeKey(
+          node,
+          cfg.default_next,
+          knownKeys,
+          'O ramo "Senão" do switch',
+        ),
+      );
+      break;
+    }
+
     case "set_tag": {
       const cfg = node.config as {
         mode?: "add" | "remove";
@@ -1047,6 +1094,17 @@ function outgoingEdges(node: NodeInput): string[] {
       const out: string[] = [];
       if (cfg.true_next) out.push(cfg.true_next);
       if (cfg.false_next) out.push(cfg.false_next);
+      return out;
+    }
+    case "switch": {
+      const cfg = node.config as {
+        branches?: Array<{ next_node_key?: string }>;
+        default_next?: string;
+      };
+      const out = (cfg.branches ?? [])
+        .map((b) => b.next_node_key)
+        .filter((k): k is string => !!k);
+      if (cfg.default_next) out.push(cfg.default_next);
       return out;
     }
     case "send_buttons": {

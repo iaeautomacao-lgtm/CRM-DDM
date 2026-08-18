@@ -73,6 +73,8 @@ import {
   type SetVariableNodeConfig,
   type SmartDelayNodeConfig,
   type StartNodeConfig,
+  type SwitchBranch,
+  type SwitchNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
 
@@ -727,45 +729,99 @@ async function executeHandoff(
  *     `subject_key` IS the tag UUID; the SELECT returns 1 row or 0.
  *   - `contact_field` → one of name/email/phone/company on `contacts`.
  */
+/**
+ * Resolves a `condition`/`switch` predicate's subject to a comparable
+ * string (or `undefined` for "absent"). Shared by `evaluateConditionNode`
+ * (one predicate) and `evaluateSwitchBranch` (N predicates across a
+ * branch) so the var/tag/contact_field lookup logic lives in exactly
+ * one place.
+ */
+async function resolveSubjectValue(
+  db: AdminClient,
+  run: FlowRunRow,
+  subject: ConditionNodeConfig["subject"],
+  subjectKey: string,
+): Promise<string | undefined> {
+  if (subject === "var") {
+    const v = run.vars[subjectKey];
+    return typeof v === "string" ? v : v === undefined ? undefined : String(v);
+  } else if (subject === "tag") {
+    const { count } = await db
+      .from("contact_tags")
+      .select("contact_id", { count: "exact", head: true })
+      .eq("contact_id", run.contact_id!)
+      .eq("tag_id", subjectKey);
+    // For tags, "present" really is the only meaningful test — the
+    // `present`/`absent` operators are the natural fit. equals/contains
+    // against a tag UUID would still work mechanically (compare its
+    // existence to the value).
+    return (count ?? 0) > 0 ? subjectKey : undefined;
+  } else {
+    const ALLOWED = ["name", "email", "phone", "company"] as const;
+    type AllowedField = (typeof ALLOWED)[number];
+    if (!ALLOWED.includes(subjectKey as AllowedField)) {
+      throw new Error(`unsupported contact_field: ${subjectKey}`);
+    }
+    const { data } = await db
+      .from("contacts")
+      .select(subjectKey)
+      .eq("id", run.contact_id!)
+      .maybeSingle();
+    const raw = (data as Record<string, unknown> | null)?.[subjectKey];
+    return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+  }
+}
+
 async function evaluateConditionNode(
   db: AdminClient,
   run: FlowRunRow,
   cfg: ConditionNodeConfig,
 ): Promise<boolean> {
-  let subjectValue: string | undefined;
-  if (cfg.subject === "var") {
-    const v = run.vars[cfg.subject_key];
-    subjectValue = typeof v === "string" ? v : v === undefined ? undefined : String(v);
-  } else if (cfg.subject === "tag") {
-    const { count } = await db
-      .from("contact_tags")
-      .select("contact_id", { count: "exact", head: true })
-      .eq("contact_id", run.contact_id!)
-      .eq("tag_id", cfg.subject_key);
-    // For tags, "present" really is the only meaningful test — the
-    // `present`/`absent` operators are the natural fit. equals/contains
-    // against a tag UUID would still work mechanically (compare its
-    // existence to the value).
-    subjectValue = (count ?? 0) > 0 ? cfg.subject_key : undefined;
-  } else {
-    const ALLOWED = ["name", "email", "phone", "company"] as const;
-    type AllowedField = (typeof ALLOWED)[number];
-    if (!ALLOWED.includes(cfg.subject_key as AllowedField)) {
-      throw new Error(`unsupported contact_field: ${cfg.subject_key}`);
-    }
-    const { data } = await db
-      .from("contacts")
-      .select(cfg.subject_key)
-      .eq("id", run.contact_id!)
-      .maybeSingle();
-    const raw = (data as Record<string, unknown> | null)?.[cfg.subject_key];
-    subjectValue = typeof raw === "string" && raw.length > 0 ? raw : undefined;
-  }
+  const subjectValue = await resolveSubjectValue(
+    db,
+    run,
+    cfg.subject,
+    cfg.subject_key,
+  );
   return evaluateConditionPredicate({
     operator: cfg.operator,
     subjectValue,
     configValue: cfg.value,
   });
+}
+
+/**
+ * Evaluates one `switch` branch: resolves every condition's subject,
+ * then combines the results with the branch's own AND/OR combinator.
+ * Conditions are resolved sequentially (not Promise.all) — branches
+ * are already evaluated in order and most flows have few conditions
+ * per branch, so the simplicity outweighs the parallelism.
+ */
+async function evaluateSwitchBranch(
+  db: AdminClient,
+  run: FlowRunRow,
+  branch: SwitchBranch,
+): Promise<boolean> {
+  const results: boolean[] = [];
+  for (const cond of branch.conditions) {
+    const subjectValue = await resolveSubjectValue(
+      db,
+      run,
+      cond.subject,
+      cond.subject_key,
+    );
+    results.push(
+      evaluateConditionPredicate({
+        operator: cond.operator,
+        subjectValue,
+        configValue: cond.value,
+      }),
+    );
+  }
+  if (results.length === 0) return false;
+  return branch.combinator === "or"
+    ? results.some(Boolean)
+    : results.every(Boolean);
 }
 
 /**
@@ -1083,6 +1139,43 @@ export async function advanceFromNodeKey(
         branch === "true" ? cfg.true_next : cfg.false_next;
       await logEvent(db, run.id, "node_entered", node.node_key, {
         condition_result: branch,
+        advancing_to: currentKey,
+      });
+      await nodeCompleted();
+      continue;
+    }
+    if (node.node_type === "switch") {
+      const cfg = node.config as unknown as SwitchNodeConfig;
+      let matchedBranchIndex: number | null = null;
+      try {
+        for (let i = 0; i < cfg.branches.length; i++) {
+          if (await evaluateSwitchBranch(db, run, cfg.branches[i])) {
+            matchedBranchIndex = i;
+            break;
+          }
+        }
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "switch_evaluation_failed",
+          detail,
+        });
+        await endRun(db, run, "failed", "switch_evaluation_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+        });
+        return { outcome: "completed" };
+      }
+      currentKey =
+        matchedBranchIndex === null
+          ? cfg.default_next
+          : cfg.branches[matchedBranchIndex].next_node_key;
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        switch_result:
+          matchedBranchIndex === null
+            ? "default"
+            : cfg.branches[matchedBranchIndex].label,
         advancing_to: currentKey,
       });
       await nodeCompleted();

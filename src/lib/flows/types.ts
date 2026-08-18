@@ -173,6 +173,54 @@ export interface ConditionNodeConfig {
   false_next: string;
 }
 
+/** One predicate inside a `SwitchBranch` — same shape as
+ *  `ConditionNodeConfig`'s subject/subject_key/operator/value, minus
+ *  the routing fields (a branch's conditions share one destination). */
+export interface SwitchCondition {
+  subject: ConditionSubject;
+  subject_key: string;
+  operator: ConditionOperator;
+  value?: string;
+}
+
+/**
+ * One ramo (branch) of a `switch` node: an ordered set of predicates
+ * combined with a single AND/OR combinator, plus where to advance
+ * when the branch matches.
+ */
+export interface SwitchBranch {
+  /** Stable id generated client-side (crypto.randomUUID()) — used as
+   *  the React key and as the `branch-<index>`-independent identity
+   *  when branches are reordered/removed. Not persisted as a
+   *  sourceHandle id; the handle scheme uses the branch's array index
+   *  instead (see edges.ts), which is simpler for drag-to-connect but
+   *  means handle ids shift if a branch is removed from the middle —
+   *  acceptable since removing a branch already requires re-wiring. */
+  id: string;
+  label: string;
+  combinator: "and" | "or";
+  /** At least one — the validator rejects a branch with none. */
+  conditions: SwitchCondition[];
+  /** Node to advance to when this branch's conditions pass. */
+  next_node_key: string;
+}
+
+/**
+ * Routes the run to the first branch whose conditions pass (evaluated
+ * in array order), or to `default_next` if none do. Each branch's
+ * conditions combine via its own `combinator` (AND requires every
+ * condition to pass; OR requires at least one). Generalizes
+ * `condition` (which is exactly a switch with one branch, one
+ * condition, and an implicit AND) for cases needing more than a
+ * true/false fork — kept as a separate node type rather than replacing
+ * `condition` so existing flows built on it don't need migrating.
+ */
+export interface SwitchNodeConfig {
+  branches: SwitchBranch[];
+  /** Node to advance to when no branch matches — the "Senão" (else). */
+  default_next: string;
+}
+
 export interface SetTagNodeConfig {
   mode: "add" | "remove";
   /** Tag UUID. The builder picks from the user's existing tags. */
@@ -329,6 +377,7 @@ export type FlowNodeConfig =
   | { node_type: "send_media"; config: SendMediaNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
+  | { node_type: "switch"; config: SwitchNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
   | { node_type: "end"; config: EndNodeConfig }
