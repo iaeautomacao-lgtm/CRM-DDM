@@ -19,6 +19,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils';
 import { ok, toApiErrorResponse } from '@/lib/api/v1/respond';
+import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 
 export async function POST(request: Request) {
   try {
@@ -63,14 +64,17 @@ export async function POST(request: Request) {
     }
 
     // 5. Find or create Contact
-    let { data: contactRow } = await ctx.supabase
-      .from('contacts')
-      .select('*')
-      .eq('phone', sanitizedPhone)
-      .eq('account_id', ctx.accountId)
-      .maybeSingle();
+    let contactRow = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone) as any;
 
-    if (!contactRow) {
+    if (contactRow) {
+      // Se o contato existe, atualiza o nome dele se tiver sido enviado um novo diferente
+      if (name && name !== contactRow.name) {
+        await ctx.supabase
+          .from('contacts')
+          .update({ name, updated_at: new Date().toISOString() })
+          .eq('id', contactRow.id);
+      }
+    } else {
       const { data: newContact, error: createContactErr } = await ctx.supabase
         .from('contacts')
         .insert({
@@ -82,13 +86,24 @@ export async function POST(request: Request) {
         .select()
         .single();
 
-      if (createContactErr || !newContact) {
-        return NextResponse.json(
-          { error: `Failed to create contact: ${createContactErr?.message}` },
-          { status: 500 }
-        );
+      if (createContactErr) {
+        // Se ocorreu um erro de chave duplicada (corrida/concorrência), tente buscar o contato existente novamente
+        if (isUniqueViolation(createContactErr)) {
+          const raced = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone);
+          if (raced) {
+            contactRow = raced;
+          }
+        }
+        
+        if (!contactRow) {
+          return NextResponse.json(
+            { error: `Failed to create contact: ${createContactErr?.message}` },
+            { status: 500 }
+          );
+        }
+      } else {
+        contactRow = newContact;
       }
-      contactRow = newContact;
     }
 
     // 6. Find or create Conversation
