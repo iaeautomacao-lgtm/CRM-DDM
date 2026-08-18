@@ -29,7 +29,7 @@ import { GitFork, List } from "lucide-react";
 
 import { FlowBuilder } from "./flow-builder";
 import { FlowCanvas } from "./flow-canvas";
-import { FlowEditorProvider } from "./flow-editor-state";
+import { FlowEditorProvider, useFlowEditor } from "./flow-editor-state";
 import { EditorHeader } from "./header";
 import { ValidationPanel, ValidationPanelBadge } from "./validation-panel";
 import { NODE_META, nodeColors, type NodeType } from "./shared";
@@ -142,20 +142,7 @@ export function FlowEditorShell({ initialFlow, initialNodes }: Props) {
                 label="Lista"
               />
             </div>
-            <div className="ml-auto hidden flex-wrap items-center gap-x-3.5 gap-y-1.5 lg:flex">
-              {LEGEND_TYPES.map((t) => (
-                <span
-                  key={t}
-                  className="inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground"
-                >
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ background: nodeColors(t).solid }}
-                  />
-                  {NODE_META[t].label}
-                </span>
-              ))}
-            </div>
+            <NodeLegend />
           </div>
         )}
 
@@ -207,6 +194,45 @@ function useMatchMedia(query: string): boolean {
     return () => mql.removeEventListener("change", handler);
   }, [query]);
   return matches;
+}
+
+/**
+ * Node-type legend — click a type to jump to its first node on the
+ * canvas (or in the list). Reuses `requestFlash`, the same "jump to
+ * node" mechanism the validation panel uses (see its header comment):
+ * canvas pans + centers the card, list scrolls + flashes the row —
+ * both views read the same `flashKey`, so this needs no per-view
+ * pan/zoom logic of its own.
+ *
+ * Types with no matching node on the current flow are inert (no
+ * onClick, default cursor) — there's nothing to jump to.
+ */
+function NodeLegend() {
+  const { state, requestFlash } = useFlowEditor();
+  return (
+    <div className="ml-auto hidden flex-wrap items-center gap-x-3.5 gap-y-1.5 lg:flex">
+      {LEGEND_TYPES.map((t) => {
+        const match = state.nodes.find((n) => n.node_type === t);
+        return (
+          <button
+            key={t}
+            type="button"
+            onClick={match ? () => requestFlash(match.node_key) : undefined}
+            className={cn(
+              "inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground transition-colors",
+              match ? "cursor-pointer hover:text-foreground" : "cursor-default"
+            )}
+          >
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ background: nodeColors(t).solid }}
+            />
+            {NODE_META[t].label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function SegButton({
