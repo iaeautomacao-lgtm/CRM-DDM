@@ -35,7 +35,9 @@ import {
   PlayCircle,
   StickyNote,
   Tag,
+  UserCheck,
   UserPlus,
+  Users,
   Variable,
   Workflow,
 } from 'lucide-react';
@@ -61,6 +63,8 @@ export type NodeType =
   | 'switch'
   | 'set_tag'
   | 'handoff'
+  | 'handoff_agent'
+  | 'handoff_team'
   | 'end'
   | 'http_fetch'
   | 'set_variable'
@@ -98,12 +102,13 @@ export interface BuilderNode {
 // the canvas, so `start` is just the entry point under Flow control.
 // ------------------------------------------------------------
 
-export type NodeCategory = 'messaging' | 'logic' | 'flow';
+export type NodeCategory = 'messaging' | 'logic' | 'routing' | 'flow';
 
 /** Category labels + the order they render in the add-step menu. */
 export const NODE_CATEGORIES: { id: NodeCategory; label: string }[] = [
   { id: 'messaging', label: 'Mensagens' },
   { id: 'logic', label: 'Lógica e dados' },
+  { id: 'routing', label: 'Roteamento' },
   { id: 'flow', label: 'Controle de fluxo' },
 ];
 
@@ -186,6 +191,20 @@ export const NODE_META: Record<
     color: 'text-amber-400',
     blurb: 'Transfere a conversa para um humano',
     category: 'flow',
+  },
+  handoff_agent: {
+    label: 'Transferir para Operador',
+    icon: UserCheck,
+    color: 'text-red-400',
+    blurb: 'Transfere a conversa para um operador específico (ou qualquer um disponível)',
+    category: 'routing',
+  },
+  handoff_team: {
+    label: 'Transferir para Equipe',
+    icon: Users,
+    color: 'text-orange-400',
+    blurb: 'Transfere a conversa para uma equipe específica (ou qualquer equipe)',
+    category: 'routing',
   },
   end: {
     label: 'Fim',
@@ -306,6 +325,8 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   switch: { l: 0.63, c: 0.17, h: 288 }, // purple — many forks in the road
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
+  handoff_agent: { l: 0.63, c: 0.19, h: 22 }, // red — hands off to a person
+  handoff_team: { l: 0.72, c: 0.15, h: 58 }, // orange — hands off to a team
   end: { l: 0.55, c: 0.01, h: 260 }, // neutral grey — terminal
   http_fetch: { l: 0.68, c: 0.15, h: 50 }, // amber-gold — external call
   set_variable: { l: 0.62, c: 0.16, h: 305 }, // purple — data write
@@ -547,6 +568,20 @@ export function summarizeNode(node: BuilderNode): string | null {
       ]
         .filter(Boolean)
         .join(' · ');
+      if (note.length > 0) return target ? `${truncate(note, 40)} (${target})` : truncate(note);
+      return target || null;
+    }
+    case 'handoff_agent': {
+      const note = typeof cfg.note === 'string' ? cfg.note : '';
+      const assignTo = typeof cfg.assign_to === 'string' ? cfg.assign_to : '';
+      const target = assignTo ? `agente ${assignTo.slice(0, 8)}…` : '';
+      if (note.length > 0) return target ? `${truncate(note, 40)} (${target})` : truncate(note);
+      return target || null;
+    }
+    case 'handoff_team': {
+      const note = typeof cfg.note === 'string' ? cfg.note : '';
+      const teamId = typeof cfg.team_id === 'string' ? cfg.team_id : '';
+      const target = teamId ? `equipe ${teamId.slice(0, 8)}…` : '';
       if (note.length > 0) return target ? `${truncate(note, 40)} (${target})` : truncate(note);
       return target || null;
     }

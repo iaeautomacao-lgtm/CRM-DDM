@@ -208,6 +208,22 @@ export function NodeConfigForm({
         <HandoffForm cfg={cfg as HandoffCfg} onUpdateConfig={onUpdateConfig} />
       );
 
+    case "handoff_agent":
+      return (
+        <HandoffAgentForm
+          cfg={cfg as HandoffAgentCfg}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
+    case "handoff_team":
+      return (
+        <HandoffTeamForm
+          cfg={cfg as HandoffTeamCfg}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
     case "end":
       return (
         <p className="text-xs text-muted-foreground">
@@ -1337,7 +1353,6 @@ interface HandoffTeamOption {
 interface HandoffAgentOption {
   user_id: string;
   full_name: string;
-  team_id: string | null;
 }
 
 const HANDOFF_ANY_TEAM = "__any_team__";
@@ -1345,18 +1360,25 @@ const HANDOFF_ANY_AGENT = "__any_agent__";
 
 /**
  * Loads the account's teams + agents for the handoff node's Selects.
- * Both `teams` and `profiles` allow any account member to SELECT
- * (migrations 049 / 017), so this queries Supabase directly — same
- * pattern as MembersTab's team roster load — no dedicated API route.
+ * `teams` and `profiles` allow any account member to SELECT (migrations
+ * 049 / 017), and `team_members` does too (migration 062), so this
+ * queries Supabase directly — same pattern as MembersTab's team roster
+ * load — no dedicated API route.
+ *
+ * Agent↔team membership comes from `wacrm.team_members` (many-to-many),
+ * NOT the deprecated scalar `profiles.team_id` — an agent can belong to
+ * more than one team.
  */
 function useHandoffOptions(): {
   teams: HandoffTeamOption[];
   agents: HandoffAgentOption[];
+  teamMembersMap: Record<string, string[]>;
   loading: boolean;
 } {
   const { accountId } = useAuth();
   const [teams, setTeams] = useState<HandoffTeamOption[]>([]);
   const [agents, setAgents] = useState<HandoffAgentOption[]>([]);
+  const [teamMembersMap, setTeamMembersMap] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -1373,7 +1395,7 @@ function useHandoffOptions(): {
           .order("name"),
         supabase
           .from("profiles")
-          .select("user_id, full_name, team_id")
+          .select("user_id, full_name")
           .eq("account_id", accountId)
           .order("full_name"),
       ]);
@@ -1390,9 +1412,26 @@ function useHandoffOptions(): {
           (aRes.data ?? []).map((row) => ({
             user_id: (row as { user_id: string }).user_id,
             full_name: (row as { full_name: string | null }).full_name || "Sem nome",
-            team_id: (row as { team_id: string | null }).team_id,
           })),
         );
+      }
+
+      const teamIds = ((tRes.data ?? []) as HandoffTeamOption[]).map((t) => t.id);
+      if (teamIds.length > 0) {
+        const mRes = await supabase
+          .from("team_members")
+          .select("team_id, user_id")
+          .in("team_id", teamIds);
+        if (cancelled) return;
+        if (mRes.error) {
+          console.error("[HandoffForm] team members load error:", mRes.error);
+        } else {
+          const map: Record<string, string[]> = {};
+          for (const row of (mRes.data ?? []) as { team_id: string; user_id: string }[]) {
+            (map[row.team_id] ??= []).push(row.user_id);
+          }
+          setTeamMembersMap(map);
+        }
       }
       setLoading(false);
     })();
@@ -1401,7 +1440,7 @@ function useHandoffOptions(): {
     };
   }, [accountId]);
 
-  return { teams, agents, loading };
+  return { teams, agents, teamMembersMap, loading };
 }
 
 function HandoffForm({
@@ -1411,11 +1450,11 @@ function HandoffForm({
   cfg: HandoffCfg;
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
-  const { teams, agents, loading } = useHandoffOptions();
+  const { teams, agents, teamMembersMap, loading } = useHandoffOptions();
   const teamId = cfg.team_id ?? "";
   const agentId = cfg.assign_to ?? "";
   const agentOptions = teamId
-    ? agents.filter((a) => a.team_id === teamId)
+    ? agents.filter((a) => (teamMembersMap[teamId] ?? []).includes(a.user_id))
     : agents;
 
   // Precomputed as plain strings (not a SelectValue render-prop) so the
@@ -1446,7 +1485,7 @@ function HandoffForm({
               if (
                 nextTeamId &&
                 agentId &&
-                agents.find((a) => a.user_id === agentId)?.team_id !== nextTeamId
+                !(teamMembersMap[nextTeamId] ?? []).includes(agentId)
               ) {
                 patch.assign_to = undefined;
               }
@@ -1498,6 +1537,127 @@ function HandoffForm({
       </div>
       <TextRow
         label="Nota interna (para o agente que assumir)"
+        value={cfg.note ?? ""}
+        onChange={(v) => onUpdateConfig({ note: v })}
+        rows={2}
+      />
+    </>
+  );
+}
+
+// ============================================================
+// handoff_agent — "Transferir para Operador": note + agent selector
+// only, no team selector.
+// ============================================================
+
+interface HandoffAgentCfg {
+  note?: string;
+  assign_to?: string;
+}
+
+function HandoffAgentForm({
+  cfg,
+  onUpdateConfig,
+}: {
+  cfg: HandoffAgentCfg;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const { agents, loading } = useHandoffOptions();
+  const agentId = cfg.assign_to ?? "";
+  const agentLabel = agentId
+    ? agents.find((a) => a.user_id === agentId)?.full_name ??
+      "Qualquer agente disponível"
+    : "Qualquer agente disponível";
+
+  return (
+    <>
+      <div className="w-full">
+        <label className="mb-1 block text-xs text-muted-foreground">Agente</label>
+        <Select
+          value={agentId || HANDOFF_ANY_AGENT}
+          onValueChange={(v) =>
+            onUpdateConfig({ assign_to: v === HANDOFF_ANY_AGENT ? undefined : v })
+          }
+          disabled={loading}
+        >
+          <SelectTrigger className="w-full bg-muted">
+            <SelectValue placeholder="Qualquer agente disponível">
+              {loading ? "Carregando…" : agentLabel}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={HANDOFF_ANY_AGENT}>
+              Qualquer agente disponível
+            </SelectItem>
+            {agents.map((a) => (
+              <SelectItem key={a.user_id} value={a.user_id}>
+                {a.full_name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <TextRow
+        label="Nota interna (para o agente que assumir)"
+        value={cfg.note ?? ""}
+        onChange={(v) => onUpdateConfig({ note: v })}
+        rows={2}
+      />
+    </>
+  );
+}
+
+// ============================================================
+// handoff_team — "Transferir para Equipe": note + team selector
+// only, no agent selector.
+// ============================================================
+
+interface HandoffTeamCfg {
+  note?: string;
+  team_id?: string;
+}
+
+function HandoffTeamForm({
+  cfg,
+  onUpdateConfig,
+}: {
+  cfg: HandoffTeamCfg;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const { teams, loading } = useHandoffOptions();
+  const teamId = cfg.team_id ?? "";
+  const teamLabel = teamId
+    ? teams.find((t) => t.id === teamId)?.name ?? "Qualquer equipe"
+    : "Qualquer equipe";
+
+  return (
+    <>
+      <div className="w-full">
+        <label className="mb-1 block text-xs text-muted-foreground">Equipe</label>
+        <Select
+          value={teamId || HANDOFF_ANY_TEAM}
+          onValueChange={(v) =>
+            onUpdateConfig({ team_id: v === HANDOFF_ANY_TEAM ? undefined : v })
+          }
+          disabled={loading}
+        >
+          <SelectTrigger className="w-full bg-muted">
+            <SelectValue placeholder="Qualquer equipe">
+              {loading ? "Carregando…" : teamLabel}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={HANDOFF_ANY_TEAM}>Qualquer equipe</SelectItem>
+            {teams.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <TextRow
+        label="Nota interna (para quem assumir)"
         value={cfg.note ?? ""}
         onChange={(v) => onUpdateConfig({ note: v })}
         rows={2}

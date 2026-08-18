@@ -208,6 +208,8 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
       }
 
       case "handoff":
+      case "handoff_agent":
+      case "handoff_team":
       case "end":
       case "go_to_flow":
         // Terminal within this flow's graph — handoff/end stop the
@@ -327,6 +329,8 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     }
 
     case "handoff":
+    case "handoff_agent":
+    case "handoff_team":
     case "end":
     case "go_to_flow":
       return [];
@@ -447,6 +451,8 @@ export function applyEdgeConnection(
     }
 
     case "handoff":
+    case "handoff_agent":
+    case "handoff_team":
     case "end":
     case "go_to_flow":
       return null;
@@ -579,6 +585,8 @@ function patchedConfigWithoutKey(
     }
 
     case "handoff":
+    case "handoff_agent":
+    case "handoff_team":
     case "end":
     case "go_to_flow":
       return null;

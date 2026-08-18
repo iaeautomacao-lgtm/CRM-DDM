@@ -114,6 +114,22 @@ export interface HandoffNodeConfig {
   team_id?: string;
 }
 
+/** 'handoff_agent' — transfers to a specific operator (or any available one). */
+export interface HandoffAgentNodeConfig {
+  /** Optional internal note written to flow_run_events.payload.note. */
+  note?: string;
+  /** Optional agent user_id to assign. Leave unset for "any available operator". */
+  assign_to?: string;
+}
+
+/** 'handoff_team' — transfers to a specific team (or any team). */
+export interface HandoffTeamNodeConfig {
+  /** Optional internal note written to flow_run_events.payload.note. */
+  note?: string;
+  /** Optional team id to route to. Leave unset for "any team". */
+  team_id?: string;
+}
+
 /**
  * Captures the customer's next free-text reply into
  * `flow_runs.vars[var_key]`, then advances.
@@ -380,6 +396,8 @@ export type FlowNodeConfig =
   | { node_type: "switch"; config: SwitchNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
+  | { node_type: "handoff_agent"; config: HandoffAgentNodeConfig }
+  | { node_type: "handoff_team"; config: HandoffTeamNodeConfig }
   | { node_type: "end"; config: EndNodeConfig }
   | { node_type: "http_fetch"; config: HttpFetchNodeConfig }
   | { node_type: "set_variable"; config: SetVariableNodeConfig }

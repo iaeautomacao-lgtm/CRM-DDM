@@ -199,6 +199,10 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
       return { mode: "add", tag_id: "", next_node_key: "" };
     case "handoff":
       return { note: "" };
+    case "handoff_agent":
+      return { note: "" };
+    case "handoff_team":
+      return { note: "" };
     case "end":
       return {};
     case "http_fetch":

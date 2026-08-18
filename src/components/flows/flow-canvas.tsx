@@ -726,6 +726,8 @@ const ADD_NODE_TYPES: NodeType[] = [
   'go_to',
   'go_to_flow',
   'handoff',
+  'handoff_agent',
+  'handoff_team',
   'end',
 ];
 

@@ -608,6 +608,8 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
     'go_to',
     'go_to_flow',
     'handoff',
+    'handoff_agent',
+    'handoff_team',
     'end',
   ];
   return (

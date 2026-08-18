@@ -789,6 +789,8 @@ function validateNode(
     }
 
     case "handoff":
+    case "handoff_agent":
+    case "handoff_team":
     case "end":
       // Terminal nodes have no outgoing edges; nothing to validate
       // beyond their existence.
@@ -1133,6 +1135,8 @@ function outgoingEdges(node: NodeInput): string[] {
       return cfg.next_node_key ? [cfg.next_node_key] : [];
     }
     case "handoff":
+    case "handoff_agent":
+    case "handoff_team":
     case "end":
     default:
       return [];

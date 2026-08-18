@@ -718,6 +718,84 @@ async function executeHandoff(
 }
 
 /**
+ * 'handoff_agent' — same as `executeHandoff`, but only ever sets
+ * `assigned_agent_id`; `team_id` is not part of this node's config and
+ * is never touched.
+ */
+async function executeHandoffAgent(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+): Promise<void> {
+  const cfg = node.config as { assign_to?: string; note?: string };
+  const convUpdate: Record<string, unknown> = {
+    status: "pending",
+    updated_at: new Date().toISOString(),
+  };
+  if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
+  if (run.conversation_id) {
+    await db
+      .from("conversations")
+      .update(convUpdate)
+      .eq("id", run.conversation_id);
+  }
+  await logEvent(db, run.id, "handoff", node.node_key, {
+    note: cfg.note ?? null,
+    assigned_to: cfg.assign_to ?? null,
+    team_id: null,
+  });
+  await logRunEvent(db, {
+    run_id: run.id,
+    flow_id: run.flow_id,
+    account_id: run.account_id,
+    node_key: node.node_key,
+    node_type: node.node_type,
+    event_type: "node_completed",
+    status: "success",
+  });
+  await endRun(db, run, "handed_off", "handoff_node");
+}
+
+/**
+ * 'handoff_team' — same as `executeHandoff`, but only ever sets
+ * `team_id`; `assign_to` is not part of this node's config and is
+ * never touched.
+ */
+async function executeHandoffTeam(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+): Promise<void> {
+  const cfg = node.config as { team_id?: string; note?: string };
+  const convUpdate: Record<string, unknown> = {
+    status: "pending",
+    updated_at: new Date().toISOString(),
+  };
+  if (cfg.team_id) convUpdate.team_id = cfg.team_id;
+  if (run.conversation_id) {
+    await db
+      .from("conversations")
+      .update(convUpdate)
+      .eq("id", run.conversation_id);
+  }
+  await logEvent(db, run.id, "handoff", node.node_key, {
+    note: cfg.note ?? null,
+    assigned_to: null,
+    team_id: cfg.team_id ?? null,
+  });
+  await logRunEvent(db, {
+    run_id: run.id,
+    flow_id: run.flow_id,
+    account_id: run.account_id,
+    node_key: node.node_key,
+    node_type: node.node_type,
+    event_type: "node_completed",
+    status: "success",
+  });
+  await endRun(db, run, "handed_off", "handoff_node");
+}
+
+/**
  * Resolve a condition node's subject value from DB / run state, then
  * call the pure `evaluateConditionPredicate`. Splits out so the
  * predicate itself stays unit-testable without a Supabase mock.
@@ -1247,6 +1325,14 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "handoff") {
       await executeHandoff(db, run, node);
+      return { outcome: "handed_off" };
+    }
+    if (node.node_type === "handoff_agent") {
+      await executeHandoffAgent(db, run, node);
+      return { outcome: "handed_off" };
+    }
+    if (node.node_type === "handoff_team") {
+      await executeHandoffTeam(db, run, node);
       return { outcome: "handed_off" };
     }
     if (node.node_type === "end") {
