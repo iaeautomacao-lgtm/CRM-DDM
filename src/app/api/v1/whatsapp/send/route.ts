@@ -75,6 +75,7 @@ export async function POST(request: Request) {
         .from('contacts')
         .insert({
           account_id: ctx.accountId,
+          user_id: config.user_id, // Atribui ao criador da configuração do WhatsApp
           phone: sanitizedPhone,
           name: name || 'API Lead',
         })
@@ -94,6 +95,7 @@ export async function POST(request: Request) {
     const conversation = await findOrCreateConversation(
       ctx.supabase,
       ctx.accountId,
+      config.user_id, // Passa o user_id da config
       contactRow.id,
       config.provider === 'waha' ? config.waha_session : undefined
     );
@@ -217,6 +219,7 @@ export async function POST(request: Request) {
 async function findOrCreateConversation(
   supabase: any,
   accountId: string,
+  userId: string,
   contactId: string,
   wahaSession?: string
 ) {
@@ -237,6 +240,7 @@ async function findOrCreateConversation(
 
   const insertObj: any = {
     account_id: accountId,
+    user_id: userId,
     contact_id: contactId,
   };
   if (wahaSession) {
