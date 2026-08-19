@@ -16,6 +16,8 @@ import {
   ChevronRight,
   Timer,
   MinusCircle,
+  Copy,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
@@ -525,199 +527,190 @@ const STATUS_BADGE: Record<
   },
 };
 
-/** Label + value row used throughout the detail body below. */
-function DetailRow({
-  label,
-  value,
-}: {
-  label: string;
-  value: React.ReactNode;
-}) {
-  if (value === null || value === undefined || value === "") return null;
+// ============================================================
+// JSON syntax highlighting — no library, just a small tokenizer over
+// JSON.stringify's output. Keys render in the DDM brand orange
+// (#FF5706) per spec; strings/numbers/booleans/null get distinct,
+// readable colors against the dark background.
+// ============================================================
+
+const JSON_TOKEN_RE =
+  /"(?:\\.|[^"\\])*"(?:\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+
+function highlightJson(json: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  JSON_TOKEN_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = JSON_TOKEN_RE.exec(json))) {
+    if (match.index > lastIndex) {
+      nodes.push(json.slice(lastIndex, match.index));
+    }
+    const tok = match[0];
+    if (tok.endsWith(":")) {
+      nodes.push(
+        <span key={key++} style={{ color: "#FF5706" }}>
+          {tok}
+        </span>,
+      );
+    } else if (tok.startsWith('"')) {
+      nodes.push(
+        <span key={key++} className="text-emerald-300">
+          {tok}
+        </span>,
+      );
+    } else if (tok === "true" || tok === "false") {
+      nodes.push(
+        <span key={key++} className="text-sky-300">
+          {tok}
+        </span>,
+      );
+    } else if (tok === "null") {
+      nodes.push(
+        <span key={key++} className="text-neutral-500">
+          {tok}
+        </span>,
+      );
+    } else {
+      nodes.push(
+        <span key={key++} className="text-purple-300">
+          {tok}
+        </span>,
+      );
+    }
+    lastIndex = JSON_TOKEN_RE.lastIndex;
+  }
+  if (lastIndex < json.length) nodes.push(json.slice(lastIndex));
+  return nodes;
+}
+
+const COLLAPSE_THRESHOLD = 500;
+
+/**
+ * Dark, mono, syntax-highlighted JSON block. Collapses to the first
+ * COLLAPSE_THRESHOLD chars with a "Ver mais" toggle when the
+ * formatted JSON is longer than that — full detail is one click away,
+ * not hidden, just not dumped on-screen by default for a fat payload
+ * (e.g. an http_fetch response_body or a long ai_agent last_reply).
+ */
+function CollapsibleJson({ value }: { value: unknown }) {
+  const [expanded, setExpanded] = useState(false);
+  const json = JSON.stringify(value, null, 2) ?? "null";
+  const isLong = json.length > COLLAPSE_THRESHOLD;
+  const shown = isLong && !expanded ? json.slice(0, COLLAPSE_THRESHOLD) : json;
   return (
-    <div className="flex items-start justify-between gap-3 py-1 text-xs">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <span className="min-w-0 break-words text-right font-mono text-[11px] text-foreground">
-        {value}
-      </span>
+    <div>
+      <pre className="overflow-x-auto rounded-md bg-[#0b0b0d] p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-neutral-300">
+        {highlightJson(shown)}
+        {isLong && !expanded && "…"}
+      </pre>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-1 text-[10.5px] text-primary hover:opacity-80"
+        >
+          {expanded ? "Ver menos" : "Ver mais"}
+        </button>
+      )}
     </div>
   );
 }
 
+/** Section wrapper — label + a CollapsibleJson body, used for Input/Output. */
+function PayloadSection({
+  label,
+  value,
+}: {
+  label: string;
+  value: unknown;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+        {label}
+      </p>
+      <CollapsibleJson value={value} />
+    </div>
+  );
+}
+
+function CopyJsonButton({ value }: { value: unknown }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(value, null, 2));
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          toast.error("Não foi possível copiar.");
+        }
+      }}
+      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+    >
+      {copied ? (
+        <>
+          <Check className="h-3 w-3" /> Copiado
+        </>
+      ) : (
+        <>
+          <Copy className="h-3 w-3" /> Copiar
+        </>
+      )}
+    </button>
+  );
+}
+
+/**
+ * Full payload detail — Input / Output / Erro sections when the
+ * payload follows the {input, output, error_message?} shape (every
+ * node_completed/node_error event does). Payloads that predate that
+ * shape (message_sent, node_entered, handoff, reply_received, or any
+ * node_completed logged before this rollout) don't have input/output
+ * keys — those fall back to one syntax-highlighted JSON dump of the
+ * whole payload, so nothing old breaks.
+ */
 function EventPayloadBody({ ev }: { ev: EventRow }) {
   const payload = ev.payload;
+  const hasInputOutput = "input" in payload || "output" in payload;
+  const errorMessage = ev.error_message ?? (payload.error_message as string | undefined);
+  const errorStack = payload.error_stack as string | null | undefined;
 
-  if ("fell_through" in payload) {
-    return (
-      <div className="flex flex-col divide-y divide-border">
-        <DetailRow
-          label="Ramo escolhido"
-          value={
-            payload.fell_through === true
-              ? "Senão (fallback)"
-              : typeof payload.branch_chosen === "string"
-                ? payload.branch_chosen
-                : null
-          }
-        />
-        <DetailRow
-          label="branch_index"
-          value={
-            typeof payload.branch_index === "number"
-              ? payload.branch_index
-              : "—"
-          }
-        />
-        <DetailRow label="fell_through" value={String(payload.fell_through)} />
-        <DetailRow
-          label="advancing_to"
-          value={
-            typeof payload.advancing_to === "string"
-              ? payload.advancing_to
-              : null
-          }
-        />
-      </div>
-    );
-  }
-
-  if ("condition_result" in payload) {
-    return (
-      <div className="flex flex-col divide-y divide-border">
-        <DetailRow
-          label="Ramo escolhido"
-          value={String(payload.condition_result)}
-        />
-        <DetailRow
-          label="advancing_to"
-          value={
-            typeof payload.advancing_to === "string"
-              ? payload.advancing_to
-              : null
-          }
-        />
-      </div>
-    );
-  }
-
-  if (Array.isArray(payload.variables_set)) {
-    const vars = payload.variables_set as Array<{ key: string; value: string }>;
-    return (
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-left text-muted-foreground">
-            <th className="pb-1 font-normal">Variável</th>
-            <th className="pb-1 font-normal">Valor</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border">
-          {vars.map((v, ix) => (
-            <tr key={ix}>
-              <td className="py-1 pr-3 align-top font-mono text-[11px] text-foreground">
-                {v.key}
-              </td>
-              <td className="py-1 align-top font-mono text-[11px] break-words text-foreground">
-                {v.value}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
-  }
-
-  if (typeof payload.last_reply === "string" || "turns_used" in payload) {
-    return (
-      <div className="flex flex-col gap-2">
-        {typeof payload.last_reply === "string" && payload.last_reply && (
-          <div>
-            <p className="mb-1 text-[11px] text-muted-foreground">
-              Última resposta do agente
-            </p>
-            <p className="rounded-md bg-background p-2 text-xs leading-relaxed whitespace-pre-wrap text-foreground">
-              {payload.last_reply}
-            </p>
-          </div>
-        )}
-        <div className="flex flex-col divide-y divide-border">
-          <DetailRow
-            label="turns_used"
-            value={
-              typeof payload.turns_used === "number"
-                ? payload.turns_used
-                : null
-            }
-          />
-          <DetailRow
-            label="exit_reason"
-            value={
-              typeof payload.exit_reason === "string"
-                ? payload.exit_reason
-                : null
-            }
-          />
-        </div>
-      </div>
-    );
-  }
-
-  if (
-    ev.event_type === "node_completed" ||
-    ev.event_type === "node_error" ||
-    ev.event_type === "run_completed" ||
-    ev.event_type === "run_error"
-  ) {
-    return (
-      <div className="flex flex-col divide-y divide-border">
-        <DetailRow label="status" value={ev.status ?? "—"} />
-        <DetailRow
-          label="duration_ms"
-          value={typeof ev.duration_ms === "number" ? ev.duration_ms : null}
-        />
-        {ev.error_message && (
-          <div className="py-1">
-            <p className="mb-1 text-xs text-muted-foreground">error_message</p>
-            <p className="rounded-md bg-red-500/10 p-2 text-xs text-red-300">
-              {ev.error_message}
-            </p>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (
-    (ev.event_type === "message_sent" || "reply_id" in payload) &&
-    ("advancing_to" in payload || "reply_id" in payload)
-  ) {
-    return (
-      <div className="flex flex-col divide-y divide-border">
-        <DetailRow
-          label="advancing_to"
-          value={
-            typeof payload.advancing_to === "string"
-              ? payload.advancing_to
-              : null
-          }
-        />
-        <DetailRow
-          label="reply_id"
-          value={
-            typeof payload.reply_id === "string" ? payload.reply_id : null
-          }
-        />
-      </div>
-    );
-  }
-
-  if (Object.keys(payload).length === 0) {
+  if (!hasInputOutput && Object.keys(payload).length === 0 && !errorMessage) {
     return <p className="text-xs text-muted-foreground">Sem payload.</p>;
   }
 
   return (
-    <pre className="overflow-x-auto rounded-md bg-background p-2 text-[11px] text-muted-foreground">
-      {JSON.stringify(payload, null, 2)}
-    </pre>
+    <div className="flex flex-col gap-4">
+      {errorMessage && (
+        <div>
+          <p className="mb-1 text-[11px] font-semibold tracking-wide text-red-400 uppercase">
+            Erro
+          </p>
+          <p className="rounded-md bg-red-500/10 p-2 text-xs text-red-300">
+            {errorMessage}
+          </p>
+          {errorStack && (
+            <div className="mt-1">
+              <CollapsibleJson value={errorStack} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {hasInputOutput ? (
+        <>
+          {"input" in payload && <PayloadSection label="Input" value={payload.input} />}
+          {"output" in payload && <PayloadSection label="Output" value={payload.output} />}
+        </>
+      ) : (
+        <PayloadSection label="Payload" value={payload} />
+      )}
+    </div>
   );
 }
 
@@ -773,6 +766,9 @@ function EventDetailSheet({
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-3 flex justify-end">
+            <CopyJsonButton value={ev.payload} />
+          </div>
           <EventPayloadBody ev={ev} />
         </div>
 

@@ -354,6 +354,47 @@ async function logRunEvent(
 }
 
 /**
+ * Builds the rich `node_error` payload shared by every failure path —
+ * the loop's own `nodeError` closure AND `endRun`'s `errorContext`
+ * (most "fatal" node failures end the run via `endRun` directly and
+ * never reach `nodeError`, so both need the same shape). `input` is
+ * the run.vars snapshot taken at node entry, reused as `input_at_error`
+ * per the debug-payload spec — the node's vars didn't change between
+ * "entered" and "errored" since the failure happened mid-execution.
+ */
+function buildErrorPayload(
+  input: Record<string, unknown>,
+  error_message: string,
+  err: unknown,
+  node_type: string | null,
+  output: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    input,
+    input_at_error: input,
+    output,
+    error_message,
+    error_stack: err instanceof Error ? (err.stack ?? null) : null,
+    node_type,
+  };
+}
+
+/**
+ * api_provider → the hardcoded model string `handleAiAutoResponse`
+ * (src/lib/ai/responder.ts) actually calls for that provider. Kept
+ * here (not imported) because responder.ts doesn't return which model
+ * it used — this is a best-effort mirror for the debug timeline, not
+ * a guarantee; if responder.ts's model strings change this drifts
+ * stale until updated to match.
+ */
+const MODEL_BY_PROVIDER: Record<string, string> = {
+  gemini: "gemini-1.5-flash",
+  openai: "gpt-4o-mini",
+  claude: "claude-3-5-sonnet-20241022",
+  hermes: "nousresearch/hermes-3-llama-3.1-405b",
+};
+
+/**
  * Idempotency check — has a `reply_received` event with this Meta
  * message_id already been recorded for any of the contact's flow
  * runs? If yes, the inbound is a duplicate (Meta retry) and we
@@ -687,18 +728,33 @@ async function executeHandoff(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<void> {
+  const startedAt = Date.now();
+  const input = { ...run.vars };
   const cfg = node.config as { assign_to?: string; team_id?: string; note?: string };
-  const convUpdate: Record<string, unknown> = {
-    status: "pending",
-    updated_at: new Date().toISOString(),
-  };
-  if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
-  if (cfg.team_id) convUpdate.team_id = cfg.team_id;
-  if (run.conversation_id) {
-    await db
-      .from("conversations")
-      .update(convUpdate)
-      .eq("id", run.conversation_id);
+  try {
+    const convUpdate: Record<string, unknown> = {
+      status: "pending",
+      updated_at: new Date().toISOString(),
+    };
+    if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
+    if (cfg.team_id) convUpdate.team_id = cfg.team_id;
+    if (run.conversation_id) {
+      await db
+        .from("conversations")
+        .update(convUpdate)
+        .eq("id", run.conversation_id);
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    await endRun(db, run, "failed", "handoff_failed", {
+      node_key: node.node_key,
+      node_type: node.node_type,
+      error_message: detail,
+      err,
+      input,
+      output: { assigned_to: cfg.assign_to ?? null, team_id: cfg.team_id ?? null },
+    });
+    return;
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
     note: cfg.note ?? null,
@@ -713,6 +769,11 @@ async function executeHandoff(
     node_type: node.node_type,
     event_type: "node_completed",
     status: "success",
+    duration_ms: Date.now() - startedAt,
+    payload: {
+      input,
+      output: { assigned_to: cfg.assign_to ?? null, team_id: cfg.team_id ?? null },
+    },
   });
   await endRun(db, run, "handed_off", "handoff_node");
 }
@@ -727,17 +788,32 @@ async function executeHandoffAgent(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<void> {
+  const startedAt = Date.now();
+  const input = { ...run.vars };
   const cfg = node.config as { assign_to?: string; note?: string };
-  const convUpdate: Record<string, unknown> = {
-    status: "pending",
-    updated_at: new Date().toISOString(),
-  };
-  if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
-  if (run.conversation_id) {
-    await db
-      .from("conversations")
-      .update(convUpdate)
-      .eq("id", run.conversation_id);
+  try {
+    const convUpdate: Record<string, unknown> = {
+      status: "pending",
+      updated_at: new Date().toISOString(),
+    };
+    if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
+    if (run.conversation_id) {
+      await db
+        .from("conversations")
+        .update(convUpdate)
+        .eq("id", run.conversation_id);
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    await endRun(db, run, "failed", "handoff_failed", {
+      node_key: node.node_key,
+      node_type: node.node_type,
+      error_message: detail,
+      err,
+      input,
+      output: { assigned_to: cfg.assign_to ?? null },
+    });
+    return;
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
     note: cfg.note ?? null,
@@ -752,6 +828,8 @@ async function executeHandoffAgent(
     node_type: node.node_type,
     event_type: "node_completed",
     status: "success",
+    duration_ms: Date.now() - startedAt,
+    payload: { input, output: { assigned_to: cfg.assign_to ?? null } },
   });
   await endRun(db, run, "handed_off", "handoff_node");
 }
@@ -766,17 +844,32 @@ async function executeHandoffTeam(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<void> {
+  const startedAt = Date.now();
+  const input = { ...run.vars };
   const cfg = node.config as { team_id?: string; note?: string };
-  const convUpdate: Record<string, unknown> = {
-    status: "pending",
-    updated_at: new Date().toISOString(),
-  };
-  if (cfg.team_id) convUpdate.team_id = cfg.team_id;
-  if (run.conversation_id) {
-    await db
-      .from("conversations")
-      .update(convUpdate)
-      .eq("id", run.conversation_id);
+  try {
+    const convUpdate: Record<string, unknown> = {
+      status: "pending",
+      updated_at: new Date().toISOString(),
+    };
+    if (cfg.team_id) convUpdate.team_id = cfg.team_id;
+    if (run.conversation_id) {
+      await db
+        .from("conversations")
+        .update(convUpdate)
+        .eq("id", run.conversation_id);
+    }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    await endRun(db, run, "failed", "handoff_failed", {
+      node_key: node.node_key,
+      node_type: node.node_type,
+      error_message: detail,
+      err,
+      input,
+      output: { assigned_to: cfg.team_id ?? null },
+    });
+    return;
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
     note: cfg.note ?? null,
@@ -791,6 +884,8 @@ async function executeHandoffTeam(
     node_type: node.node_type,
     event_type: "node_completed",
     status: "success",
+    duration_ms: Date.now() - startedAt,
+    payload: { input, output: { assigned_to: cfg.team_id ?? null } },
   });
   await endRun(db, run, "handed_off", "handoff_node");
 }
@@ -850,24 +945,6 @@ async function resolveSubjectValue(
   }
 }
 
-async function evaluateConditionNode(
-  db: AdminClient,
-  run: FlowRunRow,
-  cfg: ConditionNodeConfig,
-): Promise<boolean> {
-  const subjectValue = await resolveSubjectValue(
-    db,
-    run,
-    cfg.subject,
-    cfg.subject_key,
-  );
-  return evaluateConditionPredicate({
-    operator: cfg.operator,
-    subjectValue,
-    configValue: cfg.value,
-  });
-}
-
 /**
  * Evaluates one `switch` branch: resolves every condition's subject,
  * then combines the results with the branch's own AND/OR combinator.
@@ -875,12 +952,24 @@ async function evaluateConditionNode(
  * are already evaluated in order and most flows have few conditions
  * per branch, so the simplicity outweighs the parallelism.
  */
+interface SwitchBranchEvaluation {
+  passed: boolean;
+  conditions: Array<{
+    subject_key: string;
+    resolved_value: string | null;
+    operator: string;
+    value: string | null;
+    passed: boolean;
+  }>;
+}
+
 async function evaluateSwitchBranch(
   db: AdminClient,
   run: FlowRunRow,
   branch: SwitchBranch,
-): Promise<boolean> {
+): Promise<SwitchBranchEvaluation> {
   const results: boolean[] = [];
+  const conditions: SwitchBranchEvaluation["conditions"] = [];
   for (const cond of branch.conditions) {
     const subjectValue = await resolveSubjectValue(
       db,
@@ -888,18 +977,27 @@ async function evaluateSwitchBranch(
       cond.subject,
       cond.subject_key,
     );
-    results.push(
-      evaluateConditionPredicate({
-        operator: cond.operator,
-        subjectValue,
-        configValue: cond.value,
-      }),
-    );
+    const passed = evaluateConditionPredicate({
+      operator: cond.operator,
+      subjectValue,
+      configValue: cond.value,
+    });
+    results.push(passed);
+    conditions.push({
+      subject_key: cond.subject_key,
+      resolved_value: subjectValue ?? null,
+      operator: cond.operator,
+      value: cond.value ?? null,
+      passed,
+    });
   }
-  if (results.length === 0) return false;
-  return branch.combinator === "or"
-    ? results.some(Boolean)
-    : results.every(Boolean);
+  const passed =
+    results.length === 0
+      ? false
+      : branch.combinator === "or"
+        ? results.some(Boolean)
+        : results.every(Boolean);
+  return { passed, conditions };
 }
 
 /**
@@ -975,6 +1073,12 @@ async function endRun(
     node_key: string | null;
     node_type?: string | null;
     error_message: string;
+    /** Raw caught error, when available — unwrapped into `error_stack`. */
+    err?: unknown;
+    /** run.vars snapshot at node entry — becomes `input`/`input_at_error`. */
+    input?: Record<string, unknown>;
+    /** Whatever the node produced before failing, if anything. */
+    output?: Record<string, unknown>;
   },
 ): Promise<void> {
   await db
@@ -996,7 +1100,16 @@ async function endRun(
       event_type: "node_error",
       status: "error",
       error_message: errorContext.error_message,
-      payload: { reason },
+      payload: {
+        reason,
+        ...buildErrorPayload(
+          errorContext.input ?? {},
+          errorContext.error_message,
+          errorContext.err,
+          errorContext.node_type ?? null,
+          errorContext.output ?? {},
+        ),
+      },
     });
   }
 
@@ -1054,7 +1167,12 @@ export async function advanceFromNodeKey(
       node_type: node.node_type,
     });
     const nodeStartedAt = Date.now();
-    const nodeCompleted = () =>
+    // Snapshot BEFORE the node's own logic runs (and possibly mutates
+    // run.vars via updateRunVars) — this is the node's "input" for the
+    // debug timeline, consistent across every node type without each
+    // dispatch branch needing to capture it separately.
+    const inputSnapshot: Record<string, unknown> = { ...run.vars };
+    const nodeCompleted = (output: Record<string, unknown> = {}) =>
       logRunEvent(db, {
         run_id: run.id,
         flow_id: run.flow_id,
@@ -1064,8 +1182,13 @@ export async function advanceFromNodeKey(
         event_type: "node_completed",
         status: "success",
         duration_ms: Date.now() - nodeStartedAt,
+        payload: { input: inputSnapshot, output },
       });
-    const nodeError = (error_message: string) =>
+    const nodeError = (
+      error_message: string,
+      err?: unknown,
+      output: Record<string, unknown> = {},
+    ) =>
       logRunEvent(db, {
         run_id: run.id,
         flow_id: run.flow_id,
@@ -1076,18 +1199,26 @@ export async function advanceFromNodeKey(
         status: "error",
         error_message,
         duration_ms: Date.now() - nodeStartedAt,
+        payload: buildErrorPayload(
+          inputSnapshot,
+          error_message,
+          err,
+          node.node_type,
+          output,
+        ),
       });
 
     if (node.node_type === "start") {
       currentKey = (node.config as unknown as StartNodeConfig).next_node_key;
-      await nodeCompleted();
+      await nodeCompleted({ next_node_key: currentKey });
       continue;
     }
     if (node.node_type === "send_message") {
       const cfg = node.config as unknown as SendMessageNodeConfig;
+      const message_text = interpolateVars(cfg.text, run.vars);
       try {
         const { whatsapp_message_id } = await sendTextViaProvider(run, {
-          text: interpolateVars(cfg.text, run.vars),
+          text: message_text,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "send_message",
@@ -1103,22 +1234,26 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { message_text },
         });
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;
-      await nodeCompleted();
+      await nodeCompleted({ message_text });
       continue;
     }
     if (node.node_type === "send_media") {
       const cfg = node.config as unknown as SendMediaNodeConfig;
+      const caption = cfg.caption
+        ? interpolateVars(cfg.caption, run.vars)
+        : undefined;
       try {
         const { whatsapp_message_id } = await sendMediaViaProvider(run, {
           kind: cfg.media_type,
           link: cfg.media_url,
-          caption: cfg.caption
-            ? interpolateVars(cfg.caption, run.vars)
-            : undefined,
+          caption,
           filename: cfg.filename,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
@@ -1136,20 +1271,24 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { media_url: cfg.media_url, caption },
         });
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;
-      await nodeCompleted();
+      await nodeCompleted({ media_url: cfg.media_url, caption });
       continue;
     }
     if (node.node_type === "collect_input") {
       // Send the prompt and suspend. Customer's next TEXT reply will
       // wake us up via handleReplyForActiveRun's collect_input branch.
       const cfg = node.config as unknown as CollectInputNodeConfig;
+      const message_text = interpolateVars(cfg.prompt_text, run.vars);
       try {
         const { whatsapp_message_id } = await sendTextViaProvider(run, {
-          text: interpolateVars(cfg.prompt_text, run.vars),
+          text: message_text,
         });
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "collect_input",
@@ -1176,6 +1315,9 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { message_text },
         });
         return { outcome: "completed" };
       }
@@ -1190,14 +1332,25 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
-      await nodeCompleted();
+      await nodeCompleted({ message_text });
       return { outcome: "advanced" };
     }
     if (node.node_type === "condition") {
       const cfg = node.config as unknown as ConditionNodeConfig;
       let branch: "true" | "false";
+      let conditionSubjectValue: string | undefined;
       try {
-        branch = (await evaluateConditionNode(db, run, cfg))
+        conditionSubjectValue = await resolveSubjectValue(
+          db,
+          run,
+          cfg.subject,
+          cfg.subject_key,
+        );
+        branch = evaluateConditionPredicate({
+          operator: cfg.operator,
+          subjectValue: conditionSubjectValue,
+          configValue: cfg.value,
+        })
           ? "true"
           : "false";
       } catch (err) {
@@ -1210,6 +1363,8 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: detail,
+          err,
+          input: inputSnapshot,
         });
         return { outcome: "completed" };
       }
@@ -1219,15 +1374,33 @@ export async function advanceFromNodeKey(
         condition_result: branch,
         advancing_to: currentKey,
       });
-      await nodeCompleted();
+      await nodeCompleted({
+        branch_chosen: branch,
+        variable_value: conditionSubjectValue ?? null,
+        advancing_to: currentKey,
+      });
       continue;
     }
     if (node.node_type === "switch") {
       const cfg = node.config as unknown as SwitchNodeConfig;
       let matchedBranchIndex: number | null = null;
+      // Evaluated in order, stopping at the first match (first-branch-
+      // wins routing) — conditions_evaluated below reflects exactly
+      // the branches actually tested, not the full configured list.
+      const conditionsEvaluated: Array<{
+        branch: string;
+        result: boolean;
+        conditions: SwitchBranchEvaluation["conditions"];
+      }> = [];
       try {
         for (let i = 0; i < cfg.branches.length; i++) {
-          if (await evaluateSwitchBranch(db, run, cfg.branches[i])) {
+          const evaluation = await evaluateSwitchBranch(db, run, cfg.branches[i]);
+          conditionsEvaluated.push({
+            branch: cfg.branches[i].label,
+            result: evaluation.passed,
+            conditions: evaluation.conditions,
+          });
+          if (evaluation.passed) {
             matchedBranchIndex = i;
             break;
           }
@@ -1242,6 +1415,9 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { conditions_evaluated: conditionsEvaluated },
         });
         return { outcome: "completed" };
       }
@@ -1249,6 +1425,17 @@ export async function advanceFromNodeKey(
         matchedBranchIndex === null
           ? cfg.default_next
           : cfg.branches[matchedBranchIndex].next_node_key;
+      const chosenBranch =
+        matchedBranchIndex === null
+          ? "fallback"
+          : cfg.branches[matchedBranchIndex].label;
+      // Best-effort single "the value that decided this" — a switch can
+      // have multiple conditions per branch (unlike `condition`'s single
+      // subject), so this is the first condition's resolved value in the
+      // branch that actually matched (or the last one tried, on fallback).
+      // conditions_evaluated carries the full per-condition detail.
+      const lastEvaluation = conditionsEvaluated[conditionsEvaluated.length - 1];
+      const variableValue = lastEvaluation?.conditions[0]?.resolved_value ?? null;
       await logEvent(db, run.id, "node_entered", node.node_key, {
         switch_result:
           matchedBranchIndex === null
@@ -1262,7 +1449,12 @@ export async function advanceFromNodeKey(
         branch_index: matchedBranchIndex,
         fell_through: matchedBranchIndex === null,
       });
-      await nodeCompleted();
+      await nodeCompleted({
+        conditions_evaluated: conditionsEvaluated,
+        chosen_branch: chosenBranch,
+        variable_value: variableValue,
+        advancing_to: currentKey,
+      });
       continue;
     }
     if (node.node_type === "set_tag") {
@@ -1282,7 +1474,7 @@ export async function advanceFromNodeKey(
             .eq("contact_id", run.contact_id!)
             .eq("tag_id", cfg.tag_id);
         }
-        await nodeCompleted();
+        await nodeCompleted({ mode: cfg.mode, tag_id: cfg.tag_id });
       } catch (err) {
         // Non-fatal — log + advance. A tag-write failure shouldn't
         // strand the customer mid-flow.
@@ -1291,13 +1483,32 @@ export async function advanceFromNodeKey(
           reason: "set_tag_failed",
           detail,
         });
-        await nodeError(detail);
+        await nodeError(detail, err, { mode: cfg.mode, tag_id: cfg.tag_id });
       }
       currentKey = cfg.next_node_key;
       continue;
     }
     if (node.node_type === "send_buttons") {
-      await sendButtonsAndSuspend(db, run, node);
+      const cfg = node.config as unknown as SendButtonsNodeConfig;
+      const message_text = interpolateVars(cfg.text, run.vars);
+      try {
+        await sendButtonsAndSuspend(db, run, node);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_buttons_failed",
+          detail,
+        });
+        await endRun(db, run, "failed", "send_buttons_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { message_text },
+        });
+        return { outcome: "completed" };
+      }
       // Persist the new current_node_key via optimistic UPDATE.
       const advanced = await advanceCurrentNodeKey(
         db,
@@ -1310,11 +1521,30 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
-      await nodeCompleted();
+      await nodeCompleted({ message_text });
       return { outcome: "advanced" };
     }
     if (node.node_type === "send_list") {
-      await sendListAndSuspend(db, run, node);
+      const cfg = node.config as unknown as SendListNodeConfig;
+      const message_text = interpolateVars(cfg.text, run.vars);
+      try {
+        await sendListAndSuspend(db, run, node);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_list_failed",
+          detail,
+        });
+        await endRun(db, run, "failed", "send_list_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { message_text },
+        });
+        return { outcome: "completed" };
+      }
       const advanced = await advanceCurrentNodeKey(
         db,
         run.id,
@@ -1326,7 +1556,7 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
-      await nodeCompleted();
+      await nodeCompleted({ message_text });
       return { outcome: "advanced" };
     }
     if (node.node_type === "handoff") {
@@ -1361,6 +1591,7 @@ export async function advanceFromNodeKey(
               : interpolateVars(cfg.body_template, run.vars),
           signal: AbortSignal.timeout(timeoutMs),
         });
+        let responseBodyText: string;
         if (cfg.response_var) {
           let parsed: unknown;
           try {
@@ -1369,21 +1600,32 @@ export async function advanceFromNodeKey(
             parsed = await res.text();
           }
           await updateRunVars(db, run, { [cfg.response_var]: parsed });
+          responseBodyText =
+            typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+        } else {
+          responseBodyText = await res.clone().text();
         }
-        // Status code only — never the response body, which may carry
-        // tokens/PII from whatever third-party API this points at.
+        const response_body =
+          responseBodyText.length > 2000
+            ? `${responseBodyText.slice(0, 2000)}...[truncado]`
+            : responseBodyText;
         await logEvent(db, run.id, "node_entered", node.node_key, {
           node_type: "http_fetch",
           status: res.status,
         });
-        await nodeCompleted();
+        await nodeCompleted({
+          method: cfg.method,
+          url,
+          response_status: res.status,
+          response_body,
+        });
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "http_fetch_failed",
           detail,
         });
-        await nodeError(detail);
+        await nodeError(detail, err, { method: cfg.method, url });
       }
       currentKey = cfg.next_node_key;
       continue;
@@ -1407,7 +1649,11 @@ export async function advanceFromNodeKey(
         variables_set,
       });
       currentKey = cfg.next_node_key;
-      await nodeCompleted();
+      await nodeCompleted({
+        variables_set: Object.fromEntries(
+          variables_set.map((v) => [v.key, v.value]),
+        ),
+      });
       continue;
     }
     if (node.node_type === "smart_delay") {
@@ -1426,7 +1672,9 @@ export async function advanceFromNodeKey(
             reason: "smart_delay_message_failed",
             detail,
           });
-          await nodeError(detail);
+          await nodeError(detail, err, {
+            message_text: interpolateVars(cfg.message, run.vars),
+          });
         }
       }
       const advanced = await advanceCurrentNodeKey(
@@ -1448,7 +1696,7 @@ export async function advanceFromNodeKey(
           reason: "lost_race_during_advance",
         });
       }
-      await nodeCompleted();
+      await nodeCompleted({ delay_seconds: cfg.delay_seconds });
       return { outcome: "advanced" };
     }
     if (node.node_type === "anchor") {
@@ -1467,6 +1715,7 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: "go_to hop limit exceeded",
+          input: inputSnapshot,
         });
         return { outcome: "completed" };
       }
@@ -1476,7 +1725,7 @@ export async function advanceFromNodeKey(
         .update({ hops_count: run.hops_count })
         .eq("id", run.id);
       currentKey = cfg.target_node_key;
-      await nodeCompleted();
+      await nodeCompleted({ target_node_key: cfg.target_node_key });
       continue;
     }
     if (node.node_type === "go_to_flow") {
@@ -1496,10 +1745,12 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: `go_to_flow_invalid_target:${cfg.flow_id}`,
+          input: inputSnapshot,
+          output: { flow_id: cfg.flow_id },
         });
         return { outcome: "completed" };
       }
-      await nodeCompleted();
+      await nodeCompleted({ flow_id: cfg.flow_id });
       await endRun(db, run, "transferred", "go_to_flow");
       const targetNodes = await loadAllNodes(db, targetFlow.id);
       await startTransferredRun(db, targetFlow, run, cfg.pass_vars, targetNodes);
@@ -1542,22 +1793,26 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { template_name: cfg.template_name },
         });
         return { outcome: "completed" };
       }
       currentKey = cfg.next_node_key;
-      await nodeCompleted();
+      await nodeCompleted({ message_text: cfg.template_name });
       continue;
     }
     if (node.node_type === "add_note") {
       const cfg = node.config as unknown as AddNoteNodeConfig;
+      const note_text = interpolateVars(cfg.note_text, run.vars);
       try {
         await db.from("contact_notes").insert({
           contact_id: run.contact_id!,
           user_id: run.user_id,
-          note_text: interpolateVars(cfg.note_text, run.vars),
+          note_text,
         });
-        await nodeCompleted();
+        await nodeCompleted({ note_text });
       } catch (err) {
         // Non-fatal — a note-write failure shouldn't strand the customer.
         const detail = err instanceof Error ? err.message : String(err);
@@ -1565,7 +1820,7 @@ export async function advanceFromNodeKey(
           reason: "add_note_failed",
           detail,
         });
-        await nodeError(detail);
+        await nodeError(detail, err, { note_text });
       }
       currentKey = cfg.next_node_key;
       continue;
@@ -1591,6 +1846,9 @@ export async function advanceFromNodeKey(
             node_key: node.node_key,
             node_type: node.node_type,
             error_message: detail,
+            err,
+            input: inputSnapshot,
+            output: { message_text: interpolateVars(cfg.prompt_text, run.vars) },
           });
           return { outcome: "completed" };
         }
@@ -1613,7 +1871,20 @@ export async function advanceFromNodeKey(
       const cfg = node.config as unknown as AiAgentNodeConfig;
       let lastReply = "";
       let exitCodeFound: string | null = null;
+      let modelUsed: string | null = null;
       try {
+        // Best-effort — mirrors ai_config.api_provider to the model
+        // string handleAiAutoResponse actually calls (see
+        // MODEL_BY_PROVIDER's own comment on the duplication risk).
+        const { data: aiConfigRow } = await db
+          .from("ai_config")
+          .select("api_provider")
+          .eq("account_id", run.account_id)
+          .maybeSingle();
+        const provider = (aiConfigRow as { api_provider: string } | null)
+          ?.api_provider;
+        modelUsed = provider ? (MODEL_BY_PROVIDER[provider] ?? provider) : null;
+
         // Last customer message is the AI's input — same "what does the
         // customer want answered" the standalone auto-responder uses.
         const { data: lastCustomerMsg } = await db
@@ -1684,21 +1955,40 @@ export async function advanceFromNodeKey(
           node_key: node.node_key,
           node_type: node.node_type,
           error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: {
+            last_reply: lastReply.slice(-300),
+            ai_exit_code: exitCodeFound,
+            model_used: modelUsed,
+          },
         });
         return { outcome: "completed" };
       }
+
+      // Output shared by every ai_agent exit path below — only
+      // `exit_reason`/`turns_used` differ per mode/branch.
+      const baseOutput = {
+        last_reply: lastReply.slice(-300),
+        ai_exit_code: exitCodeFound,
+        model_used: modelUsed,
+      };
 
       if (cfg.mode === "takeover") {
         await logEvent(db, run.id, "handoff", node.node_key, {
           reason: "ai_agent_takeover",
           turns_used: 1,
-          // Not one of validate/limit_reached/next_node_set/error —
-          // a takeover ends the run via handoff, it doesn't advance
-          // to another node or hit the turn cap. Labeling it as either
-          // of those would misdescribe what actually happened.
+          // Not one of exit_code_detected/max_turns/single_response —
+          // a takeover ends the run via handoff, it doesn't advance to
+          // another node or hit the turn cap. Labeling it as either of
+          // those would misdescribe what actually happened.
           exit_reason: "takeover",
         });
-        await nodeCompleted();
+        await nodeCompleted({
+          ...baseOutput,
+          turns_used: 1,
+          exit_reason: "takeover",
+        });
         await endRun(db, run, "handed_off", "ai_agent_takeover");
         return { outcome: "handed_off" };
       }
@@ -1720,11 +2010,16 @@ export async function advanceFromNodeKey(
           // customer reply that will never come.
           await updateRunVars(db, run, { __ai_turns__: 0 });
           currentKey = cfg.next_node_key ?? null;
+          const exitReason = exitCodeFound ? "exit_code_detected" : "max_turns";
           await logEvent(db, run.id, "node_entered", node.node_key, {
             turns_used: turns,
             exit_reason: exitCodeFound ? "exit_code_matched" : "limit_reached",
           });
-          await nodeCompleted();
+          await nodeCompleted({
+            ...baseOutput,
+            turns_used: turns,
+            exit_reason: exitReason,
+          });
           continue;
         }
         await updateRunVars(db, run, { __ai_turns__: turns });
@@ -1741,12 +2036,19 @@ export async function advanceFromNodeKey(
         }
         // Still under the turn cap — suspends at this same node
         // waiting for the customer's next reply, doesn't move to
-        // another node yet, so "next_node_set" would be misleading.
+        // another node yet. Not one of the 3 requested exit_reason
+        // values (none mean "still looping, no tag yet") — reusing
+        // "awaiting_reply" from the node_entered event above rather
+        // than mislabeling it as max_turns/single_response.
         await logEvent(db, run.id, "node_entered", node.node_key, {
           turns_used: turns,
           exit_reason: "awaiting_reply",
         });
-        await nodeCompleted();
+        await nodeCompleted({
+          ...baseOutput,
+          turns_used: turns,
+          exit_reason: "awaiting_reply",
+        });
         return { outcome: "advanced" };
       }
 
@@ -1756,7 +2058,11 @@ export async function advanceFromNodeKey(
         turns_used: 1,
         exit_reason: "next_node_set",
       });
-      await nodeCompleted();
+      await nodeCompleted({
+        ...baseOutput,
+        turns_used: 1,
+        exit_reason: "single_response",
+      });
       continue;
     }
     // Unknown node type — shouldn't happen given the CHECK constraint.
@@ -1767,6 +2073,7 @@ export async function advanceFromNodeKey(
       node_key: node.node_key,
       node_type: node.node_type,
       error_message: `unknown_node_type:${node.node_type}`,
+      input: inputSnapshot,
     });
     return { outcome: "completed" };
   }
@@ -1882,13 +2189,9 @@ async function handleReplyForActiveRun(
   message: ParsedInbound,
   nodes: Map<string, FlowNodeRow>,
 ): Promise<DispatchInboundResult> {
-  // Note: we intentionally do NOT persist the raw customer text. A
-  // `collect_input` prompt that asks "what's your card number?" would
-  // otherwise leave the PAN sitting in flow_run_events.payload forever,
-  // visible to anyone with access to the runs viewer or the events
-  // table. Length is enough for "did they actually reply?" debugging;
-  // for the captured value itself, the `node_entered` event already
-  // records `captured_key` + `captured_length` after the var is stored.
+  // This event is about the delivery (which message, what kind), not
+  // the captured value — text_length only. The actual reply text is
+  // logged on collect_input's own node_entered event below.
   await logEvent(db, run.id, "reply_received", run.current_node_key, {
     meta_message_id: inboundMessageId(message),
     reply_kind: message.kind,
@@ -2003,9 +2306,15 @@ async function handleReplyForActiveRun(
         // re-SELECT the whole row.
         run.vars = newVars;
         run.reprompt_count = 0;
+        // user_input carries the raw reply — a deliberate reversal of
+        // this event's prior privacy-conservative stance (captured_key
+        // + captured_length only), per an explicit request for n8n-level
+        // input/output detail on the debug timeline. Same access model
+        // as before (flow_run_events stays scoped to the run's owner).
         await logEvent(db, run.id, "node_entered", currentNode.node_key, {
           captured_key: cfg.var_key,
           captured_length: captured.length,
+          user_input: captured,
         });
         matched = cfg.next_node_key;
       }
