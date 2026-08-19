@@ -419,6 +419,24 @@ function EventLine({ ev }: { ev: EventRow }) {
 }
 
 function summarizePayload(payload: Record<string, unknown>): string {
+  // Type-specific renderings first — richer than the generic key dump
+  // below. Detected by payload shape (not `node_type`, which the
+  // `logEvent` helper these all go through never sets on the row —
+  // only `logRunEvent`'s node_completed/node_error siblings do).
+  if ("fell_through" in payload) {
+    if (payload.fell_through === true) return "Senão (fallback)";
+    if (typeof payload.branch_chosen === "string") {
+      return `Ramo: ${payload.branch_chosen}`;
+    }
+  }
+  if (Array.isArray(payload.variables_set)) {
+    const vars = payload.variables_set as Array<{ key: string; value: string }>;
+    return vars.map((v) => `Setou: ${v.key} = ${v.value}`).join(" · ");
+  }
+  if (typeof payload.last_reply === "string" && payload.last_reply) {
+    return payload.last_reply.slice(0, 100);
+  }
+
   // Show the keys that matter most to a human debugger; full JSON is
   // available via the "Captured vars" details panel for the run.
   const keys = ["reply_id", "captured_key", "reason", "advancing_to"];

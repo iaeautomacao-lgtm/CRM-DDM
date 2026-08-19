@@ -1255,6 +1255,12 @@ export async function advanceFromNodeKey(
             ? "default"
             : cfg.branches[matchedBranchIndex].label,
         advancing_to: currentKey,
+        branch_chosen:
+          matchedBranchIndex === null
+            ? null
+            : cfg.branches[matchedBranchIndex].label,
+        branch_index: matchedBranchIndex,
+        fell_through: matchedBranchIndex === null,
       });
       await nodeCompleted();
       continue;
@@ -1390,6 +1396,16 @@ export async function advanceFromNodeKey(
         patch[a.variable] = interpolateVars(a.value, run.vars);
       }
       await updateRunVars(db, run, patch);
+      const variables_set = Object.entries(patch).map(([key, value]) => {
+        const str = String(value);
+        return {
+          key,
+          value: str.length > 200 ? `${str.slice(0, 200)}...[truncado]` : str,
+        };
+      });
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        variables_set,
+      });
       currentKey = cfg.next_node_key;
       await nodeCompleted();
       continue;
@@ -1595,20 +1611,22 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "ai_agent") {
       const cfg = node.config as unknown as AiAgentNodeConfig;
+      let lastReply = "";
       try {
         // Last customer message is the AI's input — same "what does the
         // customer want answered" the standalone auto-responder uses.
         const { data: lastCustomerMsg } = await db
           .from("messages")
-          .select("content_text")
+          .select("content_text, created_at")
           .eq("conversation_id", run.conversation_id!)
           .eq("sender_type", "customer")
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
-        const incomingText =
-          (lastCustomerMsg as { content_text: string | null } | null)
-            ?.content_text ?? "";
+        const incomingMsg = lastCustomerMsg as
+          | { content_text: string | null; created_at: string }
+          | null;
+        const incomingText = incomingMsg?.content_text ?? "";
 
         await handleAiAutoResponse(
           run.account_id,
@@ -1616,15 +1634,37 @@ export async function advanceFromNodeKey(
           run.conversation_id!,
           incomingText,
         );
+
+        // Best-effort: read back the bot's reply for the debug
+        // timeline. Scoped to AFTER the customer message that
+        // triggered this turn so a disabled/failed AI response
+        // doesn't surface a stale reply from an earlier turn.
+        let replyQuery = db
+          .from("messages")
+          .select("content_text")
+          .eq("conversation_id", run.conversation_id!)
+          .eq("sender_type", "bot")
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (incomingMsg?.created_at) {
+          replyQuery = replyQuery.gt("created_at", incomingMsg.created_at);
+        }
+        const { data: lastBotMsg } = await replyQuery.maybeSingle();
+        lastReply =
+          (lastBotMsg as { content_text: string | null } | null)
+            ?.content_text ?? "";
+
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "ai_agent",
           mode: cfg.mode,
+          last_reply: lastReply.slice(-300),
         });
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "ai_agent_failed",
           detail,
+          exit_reason: "error",
         });
         await endRun(db, run, "failed", "ai_agent_failed", {
           node_key: node.node_key,
@@ -1637,6 +1677,12 @@ export async function advanceFromNodeKey(
       if (cfg.mode === "takeover") {
         await logEvent(db, run.id, "handoff", node.node_key, {
           reason: "ai_agent_takeover",
+          turns_used: 1,
+          // Not one of validate/limit_reached/next_node_set/error —
+          // a takeover ends the run via handoff, it doesn't advance
+          // to another node or hit the turn cap. Labeling it as either
+          // of those would misdescribe what actually happened.
+          exit_reason: "takeover",
         });
         await nodeCompleted();
         await endRun(db, run, "handed_off", "ai_agent_takeover");
@@ -1655,6 +1701,10 @@ export async function advanceFromNodeKey(
           // re-entered later via go_to) and fall through to advance.
           await updateRunVars(db, run, { __ai_turns__: 0 });
           currentKey = cfg.next_node_key ?? null;
+          await logEvent(db, run.id, "node_entered", node.node_key, {
+            turns_used: turns,
+            exit_reason: "limit_reached",
+          });
           await nodeCompleted();
           continue;
         }
@@ -1670,12 +1720,23 @@ export async function advanceFromNodeKey(
             reason: "lost_race_during_advance",
           });
         }
+        // Still under the turn cap — suspends at this same node
+        // waiting for the customer's next reply, doesn't move to
+        // another node yet, so "next_node_set" would be misleading.
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          turns_used: turns,
+          exit_reason: "awaiting_reply",
+        });
         await nodeCompleted();
         return { outcome: "advanced" };
       }
 
       // mode === "once"
       currentKey = cfg.next_node_key ?? null;
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        turns_used: 1,
+        exit_reason: "next_node_set",
+      });
       await nodeCompleted();
       continue;
     }
