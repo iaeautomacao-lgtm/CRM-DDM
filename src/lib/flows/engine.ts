@@ -1612,6 +1612,7 @@ export async function advanceFromNodeKey(
     if (node.node_type === "ai_agent") {
       const cfg = node.config as unknown as AiAgentNodeConfig;
       let lastReply = "";
+      let exitCodeFound: string | null = null;
       try {
         // Last customer message is the AI's input — same "what does the
         // customer want answered" the standalone auto-responder uses.
@@ -1663,7 +1664,8 @@ export async function advanceFromNodeKey(
         // erase a routing decision an earlier turn already made).
         const exitCodeMatch = lastReply.match(/#[A-Z0-9_]+/);
         if (exitCodeMatch) {
-          await updateRunVars(db, run, { ai_exit_code: exitCodeMatch[0] });
+          exitCodeFound = exitCodeMatch[0];
+          await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
         }
 
         await logEvent(db, run.id, "message_sent", node.node_key, {
@@ -1708,14 +1710,19 @@ export async function advanceFromNodeKey(
             ? (run.vars.__ai_turns__ as number)
             : 0;
         const turns = priorTurns + 1;
-        if (turns >= maxTurns) {
-          // Cap hit — reset the counter (in case this node is ever
-          // re-entered later via go_to) and fall through to advance.
+        if (exitCodeFound || turns >= maxTurns) {
+          // Cap hit OR the agent's reply just carried a #TAG exit code
+          // (ai_exit_code was set above) — either way the loop is done:
+          // reset the counter (in case this node is ever re-entered
+          // later via go_to) and advance to the same configured
+          // next_node_key so a downstream Switch can route on
+          // ai_exit_code instead of the loop suspending for another
+          // customer reply that will never come.
           await updateRunVars(db, run, { __ai_turns__: 0 });
           currentKey = cfg.next_node_key ?? null;
           await logEvent(db, run.id, "node_entered", node.node_key, {
             turns_used: turns,
-            exit_reason: "limit_reached",
+            exit_reason: exitCodeFound ? "exit_code_matched" : "limit_reached",
           });
           await nodeCompleted();
           continue;
