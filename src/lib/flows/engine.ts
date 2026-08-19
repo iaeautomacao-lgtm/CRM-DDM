@@ -1654,6 +1654,18 @@ export async function advanceFromNodeKey(
           (lastBotMsg as { content_text: string | null } | null)
             ?.content_text ?? "";
 
+        // Exit-code convention: the AI's system prompt can instruct it
+        // to end a reply with a #TAG keyword (e.g. #NEGOCIACAO) that a
+        // Switch node downstream branches on (subject_key:
+        // "ai_exit_code"). Only overwrite when a tag is actually
+        // found — no match means "still talking", not "clear the
+        // previous exit code" (a later turn without a tag shouldn't
+        // erase a routing decision an earlier turn already made).
+        const exitCodeMatch = lastReply.match(/#[A-Z0-9_]+/);
+        if (exitCodeMatch) {
+          await updateRunVars(db, run, { ai_exit_code: exitCodeMatch[0] });
+        }
+
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "ai_agent",
           mode: cfg.mode,
