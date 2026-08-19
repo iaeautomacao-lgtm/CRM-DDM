@@ -18,6 +18,13 @@ import {
   MinusCircle,
   Copy,
   Check,
+  CheckCircle,
+  CheckCircle2,
+  XCircle,
+  MessageCircle,
+  MessageSquare,
+  Play,
+  Circle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
@@ -77,6 +84,38 @@ interface EventRow {
   duration_ms: number | null;
   payload: Record<string, unknown>;
   created_at: string;
+}
+
+/** Just enough of a flow_nodes row to render the "Nós não executados" list. */
+interface FlowNodeDef {
+  node_key: string;
+  node_type: string;
+}
+
+/**
+ * Per-run stats derived from its events, for the summary badges and
+ * the "Nós não executados" section. `null` until the run has been
+ * expanded at least once — events are fetched lazily per run (see
+ * `toggle`), so there's nothing to compute from before that.
+ */
+interface RunEventStats {
+  executedCount: number;
+  errorCount: number;
+  notExecuted: FlowNodeDef[];
+}
+
+function computeRunEventStats(
+  events: EventRow[],
+  flowNodes: FlowNodeDef[],
+): RunEventStats {
+  const executedKeys = new Set(
+    events
+      .filter((e) => e.event_type === "node_entered" && e.node_key)
+      .map((e) => e.node_key as string),
+  );
+  const errorCount = events.filter((e) => e.event_type === "node_error").length;
+  const notExecuted = flowNodes.filter((n) => !executedKeys.has(n.node_key));
+  return { executedCount: executedKeys.size, errorCount, notExecuted };
 }
 
 // Badge colors per the spec: green = completed, yellow = handed_off /
@@ -143,6 +182,9 @@ export default function FlowRunsPage() {
   const [runs, setRuns] = useState<RunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  // Full node graph for this flow — fetched once, reused across every
+  // run's "Nós não executados" section (same flow for all of them).
+  const [flowNodes, setFlowNodes] = useState<FlowNodeDef[]>([]);
 
   const [expanded, setExpanded] = useState<string | null>(null);
   const [eventsByRun, setEventsByRun] = useState<Record<string, EventRow[]>>({});
@@ -179,6 +221,36 @@ export default function FlowRunsPage() {
         }
       } finally {
         if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [params.id]);
+
+  // Independent of the runs fetch above — a failure here just means
+  // "Nós não executados" stays empty everywhere, not a page-breaking
+  // error, so it doesn't share the same loading/notFound state.
+  useEffect(() => {
+    if (!params.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/flows/${params.id}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          nodes?: Array<{ node_key: string; node_type: string }>;
+        };
+        if (!cancelled) {
+          setFlowNodes(
+            (json.nodes ?? []).map((n) => ({
+              node_key: n.node_key,
+              node_type: n.node_type,
+            })),
+          );
+        }
+      } catch (err) {
+        console.error("[flows-runs] flow nodes fetch failed:", err);
       }
     })();
     return () => {
@@ -263,6 +335,7 @@ export default function FlowRunsPage() {
               onToggle={() => void toggle(run.id)}
               selectedEvent={selectedEvent}
               onSelectEvent={setSelectedEvent}
+              flowNodes={flowNodes}
             />
           ))}
         </div>
@@ -284,6 +357,7 @@ function RunCard({
   onToggle,
   selectedEvent,
   onSelectEvent,
+  flowNodes,
 }: {
   run: RunRow;
   events: EventRow[] | null;
@@ -292,6 +366,7 @@ function RunCard({
   onToggle: () => void;
   selectedEvent: EventRow | null;
   onSelectEvent: (ev: EventRow) => void;
+  flowNodes: FlowNodeDef[];
 }) {
   const meta = STATUS_META[run.status];
   const StatusIcon = meta.icon;
@@ -302,6 +377,11 @@ function RunCard({
         addSuffix: false,
       })
     : null;
+  // null until the run has been expanded at least once — events are
+  // fetched lazily per run, so there's nothing to derive stats from
+  // before that (see the file header comment on why events aren't
+  // bulk-fetched for the whole list).
+  const stats = events ? computeRunEventStats(events, flowNodes) : null;
   return (
     <div className="rounded-lg border border-border bg-card">
       <button
@@ -339,6 +419,32 @@ function RunCard({
             )}
             {duration && <span>· durou {duration}</span>}
           </div>
+          {stats && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Badge
+                variant="outline"
+                className="border-emerald-600/40 bg-emerald-500/10 text-[10px] text-emerald-300"
+              >
+                {stats.executedCount} executados
+              </Badge>
+              {stats.errorCount > 0 && (
+                <Badge
+                  variant="outline"
+                  className="border-red-600/40 bg-red-500/10 text-[10px] text-red-300"
+                >
+                  {stats.errorCount} {stats.errorCount === 1 ? "erro" : "erros"}
+                </Badge>
+              )}
+              {stats.notExecuted.length > 0 && (
+                <Badge
+                  variant="outline"
+                  className="border-amber-600/40 bg-amber-500/10 text-[10px] text-amber-300"
+                >
+                  {stats.notExecuted.length} não executados
+                </Badge>
+              )}
+            </div>
+          )}
         </div>
       </button>
       {expanded && (
@@ -358,22 +464,27 @@ function RunCard({
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <div className="flex flex-col gap-1">
-              {!events || events.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Nenhum evento registrado para esta execução.
-                </p>
-              ) : (
-                events.map((ev, ix) => (
-                  <EventLine
-                    key={ix}
-                    ev={ev}
-                    selected={selectedEvent === ev}
-                    onSelect={() => onSelectEvent(ev)}
-                  />
-                ))
+            <>
+              <div className="flex flex-col gap-1">
+                {!events || events.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhum evento registrado para esta execução.
+                  </p>
+                ) : (
+                  events.map((ev, ix) => (
+                    <EventLine
+                      key={ix}
+                      ev={ev}
+                      selected={selectedEvent === ev}
+                      onSelect={() => onSelectEvent(ev)}
+                    />
+                  ))
+                )}
+              </div>
+              {stats && stats.notExecuted.length > 0 && (
+                <NotExecutedSection nodes={stats.notExecuted} />
               )}
-            </div>
+            </>
           )}
         </div>
       )}
@@ -381,39 +492,87 @@ function RunCard({
   );
 }
 
+/**
+ * Flow nodes the run's event log never reached (no node_entered for
+ * that node_key). Rendered as its own section, separate from the
+ * event timeline, since these never happened rather than happened
+ * with some outcome.
+ */
+function NotExecutedSection({ nodes }: { nodes: FlowNodeDef[] }) {
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+        Nós não executados
+      </p>
+      <div className="flex flex-col gap-1">
+        {nodes.map((n) => (
+          <div
+            key={n.node_key}
+            className="flex items-center gap-2 rounded-md px-2 py-1 text-xs"
+          >
+            <MinusCircle className="h-3 w-3 shrink-0 text-amber-400" />
+            <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+              {n.node_key} ({n.node_type})
+            </code>
+            <span className="text-[10.5px] text-muted-foreground">
+              Não alcançado nesta execução
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Base per-event_type icon/color. `node_completed` defaults to the
+// success (green) look; getEventIcon/getEventColor override it to the
+// error (red) look when that particular row's `status` is "error" —
+// engine.ts never writes node_completed with status:"error" today
+// (node_error is its own event_type for failures), but the DB column
+// allows it, so this stays defensive rather than assuming.
 const EVENT_ICON: Record<string, typeof Clock> = {
-  started: PlayCircle,
-  run_started: PlayCircle,
+  started: Play,
+  run_started: Play,
   node_entered: ChevronRight,
-  node_completed: CircleCheck,
-  message_sent: CircleCheck,
-  reply_received: ChevronRight,
+  node_completed: CheckCircle,
+  message_sent: MessageCircle,
+  reply_received: MessageSquare,
   fallback_fired: Clock,
   handoff: UserPlus,
   timeout: Clock,
-  error: CircleAlert,
-  node_error: CircleAlert,
-  completed: CircleCheck,
-  run_completed: CircleCheck,
-  run_error: CircleAlert,
+  error: XCircle,
+  node_error: XCircle,
+  completed: CheckCircle,
+  run_completed: CheckCircle2,
+  run_error: XCircle,
 };
 
 const EVENT_COLOR: Record<string, string> = {
-  started: "text-emerald-300",
-  run_started: "text-emerald-300",
+  started: "text-emerald-600",
+  run_started: "text-emerald-600",
   node_entered: "text-muted-foreground",
-  node_completed: "text-emerald-300",
-  message_sent: "text-sky-300",
-  reply_received: "text-primary",
+  node_completed: "text-emerald-400",
+  message_sent: "text-blue-400",
+  reply_received: "text-sky-300",
   fallback_fired: "text-amber-300",
   handoff: "text-amber-300",
   timeout: "text-muted-foreground",
-  error: "text-red-300",
-  node_error: "text-red-300",
-  completed: "text-emerald-300",
-  run_completed: "text-emerald-300",
-  run_error: "text-red-300",
+  error: "text-red-400",
+  node_error: "text-red-400",
+  completed: "text-emerald-400",
+  run_completed: "text-emerald-400",
+  run_error: "text-red-400",
 };
+
+function getEventIcon(ev: EventRow): typeof Clock {
+  if (ev.event_type === "node_completed" && ev.status === "error") return XCircle;
+  return EVENT_ICON[ev.event_type] ?? Circle;
+}
+
+function getEventColor(ev: EventRow): string {
+  if (ev.event_type === "node_completed" && ev.status === "error") return "text-red-400";
+  return EVENT_COLOR[ev.event_type] ?? "text-muted-foreground";
+}
 
 function EventLine({
   ev,
@@ -424,16 +583,23 @@ function EventLine({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const cls = EVENT_COLOR[ev.event_type] ?? "text-muted-foreground";
-  const Icon = EVENT_ICON[ev.event_type] ?? ChevronRight;
+  const cls = getEventColor(ev);
+  const Icon = getEventIcon(ev);
   const isError = ev.event_type === "node_error" || ev.event_type === "run_error";
+  const isNodeError = ev.event_type === "node_error";
   return (
     <button
       type="button"
       onClick={onSelect}
+      style={
+        isNodeError
+          ? { backgroundColor: `rgba(239,68,68,${selected ? 0.18 : 0.1})` }
+          : undefined
+      }
       className={cn(
         "flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1 text-left text-xs transition-colors",
-        selected ? "bg-muted" : "hover:bg-muted/50"
+        !isNodeError && (selected ? "bg-muted" : "hover:bg-muted/50"),
+        isNodeError && "hover:brightness-110"
       )}
     >
       <div className="flex items-start gap-2">
@@ -729,8 +895,8 @@ function EventDetailSheet({
       </Sheet>
     );
   }
-  const Icon = EVENT_ICON[ev.event_type] ?? ChevronRight;
-  const cls = EVENT_COLOR[ev.event_type] ?? "text-muted-foreground";
+  const Icon = getEventIcon(ev);
+  const cls = getEventColor(ev);
   const statusMeta = ev.status ? STATUS_BADGE[ev.status] : null;
   const StatusIcon = statusMeta?.icon;
   return (
