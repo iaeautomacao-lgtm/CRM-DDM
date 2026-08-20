@@ -35,11 +35,13 @@ export async function middleware(request: NextRequest) {
     }
   ) as any
 
+  let user = null
   let userId: string | null = null
   let authError = null
   try {
-    const { data, error } = await supabase.auth.getClaims()
-    userId = data?.claims?.sub ?? null
+    const { data, error } = await supabase.auth.getUser()
+    user = data?.user ?? null
+    userId = user?.id ?? null
     if (error) {
       authError = error.message
     }
@@ -47,9 +49,9 @@ export async function middleware(request: NextRequest) {
     authError = err.message || 'Unknown auth error'
   }
 
-  const isAuthenticated = Boolean(userId)
+  const isAuthenticated = Boolean(user)
 
-  // getClaims() may still cause the SSR client to write refreshed or cleared
+  // getUser() may still cause the SSR client to write refreshed or cleared
   // cookies through setAll(). Any redirect / JSON response below is a fresh
   // object, so copy those Set-Cookie headers onto the response we return.
   const withRefreshedCookies = <T extends NextResponse>(response: T): T => {

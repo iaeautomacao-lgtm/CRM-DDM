@@ -14,7 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { MessageSquare, UsersRound } from "lucide-react";
+import { UsersRound } from "lucide-react";
 import { DdmLogo } from "@/components/ui/ddm-logo";
 
 // `useSearchParams` opts the component out of static prerendering
@@ -28,6 +28,15 @@ export default function LoginPage() {
       <LoginPageInner />
     </Suspense>
   );
+}
+
+function getSupabaseCookieNames() {
+  if (typeof document === "undefined") return [];
+
+  return document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim().split("=")[0])
+    .filter((name) => name.startsWith("sb-"));
 }
 
 function LoginPageInner() {
@@ -49,7 +58,7 @@ function LoginPageInner() {
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -59,6 +68,12 @@ function LoginPageInner() {
       setLoading(false);
       return;
     }
+
+    console.log("[AUTH-CHECK] login session:", !!data?.session);
+    console.log("[AUTH-CHECK] sb cookies immediate:", getSupabaseCookieNames());
+    setTimeout(() => {
+      console.log("[AUTH-CHECK] sb cookies +1000ms:", getSupabaseCookieNames());
+    }, 1000);
 
     if (inviteToken) {
       router.push(`/join/${encodeURIComponent(inviteToken)}`);

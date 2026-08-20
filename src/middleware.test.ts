@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-let mockClaims: { sub: string } | null = null;
-let mockClaimsError: { message: string; name?: string; status?: number } | null = null;
+let mockUser: { id: string } | null = null;
+let mockUserError: { message: string; name?: string; status?: number } | null = null;
 let mockRole: string | null = "owner";
 let mockRoleError: { message: string } | null = null;
 let refreshedCookies: Array<{
@@ -21,11 +21,11 @@ vi.mock("@supabase/ssr", () => ({
     },
   ) => ({
     auth: {
-      getClaims: async () => {
+      getUser: async () => {
         if (refreshedCookies.length) opts.cookies.setAll(refreshedCookies);
         return {
-          data: { claims: mockClaims },
-          error: mockClaimsError,
+          data: { user: mockUser },
+          error: mockUserError,
         };
       },
     },
@@ -57,8 +57,8 @@ const { middleware } = await import("./middleware");
 beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
-  mockClaims = null;
-  mockClaimsError = null;
+  mockUser = null;
+  mockUserError = null;
   mockRole = "owner";
   mockRoleError = null;
   refreshedCookies = [];
@@ -80,8 +80,8 @@ const authMissing = {
 };
 
 describe("middleware auth", () => {
-  it("uses claims.sub as the authenticated user id for RBAC", async () => {
-    mockClaims = { sub: "user-1" };
+  it("uses user.id as the authenticated user id for RBAC", async () => {
+    mockUser = { id: "user-1" };
     mockRole = "owner";
 
     const res = await middleware(new NextRequest("https://app.test/dashboard"));
@@ -90,9 +90,9 @@ describe("middleware auth", () => {
     expect(queriedUserId).toBe("user-1");
   });
 
-  it("redirects protected routes to login when claims are missing", async () => {
-    mockClaims = null;
-    mockClaimsError = authMissing;
+  it("redirects protected routes to login when user is missing", async () => {
+    mockUser = null;
+    mockUserError = authMissing;
 
     const res = await middleware(new NextRequest("https://app.test/dashboard"));
 
@@ -107,8 +107,8 @@ describe("middleware auth", () => {
   });
 
   it("keeps refreshed cookies on auth redirects", async () => {
-    mockClaims = null;
-    mockClaimsError = authMissing;
+    mockUser = null;
+    mockUserError = authMissing;
     refreshedCookies = [ROTATED];
 
     const res = await middleware(new NextRequest("https://app.test/dashboard"));
@@ -118,7 +118,7 @@ describe("middleware auth", () => {
   });
 
   it("redirects an authenticated user away from /login with no-store", async () => {
-    mockClaims = { sub: "user-1" };
+    mockUser = { id: "user-1" };
     refreshedCookies = [ROTATED];
 
     const res = await middleware(new NextRequest("https://app.test/login"));
@@ -133,7 +133,7 @@ describe("middleware auth", () => {
   });
 
   it("redirects RBAC-denied users with no-store", async () => {
-    mockClaims = { sub: "user-1" };
+    mockUser = { id: "user-1" };
     mockRole = "viewer";
 
     const res = await middleware(new NextRequest("https://app.test/flows"));
@@ -147,7 +147,7 @@ describe("middleware auth", () => {
   });
 
   it("returns the normal response for an authenticated and authorized route", async () => {
-    mockClaims = { sub: "user-1" };
+    mockUser = { id: "user-1" };
     mockRole = "owner";
     refreshedCookies = [ROTATED];
 
