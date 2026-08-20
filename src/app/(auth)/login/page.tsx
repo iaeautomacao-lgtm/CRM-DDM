@@ -17,6 +17,14 @@ import {
 import { MessageSquare, UsersRound } from "lucide-react";
 import { DdmLogo } from "@/components/ui/ddm-logo";
 
+function getSupabaseCookieNames() {
+  if (typeof document === "undefined") return [];
+
+  return document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim().split("=")[0])
+    .filter((name) => name.startsWith("sb-"));
+}
 // `useSearchParams` opts the component out of static prerendering
 // unless it sits under a Suspense boundary. We split the form into
 // a child component so the outer page can prerender the chrome
@@ -49,16 +57,48 @@ function LoginPageInner() {
     setError(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
+
+    console.log("[AUTH-DIAG] signIn error:", !!error);
+    console.log("[AUTH-DIAG] signIn error name:", error?.name ?? null);
+    console.log("[AUTH-DIAG] signIn error status:", error?.status ?? null);
+    console.log("[AUTH-DIAG] user present:", !!data?.user);
+    console.log("[AUTH-DIAG] session present:", !!data?.session);
+    console.log("[AUTH-DIAG] hostname:", window.location.hostname);
+    console.log("[AUTH-DIAG] sb cookies immediate:", getSupabaseCookieNames());
+
+    const {
+      data: { session: persistedSession },
+      error: persistedSessionError,
+    } = await supabase.auth.getSession();
+
+    console.log(
+      "[AUTH-DIAG] getSession session present:",
+      !!persistedSession,
+    );
+    console.log("[AUTH-DIAG] getSession error:", !!persistedSessionError);
+
+    setTimeout(() => {
+      console.log("[AUTH-DIAG] sb cookies +100ms:", getSupabaseCookieNames());
+    }, 100);
+
+    setTimeout(() => {
+      console.log("[AUTH-DIAG] sb cookies +1000ms:", getSupabaseCookieNames());
+    }, 1000);
 
     if (error) {
       setError(error.message);
       setLoading(false);
       return;
     }
+
+    console.log(
+      "[AUTH-DIAG] before navigation sb cookies:",
+      getSupabaseCookieNames(),
+    );
 
     if (inviteToken) {
       router.push(`/join/${encodeURIComponent(inviteToken)}`);
