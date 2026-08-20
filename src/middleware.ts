@@ -1,6 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { canAccessRoute, getDefaultRoute, type UserRole } from '@/lib/role-utils'
 
 function noStore<T extends NextResponse>(response: T): T {
   response.headers.set(
@@ -36,12 +35,10 @@ export async function middleware(request: NextRequest) {
   ) as any
 
   let user = null
-  let userId: string | null = null
   let authError = null
   try {
     const { data, error } = await supabase.auth.getUser()
     user = data?.user ?? null
-    userId = user?.id ?? null
     if (error) {
       authError = error.message
     }
@@ -123,35 +120,6 @@ export async function middleware(request: NextRequest) {
     }
     
     return noStore(withRefreshedCookies(NextResponse.redirect(url)))
-  }
-
-  // Role-based route gating (RBAC) — layered on top of the auth check
-  // above, not a replacement for it. Only runs for signed-in users on
-  // a protected path. The role lives on `profiles.account_role`
-  // (there is no separate account_members table); the `supabase`
-  // client above is already scoped to the `wacrm` schema.
-  if (userId && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
-    const { data: roleRow, error: roleError } = await supabase
-      .from('profiles')
-      .select('account_role')
-      .eq('user_id', userId)
-      .maybeSingle()
-
-    const role = (roleRow?.account_role ?? null) as UserRole | null
-
-    if (roleError || !role) {
-      const url = request.nextUrl.clone()
-      url.pathname = '/unauthorized'
-      url.search = ''
-      return noStore(withRefreshedCookies(NextResponse.redirect(url)))
-    }
-
-    if (!canAccessRoute(role, request.nextUrl.pathname)) {
-      const url = request.nextUrl.clone()
-      url.pathname = getDefaultRoute(role)
-      url.search = ''
-      return noStore(withRefreshedCookies(NextResponse.redirect(url)))
-    }
   }
 
   // API routes that need auth (not webhooks)

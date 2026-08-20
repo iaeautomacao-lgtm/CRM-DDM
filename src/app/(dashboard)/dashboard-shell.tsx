@@ -1,19 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
+import { canAccessRoute, getDefaultRoute, isRouteGated } from "@/lib/role-utils";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
 // client components can't export Next's metadata object.
 
 function DashboardShellInner({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, profileLoading, accountRole } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   // Sidebar drawer state — only used on mobile. On lg+ the sidebar is
   // always visible and this stays at `false` (ignored by the component).
@@ -22,11 +24,25 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!loading && !user) {
-      router.push("/login");
+      router.replace("/login");
     }
   }, [user, loading, router]);
 
-  if (loading) {
+  useEffect(() => {
+    if (loading || profileLoading || !user) return;
+
+    if (!accountRole) {
+      if (pathname !== "/unauthorized") router.replace("/unauthorized");
+      return;
+    }
+
+    if (isRouteGated(pathname) && !canAccessRoute(accountRole, pathname)) {
+      const fallback = getDefaultRoute(accountRole);
+      if (pathname !== fallback) router.replace(fallback);
+    }
+  }, [accountRole, loading, pathname, profileLoading, router, user]);
+
+  if (loading || (user && profileLoading)) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">

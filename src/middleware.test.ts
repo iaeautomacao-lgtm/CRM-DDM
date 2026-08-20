@@ -3,14 +3,12 @@ import { NextRequest } from "next/server";
 
 let mockUser: { id: string } | null = null;
 let mockUserError: { message: string; name?: string; status?: number } | null = null;
-let mockRole: string | null = "owner";
-let mockRoleError: { message: string } | null = null;
 let refreshedCookies: Array<{
   name: string;
   value: string;
   options: Record<string, unknown>;
 }> = [];
-let queriedUserId: string | null = null;
+const fromSpy = vi.fn();
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: (
@@ -29,26 +27,7 @@ vi.mock("@supabase/ssr", () => ({
         };
       },
     },
-    from: (table: string) => {
-      expect(table).toBe("profiles");
-      return {
-        select: (columns: string) => {
-          expect(columns).toBe("account_role");
-          return {
-            eq: (column: string, value: string) => {
-              expect(column).toBe("user_id");
-              queriedUserId = value;
-              return {
-                maybeSingle: async () => ({
-                  data: mockRole ? { account_role: mockRole } : null,
-                  error: mockRoleError,
-                }),
-              };
-            },
-          };
-        },
-      };
-    },
+    from: fromSpy,
   }),
 }));
 
@@ -59,10 +38,8 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
   mockUser = null;
   mockUserError = null;
-  mockRole = "owner";
-  mockRoleError = null;
   refreshedCookies = [];
-  queriedUserId = null;
+  fromSpy.mockReset();
 });
 
 afterEach(() => vi.clearAllMocks());
@@ -80,14 +57,13 @@ const authMissing = {
 };
 
 describe("middleware auth", () => {
-  it("uses user.id as the authenticated user id for RBAC", async () => {
+  it("allows an authenticated protected page without querying profiles", async () => {
     mockUser = { id: "user-1" };
-    mockRole = "owner";
 
     const res = await middleware(new NextRequest("https://app.test/dashboard"));
 
     expect(res.headers.get("location")).toBeNull();
-    expect(queriedUserId).toBe("user-1");
+    expect(fromSpy).not.toHaveBeenCalled();
   });
 
   it("redirects protected routes to login when user is missing", async () => {
@@ -103,7 +79,7 @@ describe("middleware auth", () => {
     expect(res.headers.get("cache-control")).toBe(
       "private, no-store, no-cache, max-age=0, must-revalidate",
     );
-    expect(queriedUserId).toBeNull();
+    expect(fromSpy).not.toHaveBeenCalled();
   });
 
   it("keeps refreshed cookies on auth redirects", async () => {
@@ -129,32 +105,37 @@ describe("middleware auth", () => {
       "private, no-store, no-cache, max-age=0, must-revalidate",
     );
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
-    expect(queriedUserId).toBeNull();
+    expect(fromSpy).not.toHaveBeenCalled();
   });
 
-  it("redirects RBAC-denied users with no-store", async () => {
-    mockUser = { id: "user-1" };
-    mockRole = "viewer";
+  it("returns 401 for protected WhatsApp API routes when signed out", async () => {
+    mockUser = null;
 
-    const res = await middleware(new NextRequest("https://app.test/flows"));
+    const res = await middleware(new NextRequest("https://app.test/api/whatsapp/send"));
 
-    expect(queriedUserId).toBe("user-1");
-    expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toContain("/dashboard");
-    expect(res.headers.get("cache-control")).toBe(
-      "private, no-store, no-cache, max-age=0, must-revalidate",
-    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Unauthorized" });
+    expect(fromSpy).not.toHaveBeenCalled();
   });
 
-  it("returns the normal response for an authenticated and authorized route", async () => {
+  it("returns 401 for protected Disparador API routes when signed out", async () => {
+    mockUser = null;
+
+    const res = await middleware(new NextRequest("https://app.test/api/disparador/campaigns/1"));
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "Unauthorized" });
+    expect(fromSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows an authenticated protected route with refreshed cookies and no DB role lookup", async () => {
     mockUser = { id: "user-1" };
-    mockRole = "owner";
     refreshedCookies = [ROTATED];
 
     const res = await middleware(new NextRequest("https://app.test/flows"));
 
-    expect(queriedUserId).toBe("user-1");
     expect(res.headers.get("location")).toBeNull();
     expect(res.cookies.get(ROTATED.name)?.value).toBe(ROTATED.value);
+    expect(fromSpy).not.toHaveBeenCalled();
   });
 });
