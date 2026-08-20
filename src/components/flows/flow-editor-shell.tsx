@@ -25,7 +25,8 @@
  */
 
 import { useEffect, useState } from "react";
-import { GitFork, List } from "lucide-react";
+import { Eye, GitFork, List } from "lucide-react";
+import { format } from "date-fns";
 
 import { FlowBuilder } from "./flow-builder";
 import { FlowCanvas } from "./flow-canvas";
@@ -35,6 +36,7 @@ import { ValidationPanel, ValidationPanelBadge } from "./validation-panel";
 import { NODE_META, nodeColors, type NodeType } from "./shared";
 import { cn } from "@/lib/utils";
 import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
+import type { FlowDebugState } from "@/hooks/use-flow-debug";
 
 /**
  * Below this viewport width we force list view and hide the toggle.
@@ -57,9 +59,13 @@ const LEGEND_TYPES = Object.keys(NODE_META) as NodeType[];
 interface Props {
   initialFlow: FlowRow;
   initialNodes: FlowNodeRow[];
+  /** "Debug no editor" state from useFlowDebug() — optional so every
+   *  other FlowEditorShell consumer (there is currently only the one
+   *  in flows/[id]/page.tsx) keeps compiling unchanged. */
+  debug?: FlowDebugState;
 }
 
-export function FlowEditorShell({ initialFlow, initialNodes }: Props) {
+export function FlowEditorShell({ initialFlow, initialNodes, debug }: Props) {
   // Read the persisted choice in the useState initializer. Safe even
   // though this is a client component because the parent page only
   // mounts us AFTER a client-side fetch resolves — there's no SSR
@@ -80,7 +86,11 @@ export function FlowEditorShell({ initialFlow, initialNodes }: Props) {
   // intact so the user's preference comes back when they widen
   // again (e.g. rotating a tablet, resizing a window).
   const isMobile = useMatchMedia(MOBILE_BREAKPOINT);
-  const effectiveView: View = isMobile ? "list" : view;
+  const isDebugMode = debug?.isDebugMode ?? false;
+  // Debug mode only has a diagram to show a run's path on — List has
+  // no visual "which node lit up" concept, so it's not offered while
+  // a run_id is active (same override precedence as the mobile force).
+  const effectiveView: View = isDebugMode ? "canvas" : isMobile ? "list" : view;
 
   const choose = (next: View) => {
     setView(next);
@@ -116,13 +126,17 @@ export function FlowEditorShell({ initialFlow, initialNodes }: Props) {
   return (
     <FlowEditorProvider initialFlow={initialFlow} initialNodes={initialNodes}>
       <div className="flex h-full min-h-0 flex-col">
+        {isDebugMode && debug && <DebugBanner debug={debug} />}
+
         <EditorHeader />
 
         {/* ---- mode row: view toggle + node-type legend ----
             Omitted entirely on mobile (canvas is unavailable there and
             the legend is lg-only), so there's no empty band above the
-            stage on small screens. */}
-        {!isMobile && (
+            stage on small screens. Also omitted in debug mode — List
+            isn't offered there (see effectiveView above), so a
+            Canvas/List toggle with only one live option is just noise. */}
+        {!isMobile && !isDebugMode && (
           <div className="flex items-center gap-4 px-6 py-3.5">
             <div
               role="group"
@@ -149,7 +163,7 @@ export function FlowEditorShell({ initialFlow, initialNodes }: Props) {
         {/* ---- stage: the active view, owning its own overflow ---- */}
         <div className="relative mx-6 min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card-2">
           {effectiveView === "canvas" ? (
-            <FlowCanvas />
+            <FlowCanvas debug={debug} />
           ) : (
             <div className="absolute inset-0 overflow-y-auto">
               <FlowBuilder />
@@ -231,6 +245,43 @@ function NodeLegend() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * "Modo debug" banner — shown instead of the mode row while a run_id
+ * is active. Sits above `EditorHeader` (not instead of it) so
+ * save/activate/back navigation keep working normally; only the
+ * canvas itself goes readonly (see FlowCanvas's `debug` prop).
+ */
+function DebugBanner({ debug }: { debug: FlowDebugState }) {
+  const contact = debug.runMeta?.contact;
+  const contactLabel = contact?.name?.trim() || contact?.phone || "contato desconhecido";
+  const startedAt = debug.runMeta?.started_at;
+  return (
+    <div
+      className="flex items-center gap-2.5 border-b px-6 py-2.5 text-[13px]"
+      style={{
+        backgroundColor: "rgba(255, 87, 6, 0.12)",
+        borderBottomColor: "#FF5706",
+      }}
+    >
+      <Eye className="h-4 w-4 shrink-0" style={{ color: "#FF5706" }} />
+      <span className="min-w-0 truncate text-foreground">
+        {debug.loading
+          ? "Modo debug — carregando execução…"
+          : startedAt
+            ? `Modo debug — Execução de ${contactLabel} iniciada em ${format(new Date(startedAt), "PP p")}`
+            : "Modo debug — execução não encontrada"}
+      </span>
+      <button
+        type="button"
+        onClick={debug.exitDebugMode}
+        className="ml-auto shrink-0 rounded-md border border-border bg-card px-2.5 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-muted"
+      >
+        Sair do debug
+      </button>
     </div>
   );
 }

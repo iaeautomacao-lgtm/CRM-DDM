@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { FlowEditorShell } from "@/components/flows/flow-editor-shell";
+import { useFlowDebug } from "@/hooks/use-flow-debug";
 import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
 
 /**
@@ -28,6 +29,11 @@ export default function FlowEditorPage() {
   const [nodes, setNodes] = useState<FlowNodeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+
+  // "Debug no editor" — reads ?run_id= itself, no-ops entirely when
+  // absent. Called unconditionally (not after the not-found/loading
+  // guards below) so hook order stays stable across renders.
+  const debug = useFlowDebug(params.id);
 
   useEffect(() => {
     if (!params.id) return;
@@ -84,5 +90,7 @@ export default function FlowEditorPage() {
     );
   }
 
-  return <FlowEditorShell initialFlow={flow} initialNodes={nodes} />;
+  return (
+    <FlowEditorShell initialFlow={flow} initialNodes={nodes} debug={debug} />
+  );
 }

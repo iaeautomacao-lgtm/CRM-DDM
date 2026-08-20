@@ -95,6 +95,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useFlowEditor } from './flow-editor-state';
 import { NodeConfigForm } from './forms/node-config-form';
+import { NodeDebugEventsSheet } from './node-debug-sheet';
+import type { FlowDebugState, NodeDebugStatus } from '@/hooks/use-flow-debug';
 // DeletableEdge (custom edge w/ inline trash button) is temporarily
 // disabled — it crashes @xyflow/react in production with "Cannot read
 // properties of undefined (reading '1')" inside the library's own edge
@@ -111,6 +113,46 @@ interface NodeData extends Record<string, unknown> {
   /** Validator's "look here" pulse — flashes the card border for
    *  ~1.6s. Drives a CSS animation, doesn't change layout. */
   isFlashed: boolean;
+  /** null outside debug mode. See use-flow-debug.ts's classification. */
+  debugStatus: NodeDebugStatus | null;
+}
+
+/**
+ * Debug-mode node overlay — border + badge per classification. Colors
+ * are literal (not NODE_HUE) since these are status signals, not
+ * per-type identity, and need to read the same regardless of the
+ * node's own hue.
+ */
+function getDebugVisual(
+  status: NodeDebugStatus | null
+): { style: React.CSSProperties; badge: 'check' | 'cross' | null } | null {
+  switch (status) {
+    case 'success':
+      return { style: { borderColor: '#22c55e', borderWidth: 2 }, badge: 'check' };
+    case 'error':
+      return {
+        style: {
+          borderColor: '#ef4444',
+          borderWidth: 2,
+          backgroundColor: 'rgba(239,68,68,0.08)',
+        },
+        badge: 'cross',
+      };
+    case 'stalled':
+      return { style: { borderColor: '#eab308', borderWidth: 2 }, badge: null };
+    case 'unreached':
+      return {
+        style: {
+          opacity: 0.35,
+          borderColor: 'var(--border)',
+          borderStyle: 'dashed',
+          borderWidth: 2,
+        },
+        badge: null,
+      };
+    default:
+      return null;
+  }
 }
 
 const NODE_WIDTH = 240;
@@ -140,11 +182,12 @@ function slotColor(nodeType: NodeType, slotId: string, fallback: string) {
 }
 
 function FlowNodeCard({ data, selected }: NodeProps) {
-  const { node, isEntry, isFlashed } = data as NodeData;
+  const { node, isEntry, isFlashed, debugStatus } = data as NodeData;
   const meta = NODE_META[node.node_type];
   const c = nodeColors(node.node_type);
   const summary = summarizeNode(node);
   const slots = outgoingSlots(node);
+  const debugVisual = getDebugVisual(debugStatus);
   // Start nodes are entry-only; nothing ever targets them, so they
   // don't need an incoming Handle. Every other node type accepts
   // incoming edges (including terminal handoff / end — they're the
@@ -167,6 +210,9 @@ function FlowNodeCard({ data, selected }: NodeProps) {
           boxShadow: selected
             ? `0 0 0 1px ${c.solid}, 0 14px 36px -12px ${c.ring}`
             : undefined,
+          // Debug overlay wins over the normal selection border — it's
+          // the more useful signal while looking at a specific run.
+          ...(debugVisual ? debugVisual.style : {}),
         } as React.CSSProperties
       }
       className={cn(
@@ -180,6 +226,16 @@ function FlowNodeCard({ data, selected }: NodeProps) {
         isFlashed && '!border-amber-400 ring-2 ring-amber-400/60'
       )}
     >
+      {debugVisual?.badge && (
+        <span
+          className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
+          style={{
+            backgroundColor: debugVisual.badge === 'check' ? '#22c55e' : '#ef4444',
+          }}
+        >
+          {debugVisual.badge === 'check' ? '✓' : '✗'}
+        </span>
+      )}
       {hasTarget && (
         <Handle
           type="target"
@@ -272,15 +328,15 @@ const NODE_TYPES = { flow: FlowNodeCard };
  * (notably, the pan-to-flash effect). The split is required because
  * useReactFlow() must be called inside a ReactFlowProvider.
  */
-export function FlowCanvas() {
+export function FlowCanvas({ debug }: { debug?: FlowDebugState }) {
   return (
     <ReactFlowProvider>
-      <FlowCanvasInner />
+      <FlowCanvasInner debug={debug} />
     </ReactFlowProvider>
   );
 }
 
-function FlowCanvasInner() {
+function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   const {
     state,
     setState,
@@ -293,6 +349,7 @@ function FlowCanvasInner() {
   const reactFlow = useReactFlow();
   const builderNodes = state.nodes;
   const entryNodeId = state.entry_node_id;
+  const isDebugMode = debug?.isDebugMode ?? false;
 
   // Side-panel state — which node's form is open. Canvas-only UI; the
   // list view's analogue is the per-card expanded set in
@@ -351,12 +408,13 @@ function FlowCanvasInner() {
           node: n,
           isEntry: n.node_key === entryNodeId,
           isFlashed: n.node_key === flashKey,
+          debugStatus: debug ? debug.nodeStatus(n.node_key) : null,
         },
       };
     });
 
     return nodes;
-  }, [builderNodes, entryNodeId, flashKey, autoLayoutPositions]);
+  }, [builderNodes, entryNodeId, flashKey, autoLayoutPositions, debug]);
 
   const [rfNodes, setRfNodes] = useState<RfNode<NodeData>[]>(derivedRfNodes);
 
@@ -400,9 +458,10 @@ function FlowCanvasInner() {
   // the drag) keeps state updates cheap on long drags.
   const handleNodeDragStop = useCallback<OnNodeDrag<RfNode<NodeData>>>(
     (_event, node) => {
+      if (isDebugMode) return;
       updateNodePosition(node.id, node.position.x, node.position.y);
     },
-    [updateNodePosition]
+    [updateNodePosition, isDebugMode]
   );
 
   // Pan to the flashed node when the validator panel requests one.
@@ -435,6 +494,7 @@ function FlowCanvasInner() {
   // the next render — no need to maintain a separate edge list.
   const handleConnect = useCallback(
     (connection: Connection) => {
+      if (isDebugMode) return;
       if (
         !connection.source ||
         !connection.target ||
@@ -457,7 +517,7 @@ function FlowCanvasInner() {
       );
       if (patch) updateNodeConfig(connection.source, patch);
     },
-    [builderNodes, updateNodeConfig]
+    [builderNodes, updateNodeConfig, isDebugMode]
   );
 
   // Keyboard delete (Backspace / Delete) + drag-to-trash. React-Flow
@@ -468,12 +528,13 @@ function FlowCanvasInner() {
   // node currently being edited.
   const handleNodesDelete = useCallback(
     (deleted: RfNode<NodeData>[]) => {
+      if (isDebugMode) return;
       for (const n of deleted) {
         removeNode(n.id);
         if (selectedNodeKey === n.id) setSelectedNodeKey(null);
       }
     },
-    [removeNode, selectedNodeKey]
+    [removeNode, selectedNodeKey, isDebugMode]
   );
 
   // Edge delete: clear the source node's slot rather than removing
@@ -481,6 +542,7 @@ function FlowCanvasInner() {
   // "delete" one is to null out its underlying next_node_key.
   const handleEdgesDelete = useCallback(
     (deleted: RfEdge[]) => {
+      if (isDebugMode) return;
       for (const e of deleted) {
         if (!e.sourceHandle) continue;
         const sourceNode = builderNodes.find((n) => n.node_key === e.source);
@@ -489,7 +551,7 @@ function FlowCanvasInner() {
         if (patch) updateNodeConfig(e.source, patch);
       }
     },
-    [builderNodes, updateNodeConfig]
+    [builderNodes, updateNodeConfig, isDebugMode]
   );
 
   // Click-to-delete: replaces the inline trash button DeletableEdge used
@@ -530,7 +592,7 @@ function FlowCanvasInner() {
     return (
       <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 text-sm">
         <p>Nenhum nó ainda.</p>
-        <CanvasAddNodeButton />
+        {!isDebugMode && <CanvasAddNodeButton />}
       </div>
     );
   }
@@ -554,9 +616,15 @@ function FlowCanvasInner() {
           onEdgeClick={handleEdgeClick}
           // Default is "Backspace" only — accept both so Mac users
           // hitting Delete (Fn+Backspace) get the same behavior.
-          deleteKeyCode={['Backspace', 'Delete']}
-          nodesConnectable={true}
-          edgesFocusable={true}
+          deleteKeyCode={isDebugMode ? [] : ['Backspace', 'Delete']}
+          // Debug mode is readonly: no dragging nodes around, no
+          // wiring new connections. Clicking still works (it opens
+          // the per-node event panel instead of the edit sheet) and
+          // panning/zoom/minimap stay live — only graph EDITS are
+          // disabled.
+          nodesDraggable={!isDebugMode}
+          nodesConnectable={!isDebugMode}
+          edgesFocusable={!isDebugMode}
           elementsSelectable={true}
           // Lower default min/max zoom than the lib's defaults; the
           // tiles already truncate their summary at a reasonable
@@ -586,21 +654,33 @@ function FlowCanvasInner() {
             maskColor="color-mix(in oklch, var(--background) 70%, transparent)"
             className="!border-border !bg-card !rounded-xl !border !shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)]"
           />
-          <Panel position="top-left" className="!top-4 !left-4">
-            <CanvasAddNodeButton />
-          </Panel>
+          {!isDebugMode && (
+            <Panel position="top-left" className="!top-4 !left-4">
+              <CanvasAddNodeButton />
+            </Panel>
+          )}
         </ReactFlow>
       </div>
 
-      <NodeEditSheet
-        node={selectedNode}
-        isEntry={selectedNode?.node_key === entryNodeId}
-        allNodes={builderNodes}
-        onClose={() => setSelectedNodeKey(null)}
-        onUpdateConfig={onSelectedUpdateConfig}
-        onDelete={handleDeleteSelected}
-        onSetEntry={handleSetEntry}
-      />
+      {isDebugMode ? (
+        <NodeDebugEventsSheet
+          nodeKey={selectedNodeKey}
+          nodeType={selectedNode?.node_type ?? null}
+          events={selectedNodeKey ? (debug?.eventsForNode(selectedNodeKey) ?? []) : []}
+          onClose={() => setSelectedNodeKey(null)}
+          onEditNode={() => debug?.exitDebugMode()}
+        />
+      ) : (
+        <NodeEditSheet
+          node={selectedNode}
+          isEntry={selectedNode?.node_key === entryNodeId}
+          allNodes={builderNodes}
+          onClose={() => setSelectedNodeKey(null)}
+          onUpdateConfig={onSelectedUpdateConfig}
+          onDelete={handleDeleteSelected}
+          onSetEntry={handleSetEntry}
+        />
+      )}
     </>
   );
 }

@@ -16,8 +16,6 @@ import {
   ChevronRight,
   Timer,
   MinusCircle,
-  Copy,
-  Check,
   CheckCircle,
   CheckCircle2,
   XCircle,
@@ -25,6 +23,7 @@ import {
   MessageSquare,
   Play,
   Circle,
+  GitBranch,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
@@ -38,6 +37,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { CollapsibleJson, CopyJsonButton } from "@/components/flows/json-highlight";
 import { cn } from "@/lib/utils";
 
 /**
@@ -336,6 +336,7 @@ export default function FlowRunsPage() {
               selectedEvent={selectedEvent}
               onSelectEvent={setSelectedEvent}
               flowNodes={flowNodes}
+              onViewInDiagram={() => router.push(`/flows/${flow.id}?run_id=${run.id}`)}
             />
           ))}
         </div>
@@ -358,6 +359,7 @@ function RunCard({
   selectedEvent,
   onSelectEvent,
   flowNodes,
+  onViewInDiagram,
 }: {
   run: RunRow;
   events: EventRow[] | null;
@@ -367,6 +369,7 @@ function RunCard({
   selectedEvent: EventRow | null;
   onSelectEvent: (ev: EventRow) => void;
   flowNodes: FlowNodeDef[];
+  onViewInDiagram: () => void;
 }) {
   const meta = STATUS_META[run.status];
   const StatusIcon = meta.icon;
@@ -384,11 +387,12 @@ function RunCard({
   const stats = events ? computeRunEventStats(events, flowNodes) : null;
   return (
     <div className="rounded-lg border border-border bg-card">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left"
-      >
+      <div className="flex w-full items-center gap-2 px-4 py-3">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        >
         {expanded ? (
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         ) : (
@@ -447,6 +451,18 @@ function RunCard({
           )}
         </div>
       </button>
+      {expanded && events && (
+        <button
+          type="button"
+          onClick={onViewInDiagram}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-opacity hover:opacity-80"
+          style={{ borderColor: "#FF5706", color: "#FF5706" }}
+        >
+          <GitBranch className="h-3.5 w-3.5" />
+          Ver no diagrama
+        </button>
+      )}
+      </div>
       {expanded && (
         <div className="border-t border-border px-4 py-3">
           {Object.keys(run.vars).length > 0 && (
@@ -693,97 +709,6 @@ const STATUS_BADGE: Record<
   },
 };
 
-// ============================================================
-// JSON syntax highlighting — no library, just a small tokenizer over
-// JSON.stringify's output. Keys render in the DDM brand orange
-// (#FF5706) per spec; strings/numbers/booleans/null get distinct,
-// readable colors against the dark background.
-// ============================================================
-
-const JSON_TOKEN_RE =
-  /"(?:\\.|[^"\\])*"(?:\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
-
-function highlightJson(json: string): React.ReactNode[] {
-  const nodes: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let key = 0;
-  JSON_TOKEN_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = JSON_TOKEN_RE.exec(json))) {
-    if (match.index > lastIndex) {
-      nodes.push(json.slice(lastIndex, match.index));
-    }
-    const tok = match[0];
-    if (tok.endsWith(":")) {
-      nodes.push(
-        <span key={key++} style={{ color: "#FF5706" }}>
-          {tok}
-        </span>,
-      );
-    } else if (tok.startsWith('"')) {
-      nodes.push(
-        <span key={key++} className="text-emerald-300">
-          {tok}
-        </span>,
-      );
-    } else if (tok === "true" || tok === "false") {
-      nodes.push(
-        <span key={key++} className="text-sky-300">
-          {tok}
-        </span>,
-      );
-    } else if (tok === "null") {
-      nodes.push(
-        <span key={key++} className="text-neutral-500">
-          {tok}
-        </span>,
-      );
-    } else {
-      nodes.push(
-        <span key={key++} className="text-purple-300">
-          {tok}
-        </span>,
-      );
-    }
-    lastIndex = JSON_TOKEN_RE.lastIndex;
-  }
-  if (lastIndex < json.length) nodes.push(json.slice(lastIndex));
-  return nodes;
-}
-
-const COLLAPSE_THRESHOLD = 500;
-
-/**
- * Dark, mono, syntax-highlighted JSON block. Collapses to the first
- * COLLAPSE_THRESHOLD chars with a "Ver mais" toggle when the
- * formatted JSON is longer than that — full detail is one click away,
- * not hidden, just not dumped on-screen by default for a fat payload
- * (e.g. an http_fetch response_body or a long ai_agent last_reply).
- */
-function CollapsibleJson({ value }: { value: unknown }) {
-  const [expanded, setExpanded] = useState(false);
-  const json = JSON.stringify(value, null, 2) ?? "null";
-  const isLong = json.length > COLLAPSE_THRESHOLD;
-  const shown = isLong && !expanded ? json.slice(0, COLLAPSE_THRESHOLD) : json;
-  return (
-    <div>
-      <pre className="overflow-x-auto rounded-md bg-[#0b0b0d] p-3 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-neutral-300">
-        {highlightJson(shown)}
-        {isLong && !expanded && "…"}
-      </pre>
-      {isLong && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-1 text-[10.5px] text-primary hover:opacity-80"
-        >
-          {expanded ? "Ver menos" : "Ver mais"}
-        </button>
-      )}
-    </div>
-  );
-}
-
 /** Section wrapper — label + a CollapsibleJson body, used for Input/Output. */
 function PayloadSection({
   label,
@@ -799,35 +724,6 @@ function PayloadSection({
       </p>
       <CollapsibleJson value={value} />
     </div>
-  );
-}
-
-function CopyJsonButton({ value }: { value: unknown }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(JSON.stringify(value, null, 2));
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        } catch {
-          toast.error("Não foi possível copiar.");
-        }
-      }}
-      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
-    >
-      {copied ? (
-        <>
-          <Check className="h-3 w-3" /> Copiado
-        </>
-      ) : (
-        <>
-          <Copy className="h-3 w-3" /> Copiar
-        </>
-      )}
-    </button>
   );
 }
 
