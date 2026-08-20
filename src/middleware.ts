@@ -5,6 +5,18 @@ import { canAccessRoute, getDefaultRoute, type UserRole } from '@/lib/role-utils
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
+  const requestCookieNames = request.cookies.getAll().map((cookie) => cookie.name)
+  const supabaseCookieNames = requestCookieNames.filter((name) =>
+    name.startsWith('sb-')
+  )
+
+  console.log('[AUTH-MW-DIAG] pathname:', request.nextUrl.pathname)
+  console.log('[AUTH-MW-DIAG] hostname:', request.nextUrl.hostname)
+  console.log('[AUTH-MW-DIAG] cookie count:', requestCookieNames.length)
+  console.log('[AUTH-MW-DIAG] sb cookie names:', supabaseCookieNames)
+  console.log('[AUTH-MW-DIAG] sb cookie count:', supabaseCookieNames.length)
+  console.log('[AUTH-MW-DIAG] sb cookie chunks:', [...supabaseCookieNames].sort())
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -17,6 +29,10 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
+          console.log(
+            '[AUTH-MW-DIAG] Supabase setAll names:',
+            cookiesToSet.map(({ name }) => name)
+          )
           cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -31,11 +47,19 @@ export async function middleware(request: NextRequest) {
   let authError = null;
   try {
     const { data, error } = await supabase.auth.getUser();
+    console.log('[AUTH-MW-DIAG] getUser user present:', !!data?.user)
+    console.log('[AUTH-MW-DIAG] getUser error present:', !!error)
+    console.log('[AUTH-MW-DIAG] getUser error name:', error?.name ?? null)
+    console.log('[AUTH-MW-DIAG] getUser error status:', error?.status ?? null)
     user = data?.user || null;
     if (error) {
       authError = error.message;
     }
   } catch (err: any) {
+    console.log('[AUTH-MW-DIAG] getUser user present:', false)
+    console.log('[AUTH-MW-DIAG] getUser error present:', true)
+    console.log('[AUTH-MW-DIAG] getUser error name:', err?.name ?? null)
+    console.log('[AUTH-MW-DIAG] getUser error status:', err?.status ?? null)
     authError = err.message || "Unknown auth error";
   }
 
@@ -49,7 +73,15 @@ export async function middleware(request: NextRequest) {
   // the session wedges — the user gets a broken reload after idling and
   // can only recover by manually clearing cookies (issue #288). Copy the
   // refreshed cookies onto whatever response we hand back to fix that.
+  const logResponseCookieNames = () => {
+    console.log(
+      '[AUTH-MW-DIAG] response cookie names:',
+      supabaseResponse.cookies.getAll().map((cookie) => cookie.name)
+    )
+  }
+
   const withRefreshedCookies = <T extends NextResponse>(response: T): T => {
+    logResponseCookieNames()
     supabaseResponse.cookies.getAll().forEach((cookie) => {
       response.cookies.set(cookie)
     })
@@ -166,6 +198,7 @@ export async function middleware(request: NextRequest) {
     )
   }
 
+  logResponseCookieNames()
   return supabaseResponse
 }
 
