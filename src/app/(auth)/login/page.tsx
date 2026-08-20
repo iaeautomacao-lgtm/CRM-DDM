@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { UsersRound } from "lucide-react";
 import { DdmLogo } from "@/components/ui/ddm-logo";
+import { logAuthFx, summarizeSession, summarizeSupabaseCookies } from "@/lib/auth/auth-forensics";
 
 // `useSearchParams` opts the component out of static prerendering
 // unless it sits under a Suspense boundary. We split the form into
@@ -71,8 +72,17 @@ function LoginPageInner() {
 
     console.log("[AUTH-CHECK] login session:", !!data?.session);
     console.log("[AUTH-CHECK] sb cookies immediate:", getSupabaseCookieNames());
+    logAuthFx("LOGIN", {
+      phase: "after-password-login",
+      ...summarizeSession(data?.session),
+      cookies: summarizeSupabaseCookies(),
+    });
     setTimeout(() => {
       console.log("[AUTH-CHECK] sb cookies +1000ms:", getSupabaseCookieNames());
+      logAuthFx("LOGIN", {
+        phase: "+1000ms",
+        cookies: summarizeSupabaseCookies(),
+      });
     }, 1000);
 
     if (inviteToken) {

@@ -7,11 +7,13 @@ import {
   useState,
   useCallback,
   useMemo,
+  useRef,
   type ReactNode,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
+import { logAuthFx, summarizeSession, summarizeSupabaseCookies } from "@/lib/auth/auth-forensics";
 import {
   canEditSettings as canEditSettingsFor,
   canManageMembers as canManageMembersFor,
@@ -127,12 +129,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // settles later. Callers that gate on `profile.*` need to know which
   // window they're in — see the type doc above.
   const [profileLoading, setProfileLoading] = useState(true);
+  const instanceIdRef = useRef(`auth-provider-${Math.random().toString(16).slice(2)}`);
+  const fetchProfileCallsRef = useRef(0);
 
   // Shared across init, auth-state-change listener, and the exposed
   // refreshProfile() callback. Reads the current session's user id and
   // pulls the matching profile row along with its account summary.
   const fetchProfile = useCallback(async (userId: string) => {
     const supabase = createClient();
+    fetchProfileCallsRef.current += 1;
+    logAuthFx("AUTH-PROVIDER", {
+      event: "fetchProfile:start",
+      instanceId: instanceIdRef.current,
+      call: fetchProfileCallsRef.current,
+      hasUserId: !!userId,
+      cookies: summarizeSupabaseCookies(),
+    });
     setProfileLoading(true);
     try {
       const { data, error } = await supabase
@@ -217,6 +229,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error("[AuthProvider] fetchProfile threw:", err);
     } finally {
+      logAuthFx("AUTH-PROVIDER", {
+        event: "fetchProfile:end",
+        instanceId: instanceIdRef.current,
+        call: fetchProfileCallsRef.current,
+        cookies: summarizeSupabaseCookies(),
+      });
       setProfileLoading(false);
     }
   }, []);
@@ -224,6 +242,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const supabase = createClient();
     let mounted = true;
+    const providerInstanceId = instanceIdRef.current;
+    logAuthFx("AUTH-PROVIDER", {
+      event: "mount",
+      instanceId: providerInstanceId,
+      cookies: summarizeSupabaseCookies(),
+    });
 
     const safetyTimer = setTimeout(() => {
       if (mounted) {
@@ -245,6 +269,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const currentUser = session?.user ?? null;
         console.log("[AuthProvider] init: user resolved:", currentUser ? "User exists!" : "No user");
+        logAuthFx("AUTH-PROVIDER", {
+          event: "init:getSession",
+          instanceId: instanceIdRef.current,
+          error: error?.message ?? null,
+          ...summarizeSession(session),
+          cookies: summarizeSupabaseCookies(),
+        });
         if (!mounted) return;
         setUser(currentUser);
 
@@ -275,6 +306,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("[AuthProvider] onAuthStateChange event:", event, "session exists:", !!session);
+      logAuthFx("AUTH-PROVIDER", {
+        event: "state",
+        authEvent: event,
+        instanceId: instanceIdRef.current,
+        ...summarizeSession(session),
+        cookies: summarizeSupabaseCookies(),
+      });
       if (!mounted) return;
       const currentUser = session?.user ?? null;
       setUser(currentUser);
@@ -292,6 +330,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mounted = false;
+      logAuthFx("AUTH-PROVIDER", {
+        event: "unmount",
+        instanceId: providerInstanceId,
+        cookies: summarizeSupabaseCookies(),
+      });
       clearTimeout(safetyTimer);
       subscription.unsubscribe();
     };

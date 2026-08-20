@@ -10,6 +10,12 @@ function noStore<T extends NextResponse>(response: T): T {
 }
 
 export async function middleware(request: NextRequest) {
+  const authFxId = crypto.randomUUID()
+  const setAllActions: string[] = []
+  let setAllCount = 0
+  let getUserState = 'pending'
+  let authErrorName = ''
+  let authErrorCode = ''
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -24,7 +30,13 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          setAllCount += cookiesToSet.length
+          cookiesToSet.forEach(({ name, value, options }) => {
+            const expires = options?.expires instanceof Date ? options.expires.getTime() : null
+            const action = !value || options?.maxAge === 0 || (expires !== null && expires <= Date.now()) ? 'delete' : 'set'
+            setAllActions.push(name + ':' + action)
+            request.cookies.set(name, value)
+          })
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
@@ -39,15 +51,45 @@ export async function middleware(request: NextRequest) {
   try {
     const { data, error } = await supabase.auth.getUser()
     user = data?.user ?? null
+    getUserState = user ? 'user' : 'none'
     if (error) {
       authError = error.message
+      authErrorName = error.name ?? ''
+      authErrorCode = String((error as any).code ?? (error as any).status ?? '')
     }
   } catch (err: any) {
+    getUserState = 'error'
     authError = err.message || 'Unknown auth error'
+    authErrorName = err.name ?? ''
+    authErrorCode = String(err.code ?? err.status ?? '')
   }
 
   const isAuthenticated = Boolean(user)
 
+  const finalizeAuthFx = <T extends NextResponse>(response: T): T => {
+    const requestCookieNames = request.cookies
+      .getAll()
+      .map((cookie) => cookie.name)
+      .filter((name) => name.startsWith('sb-'))
+    const isRsc = request.headers.get('rsc') === '1'
+    const isPrefetch =
+      request.headers.get('next-router-prefetch') === '1' ||
+      request.headers.get('purpose') === 'prefetch' ||
+      request.headers.get('sec-purpose') === 'prefetch'
+
+    response.headers.set('X-Auth-Fx-Id', authFxId)
+    response.headers.set('X-Auth-Fx-Path', request.nextUrl.pathname)
+    response.headers.set('X-Auth-Fx-Rsc', isRsc ? '1' : '0')
+    response.headers.set('X-Auth-Fx-Prefetch', isPrefetch ? '1' : '0')
+    response.headers.set('X-Auth-Fx-Sb-Count', String(requestCookieNames.length))
+    response.headers.set('X-Auth-Fx-GetUser', getUserState)
+    response.headers.set('X-Auth-Fx-Error-Name', authErrorName)
+    response.headers.set('X-Auth-Fx-Error-Code', authErrorCode)
+    response.headers.set('X-Auth-Fx-SetAll-Count', String(setAllCount))
+    response.headers.set('X-Auth-Fx-SetAll-Actions', setAllActions.slice(0, 20).join(','))
+    response.headers.set('X-Auth-Fx-Next-Url', request.headers.get('next-url') ?? '')
+    return response
+  }
   // getUser() may still cause the SSR client to write refreshed or cleared
   // cookies through setAll(). Any redirect / JSON response below is a fresh
   // object, so copy those Set-Cookie headers onto the response we return.
@@ -82,7 +124,7 @@ export async function middleware(request: NextRequest) {
       url.pathname = '/dashboard'
       url.search = ''
     }
-    return noStore(withRefreshedCookies(NextResponse.redirect(url)))
+    return finalizeAuthFx(noStore(withRefreshedCookies(NextResponse.redirect(url))))
   }
 
   // Protected pages - redirect to login if not authenticated.
@@ -119,27 +161,27 @@ export async function middleware(request: NextRequest) {
       url.searchParams.set('missing_env_key', 'true')
     }
     
-    return noStore(withRefreshedCookies(NextResponse.redirect(url)))
+    return finalizeAuthFx(noStore(withRefreshedCookies(NextResponse.redirect(url))))
   }
 
   // API routes that need auth (not webhooks)
   if (!isAuthenticated && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
       !request.nextUrl.pathname.includes('/webhook')) {
-    return withRefreshedCookies(
+    return finalizeAuthFx(withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    )
+    ))
   }
 
   // Disparador routes need auth too, except /cron which is triggered by an
   // external scheduler authenticating via CRON_SECRET, not a user session.
   if (!isAuthenticated && request.nextUrl.pathname.startsWith('/api/disparador/') &&
       !request.nextUrl.pathname.includes('/cron')) {
-    return withRefreshedCookies(
+    return finalizeAuthFx(withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    )
+    ))
   }
 
-  return supabaseResponse
+  return finalizeAuthFx(supabaseResponse)
 }
 
 export const config = {
