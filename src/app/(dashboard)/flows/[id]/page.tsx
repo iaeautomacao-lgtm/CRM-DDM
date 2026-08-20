@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -29,11 +29,6 @@ export default function FlowEditorPage() {
   const [nodes, setNodes] = useState<FlowNodeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-
-  // "Debug no editor" — reads ?run_id= itself, no-ops entirely when
-  // absent. Called unconditionally (not after the not-found/loading
-  // guards below) so hook order stays stable across renders.
-  const debug = useFlowDebug(params.id);
 
   useEffect(() => {
     if (!params.id) return;
@@ -90,6 +85,32 @@ export default function FlowEditorPage() {
     );
   }
 
+  return (
+    <Suspense fallback={null}>
+      <FlowEditorWithDebug flowId={params.id} flow={flow} nodes={nodes} />
+    </Suspense>
+  );
+}
+
+/**
+ * Split out from FlowEditorPage so `useFlowDebug` — which calls
+ * `useSearchParams()` to read `?run_id=` — has its own Suspense
+ * boundary. Next.js requires that for any Client Component reading
+ * search params: without it, `next build` fails with "useSearchParams()
+ * should be wrapped in a suspense boundary". `fallback={null}` is fine
+ * here — this only ever suspends for a frame during the initial
+ * client-side render, there's no meaningful loading state to show.
+ */
+function FlowEditorWithDebug({
+  flowId,
+  flow,
+  nodes,
+}: {
+  flowId: string;
+  flow: FlowRow;
+  nodes: FlowNodeRow[];
+}) {
+  const debug = useFlowDebug(flowId);
   return (
     <FlowEditorShell initialFlow={flow} initialNodes={nodes} debug={debug} />
   );
