@@ -114,8 +114,8 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 /**
  * AuthProvider — wrap this around the dashboard layout.
- * Makes ONE getUser() call for the whole tree instead of one per
- * component, avoiding internal lock contention in the Supabase client.
+ * Reads the current browser session once for the whole tree instead of
+ * making every component probe auth independently.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -227,7 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const safetyTimer = setTimeout(() => {
       if (mounted) {
-        console.warn("[AuthProvider] getUser() timed out after 3s");
+        console.warn("[AuthProvider] getSession() timed out after 3s");
         setLoading(false);
         setProfileLoading(false);
       }
@@ -235,14 +235,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const init = async () => {
       try {
-        console.log("[AuthProvider] init: calling getUser()");
+        console.log("[AuthProvider] init: calling getSession()");
         const {
-          data: { user: currentUser },
+          data: { session },
           error,
-        } = await supabase.auth.getUser();
+        } = await supabase.auth.getSession();
 
-        if (error) console.error("[AuthProvider] getUser error:", error.message);
+        if (error) console.error("[AuthProvider] getSession error:", error.message);
 
+        const currentUser = session?.user ?? null;
         console.log("[AuthProvider] init: user resolved:", currentUser ? "User exists!" : "No user");
         if (!mounted) return;
         setUser(currentUser);

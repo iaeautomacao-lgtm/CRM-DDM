@@ -2,20 +2,16 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { canAccessRoute, getDefaultRoute, type UserRole } from '@/lib/role-utils'
 
+function noStore<T extends NextResponse>(response: T): T {
+  response.headers.set(
+    'Cache-Control',
+    'private, no-store, no-cache, max-age=0, must-revalidate'
+  )
+  return response
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
-
-  const requestCookieNames = request.cookies.getAll().map((cookie) => cookie.name)
-  const supabaseCookieNames = requestCookieNames.filter((name) =>
-    name.startsWith('sb-')
-  )
-
-  console.log('[AUTH-MW-DIAG] pathname:', request.nextUrl.pathname)
-  console.log('[AUTH-MW-DIAG] hostname:', request.nextUrl.hostname)
-  console.log('[AUTH-MW-DIAG] cookie count:', requestCookieNames.length)
-  console.log('[AUTH-MW-DIAG] sb cookie names:', supabaseCookieNames)
-  console.log('[AUTH-MW-DIAG] sb cookie count:', supabaseCookieNames.length)
-  console.log('[AUTH-MW-DIAG] sb cookie chunks:', [...supabaseCookieNames].sort())
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,11 +25,7 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll()
         },
         setAll(cookiesToSet) {
-          console.log(
-            '[AUTH-MW-DIAG] Supabase setAll names:',
-            cookiesToSet.map(({ name }) => name)
-          )
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
@@ -43,45 +35,24 @@ export async function middleware(request: NextRequest) {
     }
   ) as any
 
-  let user = null;
-  let authError = null;
+  let userId: string | null = null
+  let authError = null
   try {
-    const { data, error } = await supabase.auth.getUser();
-    console.log('[AUTH-MW-DIAG] getUser user present:', !!data?.user)
-    console.log('[AUTH-MW-DIAG] getUser error present:', !!error)
-    console.log('[AUTH-MW-DIAG] getUser error name:', error?.name ?? null)
-    console.log('[AUTH-MW-DIAG] getUser error status:', error?.status ?? null)
-    user = data?.user || null;
+    const { data, error } = await supabase.auth.getClaims()
+    userId = data?.claims?.sub ?? null
     if (error) {
-      authError = error.message;
+      authError = error.message
     }
   } catch (err: any) {
-    console.log('[AUTH-MW-DIAG] getUser user present:', false)
-    console.log('[AUTH-MW-DIAG] getUser error present:', true)
-    console.log('[AUTH-MW-DIAG] getUser error name:', err?.name ?? null)
-    console.log('[AUTH-MW-DIAG] getUser error status:', err?.status ?? null)
-    authError = err.message || "Unknown auth error";
+    authError = err.message || 'Unknown auth error'
   }
 
-  // getUser() transparently refreshes an expired access token, which
-  // ROTATES the refresh token and writes the new cookies onto
-  // `supabaseResponse` via setAll() above. Any response we return in
-  // place of `supabaseResponse` (every redirect / JSON branch below)
-  // is a fresh object that does NOT carry those Set-Cookie headers, so
-  // the rotated token never reaches the browser. The next request then
-  // replays the old, now-consumed refresh token, the refresh fails, and
-  // the session wedges — the user gets a broken reload after idling and
-  // can only recover by manually clearing cookies (issue #288). Copy the
-  // refreshed cookies onto whatever response we hand back to fix that.
-  const logResponseCookieNames = () => {
-    console.log(
-      '[AUTH-MW-DIAG] response cookie names:',
-      supabaseResponse.cookies.getAll().map((cookie) => cookie.name)
-    )
-  }
+  const isAuthenticated = Boolean(userId)
 
+  // getClaims() may still cause the SSR client to write refreshed or cleared
+  // cookies through setAll(). Any redirect / JSON response below is a fresh
+  // object, so copy those Set-Cookie headers onto the response we return.
   const withRefreshedCookies = <T extends NextResponse>(response: T): T => {
-    logResponseCookieNames()
     supabaseResponse.cookies.getAll().forEach((cookie) => {
       response.cookies.set(cookie)
     })
@@ -94,7 +65,7 @@ export async function middleware(request: NextRequest) {
   // they can accept the invitation in one click. Without this,
   // a forwarded invite link to someone who's already signed in
   // would silently drop them on /dashboard.
-  if (user && (
+  if (isAuthenticated && (
     request.nextUrl.pathname === '/login' ||
     request.nextUrl.pathname === '/signup' ||
     request.nextUrl.pathname === '/forgot-password'
@@ -112,7 +83,7 @@ export async function middleware(request: NextRequest) {
       url.pathname = '/dashboard'
       url.search = ''
     }
-    return withRefreshedCookies(NextResponse.redirect(url))
+    return noStore(withRefreshedCookies(NextResponse.redirect(url)))
   }
 
   // Protected pages - redirect to login if not authenticated.
@@ -133,7 +104,7 @@ export async function middleware(request: NextRequest) {
     '/automacoes',
     '/settings',
   ]
-  if (!user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
+  if (!isAuthenticated && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     
@@ -149,7 +120,7 @@ export async function middleware(request: NextRequest) {
       url.searchParams.set('missing_env_key', 'true')
     }
     
-    return withRefreshedCookies(NextResponse.redirect(url))
+    return noStore(withRefreshedCookies(NextResponse.redirect(url)))
   }
 
   // Role-based route gating (RBAC) — layered on top of the auth check
@@ -157,11 +128,11 @@ export async function middleware(request: NextRequest) {
   // a protected path. The role lives on `profiles.account_role`
   // (there is no separate account_members table); the `supabase`
   // client above is already scoped to the `wacrm` schema.
-  if (user && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
+  if (userId && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const { data: roleRow, error: roleError } = await supabase
       .from('profiles')
       .select('account_role')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .maybeSingle()
 
     const role = (roleRow?.account_role ?? null) as UserRole | null
@@ -170,19 +141,19 @@ export async function middleware(request: NextRequest) {
       const url = request.nextUrl.clone()
       url.pathname = '/unauthorized'
       url.search = ''
-      return withRefreshedCookies(NextResponse.redirect(url))
+      return noStore(withRefreshedCookies(NextResponse.redirect(url)))
     }
 
     if (!canAccessRoute(role, request.nextUrl.pathname)) {
       const url = request.nextUrl.clone()
       url.pathname = getDefaultRoute(role)
       url.search = ''
-      return withRefreshedCookies(NextResponse.redirect(url))
+      return noStore(withRefreshedCookies(NextResponse.redirect(url)))
     }
   }
 
   // API routes that need auth (not webhooks)
-  if (!user && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
+  if (!isAuthenticated && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
       !request.nextUrl.pathname.includes('/webhook')) {
     return withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -191,14 +162,13 @@ export async function middleware(request: NextRequest) {
 
   // Disparador routes need auth too, except /cron which is triggered by an
   // external scheduler authenticating via CRON_SECRET, not a user session.
-  if (!user && request.nextUrl.pathname.startsWith('/api/disparador/') &&
+  if (!isAuthenticated && request.nextUrl.pathname.startsWith('/api/disparador/') &&
       !request.nextUrl.pathname.includes('/cron')) {
     return withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     )
   }
 
-  logResponseCookieNames()
   return supabaseResponse
 }
 
