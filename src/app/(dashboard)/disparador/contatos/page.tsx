@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useState } from "react";
@@ -47,7 +48,7 @@ export default function ImportarContatosPage() {
     formData.append("file", file);
 
     try {
-      const res = await fetch("/api/disparador/contacts/import", {
+      const res = await apiFetch("/api/disparador/contacts/import", {
         method: "POST",
         body: formData,
       });

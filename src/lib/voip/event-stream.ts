@@ -42,7 +42,7 @@ class EventStream {
 
     let baseUrl = "";
     try {
-      const res = await fetch("/api/whatsapp/voip-url");
+      const res = await apiFetch("/api/whatsapp/voip-url");
       const data = await res.json();
       baseUrl = data.url || "";
     } catch (err) {
@@ -75,3 +75,4 @@ class EventStream {
 }
 
 export const voipEventStream = new EventStream();
+import { apiFetch } from "@/lib/api-fetch";

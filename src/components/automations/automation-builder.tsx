@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client"
 
 import {
@@ -229,7 +230,7 @@ function ResourcesProvider({ children }: { children: ReactNode }) {
     // deployments → pickers fall back to a raw agent-id input.
     void (async () => {
       try {
-        const res = await fetch("/api/account/members", { cache: "no-store" })
+        const res = await apiFetch("/api/account/members", { cache: "no-store" })
         if (!res.ok) return
         const json = (await res.json()) as { members?: AccountMember[] }
         if (!cancelled) setMembers(json.members ?? [])
@@ -517,12 +518,12 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
       }
 
       const res = isEditing
-        ? await fetch(`/api/automations/${initial.id}`, {
+        ? await apiFetch(`/api/automations/${initial.id}`, {
             method: "PATCH",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(payload),
           })
-        : await fetch(`/api/automations`, {
+        : await apiFetch(`/api/automations`, {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify(payload),

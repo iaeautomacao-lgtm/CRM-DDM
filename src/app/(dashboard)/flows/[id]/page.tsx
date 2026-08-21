@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
@@ -35,7 +36,7 @@ export default function FlowEditorPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/flows/${params.id}`);
+        const res = await apiFetch(`/api/flows/${params.id}`);
         if (res.status === 404) {
           if (!cancelled) setNotFound(true);
           return;

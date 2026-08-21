@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 // ============================================================
@@ -517,7 +518,7 @@ export default function AtendimentosPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/account/members", { cache: "no-store" })
+    apiFetch("/api/account/members", { cache: "no-store" })
       .then((res) => res.json())
       .then((data: { members?: { user_id: string; team_id: string | null }[] }) => {
         if (!cancelled) setMembers(data.members ?? []);

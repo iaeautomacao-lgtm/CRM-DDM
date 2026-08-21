@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 'use client';
 
 // ============================================================
@@ -174,9 +175,9 @@ export function MembersTab() {
   const loadEverything = useCallback(async () => {
     try {
       const [mres, ires] = await Promise.all([
-        fetch('/api/account/members', { cache: 'no-store' }),
+        apiFetch('/api/account/members', { cache: 'no-store' }),
         canManageMembers
-          ? fetch('/api/account/invitations', { cache: 'no-store' })
+          ? apiFetch('/api/account/invitations', { cache: 'no-store' })
           : Promise.resolve(null),
       ]);
 
@@ -224,7 +225,7 @@ export function MembersTab() {
       ),
     );
     try {
-      const res = await fetch(`/api/account/members/${member.user_id}`, {
+      const res = await apiFetch(`/api/account/members/${member.user_id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: nextRole }),
@@ -265,8 +266,7 @@ export function MembersTab() {
     if (!removingMember) return;
     setPendingMemberAction(removingMember.user_id);
     try {
-      const res = await fetch(
-        `/api/account/members/${removingMember.user_id}`,
+      const res = await apiFetch(`/api/account/members/${removingMember.user_id}`,
         { method: 'DELETE' },
       );
       if (!res.ok) {
@@ -306,8 +306,7 @@ export function MembersTab() {
 
     setResettingPassword(true);
     try {
-      const res = await fetch(
-        `/api/account/members/${resetPasswordMember.user_id}/reset-password`,
+      const res = await apiFetch(`/api/account/members/${resetPasswordMember.user_id}/reset-password`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -331,7 +330,7 @@ export function MembersTab() {
 
   async function handleRevoke(invite: Invitation) {
     try {
-      const res = await fetch(`/api/account/invitations/${invite.id}`, {
+      const res = await apiFetch(`/api/account/invitations/${invite.id}`, {
         method: 'DELETE',
       });
       if (!res.ok) {

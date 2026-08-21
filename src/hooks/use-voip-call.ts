@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -22,7 +23,7 @@ export function useVoipCall(sessionName: string) {
 
   // Fetch VoIP Base URL Config
   useEffect(() => {
-    fetch("/api/whatsapp/voip-url")
+    apiFetch("/api/whatsapp/voip-url")
       .then((res) => res.json())
       .then((data) => {
         if (data && data.url) setVoipBaseUrl(data.url);

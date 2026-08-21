@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 // ============================================================
@@ -99,7 +100,7 @@ export function EditChannelDialog({
     const nextFlowId = flowId === NO_FLOW ? null : flowId;
     if (nextFlowId === (config.flow_id ?? null)) return;
     try {
-      const res = await fetch("/api/whatsapp/config", {
+      const res = await apiFetch("/api/whatsapp/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: config.id, flow_id: nextFlowId }),
@@ -124,7 +125,7 @@ export function EditChannelDialog({
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/whatsapp/config", {
+      const res = await apiFetch("/api/whatsapp/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -162,7 +163,7 @@ export function EditChannelDialog({
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/whatsapp/config", {
+      const res = await apiFetch("/api/whatsapp/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

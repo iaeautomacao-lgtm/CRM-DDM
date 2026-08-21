@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 'use client';
 
 // ============================================================
@@ -122,7 +123,7 @@ export default function JoinPage() {
     setAuthedUserId(undefined);
     try {
       const [peekRes, authRes] = await Promise.all([
-        fetch(`/api/invitations/${encodeURIComponent(token)}/peek`, {
+        apiFetch(`/api/invitations/${encodeURIComponent(token)}/peek`, {
           cache: 'no-store',
         }),
         createClient().auth.getUser(),
@@ -147,7 +148,7 @@ export default function JoinPage() {
     (async () => {
       try {
         const [peekRes, authRes] = await Promise.all([
-          fetch(`/api/invitations/${encodeURIComponent(token)}/peek`, {
+          apiFetch(`/api/invitations/${encodeURIComponent(token)}/peek`, {
             cache: 'no-store',
           }),
           createClient().auth.getUser(),
@@ -172,8 +173,7 @@ export default function JoinPage() {
     if (!token) return;
     setAccepting(true);
     try {
-      const res = await fetch(
-        `/api/invitations/${encodeURIComponent(token)}/redeem`,
+      const res = await apiFetch(`/api/invitations/${encodeURIComponent(token)}/redeem`,
         { method: 'POST' },
       );
       if (!res.ok) {

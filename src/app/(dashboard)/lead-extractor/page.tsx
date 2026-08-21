@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { Globe, RefreshCw } from "lucide-react";
@@ -9,7 +10,7 @@ export default function LeadExtractorPage() {
   const [leadExtractorUrl, setLeadExtractorUrl] = useState("https://grupoddmlead.lovable.app/");
 
   useEffect(() => {
-    fetch("/api/whatsapp/external-urls")
+    apiFetch("/api/whatsapp/external-urls")
       .then((res) => res.json())
       .then((data) => {
         if (data && data.leadExtractorUrl) {

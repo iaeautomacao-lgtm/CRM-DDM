@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 // ============================================================
@@ -79,7 +80,7 @@ export function NewChannelDialog({
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/whatsapp/config", {
+      const res = await apiFetch("/api/whatsapp/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -112,7 +113,7 @@ export function NewChannelDialog({
     }
     setSaving(true);
     try {
-      const res = await fetch("/api/whatsapp/config", {
+      const res = await apiFetch("/api/whatsapp/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

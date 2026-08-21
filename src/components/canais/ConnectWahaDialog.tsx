@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 // ============================================================
@@ -53,7 +54,7 @@ export function ConnectWahaDialog({
   const checkStatus = useCallback(async () => {
     if (!config) return;
     try {
-      const res = await fetch("/api/whatsapp/config");
+      const res = await apiFetch("/api/whatsapp/config");
       const data = await res.json();
       const list = data.configs || [];
       const current = list.find((c: ChannelConfig) => c.id === config.id);
@@ -84,7 +85,7 @@ export function ConnectWahaDialog({
 
     if (!startedRef.current) {
       startedRef.current = true;
-      fetch("/api/whatsapp/waha/start", {
+      apiFetch("/api/whatsapp/waha/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session: config.waha_session, id: config.id }),
@@ -117,7 +118,7 @@ export function ConnectWahaDialog({
     setPairingError(null);
     setPairingCode("");
     try {
-      const res = await fetch("/api/whatsapp/waha/pairing-code", {
+      const res = await apiFetch("/api/whatsapp/waha/pairing-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

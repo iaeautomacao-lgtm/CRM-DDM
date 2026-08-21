@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useEffect, useState } from "react";
@@ -200,7 +201,7 @@ export default function FlowRunsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/flows/${params.id}/runs`);
+        const res = await apiFetch(`/api/flows/${params.id}/runs`);
         if (res.status === 404) {
           if (!cancelled) setNotFound(true);
           return;
@@ -236,7 +237,7 @@ export default function FlowRunsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/flows/${params.id}`);
+        const res = await apiFetch(`/api/flows/${params.id}`);
         if (!res.ok) return;
         const json = (await res.json()) as {
           nodes?: Array<{ node_key: string; node_type: string }>;
@@ -268,7 +269,7 @@ export default function FlowRunsPage() {
     if (eventsByRun[runId]) return;
     setLoadingEvents(runId);
     try {
-      const res = await fetch(`/api/flows/${params.id}/runs?run_id=${runId}`);
+      const res = await apiFetch(`/api/flows/${params.id}/runs?run_id=${runId}`);
       if (!res.ok) throw new Error(`Failed: ${res.status}`);
       const json = (await res.json()) as { events: EventRow[] };
       setEventsByRun((prev) => ({ ...prev, [runId]: json.events ?? [] }));

@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
@@ -201,7 +202,7 @@ export function MessageThread({
 
   useEffect(() => {
     // Fetch the active session name for VoIP routing
-    fetch("/api/whatsapp/config")
+    apiFetch("/api/whatsapp/config")
       .then((res) => res.json())
       .then((data) => {
         if (data && data.provider === "waha" && data.phone_info?.id) {
@@ -549,7 +550,7 @@ export function MessageThread({
       }
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
+        const res = await apiFetch("/api/whatsapp/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -612,7 +613,7 @@ export function MessageThread({
       }
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
+        const res = await apiFetch("/api/whatsapp/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -720,7 +721,7 @@ export function MessageThread({
       onNewMessage(optimisticMsg);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
+        const res = await apiFetch("/api/whatsapp/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1019,7 +1020,7 @@ export function MessageThread({
       });
 
       try {
-        const res = await fetch("/api/whatsapp/react", {
+        const res = await apiFetch("/api/whatsapp/react", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message_id: messageId, emoji }),

@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useEffect, useRef, useState } from "react";
@@ -273,7 +274,7 @@ export default function CampanhasPage() {
   // Start Campaign
   const handleStart = async (id: string) => {
     try {
-      const res = await fetch(`/api/disparador/campaigns/${id}/start`, { method: "POST" });
+      const res = await apiFetch(`/api/disparador/campaigns/${id}/start`, { method: "POST" });
       if (res.ok) {
         toast.success("Campanha iniciada e disparos agendados!");
         loadData();
@@ -289,7 +290,7 @@ export default function CampanhasPage() {
   // Pause Campaign
   const handlePause = async (id: string) => {
     try {
-      const res = await fetch(`/api/disparador/campaigns/${id}/stop?action=pause`, { method: "POST" });
+      const res = await apiFetch(`/api/disparador/campaigns/${id}/stop?action=pause`, { method: "POST" });
       if (res.ok) {
         toast.success("Campanha pausada com sucesso.");
         loadData();
@@ -302,7 +303,7 @@ export default function CampanhasPage() {
   // Stop/Close Campaign
   const handleStop = async (id: string) => {
     try {
-      const res = await fetch(`/api/disparador/campaigns/${id}/stop?action=stop`, { method: "POST" });
+      const res = await apiFetch(`/api/disparador/campaigns/${id}/stop?action=stop`, { method: "POST" });
       if (res.ok) {
         toast.success("Campanha encerrada e fila cancelada.");
         loadData();
@@ -398,7 +399,7 @@ export default function CampanhasPage() {
       // Deletion is scoped server-side (ownership + status re-checked)
       // instead of a direct client delete, since wacrm.campaigns has no
       // RLS yet — see src/app/api/disparador/campaigns/[id]/route.ts.
-      const res = await fetch(`/api/disparador/campaigns/${campaign.id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/disparador/campaigns/${campaign.id}`, { method: "DELETE" });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error || "Erro ao deletar campanha");
@@ -432,7 +433,7 @@ export default function CampanhasPage() {
         // "rascunho" status lock are re-checked there (see
         // /api/disparador/campaigns/[id] PATCH) instead of trusting a
         // direct client-side update.
-        const res = await fetch(`/api/disparador/campaigns/${editingId}`, {
+        const res = await apiFetch(`/api/disparador/campaigns/${editingId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

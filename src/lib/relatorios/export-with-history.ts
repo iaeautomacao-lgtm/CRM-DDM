@@ -38,7 +38,7 @@ export async function exportWithHistory(options: ExportOptions): Promise<void> {
   }) as string;
 
   try {
-    await fetch("/api/relatorios/exports", {
+    await apiFetch("/api/relatorios/exports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -62,3 +62,4 @@ export async function exportWithHistory(options: ExportOptions): Promise<void> {
     bookType: options.format === "csv" ? "csv" : "xlsx",
   });
 }
+import { apiFetch } from "@/lib/api-fetch";

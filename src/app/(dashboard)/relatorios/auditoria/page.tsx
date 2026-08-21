@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 // ============================================================
@@ -102,7 +103,7 @@ export default function AuditoriaPage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/account/members", { cache: "no-store" })
+    apiFetch("/api/account/members", { cache: "no-store" })
       .then((res) => res.json())
       .then((data: { members?: AccountMember[] }) => {
         if (!cancelled) setMembers(data.members ?? []);

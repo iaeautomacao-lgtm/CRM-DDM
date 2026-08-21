@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -81,7 +82,7 @@ export function ContactSidebar({
     if (!conversation) return;
     setAnalyzing(true);
     try {
-      const res = await fetch(`/api/conversations/${conversation.id}/sentiment`, {
+      const res = await apiFetch(`/api/conversations/${conversation.id}/sentiment`, {
         method: "POST",
       });
       const data = await res.json();

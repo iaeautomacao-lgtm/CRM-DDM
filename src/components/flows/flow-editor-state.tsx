@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 /**
@@ -362,7 +363,7 @@ export function FlowEditorProvider({
   useEffect(() => {
     if (!dirty) return;
     const handler = () => {
-      void fetch(`/api/flows/${initialFlow.id}`, {
+      void apiFetch(`/api/flows/${initialFlow.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -409,7 +410,7 @@ export function FlowEditorProvider({
       isSavingRef.current = true;
       setSaving(true);
       try {
-        const res = await fetch(`/api/flows/${initialFlow.id}`, {
+        const res = await apiFetch(`/api/flows/${initialFlow.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -466,7 +467,7 @@ export function FlowEditorProvider({
         if (next === "active") {
           await save();
         }
-        const res = await fetch(`/api/flows/${initialFlow.id}/activate`, {
+        const res = await apiFetch(`/api/flows/${initialFlow.id}/activate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: next }),
@@ -500,7 +501,7 @@ export function FlowEditorProvider({
     );
     if (!yes) return;
     try {
-      const res = await fetch(`/api/flows/${initialFlow.id}`, {
+      const res = await apiFetch(`/api/flows/${initialFlow.id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(`Falha ao excluir: ${res.status}`);

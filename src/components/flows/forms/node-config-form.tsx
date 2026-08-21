@@ -2227,7 +2227,7 @@ function useActiveFlows(): { flows: ActiveFlowOption[]; loading: boolean } {
     (async () => {
       setLoading(true);
       try {
-        const res = await fetch("/api/flows").catch(() => null);
+        const res = await apiFetch("/api/flows").catch(() => null);
         if (!res || !res.ok) return;
         const json = (await res.json()) as {
           flows?: Array<{ id: string; name: string; status: string }>;

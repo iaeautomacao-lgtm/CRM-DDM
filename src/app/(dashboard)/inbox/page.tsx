@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
@@ -160,7 +161,7 @@ export default function InboxPage() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const res = await fetch("/api/whatsapp/config");
+        const res = await apiFetch("/api/whatsapp/config");
         if (!res.ok) throw new Error(`HTTP error ${res.status}`);
         const data = await res.json();
         setWhatsappConnected(data?.connected === true);

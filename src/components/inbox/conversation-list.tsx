@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
@@ -116,7 +117,7 @@ export function ConversationList({
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/whatsapp/config");
+        const res = await apiFetch("/api/whatsapp/config");
         const data = await res.json();
         setConfigs(data.configs || []);
       } catch (err) {

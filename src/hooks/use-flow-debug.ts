@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 /**
@@ -75,7 +76,7 @@ export function useFlowDebug(flowId: string | undefined): FlowDebugState {
         // RLS) and already returns the run's own row (contact,
         // started_at) in its `runs` array, so no second request is
         // needed for the debug banner's metadata either.
-        const res = await fetch(`/api/flows/${flowId}/runs?run_id=${runId}`);
+        const res = await apiFetch(`/api/flows/${flowId}/runs?run_id=${runId}`);
         if (!res.ok) throw new Error(`Failed: ${res.status}`);
         const json = (await res.json()) as {
           runs: FlowDebugRunMeta[];

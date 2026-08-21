@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -303,7 +304,7 @@ export function TemplateManager() {
     if (!user) return;
     setSyncing(true);
     try {
-      const res = await fetch('/api/whatsapp/templates/sync', { method: 'POST' });
+      const res = await apiFetch('/api/whatsapp/templates/sync', { method: 'POST' });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data?.error || `Sync failed (HTTP ${res.status})`);
@@ -349,7 +350,7 @@ export function TemplateManager() {
       // Route handler scopes the Meta delete via hsm_id (so sibling
       // language variants survive) and falls through to remove the
       // local row. Local-only rows skip the Meta call.
-      const res = await fetch(`/api/whatsapp/templates/${target.id}`, {
+      const res = await apiFetch(`/api/whatsapp/templates/${target.id}`, {
         method: 'DELETE',
       });
       const data = await res.json().catch(() => ({}));

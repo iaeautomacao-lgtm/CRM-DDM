@@ -34,7 +34,7 @@ export async function assignConversationAgent(
     const agentName = agentFullName || "Atendente";
     const takeoverText = `Olá, aqui é o atendente ${agentName} e agora vou dar continuidade ao seu atendimento.`;
     try {
-      await fetch("/api/whatsapp/send", {
+      await apiFetch("/api/whatsapp/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -85,3 +85,4 @@ export async function closeConversationWithOutcomeTag(
     .eq("id", conversationId);
   return { error: error ? error.message : null };
 }
+import { apiFetch } from "@/lib/api-fetch";

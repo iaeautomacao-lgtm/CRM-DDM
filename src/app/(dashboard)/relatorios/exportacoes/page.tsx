@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 // ============================================================
@@ -182,7 +183,7 @@ export default function ExportacoesPage() {
     try {
       await Promise.all(
         pendingDeleteIds.map((id) =>
-          fetch(`/api/relatorios/exports?id=${id}`, { method: "DELETE" }),
+          apiFetch(`/api/relatorios/exports?id=${id}`, { method: "DELETE" }),
         ),
       );
       setSelected((prev) => {

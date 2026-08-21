@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 "use client";
 
 // ============================================================
@@ -99,7 +100,7 @@ export default function CanaisPage() {
   const fetchConfigs = useCallback(async (): Promise<ChannelConfig[]> => {
     setLoading(true);
     try {
-      const res = await fetch("/api/whatsapp/config");
+      const res = await apiFetch("/api/whatsapp/config");
       const payload = await res.json();
       const list = (payload.configs ?? []) as ChannelConfig[];
       setConfigs(list);
@@ -118,7 +119,7 @@ export default function CanaisPage() {
   }, [fetchConfigs]);
 
   useEffect(() => {
-    fetch("/api/flows")
+    apiFetch("/api/flows")
       .then((res) => res.json())
       .then((data) => {
         const list = (data.flows ?? []) as { id: string; name: string }[];
@@ -163,7 +164,7 @@ export default function CanaisPage() {
   async function handleDisconnect(c: ChannelConfig) {
     setStopBusyId(c.id);
     try {
-      const res = await fetch("/api/whatsapp/waha/stop", {
+      const res = await apiFetch("/api/whatsapp/waha/stop", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session: c.waha_session, id: c.id }),
@@ -184,7 +185,7 @@ export default function CanaisPage() {
     const next = !c[field];
     setToggleBusyKey(key);
     try {
-      const res = await fetch("/api/whatsapp/config", {
+      const res = await apiFetch("/api/whatsapp/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: c.id, [field]: next }),
@@ -206,7 +207,7 @@ export default function CanaisPage() {
     try {
       await Promise.all(
         deleteTargets.map((c) =>
-          fetch(`/api/whatsapp/config?id=${c.id}`, { method: "DELETE" }),
+          apiFetch(`/api/whatsapp/config?id=${c.id}`, { method: "DELETE" }),
         ),
       );
       toast.success(deleteTargets.length > 1 ? "Canais removidos." : "Canal removido.");

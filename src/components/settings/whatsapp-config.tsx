@@ -1,3 +1,4 @@
+import { apiFetch } from "@/lib/api-fetch";
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
@@ -135,7 +136,7 @@ export function WhatsAppConfig() {
     setPairingCode('');
 
     try {
-      const res = await fetch('/api/whatsapp/waha/pairing-code', {
+      const res = await apiFetch('/api/whatsapp/waha/pairing-code', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -206,7 +207,7 @@ export function WhatsAppConfig() {
   const checkWahaStatus = useCallback(async () => {
     if (!accountId || !wahaSession) return;
     try {
-      const res = await fetch('/api/whatsapp/config');
+      const res = await apiFetch('/api/whatsapp/config');
       const data = await res.json();
       const list = data.configs || [];
       const current = list.find((c: any) => c.waha_session === wahaSession);
@@ -226,7 +227,7 @@ export function WhatsAppConfig() {
   const fetchConfig = useCallback(async (acctId: string) => {
     setLoading(true);
     try {
-      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      const res = await apiFetch('/api/whatsapp/config', { method: 'GET' });
       const payload = await res.json();
       
       const list = payload.configs || [];
@@ -279,7 +280,7 @@ export function WhatsAppConfig() {
 
   // Fetch VoIP Base URL Config
   useEffect(() => {
-    fetch('/api/whatsapp/voip-url')
+    apiFetch('/api/whatsapp/voip-url')
       .then((res) => res.json())
       .then((data) => {
         if (data && data.url) {
@@ -383,7 +384,7 @@ export function WhatsAppConfig() {
     if (!wahaSession) return;
     setWahaConnecting(true);
     try {
-      const res = await fetch('/api/whatsapp/waha/start', { 
+      const res = await apiFetch('/api/whatsapp/waha/start', { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session: wahaSession, id: activeConfigId })
@@ -403,7 +404,7 @@ export function WhatsAppConfig() {
     if (!wahaSession) return;
     setWahaConnecting(true);
     try {
-      const res = await fetch('/api/whatsapp/waha/stop', { 
+      const res = await apiFetch('/api/whatsapp/waha/stop', { 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session: wahaSession, id: activeConfigId })
@@ -442,7 +443,7 @@ export function WhatsAppConfig() {
           payload.id = activeConfigId;
         }
 
-        const res = await fetch('/api/whatsapp/config', {
+        const res = await apiFetch('/api/whatsapp/config', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -495,7 +496,7 @@ export function WhatsAppConfig() {
         return;
       }
 
-      const res = await fetch('/api/whatsapp/config', {
+      const res = await apiFetch('/api/whatsapp/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -520,7 +521,7 @@ export function WhatsAppConfig() {
   async function handleTestConnection() {
     setTesting(true);
     try {
-      const res = await fetch('/api/whatsapp/config', { method: 'GET' });
+      const res = await apiFetch('/api/whatsapp/config', { method: 'GET' });
       const payload = await res.json();
 
       if (payload.connected) {
@@ -575,7 +576,7 @@ export function WhatsAppConfig() {
   async function handleVerifyRegistration() {
     setVerifyingRegistration(true);
     try {
-      const res = await fetch('/api/whatsapp/config/register', { method: 'GET' });
+      const res = await apiFetch('/api/whatsapp/config/register', { method: 'GET' });
       const payload = (await res.json()) as RegistrationProbe;
       setRegistrationProbe(payload);
 
@@ -699,7 +700,7 @@ export function WhatsAppConfig() {
                             onClick={async () => {
                               if (confirm('Tem certeza que deseja remover esta linha do WhatsApp?')) {
                                 try {
-                                  const res = await fetch(`/api/whatsapp/config?id=${c.id}`, { method: 'DELETE' });
+                                  const res = await apiFetch(`/api/whatsapp/config?id=${c.id}`, { method: 'DELETE' });
                                   if (!res.ok) throw new Error('Erro ao deletar linha');
                                   toast.success('Linha removida com sucesso!');
                                   if (isActive) setActiveConfigId(null);
