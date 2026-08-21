@@ -1,5 +1,6 @@
-import { apiFetch } from "@/lib/api-fetch";
 "use client";
+
+import { apiFetch } from "@/lib/api-fetch";
 
 // ============================================================
 // /relatorios/atendimentos — main operational report: attendance

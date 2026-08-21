@@ -1,5 +1,6 @@
-import { apiFetch } from "@/lib/api-fetch";
 "use client";
+
+import { apiFetch } from "@/lib/api-fetch";
 
 // ============================================================
 // ContactTimeline — timeline of a contact's past conversations

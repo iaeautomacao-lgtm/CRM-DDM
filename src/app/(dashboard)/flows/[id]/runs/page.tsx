@@ -1,5 +1,6 @@
-import { apiFetch } from "@/lib/api-fetch";
 "use client";
+
+import { apiFetch } from "@/lib/api-fetch";
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";

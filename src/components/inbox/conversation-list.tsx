@@ -1,5 +1,6 @@
-import { apiFetch } from "@/lib/api-fetch";
 "use client";
+
+import { apiFetch } from "@/lib/api-fetch";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";

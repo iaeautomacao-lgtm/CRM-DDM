@@ -1,5 +1,6 @@
-import { apiFetch } from "@/lib/api-fetch";
 "use client";
+
+import { apiFetch } from "@/lib/api-fetch";
 
 // ============================================================
 // ConnectWahaDialog — QR / pairing-code flow for a WAHA channel.

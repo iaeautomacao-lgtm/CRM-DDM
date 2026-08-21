@@ -1,5 +1,6 @@
-import { apiFetch } from "@/lib/api-fetch";
 "use client";
+
+import { apiFetch } from "@/lib/api-fetch";
 
 // ============================================================
 // NewChannelDialog — 2-step: pick provider, then fill its form.
