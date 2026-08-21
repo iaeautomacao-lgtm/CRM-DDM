@@ -556,7 +556,7 @@ export function WhatsAppConfig() {
         ? `/api/whatsapp/config?id=${activeConfigId}`
         : '/api/whatsapp/config';
       
-      const res = await fetch(url, { method: 'DELETE' });
+      const res = await apiFetch(url, { method: 'DELETE' });
       if (!res.ok) {
         const payload = await res.json();
         throw new Error(payload.error || 'Failed to delete configuration');
