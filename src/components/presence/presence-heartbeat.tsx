@@ -2,15 +2,16 @@
 
 import { useEffect, useRef } from "react";
 
-import { createClient } from "@/lib/supabase/client";
+import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import { HEARTBEAT_MS, IDLE_AFTER_MS, type StoredPresence } from "@/lib/presence";
 
 /**
  * PresenceHeartbeat — headless. Mount ONCE per signed-in dashboard tab
  * (in the dashboard shell, below the auth gate). Reports this tab's
- * presence to the `member_presence` table via the `touch_presence` RPC
- * roughly every HEARTBEAT_MS.
+ * presence to the `member_presence` table via `POST /api/account/presence`
+ * (which calls the `touch_presence` RPC server-side) roughly every
+ * HEARTBEAT_MS.
  *
  * The client only ever reports 'online' or 'away':
  *   - 'away'   when the tab is hidden, or no user input for IDLE_AFTER_MS
@@ -30,10 +31,10 @@ export function PresenceHeartbeat() {
     // Hold off until the account is known. Beating during the brief
     // window on a fresh signup — authed but profile/account row not yet
     // created — would make touch_presence raise "No account for caller"
-    // and log a spurious error. The effect re-runs once accountId lands.
+    // (surfaced here as a 500) and log a spurious error. The effect
+    // re-runs once accountId lands.
     if (!accountId) return;
 
-    const supabase = createClient();
     let cancelled = false;
     let lastBeatAt = 0;
     lastActivityRef.current = Date.now();
@@ -57,13 +58,18 @@ export function PresenceHeartbeat() {
       if (t - lastBeatAt < 1_000) return;
       lastBeatAt = t;
       try {
-        const { error } = await supabase.rpc("touch_presence", {
-          p_status: currentStatus(),
+        const res = await apiFetch("/api/account/presence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: currentStatus() }),
         });
-        if (error && !cancelled) {
+        if (!res.ok && !cancelled) {
           // Non-fatal: presence is best-effort. Log once per failure so a
           // misconfigured RPC is visible without spamming.
-          console.error("[PresenceHeartbeat] touch_presence failed:", error.message);
+          console.error(
+            "[PresenceHeartbeat] touch_presence failed:",
+            res.status,
+          );
         }
       } catch (err) {
         if (!cancelled) {
