@@ -536,7 +536,12 @@ export async function POST(request: Request) {
         // Trigger AI Auto Response if the message is inbound and conversation is unassigned
         if (direction === 'inbound' && !conversation?.assigned_agent_id && contactId && conversationId) {
           const { handleAiAutoResponse } = await import('@/lib/ai/responder')
+          // Fire-and-forget — but handleAiAutoResponse now throws on an
+          // LLM generation failure (see responder.ts), so this MUST
+          // catch or an unhandled promise rejection would crash the
+          // whole process.
           void handleAiAutoResponse(accountId, contactId, conversationId, textBody || '')
+            .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
         }
 
         // Trigger Sentiment and Auto-Tagging Analysis

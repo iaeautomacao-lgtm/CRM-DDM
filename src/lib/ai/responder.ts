@@ -875,8 +875,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         );
       }
     } catch (err) {
+      // Rethrown (not just logged + returned) so the Flow Builder's
+      // ai_agent node sees this as a real failure — its own try/catch
+      // around handleAiAutoResponse turns this into a node_error with
+      // error_message instead of a silently-empty last_reply. Callers
+      // that fire-and-forget this function (the WhatsApp webhook
+      // routes, outside any flow) must `.catch()` this call — see
+      // those call sites for why that matters.
       console.error("[AI Agent] LLM generation error:", err);
-      return;
+      throw err;
     }
   }
 

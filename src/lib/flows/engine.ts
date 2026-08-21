@@ -1872,31 +1872,38 @@ export async function advanceFromNodeKey(
       let lastReply = "";
       let exitCodeFound: string | null = null;
       let modelUsed: string | null = null;
+      let aiConfigUsable = false;
       try {
         // Best-effort — mirrors ai_config.api_provider to the model
         // string handleAiAutoResponse actually calls (see
         // MODEL_BY_PROVIDER's own comment on the duplication risk).
+        // Also doubles as the "is there even a usable config" check
+        // for the output.error_reason below — same row, no extra query.
         const { data: aiConfigRow } = await db
           .from("ai_config")
-          .select("api_provider")
+          .select("api_provider, enabled")
           .eq("account_id", run.account_id)
           .maybeSingle();
-        const provider = (aiConfigRow as { api_provider: string } | null)
-          ?.api_provider;
-        modelUsed = provider ? (MODEL_BY_PROVIDER[provider] ?? provider) : null;
+        const configRow = aiConfigRow as
+          | { api_provider: string; enabled: boolean }
+          | null;
+        aiConfigUsable = !!configRow?.enabled;
+        modelUsed = configRow?.api_provider
+          ? (MODEL_BY_PROVIDER[configRow.api_provider] ?? configRow.api_provider)
+          : null;
 
         // Last customer message is the AI's input — same "what does the
         // customer want answered" the standalone auto-responder uses.
         const { data: lastCustomerMsg } = await db
           .from("messages")
-          .select("content_text, created_at")
+          .select("content_text, received_at")
           .eq("conversation_id", run.conversation_id!)
           .eq("sender_type", "customer")
-          .order("created_at", { ascending: false })
+          .order("received_at", { ascending: false })
           .limit(1)
           .maybeSingle();
         const incomingMsg = lastCustomerMsg as
-          | { content_text: string | null; created_at: string }
+          | { content_text: string | null; received_at: string }
           | null;
         const incomingText = incomingMsg?.content_text ?? "";
 
@@ -1909,17 +1916,27 @@ export async function advanceFromNodeKey(
 
         // Best-effort: read back the bot's reply for the debug
         // timeline. Scoped to AFTER the customer message that
-        // triggered this turn so a disabled/failed AI response
-        // doesn't surface a stale reply from an earlier turn.
+        // triggered this turn via `received_at` — our own server
+        // clock (DEFAULT NOW(), stamped at INSERT time) on both sides
+        // of the comparison. `created_at` was the wrong column for
+        // this: for an inbound message it's copied from the WAHA/Meta
+        // webhook payload's own timestamp (the provider's clock — see
+        // migration 043_messages_received_at.sql, which fixed the same
+        // mismatch for the AI debounce check), while the bot's reply
+        // row always gets `created_at` from our own clock. Any
+        // provider/server clock skew could put the customer message's
+        // created_at AHEAD of the bot reply's, so `gt("created_at", …)`
+        // could wrongly exclude a reply that really was just sent —
+        // received_at doesn't have that problem on either side.
         let replyQuery = db
           .from("messages")
           .select("content_text")
           .eq("conversation_id", run.conversation_id!)
           .eq("sender_type", "bot")
-          .order("created_at", { ascending: false })
+          .order("received_at", { ascending: false })
           .limit(1);
-        if (incomingMsg?.created_at) {
-          replyQuery = replyQuery.gt("created_at", incomingMsg.created_at);
+        if (incomingMsg?.received_at) {
+          replyQuery = replyQuery.gt("received_at", incomingMsg.received_at);
         }
         const { data: lastBotMsg } = await replyQuery.maybeSingle();
         lastReply =
@@ -1961,17 +1978,30 @@ export async function advanceFromNodeKey(
             last_reply: lastReply.slice(-300),
             ai_exit_code: exitCodeFound,
             model_used: modelUsed,
+            ...(!aiConfigUsable
+              ? { error_reason: "ai_config_disabled_or_missing" }
+              : {}),
           },
         });
         return { outcome: "completed" };
       }
 
       // Output shared by every ai_agent exit path below — only
-      // `exit_reason`/`turns_used` differ per mode/branch.
+      // `exit_reason`/`turns_used` differ per mode/branch. The two
+      // extra fields below don't fix anything by themselves (per the
+      // investigation, most causes of an empty last_reply are
+      // handleAiAutoResponse returning early with no error at all —
+      // see its own early-return points) — they just make that
+      // diagnosis visible on the node's own event instead of only in
+      // server console logs.
       const baseOutput = {
         last_reply: lastReply.slice(-300),
         ai_exit_code: exitCodeFound,
         model_used: modelUsed,
+        ...(!aiConfigUsable
+          ? { error_reason: "ai_config_disabled_or_missing" }
+          : {}),
+        ...(lastReply === "" ? { warning: "ai_returned_empty_reply" } : {}),
       };
 
       if (cfg.mode === "takeover") {

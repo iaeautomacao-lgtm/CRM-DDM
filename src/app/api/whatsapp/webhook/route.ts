@@ -662,7 +662,11 @@ async function processMessage(
   // Trigger AI Auto Response if the conversation is unassigned (no human agent is handling it)
   if (!conversation.assigned_agent_id) {
     const { handleAiAutoResponse } = await import('@/lib/ai/responder')
+    // Fire-and-forget — but handleAiAutoResponse now throws on an LLM
+    // generation failure (see responder.ts), so this MUST catch or an
+    // unhandled promise rejection would crash the whole process.
     void handleAiAutoResponse(accountId, contactRecord.id, conversation.id, contentText || '')
+      .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
   }
 
   // Trigger Sentiment and Auto-Tagging Analysis
