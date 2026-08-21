@@ -10,6 +10,32 @@ function noStore<T extends NextResponse>(response: T): T {
 }
 
 export async function middleware(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+
+  // Most /api/* routes resolve auth themselves via getCurrentAccount()
+  // (its own supabase.auth.getUser() call). Middleware also calling
+  // getUser() on top of that is redundant — and worse, race-prone:
+  // under parallel API calls, each middleware invocation's getUser()
+  // can trigger its own token refresh, and Supabase refresh tokens are
+  // single-use, so two refreshes racing on the same session can
+  // invalidate each other. Skip middleware's own auth check for API
+  // routes that already gate themselves.
+  //
+  // /api/whatsapp/* and /api/disparador/* are excluded from this skip:
+  // a couple of routes under those prefixes (voip-url, external-urls)
+  // have no auth check of their own and rely entirely on the 401 gates
+  // further down, so those two prefixes still run the full check.
+  const isSelfGatedApiRoute =
+    pathname.startsWith('/api/') &&
+    !pathname.startsWith('/api/whatsapp/') &&
+    !pathname.startsWith('/api/disparador/')
+
+  if (isSelfGatedApiRoute) {
+    const response = NextResponse.next({ request })
+    response.headers.set('X-Auth-Fx-GetUser', 'skipped')
+    return response
+  }
+
   const authFxId = crypto.randomUUID()
   const setAllActions: string[] = []
   let setAllCount = 0
