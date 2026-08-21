@@ -14,6 +14,7 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { createClient } from "@/lib/supabase/client";
+import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import { useRealtime } from "@/hooks/use-realtime";
 import { usePresence } from "@/hooks/use-presence";
@@ -400,7 +401,7 @@ export default function MonitoramentoPage() {
       const entries = await Promise.all(
         teamList.map(async (team) => {
           try {
-            const res = await fetch(`/api/account/teams/${team.id}/members`, {
+            const res = await apiFetch(`/api/account/teams/${team.id}/members`, {
               cache: "no-store",
             });
             if (!res.ok) return [team.id, [] as string[]] as const;
@@ -584,7 +585,7 @@ export default function MonitoramentoPage() {
 
       try {
         if (oldTeamId) {
-          const res = await fetch(`/api/account/teams/${oldTeamId}/members`, {
+          const res = await apiFetch(`/api/account/teams/${oldTeamId}/members`, {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ userId: agent.user_id }),
@@ -595,7 +596,7 @@ export default function MonitoramentoPage() {
           }
         }
         if (nextTeamId) {
-          const res = await fetch(`/api/account/teams/${nextTeamId}/members`, {
+          const res = await apiFetch(`/api/account/teams/${nextTeamId}/members`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ userId: agent.user_id }),

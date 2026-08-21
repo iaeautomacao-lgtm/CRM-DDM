@@ -20,6 +20,7 @@ import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api-fetch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -130,7 +131,7 @@ export function TeamFormDialog({
       try {
         const [membersRes, teamMembersRes] = await Promise.all([
           fetch('/api/account/members', { cache: 'no-store' }),
-          fetch(`/api/account/teams/${team.id}/members`, { cache: 'no-store' }),
+          apiFetch(`/api/account/teams/${team.id}/members`, { cache: 'no-store' }),
         ]);
         if (cancelled) return;
 
@@ -172,7 +173,7 @@ export function TeamFormDialog({
       return next;
     });
     try {
-      const res = await fetch(`/api/account/teams/${team.id}/members`, {
+      const res = await apiFetch(`/api/account/teams/${team.id}/members`, {
         method: checked ? 'POST' : 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: agentId }),

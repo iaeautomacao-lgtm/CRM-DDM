@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { useCan } from "@/hooks/use-can";
+import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
 import {
@@ -100,8 +101,8 @@ export default function FlowsPage() {
     (async () => {
       try {
         const [flowsRes, tmplRes] = await Promise.all([
-          fetch("/api/flows"),
-          fetch("/api/flows/templates"),
+          apiFetch("/api/flows"),
+          apiFetch("/api/flows/templates"),
         ]);
         if (!flowsRes.ok) {
           throw new Error(`Failed to load flows: ${flowsRes.status}`);
@@ -134,7 +135,7 @@ export default function FlowsPage() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const res = await fetch("/api/flows", {
+      const res = await apiFetch("/api/flows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -159,7 +160,7 @@ export default function FlowsPage() {
   async function handleUseTemplate(slug: string) {
     setCreating(true);
     try {
-      const res = await fetch("/api/flows", {
+      const res = await apiFetch("/api/flows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template_slug: slug }),
@@ -185,7 +186,7 @@ export default function FlowsPage() {
     );
     if (!yes) return;
     try {
-      const res = await fetch(`/api/flows/${flow.id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/flows/${flow.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
       setFlows((prev) => prev.filter((f) => f.id !== flow.id));
       toast.success("Fluxo excluído.");
@@ -197,7 +198,7 @@ export default function FlowsPage() {
 
   async function handleExport(flow: FlowRow) {
     try {
-      const res = await fetch(`/api/flows/${flow.id}/export`);
+      const res = await apiFetch(`/api/flows/${flow.id}/export`);
       if (!res.ok) throw new Error(`Export failed: ${res.status}`);
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition");
@@ -232,7 +233,7 @@ export default function FlowsPage() {
         throw new Error("Arquivo inválido: não é um JSON válido.");
       }
 
-      const res = await fetch("/api/flows/import", {
+      const res = await apiFetch("/api/flows/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(json),
@@ -250,7 +251,7 @@ export default function FlowsPage() {
         },
       });
 
-      const flowsRes = await fetch("/api/flows");
+      const flowsRes = await apiFetch("/api/flows");
       if (flowsRes.ok) {
         const flowsJson = (await flowsRes.json()) as { flows: FlowRow[] };
         setFlows(flowsJson.flows ?? []);
