@@ -3,61 +3,65 @@
 /**
  * fetch() wrapper for client components that retries once on a 401.
  *
- * Why: Supabase refresh tokens are rotating/single-use. The browser
- * SDK's own auto-refresh timer and the middleware's on-demand
- * refresh-if-expired (see src/middleware.ts) run as independent
- * processes with no shared coordination — if both attempt to refresh
- * around the same moment, whichever reaches the Auth server second
- * finds its refresh token already consumed by the first, and the
- * request in flight at that exact moment gets a 401 even though the
- * user is genuinely still logged in. Forcing our own refreshSession()
- * call and retrying once recovers from that narrow window without
- * surfacing a spurious "logged out" error to the user.
+ * A 401 from an app API route is not, by itself, proof that the
+ * browser session is invalid. The server middleware may already have
+ * refreshed/rotated cookies for the request while the browser Supabase
+ * client is reconciling its local state. Supabase refresh tokens are
+ * rotating/single-use, so forcing refreshSession() from every client
+ * 401 can steal the refresh token from the middleware (or vice versa)
+ * and turn a recoverable stale request into a real client-side
+ * SIGNED_OUT event.
  *
- * Only reacts to a 401 — every other status (2xx, other 4xx, 5xx) is
- * returned untouched, exactly like a plain fetch().
+ * This wrapper therefore only confirms that the browser client still
+ * has a session, then retries once with cookies included. If Supabase
+ * itself has already concluded there is no session, callers get the
+ * original 401 without an extra refresh attempt.
  */
 
 import { createClient } from "@/lib/supabase/client";
 
-// Serializes refreshSession() across every concurrent apiFetch() call.
-// Without this, N requests that all hit a 401 at once each call
-// refreshSession() in parallel — since Supabase refresh tokens are
-// rotating/single-use, only the first to reach the Auth server
-// succeeds and every other concurrent call fails, which is its own
-// version of the exact race this wrapper exists to route around.
-// Sharing one in-flight promise means only the FIRST 401 triggers a
-// refresh; every other concurrent caller just awaits that same
-// promise instead of starting its own.
-let refreshPromise: Promise<void> | null = null;
+// Coalesce session checks after bursts of concurrent 401s. getSession()
+// may update browser auth state if the local session is truly gone, but
+// unlike refreshSession() it does not unconditionally consume a rotating
+// refresh token merely because one API request was rejected.
+let sessionCheckPromise: Promise<boolean> | null = null;
+
+function withCredentials(options?: RequestInit): RequestInit {
+  return {
+    ...options,
+    credentials: options?.credentials ?? "same-origin",
+  };
+}
+
+async function hasRecoverableBrowserSession(): Promise<boolean> {
+  if (!sessionCheckPromise) {
+    const supabase = createClient();
+    sessionCheckPromise = supabase.auth
+      .getSession()
+      .then(({ data, error }) => !error && !!data.session)
+      .catch(() => false)
+      .finally(() => {
+        sessionCheckPromise = null;
+      });
+  }
+
+  return sessionCheckPromise;
+}
 
 export async function apiFetch(
   url: string,
   options?: RequestInit,
 ): Promise<Response> {
-  const res = await fetch(url, options);
+  const requestOptions = withCredentials(options);
+  const res = await fetch(url, requestOptions);
   if (res.status !== 401) return res;
 
-  if (!refreshPromise) {
-    const supabase = createClient();
-    refreshPromise = supabase.auth
-      .refreshSession()
-      .then(() => {})
-      .catch(() => {})
-      .finally(() => {
-        refreshPromise = null;
-      });
-  }
+  const hasSession = await hasRecoverableBrowserSession();
+  if (!hasSession) return res;
 
-  await refreshPromise;
-
-  // Retry once after the (shared) refresh settles — win or lose, we
-  // only get one retry per original 401.
-  const retryRes = await fetch(url, options);
-  if (retryRes.status === 401) {
-    throw new Error(
-      `apiFetch: still unauthorized after session refresh (${url})`,
-    );
-  }
+  // Retry once after the browser client has confirmed a session still
+  // exists. If the server still rejects it, return the 401 to the
+  // caller without mutating auth state.
+  const retryRes = await fetch(url, requestOptions);
   return retryRes;
 }
