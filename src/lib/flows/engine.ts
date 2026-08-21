@@ -1125,6 +1125,142 @@ async function endRun(
   });
 }
 
+/**
+ * Shared core of an ai_agent node's per-turn logic: reads the AI
+ * config, calls handleAiAutoResponse with the conversation's last
+ * customer message, reads back the bot's reply (scoped by
+ * `received_at` — our own server clock on both sides, see
+ * migration 043_messages_received_at.sql; `created_at` would be wrong
+ * here since an inbound message's created_at is copied from the
+ * provider's own clock), and extracts a #TAG exit code if present.
+ *
+ * Used both when a run first enters an ai_agent node
+ * (`advanceFromNodeKey` below) and when a reply arrives while parked
+ * in loop mode (`handleReplyForActiveRun`) — both cases are "the
+ * customer's last message needs an AI turn," so both re-query the
+ * same way rather than one trusting a passed-in value the other
+ * doesn't have.
+ */
+async function runAiAgentCore(
+  db: AdminClient,
+  run: FlowRunRow,
+): Promise<
+  | {
+      ok: true;
+      lastReply: string;
+      exitCodeFound: string | null;
+      modelUsed: string | null;
+      aiConfigUsable: boolean;
+      baseOutput: Record<string, unknown>;
+    }
+  | {
+      ok: false;
+      detail: string;
+      err: unknown;
+      lastReply: string;
+      exitCodeFound: string | null;
+      modelUsed: string | null;
+      aiConfigUsable: boolean;
+    }
+> {
+  let lastReply = "";
+  let exitCodeFound: string | null = null;
+  let modelUsed: string | null = null;
+  let aiConfigUsable = false;
+  try {
+    // Best-effort — mirrors ai_config.api_provider to the model
+    // string handleAiAutoResponse actually calls (see
+    // MODEL_BY_PROVIDER's own comment on the duplication risk).
+    // Also doubles as the "is there even a usable config" check
+    // for the output.error_reason below — same row, no extra query.
+    const { data: aiConfigRow } = await db
+      .from("ai_config")
+      .select("api_provider, enabled")
+      .eq("account_id", run.account_id)
+      .maybeSingle();
+    const configRow = aiConfigRow as
+      | { api_provider: string; enabled: boolean }
+      | null;
+    aiConfigUsable = !!configRow?.enabled;
+    modelUsed = configRow?.api_provider
+      ? (MODEL_BY_PROVIDER[configRow.api_provider] ?? configRow.api_provider)
+      : null;
+
+    // Last customer message is the AI's input — same "what does the
+    // customer want answered" the standalone auto-responder uses.
+    const { data: lastCustomerMsg } = await db
+      .from("messages")
+      .select("content_text, received_at")
+      .eq("conversation_id", run.conversation_id!)
+      .eq("sender_type", "customer")
+      .order("received_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const incomingMsg = lastCustomerMsg as
+      | { content_text: string | null; received_at: string }
+      | null;
+    const incomingText = incomingMsg?.content_text ?? "";
+
+    await handleAiAutoResponse(
+      run.account_id,
+      run.contact_id!,
+      run.conversation_id!,
+      incomingText,
+    );
+
+    // Best-effort: read back the bot's reply for the debug timeline.
+    // Scoped to AFTER the customer message that triggered this turn
+    // via `received_at` on both sides of the comparison.
+    let replyQuery = db
+      .from("messages")
+      .select("content_text")
+      .eq("conversation_id", run.conversation_id!)
+      .eq("sender_type", "bot")
+      .order("received_at", { ascending: false })
+      .limit(1);
+    if (incomingMsg?.received_at) {
+      replyQuery = replyQuery.gt("received_at", incomingMsg.received_at);
+    }
+    const { data: lastBotMsg } = await replyQuery.maybeSingle();
+    lastReply =
+      (lastBotMsg as { content_text: string | null } | null)?.content_text ??
+      "";
+
+    // Exit-code convention: the AI's system prompt can instruct it to
+    // end a reply with a #TAG keyword (e.g. #NEGOCIACAO) that a Switch
+    // node downstream branches on (subject_key: "ai_exit_code"). Only
+    // overwrite when a tag is actually found — no match means "still
+    // talking," not "clear the previous exit code."
+    const exitCodeMatch = lastReply.match(/#[A-Z0-9_]+/);
+    if (exitCodeMatch) {
+      exitCodeFound = exitCodeMatch[0];
+      await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
+    }
+
+    const baseOutput = {
+      last_reply: lastReply.slice(-300),
+      ai_exit_code: exitCodeFound,
+      model_used: modelUsed,
+      ...(!aiConfigUsable
+        ? { error_reason: "ai_config_disabled_or_missing" }
+        : {}),
+      ...(lastReply === "" ? { warning: "ai_returned_empty_reply" } : {}),
+    };
+
+    return {
+      ok: true,
+      lastReply,
+      exitCodeFound,
+      modelUsed,
+      aiConfigUsable,
+      baseOutput,
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return { ok: false, detail, err, lastReply, exitCodeFound, modelUsed, aiConfigUsable };
+  }
+}
+
 // ============================================================
 // The synchronous advance loop. Walks through auto-advance nodes
 // until it hits one that suspends (send_buttons/send_list) or
@@ -1869,116 +2005,24 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "ai_agent") {
       const cfg = node.config as unknown as AiAgentNodeConfig;
-      let lastReply = "";
-      let exitCodeFound: string | null = null;
-      let modelUsed: string | null = null;
-      let aiConfigUsable = false;
-      try {
-        // Best-effort — mirrors ai_config.api_provider to the model
-        // string handleAiAutoResponse actually calls (see
-        // MODEL_BY_PROVIDER's own comment on the duplication risk).
-        // Also doubles as the "is there even a usable config" check
-        // for the output.error_reason below — same row, no extra query.
-        const { data: aiConfigRow } = await db
-          .from("ai_config")
-          .select("api_provider, enabled")
-          .eq("account_id", run.account_id)
-          .maybeSingle();
-        const configRow = aiConfigRow as
-          | { api_provider: string; enabled: boolean }
-          | null;
-        aiConfigUsable = !!configRow?.enabled;
-        modelUsed = configRow?.api_provider
-          ? (MODEL_BY_PROVIDER[configRow.api_provider] ?? configRow.api_provider)
-          : null;
-
-        // Last customer message is the AI's input — same "what does the
-        // customer want answered" the standalone auto-responder uses.
-        const { data: lastCustomerMsg } = await db
-          .from("messages")
-          .select("content_text, received_at")
-          .eq("conversation_id", run.conversation_id!)
-          .eq("sender_type", "customer")
-          .order("received_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const incomingMsg = lastCustomerMsg as
-          | { content_text: string | null; received_at: string }
-          | null;
-        const incomingText = incomingMsg?.content_text ?? "";
-
-        await handleAiAutoResponse(
-          run.account_id,
-          run.contact_id!,
-          run.conversation_id!,
-          incomingText,
-        );
-
-        // Best-effort: read back the bot's reply for the debug
-        // timeline. Scoped to AFTER the customer message that
-        // triggered this turn via `received_at` — our own server
-        // clock (DEFAULT NOW(), stamped at INSERT time) on both sides
-        // of the comparison. `created_at` was the wrong column for
-        // this: for an inbound message it's copied from the WAHA/Meta
-        // webhook payload's own timestamp (the provider's clock — see
-        // migration 043_messages_received_at.sql, which fixed the same
-        // mismatch for the AI debounce check), while the bot's reply
-        // row always gets `created_at` from our own clock. Any
-        // provider/server clock skew could put the customer message's
-        // created_at AHEAD of the bot reply's, so `gt("created_at", …)`
-        // could wrongly exclude a reply that really was just sent —
-        // received_at doesn't have that problem on either side.
-        let replyQuery = db
-          .from("messages")
-          .select("content_text")
-          .eq("conversation_id", run.conversation_id!)
-          .eq("sender_type", "bot")
-          .order("received_at", { ascending: false })
-          .limit(1);
-        if (incomingMsg?.received_at) {
-          replyQuery = replyQuery.gt("received_at", incomingMsg.received_at);
-        }
-        const { data: lastBotMsg } = await replyQuery.maybeSingle();
-        lastReply =
-          (lastBotMsg as { content_text: string | null } | null)
-            ?.content_text ?? "";
-
-        // Exit-code convention: the AI's system prompt can instruct it
-        // to end a reply with a #TAG keyword (e.g. #NEGOCIACAO) that a
-        // Switch node downstream branches on (subject_key:
-        // "ai_exit_code"). Only overwrite when a tag is actually
-        // found — no match means "still talking", not "clear the
-        // previous exit code" (a later turn without a tag shouldn't
-        // erase a routing decision an earlier turn already made).
-        const exitCodeMatch = lastReply.match(/#[A-Z0-9_]+/);
-        if (exitCodeMatch) {
-          exitCodeFound = exitCodeMatch[0];
-          await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
-        }
-
-        await logEvent(db, run.id, "message_sent", node.node_key, {
-          node_type: "ai_agent",
-          mode: cfg.mode,
-          last_reply: lastReply.slice(-300),
-        });
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
+      const core = await runAiAgentCore(db, run);
+      if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "ai_agent_failed",
-          detail,
+          detail: core.detail,
           exit_reason: "error",
         });
         await endRun(db, run, "failed", "ai_agent_failed", {
           node_key: node.node_key,
           node_type: node.node_type,
-          error_message: detail,
-          err,
+          error_message: core.detail,
+          err: core.err,
           input: inputSnapshot,
           output: {
-            last_reply: lastReply.slice(-300),
-            ai_exit_code: exitCodeFound,
-            model_used: modelUsed,
-            ...(!aiConfigUsable
+            last_reply: core.lastReply.slice(-300),
+            ai_exit_code: core.exitCodeFound,
+            model_used: core.modelUsed,
+            ...(!core.aiConfigUsable
               ? { error_reason: "ai_config_disabled_or_missing" }
               : {}),
           },
@@ -1986,23 +2030,12 @@ export async function advanceFromNodeKey(
         return { outcome: "completed" };
       }
 
-      // Output shared by every ai_agent exit path below — only
-      // `exit_reason`/`turns_used` differ per mode/branch. The two
-      // extra fields below don't fix anything by themselves (per the
-      // investigation, most causes of an empty last_reply are
-      // handleAiAutoResponse returning early with no error at all —
-      // see its own early-return points) — they just make that
-      // diagnosis visible on the node's own event instead of only in
-      // server console logs.
-      const baseOutput = {
+      const { lastReply, exitCodeFound, baseOutput } = core;
+      await logEvent(db, run.id, "message_sent", node.node_key, {
+        node_type: "ai_agent",
+        mode: cfg.mode,
         last_reply: lastReply.slice(-300),
-        ai_exit_code: exitCodeFound,
-        model_used: modelUsed,
-        ...(!aiConfigUsable
-          ? { error_reason: "ai_config_disabled_or_missing" }
-          : {}),
-        ...(lastReply === "" ? { warning: "ai_returned_empty_reply" } : {}),
-      };
+      });
 
       if (cfg.mode === "takeover") {
         await logEvent(db, run.id, "handoff", node.node_key, {
@@ -2227,6 +2260,12 @@ async function handleReplyForActiveRun(
     reply_kind: message.kind,
     reply_id: message.kind === "interactive_reply" ? message.reply_id : null,
     text_length: message.kind === "text" ? message.text.length : null,
+    // For the debug timeline — this event previously only recorded
+    // length, losing the actual content. Not consumed by ai_agent's
+    // own per-turn processing below, which re-reads the customer's
+    // message from `messages` directly (same source runAiAgentCore
+    // uses on the initial-entry path too).
+    reply_text: message.kind === "text" ? message.text : null,
   });
 
   if (!run.current_node_key) {
@@ -2284,6 +2323,128 @@ async function handleReplyForActiveRun(
         message_id: message.message_id,
       };
     }
+  }
+
+  // ai_agent in loop mode suspends parked at itself awaiting the
+  // customer's next reply (see the "loop" branch in
+  // advanceFromNodeKey) — unlike send_buttons/collect_input, it isn't
+  // driven by matching a button id or capturing into a var: every
+  // text reply just feeds another AI turn. Handled here, before the
+  // interactive/collect_input matching below and before the fallback
+  // policy — fallback.ts was designed for unmatched send_buttons/
+  // send_list replies, not for this, and previously a reply parked
+  // here silently fell through to it (reprompt_count incrementing
+  // with nothing actually sent, eventually handing off after
+  // max_reprompts) instead of ever reaching the AI again.
+  if (currentNode.node_type === "ai_agent") {
+    const cfg = currentNode.config as unknown as AiAgentNodeConfig;
+    const core = await runAiAgentCore(db, run);
+    if (!core.ok) {
+      await logEvent(db, run.id, "error", currentNode.node_key, {
+        reason: "ai_agent_failed",
+        detail: core.detail,
+        exit_reason: "error",
+      });
+      await endRun(db, run, "failed", "ai_agent_failed", {
+        node_key: currentNode.node_key,
+        node_type: currentNode.node_type,
+        error_message: core.detail,
+        err: core.err,
+        output: {
+          last_reply: core.lastReply.slice(-300),
+          ai_exit_code: core.exitCodeFound,
+          model_used: core.modelUsed,
+          ...(!core.aiConfigUsable
+            ? { error_reason: "ai_config_disabled_or_missing" }
+            : {}),
+        },
+      });
+      return { consumed: true, flow_run_id: run.id, outcome: "completed" };
+    }
+
+    const { lastReply, exitCodeFound, baseOutput } = core;
+    await logEvent(db, run.id, "message_sent", currentNode.node_key, {
+      node_type: "ai_agent",
+      mode: cfg.mode,
+      last_reply: lastReply.slice(-300),
+    });
+
+    const nodeStartedAt = Date.now();
+    const inputSnapshot: Record<string, unknown> = { ...run.vars };
+    const nodeCompleted = (output: Record<string, unknown> = {}) =>
+      logRunEvent(db, {
+        run_id: run.id,
+        flow_id: run.flow_id,
+        account_id: run.account_id,
+        node_key: currentNode.node_key,
+        node_type: currentNode.node_type,
+        event_type: "node_completed",
+        status: "success",
+        duration_ms: Date.now() - nodeStartedAt,
+        payload: { input: inputSnapshot, output },
+      });
+
+    const maxTurns = cfg.max_turns ?? 20;
+    const priorTurns =
+      typeof run.vars.__ai_turns__ === "number"
+        ? (run.vars.__ai_turns__ as number)
+        : 0;
+    const turns = priorTurns + 1;
+
+    if (exitCodeFound || turns >= maxTurns) {
+      // Same exit condition as the initial-entry branch in
+      // advanceFromNodeKey: a #TAG in the reply, or the turn cap hit.
+      // Reset the counter and hand off to advanceFromNodeKey to walk
+      // the rest of the graph from next_node_key — current_node_key
+      // is already this node, so there's nothing to advance INTO
+      // first (unlike the entry case, which transitions from a prior
+      // node via `continue` in that function's own loop).
+      await updateRunVars(db, run, { __ai_turns__: 0 });
+      const exitReason = exitCodeFound ? "exit_code_detected" : "max_turns";
+      await logEvent(db, run.id, "node_entered", currentNode.node_key, {
+        turns_used: turns,
+        exit_reason: exitCodeFound ? "exit_code_matched" : "limit_reached",
+      });
+      await nodeCompleted({
+        ...baseOutput,
+        turns_used: turns,
+        exit_reason: exitReason,
+      });
+
+      const nextKey = cfg.next_node_key ?? null;
+      if (!nextKey) {
+        await logEvent(db, run.id, "error", null, {
+          reason: "next_node_key was null mid-advance",
+        });
+        await endRun(db, run, "failed", "missing_next_node", {
+          node_key: null,
+          error_message: "next_node_key was null mid-advance",
+        });
+        return { consumed: true, flow_run_id: run.id, outcome: "completed" };
+      }
+      const outcome = await advanceFromNodeKey(db, run, nextKey, nodes);
+      return {
+        consumed: true,
+        flow_run_id: run.id,
+        outcome: outcome.outcome,
+      };
+    }
+
+    // Still under the turn cap — stays parked at this same node
+    // awaiting the next reply. current_node_key already equals this
+    // node's key (that's how we got here), so no advanceCurrentNodeKey
+    // call is needed, unlike the initial-entry branch.
+    await updateRunVars(db, run, { __ai_turns__: turns });
+    await logEvent(db, run.id, "node_entered", currentNode.node_key, {
+      turns_used: turns,
+      exit_reason: "awaiting_reply",
+    });
+    await nodeCompleted({
+      ...baseOutput,
+      turns_used: turns,
+      exit_reason: "awaiting_reply",
+    });
+    return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
   }
 
   // Two ways a reply can advance:
