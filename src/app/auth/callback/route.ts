@@ -1,4 +1,4 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 
@@ -10,19 +10,25 @@ export async function GET(request: Request) {
 
   if (code) {
     const cookieStore = await cookies()
+    // Anon key, not service role — exchangeCodeForSession is an Auth
+    // operation, not a data query, so it doesn't go through RLS and
+    // gains nothing from an elevated key. Same getAll/setAll cookie
+    // adapter as lib/supabase/server.ts, so this route's session
+    // cookies round-trip identically to every other server client in
+    // the app instead of going through the deprecated get/set/remove
+    // shape.
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!, // Usar Service role para evitar problemas de RLS na troca de sessão
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value
+          getAll() {
+            return cookieStore.getAll()
           },
-          set(name: string, value: string, options: CookieOptions) {
-            cookieStore.set({ name, value, ...options })
-          },
-          remove(name: string, options: CookieOptions) {
-            cookieStore.set({ name, value: '', ...options })
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
           },
         },
       }
