@@ -48,6 +48,18 @@ export async function middleware(request: NextRequest) {
 
   let user = null
   let authError = null
+  // True only when calling getUser() itself threw (network blip, timeout
+  // talking to the auth server, etc.) — NOT when Supabase cleanly
+  // returned an error saying the token is invalid/expired. That
+  // distinction matters: an explicit AuthApiError means the session is
+  // genuinely dead and redirecting to /login (clearing the stale
+  // cookie along the way) is correct. An exception here means we don't
+  // actually know the auth state — treating that as "logged out" would
+  // force a login redirect (and cookie churn) on what might just be a
+  // transient hiccup. So only the exception path skips the
+  // authenticated/unauthenticated gates below and lets the request
+  // through untouched.
+  let hadException = false
   try {
     const { data, error } = await supabase.auth.getUser()
     user = data?.user ?? null
@@ -58,6 +70,7 @@ export async function middleware(request: NextRequest) {
       authErrorCode = String((error as any).code ?? (error as any).status ?? '')
     }
   } catch (err: any) {
+    hadException = true
     getUserState = 'error'
     authError = err.message || 'Unknown auth error'
     authErrorName = err.name ?? ''
@@ -88,6 +101,7 @@ export async function middleware(request: NextRequest) {
     response.headers.set('X-Auth-Fx-SetAll-Count', String(setAllCount))
     response.headers.set('X-Auth-Fx-SetAll-Actions', setAllActions.slice(0, 20).join(','))
     response.headers.set('X-Auth-Fx-Next-Url', request.headers.get('next-url') ?? '')
+    response.headers.set('X-Auth-Fx-Exception', hadException ? '1' : '0')
     return response
   }
   // getUser() may still cause the SSR client to write refreshed or cleared
@@ -145,7 +159,7 @@ export async function middleware(request: NextRequest) {
     '/automacoes',
     '/settings',
   ]
-  if (!isAuthenticated && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
+  if (!isAuthenticated && !hadException && protectedPaths.some(path => request.nextUrl.pathname.startsWith(path))) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     
@@ -165,7 +179,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // API routes that need auth (not webhooks)
-  if (!isAuthenticated && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
+  if (!isAuthenticated && !hadException && request.nextUrl.pathname.startsWith('/api/whatsapp/') &&
       !request.nextUrl.pathname.includes('/webhook')) {
     return finalizeAuthFx(withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -174,7 +188,7 @@ export async function middleware(request: NextRequest) {
 
   // Disparador routes need auth too, except /cron which is triggered by an
   // external scheduler authenticating via CRON_SECRET, not a user session.
-  if (!isAuthenticated && request.nextUrl.pathname.startsWith('/api/disparador/') &&
+  if (!isAuthenticated && !hadException && request.nextUrl.pathname.startsWith('/api/disparador/') &&
       !request.nextUrl.pathname.includes('/cron')) {
     return finalizeAuthFx(withRefreshedCookies(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -186,6 +200,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|icon|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|woff|woff2|ttf|otf)$).*)',
   ],
 }
