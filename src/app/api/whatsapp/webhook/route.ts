@@ -659,14 +659,6 @@ async function processMessage(
     console.error('Error updating conversation:', convError)
   }
 
-  // Trigger Sentiment and Auto-Tagging Analysis
-  const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
-  void analyzeConversationSentimentAndTags(accountId, contactRecord.id, conversation.id)
-
-  // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
-  const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
-  void autoTagAcordoRealizado(accountId, contactRecord.id, conversation.id)
-
   // If this contact was a recent broadcast recipient, flag the reply
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
@@ -713,20 +705,35 @@ async function processMessage(
   })
   const flowConsumed = flowResult.consumed
 
-  // Trigger AI Auto Response if the conversation is unassigned (no human
-  // agent is handling it) AND the flow runner didn't already handle this
-  // inbound — mirrors the WAHA webhook's guard (see waha/route.ts). Without
-  // the !flowConsumed check, an account with an active ai_agent flow node
-  // would get handleAiAutoResponse called twice for the same message: once
-  // here, once via dispatchInboundToFlows -> runAiAgentCore -> that same
-  // function — producing two AI replies to a single customer message.
-  if (!flowConsumed && !conversation.assigned_agent_id) {
-    const { handleAiAutoResponse } = await import('@/lib/ai/responder')
-    // Fire-and-forget — but handleAiAutoResponse now throws on an LLM
-    // generation failure (see responder.ts), so this MUST catch or an
-    // unhandled promise rejection would crash the whole process.
-    void handleAiAutoResponse(accountId, contactRecord.id, conversation.id, contentText || '')
-      .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
+  // Trigger AI Auto Response / Sentiment / Auto-Tagging only when the flow
+  // runner didn't already handle this inbound — mirrors the WAHA webhook's
+  // guard (see waha/route.ts:531-555). Without the !flowConsumed check, an
+  // account with an active ai_agent flow node would get handleAiAutoResponse
+  // called twice for the same message: once here, once via
+  // dispatchInboundToFlows -> runAiAgentCore -> that same function —
+  // producing two AI replies to a single customer message. Sentiment/
+  // auto-tagging are grouped in here too so a customer navigating the bot
+  // menu (e.g. tapping "1") doesn't get analyzed as if it were a real
+  // conversational message.
+  if (!flowConsumed) {
+    // Trigger AI Auto Response if the conversation is unassigned (no
+    // human agent is handling it).
+    if (!conversation.assigned_agent_id) {
+      const { handleAiAutoResponse } = await import('@/lib/ai/responder')
+      // Fire-and-forget — but handleAiAutoResponse now throws on an LLM
+      // generation failure (see responder.ts), so this MUST catch or an
+      // unhandled promise rejection would crash the whole process.
+      void handleAiAutoResponse(accountId, contactRecord.id, conversation.id, contentText || '')
+        .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
+    }
+
+    // Trigger Sentiment and Auto-Tagging Analysis
+    const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
+    void analyzeConversationSentimentAndTags(accountId, contactRecord.id, conversation.id)
+
+    // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
+    const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
+    void autoTagAcordoRealizado(accountId, contactRecord.id, conversation.id)
   }
 
   // Fire any automations that react to this webhook event. All dispatches

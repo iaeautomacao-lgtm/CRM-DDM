@@ -201,8 +201,9 @@ export async function handleAiAutoResponse(
   contactId: string,
   conversationId: string,
   incomingText: string,
-  systemPromptOverride?: string
-) {
+  systemPromptOverride?: string,
+  skipDebounce?: boolean
+): Promise<string | null | void> {
   const db = supabaseAdmin();
 
   // 1. Fetch AI Configuration
@@ -219,33 +220,40 @@ export async function handleAiAutoResponse(
   // --- DEBOUNCE E DELAY DE DIGITAÇÃO ---
   // Aguarda 4 segundos antes de prosseguir. Se uma nova mensagem chegar durante esse intervalo,
   // a execução anterior é interrompida porque o histórico de mensagens mudará e haverá um novo gatilho.
-  await new Promise((resolve) => setTimeout(resolve, 4000));
-
-  // Recarrega as últimas mensagens para ver se o cliente enviou algo novo depois do gatilho inicial.
-  // Se a última mensagem não for a que disparou esta execução, encerramos esta chamada para deixar a mais recente responder.
   //
-  // Compara contra received_at (marcado por NOW() no INSERT, isto é,
-  // o relógio do nosso servidor), não created_at (o timestamp que o
-  // WAHA/Meta manda no payload). created_at reflete o relógio do
-  // provedor — qualquer atraso de entrega/fila entre o provedor gerar
-  // aquele timestamp e nosso webhook inserir a linha invalidava essa
-  // conta de tempo decorrido, deixando duas mensagens rápidas do
-  // cliente gerarem duas respostas da IA.
-  const { data: latestCheckMsg } = await db
-    .from("messages")
-    .select("id, content_text, received_at, sender_type")
-    .eq("conversation_id", conversationId)
-    .order("received_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // Skipped when the caller already debounced (the ai_agent flow node —
+  // see debounceAiAgentReply in flows/engine.ts, which serializes replies
+  // per run_id before ever calling in here). Stacking both meant every
+  // flow-driven AI turn paid this 4s twice for no extra protection.
+  if (!skipDebounce) {
+    await new Promise((resolve) => setTimeout(resolve, 4000));
 
-  if (latestCheckMsg && latestCheckMsg.sender_type === "customer") {
-    // Se o cliente mandou mais mensagens, esse webhook antigo cancela para o novo responder com todo o contexto junto.
-    const lastCheckTime = new Date(latestCheckMsg.received_at).getTime();
-    // Adiciona uma tolerância de 500ms para evitar falsos cancelamentos
-    if (Date.now() - lastCheckTime < 3800) {
-      console.log(`[AI Agent] Debounce triggered on conversation ${conversationId}. Cancelling old execution.`);
-      return;
+    // Recarrega as últimas mensagens para ver se o cliente enviou algo novo depois do gatilho inicial.
+    // Se a última mensagem não for a que disparou esta execução, encerramos esta chamada para deixar a mais recente responder.
+    //
+    // Compara contra received_at (marcado por NOW() no INSERT, isto é,
+    // o relógio do nosso servidor), não created_at (o timestamp que o
+    // WAHA/Meta manda no payload). created_at reflete o relógio do
+    // provedor — qualquer atraso de entrega/fila entre o provedor gerar
+    // aquele timestamp e nosso webhook inserir a linha invalidava essa
+    // conta de tempo decorrido, deixando duas mensagens rápidas do
+    // cliente gerarem duas respostas da IA.
+    const { data: latestCheckMsg } = await db
+      .from("messages")
+      .select("id, content_text, received_at, sender_type")
+      .eq("conversation_id", conversationId)
+      .order("received_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestCheckMsg && latestCheckMsg.sender_type === "customer") {
+      // Se o cliente mandou mais mensagens, esse webhook antigo cancela para o novo responder com todo o contexto junto.
+      const lastCheckTime = new Date(latestCheckMsg.received_at).getTime();
+      // Adiciona uma tolerância de 500ms para evitar falsos cancelamentos
+      if (Date.now() - lastCheckTime < 3800) {
+        console.log(`[AI Agent] Debounce triggered on conversation ${conversationId}. Cancelling old execution.`);
+        return;
+      }
     }
   }
 
@@ -898,6 +906,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   generatedText = generatedText.trim();
   if (!generatedText) return;
 
+  // Captured BEFORE the known-tag strip below removes it from the text
+  // that actually gets sent/persisted — this is what the ai_agent flow
+  // node needs back as `ai_exit_code`. Re-reading the saved message and
+  // regex-matching it (the old approach) never found anything, because
+  // by the time it's saved the tag is already gone.
+  const exitTagMatch = generatedText.match(/#[A-Z0-9_]+/);
+  const detectedTag: string | null = exitTagMatch ? exitTagMatch[0] : null;
+
   let payBoletoUrl = "";
   let shouldTransferToHuman = false;
   let hasAgreedAcordo = false;
@@ -1252,6 +1268,8 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       updated_at: new Date().toISOString(),
     })
     .eq("id", conversationId);
+
+  return detectedTag;
 }
 
 async function generateGeminiResponse(

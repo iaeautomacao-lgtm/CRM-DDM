@@ -231,7 +231,26 @@ async function loadActiveRunForContact(
     return null;
   }
   const rows = (data as FlowRunRow[] | null) ?? [];
-  return rows[0] ?? null;
+  const run = rows[0] ?? null;
+  if (!run) return null;
+
+  // A human agent taking over the conversation should silence the flow —
+  // nothing else clears `current_node_key`/`status='active'` on the run
+  // row when that happens (e.g. handleAiAutoResponse's tag-triggered
+  // handoff in responder.ts, or a manual assign from the inbox), so
+  // without this check the engine would keep feeding the customer's
+  // replies to the AI even after a human has been assigned.
+  if (run.conversation_id) {
+    const { data: conv } = await db
+      .from("conversations")
+      .select("assigned_agent_id")
+      .eq("id", run.conversation_id)
+      .maybeSingle();
+    if ((conv as { assigned_agent_id: string | null } | null)?.assigned_agent_id) {
+      return null;
+    }
+  }
+  return run;
 }
 
 async function loadFlow(
@@ -1202,12 +1221,17 @@ async function runAiAgentCore(
       | null;
     const incomingText = incomingMsg?.content_text ?? "";
 
-    await handleAiAutoResponse(
+    // skipDebounce: true — debounceAiAgentReply (handleReplyForActiveRun)
+    // already serializes replies per run_id before this ever runs, so
+    // responder.ts's own 4s sleep-and-recheck would just double the delay
+    // for no extra protection.
+    const detectedTag = await handleAiAutoResponse(
       run.account_id,
       run.contact_id!,
       run.conversation_id!,
       incomingText,
       systemPromptOverride,
+      true,
     );
 
     // Best-effort: read back the bot's reply for the debug timeline.
@@ -1232,10 +1256,14 @@ async function runAiAgentCore(
     // end a reply with a #TAG keyword (e.g. #NEGOCIACAO) that a Switch
     // node downstream branches on (subject_key: "ai_exit_code"). Only
     // overwrite when a tag is actually found — no match means "still
-    // talking," not "clear the previous exit code."
-    const exitCodeMatch = lastReply.match(/#[A-Z0-9_]+/);
-    if (exitCodeMatch) {
-      exitCodeFound = exitCodeMatch[0];
+    // talking," not "clear the previous exit code." Uses the tag
+    // handleAiAutoResponse detected BEFORE stripping it from the text it
+    // sends/persists — re-matching against `lastReply` (the persisted,
+    // already-stripped copy) would never find any of the built-in tags
+    // (#ACORDOFORMALIZADO, #EQUIPEHUMANA, etc.), since those are removed
+    // before the message is saved.
+    if (detectedTag) {
+      exitCodeFound = detectedTag;
       await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
     }
 
