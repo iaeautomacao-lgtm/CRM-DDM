@@ -1144,6 +1144,7 @@ async function endRun(
 async function runAiAgentCore(
   db: AdminClient,
   run: FlowRunRow,
+  systemPromptOverride?: string,
 ): Promise<
   | {
       ok: true;
@@ -1206,6 +1207,7 @@ async function runAiAgentCore(
       run.contact_id!,
       run.conversation_id!,
       incomingText,
+      systemPromptOverride,
     );
 
     // Best-effort: read back the bot's reply for the debug timeline.
@@ -2005,7 +2007,11 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "ai_agent") {
       const cfg = node.config as unknown as AiAgentNodeConfig;
-      const core = await runAiAgentCore(db, run);
+      const core = await runAiAgentCore(
+        db,
+        run,
+        cfg.system_prompt_override || undefined,
+      );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "ai_agent_failed",
@@ -2384,7 +2390,11 @@ async function handleReplyForActiveRun(
       return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
     }
 
-    const core = await runAiAgentCore(db, run);
+    const core = await runAiAgentCore(
+      db,
+      run,
+      cfg.system_prompt_override || undefined,
+    );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
         reason: "ai_agent_failed",

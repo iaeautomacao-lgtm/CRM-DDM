@@ -200,7 +200,8 @@ export async function handleAiAutoResponse(
   accountId: string,
   contactId: string,
   conversationId: string,
-  incomingText: string
+  incomingText: string,
+  systemPromptOverride?: string
 ) {
   const db = supabaseAdmin();
 
@@ -442,7 +443,14 @@ export async function handleAiAutoResponse(
     .select("name, content")
     .eq("account_id", accountId);
 
-  let systemPromptWithKb = aiConfig.system_prompt || `Você é o(a) Aleh, assistente comercial especializado do Grupo DDM.
+  // Node-level override wins over the account's global ai_config prompt,
+  // which in turn wins over the hardcoded Aleh default — but only as the
+  // BASE prompt. Everything below (KB context, CPF/institution injected
+  // blocks) still concatenates onto whichever base was picked.
+  const hasOverride = !!systemPromptOverride && systemPromptOverride.trim() !== "";
+  let systemPromptWithKb = hasOverride
+    ? systemPromptOverride!
+    : aiConfig.system_prompt || `Você é o(a) Aleh, assistente comercial especializado do Grupo DDM.
 Sua missão é atender leads/clientes de forma humana, simpática e focada em SUPORTE.
 
 === SAUDAÇÃO INICIAL (CRÍTICO) ===
