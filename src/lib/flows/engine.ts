@@ -2246,6 +2246,43 @@ export async function dispatchInboundToFlows(
   }
 }
 
+/**
+ * Debounce for ai_agent loop-mode replies. Two customer messages sent
+ * a couple seconds apart (e.g. "segunda via de boleto" then "2") each
+ * arrive as their own webhook call and their own `handleReplyForActiveRun`
+ * invocation — without this, each independently calls `runAiAgentCore`
+ * and the AI answers twice instead of once with the combined context.
+ *
+ * Keyed by run_id: only one pending timer per active run. A reply that
+ * arrives while another is still waiting cancels the earlier timer
+ * (and resolves its promise to `false` immediately, so that older
+ * request doesn't hang for the rest of the window) and restarts the
+ * clock. Only the reply that survives the full window uninterrupted
+ * proceeds — by then `runAiAgentCore` re-reads the latest customer
+ * message from `messages`, so it naturally picks up whatever the
+ * customer sent last, combined turn included.
+ */
+const AI_AGENT_REPLY_DEBOUNCE_MS = 4000;
+const aiAgentReplyDebounceTimers = new Map<
+  string,
+  { timer: ReturnType<typeof setTimeout>; resolve: (proceed: boolean) => void }
+>();
+
+function debounceAiAgentReply(runId: string): Promise<boolean> {
+  const pending = aiAgentReplyDebounceTimers.get(runId);
+  if (pending) {
+    clearTimeout(pending.timer);
+    pending.resolve(false);
+  }
+  return new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => {
+      aiAgentReplyDebounceTimers.delete(runId);
+      resolve(true);
+    }, AI_AGENT_REPLY_DEBOUNCE_MS);
+    aiAgentReplyDebounceTimers.set(runId, { timer, resolve });
+  });
+}
+
 async function handleReplyForActiveRun(
   db: AdminClient,
   run: FlowRunRow,
@@ -2338,6 +2375,15 @@ async function handleReplyForActiveRun(
   // max_reprompts) instead of ever reaching the AI again.
   if (currentNode.node_type === "ai_agent") {
     const cfg = currentNode.config as unknown as AiAgentNodeConfig;
+
+    // Debounce — see debounceAiAgentReply's own comment. If a newer
+    // reply for this run supersedes us before the window elapses, bail
+    // without touching turns/vars/events; the newer call handles it.
+    const shouldProceed = await debounceAiAgentReply(run.id);
+    if (!shouldProceed) {
+      return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
+    }
+
     const core = await runAiAgentCore(db, run);
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {

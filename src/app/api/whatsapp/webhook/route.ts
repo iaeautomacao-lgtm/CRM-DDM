@@ -659,16 +659,6 @@ async function processMessage(
     console.error('Error updating conversation:', convError)
   }
 
-  // Trigger AI Auto Response if the conversation is unassigned (no human agent is handling it)
-  if (!conversation.assigned_agent_id) {
-    const { handleAiAutoResponse } = await import('@/lib/ai/responder')
-    // Fire-and-forget — but handleAiAutoResponse now throws on an LLM
-    // generation failure (see responder.ts), so this MUST catch or an
-    // unhandled promise rejection would crash the whole process.
-    void handleAiAutoResponse(accountId, contactRecord.id, conversation.id, contentText || '')
-      .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
-  }
-
   // Trigger Sentiment and Auto-Tagging Analysis
   const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
   void analyzeConversationSentimentAndTags(accountId, contactRecord.id, conversation.id)
@@ -722,6 +712,22 @@ async function processMessage(
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed
+
+  // Trigger AI Auto Response if the conversation is unassigned (no human
+  // agent is handling it) AND the flow runner didn't already handle this
+  // inbound — mirrors the WAHA webhook's guard (see waha/route.ts). Without
+  // the !flowConsumed check, an account with an active ai_agent flow node
+  // would get handleAiAutoResponse called twice for the same message: once
+  // here, once via dispatchInboundToFlows -> runAiAgentCore -> that same
+  // function — producing two AI replies to a single customer message.
+  if (!flowConsumed && !conversation.assigned_agent_id) {
+    const { handleAiAutoResponse } = await import('@/lib/ai/responder')
+    // Fire-and-forget — but handleAiAutoResponse now throws on an LLM
+    // generation failure (see responder.ts), so this MUST catch or an
+    // unhandled promise rejection would crash the whole process.
+    void handleAiAutoResponse(accountId, contactRecord.id, conversation.id, contentText || '')
+      .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
+  }
 
   // Fire any automations that react to this webhook event. All dispatches
   // run here (not earlier) so the contact, conversation, and inbound
