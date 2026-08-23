@@ -2141,8 +2141,8 @@ export async function advanceFromNodeKey(
         db,
         run,
         cfg.system_prompt_override || undefined,
-        undefined,       // trigger keyword não é input — AI lê do DB e recebe vazio
-        run.started_at,  // exclui trigger e histórico de runs anteriores
+        undefined,                    // sem override — AI lê do DB
+        new Date().toISOString(),     // garante histórico vazio — BEN sempre inicia com saudação
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
