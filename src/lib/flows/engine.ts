@@ -2194,8 +2194,8 @@ export async function advanceFromNodeKey(
         cfg.system_prompt_override
           ? interpolateVars(cfg.system_prompt_override, run.vars ?? {})
           : undefined,
-        undefined,                    // sem override — AI lê do DB
-        new Date().toISOString(),     // garante histórico vazio — BEN sempre inicia com saudação
+        undefined,
+        run.started_at,  // usa início do run — agente vê histórico completo desde o trigger
         undefined,
         cfg.tools,
       );
