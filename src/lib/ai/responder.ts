@@ -973,6 +973,8 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       .trim();
   }
 
+  if (!generatedText) return detectedTag;
+
   if (hasAgreedAcordo && foundCpf) {
     console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${foundCpf}...`);
     try {

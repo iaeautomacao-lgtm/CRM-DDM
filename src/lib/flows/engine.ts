@@ -2885,6 +2885,14 @@ async function startNewRun(
     return { consumed: false, outcome: "no_match" };
   }
   const run = inserted as FlowRunRow;
+
+  if (input.conversationId) {
+    await db
+      .from("conversations")
+      .update({ assigned_agent_id: null })
+      .eq("id", input.conversationId);
+  }
+
   await logEvent(db, run.id, "started", flow.entry_node_id, {
     flow_id: flow.id,
     trigger_type: flow.trigger_type,
