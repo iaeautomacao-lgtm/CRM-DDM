@@ -2191,7 +2191,9 @@ export async function advanceFromNodeKey(
       const core = await runAiAgentCore(
         db,
         run,
-        cfg.system_prompt_override || undefined,
+        cfg.system_prompt_override
+          ? interpolateVars(cfg.system_prompt_override, run.vars ?? {})
+          : undefined,
         undefined,                    // sem override — AI lê do DB
         new Date().toISOString(),     // garante histórico vazio — BEN sempre inicia com saudação
         undefined,
@@ -2603,7 +2605,9 @@ async function handleReplyForActiveRun(
     const core = await runAiAgentCore(
       db,
       run,
-      cfg.system_prompt_override || undefined,
+      cfg.system_prompt_override
+        ? interpolateVars(cfg.system_prompt_override, run.vars ?? {})
+        : undefined,
       undefined,
       run.started_at,  // historyAfter — exclui runs anteriores
       undefined,       // historyBefore — sem corte superior, agente vê histórico completo da run
