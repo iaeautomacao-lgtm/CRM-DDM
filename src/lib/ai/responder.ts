@@ -203,7 +203,8 @@ export async function handleAiAutoResponse(
   incomingText: string,
   systemPromptOverride?: string,
   skipDebounce?: boolean,
-  historyAfter?: string
+  historyAfter?: string,
+  historyBefore?: string
 ): Promise<string | null | void> {
   const db = supabaseAdmin();
 
@@ -266,6 +267,9 @@ export async function handleAiAutoResponse(
 
   if (historyAfter) {
     messagesQuery = messagesQuery.gt("created_at", historyAfter);
+  }
+  if (historyBefore) {
+    messagesQuery = messagesQuery.lt("created_at", historyBefore);
   }
 
   const { data: messages, error: messagesError } = await messagesQuery

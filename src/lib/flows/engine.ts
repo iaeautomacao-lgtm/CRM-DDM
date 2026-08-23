@@ -1247,6 +1247,7 @@ async function runAiAgentCore(
   systemPromptOverride?: string,
   incomingTextOverride?: string,
   historyAfter?: string,
+  historyBefore?: string,
 ): Promise<
   | {
       ok: true;
@@ -1335,6 +1336,7 @@ async function runAiAgentCore(
       systemPromptOverride,
       true, // skipDebounce
       historyAfter,
+      historyBefore,
     );
 
     // Filtra pelo momento imediatamente anterior à chamada da IA —
@@ -2553,6 +2555,7 @@ async function handleReplyForActiveRun(
       cfg.system_prompt_override || undefined,
       undefined,       // incomingText lido do DB — mensagem já persistida pelo webhook
       run.started_at,  // historyAfter — corta histórico de runs anteriores
+      new Date().toISOString(), // historyBefore — corta mensagens de runs futuras
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
