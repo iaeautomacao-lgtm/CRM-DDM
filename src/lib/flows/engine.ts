@@ -348,7 +348,9 @@ async function logRunEvent(
       | "node_completed"
       | "node_error"
       | "run_completed"
-      | "run_error";
+      | "run_error"
+      | "tool_called"
+      | "tool_result";
     status?: "success" | "error" | "skipped" | null;
     payload?: Record<string, unknown>;
     error_message?: string | null;
@@ -1340,6 +1342,41 @@ async function runAiAgentCore(
       historyAfter,
       historyBefore,
       tools,
+      // tool call logging callbacks
+      async (toolName, args) => {
+        await logRunEvent(db, {
+          run_id: run.id,
+          flow_id: run.flow_id,
+          account_id: run.account_id,
+          node_key: run.current_node_key ?? "agente_de_ia",
+          node_type: "ai_agent",
+          event_type: "tool_called",
+          status: "success",
+          duration_ms: 0,
+          payload: {
+            tool_name: toolName,
+            args,
+          },
+        });
+      },
+      async (toolName, result, durationMs) => {
+        // Truncate result to 500 chars for readability in logs
+        const truncated = result.length > 500 ? result.slice(0, 500) + "…" : result;
+        await logRunEvent(db, {
+          run_id: run.id,
+          flow_id: run.flow_id,
+          account_id: run.account_id,
+          node_key: run.current_node_key ?? "agente_de_ia",
+          node_type: "ai_agent",
+          event_type: "tool_result",
+          status: "success",
+          duration_ms: durationMs,
+          payload: {
+            tool_name: toolName,
+            result: truncated,
+          },
+        });
+      },
     );
 
     // Filtra pelo momento imediatamente anterior à chamada da IA —

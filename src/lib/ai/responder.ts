@@ -206,7 +206,9 @@ export async function handleAiAutoResponse(
   skipDebounce?: boolean,
   historyAfter?: string,
   historyBefore?: string,
-  tools?: AiAgentTool[]
+  tools?: AiAgentTool[],
+  onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
+  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>
 ): Promise<string | null | void> {
   const db = supabaseAdmin();
 
@@ -883,7 +885,9 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
           activeKey,
           systemPromptWithKb,
           history,
-          tools
+          tools,
+          onToolCall,
+          onToolResult,
         );
       } else if (aiConfig.api_provider === "claude") {
         generatedText = await generateClaudeResponse(
@@ -1378,6 +1382,8 @@ async function generateOpenAiResponse(
   systemPrompt: string,
   history: any[],
   tools?: AiAgentTool[],
+  onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
+  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
 
@@ -1472,6 +1478,10 @@ async function generateOpenAiResponse(
       let toolResult = "";
 
       if (toolDef) {
+        const toolStartedAt = Date.now();
+        if (onToolCall) {
+          await onToolCall(toolName, toolArgs).catch(() => {});
+        }
         try {
           // Substitute {{param}} placeholders in URL and body
           const interpolate = (str: string) =>
@@ -1492,9 +1502,17 @@ async function generateOpenAiResponse(
             ...(resolvedBody ? { body: resolvedBody } : {}),
           });
           const httpText = await httpRes.text();
+          const toolDurationMs = Date.now() - toolStartedAt;
+          if (onToolResult) {
+            await onToolResult(toolName, httpText, toolDurationMs).catch(() => {});
+          }
           toolResult = httpText;
         } catch (err) {
           toolResult = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+          const toolDurationMs = Date.now() - toolStartedAt;
+          if (onToolResult) {
+            await onToolResult(toolName, toolResult, toolDurationMs).catch(() => {});
+          }
         }
       } else {
         toolResult = JSON.stringify({ error: `Tool "${toolName}" not found in node config` });
