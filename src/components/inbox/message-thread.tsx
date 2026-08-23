@@ -664,6 +664,24 @@ export function MessageThread({
       const supabase = createClient();
       await supabase.from("conversations").update(updates).eq("id", conversation.id);
 
+      // Closing/tabulating is the strongest "stop the automated flow"
+      // signal there is — best-effort, mustn't block the status change
+      // that already committed above.
+      if (status === "closed") {
+        try {
+          await apiFetch("/api/flows/end-run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              conversation_id: conversation.id,
+              reason: "conversation_closed",
+            }),
+          });
+        } catch (err) {
+          console.error("[handleStatusChange] end-run failed:", err);
+        }
+      }
+
       onStatusChange(conversation.id, status, outcomeTag);
     },
     [conversation, onStatusChange]

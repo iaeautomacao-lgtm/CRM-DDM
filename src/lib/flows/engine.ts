@@ -1145,6 +1145,45 @@ async function endRun(
 }
 
 /**
+ * Ends the active flow run for a conversation, if one exists — for
+ * callers outside the webhook dispatch path (inbox/monitoramento close
+ * actions, the `close_conversation` automation step) that need to stop
+ * an automated flow from continuing to process a conversation a human
+ * just wrapped up. A no-op (not an error) when there's no active run —
+ * every call site here is a best-effort side effect of closing, not a
+ * precondition for it.
+ *
+ * `status: 'completed'` — `flow_runs.status` has no 'ended' value (see
+ * FlowRunRow in types.ts); 'completed' is the closest first-class
+ * terminal status for "run finished normally," which fits a human
+ * resolving/tabulating the conversation better than 'failed'/'error'.
+ */
+export async function endActiveRunForConversation(
+  conversationId: string,
+  reason: string,
+): Promise<void> {
+  const db = supabaseAdmin();
+  const { data, error } = await db
+    .from("flow_runs")
+    .select("id, flow_id, account_id")
+    .eq("conversation_id", conversationId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[flows] endActiveRunForConversation lookup error:", error.message);
+    return;
+  }
+  if (!data) return;
+  await endRun(
+    db,
+    data as Pick<FlowRunRow, "id" | "flow_id" | "account_id">,
+    "completed",
+    reason,
+  );
+}
+
+/**
  * Shared core of an ai_agent node's per-turn logic: reads the AI
  * config, calls handleAiAutoResponse with the conversation's last
  * customer message, reads back the bot's reply (scoped by

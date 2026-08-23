@@ -18,6 +18,7 @@ import type {
 import { supabaseAdmin } from './admin-client'
 import { engineSendText, engineSendTemplate } from './meta-send'
 import { DEFAULT_CURRENCY } from '@/lib/currency'
+import { endActiveRunForConversation } from '@/lib/flows/engine'
 
 // ------------------------------------------------------------
 // Public API
@@ -578,6 +579,19 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         })
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId)
+
+      // Best-effort — stop the flow engine from continuing to process a
+      // conversation this automation just closed. Resolve the same way
+      // send-type steps do (webhook-provided id, falling back to the
+      // contact's conversation) rather than failing the whole close over
+      // a lookup miss.
+      try {
+        const conversationId = await resolveConversationId(args)
+        await endActiveRunForConversation(conversationId, 'conversation_closed')
+      } catch (err) {
+        console.warn('[automations] close_conversation: could not resolve conversation to end its flow run', err)
+      }
+
       return 'conversation closed'
     }
 
