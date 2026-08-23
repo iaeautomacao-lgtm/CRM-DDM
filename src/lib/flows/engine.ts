@@ -2604,9 +2604,9 @@ async function handleReplyForActiveRun(
       db,
       run,
       cfg.system_prompt_override || undefined,
-      undefined,       // incomingText lido do DB — mensagem já persistida pelo webhook
-      run.started_at,  // historyAfter — corta histórico de runs anteriores
-      new Date().toISOString(), // historyBefore — corta mensagens de runs futuras
+      undefined,
+      run.started_at,  // historyAfter — exclui runs anteriores
+      undefined,       // historyBefore — sem corte superior, agente vê histórico completo da run
       cfg.tools,
     );
     if (!core.ok) {
