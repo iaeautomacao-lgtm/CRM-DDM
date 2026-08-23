@@ -375,6 +375,29 @@ export interface AiAgentNodeConfig {
   next_node_key?: string;
   /** Safety cap for `loop` mode. Defaults to 20 when unset. */
   max_turns?: number;
+  tools?: AiAgentTool[]; // ← novo campo
+}
+
+export interface AiAgentToolParameter {
+  type: string;
+  description: string;
+  enum?: string[];
+}
+
+export interface AiAgentTool {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, AiAgentToolParameter>;
+    required?: string[];
+  };
+  http: {
+    url: string;
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    headers?: Record<string, string>;
+    body?: string; // JSON template com {{param}} placeholders
+  };
 }
 
 /**

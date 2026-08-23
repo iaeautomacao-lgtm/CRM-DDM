@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { AiAgentTool } from "@/lib/flows/types";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
 import { sendWahaTextMessage, sendWahaMediaMessage } from "@/lib/whatsapp/waha-api";
@@ -204,7 +205,8 @@ export async function handleAiAutoResponse(
   systemPromptOverride?: string,
   skipDebounce?: boolean,
   historyAfter?: string,
-  historyBefore?: string
+  historyBefore?: string,
+  tools?: AiAgentTool[]
 ): Promise<string | null | void> {
   const db = supabaseAdmin();
 
@@ -880,7 +882,8 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         generatedText = await generateOpenAiResponse(
           activeKey,
           systemPromptWithKb,
-          history
+          history,
+          tools
         );
       } else if (aiConfig.api_provider === "claude") {
         generatedText = await generateClaudeResponse(
@@ -1371,19 +1374,18 @@ async function generateGeminiResponse(
 async function generateOpenAiResponse(
   apiKey: string,
   systemPrompt: string,
-  history: any[]
+  history: any[],
+  tools?: AiAgentTool[],
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
-  const messages = [];
 
+  // Build base messages array
+  const baseMessages: any[] = [];
   if (systemPrompt) {
-    messages.push({ role: "system", content: systemPrompt });
+    baseMessages.push({ role: "system", content: systemPrompt });
   }
-
   for (const msg of history) {
     const isCustomer = msg.sender_type === "customer";
-    
-    // Multi-modal image handler
     if (msg.content_type === "image" && msg.media_url) {
       let fetchUrl = msg.media_url;
       if (!fetchUrl.startsWith("http")) {
@@ -1394,52 +1396,118 @@ async function generateOpenAiResponse(
         ).storage.from("chat-media").getPublicUrl(fetchUrl);
         fetchUrl = publicUrlData.publicUrl;
       }
-
-      // Tratamento preventivo: Se for WebP ou falhar no download do bucket público, enviamos apenas o texto para evitar erro 400 da OpenAI
       const isWebp = fetchUrl.toLowerCase().includes(".webp");
       if (isWebp) {
-        messages.push({
-          role: isCustomer ? "user" : "assistant",
-          content: msg.content_text || "[Imagem enviada]"
-        });
+        baseMessages.push({ role: isCustomer ? "user" : "assistant", content: msg.content_text || "[Imagem enviada]" });
       } else {
-        messages.push({
+        baseMessages.push({
           role: isCustomer ? "user" : "assistant",
           content: [
             { type: "text", text: msg.content_text || "O que está nesta imagem?" },
-            { type: "image_url", image_url: { url: fetchUrl } }
-          ]
+            { type: "image_url", image_url: { url: fetchUrl } },
+          ],
         });
       }
     } else {
-      messages.push({
-        role: isCustomer ? "user" : "assistant",
-        content: msg.content_text || "",
-      });
+      baseMessages.push({ role: isCustomer ? "user" : "assistant", content: msg.content_text || "" });
     }
   }
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  // Tool calling loop (max 5 iterations to prevent infinite loops)
+  const messages = [...baseMessages];
+  const openAiTools = tools?.length
+    ? tools.map((t) => ({
+        type: "function" as const,
+        function: {
+          name: t.name,
+          description: t.description,
+          parameters: t.parameters,
+        },
+      }))
+    : undefined;
+
+  for (let iteration = 0; iteration < 5; iteration++) {
+    const body: any = {
       model: "gpt-4o-mini",
       messages,
       temperature: 0.7,
       max_tokens: 1000,
-    }),
-  });
+    };
+    if (openAiTools?.length) {
+      body.tools = openAiTools;
+      body.tool_choice = "auto";
+    }
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+    }
+
+    const data = await response.json();
+    const choice = data?.choices?.[0];
+    const message = choice?.message;
+
+    // No tool calls — final text response
+    if (!message?.tool_calls?.length) {
+      return message?.content || "";
+    }
+
+    // Has tool calls — execute each and feed results back
+    messages.push({ role: "assistant", content: message.content || null, tool_calls: message.tool_calls });
+
+    for (const toolCall of message.tool_calls) {
+      const toolName = toolCall.function?.name;
+      const toolArgs = (() => {
+        try { return JSON.parse(toolCall.function?.arguments || "{}"); } catch { return {}; }
+      })();
+
+      const toolDef = tools?.find((t) => t.name === toolName);
+      let toolResult = "";
+
+      if (toolDef) {
+        try {
+          // Substitute {{param}} placeholders in URL and body
+          const interpolate = (str: string) =>
+            str.replace(/\{\{(\w+)\}\}/g, (_, key) =>
+              toolArgs[key] !== undefined ? String(toolArgs[key]) : ""
+            );
+
+          const resolvedUrl = interpolate(toolDef.http.url);
+          const resolvedBody = toolDef.http.body ? interpolate(toolDef.http.body) : undefined;
+          const resolvedHeaders: Record<string, string> = {};
+          for (const [k, v] of Object.entries(toolDef.http.headers || {})) {
+            resolvedHeaders[k] = interpolate(v);
+          }
+
+          const httpRes = await fetch(resolvedUrl, {
+            method: toolDef.http.method,
+            headers: { "Content-Type": "application/json", ...resolvedHeaders },
+            ...(resolvedBody ? { body: resolvedBody } : {}),
+          });
+          const httpText = await httpRes.text();
+          toolResult = httpText;
+        } catch (err) {
+          toolResult = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+        }
+      } else {
+        toolResult = JSON.stringify({ error: `Tool "${toolName}" not found in node config` });
+      }
+
+      messages.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        content: toolResult,
+      });
+    }
+    // Loop back to get GPT's response after tool results
   }
 
-  const data = await response.json();
-  return data?.choices?.[0]?.message?.content || "";
+  return ""; // Fallback if max iterations reached
 }
 
 async function generateClaudeResponse(

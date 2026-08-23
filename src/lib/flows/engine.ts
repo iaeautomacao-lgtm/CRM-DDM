@@ -51,6 +51,7 @@ import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
   type AddNoteNodeConfig,
   type AiAgentNodeConfig,
+  type AiAgentTool,
   type AnchorNodeConfig,
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
@@ -1248,6 +1249,7 @@ async function runAiAgentCore(
   incomingTextOverride?: string,
   historyAfter?: string,
   historyBefore?: string,
+  tools?: AiAgentTool[],
 ): Promise<
   | {
       ok: true;
@@ -1337,6 +1339,7 @@ async function runAiAgentCore(
       true, // skipDebounce
       historyAfter,
       historyBefore,
+      tools,
     );
 
     // Filtra pelo momento imediatamente anterior à chamada da IA —
@@ -2145,6 +2148,8 @@ export async function advanceFromNodeKey(
         cfg.system_prompt_override || undefined,
         undefined,                    // sem override — AI lê do DB
         new Date().toISOString(),     // garante histórico vazio — BEN sempre inicia com saudação
+        undefined,
+        cfg.tools,
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
@@ -2556,6 +2561,7 @@ async function handleReplyForActiveRun(
       undefined,       // incomingText lido do DB — mensagem já persistida pelo webhook
       run.started_at,  // historyAfter — corta histórico de runs anteriores
       new Date().toISOString(), // historyBefore — corta mensagens de runs futuras
+      cfg.tools,
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
