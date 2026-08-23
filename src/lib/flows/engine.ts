@@ -1404,6 +1404,7 @@ export async function advanceFromNodeKey(
   run: FlowRunRow,
   startNodeKey: string,
   nodes: Map<string, FlowNodeRow>,
+  triggerMessage?: ParsedInbound,
 ): Promise<{ outcome: "advanced" | "completed" | "handed_off" | "transferred" }> {
   let currentKey: string | null = startNodeKey;
   // Defensive cap — if a flow has a cycle (which the validator
@@ -2136,16 +2137,12 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "ai_agent") {
       const cfg = node.config as unknown as AiAgentNodeConfig;
-      const triggerHistoryAfter = new Date(
-        Date.parse(run.started_at) - 30_000
-      ).toISOString();
-
       const core = await runAiAgentCore(
         db,
         run,
         cfg.system_prompt_override || undefined,
-        undefined,           // incomingTextOverride — lê do DB normalmente
-        triggerHistoryAfter, // historyAfter com margem de 30s
+        triggerMessage?.kind === "text" ? triggerMessage.text : undefined,
+        triggerMessage ? run.started_at : undefined,
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
@@ -2910,7 +2907,7 @@ async function startNewRun(
   }
 
   // Run the advance loop starting from the entry node.
-  const outcome = await advanceFromNodeKey(db, run, flow.entry_node_id!, nodes);
+  const outcome = await advanceFromNodeKey(db, run, flow.entry_node_id!, nodes, input.message);
   return {
     consumed: true,
     flow_run_id: run.id,
