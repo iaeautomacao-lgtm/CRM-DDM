@@ -2551,8 +2551,8 @@ async function handleReplyForActiveRun(
       db,
       run,
       cfg.system_prompt_override || undefined,
-      message.kind === "text" ? message.text : undefined,
-      run.started_at,
+      undefined,       // incomingText lido do DB — mensagem já persistida pelo webhook
+      run.started_at,  // historyAfter — corta histórico de runs anteriores
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
