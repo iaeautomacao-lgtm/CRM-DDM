@@ -1325,6 +1325,8 @@ async function runAiAgentCore(
     // already serializes replies per run_id before this ever runs, so
     // responder.ts's own 4s sleep-and-recheck would just double the delay
     // for no extra protection.
+    const beforeAiCall = new Date().toISOString();
+
     const detectedTag = await handleAiAutoResponse(
       run.account_id,
       run.contact_id!,
@@ -1335,20 +1337,18 @@ async function runAiAgentCore(
       historyAfter,
     );
 
-    // Best-effort: read back the bot's reply for the debug timeline.
-    // Scoped to AFTER the customer message that triggered this turn
-    // via `received_at` on both sides of the comparison.
-    let replyQuery = db
+    // Filtra pelo momento imediatamente anterior à chamada da IA —
+    // garante que pegamos apenas a mensagem recém-enviada, ignorando
+    // bot messages de runs anteriores que possam ter timestamps mais recentes.
+    const { data: lastBotMsg } = await db
       .from("messages")
       .select("content_text")
       .eq("conversation_id", run.conversation_id!)
       .eq("sender_type", "bot")
+      .gt("received_at", beforeAiCall)
       .order("received_at", { ascending: false })
-      .limit(1);
-    if (incomingMsg?.received_at) {
-      replyQuery = replyQuery.gt("received_at", incomingMsg.received_at);
-    }
-    const { data: lastBotMsg } = await replyQuery.maybeSingle();
+      .limit(1)
+      .maybeSingle();
     lastReply =
       (lastBotMsg as { content_text: string | null } | null)?.content_text ??
       "";
