@@ -2136,10 +2136,16 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "ai_agent") {
       const cfg = node.config as unknown as AiAgentNodeConfig;
+      const triggerHistoryAfter = new Date(
+        Date.parse(run.started_at) - 30_000
+      ).toISOString();
+
       const core = await runAiAgentCore(
         db,
         run,
         cfg.system_prompt_override || undefined,
+        undefined,           // incomingTextOverride — lê do DB normalmente
+        triggerHistoryAfter, // historyAfter com margem de 30s
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
