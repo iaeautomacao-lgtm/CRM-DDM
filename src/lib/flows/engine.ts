@@ -1174,10 +1174,52 @@ export async function endActiveRunForConversation(
     console.error("[flows] endActiveRunForConversation lookup error:", error.message);
     return;
   }
-  if (!data) return;
+  if (data) {
+    await endRun(
+      db,
+      data as Pick<FlowRunRow, "id" | "flow_id" | "account_id">,
+      "completed",
+      reason,
+    );
+    return;
+  }
+
+  // Fallback — a contact can have more than one conversation (e.g. two
+  // WAHA lines), but only one active run per (account_id, contact_id).
+  // If that run's conversation_id doesn't match the one being closed
+  // (started on a different conversation than the one the agent is
+  // wrapping up now, or already nulled out by a `conversations`/
+  // `contacts` ON DELETE SET NULL elsewhere), resolve via the contact
+  // instead. Best-effort: if the conversation row itself is gone (the
+  // delete that orphaned the run also deleted it), there's nothing left
+  // to resolve from and this quietly no-ops, same as the primary lookup.
+  const { data: conv, error: convError } = await db
+    .from("conversations")
+    .select("contact_id, account_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+  if (convError) {
+    console.error("[flows] endActiveRunForConversation conversation lookup error:", convError.message);
+    return;
+  }
+  if (!conv?.contact_id) return;
+
+  const { data: fallbackRun, error: fallbackError } = await db
+    .from("flow_runs")
+    .select("id, flow_id, account_id")
+    .eq("account_id", conv.account_id)
+    .eq("contact_id", conv.contact_id)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+  if (fallbackError) {
+    console.error("[flows] endActiveRunForConversation fallback lookup error:", fallbackError.message);
+    return;
+  }
+  if (!fallbackRun) return;
   await endRun(
     db,
-    data as Pick<FlowRunRow, "id" | "flow_id" | "account_id">,
+    fallbackRun as Pick<FlowRunRow, "id" | "flow_id" | "account_id">,
     "completed",
     reason,
   );
@@ -2145,7 +2187,7 @@ export async function advanceFromNodeKey(
           // ai_exit_code instead of the loop suspending for another
           // customer reply that will never come.
           await updateRunVars(db, run, { __ai_turns__: 0 });
-          currentKey = cfg.next_node_key ?? null;
+          const nextKey = cfg.next_node_key ?? null;
           const exitReason = exitCodeFound ? "exit_code_detected" : "max_turns";
           await logEvent(db, run.id, "node_entered", node.node_key, {
             turns_used: turns,
@@ -2156,6 +2198,31 @@ export async function advanceFromNodeKey(
             turns_used: turns,
             exit_reason: exitReason,
           });
+
+          if (nextKey && nodes.get(nextKey)?.node_type === "ai_agent") {
+            // Don't chain straight into another ai_agent node's turn
+            // with the SAME customer message that just closed this one
+            // out — runAiAgentCore always reads "the last customer
+            // message," which hasn't changed yet, so an immediate
+            // continue here would process it twice and send two real
+            // replies for one customer message. Park at the next node
+            // instead and let the customer's actual next reply drive it
+            // via handleReplyForActiveRun's (debounced) ai_agent branch.
+            const advanced = await advanceCurrentNodeKey(
+              db,
+              run.id,
+              run.current_node_key,
+              nextKey,
+            );
+            if (!advanced) {
+              await logEvent(db, run.id, "error", node.node_key, {
+                reason: "lost_race_during_advance",
+              });
+            }
+            return { outcome: "advanced" };
+          }
+
+          currentKey = nextKey;
           continue;
         }
         await updateRunVars(db, run, { __ai_turns__: turns });
@@ -2545,6 +2612,27 @@ async function handleReplyForActiveRun(
         });
         return { consumed: true, flow_run_id: run.id, outcome: "completed" };
       }
+
+      if (nodes.get(nextKey)?.node_type === "ai_agent") {
+        // Same guard as advanceFromNodeKey's own loop-mode exit branch
+        // — don't hand this straight to advanceFromNodeKey, which would
+        // immediately run the next ai_agent node's own turn against the
+        // SAME customer message that just closed this node out. Park
+        // there instead and let the customer's actual next reply drive it.
+        const advanced = await advanceCurrentNodeKey(
+          db,
+          run.id,
+          run.current_node_key,
+          nextKey,
+        );
+        if (!advanced) {
+          await logEvent(db, run.id, "error", currentNode.node_key, {
+            reason: "lost_race_during_advance",
+          });
+        }
+        return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
+      }
+
       const outcome = await advanceFromNodeKey(db, run, nextKey, nodes);
       return {
         consumed: true,
