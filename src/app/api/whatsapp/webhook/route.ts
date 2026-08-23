@@ -644,15 +644,25 @@ async function processMessage(
     return
   }
 
-  // Update conversation
+  // Update conversation. This function only ever handles an inbound
+  // message (Meta doesn't echo the account's own outbound sends back
+  // through this webhook the way WAHA does), so a customer replying to
+  // a closed/tabulated conversation always means "reopen it" — surface
+  // it back in the working queues (conversation-list.tsx's default
+  // "Todos" view never shows status='closed') instead of leaving it
+  // stuck in "Fechados" with an unread message no one is watching.
+  const convUpdates: Record<string, unknown> = {
+    last_message_text: contentText || `[${message.type}]`,
+    last_message_at: new Date().toISOString(),
+    unread_count: (conversation.unread_count || 0) + 1,
+    updated_at: new Date().toISOString(),
+  }
+  if (conversation.status === 'closed') {
+    convUpdates.status = 'pending'
+  }
   const { error: convError } = await supabaseAdmin()
     .from('conversations')
-    .update({
-      last_message_text: contentText || `[${message.type}]`,
-      last_message_at: new Date().toISOString(),
-      unread_count: (conversation.unread_count || 0) + 1,
-      updated_at: new Date().toISOString(),
-    })
+    .update(convUpdates)
     .eq('id', conversation.id)
 
   if (convError) {

@@ -269,7 +269,7 @@ export async function POST(request: Request) {
       let conversationId: string | null = null
       const { data: convsList, error: convFetchError } = await db
         .from('conversations')
-        .select('id, unread_count, assigned_agent_id')
+        .select('id, status, unread_count, assigned_agent_id')
         .eq('account_id', accountId)
         .eq('contact_id', contactId!)
         .eq('waha_session', session)
@@ -482,6 +482,15 @@ export async function POST(request: Request) {
 
       if (direction === 'inbound') {
         updates.unread_count = (conversation?.unread_count || 0) + 1
+
+        // A customer replying to a closed/tabulated conversation is a
+        // fresh contact, not a continuation of the resolved one — surface
+        // it back in the working queues (conversation-list.tsx's default
+        // "Todos" view never shows status='closed') instead of leaving it
+        // stuck in "Fechados" with an unread message no one is watching.
+        if (conversation?.status === 'closed') {
+          updates.status = 'pending'
+        }
       }
 
       const { error: convUpdateError } = await db
