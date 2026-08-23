@@ -1245,6 +1245,7 @@ async function runAiAgentCore(
   db: AdminClient,
   run: FlowRunRow,
   systemPromptOverride?: string,
+  incomingTextOverride?: string,
 ): Promise<
   | {
       ok: true;
@@ -1289,18 +1290,35 @@ async function runAiAgentCore(
 
     // Last customer message is the AI's input — same "what does the
     // customer want answered" the standalone auto-responder uses.
-    const { data: lastCustomerMsg } = await db
-      .from("messages")
-      .select("content_text, received_at")
-      .eq("conversation_id", run.conversation_id!)
-      .eq("sender_type", "customer")
-      .order("received_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const incomingMsg = lastCustomerMsg as
-      | { content_text: string | null; received_at: string }
-      | null;
-    const incomingText = incomingMsg?.content_text ?? "";
+    let incomingText: string;
+    let incomingMsg: { content_text: string | null; received_at: string } | null = null;
+
+    if (incomingTextOverride !== undefined && incomingTextOverride !== "") {
+      // Mensagem já disponível no caller — evita race condition de leitura do banco
+      incomingText = incomingTextOverride;
+      // Ainda precisamos do received_at para filtrar a query do bot depois
+      const { data: msgRow } = await db
+        .from("messages")
+        .select("content_text, received_at")
+        .eq("conversation_id", run.conversation_id!)
+        .eq("sender_type", "customer")
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      incomingMsg = msgRow as { content_text: string | null; received_at: string } | null;
+    } else {
+      // Trigger inicial: busca normalmente do banco
+      const { data: lastCustomerMsg } = await db
+        .from("messages")
+        .select("content_text, received_at")
+        .eq("conversation_id", run.conversation_id!)
+        .eq("sender_type", "customer")
+        .order("received_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      incomingMsg = lastCustomerMsg as { content_text: string | null; received_at: string } | null;
+      incomingText = incomingMsg?.content_text ?? "";
+    }
 
     // skipDebounce: true — debounceAiAgentReply (handleReplyForActiveRun)
     // already serializes replies per run_id before this ever runs, so
@@ -2528,6 +2546,7 @@ async function handleReplyForActiveRun(
       db,
       run,
       cfg.system_prompt_override || undefined,
+      message.kind === "text" ? message.text : undefined,
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
