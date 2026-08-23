@@ -268,10 +268,10 @@ export async function handleAiAutoResponse(
     .eq("conversation_id", conversationId);
 
   if (historyAfter) {
-    messagesQuery = messagesQuery.gt("created_at", historyAfter);
+    messagesQuery = messagesQuery.gt("received_at", historyAfter);
   }
   if (historyBefore) {
-    messagesQuery = messagesQuery.lt("created_at", historyBefore);
+    messagesQuery = messagesQuery.lt("received_at", historyBefore);
   }
 
   const { data: messages, error: messagesError } = await messagesQuery
