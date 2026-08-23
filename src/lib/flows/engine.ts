@@ -1246,6 +1246,7 @@ async function runAiAgentCore(
   run: FlowRunRow,
   systemPromptOverride?: string,
   incomingTextOverride?: string,
+  historyAfter?: string,
 ): Promise<
   | {
       ok: true;
@@ -1331,7 +1332,7 @@ async function runAiAgentCore(
       incomingText,
       systemPromptOverride,
       true, // skipDebounce
-      run.started_at ?? undefined,
+      historyAfter,
     );
 
     // Best-effort: read back the bot's reply for the debug timeline.
@@ -2548,6 +2549,7 @@ async function handleReplyForActiveRun(
       run,
       cfg.system_prompt_override || undefined,
       message.kind === "text" ? message.text : undefined,
+      run.started_at,
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
