@@ -2179,6 +2179,15 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "ai_agent") {
       const cfg = node.config as unknown as AiAgentNodeConfig;
+
+      // Limpa assigned_agent_id para que replies do cliente cheguem ao agente
+      if (run.conversation_id) {
+        await db
+          .from("conversations")
+          .update({ assigned_agent_id: null })
+          .eq("id", run.conversation_id);
+      }
+
       const core = await runAiAgentCore(
         db,
         run,
