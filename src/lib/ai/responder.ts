@@ -202,7 +202,8 @@ export async function handleAiAutoResponse(
   conversationId: string,
   incomingText: string,
   systemPromptOverride?: string,
-  skipDebounce?: boolean
+  skipDebounce?: boolean,
+  historyAfter?: string
 ): Promise<string | null | void> {
   const db = supabaseAdmin();
 
@@ -258,10 +259,16 @@ export async function handleAiAutoResponse(
   }
 
   // 2. Load recent conversation history (last 10 messages)
-  const { data: messages, error: messagesError } = await db
+  let messagesQuery = db
     .from("messages")
     .select("id, content_text, content_type, media_url, created_at, sender_type")
-    .eq("conversation_id", conversationId)
+    .eq("conversation_id", conversationId);
+
+  if (historyAfter) {
+    messagesQuery = messagesQuery.gt("created_at", historyAfter);
+  }
+
+  const { data: messages, error: messagesError } = await messagesQuery
     .order("created_at", { ascending: false })
     .limit(10);
 

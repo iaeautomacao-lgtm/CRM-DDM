@@ -1330,7 +1330,8 @@ async function runAiAgentCore(
       run.conversation_id!,
       incomingText,
       systemPromptOverride,
-      true,
+      true, // skipDebounce
+      run.started_at ?? undefined,
     );
 
     // Best-effort: read back the bot's reply for the debug timeline.
