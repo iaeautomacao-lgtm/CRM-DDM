@@ -363,7 +363,7 @@ export function MessageThread({
         .from("messages")
         .select("*")
         .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true });
+        .order("received_at", { ascending: true });
 
       if (cancelled) return;
 
