@@ -2442,6 +2442,25 @@ export async function dispatchInboundToFlows(
       return handleReplyForActiveRun(db, activeRun, input.message, nodes);
     }
 
+    // No active run — but the conversation may still already be in human
+    // hands (assigned_agent_id set, or status='pending' from a handoff/
+    // fallback that ended the previous run) without a fresh run existing
+    // yet to gate it via loadActiveRunForContact's own check. Don't let a
+    // trigger word start a brand-new bot run out from under a human who's
+    // already handling this conversation.
+    if (input.conversationId) {
+      const { data: conv } = await db
+        .from("conversations")
+        .select("assigned_agent_id, status")
+        .eq("id", input.conversationId)
+        .maybeSingle();
+      const convRow = conv as { assigned_agent_id: string | null; status: string } | null;
+      if (convRow?.assigned_agent_id != null || convRow?.status === "pending") {
+        console.log("[engine] Conversa em atendimento humano, ignorando trigger de fluxo");
+        return { consumed: false, outcome: "no_match" };
+      }
+    }
+
     // No active run → look for a flow whose entry trigger matches.
     const flow = await findEntryFlow(
       db,
