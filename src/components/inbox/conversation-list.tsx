@@ -482,6 +482,7 @@ function ConversationItem({
   isActive,
   onSelect,
 }: ConversationItemProps) {
+  const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Desconhecido";
   const initials = displayName.charAt(0).toUpperCase();
@@ -574,4 +575,5 @@ function ConversationItem({
     </button>
   );
 }
+
 
