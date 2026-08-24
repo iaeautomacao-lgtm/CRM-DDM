@@ -31,7 +31,9 @@ export async function GET(request: Request) {
       waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
     }
 
-    const avatarUrl = await getWahaProfilePicture(wahaConfig, phone)
+    // Normaliza o telefone removendo + e espaços
+    const normalizedPhone = phone.replace(/^\+/, "").replace(/\s/g, "")
+    const avatarUrl = await getWahaProfilePicture(wahaConfig, normalizedPhone)
 
     if (!avatarUrl) {
       return new NextResponse(null, { status: 404 })
@@ -56,3 +58,4 @@ export async function GET(request: Request) {
     return new NextResponse(null, { status: 500 })
   }
 }
+
