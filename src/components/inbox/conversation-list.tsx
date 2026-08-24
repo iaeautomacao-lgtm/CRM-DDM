@@ -1,6 +1,7 @@
-"use client";
+﻿"use client";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { useAuth } from "@/hooks/use-auth";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -25,7 +26,7 @@ interface ConversationListProps {
   onConversationsLoaded: (conversations: Conversation[]) => void;
   /**
    * Increment to force the fetch effect below to refire. The parent
-   * bumps this on realtime reconnect / tab visibility → visible so the
+   * bumps this on realtime reconnect / tab visibility â†’ visible so the
    * list catches up on any events sent while the WS was disconnected
    * or the tab was throttled. Optional so existing callers keep working.
    */
@@ -41,19 +42,19 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
 // "open"/"pending" used to be selectable filters; they're now the two
 // fixed visual sections ("Em Atendimento" / "Em Espera") the default
 // "all" view groups conversations into, so they're no longer options
-// here. "closed" stays a real filter — closed conversations never
+// here. "closed" stays a real filter â€” closed conversations never
 // appear in the grouped view, this is the only way to see them.
 type InboxFilter = "all" | "unread" | "closed";
 
 const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = [
   { label: "Todos", value: "all" },
-  { label: "Não lidos", value: "unread" },
+  { label: "NÃ£o lidos", value: "unread" },
   { label: "Fechados", value: "closed" },
 ];
 
 // Persisted independently per section so collapsing one doesn't touch
 // the other. Same "default true, reconcile from localStorage after
-// mount" pattern as inbox/page.tsx's contactPanelOpen — reading a
+// mount" pattern as inbox/page.tsx's contactPanelOpen â€” reading a
 // stored `false` synchronously in the initializer would produce a
 // hydration mismatch against the server-rendered `true`.
 const SECTION_STORAGE_KEY = {
@@ -68,13 +69,14 @@ export function ConversationList({
   onConversationsLoaded,
   resyncToken = 0,
 }: ConversationListProps) {
+  const { accountId } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [selectedLine, setSelectedLine] = useState<string>("all");
   const [configs, setConfigs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Section collapse state — defaults to expanded, reconciled from
+  // Section collapse state â€” defaults to expanded, reconciled from
   // localStorage after mount (see SECTION_STORAGE_KEY comment above).
   const [openSectionExpanded, setOpenSectionExpanded] = useState(true);
   const [pendingSectionExpanded, setPendingSectionExpanded] = useState(true);
@@ -130,14 +132,14 @@ export function ConversationList({
   // Keep the latest callback in a ref so the fetch effect below can
   // have a stable, empty-dep identity. Previously the fetch useCallback
   // depended on `onConversationsLoaded`, which depends on the parent's
-  // `deepLinkConvId` — so every URL change (including one the parent
+  // `deepLinkConvId` â€” so every URL change (including one the parent
   // triggered via router.replace after a click) caused a fresh
   // conversations fetch. That extra refetch was the trigger for the
   // deep-link auto-select running a second time and wiping the active
   // thread's messages.
   // Mutation lives in an effect (not render) per React 19's refs rule;
   // the fetch runs once on mount so it's fine to read the slightly
-  // older value — the very next render updates the ref for any
+  // older value â€” the very next render updates the ref for any
   // subsequent async completion.
   const onConversationsLoadedRef = useRef(onConversationsLoaded);
   useEffect(() => {
@@ -157,7 +159,7 @@ export function ConversationList({
       if (cancelled) return;
 
       if (error) {
-        // Supabase errors have non-enumerable properties — log fields explicitly
+        // Supabase errors have non-enumerable properties â€” log fields explicitly
         console.error("Failed to fetch conversations:", {
           message: error.message,
           details: error.details,
@@ -176,11 +178,11 @@ export function ConversationList({
       cancelled = true;
     };
     // `resyncToken` is included so the parent can force a refetch when
-    // the realtime channel reconnects or the tab regains focus — catches
+    // the realtime channel reconnects or the tab regains focus â€” catches
     // up on any events sent while the WS was disconnected or throttled.
   }, [resyncToken]);
 
-  // Line + search + sort — shared by every filter mode and by both
+  // Line + search + sort â€” shared by every filter mode and by both
   // grouped sections. Status/unread narrowing happens below, per mode.
   const baseFiltered = useMemo(() => {
     let result = [...conversations];
@@ -209,7 +211,7 @@ export function ConversationList({
     return result;
   }, [conversations, selectedLine, search]);
 
-  // "Não lidos" / "Fechados" — flat lists, used only when `filter`
+  // "NÃ£o lidos" / "Fechados" â€” flat lists, used only when `filter`
   // picks one of them (compatibility mode, no grouping).
   const unreadFiltered = useMemo(
     () => baseFiltered.filter((c) => c.unread_count > 0),
@@ -220,7 +222,7 @@ export function ConversationList({
     [baseFiltered],
   );
 
-  // "Todos" (default) — grouped into the two fixed sections. Closed
+  // "Todos" (default) â€” grouped into the two fixed sections. Closed
   // conversations never appear here; "Fechados" above is the only way
   // to see them.
   const openGroup = useMemo(
@@ -333,7 +335,7 @@ export function ConversationList({
           `min-h-0` is load-bearing: a flex child defaults to
           min-height:auto, so without it this ScrollArea grows to fit
           every conversation instead of shrinking to the remaining
-          space — the list then overflows and gets clipped by the
+          space â€” the list then overflows and gets clipped by the
           parent's overflow-hidden with no scrollbar (issue #229). */}
       <ScrollArea className="min-h-0 flex-1">
         {loading ? (
@@ -341,7 +343,7 @@ export function ConversationList({
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
           </div>
         ) : filter === "unread" || filter === "closed" ? (
-          // Compatibility mode — flat list, no sections.
+          // Compatibility mode â€” flat list, no sections.
           (() => {
             const flat = filter === "unread" ? unreadFiltered : closedFiltered;
             return flat.length === 0 ? (
@@ -362,7 +364,7 @@ export function ConversationList({
             );
           })()
         ) : (
-          // "Todos" — grouped into the two fixed sections.
+          // "Todos" â€” grouped into the two fixed sections.
           <div className="flex flex-col py-1">
             <div>
               <SectionHeader
@@ -426,7 +428,7 @@ export function ConversationList({
 
 /** Collapsible header for a status section ("Em Atendimento" / "Em
  *  Espera") in the default "Todos" view. Chevron rotates in place
- *  rather than swapping icons — no separator, sections are told
+ *  rather than swapping icons â€” no separator, sections are told
  *  apart by spacing alone (`mt-2` between them in the parent). */
 function SectionHeader({
   label,
@@ -469,10 +471,10 @@ interface ConversationItemProps {
 }
 
 const SENTIMENT_ICONS: Record<string, { emoji: string; color: string; label: string }> = {
-  positive: { emoji: "😊", color: "text-emerald-500", label: "Sentimento: Positivo" },
-  neutral: { emoji: "😐", color: "text-slate-400", label: "Sentimento: Neutro" },
-  negative: { emoji: "😠", color: "text-rose-500", label: "Sentimento: Negativo" },
-  mixed: { emoji: "🧐", color: "text-amber-500", label: "Sentimento: Misto" },
+  positive: { emoji: "ðŸ˜Š", color: "text-emerald-500", label: "Sentimento: Positivo" },
+  neutral: { emoji: "ðŸ˜", color: "text-slate-400", label: "Sentimento: Neutro" },
+  negative: { emoji: "ðŸ˜ ", color: "text-rose-500", label: "Sentimento: Negativo" },
+  mixed: { emoji: "ðŸ§", color: "text-amber-500", label: "Sentimento: Misto" },
 };
 
 function ConversationItem({
@@ -513,7 +515,7 @@ function ConversationItem({
       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
         {contact?.avatar_url ? (
           <img
-            src={contact.avatar_url}
+            src={contact.avatar_url && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone)}&account_id=${accountId}` : contact.avatar_url ?? ""}
             alt={displayName}
             className="h-10 w-10 rounded-full object-cover"
           />
@@ -572,3 +574,4 @@ function ConversationItem({
     </button>
   );
 }
+
