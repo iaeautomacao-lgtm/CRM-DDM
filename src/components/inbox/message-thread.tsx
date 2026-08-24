@@ -143,7 +143,12 @@ function formatDateSeparator(dateStr: string): string {
   const date = new Date(dateStr);
   if (isToday(date)) return "Hoje";
   if (isYesterday(date)) return "Ontem";
-  return format(date, "d 'de' MMMM 'de' yyyy");
+  return new Date(date).toLocaleDateString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "numeric",
+    month: "long",
+    year: "numeric"
+  });
 }
 
 function groupMessagesByDate(messages: Message[]) {
@@ -151,7 +156,9 @@ function groupMessagesByDate(messages: Message[]) {
   let currentDate = "";
 
   for (const msg of messages) {
-    const day = format(new Date(msg.created_at), "yyyy-MM-dd");
+    const day = new Date(msg.created_at).toLocaleDateString("pt-BR", {
+      timeZone: "America/Sao_Paulo"
+    });
     if (day !== currentDate) {
       currentDate = day;
       groups.push({ date: msg.created_at, messages: [msg] });
