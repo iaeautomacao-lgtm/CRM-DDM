@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import type { MonitorConversation } from "@/lib/monitoramento/queries";
 import { PHASE_META, type MonitorPhase } from "@/lib/monitoramento/phases";
 
@@ -48,6 +49,7 @@ export function ConversationCard({
   onFinalizeClick: (conversation: MonitorConversation) => void;
   onHistoryClick: (conversation: MonitorConversation) => void;
 }) {
+  const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name?.trim() || contact?.phone || "Desconhecido";
   const initials = displayName.charAt(0).toUpperCase();
@@ -86,7 +88,10 @@ export function ConversationCard({
       >
         <Avatar>
           {contact?.avatar_url ? (
-            <AvatarImage src={contact.avatar_url} alt={displayName} />
+            <AvatarImage
+              src={contact.avatar_url && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent((contact.phone ?? "").replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
+              alt={displayName}
+            />
           ) : null}
           <AvatarFallback className="bg-primary/10 font-medium text-primary">
             {initials}

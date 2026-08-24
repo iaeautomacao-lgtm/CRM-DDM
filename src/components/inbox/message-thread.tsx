@@ -198,7 +198,7 @@ export function MessageThread({
   whatsappProvider = "meta",
   onDeleteConversation,
 }: MessageThreadProps) {
-  const { user } = useAuth();
+  const { user, accountId } = useAuth();
   const [voipSession, setVoipSession] = useState<string>("default");
 
   useEffect(() => {
@@ -1140,7 +1140,7 @@ export function MessageThread({
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden">
             {contact.avatar_url ? (
               <img
-                src={contact.avatar_url}
+                src={contact.avatar_url && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent((contact.phone ?? "").replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
                 alt={displayName}
                 className="h-9 w-9 rounded-full object-cover"
               />

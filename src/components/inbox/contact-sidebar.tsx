@@ -224,7 +224,7 @@ export function ContactSidebar({
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-lg font-semibold text-foreground">
               {contact.avatar_url ? (
                 <img
-                  src={contact.avatar_url}
+                  src={contact.avatar_url && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent((contact.phone ?? "").replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
                   alt={displayName}
                   className="h-16 w-16 rounded-full object-cover"
                 />
