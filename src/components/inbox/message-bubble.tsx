@@ -306,7 +306,7 @@ export function MessageBubble({
   onToggleReaction,
 }: MessageBubbleProps) {
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
-  const time = new Date(message.created_at).toLocaleTimeString("pt-BR", {
+  const time = new Date(message.received_at ?? message.created_at).toLocaleTimeString("pt-BR", {
     timeZone: "America/Sao_Paulo",
     hour: "2-digit",
     minute: "2-digit",

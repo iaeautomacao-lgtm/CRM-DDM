@@ -156,12 +156,12 @@ function groupMessagesByDate(messages: Message[]) {
   let currentDate = "";
 
   for (const msg of messages) {
-    const day = new Date(msg.created_at).toLocaleDateString("pt-BR", {
+    const day = new Date(msg.received_at ?? msg.created_at).toLocaleDateString("pt-BR", {
       timeZone: "America/Sao_Paulo"
     });
     if (day !== currentDate) {
       currentDate = day;
-      groups.push({ date: msg.created_at, messages: [msg] });
+      groups.push({ date: msg.received_at ?? msg.created_at, messages: [msg] });
     } else {
       groups[groups.length - 1].messages.push(msg);
     }
