@@ -208,7 +208,12 @@ export async function handleAiAutoResponse(
   historyBefore?: string,
   tools?: AiAgentTool[],
   onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
-  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>
+  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>,
+  // Node key of the calling ai_agent flow node — only "agente_de_ia"
+  // (BEN) gets the #NEGOCIACAO auto-exit in generateOpenAiResponse.
+  // "agente_de_ia_2" (Aleh) needs consultar_debitos' data to present
+  // installments to the customer, so it must never get suppressed.
+  nodeKey?: string
 ): Promise<string | null | void> {
   const db = supabaseAdmin();
 
@@ -874,6 +879,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
           tools,
           onToolCall,
           onToolResult,
+          nodeKey,
         );
       } else if (aiConfig.api_provider === "claude") {
         generatedText = await generateClaudeResponse(
@@ -1370,6 +1376,7 @@ async function generateOpenAiResponse(
   tools?: AiAgentTool[],
   onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
   onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>,
+  nodeKey?: string,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
 
@@ -1455,25 +1462,29 @@ async function generateOpenAiResponse(
       // Se consultar_debitos encontrou um débito com nominal > 0,
       // suprime o texto do GPT e retorna só o exit code — o cliente
       // não deve receber texto nesse turno, só o #NEGOCIACAO deve ser
-      // processado pelo engine.
-      const hasPositiveNominal = collectedToolResults.some((tr) => {
-        if (tr.toolName !== "consultar_debitos") return false;
-        // Formato 1 — Acordos: "nominal" com ponto decimal.
-        const acordosMatch = tr.result.match(/"nominal"\s*:\s*"?(\d+\.?\d*)"?/);
-        if (acordosMatch) {
-          const value = parseFloat(acordosMatch[1]);
-          if (!Number.isNaN(value) && value > 0) return true;
+      // processado pelo engine. Só se aplica ao nó BEN (agente_de_ia):
+      // o Aleh (agente_de_ia_2) precisa apresentar os dados de
+      // consultar_debitos ao cliente, não pode ser suprimido.
+      if (nodeKey === "agente_de_ia") {
+        const hasPositiveNominal = collectedToolResults.some((tr) => {
+          if (tr.toolName !== "consultar_debitos") return false;
+          // Formato 1 — Acordos: "nominal" com ponto decimal.
+          const acordosMatch = tr.result.match(/"nominal"\s*:\s*"?(\d+\.?\d*)"?/);
+          if (acordosMatch) {
+            const value = parseFloat(acordosMatch[1]);
+            if (!Number.isNaN(value) && value > 0) return true;
+          }
+          // Formato 2 — Calculos: "NominalPrinc" com vírgula decimal.
+          const calculosMatch = tr.result.match(/"NominalPrinc"\s*:\s*"(\d+,\d+)"/);
+          if (calculosMatch) {
+            const value = parseFloat(calculosMatch[1].replace(",", "."));
+            if (!Number.isNaN(value) && value > 0) return true;
+          }
+          return false;
+        });
+        if (hasPositiveNominal) {
+          return "#NEGOCIACAO";
         }
-        // Formato 2 — Calculos: "NominalPrinc" com vírgula decimal.
-        const calculosMatch = tr.result.match(/"NominalPrinc"\s*:\s*"(\d+,\d+)"/);
-        if (calculosMatch) {
-          const value = parseFloat(calculosMatch[1].replace(",", "."));
-          if (!Number.isNaN(value) && value > 0) return true;
-        }
-        return false;
-      });
-      if (hasPositiveNominal) {
-        return "#NEGOCIACAO";
       }
       return message?.content || "";
     }

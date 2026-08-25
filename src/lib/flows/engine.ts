@@ -1482,6 +1482,7 @@ async function runAiAgentCore(
           },
         });
       },
+      run.current_node_key ?? "agente_de_ia",
     );
 
     // Filtra pelo momento imediatamente anterior à chamada da IA —
