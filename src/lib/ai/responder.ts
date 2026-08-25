@@ -1420,6 +1420,10 @@ async function generateOpenAiResponse(
       }))
     : undefined;
 
+  // Raw tool_result payloads collected across the loop below, for the
+  // #NEGOCIACAO auto-suppress check once GPT produces its final text.
+  const collectedToolResults: { toolName: string; result: string }[] = [];
+
   for (let iteration = 0; iteration < 5; iteration++) {
     const body: any = {
       model: "gpt-4o-mini",
@@ -1448,6 +1452,20 @@ async function generateOpenAiResponse(
 
     // No tool calls — final text response
     if (!message?.tool_calls?.length) {
+      // Se consultar_debitos encontrou um débito com nominal > 0,
+      // suprime o texto do GPT e retorna só o exit code — o cliente
+      // não deve receber texto nesse turno, só o #NEGOCIACAO deve ser
+      // processado pelo engine.
+      const hasPositiveNominal = collectedToolResults.some((tr) => {
+        if (tr.toolName !== "consultar_debitos") return false;
+        const match = tr.result.match(/"nominal"\s*:\s*"?(\d+\.?\d*)"?/);
+        if (!match) return false;
+        const value = parseFloat(match[1]);
+        return !Number.isNaN(value) && value > 0;
+      });
+      if (hasPositiveNominal) {
+        return "#NEGOCIACAO";
+      }
       return message?.content || "";
     }
 
@@ -1503,6 +1521,8 @@ async function generateOpenAiResponse(
       } else {
         toolResult = JSON.stringify({ error: `Tool "${toolName}" not found in node config` });
       }
+
+      collectedToolResults.push({ toolName, result: toolResult });
 
       messages.push({
         role: "tool",
