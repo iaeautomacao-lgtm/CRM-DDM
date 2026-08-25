@@ -2322,6 +2322,10 @@ export async function advanceFromNodeKey(
           .eq("id", run.conversation_id);
       }
 
+      // Limpa ai_exit_code ao entrar neste nó — garante que o exit code
+      // de um nó ai_agent anterior não vaze pra decisão do nó atual.
+      await updateRunVars(db, run, { ai_exit_code: null });
+
       const core = await runAiAgentCore(
         db,
         run,
