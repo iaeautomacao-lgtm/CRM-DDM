@@ -1458,10 +1458,19 @@ async function generateOpenAiResponse(
       // processado pelo engine.
       const hasPositiveNominal = collectedToolResults.some((tr) => {
         if (tr.toolName !== "consultar_debitos") return false;
-        const match = tr.result.match(/"nominal"\s*:\s*"?(\d+\.?\d*)"?/);
-        if (!match) return false;
-        const value = parseFloat(match[1]);
-        return !Number.isNaN(value) && value > 0;
+        // Formato 1 — Acordos: "nominal" com ponto decimal.
+        const acordosMatch = tr.result.match(/"nominal"\s*:\s*"?(\d+\.?\d*)"?/);
+        if (acordosMatch) {
+          const value = parseFloat(acordosMatch[1]);
+          if (!Number.isNaN(value) && value > 0) return true;
+        }
+        // Formato 2 — Calculos: "NominalPrinc" com vírgula decimal.
+        const calculosMatch = tr.result.match(/"NominalPrinc"\s*:\s*"(\d+,\d+)"/);
+        if (calculosMatch) {
+          const value = parseFloat(calculosMatch[1].replace(",", "."));
+          if (!Number.isNaN(value) && value > 0) return true;
+        }
+        return false;
       });
       if (hasPositiveNominal) {
         return "#NEGOCIACAO";
