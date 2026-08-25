@@ -1430,6 +1430,12 @@ async function runAiAgentCore(
     // for no extra protection.
     const beforeAiCall = new Date().toISOString();
 
+    // Raw (untruncated) tool_result payloads collected as the tool-call
+    // loop runs inside handleAiAutoResponse, for the #NEGOCIACAO
+    // auto-exit check below — the log payload truncates to 500 chars,
+    // which could cut off the "nominal" field on a large response.
+    const collectedToolResults: { toolName: string; result: string }[] = [];
+
     const detectedTag = await handleAiAutoResponse(
       run.account_id,
       run.contact_id!,
@@ -1458,6 +1464,7 @@ async function runAiAgentCore(
         });
       },
       async (toolName, result, durationMs) => {
+        collectedToolResults.push({ toolName, result });
         // Truncate result to 500 chars for readability in logs
         const truncated = result.length > 500 ? result.slice(0, 500) + "…" : result;
         await logRunEvent(db, {
@@ -1506,6 +1513,25 @@ async function runAiAgentCore(
     if (detectedTag) {
       exitCodeFound = detectedTag;
       await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
+    }
+
+    // Auto-exit #NEGOCIACAO: no nó BEN (agente_de_ia), se alguma
+    // chamada a consultar_debitos retornou um débito com nominal > 0,
+    // força o exit code correto mesmo que o GPT gere texto adicional
+    // sem repetir a tag na resposta final — não depende de mais uma
+    // chamada ao GPT, e sobrescreve qualquer detectedTag acima.
+    if ((run.current_node_key ?? "agente_de_ia") === "agente_de_ia") {
+      const hasPositiveNominal = collectedToolResults.some((tr) => {
+        if (tr.toolName !== "consultar_debitos") return false;
+        const match = tr.result.match(/"nominal"\s*:\s*"?(\d+\.?\d*)"?/);
+        if (!match) return false;
+        const value = parseFloat(match[1]);
+        return !Number.isNaN(value) && value > 0;
+      });
+      if (hasPositiveNominal) {
+        exitCodeFound = "#NEGOCIACAO";
+        await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
+      }
     }
 
     const baseOutput = {
