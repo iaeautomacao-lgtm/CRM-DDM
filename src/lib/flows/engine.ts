@@ -1369,6 +1369,12 @@ async function runAiAgentCore(
       aiConfigUsable: boolean;
     }
 > {
+  // Garante que exit codes de nós anteriores não vazem para este nó
+  if (run.vars?.ai_exit_code) {
+    await updateRunVars(db, run, { ai_exit_code: null });
+    run.vars = { ...run.vars, ai_exit_code: null };
+  }
+
   let lastReply = "";
   let exitCodeFound: string | null = null;
   let modelUsed: string | null = null;
