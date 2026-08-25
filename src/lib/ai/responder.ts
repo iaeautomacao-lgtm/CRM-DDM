@@ -460,6 +460,34 @@ export async function handleAiAutoResponse(
     }
   }
 
+  // Garante que a mensagem atual do cliente (incomingText) esteja no
+  // histórico enviado ao GPT. O filtro historyAfter (nós ai_agent do
+  // Flow Builder passam run.started_at) pode excluir da tabela
+  // `messages` a própria mensagem que disparou o run, já que ela é
+  // inserida ANTES do run existir — received_at fica <= started_at e
+  // o `.gt()` do filtro a corta, deixando o GPT sem nenhum turno do
+  // cliente. Só adiciona se a última mensagem do cliente no histórico
+  // ainda não contiver esse texto (evita duplicar no caminho normal).
+  const trimmedIncoming = (incomingText || "").trim();
+  if (trimmedIncoming) {
+    const lastCustomerMsg = [...history]
+      .reverse()
+      .find((m: any) => m.sender_type === "customer");
+    const alreadyIncluded =
+      lastCustomerMsg &&
+      (lastCustomerMsg.content_text || "").includes(trimmedIncoming);
+    if (!alreadyIncluded) {
+      history.push({
+        id: null,
+        content_text: incomingText,
+        content_type: "text",
+        media_url: null,
+        created_at: new Date().toISOString(),
+        sender_type: "customer",
+      });
+    }
+  }
+
   // 4. Load Knowledge Base (File Search RAG) Context
   const { data: kbFiles } = await db
     .from("knowledge_base_files")
