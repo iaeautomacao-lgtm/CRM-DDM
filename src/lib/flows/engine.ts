@@ -1350,6 +1350,16 @@ async function runAiAgentCore(
   historyAfter?: string,
   historyBefore?: string,
   tools?: AiAgentTool[],
+  // Node key of the ai_agent node actually being executed. In
+  // advanceFromNodeKey's synchronous multi-node walk, run.current_node_key
+  // is NOT updated as the walk moves through auto-advancing nodes (only
+  // persisted to the DB once a node suspends/terminates) — so it can
+  // still be a PREVIOUS node's key when this ai_agent node runs mid-walk.
+  // Callers that know the real current node (advanceFromNodeKey has
+  // `node.node_key`) must pass it here; callers where run.current_node_key
+  // is already accurate (e.g. handleReplyForActiveRun, which loads the
+  // node run is already parked at) can omit it and rely on the fallback.
+  currentNodeKeyOverride?: string,
 ): Promise<
   | {
       ok: true;
@@ -1488,7 +1498,7 @@ async function runAiAgentCore(
           },
         });
       },
-      run.current_node_key ?? "agente_de_ia",
+      currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
     );
 
     // Filtra pelo momento imediatamente anterior à chamada da IA —
@@ -2343,6 +2353,11 @@ export async function advanceFromNodeKey(
         run.started_at,  // usa início do run — agente vê histórico completo desde o trigger
         undefined,
         cfg.tools,
+        // run.current_node_key ainda não reflete este nó aqui — dentro do
+        // walk síncrono de advanceFromNodeKey ele só é persistido quando
+        // um nó suspende/termina, então pode estar apontando pro nó
+        // anterior. node.node_key é o valor correto para este turno.
+        node.node_key,
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
