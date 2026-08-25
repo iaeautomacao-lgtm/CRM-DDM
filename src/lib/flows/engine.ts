@@ -857,9 +857,102 @@ async function executeHandoffAgent(
 }
 
 /**
+ * Picks who a `handoff_team` should assign the conversation to.
+ *
+ * Priority: an online team member with the fewest open conversations,
+ * falling back to an away member, falling back to the team's overflow
+ * team (recursively), falling back to unassigned (null). Ties go to
+ * whichever member has been on the team longest (`team_members.created_at`
+ * ascending).
+ *
+ * `member_presence`/`team_members`/`teams`/`conversations` all live in
+ * the `wacrm` schema that `supabaseAdmin()` is scoped to — confirmed
+ * against production on 2026-08-25, since migration files alone don't
+ * reliably reflect schema placement on this project (some tables were
+ * applied manually before being versioned).
+ */
+async function selectAgentForTeam(
+  db: AdminClient,
+  teamId: string,
+  accountId: string,
+): Promise<string | null> {
+  const { data: members, error: membersError } = await db
+    .from("team_members")
+    .select("user_id")
+    .eq("team_id", teamId)
+    .order("created_at", { ascending: true });
+  if (membersError || !members || members.length === 0) return null;
+
+  const memberIds = (members as { user_id: string }[]).map((m) => m.user_id);
+  const cutoff = new Date(Date.now() - 75_000).toISOString();
+
+  const { data: onlineRows } = await db
+    .from("member_presence")
+    .select("user_id")
+    .in("user_id", memberIds)
+    .eq("status", "online")
+    .gte("last_seen_at", cutoff);
+
+  let eligibleIds = (onlineRows as { user_id: string }[] | null ?? []).map(
+    (r) => r.user_id,
+  );
+
+  if (eligibleIds.length === 0) {
+    const { data: awayRows } = await db
+      .from("member_presence")
+      .select("user_id")
+      .in("user_id", memberIds)
+      .eq("status", "away")
+      .gte("last_seen_at", cutoff);
+    eligibleIds = (awayRows as { user_id: string }[] | null ?? []).map(
+      (r) => r.user_id,
+    );
+  }
+
+  if (eligibleIds.length === 0) {
+    // account_id scopes the overflow lookup to the caller's own account —
+    // teamId is trusted (comes from this same account's flow config), but
+    // this keeps the recursion from ever following a cross-account team.
+    const { data: teamRow } = await db
+      .from("teams")
+      .select("overflow_team_id")
+      .eq("id", teamId)
+      .eq("account_id", accountId)
+      .maybeSingle();
+    const overflowTeamId = (
+      teamRow as { overflow_team_id: string | null } | null
+    )?.overflow_team_id;
+    if (overflowTeamId) {
+      return selectAgentForTeam(db, overflowTeamId, accountId);
+    }
+    return null;
+  }
+
+  const { data: openConvs } = await db
+    .from("conversations")
+    .select("assigned_agent_id")
+    .in("assigned_agent_id", eligibleIds)
+    .in("status", ["open", "pending"]);
+
+  const counts = new Map<string, number>();
+  for (const id of eligibleIds) counts.set(id, 0);
+  for (const row of (openConvs as { assigned_agent_id: string | null }[] | null) ?? []) {
+    if (row.assigned_agent_id && counts.has(row.assigned_agent_id)) {
+      counts.set(row.assigned_agent_id, counts.get(row.assigned_agent_id)! + 1);
+    }
+  }
+
+  const minCount = Math.min(...counts.values());
+  // memberIds is oldest-first (query above), so the first eligible id at
+  // the min count is the tie-break winner.
+  return memberIds.find((id) => counts.get(id) === minCount) ?? null;
+}
+
+/**
  * 'handoff_team' — same as `executeHandoff`, but only ever sets
  * `team_id`; `assign_to` is not part of this node's config and is
- * never touched.
+ * never touched directly (though `selectAgentForTeam` may still
+ * populate `assigned_agent_id` with an auto-picked agent below).
  */
 async function executeHandoffTeam(
   db: AdminClient,
@@ -869,12 +962,17 @@ async function executeHandoffTeam(
   const startedAt = Date.now();
   const input = { ...run.vars };
   const cfg = node.config as { team_id?: string; note?: string };
+  let selectedAgent: string | null = null;
   try {
     const convUpdate: Record<string, unknown> = {
       status: "pending",
       updated_at: new Date().toISOString(),
     };
-    if (cfg.team_id) convUpdate.team_id = cfg.team_id;
+    if (cfg.team_id) {
+      convUpdate.team_id = cfg.team_id;
+      selectedAgent = await selectAgentForTeam(db, cfg.team_id, run.account_id);
+      if (selectedAgent) convUpdate.assigned_agent_id = selectedAgent;
+    }
     if (run.conversation_id) {
       await db
         .from("conversations")
@@ -895,7 +993,7 @@ async function executeHandoffTeam(
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
     note: cfg.note ?? null,
-    assigned_to: null,
+    assigned_to: selectedAgent ?? null,
     team_id: cfg.team_id ?? null,
   });
   await logRunEvent(db, {
