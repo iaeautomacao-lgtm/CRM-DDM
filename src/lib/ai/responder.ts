@@ -989,7 +989,11 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   if (!generatedText) return detectedTag;
 
-  if (hasAgreedAcordo && foundCpf) {
+  // Flow Builder nodes formalize through their configured tools (for
+  // example, efetiva_acordo). Do not run the legacy CPF-based
+  // CalculaDebitos.php side effect for those nodes: it can formalize a
+  // second agreement and append a fabricated/placeholder payment URL.
+  if (hasAgreedAcordo && foundCpf && !hasOverride) {
     console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${foundCpf}...`);
     try {
       const activeKey = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
