@@ -726,9 +726,11 @@ async function processMessage(
   // menu (e.g. tapping "1") doesn't get analyzed as if it were a real
   // conversational message.
   if (!flowConsumed) {
-    // Trigger AI Auto Response if the conversation is unassigned (no
-    // human agent is handling it).
-    if (!conversation.assigned_agent_id) {
+    // Trigger AI Auto Response only when the conversation is not assigned
+    // to a human and is not pending after a handoff. The flow dispatcher
+    // deliberately treats status='pending' as human-owned even when no
+    // agent was selected; the global responder must honor the same guard.
+    if (!conversation.assigned_agent_id && conversation.status !== 'pending') {
       const { handleAiAutoResponse } = await import('@/lib/ai/responder')
       // Fire-and-forget — but handleAiAutoResponse now throws on an LLM
       // generation failure (see responder.ts), so this MUST catch or an

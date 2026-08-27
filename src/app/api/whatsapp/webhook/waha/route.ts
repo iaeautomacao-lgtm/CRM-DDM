@@ -542,8 +542,11 @@ export async function POST(request: Request) {
       // rule as the Meta webhook (the customer is navigating the bot
       // menu, not sending something those should react to).
       if (!flowConsumed) {
-        // Trigger AI Auto Response if the message is inbound and conversation is unassigned
-        if (direction === 'inbound' && !conversation?.assigned_agent_id && contactId && conversationId) {
+        // Trigger AI Auto Response only when the conversation is not assigned
+        // to a human and is not pending after a handoff. The flow dispatcher
+        // deliberately treats status='pending' as human-owned even when no
+        // agent was selected; the global responder must honor the same guard.
+        if (direction === 'inbound' && !conversation?.assigned_agent_id && conversation?.status !== 'pending' && contactId && conversationId) {
           // Extra guard on top of !flowConsumed: skip the global AI agent
           // whenever a flow run is still active for this conversation
           // (e.g. parked in an ai_agent/collect_input loop waiting on the
