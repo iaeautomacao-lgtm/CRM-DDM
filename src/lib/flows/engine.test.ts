@@ -7,6 +7,7 @@ import {
   isTerminal,
   evaluateConditionPredicate,
   isBenAiAgentNode,
+  canonicalizeAgreementToolArgs,
 } from "./engine";
 
 describe("matchReplyId", () => {
@@ -212,6 +213,27 @@ describe("isBenAiAgentNode", () => {
 
   it("defaults to BEN only when both keys are absent", () => {
     expect(isBenAiAgentNode(undefined, undefined)).toBe(true);
+  });
+});
+
+describe("canonicalizeAgreementToolArgs", () => {
+  it("replaces model-invented identity fields with localizer output", () => {
+    expect(
+      canonicalizeAgreementToolArgs(
+        { idDev: "123456", cli: "multivix", Parc: "1" },
+        '[{"sistema":"ddm","iddev":"1149232","instituicao":"MULTIVIX- Cachoeiro"}]',
+      ),
+    ).toEqual({ idDev: "1149232", cli: "ddm", Parc: "1" });
+  });
+
+  it("supports camel-case identity keys and leaves args unchanged without them", () => {
+    expect(
+      canonicalizeAgreementToolArgs(
+        { idDev: "wrong", cli: "wrong", Parc: "3" },
+        '{"system":"yduqs","idDev":"987654"}',
+      ),
+    ).toEqual({ idDev: "987654", cli: "yduqs", Parc: "3" });
+    expect(canonicalizeAgreementToolArgs({ Parc: "1" }, "[]")).toEqual({ Parc: "1" });
   });
 });
 

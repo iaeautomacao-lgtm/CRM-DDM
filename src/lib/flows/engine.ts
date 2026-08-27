@@ -1354,6 +1354,49 @@ export function isBenAiAgentNode(
   return (currentNodeKeyOverride ?? persistedNodeKey ?? "agente_de_ia") === "agente_de_ia";
 }
 
+/**
+ * Agreement formalization must reuse identity fields returned by
+ * localizar_devedor. The model can see the conversational messages on a
+ * later turn, but tool results are stored in run events rather than as chat
+ * messages; without this guard it may invent idDev/cli values.
+ */
+export function canonicalizeAgreementToolArgs(
+  args: Record<string, unknown>,
+  localizerResult?: string | null,
+): Record<string, unknown> {
+  if (!localizerResult) return args;
+
+  const idDev = localizerResult.match(/"iddev"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? localizerResult.match(/"idDev"\s*:\s*"([^"]+)"/i)?.[1];
+  const cli = localizerResult.match(/"sistema"\s*:\s*"([^"]+)"/i)?.[1]
+    ?? localizerResult.match(/"system"\s*:\s*"([^"]+)"/i)?.[1];
+
+  if (!idDev || !cli) return args;
+  return { ...args, idDev, cli };
+}
+
+async function canonicalizeAgreementArgsFromRun(
+  db: AdminClient,
+  run: FlowRunRow,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { data } = await db
+    .from("flow_run_events")
+    .select("payload")
+    .eq("flow_run_id", run.id)
+    .eq("event_type", "tool_result")
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  for (const event of data ?? []) {
+    const payload = event.payload as { tool_name?: string; result?: string } | null;
+    if (payload?.tool_name !== "localizar_devedor" || !payload.result) continue;
+    const normalized = canonicalizeAgreementToolArgs(args, payload.result);
+    if (normalized !== args) return normalized;
+  }
+  return args;
+}
+
 async function runAiAgentCore(
   db: AdminClient,
   run: FlowRunRow,
@@ -1476,6 +1519,13 @@ async function runAiAgentCore(
       tools,
       // tool call logging callbacks
       async (toolName, args) => {
+        if (toolName === "efetiva_acordo") {
+          const normalizedArgs = await canonicalizeAgreementArgsFromRun(db, run, args);
+          // handleAiAutoResponse interpolates this same object after the
+          // callback resolves, so mutate it before the HTTP request is built.
+          for (const key of Object.keys(args)) delete args[key];
+          Object.assign(args, normalizedArgs);
+        }
         await logRunEvent(db, {
           run_id: run.id,
           flow_id: run.flow_id,
