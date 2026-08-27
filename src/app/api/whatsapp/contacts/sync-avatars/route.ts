@@ -15,12 +15,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const db = supabaseAdmin()
-  const { account_id } = await request.json()
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('account_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
 
-  if (!account_id) {
-    return NextResponse.json({ error: 'account_id required' }, { status: 400 })
+  if (!profile?.account_id) {
+    return NextResponse.json({ error: 'Account not found' }, { status: 403 })
   }
+
+  const db = supabaseAdmin()
+  const account_id = profile.account_id
 
   const { data: config, error: configError } = await db
     .from('whatsapp_config')

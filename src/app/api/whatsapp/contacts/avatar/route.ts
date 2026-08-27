@@ -15,12 +15,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('account_id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (!profile?.account_id) {
+    return NextResponse.json({ error: 'Account not found' }, { status: 403 })
+  }
+
   const { searchParams } = new URL(request.url)
   const phone = searchParams.get('phone')
-  const account_id = searchParams.get('account_id')
+  const account_id = profile.account_id
 
-  if (!phone || !account_id) {
-    return NextResponse.json({ error: 'phone and account_id required' }, { status: 400 })
+  if (!phone) {
+    return NextResponse.json({ error: 'phone required' }, { status: 400 })
   }
 
   const db = supabaseAdmin()
