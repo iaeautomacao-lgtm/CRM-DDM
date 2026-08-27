@@ -1342,6 +1342,18 @@ export async function endActiveRunForConversation(
  * same way rather than one trusting a passed-in value the other
  * doesn't have.
  */
+/**
+ * The synchronous advance walk may execute a downstream ai_agent before
+ * persisting flow_runs.current_node_key. In that window, the persisted key
+ * still points at BEN even though Aleh is the node actually running.
+ */
+export function isBenAiAgentNode(
+  currentNodeKeyOverride: string | null | undefined,
+  persistedNodeKey?: string | null,
+): boolean {
+  return (currentNodeKeyOverride ?? persistedNodeKey ?? "agente_de_ia") === "agente_de_ia";
+}
+
 async function runAiAgentCore(
   db: AdminClient,
   run: FlowRunRow,
@@ -1468,7 +1480,7 @@ async function runAiAgentCore(
           run_id: run.id,
           flow_id: run.flow_id,
           account_id: run.account_id,
-          node_key: run.current_node_key ?? "agente_de_ia",
+          node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
           node_type: "ai_agent",
           event_type: "tool_called",
           status: "success",
@@ -1487,7 +1499,7 @@ async function runAiAgentCore(
           run_id: run.id,
           flow_id: run.flow_id,
           account_id: run.account_id,
-          node_key: run.current_node_key ?? "agente_de_ia",
+          node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
           node_type: "ai_agent",
           event_type: "tool_result",
           status: "success",
@@ -1537,7 +1549,7 @@ async function runAiAgentCore(
     // força o exit code correto mesmo que o GPT gere texto adicional
     // sem repetir a tag na resposta final — não depende de mais uma
     // chamada ao GPT, e sobrescreve qualquer detectedTag acima.
-    if ((run.current_node_key ?? "agente_de_ia") === "agente_de_ia") {
+    if (isBenAiAgentNode(currentNodeKeyOverride, run.current_node_key)) {
       const hasPositiveNominal = collectedToolResults.some((tr) => {
         if (tr.toolName !== "consultar_debitos") return false;
         // Formato 1 — Acordos: "nominal" com ponto decimal.

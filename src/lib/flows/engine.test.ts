@@ -6,6 +6,7 @@ import {
   isSuspending,
   isTerminal,
   evaluateConditionPredicate,
+  isBenAiAgentNode,
 } from "./engine";
 
 describe("matchReplyId", () => {
@@ -195,6 +196,22 @@ describe("node classification helpers", () => {
       // Exactly one of the three should be true for every known node.
       expect(flags.filter(Boolean).length).toBe(1);
     }
+  });
+});
+
+describe("isBenAiAgentNode", () => {
+  it("uses the effective node during the synchronous walk", () => {
+    expect(isBenAiAgentNode("agente_de_ia_2", "agente_de_ia")).toBe(false);
+    expect(isBenAiAgentNode("agente_de_ia", "agente_de_ia_2")).toBe(true);
+  });
+
+  it("falls back to the persisted node when no override exists", () => {
+    expect(isBenAiAgentNode(undefined, "agente_de_ia")).toBe(true);
+    expect(isBenAiAgentNode(undefined, "agente_de_ia_2")).toBe(false);
+  });
+
+  it("defaults to BEN only when both keys are absent", () => {
+    expect(isBenAiAgentNode(undefined, undefined)).toBe(true);
   });
 });
 
