@@ -345,6 +345,10 @@ export function MessageThread({
 
   const conversationId = conversation?.id;
   const hasUnread = (conversation?.unread_count ?? 0) > 0;
+  // Tracks which conversation has completed at least one successful
+  // messages fetch. Reconnect/foreground resyncs should update the
+  // existing thread silently instead of replacing it with the main loader.
+  const loadedConversationIdRef = useRef<string | null>(null);
 
   // Fetch messages whenever the selected conversation changes. Kept
   // separate from the unread-reset effect so that incoming messages
@@ -356,8 +360,13 @@ export function MessageThread({
     const supabase = createClient();
     let cancelled = false;
 
+    const showInitialLoading = loadedConversationIdRef.current !== conversationId;
+
     (async () => {
-      setLoading(true);
+      // Only a first successful load for this conversation uses the main
+      // spinner. Reconnect/foreground resyncs keep the current messages
+      // visible while replacing them with the fresh DB snapshot.
+      if (showInitialLoading) setLoading(true);
 
       const { data, error } = await supabase
         .from("messages")
@@ -371,9 +380,10 @@ export function MessageThread({
         console.error("Failed to fetch messages:", error);
       } else {
         onMessagesLoadedRef.current(data ?? []);
+        loadedConversationIdRef.current = conversationId;
       }
 
-      if (!cancelled) setLoading(false);
+      if (!cancelled && showInitialLoading) setLoading(false);
     })();
 
     return () => {
