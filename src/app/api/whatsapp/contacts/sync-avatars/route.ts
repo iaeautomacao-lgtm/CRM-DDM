@@ -1,9 +1,20 @@
 ﻿import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { getWahaProfilePicture } from '@/lib/whatsapp/waha-api'
 
 export async function POST(request: Request) {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const db = supabaseAdmin()
   const { account_id } = await request.json()
 
