@@ -548,21 +548,28 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
     const sistema = ddmData.sistema || "";
     const hasActiveDebt = debt && debt !== "0,00" && debt !== "0" && debt !== 0;
 
-    const isEducational = 
-      inst.toLowerCase().includes("uva") || 
-      inst.toLowerCase().includes("veiga") || 
-      inst.toLowerCase().includes("unijorge") || 
-      inst.toLowerCase().includes("unisuam") || 
-      inst.toLowerCase().includes("castelo") || 
-      inst.toLowerCase().includes("bezerra") || 
+    // O bloco isEducational (detecção de instituição + transferência
+    // forçada) só roda quando o agente global está respondendo. Um nó
+    // ai_agent do Flow Builder com system_prompt_override (BEN/Aleh) já
+    // tem sua própria lógica via tools — isEducational nunca calculado
+    // (fica false) e forceTransferHumanMsg nunca setado nesse caso.
+    let isEducational = false;
+    if (!hasOverride) {
+    isEducational =
+      inst.toLowerCase().includes("uva") ||
+      inst.toLowerCase().includes("veiga") ||
+      inst.toLowerCase().includes("unijorge") ||
+      inst.toLowerCase().includes("unisuam") ||
+      inst.toLowerCase().includes("castelo") ||
+      inst.toLowerCase().includes("bezerra") ||
       inst.toLowerCase().includes("potiguar") ||
       inst.toLowerCase().includes("multivix") ||
-      sistema.toLowerCase().includes("uva") || 
-      sistema.toLowerCase().includes("veiga") || 
-      sistema.toLowerCase().includes("unijorge") || 
-      sistema.toLowerCase().includes("unisuam") || 
-      sistema.toLowerCase().includes("castelo") || 
-      sistema.toLowerCase().includes("bezerra") || 
+      sistema.toLowerCase().includes("uva") ||
+      sistema.toLowerCase().includes("veiga") ||
+      sistema.toLowerCase().includes("unijorge") ||
+      sistema.toLowerCase().includes("unisuam") ||
+      sistema.toLowerCase().includes("castelo") ||
+      sistema.toLowerCase().includes("bezerra") ||
       sistema.toLowerCase().includes("potiguar") ||
       sistema.toLowerCase().includes("multivix");
 
@@ -594,9 +601,13 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
         forceTransferHumanMsg = "Verifiquei que há pendências em aberto, mas com vencimento futuro. Vou te transferir para um atendente para maiores informações. Um momento! #EQUIPEHUMANA";
       }
     }
+    }
 
     if ((inst.toLowerCase().includes("cruzeiro") || sistema.toLowerCase() === "cruzeiro") && hasActiveDebt) {
-      systemPromptWithKb = aiConfig.system_prompt 
+      // hasOverride: mantém o override do nó ai_agent intacto — não
+      // sobrescreve com aiConfig.system_prompt (nem com o default Sabrina).
+      if (!hasOverride) {
+      systemPromptWithKb = aiConfig.system_prompt
         ? `${aiConfig.system_prompt}
 
 === DADOS DO CLIENTE (DDM API) ===
@@ -634,6 +645,7 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
 5. **Tratamento de Recusas e Solicitação de Atendente:**
    - Se o cliente solicitar falar com um atendente humano, transferir ou disser que prefere falar com uma pessoa, diga que está transferindo o atendimento e termine a mensagem obrigatoriamente com a tag #EQUIPEHUMANA.
    - Se o cliente recusar, argumente gentilmente até 3 vezes lembrando-o das consequências (acúmulo de juros, ações de cobrança e órgãos de proteção de crédito) antes de desistir. Caso ele mantenha a recusa após as 3 tentativas, retorne #RECUSA no final da mensagem.`;
+      }
     } else if (isEducational && hasActiveDebt) {
       const formattedBoleto = JSON.stringify(ddmData.resumo_parcelamento || []);
       const formattedAcordos = JSON.stringify(ddmData.acordos || []);
@@ -651,6 +663,10 @@ Sua missão é ajudar o aluno a regularizar sua situação financeira de forma c
           .replace(/c=&u=/g, `c=${ddmData.calculoId || ""}&u=`);
       }
 
+      // hasOverride: na prática isEducational já vem false nesse caso
+      // (bloco acima), então este branch nem é alcançado — guard
+      // explícito mantido por segurança, mesma regra do branch Cruzeiro.
+      if (!hasOverride) {
       systemPromptWithKb = customPrompt
         ? `${customPrompt}
 
@@ -819,6 +835,7 @@ Você precisa descobrir mais sobre as necessidades e desafios que o cliente est�
   - evitar soar robótica ou insistente;
   - usar frases mais curtas e claras;
   - reforçar que o objetivo é ajudar.`;
+      }
     } else if (!hasActiveDebt) {
       systemPromptWithKb = `${systemPromptWithKb}
 
