@@ -318,7 +318,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(currentUser);
 
       if (currentUser) {
-        fetchProfile(currentUser.id);
+        // TOKEN_REFRESHED is emitted when Supabase renews the session,
+        // commonly when a background tab becomes visible again. The
+        // session changed, but the profile did not; refetching it here
+        // toggles profileLoading and makes the whole dashboard flash its
+        // blocking loader. Refresh profile data only for auth events that
+        // can actually change the profile or establish a new session.
+        const shouldRefreshProfile =
+          event === "INITIAL_SESSION" ||
+          event === "SIGNED_IN" ||
+          event === "USER_UPDATED";
+        if (shouldRefreshProfile) {
+          fetchProfile(currentUser.id);
+        }
       } else {
         setProfile(null);
         setAccount(null);
