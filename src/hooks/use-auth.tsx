@@ -131,6 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profileLoading, setProfileLoading] = useState(true);
   const instanceIdRef = useRef(`auth-provider-${Math.random().toString(16).slice(2)}`);
   const fetchProfileCallsRef = useRef(0);
+  const profileUserIdRef = useRef<string | null>(null);
 
   // Shared across init, auth-state-change listener, and the exposed
   // refreshProfile() callback. Reads the current session's user id and
@@ -210,6 +211,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? data.account_role
           : null;
 
+        profileUserIdRef.current = userId;
         setProfile({
           id: data.id,
           full_name: data.full_name,
@@ -318,20 +320,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(currentUser);
 
       if (currentUser) {
-        // TOKEN_REFRESHED is emitted when Supabase renews the session,
-        // commonly when a background tab becomes visible again. The
-        // session changed, but the profile did not; refetching it here
-        // toggles profileLoading and makes the whole dashboard flash its
-        // blocking loader. Refresh profile data only for auth events that
-        // can actually change the profile or establish a new session.
+        // Supabase can emit SIGNED_IN again when a background tab becomes
+        // visible. Refresh only for a new user or an explicit profile
+        // update; session-renewal/focus events must not toggle the global
+        // profile loading state.
         const shouldRefreshProfile =
-          event === "INITIAL_SESSION" ||
-          event === "SIGNED_IN" ||
-          event === "USER_UPDATED";
+          event === "USER_UPDATED" || profileUserIdRef.current !== currentUser.id;
         if (shouldRefreshProfile) {
           fetchProfile(currentUser.id);
         }
       } else {
+        profileUserIdRef.current = null;
         setProfile(null);
         setAccount(null);
         setProfileLoading(false);
