@@ -500,9 +500,10 @@ export async function handleAiAutoResponse(
     .eq("account_id", accountId);
 
   // Node-level override wins over the account's global ai_config prompt,
-  // which in turn wins over the hardcoded Aleh default — but only as the
-  // BASE prompt. Everything below (KB context, CPF/institution injected
-  // blocks) still concatenates onto whichever base was picked.
+  // which in turn wins over the hardcoded Aleh default. A flow node override
+  // must remain isolated from the legacy CPF/institution blocks below: those
+  // blocks belong to the standalone global responder and can contradict a
+  // node's own policy. Knowledge-base context still appends to the base.
   const hasOverride = !!systemPromptOverride && systemPromptOverride.trim() !== "";
   let systemPromptWithKb = hasOverride
     ? systemPromptOverride!
@@ -836,7 +837,7 @@ Você precisa descobrir mais sobre as necessidades e desafios que o cliente est�
   - usar frases mais curtas e claras;
   - reforçar que o objetivo é ajudar.`;
       }
-    } else if (!hasActiveDebt) {
+    } else if (!hasOverride && !hasActiveDebt) {
       systemPromptWithKb = `${systemPromptWithKb}
 
 === INFORMAÇÕES DE CONSULTA (DDM API) ===
@@ -848,7 +849,7 @@ Você é o(a) Aleh.
 2. Pergunte de forma simpática se pode ajudá-lo em mais alguma coisa.
 3. Não fale sobre acordos, cobranças ou valores pendentes.
 4. Caso o cliente solicite falar com um atendente ou transferir para um humano, transfira e retorne a tag #EQUIPEHUMANA.`;
-    } else {
+    } else if (!hasOverride) {
       systemPromptWithKb = `${systemPromptWithKb}
 
 === INFORMAÇÕES DE CONSULTA (DDM API) ===
@@ -861,7 +862,7 @@ Você é o(a) Aleh. Como o cadastro do cliente é na instituição ${inst}:
 2. Pergunte de forma simpática como você pode ajudá-lo ou se ele gostaria de tirar alguma dúvida geral sobre o débito.
 3. Ofereça-se para transferi-lo para falar com um especialista humano especializado na ${inst} caso ele queira. Se ele concordar ou solicitar explicitamente a transferência, encerre obrigatoriamente com a tag #EQUIPEHUMANA.`;
     }
-  } else if (foundCpf) {
+  } else if (!hasOverride && foundCpf) {
     systemPromptWithKb = `${systemPromptWithKb}
 
 === INFORMAÇÕES DE CONSULTA (DDM API) ===
@@ -872,7 +873,7 @@ Você é o(a) Aleh.
 1. Informe de forma amigável que não localizou nenhuma pendência em aberto para o CPF digitado em nosso sistema.
 2. Pergunte de forma aberta e simpática como você pode ajudá-lo hoje.
 3. Caso ele solicite falar com um atendente ou peça transferência para um humano, transfira e retorne a tag #EQUIPEHUMANA.`;
-  } else {
+  } else if (!hasOverride) {
     systemPromptWithKb = `${systemPromptWithKb}
 
 === INFORMAÇÃO OBRIGATÓRIA ANTES DE INICIAR ===
