@@ -49,6 +49,8 @@ class EventStream {
       console.warn("[VoIP SSE] Failed to resolve VoIP URL, using fallback:", err);
     }
 
+    if (!baseUrl) return;
+
     if (this.#es) return; // prevent race condition
 
     this.#es = new EventSource(`${baseUrl}/api/events?clientId=${encodeURIComponent(clientId)}`);

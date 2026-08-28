@@ -35,6 +35,7 @@ export function useVoipCall(sessionName: string) {
   // Initialize event stream connection
   useEffect(() => {
     if (!sessionName) return;
+    if (!voipBaseUrl) return;
 
     voipEventStream.connect();
 
@@ -101,7 +102,7 @@ export function useVoipCall(sessionName: string) {
     return () => {
       unsubscribe();
     };
-  }, [sessionName, activeCall, incomingCall]);
+  }, [sessionName, voipBaseUrl, activeCall, incomingCall]);
 
   const startOutboundCall = useCallback(async (phone: string) => {
     if (!sessionName || !voipBaseUrl) {
