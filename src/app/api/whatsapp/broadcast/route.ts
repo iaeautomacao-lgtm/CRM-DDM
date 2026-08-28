@@ -71,6 +71,7 @@ export async function POST(request: Request) {
       template_name,
       template_language,
       template_params,
+      configId,
     } = body
 
     let recipients: NewRecipient[]
@@ -101,11 +102,17 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await supabase
+    let configQuery = supabase
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', accountId)
-      .single()
+
+    if (configId) {
+      configQuery = configQuery.eq('id', configId)
+    }
+
+    const { data: configList, error: configError } = await configQuery.limit(1)
+    const config = configList?.[0]
 
     if (configError || !config) {
       return NextResponse.json(

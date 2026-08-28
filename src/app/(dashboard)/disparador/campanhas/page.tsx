@@ -254,15 +254,15 @@ export default function CampanhasPage() {
       const { data: tagList } = await supabase.from("tags").select("id, name, color").order("name");
       setTags(tagList ?? []);
 
-      // Load Active WAHA Sessions
+      // Load enabled WhatsApp channels (WAHA + Meta)
       const { data: configList } = await supabase
         .from("whatsapp_config")
-        .select("id, waha_session")
-        .eq("provider", "waha");
+        .select("id, waha_session, provider")
+        .eq("habilitado", true);
 
       const wahaSessions = (configList ?? []).map((c) => ({
         id: c.id,
-        name: c.waha_session || "Sessão WAHA",
+        name: c.provider === "meta" ? "WhatsApp Oficial (Meta)" : (c.waha_session || "Sessão WAHA"),
       }));
       setSessions(wahaSessions);
     } catch (err) {
