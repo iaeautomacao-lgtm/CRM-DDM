@@ -418,9 +418,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true, message: 'WAHA configuration saved.' })
     }
 
-    if (!access_token || !phone_number_id) {
+    if (!phone_number_id) {
       return NextResponse.json(
-        { error: 'access_token and phone_number_id are required' },
+        { error: 'phone_number_id is required' },
         { status: 400 }
       )
     }
@@ -466,12 +466,76 @@ export async function POST(request: Request) {
       )
     }
 
+    // Look up any pre-existing row for this account so we know whether
+    // this number is already registered with Meta — if so we can skip
+    // /register when the user didn't provide a PIN this time around,
+    // and whether there's a stored access_token to fall back on below.
+    let existing = null
+    if (configId) {
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, registered_at, phone_number_id, access_token')
+        .eq('id', configId)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      existing = data
+    } else {
+      const { data } = await supabase
+        .from('whatsapp_config')
+        .select('id, registered_at, phone_number_id, access_token')
+        .eq('account_id', accountId)
+        .eq('phone_number_id', phone_number_id)
+        .maybeSingle()
+      existing = data
+    }
+
+    // Resolve the access token to actually use, mirroring the
+    // waha_api_key === MASKED_TOKEN pattern above: a masked/omitted
+    // token on an update means "keep the current one" rather than "no
+    // token provided". `effectiveAccessToken` (plaintext) is what the
+    // live Meta API calls below need; `encryptedAccessToken` is what
+    // gets persisted.
+    let effectiveAccessToken: string
+    let encryptedAccessToken: string
+    if ((!access_token || access_token === MASKED_TOKEN) && existing?.access_token) {
+      try {
+        effectiveAccessToken = decrypt(existing.access_token)
+      } catch (err) {
+        console.error('Failed to decrypt existing access_token:', err)
+        return NextResponse.json(
+          { error: 'The stored access token cannot be decrypted. Please re-enter it.' },
+          { status: 500 }
+        )
+      }
+      encryptedAccessToken = existing.access_token
+    } else if (access_token && access_token !== MASKED_TOKEN) {
+      effectiveAccessToken = access_token
+      try {
+        encryptedAccessToken = encrypt(access_token)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown encryption error'
+        console.error('Encryption failed:', message)
+        return NextResponse.json(
+          {
+            error:
+              'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+          },
+          { status: 500 }
+        )
+      }
+    } else {
+      return NextResponse.json(
+        { error: 'access_token and phone_number_id are required' },
+        { status: 400 }
+      )
+    }
+
     // Verify credentials with Meta BEFORE saving
     let phoneInfo
     try {
       phoneInfo = await verifyPhoneNumber({
         phoneNumberId: phone_number_id,
-        accessToken: access_token,
+        accessToken: effectiveAccessToken,
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown Meta API error'
@@ -482,11 +546,11 @@ export async function POST(request: Request) {
       )
     }
 
-    // Encrypt sensitive tokens before storing
-    let encryptedAccessToken: string
+    // verify_token has no "keep existing" path — unaffected by this
+    // change, matches its pre-existing behaviour (omitted verify_token
+    // on an edit still nulls it out).
     let encryptedVerifyToken: string | null
     try {
-      encryptedAccessToken = encrypt(access_token)
       encryptedVerifyToken = verify_token ? encrypt(verify_token) : null
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown encryption error'
@@ -498,28 +562,6 @@ export async function POST(request: Request) {
         },
         { status: 500 }
       )
-    }
-
-    // Look up any pre-existing row for this account so we know whether
-    // this number is already registered with Meta — if so we can skip
-    // /register when the user didn't provide a PIN this time around.
-    let existing = null
-    if (configId) {
-      const { data } = await supabase
-        .from('whatsapp_config')
-        .select('id, registered_at, phone_number_id')
-        .eq('id', configId)
-        .eq('account_id', accountId)
-        .maybeSingle()
-      existing = data
-    } else {
-      const { data } = await supabase
-        .from('whatsapp_config')
-        .select('id, registered_at, phone_number_id')
-        .eq('account_id', accountId)
-        .eq('phone_number_id', phone_number_id)
-        .maybeSingle()
-      existing = data
     }
 
     const sameNumber =
@@ -557,7 +599,7 @@ export async function POST(request: Request) {
         try {
           await registerPhoneNumber({
             phoneNumberId: phone_number_id,
-            accessToken: access_token,
+            accessToken: effectiveAccessToken,
             pin,
           })
           registeredAt = new Date().toISOString()
@@ -582,7 +624,7 @@ export async function POST(request: Request) {
       try {
         await subscribeWabaToApp({
           wabaId: waba_id,
-          accessToken: access_token,
+          accessToken: effectiveAccessToken,
         })
         subscribedAppsAt = new Date().toISOString()
       } catch (err) {

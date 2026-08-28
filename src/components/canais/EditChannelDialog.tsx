@@ -155,13 +155,6 @@ export function EditChannelDialog({
       toast.error("Phone Number ID é obrigatório");
       return;
     }
-    // The server requires a real access_token on every save, update or
-    // not — there's no "keep existing" path for Meta (confirmed in
-    // route.ts: `if (!access_token || !phone_number_id) return 400`).
-    if (!tokenEdited || !accessToken.trim() || accessToken === MASKED_TOKEN) {
-      toast.error("Reentre o Access Token para salvar as alterações");
-      return;
-    }
     setSaving(true);
     try {
       const res = await apiFetch("/api/whatsapp/config", {
@@ -172,7 +165,7 @@ export function EditChannelDialog({
           provider: "meta",
           phone_number_id: phoneNumberId.trim(),
           waba_id: wabaId.trim() || null,
-          access_token: accessToken.trim(),
+          access_token: tokenEdited ? accessToken.trim() : MASKED_TOKEN,
           verify_token: verifyToken.trim() || null,
         }),
       });
