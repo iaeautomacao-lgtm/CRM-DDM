@@ -7,6 +7,7 @@ import type { DisparadorMessageTemplate } from "@/types";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -27,10 +28,25 @@ import {
   Upload,
 } from "lucide-react";
 
+// Common shape both template sources (internal disparador_message_templates
+// and the Meta-approved wacrm.message_templates catalog) get mapped into,
+// so the list/select UI below doesn't need to branch on hasMeta.
+interface PickerTemplate {
+  id: string;
+  nome: string;
+  conteudo: string;
+  language?: string;
+}
+
 interface MessageTemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelect: (template: DisparadorMessageTemplate) => void;
+  onSelect: (template: PickerTemplate) => void;
+  /** When true, list Meta-approved templates (read-only) instead of the
+   * account's own editable disparador_message_templates catalog — used
+   * when the campaign's selected sessions include a Meta channel, which
+   * can only send approved templates. */
+  hasMeta?: boolean;
 }
 
 type Mode = "list" | "create";
@@ -39,9 +55,10 @@ export function MessageTemplatePicker({
   open,
   onOpenChange,
   onSelect,
+  hasMeta = false,
 }: MessageTemplatePickerProps) {
   const { accountId, user } = useAuth();
-  const [templates, setTemplates] = useState<DisparadorMessageTemplate[]>([]);
+  const [templates, setTemplates] = useState<PickerTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState<Mode>("list");
   const [search, setSearch] = useState("");
@@ -56,6 +73,32 @@ export function MessageTemplatePicker({
   const loadTemplates = async () => {
     setLoading(true);
     const supabase = createClient();
+
+    if (hasMeta) {
+      const { data, error } = await supabase
+        .from("message_templates")
+        .select("id, name, body_text, language")
+        .eq("account_id", accountId)
+        .eq("status", "APPROVED")
+        .order("name", { ascending: true });
+
+      if (error) {
+        console.error("Failed to fetch Meta message templates:", error);
+        setTemplates([]);
+      } else {
+        setTemplates(
+          (data ?? []).map((t) => ({
+            id: t.id,
+            nome: t.name,
+            conteudo: t.body_text,
+            language: t.language,
+          })),
+        );
+      }
+      setLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("disparador_message_templates")
       .select("*")
@@ -65,7 +108,13 @@ export function MessageTemplatePicker({
       console.error("Failed to fetch message templates:", error);
       setTemplates([]);
     } else {
-      setTemplates((data as DisparadorMessageTemplate[]) ?? []);
+      setTemplates(
+        ((data as DisparadorMessageTemplate[]) ?? []).map((t) => ({
+          id: t.id,
+          nome: t.nome,
+          conteudo: t.conteudo,
+        })),
+      );
     }
     setLoading(false);
   };
@@ -75,7 +124,7 @@ export function MessageTemplatePicker({
     setMode("list");
     setSearch("");
     void loadTemplates();
-  }, [open]);
+  }, [open, hasMeta]);
 
   function resetCreateForm() {
     setEditingId(null);
@@ -88,7 +137,7 @@ export function MessageTemplatePicker({
     onOpenChange(next);
   }
 
-  function handleEditClick(template: DisparadorMessageTemplate) {
+  function handleEditClick(template: PickerTemplate) {
     setEditingId(template.id);
     setNome(template.nome);
     setConteudo(template.conteudo);
@@ -178,7 +227,7 @@ export function MessageTemplatePicker({
     }
   }
 
-  async function handleDelete(template: DisparadorMessageTemplate) {
+  async function handleDelete(template: PickerTemplate) {
     const confirmed = window.confirm(`Excluir o template "${template.nome}"?`);
     if (!confirmed) return;
 
@@ -214,6 +263,18 @@ export function MessageTemplatePicker({
           </DialogDescription>
         </DialogHeader>
 
+        {mode === "list" && (
+          <Badge
+            className={
+              hasMeta
+                ? "w-fit bg-[#14532D] text-white"
+                : "w-fit bg-muted text-muted-foreground"
+            }
+          >
+            {hasMeta ? "Templates oficiais Meta (aprovados)" : "Templates internos"}
+          </Badge>
+        )}
+
         {mode === "list" ? (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
@@ -223,15 +284,17 @@ export function MessageTemplatePicker({
                 placeholder="Buscar template..."
                 className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
               />
-              <Button
-                type="button"
-                variant="secondary"
-                className="shrink-0"
-                onClick={() => setMode("create")}
-              >
-                <Plus className="h-4 w-4" />
-                Novo
-              </Button>
+              {!hasMeta && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="shrink-0"
+                  onClick={() => setMode("create")}
+                >
+                  <Plus className="h-4 w-4" />
+                  Novo
+                </Button>
+              )}
             </div>
 
             <div className="max-h-[50vh] space-y-2 overflow-y-auto">
@@ -241,9 +304,13 @@ export function MessageTemplatePicker({
                 </div>
               ) : filtered.length === 0 ? (
                 <div className="rounded-md border border-border bg-background/50 p-6 text-center">
-                  <p className="text-sm text-popover-foreground">Nenhum template</p>
+                  <p className="text-sm text-popover-foreground">
+                    {hasMeta ? "Nenhum template aprovado" : "Nenhum template"}
+                  </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Crie um template manualmente ou importe de um arquivo .docx/.txt.
+                    {hasMeta
+                      ? "Aprove um template na aba Templates para usá-lo aqui."
+                      : "Crie um template manualmente ou importe de um arquivo .docx/.txt."}
                   </p>
                 </div>
               ) : (
@@ -261,30 +328,34 @@ export function MessageTemplatePicker({
                       className="min-w-0 flex-1 text-left"
                     >
                       <p className="truncate text-sm font-medium text-popover-foreground">
-                        {t.nome}
+                        {hasMeta && t.language ? `${t.nome} (${t.language})` : t.nome}
                       </p>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                         {t.conteudo}
                       </p>
                     </button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                      onClick={() => handleEditClick(t)}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0 text-red-500 hover:bg-red-500/10"
-                      onClick={() => handleDelete(t)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {!hasMeta && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                          onClick={() => handleEditClick(t)}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-red-500 hover:bg-red-500/10"
+                          onClick={() => handleDelete(t)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                   </div>
                 ))

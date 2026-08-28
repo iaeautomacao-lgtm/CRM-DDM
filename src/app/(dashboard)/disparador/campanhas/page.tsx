@@ -57,6 +57,7 @@ interface WahaSession {
   id: string;
   name: string;
   phone_info?: { id: string };
+  provider?: string;
 }
 
 interface CampaignMessage {
@@ -263,6 +264,7 @@ export default function CampanhasPage() {
       const wahaSessions = (configList ?? []).map((c) => ({
         id: c.id,
         name: c.provider === "meta" ? "WhatsApp Oficial (Meta)" : (c.waha_session || "Sessão WAHA"),
+        provider: c.provider,
       }));
       setSessions(wahaSessions);
     } catch (err) {
@@ -509,6 +511,13 @@ export default function CampanhasPage() {
     setIntervaloMin(30);
     setIntervaloMax(60);
   };
+
+  // Meta channels can only send approved templates — the picker needs to
+  // know this to show the Meta catalog instead of the account's own
+  // editable disparador_message_templates list.
+  const hasMeta = sessions
+    .filter((s) => selectedSessions.includes(s.id))
+    .some((s) => s.provider === "meta");
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
@@ -1055,6 +1064,7 @@ export default function CampanhasPage() {
 
       <MessageTemplatePicker
         open={templatePickerIndex !== null}
+        hasMeta={hasMeta}
         onOpenChange={(next) => {
           if (!next) setTemplatePickerIndex(null);
         }}
