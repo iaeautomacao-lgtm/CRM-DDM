@@ -104,6 +104,10 @@ export async function POST(request: Request) {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown Meta API error'
         console.error('[channel-test] Meta send failed:', message)
+        console.error('[channel-test] Meta error details:', {
+          message: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        })
         return NextResponse.json(
           { error: `Meta API error: ${message}` },
           { status: 502 },
