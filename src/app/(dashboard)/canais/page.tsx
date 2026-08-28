@@ -25,7 +25,7 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { MessageCircle, MoreVertical, Plus, Search, Trash2 } from "lucide-react";
+import { MessageCircle, MoreVertical, Plus, Search, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +59,7 @@ import type { ChannelConfig } from "@/components/canais/types";
 import { NewChannelDialog } from "@/components/canais/NewChannelDialog";
 import { EditChannelDialog } from "@/components/canais/EditChannelDialog";
 import { ConnectWahaDialog } from "@/components/canais/ConnectWahaDialog";
+import { TestChannelDialog } from "@/components/canais/TestChannelDialog";
 
 function channelName(c: ChannelConfig): string {
   if (c.provider === "waha") return c.waha_session || "Sessão WAHA";
@@ -94,6 +95,7 @@ export default function CanaisPage() {
   const [newOpen, setNewOpen] = useState(false);
   const [editing, setEditing] = useState<ChannelConfig | null>(null);
   const [connecting, setConnecting] = useState<ChannelConfig | null>(null);
+  const [testing, setTesting] = useState<ChannelConfig | null>(null);
   const [deleteTargets, setDeleteTargets] = useState<ChannelConfig[] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [stopBusyId, setStopBusyId] = useState<string | null>(null);
@@ -399,6 +401,10 @@ export default function CanaisPage() {
                             </DropdownMenuItem>
                           ))}
                         {c.provider === "waha" && <DropdownMenuSeparator className="bg-border" />}
+                        <DropdownMenuItem onClick={() => setTesting(c)} className="text-popover-foreground">
+                          <Zap className="size-4" />
+                          Testar
+                        </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => setEditing(c)} className="text-popover-foreground">
                           Editar
                         </DropdownMenuItem>
@@ -450,6 +456,8 @@ export default function CanaisPage() {
           fetchConfigs();
         }}
       />
+
+      <TestChannelDialog channel={testing} onClose={() => setTesting(null)} />
 
       <Dialog open={deleteTargets !== null} onOpenChange={(open) => !open && setDeleteTargets(null)}>
         <DialogContent className="sm:max-w-sm">
