@@ -26,11 +26,31 @@ import {
   Play,
   Circle,
   GitBranch,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { GatedButton } from "@/components/ui/gated-button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Sheet,
   SheetContent,
@@ -41,6 +61,7 @@ import {
 } from "@/components/ui/sheet";
 import { CollapsibleJson, CopyJsonButton } from "@/components/flows/json-highlight";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/hooks/use-can";
 
 /**
  * Run history viewer.
@@ -176,7 +197,26 @@ const STATUS_META: Record<
   },
 };
 
+const STATUS_FILTER_ALL = "all";
+
+// The 7 statuses called out in the filter spec — a deliberate subset
+// of STATUS_META's 9 (omits "delayed" and "transferred", which aren't
+// part of the requested filter list). Labels reuse STATUS_META's
+// wording where they match; "Pausado" is shortened from STATUS_META's
+// "Pausado pelo agente" to fit the select trigger.
+const STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: STATUS_FILTER_ALL, label: "Todos" },
+  { value: "active", label: "Ativo" },
+  { value: "completed", label: "Concluído" },
+  { value: "handed_off", label: "Transferido" },
+  { value: "failed", label: "Falhou" },
+  { value: "timed_out", label: "Timeout" },
+  { value: "paused_by_agent", label: "Pausado" },
+  { value: "error", label: "Erro" },
+];
+
 export default function FlowRunsPage() {
+  const canDelete = useCan("send-messages");
   const router = useRouter();
   const params = useParams<{ id: string }>();
 
@@ -197,12 +237,64 @@ export default function FlowRunsPage() {
   // event from a different run.
   const [selectedEvent, setSelectedEvent] = useState<EventRow | null>(null);
 
+  // ---- Filters ----
+  const [statusFilter, setStatusFilter] = useState(STATUS_FILTER_ALL);
+  const [contactInput, setContactInput] = useState("");
+  // Debounced (500ms) copy of contactInput — this, not contactInput
+  // directly, drives the fetch so typing doesn't fire a request per
+  // keystroke.
+  const [contactFilter, setContactFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const hasActiveFilters =
+    statusFilter !== STATUS_FILTER_ALL ||
+    contactInput.trim() !== "" ||
+    dateFrom !== "" ||
+    dateTo !== "";
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setContactFilter(contactInput.trim());
+    }, 500);
+    return () => clearTimeout(t);
+  }, [contactInput]);
+
+  function clearFilters() {
+    setStatusFilter(STATUS_FILTER_ALL);
+    setContactInput("");
+    setContactFilter("");
+    setDateFrom("");
+    setDateTo("");
+  }
+
+  // ---- Selection + bulk delete ----
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  // Bumped after a successful delete to re-trigger the runs fetch below
+  // without duplicating its fetch/error-handling logic in a callback.
+  const [reloadKey, setReloadKey] = useState(0);
+
   useEffect(() => {
     if (!params.id) return;
     let cancelled = false;
     (async () => {
+      setLoading(true);
       try {
-        const res = await apiFetch(`/api/flows/${params.id}/runs`);
+        const qs = new URLSearchParams();
+        if (statusFilter !== STATUS_FILTER_ALL) qs.set("status", statusFilter);
+        if (contactFilter) qs.set("contact", contactFilter);
+        if (dateFrom) {
+          qs.set("date_from", new Date(`${dateFrom}T00:00:00`).toISOString());
+        }
+        if (dateTo) {
+          qs.set("date_to", new Date(`${dateTo}T23:59:59.999`).toISOString());
+        }
+        const qsStr = qs.toString();
+        const res = await apiFetch(
+          `/api/flows/${params.id}/runs${qsStr ? `?${qsStr}` : ""}`,
+        );
         if (res.status === 404) {
           if (!cancelled) setNotFound(true);
           return;
@@ -215,6 +307,7 @@ export default function FlowRunsPage() {
         if (!cancelled) {
           setFlow(json.flow);
           setRuns(json.runs ?? []);
+          setSelected(new Set());
         }
       } catch (err) {
         if (!cancelled) {
@@ -228,7 +321,7 @@ export default function FlowRunsPage() {
     return () => {
       cancelled = true;
     };
-  }, [params.id]);
+  }, [params.id, statusFilter, contactFilter, dateFrom, dateTo, reloadKey]);
 
   // Independent of the runs fetch above — a failure here just means
   // "Nós não executados" stays empty everywhere, not a page-breaking
@@ -282,7 +375,65 @@ export default function FlowRunsPage() {
     }
   }
 
-  if (loading) {
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const allVisibleSelected = runs.length > 0 && runs.every((r) => selected.has(r.id));
+  const someVisibleSelected = runs.some((r) => selected.has(r.id));
+
+  function toggleSelectAllVisible() {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        runs.forEach((r) => next.delete(r.id));
+      } else {
+        runs.forEach((r) => next.add(r.id));
+      }
+      return next;
+    });
+  }
+
+  async function deleteRuns(ids: string[]) {
+    if (ids.length === 0) return;
+    setDeleting(true);
+    try {
+      const res = await apiFetch(`/api/flows/${params.id}/runs`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error(`Failed: ${res.status}`);
+      const json = (await res.json()) as { deleted: number };
+      toast.success(
+        `${json.deleted} execuç${json.deleted === 1 ? "ão excluída" : "ões excluídas"}`,
+      );
+      setSelected(new Set());
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      console.error(err);
+      toast.error("Não foi possível excluir as execuções.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleBulkDelete() {
+    await deleteRuns([...selected]);
+    setBulkDeleteOpen(false);
+  }
+
+  async function handleDeleteAll() {
+    await deleteRuns(runs.map((r) => r.id));
+    setDeleteAllOpen(false);
+  }
+
+  if (loading && !flow) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -316,21 +467,150 @@ export default function FlowRunsPage() {
       </button>
       <h1 className="text-xl font-semibold text-foreground">Execuções</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        As 50 execuções mais recentes deste fluxo. Clique em uma linha para ver
-        o log passo a passo do motor.
+        As 50 execuções mais recentes deste fluxo (após os filtros abaixo).
+        Clique em uma linha para ver o log passo a passo do motor.
       </p>
 
+      {/* Filters */}
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Status</label>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => v && setStatusFilter(v)}
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue>
+                {(v: string) =>
+                  STATUS_FILTER_OPTIONS.find((o) => o.value === v)?.label ?? v
+                }
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTER_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="min-w-[200px] flex-1 space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Contato</label>
+          <Input
+            placeholder="Buscar por nome ou telefone"
+            value={contactInput}
+            onChange={(e) => setContactInput(e.target.value)}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">De</label>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-36"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Até</label>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-36"
+          />
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={clearFilters}
+          disabled={!hasActiveFilters}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          Limpar filtros
+        </Button>
+      </div>
+
+      {/* Selection header + "excluir todas" */}
+      <div className="mt-6 flex items-center justify-between gap-2">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <Checkbox
+            checked={allVisibleSelected}
+            indeterminate={!allVisibleSelected && someVisibleSelected}
+            onCheckedChange={toggleSelectAllVisible}
+            disabled={runs.length === 0}
+            aria-label="Selecionar todas as execuções visíveis"
+          />
+          Selecionar todos
+        </label>
+        <GatedButton
+          variant="outline"
+          size="sm"
+          canAct={canDelete}
+          gateReason="excluir execuções"
+          disabled={runs.length === 0}
+          onClick={() => setDeleteAllOpen(true)}
+          className="text-destructive hover:bg-destructive/10"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Excluir todas
+        </GatedButton>
+      </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="mt-2 flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/40 px-4 py-2">
+          <p className="text-sm text-foreground">
+            <span className="font-medium">{selected.size}</span>{" "}
+            selecionado{selected.size === 1 ? "" : "s"}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelected(new Set())}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              Limpar seleção
+            </Button>
+            <GatedButton
+              variant="destructive"
+              size="sm"
+              canAct={canDelete}
+              gateReason="excluir execuções"
+              onClick={() => setBulkDeleteOpen(true)}
+            >
+              <Trash2 className="h-4 w-4" />
+              Excluir selecionados
+            </GatedButton>
+          </div>
+        </div>
+      )}
+
       {runs.length === 0 ? (
-        <div className="mt-6 rounded-lg border border-dashed border-border bg-card/50 px-6 py-12 text-center text-sm text-muted-foreground">
-          Nenhuma execução ainda. Dispare o fluxo a partir de um número do
-          WhatsApp para vê-lo aparecer aqui.
+        <div className="mt-4 rounded-lg border border-dashed border-border bg-card/50 px-6 py-12 text-center text-sm text-muted-foreground">
+          {hasActiveFilters
+            ? "Nenhuma execução corresponde aos filtros aplicados."
+            : "Nenhuma execução ainda. Dispare o fluxo a partir de um número do WhatsApp para vê-lo aparecer aqui."}
         </div>
       ) : (
-        <div className="mt-6 flex flex-col gap-2">
+        <div className="relative mt-4 flex flex-col gap-2">
+          {loading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/60">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
           {runs.map((run) => (
             <RunCard
               key={run.id}
               run={run}
+              selected={selected.has(run.id)}
+              onToggleSelect={() => toggleSelect(run.id)}
               events={eventsByRun[run.id] ?? null}
               loadingEvents={loadingEvents === run.id}
               expanded={expanded === run.id}
@@ -348,12 +628,79 @@ export default function FlowRunsPage() {
         ev={selectedEvent}
         onClose={() => setSelectedEvent(null)}
       />
+
+      {/* Bulk delete confirmation */}
+      <Dialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Excluir {selected.size} {selected.size === 1 ? "execução" : "execuções"}
+            </DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja excluir{" "}
+              <span className="font-medium text-foreground">
+                {selected.size} {selected.size === 1 ? "execução" : "execuções"}
+              </span>
+              ? Os logs de eventos dessas execuções também serão excluídos. Esta
+              ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setBulkDeleteOpen(false)}
+              disabled={deleting}
+            >
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={deleting}>
+              {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* "Excluir todas" confirmation */}
+      <Dialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Excluir todas as execuções listadas</DialogTitle>
+            <DialogDescription>
+              Tem certeza que deseja excluir{" "}
+              <span className="font-medium text-foreground">
+                {runs.length} {runs.length === 1 ? "execução" : "execuções"}
+              </span>{" "}
+              {hasActiveFilters
+                ? "que correspondem aos filtros aplicados"
+                : "listadas"}
+              ? Os logs de eventos dessas execuções também serão excluídos. Esta
+              ação não pode ser desfeita.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteAllOpen(false)}
+              disabled={deleting}
+            >
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteAll} disabled={deleting}>
+              {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 function RunCard({
   run,
+  selected,
+  onToggleSelect,
   events,
   loadingEvents,
   expanded,
@@ -364,6 +711,8 @@ function RunCard({
   onViewInDiagram,
 }: {
   run: RunRow;
+  selected: boolean;
+  onToggleSelect: () => void;
   events: EventRow[] | null;
   loadingEvents: boolean;
   expanded: boolean;
@@ -390,6 +739,12 @@ function RunCard({
   return (
     <div className="rounded-lg border border-border bg-card">
       <div className="flex w-full items-center gap-2 px-4 py-3">
+        <Checkbox
+          checked={selected}
+          onCheckedChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          aria-label="Selecionar execução"
+        />
         <button
           type="button"
           onClick={onToggle}
