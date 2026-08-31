@@ -114,7 +114,7 @@ export function MonitorFiltersPanel({
           </div>
 
           <div className="mt-3 flex items-center gap-2">
-            <Button onClick={() => onApply(draft)}>Pesquisar</Button>
+            <Button variant="secondary" onClick={() => onApply(draft)}>Pesquisar</Button>
             <Button
               variant="outline"
               onClick={() => {

@@ -142,17 +142,17 @@ export function ConversationCard({
         >
           <MoreVertical className="size-4" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="bg-popover text-popover-foreground">
+        <DropdownMenuContent align="end" className="min-w-[200px] bg-popover text-popover-foreground">
           <DropdownMenuItem
             render={<Link href={`/inbox?c=${conversation.id}`} />}
-            className="text-popover-foreground"
+            className="whitespace-nowrap text-popover-foreground"
           >
             <Eye className="size-4" />
             Ver conversa
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => onHistoryClick(conversation)}
-            className="text-popover-foreground"
+            className="whitespace-nowrap text-popover-foreground"
           >
             <History className="size-4" />
             Ver histórico
@@ -160,7 +160,7 @@ export function ConversationCard({
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
             onClick={() => onTransferClick(conversation)}
-            className="text-popover-foreground"
+            className="whitespace-nowrap text-popover-foreground"
           >
             <ArrowLeftRight className="size-4" />
             Transferir para…
@@ -168,7 +168,7 @@ export function ConversationCard({
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
             onClick={() => onFinalizeClick(conversation)}
-            className="text-red-500 focus:bg-red-50 focus:text-red-500"
+            className="whitespace-nowrap text-red-500 focus:bg-red-50 focus:text-red-500"
           >
             <XCircle className="size-4" />
             Finalizar atendimento

@@ -117,13 +117,12 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Análise em tempo real de conversas, contatos, negócios, transmissões e automações.
-        </p>
-      </div>
+      {/* Header — the top bar (components/layout/header.tsx) already
+          renders the "Dashboard" H1 for this route; only the subtitle
+          belongs here. */}
+      <p className="text-sm text-muted-foreground">
+        Análise em tempo real de conversas, contatos, negócios, transmissões e automações.
+      </p>
 
       {/* Metric cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
