@@ -14,6 +14,16 @@
 export type ColorUtility = "bg" | "stroke" | "fill" | "text"
 
 export const chartColors = {
+  // Not part of upstream Tremor — added locally so dashboard charts can
+  // use the DDM brand primary (#FF5706) instead of Tremor's default
+  // categorical palette. Arbitrary-value Tailwind classes since #FF5706
+  // has no matching stock color step.
+  ddmOrange: {
+    bg: "bg-[#FF5706]",
+    stroke: "stroke-[#FF5706]",
+    fill: "fill-[#FF5706]",
+    text: "text-[#FF5706]",
+  },
   blue: {
     bg: "bg-blue-500",
     stroke: "stroke-blue-500",

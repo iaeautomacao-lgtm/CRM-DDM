@@ -306,7 +306,17 @@ export function TeamFormDialog({
               onValueChange={(v) => v && setForm((f) => ({ ...f, overflowTeamId: v }))}
             >
               <SelectTrigger className="w-full">
-                <SelectValue />
+                {/* Select.Value has no built-in value → label lookup, so
+                    without this children render it shows the raw stored
+                    value ("__none__") instead of the matching SelectItem's
+                    text — see fields.tsx for the same pattern. */}
+                <SelectValue>
+                  {(v: string) =>
+                    v === NO_OVERFLOW
+                      ? 'Sem transbordo'
+                      : (overflowOptions.find((t) => t.id === v)?.name ?? v)
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={NO_OVERFLOW}>Sem transbordo</SelectItem>

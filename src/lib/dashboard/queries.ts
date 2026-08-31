@@ -156,10 +156,12 @@ export async function loadConversationsStatusDonut(db: DB): Promise<Conversation
     else if (row.status === 'closed') counts.closed += 1
   }
 
+  // DDM chart palette: primary orange for the most actionable status,
+  // secondary blue for "waiting", success green for "done".
   const slices: ConversationsStatusSlice[] = [
-    { status: 'open', label: 'Em Atendimento (Abertas)', color: '#3b82f6', count: counts.open },
-    { status: 'pending', label: 'Aguardando Resposta (Pendentes)', color: '#f59e0b', count: counts.pending },
-    { status: 'closed', label: 'Resolvidas (Fechadas)', color: '#10b981', count: counts.closed },
+    { status: 'open', label: 'Em Atendimento (Abertas)', color: '#FF5706', count: counts.open },
+    { status: 'pending', label: 'Aguardando Resposta (Pendentes)', color: '#3B82F6', count: counts.pending },
+    { status: 'closed', label: 'Resolvidas (Fechadas)', color: '#10B981', count: counts.closed },
   ]
 
   return {
@@ -266,6 +268,15 @@ export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
 
 // --- 5. Activity feed --------------------------------------------------
 
+// broadcasts.status values (see migration 001_initial_schema.sql) minus
+// 'sent', which gets its own "enviada para N contatos" phrasing above.
+const BROADCAST_STATUS_LABELS: Record<string, string> = {
+  draft: 'rascunho',
+  scheduled: 'agendada',
+  sending: 'enviando',
+  failed: 'falhou',
+}
+
 export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> {
   // Pull ~10 from each source (plenty of headroom after merge-sort),
   // then interleave by timestamp. The individual per-table limits
@@ -315,11 +326,11 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
   }>) {
     const conv = Array.isArray(m.conversations) ? m.conversations[0] : m.conversations
     const contact = Array.isArray(conv?.contacts) ? conv?.contacts[0] : conv?.contacts
-    const who = contact?.name || contact?.phone || 'Unknown'
+    const who = contact?.name || contact?.phone || 'Desconhecido'
     items.push({
       id: `msg-${m.id}`,
       kind: 'message',
-      text: `New message from ${who}`,
+      text: `Nova mensagem de ${who}`,
       at: m.created_at,
       href: `/inbox?c=${m.conversation_id}`,
     })
@@ -329,7 +340,7 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
     items.push({
       id: `contact-${c.id}`,
       kind: 'contact',
-      text: `New contact: ${c.name || c.phone}`,
+      text: `Novo contato: ${c.name || c.phone}`,
       at: c.created_at,
       href: '/contacts',
     })
@@ -346,8 +357,8 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
       id: `deal-${d.id}`,
       kind: 'deal',
       text: stage?.name
-        ? `Deal "${d.title}" in ${stage.name}`
-        : `Deal "${d.title}" updated`,
+        ? `Negócio "${d.title}" em ${stage.name}`
+        : `Negócio "${d.title}" atualizado`,
       at: d.updated_at,
       href: '/pipelines',
     })
@@ -362,12 +373,12 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
   }>) {
     const label =
       b.status === 'sent'
-        ? `sent to ${b.total_recipients} contacts`
-        : `${b.status} (${b.total_recipients} recipients)`
+        ? `enviada para ${b.total_recipients} contatos`
+        : `${BROADCAST_STATUS_LABELS[b.status] ?? b.status} (${b.total_recipients} destinatários)`
     items.push({
       id: `broadcast-${b.id}`,
       kind: 'broadcast',
-      text: `Broadcast "${b.name}" ${label}`,
+      text: `Transmissão "${b.name}" ${label}`,
       at: b.created_at,
       href: '/broadcasts',
     })
@@ -383,12 +394,12 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
   }>) {
     const automation = Array.isArray(l.automation) ? l.automation[0] : l.automation
     const contact = Array.isArray(l.contact) ? l.contact[0] : l.contact
-    const who = contact?.name || contact?.phone || 'a contact'
-    const autoName = automation?.name || 'Automation'
+    const who = contact?.name || contact?.phone || 'um contato'
+    const autoName = automation?.name || 'Automação'
     items.push({
       id: `auto-${l.id}`,
       kind: 'automation',
-      text: `Automation "${autoName}" ${l.status === 'failed' ? 'failed for' : 'triggered for'} ${who}`,
+      text: `Automação "${autoName}" ${l.status === 'failed' ? 'falhou para' : 'disparada para'} ${who}`,
       at: l.created_at,
     })
   }
