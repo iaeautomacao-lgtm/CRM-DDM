@@ -49,9 +49,9 @@ function DeltaRow({ sign, label }: { sign: number; label: string }) {
       : 'text-muted-foreground'
   const Arrow = sign > 0 ? ArrowUp : sign < 0 ? ArrowDown : Minus
   return (
-    <div className={cn('mt-2 flex items-center gap-1 text-sm', tone)}>
+    <div className={cn('mt-2 flex items-center gap-1 overflow-hidden text-sm', tone)}>
       <Arrow className="h-4 w-4 shrink-0" aria-hidden />
-      <span className="min-w-0 truncate tabular-nums">{label}</span>
+      <span className="min-w-0 flex-1 truncate overflow-hidden tabular-nums">{label}</span>
     </div>
   )
 }
