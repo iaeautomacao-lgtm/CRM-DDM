@@ -10,7 +10,7 @@
 // ============================================================
 
 import { useState } from "react";
-import { Filter, Search } from "lucide-react";
+import { ChevronDown, Filter, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -77,6 +77,7 @@ export function MultiSelectFilter({
             {selectedIds.length}
           </span>
         )}
+        <ChevronDown className="h-3 w-3 ml-1 opacity-60" />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-0">
         <div className="flex items-center justify-between border-b border-border px-3 py-2">

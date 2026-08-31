@@ -36,8 +36,21 @@ export function PhaseColumn({
   const allSelected = visibleIds.length > 0 && visibleIds.every((id) => actions.selectedIds.has(id));
   const someSelected = visibleIds.some((id) => actions.selectedIds.has(id));
 
+  // "Em atendimento" never collapses — an empty queue/browsing column is
+  // the normal/good state, but an empty "in service" column is worth
+  // noticing at full size. `self-start` opts this one grid item out of
+  // the row's default stretch-to-tallest-sibling behavior so it can
+  // actually shrink instead of just leaving blank space at the bottom.
+  const collapsible = phase !== "atendimento";
+  const collapsed = collapsible && !loading && visible.length === 0;
+
   return (
-    <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card">
+    <section
+      className={cn(
+        "flex min-h-0 flex-col rounded-xl border border-border bg-card",
+        collapsed && "self-start",
+      )}
+    >
       <header className="flex items-center gap-2 border-b border-border px-4 py-3">
         <span
           className={cn(
@@ -65,13 +78,23 @@ export function PhaseColumn({
           selecionadas — Transferir / Finalizar") once selection drives
           real actions — for now it's visual/foundation only. */}
 
-      <div className="flex-1 space-y-2 overflow-y-auto p-3" style={{ maxHeight: "70vh" }}>
+      <div
+        className={cn(
+          "space-y-2 overflow-y-auto p-3",
+          collapsed ? "flex min-h-[80px] items-center justify-center" : "flex-1",
+        )}
+        style={collapsed ? undefined : { maxHeight: "70vh" }}
+      >
         {loading ? (
           Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-16 w-full rounded-lg" />
           ))
         ) : visible.length === 0 ? (
-          <EmptyState icon={Icon} title={meta.emptyTitle} hint={meta.emptyHint} className="h-full" />
+          collapsed ? (
+            <p className="text-xs text-muted-foreground">Nenhuma conversa</p>
+          ) : (
+            <EmptyState icon={Icon} title={meta.emptyTitle} hint={meta.emptyHint} className="h-full" />
+          )
         ) : (
           visible.map((c) => (
             <ConversationCard

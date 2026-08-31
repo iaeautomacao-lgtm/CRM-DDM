@@ -116,7 +116,11 @@ export default function DashboardPage() {
   )
 
   return (
-    <div className="space-y-5">
+    // Explicit mt-* per section (rather than a blanket space-y-* on this
+    // container) so the three section-opener gaps below can be widened
+    // independently — space-y's margin-top would otherwise win over a
+    // per-child override at equal specificity.
+    <div>
       {/* Header — the top bar (components/layout/header.tsx) already
           renders the "Dashboard" H1 for this route; only the subtitle
           belongs here. */}
@@ -125,9 +129,11 @@ export default function DashboardPage() {
       </p>
 
       {/* Metric cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {metricsLoading || !metrics ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)
+          Array.from({ length: 4 }).map((_, i) => (
+            <SkeletonCard key={i} className="min-h-[120px]" />
+          ))
         ) : (
           <>
             <MetricCard
@@ -178,22 +184,24 @@ export default function DashboardPage() {
       </div>
 
       {/* Quick actions */}
-      <QuickActions />
+      <div className="mt-5">
+        <QuickActions />
+      </div>
 
       {/* Recuperação Financeira e Metas */}
-      <div className="space-y-1.5">
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Recuperação Financeira</h3>
+      <div className="mt-10">
+        <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Recuperação Financeira</h3>
         <FinancialPerformance data={aiPerformance} loading={aiPerformanceLoading} />
       </div>
 
       {/* Desempenho da IA e Vendas */}
-      <div className="space-y-1.5">
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Desempenho da IA & Conversão</h3>
+      <div className="mt-10">
+        <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Desempenho da IA & Conversão</h3>
         <AiPerformance data={aiPerformance} loading={aiPerformanceLoading} />
       </div>
 
       {/* Charts row */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+      <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="h-full lg:col-span-3">
           <ConversationsChart
             series={series}
@@ -211,10 +219,14 @@ export default function DashboardPage() {
       </div>
 
       {/* Response time */}
-      <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
+      <div className="mt-5">
+        <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
+      </div>
 
       {/* Activity feed */}
-      <ActivityFeed items={activity} loading={activityLoading} />
+      <div className="mt-5">
+        <ActivityFeed items={activity} loading={activityLoading} />
+      </div>
     </div>
   )
 }

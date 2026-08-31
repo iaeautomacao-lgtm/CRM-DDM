@@ -23,7 +23,7 @@ interface MetricCardProps {
 
 export function MetricCard({ title, value, icon: Icon, delta, subtitle }: MetricCardProps) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <div className="min-h-[120px] rounded-xl border border-border bg-card p-5">
       <div className="flex items-start justify-between">
         <p className="text-sm font-medium text-muted-foreground">{title}</p>
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -50,8 +50,8 @@ function DeltaRow({ sign, label }: { sign: number; label: string }) {
   const Arrow = sign > 0 ? ArrowUp : sign < 0 ? ArrowDown : Minus
   return (
     <div className={cn('mt-2 flex items-center gap-1 text-sm', tone)}>
-      <Arrow className="h-4 w-4" aria-hidden />
-      <span className="tabular-nums">{label}</span>
+      <Arrow className="h-4 w-4 shrink-0" aria-hidden />
+      <span className="min-w-0 truncate tabular-nums">{label}</span>
     </div>
   )
 }
