@@ -12,16 +12,83 @@ import { apiFetch } from "@/lib/api-fetch";
 // looks it up in a fresh GET and opens ConnectWahaDialog with it.
 // ============================================================
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { MessageCircle, Server } from "lucide-react";
+import { Info, MessageCircle, Server } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { normalizeSessionName } from "./types";
 
 type Provider = "waha" | "meta";
+
+// ------------------------------------------------------------
+// Non-sensitive form-field persistence — remembers wahaUrl/
+// phoneNumberId/wabaId across dialog sessions (e.g. an org that
+// always connects Meta numbers under the same WABA doesn't have to
+// retype it every time). Never stores waha_api_key/access_token/
+// verify_token — those are credentials, not conveniences.
+// ------------------------------------------------------------
+const CHANNEL_DEFAULTS_KEY = "wacrm_new_channel_defaults";
+
+interface ChannelDefaults {
+  wahaUrl: string;
+  phoneNumberId: string;
+  wabaId: string;
+}
+
+function readChannelDefaults(): Partial<ChannelDefaults> {
+  try {
+    const raw = localStorage.getItem(CHANNEL_DEFAULTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    // Private browsing / storage disabled — just start blank.
+    return {};
+  }
+}
+
+function writeChannelDefaults(patch: Partial<ChannelDefaults>) {
+  try {
+    const current = readChannelDefaults();
+    localStorage.setItem(CHANNEL_DEFAULTS_KEY, JSON.stringify({ ...current, ...patch }));
+  } catch {
+    // Non-fatal — the channel is already saved server-side by this point.
+  }
+}
+
+/** Label + explanatory Info tooltip, used above every field in both forms. */
+function FieldLabel({
+  htmlFor,
+  tooltip,
+  children,
+}: {
+  htmlFor: string;
+  tooltip: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Label htmlFor={htmlFor}>{children}</Label>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger
+            render={<Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />}
+          />
+          <TooltipContent className="max-w-[260px] text-xs">{tooltip}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  );
+}
 
 export function NewChannelDialog({
   open,
@@ -47,14 +114,29 @@ export function NewChannelDialog({
   const [accessToken, setAccessToken] = useState("");
   const [verifyToken, setVerifyToken] = useState("");
 
+  // Prefill the non-sensitive fields on first mount — this dialog is
+  // rendered once by the /canais page and toggled via `open`, so this
+  // never re-fires on subsequent opens (reset() below handles that case).
+  useEffect(() => {
+    const defaults = readChannelDefaults();
+    if (defaults.wahaUrl) setWahaUrl(defaults.wahaUrl);
+    if (defaults.phoneNumberId) setPhoneNumberId(defaults.phoneNumberId);
+    if (defaults.wabaId) setWabaId(defaults.wabaId);
+  }, []);
+
   function reset() {
+    // Restores (not blanks) the non-sensitive fields from localStorage —
+    // reset() runs every time the dialog closes, so this is what makes
+    // "comes back prefilled" true on the *next* open too, not just the
+    // component's very first mount.
+    const defaults = readChannelDefaults();
     setStep("choose");
     setProvider(null);
     setWahaSession("");
-    setWahaUrl("");
+    setWahaUrl(defaults.wahaUrl ?? "");
     setWahaApiKey("");
-    setPhoneNumberId("");
-    setWabaId("");
+    setPhoneNumberId(defaults.phoneNumberId ?? "");
+    setWabaId(defaults.wabaId ?? "");
     setAccessToken("");
     setVerifyToken("");
   }
@@ -93,6 +175,7 @@ export function NewChannelDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao criar canal");
+      writeChannelDefaults({ wahaUrl: wahaUrl.trim() });
       toast.success(data.message || "Canal WAHA criado.");
       handleOpenChange(false);
       onCreated("waha", session);
@@ -127,6 +210,7 @@ export function NewChannelDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao criar canal");
+      writeChannelDefaults({ phoneNumberId: phoneNumberId.trim(), wabaId: wabaId.trim() });
       toast.success("Canal Meta salvo.");
       handleOpenChange(false);
       onCreated("meta");
@@ -171,7 +255,12 @@ export function NewChannelDialog({
         ) : provider === "waha" ? (
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="new-waha-session">Nome da sessão</Label>
+              <FieldLabel
+                htmlFor="new-waha-session"
+                tooltip="Identificador único desta sessão no servidor WAHA. Use letras minúsculas, números e hífens. Ex.: sessao-ddm-1"
+              >
+                Nome da sessão
+              </FieldLabel>
               <Input
                 id="new-waha-session"
                 value={wahaSession}
@@ -181,7 +270,12 @@ export function NewChannelDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="new-waha-url">URL do WAHA</Label>
+              <FieldLabel
+                htmlFor="new-waha-url"
+                tooltip="Endereço do servidor WAHA onde a sessão será criada. Ex.: https://api.meuchatia.com.br"
+              >
+                URL do WAHA
+              </FieldLabel>
               <Input
                 id="new-waha-url"
                 value={wahaUrl}
@@ -191,7 +285,12 @@ export function NewChannelDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="new-waha-key">API Key</Label>
+              <FieldLabel
+                htmlFor="new-waha-key"
+                tooltip="Chave de autenticação do servidor WAHA. Deixe em branco se o servidor não exigir autenticação."
+              >
+                API Key
+              </FieldLabel>
               <Input
                 id="new-waha-key"
                 type="password"
@@ -217,7 +316,12 @@ export function NewChannelDialog({
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="new-meta-phone-id">Phone Number ID</Label>
+              <FieldLabel
+                htmlFor="new-meta-phone-id"
+                tooltip="ID do número de telefone registrado na WhatsApp Cloud API. Encontre em: Meta Developers → seu app → WhatsApp → Configuração da API."
+              >
+                Número de telefone ID
+              </FieldLabel>
               <Input
                 id="new-meta-phone-id"
                 value={phoneNumberId}
@@ -226,7 +330,12 @@ export function NewChannelDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="new-meta-waba-id">WABA ID</Label>
+              <FieldLabel
+                htmlFor="new-meta-waba-id"
+                tooltip="ID da conta WhatsApp Business. Encontre ao lado do Phone Number ID no painel do Meta Developers."
+              >
+                ID WABA
+              </FieldLabel>
               <Input
                 id="new-meta-waba-id"
                 value={wabaId}
@@ -236,7 +345,12 @@ export function NewChannelDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="new-meta-token">Access Token</Label>
+              <FieldLabel
+                htmlFor="new-meta-token"
+                tooltip="Token permanente de um Usuário do Sistema com permissões whatsapp_business_messaging e whatsapp_business_management. Gere em: Meta Business Manager → Usuários do sistema."
+              >
+                Token de acesso
+              </FieldLabel>
               <Input
                 id="new-meta-token"
                 type="password"
@@ -246,7 +360,12 @@ export function NewChannelDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="new-meta-verify">Verify Token</Label>
+              <FieldLabel
+                htmlFor="new-meta-verify"
+                tooltip="String definida por você para validar o webhook. Use o valor configurado no CRM: omnicrm_ddm_webhook_2026"
+              >
+                Verificar token
+              </FieldLabel>
               <Input
                 id="new-meta-verify"
                 value={verifyToken}
