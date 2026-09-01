@@ -78,6 +78,10 @@ const renderShape = (
   activeBar: any | undefined,
   activeLegend: string | undefined,
   layout: string,
+  // Not part of upstream Tremor — threaded through from BarChart's
+  // `borderRadius` prop so bars can render with rounded corners
+  // instead of the raw upstream `<rect>`.
+  radius = 0,
 ) => {
   const { fillOpacity, name, payload, value } = props
   let { x, width, y, height } = props
@@ -96,6 +100,8 @@ const renderShape = (
       y={y}
       width={width}
       height={height}
+      rx={radius}
+      ry={radius}
       opacity={
         activeBar || (activeLegend && activeLegend !== name)
           ? deepEqual(activeBar, { ...payload, value })
@@ -542,6 +548,10 @@ interface BarChartProps extends React.HTMLAttributes<HTMLDivElement> {
   showYAxis?: boolean
   showGridLines?: boolean
   yAxisWidth?: number
+  /** Not part of upstream Tremor — corner radius (px, in chart
+   *  coordinate space) applied to every bar. Defaults to 0 (upstream's
+   *  square-cornered `<rect>`). */
+  borderRadius?: number
   intervalType?: "preserveStartEnd" | "equidistantPreserveStart"
   showTooltip?: boolean
   showLegend?: boolean
@@ -575,6 +585,7 @@ const BarChart = React.forwardRef<HTMLDivElement, BarChartProps>(
       showYAxis = true,
       showGridLines = true,
       yAxisWidth = 56,
+      borderRadius = 0,
       intervalType = "equidistantPreserveStart",
       showTooltip = true,
       showLegend = true,
@@ -872,7 +883,7 @@ const BarChart = React.forwardRef<HTMLDivElement, BarChartProps>(
                 isAnimationActive={false}
                 fill=""
                 shape={(props: any) =>
-                  renderShape(props, activeBar, activeLegend, layout)
+                  renderShape(props, activeBar, activeLegend, layout, borderRadius)
                 }
                 onClick={onBarClick}
               />

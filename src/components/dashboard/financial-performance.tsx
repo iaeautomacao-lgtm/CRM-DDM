@@ -83,13 +83,8 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
           </div>
         </div>
 
-        <div className="space-y-3">
-          <div className="h-3 w-full bg-muted rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-500" 
-              style={{ width: `${pctGoal}%` }} 
-            />
-          </div>
+        <div className="space-y-1">
+          <RecoveryGoalGauge pctGoal={pctGoal} />
           <div className="flex justify-between text-[11px] text-muted-foreground">
             <span>Progresso</span>
             <span className="font-bold text-foreground">{formatBRL(totalWonValue)} / {formatBRL(monthlyGoal)}</span>
@@ -126,5 +121,77 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
         </div>
       </div>
     </div>
+  );
+}
+
+// ------------------------------------------------------------
+// Segmented arc gauge for "Meta de Recuperação" — a 180° semicircle
+// (left = 0%, right = 100%) split into 10 discrete segments with small
+// gaps between them, filled left-to-right based on pctGoal. Hand-rolled
+// SVG, same approach as the other dashboard charts (no chart lib).
+// ------------------------------------------------------------
+const GAUGE_CX = 100;
+const GAUGE_CY = 100;
+const GAUGE_R = 80;
+const GAUGE_STROKE = 16;
+const GAUGE_SEGMENT_COUNT = 10;
+const GAUGE_SEGMENT_ANGLE = 16;
+const GAUGE_GAP_ANGLE = 2;
+const GAUGE_STEP_ANGLE = GAUGE_SEGMENT_ANGLE + GAUGE_GAP_ANGLE;
+
+function pointOnGaugeArc(angleDeg: number) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return {
+    x: GAUGE_CX + GAUGE_R * Math.cos(rad),
+    y: GAUGE_CY - GAUGE_R * Math.sin(rad),
+  };
+}
+
+function gaugeArcPath(startAngle: number, endAngle: number) {
+  const start = pointOnGaugeArc(startAngle);
+  const end = pointOnGaugeArc(endAngle);
+  return `M ${start.x} ${start.y} A ${GAUGE_R} ${GAUGE_R} 0 0 1 ${end.x} ${end.y}`;
+}
+
+function RecoveryGoalGauge({ pctGoal }: { pctGoal: number }) {
+  const filledSegments = Math.min(
+    GAUGE_SEGMENT_COUNT,
+    Math.round((pctGoal / 100) * GAUGE_SEGMENT_COUNT),
+  );
+
+  return (
+    <svg viewBox="0 0 200 110" className="mx-auto h-28 w-full" role="img" aria-label={`Meta de recuperação: ${pctGoal}%`}>
+      <path
+        d={gaugeArcPath(180, 0)}
+        stroke="var(--muted)"
+        strokeWidth={GAUGE_STROKE}
+        fill="none"
+      />
+      {Array.from({ length: GAUGE_SEGMENT_COUNT }).map((_, i) => {
+        const startAngle = 180 - i * GAUGE_STEP_ANGLE;
+        const endAngle = startAngle - GAUGE_SEGMENT_ANGLE;
+        const filled = i < filledSegments;
+        return (
+          <path
+            key={i}
+            d={gaugeArcPath(startAngle, endAngle)}
+            stroke={filled ? '#FF5706' : 'var(--border)'}
+            strokeWidth={GAUGE_STROKE}
+            strokeLinecap="round"
+            fill="none"
+          />
+        );
+      })}
+      <text
+        x={GAUGE_CX}
+        y={90}
+        textAnchor="middle"
+        fontSize={28}
+        fontWeight="bold"
+        fill="var(--foreground)"
+      >
+        {pctGoal}%
+      </text>
+    </svg>
   );
 }

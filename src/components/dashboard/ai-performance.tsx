@@ -63,10 +63,13 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
           <div className="space-y-1">
             <div className="flex justify-between text-[11px]">
               <span className="text-muted-foreground flex items-center gap-1">😊 Positivo</span>
-              <span className="font-semibold text-foreground">{sentiment.positive} ({pctPositive}%)</span>
+              <span className="font-semibold text-foreground tabular-nums">{sentiment.positive} ({pctPositive}%)</span>
             </div>
-            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pctPositive}%` }} />
+            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 rounded-full opacity-80 shadow-[0_0_6px_rgba(16,185,129,0.5)]"
+                style={{ width: `${pctPositive}%` }}
+              />
             </div>
           </div>
 
@@ -74,10 +77,10 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
           <div className="space-y-1">
             <div className="flex justify-between text-[11px]">
               <span className="text-muted-foreground flex items-center gap-1">😐 Neutro</span>
-              <span className="font-semibold text-foreground">{sentiment.neutral} ({pctNeutral}%)</span>
+              <span className="font-semibold text-foreground tabular-nums">{sentiment.neutral} ({pctNeutral}%)</span>
             </div>
-            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-slate-400 rounded-full" style={{ width: `${pctNeutral}%` }} />
+            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-slate-400 rounded-full opacity-80" style={{ width: `${pctNeutral}%` }} />
             </div>
           </div>
 
@@ -85,10 +88,13 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
           <div className="space-y-1">
             <div className="flex justify-between text-[11px]">
               <span className="text-muted-foreground flex items-center gap-1">😡 Negativo</span>
-              <span className="font-semibold text-foreground">{sentiment.negative} ({pctNegative}%)</span>
+              <span className="font-semibold text-foreground tabular-nums">{sentiment.negative} ({pctNegative}%)</span>
             </div>
-            <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-rose-500 rounded-full" style={{ width: `${pctNegative}%` }} />
+            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-rose-500 rounded-full opacity-80 shadow-[0_0_6px_rgba(244,63,94,0.5)]"
+                style={{ width: `${pctNegative}%` }}
+              />
             </div>
           </div>
 
@@ -97,10 +103,10 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
             <div className="space-y-1">
               <div className="flex justify-between text-[11px]">
                 <span className="text-muted-foreground flex items-center gap-1">😕 Misto</span>
-                <span className="font-semibold text-foreground">{sentiment.mixed} ({pctMixed}%)</span>
+                <span className="font-semibold text-foreground tabular-nums">{sentiment.mixed} ({pctMixed}%)</span>
               </div>
-              <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 rounded-full" style={{ width: `${pctMixed}%` }} />
+              <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500 rounded-full opacity-80" style={{ width: `${pctMixed}%` }} />
               </div>
             </div>
           )}

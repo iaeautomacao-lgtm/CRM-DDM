@@ -126,8 +126,13 @@ function LineSvg({
     maxY === 0 ? PADDING.top + chartH : PADDING.top + chartH - (v / maxY) * chartH
   const xFor = (i: number) => PADDING.left + i * stepX
 
-  const incomingPath = data.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i)},${yFor(p.incoming)}`).join(' ')
-  const outgoingPath = data.map((p, i) => `${i === 0 ? 'M' : 'L'}${xFor(i)},${yFor(p.outgoing)}`).join(' ')
+  const incomingPoints = data.map((p, i) => ({ x: xFor(i), y: yFor(p.incoming) }))
+  const outgoingPoints = data.map((p, i) => ({ x: xFor(i), y: yFor(p.outgoing) }))
+  const incomingPath = buildSmoothPath(incomingPoints)
+  const outgoingPath = buildSmoothPath(outgoingPoints)
+  const baselineY = yFor(0)
+  const incomingAreaPath = buildAreaPath(incomingPoints, baselineY)
+  const outgoingAreaPath = buildAreaPath(outgoingPoints, baselineY)
 
   // Mouse-move: use the SVG's current screen-CTM to map clientX
   // back to viewBox coordinates. The previous rect-based math
@@ -197,6 +202,17 @@ function LineSvg({
         role="img"
         aria-label="Conversations per day"
       >
+        <defs>
+          <linearGradient id="gradEntrada" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} />
+            <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
+          </linearGradient>
+          <linearGradient id="gradSaida" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#FF5706" stopOpacity={0.3} />
+            <stop offset="100%" stopColor="#FF5706" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+
         {/* Y-axis gridlines + labels */}
         {ticks.map((t) => {
           const y = yFor(t)
@@ -238,6 +254,8 @@ function LineSvg({
           ) : null,
         )}
 
+        {/* Outgoing area (DDM orange gradient) */}
+        <path d={outgoingAreaPath} fill="url(#gradSaida)" stroke="none" />
         {/* Outgoing polyline (DDM orange) */}
         <path
           d={outgoingPath}
@@ -247,6 +265,8 @@ function LineSvg({
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+        {/* Incoming area (blue gradient) */}
+        <path d={incomingAreaPath} fill="url(#gradEntrada)" stroke="none" />
         {/* Incoming polyline (blue) */}
         <path
           d={incomingPath}
@@ -307,6 +327,37 @@ function LegendDot({ color, label }: { color: string; label: string }) {
       {label}
     </span>
   )
+}
+
+/**
+ * Smooth line through `points` using cubic beziers with horizontal
+ * control-point tangents (cp1 = p0 shifted 1/3 toward p1 on x only, cp2
+ * = p1 shifted 1/3 back toward p0 on x only). Simple stand-in for a real
+ * monotone-cubic interpolation — good enough for a small daily series
+ * and avoids pulling in a curve-fitting dependency for one chart.
+ */
+function buildSmoothPath(points: { x: number; y: number }[]): string {
+  if (points.length === 0) return ''
+  if (points.length === 1) return `M${points[0].x},${points[0].y}`
+  let d = `M${points[0].x},${points[0].y}`
+  for (let i = 1; i < points.length; i++) {
+    const p0 = points[i - 1]
+    const p1 = points[i]
+    const cp1x = p0.x + (p1.x - p0.x) / 3
+    const cp2x = p1.x - (p1.x - p0.x) / 3
+    d += ` C${cp1x},${p0.y} ${cp2x},${p1.y} ${p1.x},${p1.y}`
+  }
+  return d
+}
+
+/** Same smooth line as `buildSmoothPath`, closed down to `baselineY` for
+ *  an area fill under the curve. */
+function buildAreaPath(points: { x: number; y: number }[], baselineY: number): string {
+  if (points.length === 0) return ''
+  const line = buildSmoothPath(points)
+  const last = points[points.length - 1]
+  const first = points[0]
+  return `${line} L${last.x},${baselineY} L${first.x},${baselineY} Z`
 }
 
 function shortDayLabel(key: string): string {

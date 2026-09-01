@@ -96,7 +96,12 @@ export function ResponseTimeChart({
             colors={['ddmOrange']}
             valueFormatter={(value) => `${value.toFixed(1)}m`}
             showLegend={false}
-            yAxisWidth={48}
+            borderRadius={6}
+            // Explicit floor at 0 + no fixed yAxisWidth override — let
+            // Tremor size the axis to whatever tick labels it computes,
+            // instead of a width tuned for a narrower label that could
+            // clip/duplicate ticks (e.g. "0.1m" appearing twice).
+            minValue={0}
             // Compact height so the chart sits well inside the card
             // without dominating the row alongside the donut + activity feed.
             className="h-[260px]"
