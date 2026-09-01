@@ -334,7 +334,7 @@ export default function CanaisPage() {
                     <Badge
                       className={
                         c.provider === "waha"
-                          ? "bg-[#DBEAFE] text-[#1D4ED8]"
+                          ? "border border-border bg-muted text-muted-foreground"
                           : "bg-[#14532D] text-white"
                       }
                     >
@@ -410,7 +410,7 @@ export default function CanaisPage() {
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onClick={() => setDeleteTargets([c])}
-                          className="text-red-500 focus:bg-red-50 focus:text-red-500"
+                          className="text-red-400 hover:bg-red-950/30 hover:text-red-400 focus:bg-red-950/30 focus:text-red-400"
                         >
                           Excluir
                         </DropdownMenuItem>

@@ -14,7 +14,7 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Info, MessageCircle, Server } from "lucide-react";
+import { Cloud, Info, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -246,7 +246,7 @@ export function NewChannelDialog({
                 onClick={() => chooseProvider("meta")}
                 className="flex flex-col items-center gap-2 rounded-xl border border-border p-4 text-center hover:bg-muted"
               >
-                <Server className="size-6 text-[#14532D]" />
+                <Cloud className="h-8 w-8 text-[#25D366]" />
                 <span className="text-sm font-medium text-foreground">WhatsApp Meta</span>
                 <span className="text-xs text-muted-foreground">(Cloud API)</span>
               </button>

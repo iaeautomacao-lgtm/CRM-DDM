@@ -256,7 +256,16 @@ export function EditChannelDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-between pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={saving}
+                className="border-border text-muted-foreground hover:bg-muted"
+              >
+                Cancelar
+              </Button>
               <Button
                 onClick={handleSaveWaha}
                 disabled={saving}
@@ -343,7 +352,16 @@ export function EditChannelDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-between pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={saving}
+                className="border-border text-muted-foreground hover:bg-muted"
+              >
+                Cancelar
+              </Button>
               <Button
                 onClick={handleSaveMeta}
                 disabled={saving}
