@@ -1481,6 +1481,13 @@ async function generateOpenAiResponse(
     }
 
     const data = await response.json();
+    // TEMP DEBUG — remove before commit.
+    console.log('[AI DEBUG RAW]', JSON.stringify({
+      finish_reason: data?.choices?.[0]?.finish_reason,
+      content: data?.choices?.[0]?.message?.content?.slice(0, 100),
+      tool_calls_count: data?.choices?.[0]?.message?.tool_calls?.length,
+      usage: data?.usage,
+    }));
     const choice = data?.choices?.[0];
     const message = choice?.message;
 

@@ -1579,6 +1579,9 @@ async function runAiAgentCore(
       (lastBotMsg as { content_text: string | null } | null)?.content_text ??
       "";
 
+    // TEMP DEBUG — remove before commit.
+    console.log('[AI DEBUG runAiAgentCore]', { detectedTag, lastReply: lastReply?.slice(0, 500), aiConfigUsable, modelUsed });
+
     // Exit-code convention: the AI's system prompt can instruct it to
     // end a reply with a #TAG keyword (e.g. #NEGOCIACAO) that a Switch
     // node downstream branches on (subject_key: "ai_exit_code"). Only
