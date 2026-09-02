@@ -1181,6 +1181,17 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .eq("account_id", accountId);
   if (configId) configQuery = configQuery.eq("id", configId);
   const { data: config, error: configError } = await configQuery.maybeSingle();
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'AI_DEBUG_CONFIG',
+      hasConfig: !!config,
+      configError: configError?.message,
+      provider: config?.provider,
+      configId: config?.id,
+    }) + '\n');
+  } catch {}
 
   if (configError || !config) {
     console.error("[AI Agent] WhatsApp config not found");
@@ -1198,6 +1209,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .eq("id", contactId)
     .eq("account_id", accountId)
     .single();
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'AI_DEBUG_CONTACT',
+      hasContact: !!contact,
+      phone: contact?.phone?.slice(0, 8),
+    }) + '\n');
+  } catch {}
 
   if (!contact?.phone) return;
 
@@ -1214,7 +1234,23 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
       }
     : null;
-  const accessToken = isWaha ? "" : decrypt(config.access_token);
+  let accessToken = "";
+  if (!isWaha) {
+    try {
+      accessToken = decrypt(config.access_token);
+    } catch (err) {
+      // TEMP DEBUG — remove before commit.
+      try {
+        appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+          ts: new Date().toISOString(),
+          type: 'AI_DEBUG_DECRYPT_ERROR',
+          configId: config?.id,
+          error: err instanceof Error ? err.message : String(err),
+        }) + '\n');
+      } catch {}
+      throw err;
+    }
+  }
 
   // 8. Send message via WAHA or Meta
   // Simulação de digitação: aguarda 2 segundos adicionais antes de enviar a mensagem de fato
