@@ -1,4 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+// TEMP DEBUG — remove before commit, along with every appendFileSync
+// call below that writes to AI_DEBUG_LOG_PATH.
+import { appendFileSync } from "fs";
 import type { AiAgentTool } from "@/lib/flows/types";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
@@ -9,6 +12,9 @@ import {
   isValidE164,
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
+
+// TEMP DEBUG — remove before commit.
+const AI_DEBUG_LOG_PATH = '/tmp/ai_debug.log';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -400,7 +406,15 @@ export async function handleAiAutoResponse(
 
   const activeKey = !configKey ? masterKey : configKey;
   // TEMP DEBUG — remove before commit.
-  console.log('[AI DEBUG] activeKey length:', activeKey?.length, 'first10:', activeKey?.slice(0, 10), 'accountId:', accountId);
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'AI_DEBUG_ACTIVE_KEY',
+      activeKeyLength: activeKey?.length,
+      first10: activeKey?.slice(0, 10),
+      accountId,
+    }) + '\n');
+  } catch {}
 
   if (!activeKey) {
     console.warn(`[AI Agent] Missing API Key for provider: ${aiConfig.api_provider}`);
@@ -1468,7 +1482,16 @@ async function generateOpenAiResponse(
     }
 
     // TEMP DEBUG — remove before commit.
-    console.log('[AI DEBUG] OpenAI request - model:', body.model, 'messages count:', messages.length, 'apiKey first10:', apiKey?.slice(0, 10), 'apiKey length:', apiKey?.length);
+    try {
+      appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+        ts: new Date().toISOString(),
+        type: 'AI_DEBUG_OPENAI_REQUEST',
+        model: body.model,
+        messagesCount: messages.length,
+        apiKeyFirst10: apiKey?.slice(0, 10),
+        apiKeyLength: apiKey?.length,
+      }) + '\n');
+    } catch {}
 
     const response = await fetch(url, {
       method: "POST",
@@ -1482,12 +1505,17 @@ async function generateOpenAiResponse(
 
     const data = await response.json();
     // TEMP DEBUG — remove before commit.
-    console.log('[AI DEBUG RAW]', JSON.stringify({
-      finish_reason: data?.choices?.[0]?.finish_reason,
-      content: data?.choices?.[0]?.message?.content?.slice(0, 100),
-      tool_calls_count: data?.choices?.[0]?.message?.tool_calls?.length,
-      usage: data?.usage,
-    }));
+    try {
+      appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+        ts: new Date().toISOString(),
+        type: 'AI_DEBUG_RAW',
+        finish_reason: data?.choices?.[0]?.finish_reason,
+        content: data?.choices?.[0]?.message?.content?.slice(0, 200),
+        tool_calls_count: data?.choices?.[0]?.message?.tool_calls?.length,
+        usage: data?.usage,
+        error: data?.error,
+      }) + '\n');
+    } catch {}
     const choice = data?.choices?.[0];
     const message = choice?.message;
 
