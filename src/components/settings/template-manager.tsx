@@ -983,13 +983,13 @@ export function TemplateManager() {
                     value="APPROVED"
                     className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
                   >
-                    Aprovado
+                    Aprovados
                   </SelectItem>
                   <SelectItem
                     value="DISABLED"
                     className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
                   >
-                    Desativado
+                    Desativados
                   </SelectItem>
                 </SelectContent>
               </Select>
