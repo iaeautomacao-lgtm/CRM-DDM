@@ -109,15 +109,27 @@ export function EditChannelDialog({
   // persisted through the same PATCH /canais's inline toggles use
   // (migration 056 + the PATCH handler). Fired after the provider POST
   // succeeds so a settings-save failure doesn't look like the whole
-  // edit failed. Only sends the fields that actually changed.
+  // edit failed.
+  //
+  // receptivo/habilitado are always included, unconditionally — `config`
+  // is the prop this dialog's own local state was seeded from, so
+  // diffing local state against it is always zero unless the user
+  // flips a toggle in THIS render of the dialog. Any earlier update
+  // (e.g. the /canais table's inline switches) already moved what the
+  // "current" value looks like without this dialog's `config` prop
+  // necessarily reflecting it, so a diff-based guard can silently skip
+  // sending values that are stale relative to the DB. flow_id keeps
+  // its diff check — the backend validates flow ownership on every
+  // PATCH that includes it, so skipping when unchanged avoids that
+  // extra cost on every save.
   async function syncSettings() {
     if (!config) return;
     const nextFlowId = flowId === NO_FLOW ? null : flowId;
-    const patch: Record<string, unknown> = {};
+    const patch: Record<string, unknown> = {
+      receptivo,
+      habilitado,
+    };
     if (nextFlowId !== (config.flow_id ?? null)) patch.flow_id = nextFlowId;
-    if (receptivo !== config.receptivo) patch.receptivo = receptivo;
-    if (habilitado !== config.habilitado) patch.habilitado = habilitado;
-    if (Object.keys(patch).length === 0) return;
     try {
       const res = await apiFetch("/api/whatsapp/config", {
         method: "PATCH",
