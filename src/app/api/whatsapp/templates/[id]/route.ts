@@ -44,6 +44,92 @@ function isDryRun(): boolean {
   )
 }
 
+// Local-only organizational fields (folder placement, channel tags) —
+// never sent to Meta, so a change here must NOT flip status back to
+// PENDING or trigger editMessageTemplate. Bodies containing only
+// these keys take the lightweight branch below instead of the full
+// Meta-edit flow.
+const METADATA_PATCH_KEYS = new Set(['folder_id', 'channel_tags'])
+const CHANNEL_TAG_MAX_LENGTH = 40
+const CHANNEL_TAGS_MAX_COUNT = 20
+
+interface TemplateMetadataPatch {
+  folder_id?: string | null
+  channel_tags?: string[]
+}
+
+function isMetadataOnlyBody(body: Record<string, unknown>): boolean {
+  const keys = Object.keys(body)
+  return keys.length > 0 && keys.every((k) => METADATA_PATCH_KEYS.has(k))
+}
+
+async function handleMetadataPatch(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  accountId: string,
+  id: string,
+  body: TemplateMetadataPatch,
+): Promise<NextResponse> {
+  const patch: { folder_id?: string | null; channel_tags?: string[] | null } = {}
+
+  if ('folder_id' in body) {
+    if (body.folder_id !== null && !UUID_RE.test(body.folder_id ?? '')) {
+      return NextResponse.json({ error: 'Invalid folder_id.' }, { status: 400 })
+    }
+    if (body.folder_id !== null) {
+      const { data: folder } = await supabase
+        .from('template_folders')
+        .select('id')
+        .eq('id', body.folder_id)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      if (!folder) {
+        return NextResponse.json({ error: 'Folder not found.' }, { status: 404 })
+      }
+    }
+    patch.folder_id = body.folder_id
+  }
+
+  if ('channel_tags' in body) {
+    if (!Array.isArray(body.channel_tags) || !body.channel_tags.every((t) => typeof t === 'string')) {
+      return NextResponse.json({ error: 'channel_tags must be an array of strings.' }, { status: 400 })
+    }
+    const tags = [
+      ...new Set(body.channel_tags.map((t) => t.trim()).filter(Boolean)),
+    ]
+    if (tags.length > CHANNEL_TAGS_MAX_COUNT) {
+      return NextResponse.json(
+        { error: `At most ${CHANNEL_TAGS_MAX_COUNT} channel tags allowed.` },
+        { status: 400 },
+      )
+    }
+    if (tags.some((t) => t.length > CHANNEL_TAG_MAX_LENGTH)) {
+      return NextResponse.json(
+        { error: `Channel tags must be at most ${CHANNEL_TAG_MAX_LENGTH} characters.` },
+        { status: 400 },
+      )
+    }
+    patch.channel_tags = tags.length > 0 ? tags : null
+  }
+
+  const { data: template, error } = await supabase
+    .from('message_templates')
+    .update(patch)
+    .eq('id', id)
+    .eq('account_id', accountId)
+    .select()
+    .maybeSingle()
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+  if (!template) {
+    return NextResponse.json({ error: 'Template not found.' }, { status: 404 })
+  }
+
+  return NextResponse.json({ success: true, template })
+}
+
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -80,12 +166,26 @@ export async function PATCH(
       )
     }
 
-    let payload: TemplatePayload
+    let rawBody: unknown
     try {
-      payload = (await request.json()) as TemplatePayload
+      rawBody = await request.json()
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
     }
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+    }
+
+    if (isMetadataOnlyBody(rawBody as Record<string, unknown>)) {
+      return handleMetadataPatch(
+        supabase,
+        accountId,
+        id,
+        rawBody as TemplateMetadataPatch,
+      )
+    }
+
+    const payload = rawBody as TemplatePayload
 
     // RLS handles ownership, but we need the existing row to read
     // meta_template_id and status — fetch explicitly.

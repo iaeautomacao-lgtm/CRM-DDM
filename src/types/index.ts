@@ -307,6 +307,18 @@ export interface MessageTemplate {
   submission_error?: string;
   last_submitted_at?: string;
   created_at: string;
+  folder_id?: string | null;
+  position?: number;
+  channel_tags?: string[];
+}
+
+export interface TemplateFolder {
+  id: string;
+  account_id: string;
+  name: string;
+  position: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Pipeline {

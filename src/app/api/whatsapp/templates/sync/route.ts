@@ -232,6 +232,14 @@ export async function POST() {
           ? headerFormat.toLowerCase()
           : null
 
+      // Meta-sourced fields only — deliberately omits folder_id and
+      // channel_tags. Both are local-only organization the user sets
+      // via the folders UI; Meta has no concept of either, so a sync
+      // must never touch them. On the UPDATE branch below, Supabase's
+      // `.update(row)` only sets the columns present in `row` (a plain
+      // PATCH body), so leaving them out here is what preserves the
+      // existing values — do not "fill in" folder_id/channel_tags
+      // here even to null.
       const row = {
         // Account tenancy + user audit, same split as the submit
         // route. account_id is NOT NULL on message_templates

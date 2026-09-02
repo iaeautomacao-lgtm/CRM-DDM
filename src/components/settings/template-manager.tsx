@@ -14,6 +14,9 @@ import {
   Pencil,
   RotateCcw,
   Upload,
+  Folder,
+  GripVertical,
+  MoreVertical,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -21,6 +24,7 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from '@/lib/storage/upload-media';
 import { useAuth } from '@/hooks/use-auth';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -37,6 +41,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -46,6 +56,7 @@ import {
 import type {
   MessageTemplate,
   TemplateButton,
+  TemplateFolder,
   TemplateSampleValues,
 } from '@/types';
 import { templateStatusConfig } from '@/lib/template-status';
@@ -71,6 +82,11 @@ const categoryColors: Record<string, string> = {
   Authentication: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
 };
 
+// Sidebar sentinel folder selections — not real folder ids.
+type FolderFilter = 'all' | 'unorganized' | string;
+type StatusFilter = 'all' | 'APPROVED' | 'DISABLED';
+const FOLDER_NAME_MAX_LENGTH = 50;
+
 interface TemplateFormData {
   name: string;
   category: MessageTemplate['category'];
@@ -83,6 +99,7 @@ interface TemplateFormData {
   body_samples: string[];
   footer_text: string;
   buttons: TemplateButton[];
+  channel_tags: string[];
 }
 
 const emptyForm: TemplateFormData = {
@@ -97,6 +114,7 @@ const emptyForm: TemplateFormData = {
   body_samples: [],
   footer_text: '',
   buttons: [],
+  channel_tags: [],
 };
 
 const COMMON_LANGUAGE_CODES = [
@@ -138,10 +156,12 @@ export function TemplateManager() {
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [folders, setFolders] = useState<TemplateFolder[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
+  const [channelTagInput, setChannelTagInput] = useState('');
   // Non-null when the dialog is editing an existing row — switches the
   // submit handler from POST /submit to PATCH /[id] and changes the
   // dialog title + CTA. Set to the template id to pre-fill from a row.
@@ -157,6 +177,19 @@ export function TemplateManager() {
   // submit route turns that into a Meta Resumable-Upload handle.
   const [uploadingHeader, setUploadingHeader] = useState(false);
   const headerFileRef = useRef<HTMLInputElement>(null);
+
+  // ---- Folders sidebar / filters / drag & drop ----
+  const [activeFolder, setActiveFolder] = useState<FolderFilter>('all');
+  const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
+  const [filterChannelTag, setFilterChannelTag] = useState('');
+  const [draggingTemplate, setDraggingTemplate] = useState<string | null>(null);
+  const [draggingFolder, setDraggingFolder] = useState<string | null>(null);
+  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [folderToDelete, setFolderToDelete] = useState<TemplateFolder | null>(null);
 
   // Body variable indices — `[1, 2, 3]` for "{{1}} {{2}} {{3}}". We
   // re-run the extractor on every render to keep the sample-value rows
@@ -191,6 +224,7 @@ export function TemplateManager() {
       return;
     }
     fetchTemplates(user.id);
+    fetchFolders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
 
@@ -211,6 +245,218 @@ export function TemplateManager() {
       setLoading(false);
     }
   }
+
+  async function fetchFolders() {
+    try {
+      const res = await apiFetch('/api/whatsapp/templates/folders');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Falha ao carregar pastas');
+      setFolders(data.folders ?? []);
+    } catch (err) {
+      console.error('Failed to fetch folders:', err);
+      toast.error(err instanceof Error ? err.message : 'Falha ao carregar pastas');
+    }
+  }
+
+  async function persistReorder(payload: {
+    templates?: { id: string; position: number; folder_id: string | null }[];
+    folders?: { id: string; position: number }[];
+  }) {
+    try {
+      const res = await apiFetch('/api/whatsapp/templates/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Falha ao reordenar');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao reordenar');
+    }
+  }
+
+  async function moveTemplateToFolder(templateId: string, folderId: string | null) {
+    const template = templates.find((t) => t.id === templateId);
+    if (!template || (template.folder_id ?? null) === folderId) return;
+
+    const destCount = templates.filter(
+      (t) => t.id !== templateId && (t.folder_id ?? null) === folderId,
+    ).length;
+
+    setTemplates((prev) =>
+      prev.map((t) =>
+        t.id === templateId ? { ...t, folder_id: folderId, position: destCount } : t,
+      ),
+    );
+
+    try {
+      const res = await apiFetch(`/api/whatsapp/templates/${templateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_id: folderId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Falha ao mover template');
+      }
+      await persistReorder({
+        templates: [{ id: templateId, position: destCount, folder_id: folderId }],
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao mover template');
+      if (user) await fetchTemplates(user.id);
+    }
+  }
+
+  async function reorderFolders(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    const current = [...folders].sort((a, b) => a.position - b.position);
+    const fromIdx = current.findIndex((f) => f.id === draggedId);
+    const toIdx = current.findIndex((f) => f.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const reordered = [...current];
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const withPositions = reordered.map((f, i) => ({ ...f, position: i }));
+    setFolders(withPositions);
+    await persistReorder({
+      folders: withPositions.map((f) => ({ id: f.id, position: f.position })),
+    });
+  }
+
+  async function submitCreateFolder() {
+    const name = newFolderName.trim();
+    if (!name) {
+      setCreatingFolder(false);
+      setNewFolderName('');
+      return;
+    }
+    try {
+      const res = await apiFetch('/api/whatsapp/templates/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Falha ao criar pasta');
+      setFolders((prev) => [...prev, data.folder]);
+      setNewFolderName('');
+      setCreatingFolder(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao criar pasta');
+    }
+  }
+
+  async function submitRenameFolder(folderId: string) {
+    const name = renameValue.trim();
+    const original = folders.find((f) => f.id === folderId);
+    setRenamingFolderId(null);
+    if (!name || !original || name === original.name) return;
+    try {
+      const res = await apiFetch(`/api/whatsapp/templates/folders/${folderId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || 'Falha ao renomear pasta');
+      setFolders((prev) => prev.map((f) => (f.id === folderId ? data.folder : f)));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao renomear pasta');
+    }
+  }
+
+  async function confirmDeleteFolder() {
+    const target = folderToDelete;
+    if (!target) return;
+    try {
+      const res = await apiFetch(`/api/whatsapp/templates/folders/${target.id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || 'Falha ao excluir pasta');
+      setFolders((prev) => prev.filter((f) => f.id !== target.id));
+      setTemplates((prev) =>
+        prev.map((t) => (t.folder_id === target.id ? { ...t, folder_id: null } : t)),
+      );
+      setActiveFolder((prev) => (prev === target.id ? 'all' : prev));
+      toast.success('Pasta excluída');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao excluir pasta');
+    } finally {
+      setFolderToDelete(null);
+    }
+  }
+
+  function addChannelTag() {
+    const tag = channelTagInput.trim();
+    if (!tag) return;
+    setChannelTagInput('');
+    setForm((prev) =>
+      prev.channel_tags.includes(tag)
+        ? prev
+        : { ...prev, channel_tags: [...prev.channel_tags, tag] },
+    );
+  }
+
+  function removeChannelTag(tag: string) {
+    setForm((prev) => ({
+      ...prev,
+      channel_tags: prev.channel_tags.filter((t) => t !== tag),
+    }));
+  }
+
+  async function saveChannelTags(templateId: string, tags: string[]) {
+    try {
+      const res = await apiFetch(`/api/whatsapp/templates/${templateId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel_tags: tags }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Falha ao salvar tags de canal');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao salvar tags de canal');
+    }
+  }
+
+  const folderCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of templates) {
+      if (t.folder_id) counts.set(t.folder_id, (counts.get(t.folder_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [templates]);
+
+  const unorganizedCount = useMemo(
+    () => templates.filter((t) => !t.folder_id).length,
+    [templates],
+  );
+
+  const filteredTemplates = useMemo(() => {
+    return templates.filter((t) => {
+      if (activeFolder === 'unorganized' && t.folder_id) return false;
+      if (
+        activeFolder !== 'all' &&
+        activeFolder !== 'unorganized' &&
+        t.folder_id !== activeFolder
+      ) {
+        return false;
+      }
+      if (filterStatus !== 'all' && (t.status || 'DRAFT') !== filterStatus) return false;
+      if (filterChannelTag.trim()) {
+        const needle = filterChannelTag.trim().toLowerCase();
+        const tags = t.channel_tags ?? [];
+        if (!tags.some((tag) => tag.toLowerCase().includes(needle))) return false;
+      }
+      return true;
+    });
+  }, [templates, activeFolder, filterStatus, filterChannelTag]);
 
   function buildSubmitPayload() {
     const sample_values: TemplateSampleValues = {};
@@ -254,13 +500,16 @@ export function TemplateManager() {
       body_samples: template.sample_values?.body ?? [],
       footer_text: template.footer_text ?? '',
       buttons: template.buttons ?? [],
+      channel_tags: template.channel_tags ?? [],
     });
+    setChannelTagInput('');
     setDialogOpen(true);
   }
 
   function openCreate() {
     setEditingId(null);
     setForm(emptyForm);
+    setChannelTagInput('');
     setDialogOpen(true);
   }
 
@@ -284,6 +533,12 @@ export function TemplateManager() {
         throw new Error(
           data?.error || `${isEdit ? 'Edição' : 'Envio'} falhou (HTTP ${res.status})`,
         );
+      }
+      // channel_tags aren't part of the Meta submit/edit payload — they're
+      // local-only metadata, saved separately via the lightweight
+      // metadata PATCH so a tag change never triggers a Meta resubmission.
+      if (data.template?.id) {
+        await saveChannelTags(data.template.id, form.channel_tags);
       }
       // Refresh first, then close — re-opening the dialog
       // immediately should not show a stale list.
@@ -514,128 +769,406 @@ export function TemplateManager() {
         }
       />
 
-      {templates.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <p className="text-muted-foreground text-sm">Nenhum template ainda.</p>
-            <p className="text-muted-foreground text-xs mt-1">
-              Crie seu primeiro template de mensagem para começar.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
-          {templates.map((template) => {
-            const statusKey = template.status || 'DRAFT';
-            const status = templateStatusConfig[statusKey];
-            return (
-              <Card key={template.id}>
-                <CardContent className="flex items-start justify-between pt-4">
-                  <div className="space-y-2 min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="font-medium text-foreground">{template.name}</h3>
-                      <Badge
-                        className={`text-xs border ${categoryColors[template.category] || ''}`}
+      <div className="flex gap-4 items-start">
+          <aside className="w-48 shrink-0 border-r border-border pr-3 space-y-1">
+            <button
+              type="button"
+              onClick={() => setActiveFolder('all')}
+              className={cn(
+                'w-full flex items-center justify-between rounded px-2 py-1.5 text-sm text-left',
+                activeFolder === 'all'
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/50',
+              )}
+            >
+              Todos
+              <span className="text-xs text-muted-foreground">{templates.length}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveFolder('unorganized')}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOverFolder('unorganized');
+              }}
+              onDragLeave={() =>
+                setDragOverFolder((prev) => (prev === 'unorganized' ? null : prev))
+              }
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverFolder(null);
+                if (draggingTemplate) {
+                  void moveTemplateToFolder(draggingTemplate, null);
+                  setDraggingTemplate(null);
+                }
+              }}
+              className={cn(
+                'w-full flex items-center justify-between rounded px-2 py-1.5 text-sm text-left border',
+                activeFolder === 'unorganized'
+                  ? 'bg-muted text-foreground border-transparent'
+                  : 'text-muted-foreground hover:bg-muted/50 border-transparent',
+                dragOverFolder === 'unorganized' && 'border-primary',
+              )}
+            >
+              Sem pasta
+              <span className="text-xs text-muted-foreground">{unorganizedCount}</span>
+            </button>
+
+            <div className="h-px bg-border my-2" />
+
+            <ul className="space-y-0.5">
+              {[...folders]
+                .sort((a, b) => a.position - b.position)
+                .map((folder) => (
+                  <li
+                    key={folder.id}
+                    draggable={renamingFolderId !== folder.id}
+                    onDragStart={(e) => {
+                      setDraggingFolder(folder.id);
+                      e.dataTransfer.setData('text/plain', folder.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragEnd={() => setDraggingFolder(null)}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverFolder(folder.id);
+                    }}
+                    onDragLeave={() =>
+                      setDragOverFolder((prev) => (prev === folder.id ? null : prev))
+                    }
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setDragOverFolder(null);
+                      if (draggingTemplate) {
+                        void moveTemplateToFolder(draggingTemplate, folder.id);
+                        setDraggingTemplate(null);
+                        return;
+                      }
+                      if (draggingFolder && draggingFolder !== folder.id) {
+                        void reorderFolders(draggingFolder, folder.id);
+                      }
+                      setDraggingFolder(null);
+                    }}
+                    className={cn(
+                      'group flex items-center gap-1 rounded px-1.5 py-1.5 text-sm border cursor-pointer',
+                      activeFolder === folder.id
+                        ? 'bg-muted text-foreground border-transparent'
+                        : 'text-muted-foreground hover:bg-muted/50 border-transparent',
+                      dragOverFolder === folder.id && 'border-primary',
+                      draggingFolder === folder.id && 'opacity-50',
+                    )}
+                    onClick={() => setActiveFolder(folder.id)}
+                  >
+                    <GripVertical className="size-3.5 shrink-0 opacity-0 group-hover:opacity-60 cursor-grab" />
+                    <Folder className="size-3.5 shrink-0" />
+                    {renamingFolderId === folder.id ? (
+                      <Input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void submitRenameFolder(folder.id);
+                          }
+                          if (e.key === 'Escape') setRenamingFolderId(null);
+                        }}
+                        onBlur={() => void submitRenameFolder(folder.id)}
+                        maxLength={FOLDER_NAME_MAX_LENGTH}
+                        className="h-6 text-xs px-1"
+                      />
+                    ) : (
+                      <span
+                        className="flex-1 truncate"
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setRenamingFolderId(folder.id);
+                          setRenameValue(folder.name);
+                        }}
                       >
-                        {template.category}
-                      </Badge>
-                      <Badge className={`text-xs border ${status.classes}`}>
-                        {status.label}
-                      </Badge>
-                      {template.language && (
-                        <span className="text-xs text-muted-foreground uppercase">
-                          {template.language}
-                        </span>
-                      )}
-                      {template.quality_score && (
-                        <span
-                          className={`text-[10px] uppercase font-medium ${
-                            template.quality_score === 'GREEN'
-                              ? 'text-emerald-400'
-                              : template.quality_score === 'YELLOW'
-                                ? 'text-yellow-400'
-                                : 'text-red-400'
-                          }`}
-                          title="Pontuação de qualidade do Meta"
+                        {folder.name}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {folderCounts.get(folder.id) ?? 0}
+                    </span>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <button
+                            type="button"
+                            aria-label="Mais ações da pasta"
+                            onClick={(e) => e.stopPropagation()}
+                            className="shrink-0 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+                          >
+                            <MoreVertical className="size-3.5" />
+                          </button>
+                        }
+                      />
+                      <DropdownMenuContent
+                        align="end"
+                        className="bg-popover text-popover-foreground border-border"
+                      >
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setRenamingFolderId(folder.id);
+                            setRenameValue(folder.name);
+                          }}
                         >
-                          {template.quality_score}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {template.body_text}
-                    </p>
-                    {template.footer_text && (
-                      <p className="text-xs text-muted-foreground italic">
-                        {template.footer_text}
+                          <Pencil className="size-3.5" />
+                          Renomear
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setFolderToDelete(folder)}>
+                          <Trash2 className="size-3.5" />
+                          Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </li>
+                ))}
+            </ul>
+
+            {creatingFolder ? (
+              <Input
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void submitCreateFolder();
+                  }
+                  if (e.key === 'Escape') {
+                    setCreatingFolder(false);
+                    setNewFolderName('');
+                  }
+                }}
+                onBlur={() => void submitCreateFolder()}
+                placeholder="Nome da pasta"
+                maxLength={FOLDER_NAME_MAX_LENGTH}
+                className="h-7 text-xs mt-1"
+              />
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setCreatingFolder(true)}
+                className="w-full justify-start text-muted-foreground h-7 text-xs mt-1"
+              >
+                <Plus className="size-3" />
+                Nova pasta
+              </Button>
+            )}
+          </aside>
+
+          <div className="flex-1 min-w-0 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Select
+                value={filterStatus}
+                onValueChange={(val) => setFilterStatus((val || 'all') as StatusFilter)}
+              >
+                <SelectTrigger className="w-40 bg-muted border-border text-foreground h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  <SelectItem
+                    value="all"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Todos os status
+                  </SelectItem>
+                  <SelectItem
+                    value="APPROVED"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Aprovado
+                  </SelectItem>
+                  <SelectItem
+                    value="DISABLED"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Desativado
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="Filtrar por tag de canal"
+                value={filterChannelTag}
+                onChange={(e) => setFilterChannelTag(e.target.value)}
+                className="w-56 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+              />
+              {(filterStatus !== 'all' || filterChannelTag) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFilterStatus('all');
+                    setFilterChannelTag('');
+                  }}
+                  className="h-8 text-xs text-muted-foreground"
+                >
+                  Limpar filtros
+                </Button>
+              )}
+            </div>
+
+            {filteredTemplates.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                  {templates.length === 0 ? (
+                    <>
+                      <p className="text-muted-foreground text-sm">Nenhum template ainda.</p>
+                      <p className="text-muted-foreground text-xs mt-1">
+                        Crie seu primeiro template de mensagem para começar.
                       </p>
-                    )}
-                    {(template.rejection_reason || template.submission_error) && (
-                      <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-950/20 border border-red-900/40 rounded px-2 py-1.5">
-                        <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
-                        <span>
-                          {template.rejection_reason || template.submission_error}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    {statusKey === 'APPROVED' && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEdit(template)}
-                        title="Editar dispara uma nova revisão do Meta — o status muda para PENDENTE."
-                        aria-label="Editar template"
-                        className="text-muted-foreground hover:text-primary hover:bg-primary/10 h-8 px-2"
-                      >
-                        <Pencil className="size-3.5" />
-                        Editar
-                      </Button>
-                    )}
-                    {(statusKey === 'REJECTED' || statusKey === 'PAUSED') && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openEdit(template)}
-                        title="Editar o template e reenviar para revisão do Meta."
-                        aria-label="Editar e reenviar template"
-                        className="text-muted-foreground hover:text-primary hover:bg-primary/10 h-8 px-2"
-                      >
-                        <RotateCcw className="size-3.5" />
-                        Reenviar
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setTemplateToDelete(template)}
-                      disabled={deletingId === template.id}
-                      aria-label={
-                        template.meta_template_id
-                          ? 'Excluir template do Meta e localmente'
-                          : 'Excluir template localmente'
-                      }
-                      title={
-                        template.meta_template_id
-                          ? 'Excluir do Meta e localmente'
-                          : 'Excluir localmente'
-                      }
-                      className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 h-8 w-8"
-                    >
-                      {deletingId === template.id ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="size-4" />
-                      )}
-                    </Button>
-                  </div>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground text-sm">
+                      Nenhum template corresponde aos filtros.
+                    </p>
+                  )}
                 </CardContent>
               </Card>
-            );
-          })}
+            ) : (
+              <div className="grid gap-3 xl:grid-cols-2">
+                {filteredTemplates.map((template) => {
+                  const statusKey = template.status || 'DRAFT';
+                  const status = templateStatusConfig[statusKey];
+                  return (
+                    <Card
+                      key={template.id}
+                      draggable
+                      onDragStart={(e) => {
+                        setDraggingTemplate(template.id);
+                        e.dataTransfer.setData('text/plain', template.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                      }}
+                      onDragEnd={() => setDraggingTemplate(null)}
+                      className={draggingTemplate === template.id ? 'opacity-50' : ''}
+                    >
+                      <CardContent className="group relative flex items-start justify-between pt-4">
+                        <GripVertical className="absolute left-1 top-1 size-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
+                        <div className="space-y-2 min-w-0 flex-1 pl-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="font-medium text-foreground">{template.name}</h3>
+                            <Badge
+                              className={`text-xs border ${categoryColors[template.category] || ''}`}
+                            >
+                              {template.category}
+                            </Badge>
+                            <Badge className={`text-xs border ${status.classes}`}>
+                              {status.label}
+                            </Badge>
+                            {template.language && (
+                              <span className="text-xs text-muted-foreground uppercase">
+                                {template.language}
+                              </span>
+                            )}
+                            {template.quality_score && (
+                              <span
+                                className={`text-[10px] uppercase font-medium ${
+                                  template.quality_score === 'GREEN'
+                                    ? 'text-emerald-400'
+                                    : template.quality_score === 'YELLOW'
+                                      ? 'text-yellow-400'
+                                      : 'text-red-400'
+                                }`}
+                                title="Pontuação de qualidade do Meta"
+                              >
+                                {template.quality_score}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground line-clamp-2">
+                            {template.body_text}
+                          </p>
+                          {template.footer_text && (
+                            <p className="text-xs text-muted-foreground italic">
+                              {template.footer_text}
+                            </p>
+                          )}
+                          {template.channel_tags && template.channel_tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {template.channel_tags.map((tag) => (
+                                <Badge
+                                  key={tag}
+                                  className="text-[10px] border bg-muted text-muted-foreground border-border"
+                                >
+                                  {tag}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                          {(template.rejection_reason || template.submission_error) && (
+                            <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-950/20 border border-red-900/40 rounded px-2 py-1.5">
+                              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                              <span>
+                                {template.rejection_reason || template.submission_error}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
+                          {statusKey === 'APPROVED' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEdit(template)}
+                              title="Editar dispara uma nova revisão do Meta — o status muda para PENDENTE."
+                              aria-label="Editar template"
+                              className="text-muted-foreground hover:text-primary hover:bg-primary/10 h-8 px-2"
+                            >
+                              <Pencil className="size-3.5" />
+                              Editar
+                            </Button>
+                          )}
+                          {(statusKey === 'REJECTED' || statusKey === 'PAUSED') && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEdit(template)}
+                              title="Editar o template e reenviar para revisão do Meta."
+                              aria-label="Editar e reenviar template"
+                              className="text-muted-foreground hover:text-primary hover:bg-primary/10 h-8 px-2"
+                            >
+                              <RotateCcw className="size-3.5" />
+                              Reenviar
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setTemplateToDelete(template)}
+                            disabled={deletingId === template.id}
+                            aria-label={
+                              template.meta_template_id
+                                ? 'Excluir template do Meta e localmente'
+                                : 'Excluir template localmente'
+                            }
+                            title={
+                              template.meta_template_id
+                                ? 'Excluir do Meta e localmente'
+                                : 'Excluir localmente'
+                            }
+                            className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 h-8 w-8"
+                          >
+                            {deletingId === template.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="size-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
-      )}
 
       <Dialog
         open={dialogOpen}
@@ -644,6 +1177,7 @@ export function TemplateManager() {
           if (!open) {
             setEditingId(null);
             setForm(emptyForm);
+            setChannelTagInput('');
           }
         }}
       >
@@ -929,6 +1463,42 @@ export function TemplateManager() {
             </div>
 
             <div className="space-y-2">
+              <Label className="text-muted-foreground">Tags de canal (opcional)</Label>
+              {form.channel_tags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {form.channel_tags.map((tag) => (
+                    <Badge
+                      key={tag}
+                      className="text-xs border bg-muted text-foreground border-border gap-1 pr-1"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => removeChannelTag(tag)}
+                        aria-label={`Remover tag ${tag}`}
+                        className="hover:text-red-400"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              <Input
+                placeholder="Digite uma tag e pressione Enter"
+                value={channelTagInput}
+                onChange={(e) => setChannelTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addChannelTag();
+                  }
+                }}
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
+              />
+            </div>
+
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-muted-foreground">Botões (opcional)</Label>
                 <Button
@@ -1133,6 +1703,40 @@ export function TemplateManager() {
               ) : (
                 'Excluir'
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm-delete-folder dialog — templates keep living, just
+          unfiled, so the copy is explicit that this isn't destructive
+          to the templates themselves. */}
+      <Dialog
+        open={folderToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setFolderToDelete(null);
+        }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground">Excluir pasta?</DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              {`"${folderToDelete?.name}" será excluída. Os templates desta pasta serão mantidos sem pasta.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="bg-popover border-border">
+            <Button
+              variant="outline"
+              onClick={() => setFolderToDelete(null)}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmDeleteFolder}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Excluir
             </Button>
           </DialogFooter>
         </DialogContent>
