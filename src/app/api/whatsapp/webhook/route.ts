@@ -1006,16 +1006,21 @@ async function findOrCreateConversation(
   configOwnerUserId: string,
   contactId: string,
 ) {
-  // Look for existing conversation in this account
+  // Look for existing conversation in this account. `.single()` used to
+  // throw PGRST116 (and silently fall through to creating a duplicate
+  // conversation) whenever more than one row matched — `.limit(1)` +
+  // ordering by most recent instead tolerates that and just picks the
+  // latest conversation for this contact.
   const { data: existing, error: findError } = await supabaseAdmin()
     .from('conversations')
     .select('*')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
-    .single()
+    .order('created_at', { ascending: false })
+    .limit(1)
 
-  if (!findError && existing) {
-    return existing
+  if (!findError && existing && existing.length > 0) {
+    return existing[0]
   }
 
   // Create new conversation. Same tenancy + audit split as
