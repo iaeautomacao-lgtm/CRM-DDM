@@ -474,7 +474,7 @@ export async function POST(request: Request) {
     if (configId) {
       const { data } = await supabase
         .from('whatsapp_config')
-        .select('id, registered_at, phone_number_id, access_token, app_secret')
+        .select('id, registered_at, phone_number_id, access_token, app_secret, verify_token')
         .eq('id', configId)
         .eq('account_id', accountId)
         .maybeSingle()
@@ -482,7 +482,7 @@ export async function POST(request: Request) {
     } else {
       const { data } = await supabase
         .from('whatsapp_config')
-        .select('id, registered_at, phone_number_id, access_token, app_secret')
+        .select('id, registered_at, phone_number_id, access_token, app_secret, verify_token')
         .eq('account_id', accountId)
         .eq('phone_number_id', phone_number_id)
         .maybeSingle()
@@ -579,22 +579,30 @@ export async function POST(request: Request) {
       )
     }
 
-    // verify_token has no "keep existing" path — unaffected by this
-    // change, matches its pre-existing behaviour (omitted verify_token
-    // on an edit still nulls it out).
+    // verify_token — same "keep existing on blank" pattern as
+    // access_token/app_secret above. Previously any edit that didn't
+    // retype this field (the GET response never returns it, so
+    // EditChannelDialog always starts it blank) silently nulled out an
+    // already-configured verify_token.
     let encryptedVerifyToken: string | null
-    try {
-      encryptedVerifyToken = verify_token ? encrypt(verify_token) : null
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown encryption error'
-      console.error('Encryption failed:', message)
-      return NextResponse.json(
-        {
-          error:
-            'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
-        },
-        { status: 500 }
-      )
+    if (verify_token && verify_token.trim()) {
+      try {
+        encryptedVerifyToken = encrypt(verify_token.trim())
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown encryption error'
+        console.error('Encryption failed:', message)
+        return NextResponse.json(
+          {
+            error:
+              'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+          },
+          { status: 500 }
+        )
+      }
+    } else if (existing?.verify_token) {
+      encryptedVerifyToken = existing.verify_token
+    } else {
+      encryptedVerifyToken = null
     }
 
     const sameNumber =

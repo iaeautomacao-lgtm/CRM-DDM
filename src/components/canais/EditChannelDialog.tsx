@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -60,6 +61,10 @@ export function EditChannelDialog({
 }) {
   const [saving, setSaving] = useState(false);
   const [flowId, setFlowId] = useState<string>(NO_FLOW);
+  // Shared by both providers (same whatsapp_config columns, same PATCH
+  // endpoint the /canais table's inline toggles use).
+  const [receptivo, setReceptivo] = useState(true);
+  const [habilitado, setHabilitado] = useState(true);
 
   // WAHA
   const [wahaSession, setWahaSession] = useState("");
@@ -82,6 +87,8 @@ export function EditChannelDialog({
   useEffect(() => {
     if (!config) return;
     setFlowId(config.flow_id ?? NO_FLOW);
+    setReceptivo(config.receptivo);
+    setHabilitado(config.habilitado);
     if (config.provider === "waha") {
       setWahaSession(config.waha_session ?? "");
       setWahaUrl(config.waha_url ?? "");
@@ -97,25 +104,30 @@ export function EditChannelDialog({
     }
   }, [config]);
 
-  // flow_id has no home in POST (that endpoint never reads it — see
-  // route.ts's destructuring) — it's persisted through the same PATCH
-  // /canais's inline toggles use (migration 056 + the new PATCH
-  // handler). Fired after the provider POST succeeds so a flow-save
-  // failure doesn't look like the whole edit failed.
-  async function syncFlowId() {
+  // flow_id/receptivo/habilitado have no home in POST (that endpoint
+  // never reads them — see route.ts's destructuring) — they're
+  // persisted through the same PATCH /canais's inline toggles use
+  // (migration 056 + the PATCH handler). Fired after the provider POST
+  // succeeds so a settings-save failure doesn't look like the whole
+  // edit failed. Only sends the fields that actually changed.
+  async function syncSettings() {
     if (!config) return;
     const nextFlowId = flowId === NO_FLOW ? null : flowId;
-    if (nextFlowId === (config.flow_id ?? null)) return;
+    const patch: Record<string, unknown> = {};
+    if (nextFlowId !== (config.flow_id ?? null)) patch.flow_id = nextFlowId;
+    if (receptivo !== config.receptivo) patch.receptivo = receptivo;
+    if (habilitado !== config.habilitado) patch.habilitado = habilitado;
+    if (Object.keys(patch).length === 0) return;
     try {
       const res = await apiFetch("/api/whatsapp/config", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: config.id, flow_id: nextFlowId }),
+        body: JSON.stringify({ id: config.id, ...patch }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao associar fluxo");
+      if (!res.ok) throw new Error(data.error || "Falha ao salvar configurações do canal");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao associar fluxo ao canal");
+      toast.error(err instanceof Error ? err.message : "Falha ao salvar configurações do canal");
     }
   }
 
@@ -145,7 +157,7 @@ export function EditChannelDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao salvar canal");
-      await syncFlowId();
+      await syncSettings();
       toast.success(data.message || "Canal atualizado.");
       onSaved();
     } catch (err) {
@@ -181,7 +193,7 @@ export function EditChannelDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao salvar canal");
-      await syncFlowId();
+      await syncSettings();
       toast.success("Canal Meta atualizado.");
       onSaved();
     } catch (err) {
@@ -247,6 +259,24 @@ export function EditChannelDialog({
                   </Button>
                 </div>
               )}
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="edit-waha-receptivo">Receptivo</Label>
+              <Switch
+                id="edit-waha-receptivo"
+                checked={receptivo}
+                onCheckedChange={setReceptivo}
+                disabled={saving}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="edit-waha-habilitado">Habilitado</Label>
+              <Switch
+                id="edit-waha-habilitado"
+                checked={habilitado}
+                onCheckedChange={setHabilitado}
+                disabled={saving}
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="edit-waha-flow">Fluxo (opcional)</Label>
@@ -352,6 +382,24 @@ export function EditChannelDialog({
                 value={verifyToken}
                 onChange={(e) => setVerifyToken(e.target.value)}
                 placeholder="(opcional)"
+                disabled={saving}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="edit-meta-receptivo">Receptivo</Label>
+              <Switch
+                id="edit-meta-receptivo"
+                checked={receptivo}
+                onCheckedChange={setReceptivo}
+                disabled={saving}
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="edit-meta-habilitado">Habilitado</Label>
+              <Switch
+                id="edit-meta-habilitado"
+                checked={habilitado}
+                onCheckedChange={setHabilitado}
                 disabled={saving}
               />
             </div>
