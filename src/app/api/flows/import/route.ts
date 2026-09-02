@@ -143,12 +143,17 @@ export async function POST(request: Request) {
 
   const admin = supabaseAdmin()
 
+  // Avoid "X (importado) (importado)" when re-importing a flow that
+  // was already exported from a previously-imported one.
+  const baseName = body.flow.name.trim()
+  const name = baseName.endsWith(' (importado)') ? baseName : `${baseName} (importado)`
+
   const { data: flow, error: flowErr } = await admin
     .from('flows')
     .insert({
       user_id: user.id,
       account_id: accountId,
-      name: `${body.flow.name.trim()} (importado)`,
+      name,
       description: body.flow.description ?? null,
       status: 'draft',
       trigger_type,
