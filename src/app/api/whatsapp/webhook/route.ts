@@ -341,7 +341,8 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           // inserts that need it for NOT NULL FK compliance. Always
           // the admin who saved the WhatsApp config.
           config.user_id,
-          decryptedAccessToken
+          decryptedAccessToken,
+          config.id
         )
       }
     }
@@ -575,7 +576,13 @@ async function processMessage(
   // (contacts, conversations). Always the admin who saved the
   // WhatsApp config; the choice is arbitrary post-017 but stable.
   configOwnerUserId: string,
-  accessToken: string
+  accessToken: string,
+  // The matched whatsapp_config row's id — drives dispatchInboundToFlows'
+  // per-channel flow_id binding (findEntryFlow in engine.ts). Without
+  // this, a flow bound to a specific Meta number via /canais is
+  // silently ignored and every inbound falls through to the
+  // account-wide keyword/first-inbound scan instead.
+  configId: string,
 ) {
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
@@ -736,6 +743,7 @@ async function processMessage(
     userId: configOwnerUserId,
     contactId: contactRecord.id,
     conversationId: conversation.id,
+    configId,
     message:
       interactiveReplyId
         ? {

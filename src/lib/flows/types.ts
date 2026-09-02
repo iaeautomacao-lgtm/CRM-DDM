@@ -619,12 +619,13 @@ export interface DispatchInboundInput {
   conversationId: string;
   message: ParsedInbound;
   /**
-   * The wacrm.whatsapp_config row this inbound arrived on. Optional —
-   * Meta's webhook doesn't pass it (an account has at most one Meta
-   * config, resolved by meta-send.ts the same way it always has); the
-   * WAHA webhook always passes it, since an account can have several
-   * WAHA lines. Drives provider selection (getConfigProvider) and
-   * per-channel flow binding (findEntryFlow) — see engine.ts.
+   * The wacrm.whatsapp_config row this inbound arrived on. Both the
+   * Meta and WAHA webhooks pass it — an account can have several
+   * configs of either provider (multiple Meta numbers, multiple WAHA
+   * lines). Optional only for callers outside the two webhooks.
+   * Drives provider selection (getConfigProvider), per-channel flow
+   * binding (findEntryFlow), and scoping outbound sends back to the
+   * same number the contact messaged (meta-send.ts) — see engine.ts.
    */
   configId?: string;
 }

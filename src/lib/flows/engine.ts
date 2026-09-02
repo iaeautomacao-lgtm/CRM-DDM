@@ -3154,9 +3154,9 @@ async function startNewRun(
       user_id: flow.user_id,
       contact_id: input.contactId,
       conversation_id: input.conversationId,
-      // Which channel this run started on (migration 057) — NULL for
-      // Meta (meta-send.ts still resolves "the account's Meta config"
-      // on its own) or when the caller didn't pass one. Fixed for the
+      // Which channel this run started on (migration 057) — both
+      // webhooks pass it now, so this is only NULL when the caller
+      // didn't (e.g. a manually/API-triggered run). Fixed for the
       // life of the run; a later reply on a different channel still
       // sends back through this one (see handleReplyForActiveRun,
       // which never re-reads input.configId).
