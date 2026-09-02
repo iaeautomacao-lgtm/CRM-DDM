@@ -1,7 +1,4 @@
 import { createClient } from "@supabase/supabase-js";
-// TEMP DEBUG — remove before commit, along with every appendFileSync
-// call below that writes to AI_DEBUG_LOG_PATH.
-import { appendFileSync } from "fs";
 import type { AiAgentTool } from "@/lib/flows/types";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
@@ -12,9 +9,6 @@ import {
   isValidE164,
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
-
-// TEMP DEBUG — remove before commit.
-const AI_DEBUG_LOG_PATH = '/tmp/ai_debug.log';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -413,16 +407,6 @@ export async function handleAiAutoResponse(
   }
 
   const activeKey = !configKey ? masterKey : configKey;
-  // TEMP DEBUG — remove before commit.
-  try {
-    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-      ts: new Date().toISOString(),
-      type: 'AI_DEBUG_ACTIVE_KEY',
-      activeKeyLength: activeKey?.length,
-      first10: activeKey?.slice(0, 10),
-      accountId,
-    }) + '\n');
-  } catch {}
 
   if (!activeKey) {
     console.warn(`[AI Agent] Missing API Key for provider: ${aiConfig.api_provider}`);
@@ -1181,17 +1165,6 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .eq("account_id", accountId);
   if (configId) configQuery = configQuery.eq("id", configId);
   const { data: config, error: configError } = await configQuery.maybeSingle();
-  // TEMP DEBUG — remove before commit.
-  try {
-    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-      ts: new Date().toISOString(),
-      type: 'AI_DEBUG_CONFIG',
-      hasConfig: !!config,
-      configError: configError?.message,
-      provider: config?.provider,
-      configId: config?.id,
-    }) + '\n');
-  } catch {}
 
   if (configError || !config) {
     console.error("[AI Agent] WhatsApp config not found");
@@ -1209,15 +1182,6 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .eq("id", contactId)
     .eq("account_id", accountId)
     .single();
-  // TEMP DEBUG — remove before commit.
-  try {
-    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-      ts: new Date().toISOString(),
-      type: 'AI_DEBUG_CONTACT',
-      hasContact: !!contact,
-      phone: contact?.phone?.slice(0, 8),
-    }) + '\n');
-  } catch {}
 
   if (!contact?.phone) return;
 
@@ -1234,32 +1198,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
       }
     : null;
-  let accessToken = "";
-  if (!isWaha) {
-    try {
-      accessToken = decrypt(config.access_token);
-    } catch (err) {
-      // TEMP DEBUG — remove before commit.
-      try {
-        appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-          ts: new Date().toISOString(),
-          type: 'AI_DEBUG_DECRYPT_ERROR',
-          configId: config?.id,
-          error: err instanceof Error ? err.message : String(err),
-        }) + '\n');
-      } catch {}
-      throw err;
-    }
-  }
-  // TEMP DEBUG — remove before commit.
-  try {
-    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-      ts: new Date().toISOString(),
-      type: 'AI_DEBUG_TOKEN',
-      tokenFirst10: accessToken?.slice(0, 10),
-      tokenLength: accessToken?.length,
-    }) + '\n');
-  } catch {}
+  const accessToken = isWaha ? "" : decrypt(config.access_token);
 
   // 8. Send message via WAHA or Meta
   // Simulação de digitação: aguarda 2 segundos adicionais antes de enviar a mensagem de fato
@@ -1323,20 +1262,6 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         }
       }
       workingPhone = variant;
-      // TEMP DEBUG — remove before commit.
-      if (!isWaha) {
-        try {
-          appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-            ts: new Date().toISOString(),
-            type: 'AI_DEBUG_META_SEND',
-            sentMessageId,
-            workingPhone,
-            configId: config?.id,
-            provider: config?.provider,
-            phone_number_id: config?.phone_number_id,
-          }) + '\n');
-        } catch {}
-      }
       break;
     } catch (err) {
       if (isWaha) {
@@ -1344,15 +1269,6 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         break;
       }
       const msg = err instanceof Error ? err.message : String(err);
-      // TEMP DEBUG — remove before commit.
-      try {
-        appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-          ts: new Date().toISOString(),
-          type: 'AI_DEBUG_SEND_ERROR',
-          variant: variant?.slice(0, 10),
-          error: err instanceof Error ? err.message : String(err),
-        }) + '\n');
-      } catch {}
       if (!isRecipientNotAllowedError(msg)) {
         console.error("[AI Agent] Meta send error:", err);
         break;
@@ -1558,18 +1474,6 @@ async function generateOpenAiResponse(
       body.tool_choice = "auto";
     }
 
-    // TEMP DEBUG — remove before commit.
-    try {
-      appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-        ts: new Date().toISOString(),
-        type: 'AI_DEBUG_OPENAI_REQUEST',
-        model: body.model,
-        messagesCount: messages.length,
-        apiKeyFirst10: apiKey?.slice(0, 10),
-        apiKeyLength: apiKey?.length,
-      }) + '\n');
-    } catch {}
-
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -1581,18 +1485,6 @@ async function generateOpenAiResponse(
     }
 
     const data = await response.json();
-    // TEMP DEBUG — remove before commit.
-    try {
-      appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-        ts: new Date().toISOString(),
-        type: 'AI_DEBUG_RAW',
-        finish_reason: data?.choices?.[0]?.finish_reason,
-        content: data?.choices?.[0]?.message?.content?.slice(0, 200),
-        tool_calls_count: data?.choices?.[0]?.message?.tool_calls?.length,
-        usage: data?.usage,
-        error: data?.error,
-      }) + '\n');
-    } catch {}
     const choice = data?.choices?.[0];
     const message = choice?.message;
 
