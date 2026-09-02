@@ -1251,6 +1251,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       throw err;
     }
   }
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'AI_DEBUG_TOKEN',
+      tokenFirst10: accessToken?.slice(0, 10),
+      tokenLength: accessToken?.length,
+    }) + '\n');
+  } catch {}
 
   // 8. Send message via WAHA or Meta
   // Simulação de digitação: aguarda 2 segundos adicionais antes de enviar a mensagem de fato
