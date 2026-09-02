@@ -1278,6 +1278,20 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         }
       }
       workingPhone = variant;
+      // TEMP DEBUG — remove before commit.
+      if (!isWaha) {
+        try {
+          appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+            ts: new Date().toISOString(),
+            type: 'AI_DEBUG_META_SEND',
+            sentMessageId,
+            workingPhone,
+            configId: config?.id,
+            provider: config?.provider,
+            phone_number_id: config?.phone_number_id,
+          }) + '\n');
+        } catch {}
+      }
       break;
     } catch (err) {
       if (isWaha) {
