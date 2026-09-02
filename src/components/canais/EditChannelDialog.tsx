@@ -73,6 +73,11 @@ export function EditChannelDialog({
   const [verifyToken, setVerifyToken] = useState("");
   const [accessToken, setAccessToken] = useState(MASKED_TOKEN);
   const [tokenEdited, setTokenEdited] = useState(false);
+  // App Secret is never returned by GET (like access_token), but unlike
+  // it, there's no masked-placeholder dance here — it just starts blank.
+  // Blank on submit means "keep the value already in the DB" (see
+  // route.ts's POST handler).
+  const [appSecret, setAppSecret] = useState("");
 
   useEffect(() => {
     if (!config) return;
@@ -88,6 +93,7 @@ export function EditChannelDialog({
       setVerifyToken("");
       setAccessToken(MASKED_TOKEN);
       setTokenEdited(false);
+      setAppSecret("");
     }
   }, [config]);
 
@@ -166,6 +172,10 @@ export function EditChannelDialog({
           phone_number_id: phoneNumberId.trim(),
           waba_id: wabaId.trim() || null,
           access_token: tokenEdited ? accessToken.trim() : MASKED_TOKEN,
+          // Omitted (not empty string) when left blank, so the server's
+          // "was this key even present?" check treats it the same as
+          // never having touched the field — keep the existing value.
+          app_secret: appSecret.trim() || undefined,
           verify_token: verifyToken.trim() || null,
         }),
       });
@@ -323,6 +333,17 @@ export function EditChannelDialog({
                   </Button>
                 </div>
               )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-meta-app-secret">App Secret</Label>
+              <Input
+                id="edit-meta-app-secret"
+                type="password"
+                value={appSecret}
+                onChange={(e) => setAppSecret(e.target.value)}
+                placeholder="(deixe em branco para manter o atual)"
+                disabled={saving}
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="edit-meta-verify">Verify Token</Label>

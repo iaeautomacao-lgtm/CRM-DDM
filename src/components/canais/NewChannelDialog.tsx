@@ -112,6 +112,7 @@ export function NewChannelDialog({
   const [phoneNumberId, setPhoneNumberId] = useState("");
   const [wabaId, setWabaId] = useState("");
   const [accessToken, setAccessToken] = useState("");
+  const [appSecret, setAppSecret] = useState("");
   const [verifyToken, setVerifyToken] = useState("");
 
   // Prefill the non-sensitive fields on first mount — this dialog is
@@ -138,6 +139,7 @@ export function NewChannelDialog({
     setPhoneNumberId(defaults.phoneNumberId ?? "");
     setWabaId(defaults.wabaId ?? "");
     setAccessToken("");
+    setAppSecret("");
     setVerifyToken("");
   }
 
@@ -195,6 +197,10 @@ export function NewChannelDialog({
       toast.error("Access Token é obrigatório");
       return;
     }
+    if (!appSecret.trim()) {
+      toast.error("App Secret é obrigatório");
+      return;
+    }
     setSaving(true);
     try {
       const res = await apiFetch("/api/whatsapp/config", {
@@ -205,6 +211,7 @@ export function NewChannelDialog({
           phone_number_id: phoneNumberId.trim(),
           waba_id: wabaId.trim() || null,
           access_token: accessToken.trim(),
+          app_secret: appSecret.trim(),
           verify_token: verifyToken.trim() || null,
         }),
       });
@@ -356,6 +363,21 @@ export function NewChannelDialog({
                 type="password"
                 value={accessToken}
                 onChange={(e) => setAccessToken(e.target.value)}
+                disabled={saving}
+              />
+            </div>
+            <div className="space-y-1">
+              <FieldLabel
+                htmlFor="new-meta-app-secret"
+                tooltip="Encontrado em developers.facebook.com → Seu App → Configurações → Básico → App Secret"
+              >
+                App Secret
+              </FieldLabel>
+              <Input
+                id="new-meta-app-secret"
+                type="password"
+                value={appSecret}
+                onChange={(e) => setAppSecret(e.target.value)}
                 disabled={saving}
               />
             </div>

@@ -178,19 +178,57 @@ export async function POST(request: Request) {
   const rawBody = await request.text()
   const signature = request.headers.get('x-hub-signature-256')
 
-  if (!verifyMetaWebhookSignature(rawBody, signature)) {
-    // 401 (not 200) — we want Meta's delivery dashboard to show failures
-    // loudly if a misconfiguration causes signatures to stop matching,
-    // rather than silently eating events.
-    console.warn('[webhook] rejected request with invalid signature')
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
-  }
-
   let body: { entry?: WhatsAppWebhookEntry[] }
   try {
     body = JSON.parse(rawBody)
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+
+  // Resolve the App Secret to verify against. Each Meta channel can have
+  // its own (whatsapp_config.app_secret) — a single global secret breaks
+  // as soon as an account connects numbers from two different Meta Apps.
+  // We only need the first entry/change's phone_number_id: Meta batches
+  // webhook deliveries per subscribed App, so every entry in one POST
+  // body is already signed with the same App Secret.
+  const phoneNumberId = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
+
+  let channelAppSecret: string | null = null
+  if (phoneNumberId) {
+    const { data: config } = await supabaseAdmin()
+      .from('whatsapp_config')
+      .select('app_secret')
+      .eq('phone_number_id', phoneNumberId)
+      .eq('provider', 'meta')
+      .limit(1)
+      .single()
+    if (config?.app_secret) {
+      try {
+        channelAppSecret = decrypt(config.app_secret)
+      } catch (err) {
+        console.error('[webhook] failed to decrypt app_secret for phone_number_id:', phoneNumberId, err)
+      }
+    }
+  }
+
+  // Fall back to the global env var for channels saved before app_secret
+  // was captured per-config.
+  const secret = channelAppSecret ?? process.env.META_APP_SECRET ?? null
+
+  if (!secret) {
+    console.error('[webhook] no App Secret configured for phone_number_id:', phoneNumberId)
+    return NextResponse.json(
+      { error: 'App Secret não configurado para este canal' },
+      { status: 401 },
+    )
+  }
+
+  if (!verifyMetaWebhookSignature(rawBody, signature, secret)) {
+    // 401 (not 200) — we want Meta's delivery dashboard to show failures
+    // loudly if a misconfiguration causes signatures to stop matching,
+    // rather than silently eating events.
+    console.warn('[webhook] rejected request with invalid signature')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
   // Process AFTER the response so we ack Meta within their ~20s timeout

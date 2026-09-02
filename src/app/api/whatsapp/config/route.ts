@@ -275,7 +275,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { id: configId, provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, verify_token, pin } = body
+    const { id: configId, provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, app_secret, verify_token, pin } = body
 
     const MASKED_TOKEN = '••••••••••••••••'
 
@@ -474,7 +474,7 @@ export async function POST(request: Request) {
     if (configId) {
       const { data } = await supabase
         .from('whatsapp_config')
-        .select('id, registered_at, phone_number_id, access_token')
+        .select('id, registered_at, phone_number_id, access_token, app_secret')
         .eq('id', configId)
         .eq('account_id', accountId)
         .maybeSingle()
@@ -482,7 +482,7 @@ export async function POST(request: Request) {
     } else {
       const { data } = await supabase
         .from('whatsapp_config')
-        .select('id, registered_at, phone_number_id, access_token')
+        .select('id, registered_at, phone_number_id, access_token, app_secret')
         .eq('account_id', accountId)
         .eq('phone_number_id', phone_number_id)
         .maybeSingle()
@@ -528,6 +528,39 @@ export async function POST(request: Request) {
         { error: 'access_token and phone_number_id are required' },
         { status: 400 }
       )
+    }
+
+    // app_secret — used by the webhook to HMAC-verify inbound payloads
+    // per channel. Same "keep existing on blank" pattern as access_token
+    // above, but with no MASKED_TOKEN sentinel: the client just omits
+    // the field (or sends '') when it wants to keep the stored value.
+    // Required on first save — a Meta channel with no app_secret and no
+    // process.env.META_APP_SECRET fallback can never pass the webhook's
+    // signature check, so failing here beats a silently broken channel.
+    let encryptedAppSecret: string | null
+    if (app_secret && app_secret.trim()) {
+      try {
+        encryptedAppSecret = encrypt(app_secret.trim())
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown encryption error'
+        console.error('Encryption failed:', message)
+        return NextResponse.json(
+          {
+            error:
+              'Failed to encrypt App Secret. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+          },
+          { status: 500 }
+        )
+      }
+    } else if (existing?.app_secret) {
+      encryptedAppSecret = existing.app_secret
+    } else if (!existing) {
+      return NextResponse.json(
+        { error: 'app_secret is required' },
+        { status: 400 }
+      )
+    } else {
+      encryptedAppSecret = null
     }
 
     // Verify credentials with Meta BEFORE saving
@@ -643,6 +676,7 @@ export async function POST(request: Request) {
       phone_number_id,
       waba_id: waba_id || null,
       access_token: encryptedAccessToken,
+      app_secret: encryptedAppSecret,
       verify_token: encryptedVerifyToken,
       status: registrationError ? 'disconnected' : 'connected',
       connected_at: registrationError ? null : new Date().toISOString(),
