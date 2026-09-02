@@ -186,6 +186,8 @@ export default function CanaisPage() {
   async function handleToggleField(c: ChannelConfig, field: "receptivo" | "habilitado") {
     const key = `${c.id}:${field}`;
     const next = !c[field];
+    // TEMP DEBUG — remove before commit.
+    console.log('handleToggleField', { id: c.id, phone_number_id: c.phone_info?.id, field, next });
     setToggleBusyKey(key);
     try {
       const res = await apiFetch("/api/whatsapp/config", {
