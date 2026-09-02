@@ -399,6 +399,8 @@ export async function handleAiAutoResponse(
   }
 
   const activeKey = !configKey ? masterKey : configKey;
+  // TEMP DEBUG — remove before commit.
+  console.log('[AI DEBUG] activeKey length:', activeKey?.length, 'first10:', activeKey?.slice(0, 10), 'accountId:', accountId);
 
   if (!activeKey) {
     console.warn(`[AI Agent] Missing API Key for provider: ${aiConfig.api_provider}`);
@@ -1464,6 +1466,9 @@ async function generateOpenAiResponse(
       body.tools = openAiTools;
       body.tool_choice = "auto";
     }
+
+    // TEMP DEBUG — remove before commit.
+    console.log('[AI DEBUG] OpenAI request - model:', body.model, 'messages count:', messages.length, 'apiKey first10:', apiKey?.slice(0, 10), 'apiKey length:', apiKey?.length);
 
     const response = await fetch(url, {
       method: "POST",
