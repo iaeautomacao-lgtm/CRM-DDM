@@ -107,6 +107,8 @@ export default function CanaisPage() {
       const payload = await res.json();
       const list = (payload.configs ?? []) as ChannelConfig[];
       setConfigs(list);
+      // TEMP DEBUG — remove before commit.
+      console.log('configs order:', list.map(c => ({ id: c.id, name: channelName(c), phone: c.phone_info?.id })));
       return list;
     } catch (err) {
       console.error("[canais] failed to load channels:", err);
