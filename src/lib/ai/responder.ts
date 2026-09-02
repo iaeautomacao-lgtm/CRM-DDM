@@ -219,7 +219,15 @@ export async function handleAiAutoResponse(
   // (BEN) gets the #NEGOCIACAO auto-exit in generateOpenAiResponse.
   // "agente_de_ia_2" (Aleh) needs consultar_debitos' data to present
   // installments to the customer, so it must never get suppressed.
-  nodeKey?: string
+  nodeKey?: string,
+  // The wacrm.whatsapp_config row this inbound arrived on. Without it,
+  // step 7 below scopes the config lookup by account_id alone, which
+  // errors out (or, if RLS/`.maybeSingle()` semantics ever loosen,
+  // silently picks an arbitrary row) once an account has more than one
+  // WhatsApp channel. Callers should always pass this when they know
+  // it — see the three call sites (Meta webhook, WAHA webhook,
+  // flows/engine.ts's runAiAgentCore).
+  configId?: string,
 ): Promise<string | null | void> {
   const db = supabaseAdmin();
 
@@ -1167,11 +1175,12 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   }
 
   // 7. Load WhatsApp configuration
-  const { data: config, error: configError } = await db
+  let configQuery = db
     .from("whatsapp_config")
     .select("*")
-    .eq("account_id", accountId)
-    .maybeSingle();
+    .eq("account_id", accountId);
+  if (configId) configQuery = configQuery.eq("id", configId);
+  const { data: config, error: configError } = await configQuery.maybeSingle();
 
   if (configError || !config) {
     console.error("[AI Agent] WhatsApp config not found");

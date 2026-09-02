@@ -1561,6 +1561,7 @@ async function runAiAgentCore(
         });
       },
       currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+      run.config_id ?? undefined,
     );
 
     // Filtra pelo momento imediatamente anterior à chamada da IA —

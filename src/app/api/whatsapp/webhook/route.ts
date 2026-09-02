@@ -781,7 +781,21 @@ async function processMessage(
       // Fire-and-forget — but handleAiAutoResponse now throws on an LLM
       // generation failure (see responder.ts), so this MUST catch or an
       // unhandled promise rejection would crash the whole process.
-      void handleAiAutoResponse(accountId, contactRecord.id, conversation.id, contentText || '')
+      void handleAiAutoResponse(
+        accountId,
+        contactRecord.id,
+        conversation.id,
+        contentText || '',
+        undefined, // systemPromptOverride
+        undefined, // skipDebounce
+        undefined, // historyAfter
+        undefined, // historyBefore
+        undefined, // tools
+        undefined, // onToolCall
+        undefined, // onToolResult
+        undefined, // nodeKey
+        configId,
+      )
         .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
     }
 

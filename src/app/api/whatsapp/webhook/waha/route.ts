@@ -565,7 +565,21 @@ export async function POST(request: Request) {
             // LLM generation failure (see responder.ts), so this MUST
             // catch or an unhandled promise rejection would crash the
             // whole process.
-            void handleAiAutoResponse(accountId, contactId, conversationId, textBody || '')
+            void handleAiAutoResponse(
+              accountId,
+              contactId,
+              conversationId,
+              textBody || '',
+              undefined, // systemPromptOverride
+              undefined, // skipDebounce
+              undefined, // historyAfter
+              undefined, // historyBefore
+              undefined, // tools
+              undefined, // onToolCall
+              undefined, // onToolResult
+              undefined, // nodeKey
+              config.id,
+            )
               .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
           }
         }
