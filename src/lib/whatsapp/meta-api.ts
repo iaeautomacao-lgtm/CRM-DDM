@@ -9,11 +9,6 @@
  * instead of a runtime rejection from Meta.
  */
 
-// TEMP DEBUG — remove before commit, along with every appendFileSync
-// call below that writes to AI_DEBUG_LOG_PATH.
-import { appendFileSync } from 'fs'
-const AI_DEBUG_LOG_PATH = '/tmp/ai_debug.log'
-
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
@@ -249,16 +244,15 @@ export async function sendTextMessage(
   if (contextMessageId) {
     body.context = { message_id: contextMessageId }
   }
-  // TEMP DEBUG — remove before commit.
-  try {
-    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
-      ts: new Date().toISOString(),
-      type: 'META_REQUEST',
-      url: url,
-      to: to,
-      tokenFirst10: accessToken?.slice(0, 10),
-    }) + '\n')
-  } catch {}
+  // TEMP DEBUG — remove before commit. console.error (not
+  // appendFileSync) so this file has no static `fs` import — it gets
+  // bundled by routes that may not run under a plain Node runtime.
+  console.error('[META_REQUEST]', JSON.stringify({
+    ts: new Date().toISOString(),
+    url,
+    to,
+    tokenFirst10: accessToken?.slice(0, 10),
+  }))
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -271,12 +265,11 @@ export async function sendTextMessage(
     // TEMP DEBUG — remove before commit.
     try {
       const errorBody = await response.clone().text()
-      appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      console.error('[META_ERROR]', JSON.stringify({
         ts: new Date().toISOString(),
-        type: 'META_ERROR',
         status: response.status,
         body: errorBody,
-      }) + '\n')
+      }))
     } catch {}
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
