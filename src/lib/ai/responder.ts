@@ -1,4 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
+// TEMP DEBUG — remove before commit, along with every appendFileSync
+// call below that writes to AI_DEBUG_LOG_PATH.
+import { appendFileSync } from "fs";
 import type { AiAgentTool } from "@/lib/flows/types";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
@@ -9,6 +12,9 @@ import {
   isValidE164,
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
+
+// TEMP DEBUG — remove before commit.
+const AI_DEBUG_LOG_PATH = '/tmp/ai_debug.log';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -940,6 +946,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   }
 
   generatedText = generatedText.trim();
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'RAW',
+      len: generatedText?.length,
+      first50: generatedText?.slice(0, 50),
+    }) + '\n');
+  } catch {}
   if (!generatedText) return;
 
   // Captured BEFORE the known-tag strip below removes it from the text
@@ -1165,6 +1180,17 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .eq("account_id", accountId);
   if (configId) configQuery = configQuery.eq("id", configId);
   const { data: config, error: configError } = await configQuery.maybeSingle();
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'CFG',
+      hasConfig: !!config,
+      err: configError?.message,
+      provider: config?.provider,
+      id: config?.id,
+    }) + '\n');
+  } catch {}
 
   if (configError || !config) {
     console.error("[AI Agent] WhatsApp config not found");
@@ -1182,6 +1208,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .eq("id", contactId)
     .eq("account_id", accountId)
     .single();
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'CTT',
+      hasContact: !!contact,
+      phone: contact?.phone?.slice(0, 8),
+    }) + '\n');
+  } catch {}
 
   if (!contact?.phone) return;
 
@@ -1311,6 +1346,16 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       updated_at: new Date().toISOString(),
     })
     .eq("id", conversationId);
+
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'END',
+      generatedLen: generatedText?.length,
+      detectedTag,
+    }) + '\n');
+  } catch {}
 
   return detectedTag;
 }
