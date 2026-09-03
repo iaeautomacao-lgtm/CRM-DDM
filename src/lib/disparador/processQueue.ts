@@ -6,6 +6,11 @@ import {
   playWacallsAudio,
   getWacallsCallStatus,
 } from "@/lib/whatsapp/waha-api";
+import {
+  sendTemplateMessage,
+  sendTextMessage,
+  sendMediaMessage,
+} from "@/lib/whatsapp/meta-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -21,6 +26,11 @@ export interface QueueItem {
   media_url?: string;
   tentativas?: number;
   contacts?: { name?: string; phone?: string; company?: string };
+  // Migration 070 — campos de template Meta (business-initiated /
+  // fora da janela de 24h). Ausentes/undefined em itens WAHA.
+  template_name?: string;
+  template_language?: string;
+  template_variables?: string[];
 }
 
 export interface Campaign {
@@ -248,17 +258,71 @@ async function sendViaWaha(
 }
 
 async function sendViaMeta(
-  _config: any,
-  _item: QueueItem,
-  _phone: string,
-  _text: string,
+  config: any,
+  item: QueueItem,
+  phone: string,
+  text: string,
   tipo: string
 ): Promise<string> {
   if (tipo === "ligacao") {
     throw new Error("Tipo 'ligacao' não é suportado em canais Meta Cloud API");
   }
-  // TODO Fase 2: implementar sendMetaTemplateMessage
-  throw new Error(
-    "[Disparador] Envio via Meta Cloud API ainda não implementado. Use um canal WAHA para esta campanha."
-  );
+
+  const accessToken = config.access_token ? decrypt(config.access_token) : null;
+  if (!accessToken) {
+    throw new Error(`Canal Meta sem access_token configurado (session_id: ${item.session_id})`);
+  }
+  const phoneNumberId = config.phone_number_id;
+  if (!phoneNumberId) {
+    throw new Error(`Canal Meta sem phone_number_id configurado (session_id: ${item.session_id})`);
+  }
+
+  // Caminho template (business-initiated obrigatório fora da janela 24h)
+  if (item.template_name) {
+    const variables: string[] = Array.isArray(item.template_variables)
+      ? item.template_variables.map(String)
+      : [];
+
+    const result = await sendTemplateMessage({
+      phoneNumberId,
+      accessToken,
+      to: phone,
+      templateName: item.template_name,
+      language: item.template_language ?? "pt_BR",
+      params: variables,
+    });
+    return result.messageId;
+  }
+
+  // Caminho texto livre (só válido dentro da janela 24h — customer-initiated)
+  if (tipo === "imagem" || tipo === "video" || tipo === "audio" || tipo === "arquivo") {
+    const kindMap: Record<string, "image" | "video" | "audio" | "document"> = {
+      imagem: "image",
+      video: "video",
+      audio: "audio",
+      arquivo: "document",
+    };
+    if (!item.media_url) {
+      throw new Error(`Item ${item.id} do tipo ${tipo} não tem media_url`);
+    }
+    const result = await sendMediaMessage({
+      phoneNumberId,
+      accessToken,
+      to: phone,
+      kind: kindMap[tipo],
+      link: item.media_url,
+      caption: text || undefined,
+      filename: tipo === "arquivo" ? "documento" : undefined,
+    });
+    return result.messageId;
+  }
+
+  // Texto simples
+  const result = await sendTextMessage({
+    phoneNumberId,
+    accessToken,
+    to: phone,
+    text,
+  });
+  return result.messageId;
 }
