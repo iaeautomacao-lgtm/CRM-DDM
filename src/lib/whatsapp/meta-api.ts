@@ -9,6 +9,11 @@
  * instead of a runtime rejection from Meta.
  */
 
+// TEMP DEBUG — remove before commit, along with every appendFileSync
+// call below that writes to AI_DEBUG_LOG_PATH.
+import { appendFileSync } from 'fs'
+const AI_DEBUG_LOG_PATH = '/tmp/ai_debug.log'
+
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
 
@@ -244,6 +249,16 @@ export async function sendTextMessage(
   if (contextMessageId) {
     body.context = { message_id: contextMessageId }
   }
+  // TEMP DEBUG — remove before commit.
+  try {
+    appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(),
+      type: 'META_REQUEST',
+      url: url,
+      to: to,
+      tokenFirst10: accessToken?.slice(0, 10),
+    }) + '\n')
+  } catch {}
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -253,6 +268,16 @@ export async function sendTextMessage(
     body: JSON.stringify(body),
   })
   if (!response.ok) {
+    // TEMP DEBUG — remove before commit.
+    try {
+      const errorBody = await response.clone().text()
+      appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+        ts: new Date().toISOString(),
+        type: 'META_ERROR',
+        status: response.status,
+        body: errorBody,
+      }) + '\n')
+    } catch {}
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
   const data = await response.json()
