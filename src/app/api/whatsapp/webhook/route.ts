@@ -601,7 +601,8 @@ async function processMessage(
   const conversation = await findOrCreateConversation(
     accountId,
     configOwnerUserId,
-    contactRecord.id
+    contactRecord.id,
+    configId,
   )
   if (!conversation) return
 
@@ -1065,6 +1066,7 @@ async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
   contactId: string,
+  configId: string,
 ) {
   // Look for existing conversation in this account. `.single()` used to
   // throw PGRST116 (and silently fall through to creating a duplicate
@@ -1091,6 +1093,12 @@ async function findOrCreateConversation(
       account_id: accountId,
       user_id: configOwnerUserId,
       contact_id: contactId,
+      // Which Meta whatsapp_config this conversation started on
+      // (migration 069) — only set on creation, not backfilled onto
+      // pre-existing conversations found above. Lets send/route.ts
+      // (and anything else keyed on the channel) resolve the exact
+      // config instead of guessing "the account's only Meta config".
+      config_id: configId,
     })
     .select()
     .single()

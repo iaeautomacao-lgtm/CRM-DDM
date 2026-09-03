@@ -293,6 +293,9 @@ export async function POST(request: Request) {
             unread_count: 0,
             user_id: config.user_id,
             waha_session: session,
+            // Migration 069 — only set on creation, not backfilled
+            // onto the pre-existing-conversation branch above.
+            config_id: config.id,
           })
           .select('id')
           .single()

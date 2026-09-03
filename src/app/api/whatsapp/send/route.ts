@@ -245,7 +245,9 @@ export async function POST(request: Request) {
       .select('*')
       .eq('account_id', accountId)
 
-    if (conversation && (conversation as any).waha_session) {
+    if (conversation && (conversation as any).config_id) {
+      configQuery = configQuery.eq('id', (conversation as any).config_id)
+    } else if (conversation && (conversation as any).waha_session) {
       configQuery = configQuery.eq('waha_session', (conversation as any).waha_session)
     }
 
