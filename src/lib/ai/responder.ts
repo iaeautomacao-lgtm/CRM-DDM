@@ -1304,6 +1304,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         break;
       }
       const msg = err instanceof Error ? err.message : String(err);
+      // TEMP DEBUG — remove before commit.
+      try {
+        appendFileSync(AI_DEBUG_LOG_PATH, JSON.stringify({
+          ts: new Date().toISOString(),
+          type: 'SEND_ERR',
+          variant: variant?.slice(0, 10),
+          err: err instanceof Error ? err.message : String(err),
+        }) + '\n');
+      } catch {}
       if (!isRecipientNotAllowedError(msg)) {
         console.error("[AI Agent] Meta send error:", err);
         break;
