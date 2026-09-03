@@ -98,8 +98,22 @@ export function EditChannelDialog({
       setPhoneNumberId(config.phone_info?.id ?? "");
       setWabaId("");
       setVerifyToken("");
-      setAccessToken(MASKED_TOKEN);
-      setTokenEdited(false);
+      // A channel that's down because of a bad/expired token gets the
+      // token field pre-opened (as if "Substituir token" was already
+      // clicked) instead of the masked placeholder — the whole point
+      // of opening this dialog for one of these is to paste a new
+      // token, so don't make the user find the reveal button first.
+      const hasInvalidToken = config.reason === "token_corrupted" || config.needs_reset === true;
+      if (hasInvalidToken) {
+        setAccessToken("");
+        setTokenEdited(true);
+        toast.warning("Este canal está com token inválido. Cole o novo token de acesso abaixo.", {
+          duration: 8000,
+        });
+      } else {
+        setAccessToken(MASKED_TOKEN);
+        setTokenEdited(false);
+      }
       setAppSecret("");
     }
   }, [config]);

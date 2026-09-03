@@ -25,7 +25,7 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { MessageCircle, MoreVertical, Plus, Search, Trash2, Zap } from "lucide-react";
+import { AlertTriangle, MessageCircle, MoreVertical, Plus, Search, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +53,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { ChannelConfig } from "@/components/canais/types";
@@ -64,6 +70,30 @@ import { TestChannelDialog } from "@/components/canais/TestChannelDialog";
 function channelName(c: ChannelConfig): string {
   if (c.provider === "waha") return c.waha_session || "Sessão WAHA";
   return c.phone_info?.verified_name || c.phone_info?.display_phone_number || "Meta Config";
+}
+
+// Keywords Meta's Graph API error messages use for an expired/invalid
+// OAuth token (e.g. "Error validating access token: Session has
+// expired...", "Invalid OAuth access token..."). Matched case-
+// insensitively against `message` when `reason === "meta_api_error"` —
+// that reason also covers other, unrelated Meta API failures, so we
+// only treat it as a token problem when the message itself looks like
+// one.
+const TOKEN_ERROR_KEYWORDS = ["authorization", "access token", "oauth", "expired"];
+
+/**
+ * Non-null (and a user-facing label) when this channel is down because
+ * its Meta access token is invalid or expired — as opposed to any other
+ * "Desconectado" cause (WAHA session stopped, network error, etc.).
+ */
+function invalidTokenLabel(c: ChannelConfig): string | null {
+  if (c.connected) return null;
+  if (c.reason === "token_corrupted") return "Token inválido";
+  if (c.reason === "meta_api_error") {
+    const msg = (c.message ?? "").toLowerCase();
+    if (TOKEN_ERROR_KEYWORDS.some((kw) => msg.includes(kw))) return "Token expirado";
+  }
+  return null;
 }
 
 function sessionOrNumber(c: ChannelConfig): string {
@@ -141,6 +171,11 @@ export default function CanaisPage() {
 
   const allVisibleSelected =
     filteredConfigs.length > 0 && filteredConfigs.every((c) => selected.has(c.id));
+
+  const hasInvalidTokenChannel = useMemo(
+    () => configs.some((c) => invalidTokenLabel(c) !== null),
+    [configs],
+  );
 
   function toggleSelectAll() {
     setSelected((prev) => {
@@ -270,6 +305,16 @@ export default function CanaisPage() {
         )}
       </div>
 
+      {hasInvalidTokenChannel && (
+        <div className="flex items-center gap-2 rounded-lg border border-[#FF5706]/30 bg-[#FF5706]/10 px-3 py-2 text-sm text-[#FF5706]">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span>
+            ⚠️ Um ou mais canais Meta estão com token de acesso inválido. Edite o canal e
+            atualize o Token de acesso para restaurar o funcionamento.
+          </span>
+        </div>
+      )}
+
       <div className="rounded-xl border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
@@ -350,6 +395,23 @@ export default function CanaisPage() {
                         </span>
                         Conectado
                       </span>
+                    ) : invalidTokenLabel(c) ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="inline-flex cursor-help items-center gap-1 rounded-full bg-[#FEE2E2] px-2 py-0.5 text-xs font-medium text-[#B91C1C]">
+                                <AlertTriangle className="size-3" />
+                                {invalidTokenLabel(c)}
+                              </span>
+                            }
+                          />
+                          <TooltipContent className="max-w-[260px] text-xs">
+                            O token de acesso deste canal está inválido ou expirado. Edite o
+                            canal e atualize o Token de acesso.
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
                     ) : (
                       <span className="inline-flex items-center rounded-full bg-[#FEE2E2] px-2 py-0.5 text-xs font-medium text-[#B91C1C]">
                         Desconectado
