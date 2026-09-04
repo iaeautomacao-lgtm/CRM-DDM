@@ -1082,7 +1082,14 @@ async function findOrCreateConversation(
     .limit(1)
 
   if (!findError && existing && existing.length > 0) {
-    return existing[0]
+    const conv = existing[0] as { status: string } & typeof existing[0]
+    // Conversa fechada → cria uma nova em vez de reutilizar.
+    // Isso garante que um novo contato reinicie o fluxo do BEN
+    // mesmo que já tenha sido atendido antes.
+    if (conv.status !== 'closed') {
+      return existing[0]
+    }
+    // Caso contrário, cai no create abaixo
   }
 
   // Create new conversation. Same tenancy + audit split as
