@@ -32,6 +32,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
@@ -177,6 +187,23 @@ export default function CampanhasPage() {
   // awaiting the user's "Restaurar" / "Descartar" decision.
   const [pendingDraft, setPendingDraft] = useState<CampaignDraft | null>(null);
 
+  // Campanha aguardando confirmação de início (modal de tier Meta)
+  const [startConfirmId, setStartConfirmId] = useState<string | null>(null);
+  const [campaignInfo, setCampaignInfo] = useState<{
+    hasMeta: boolean;
+    channels: Array<{
+      id: string;
+      provider: string;
+      phone_number_id?: string;
+      display_phone_number?: string;
+      tier?: string;
+      dailyLimit?: number | null;
+      quality_rating?: string | null;
+      error?: string;
+    }>;
+  } | null>(null);
+  const [infoLoading, setInfoLoading] = useState(false);
+
   // Auto-save the in-progress form to localStorage — creation mode only.
   // Skipped while a restore decision is pending so we don't overwrite the
   // saved draft with the blank fields the modal opened with.
@@ -291,10 +318,34 @@ export default function CampanhasPage() {
     }
   };
 
-  // Start Campaign
-  const handleStart = async (id: string) => {
+  // Abre o modal e busca info do canal antes de confirmar
+  const handleStartClick = async (id: string) => {
+    setStartConfirmId(id);
+    setCampaignInfo(null);
+    setInfoLoading(true);
     try {
-      const res = await apiFetch(`/api/disparador/campaigns/${id}/start`, { method: "POST" });
+      const res = await apiFetch(`/api/disparador/campaigns/${id}/info`);
+      if (res.ok) {
+        const data = await res.json();
+        setCampaignInfo(data);
+      }
+    } catch {
+      // Se falhar a busca de info, abre o modal mesmo assim sem dados
+    } finally {
+      setInfoLoading(false);
+    }
+  };
+
+  // Confirmação efetiva — chama o start real
+  const handleStartConfirm = async () => {
+    if (!startConfirmId) return;
+    const id = startConfirmId;
+    setStartConfirmId(null);
+    setCampaignInfo(null);
+    try {
+      const res = await apiFetch(`/api/disparador/campaigns/${id}/start`, {
+        method: "POST",
+      });
       if (res.ok) {
         toast.success("Campanha iniciada e disparos agendados!");
         loadData();
@@ -617,7 +668,7 @@ export default function CampanhasPage() {
                         <Pause className="h-3.5 w-3.5" /> Pausar
                       </Button>
                     ) : (
-                      <Button size="sm" onClick={() => handleStart(c.id)} disabled={c.status === "encerrada"} className="h-8 gap-1 text-xs">
+                      <Button size="sm" onClick={() => handleStartClick(c.id)} disabled={c.status === "encerrada"} className="h-8 gap-1 text-xs">
                         <Play className="h-3.5 w-3.5" /> Iniciar
                       </Button>
                     )}
@@ -1184,6 +1235,105 @@ export default function CampanhasPage() {
           setTemplatePickerIndex(null);
         }}
       />
+
+      <AlertDialog
+        open={startConfirmId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setStartConfirmId(null);
+            setCampaignInfo(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar início da campanha</AlertDialogTitle>
+            <AlertDialogDescription render={<div />}>
+              <div className="space-y-3">
+                {infoLoading && (
+                  <p className="text-sm text-muted-foreground">
+                    Consultando limites do canal...
+                  </p>
+                )}
+
+                {!infoLoading && campaignInfo && campaignInfo.hasMeta && (
+                  <div className="space-y-2">
+                    {campaignInfo.channels.map((ch) => (
+                      <div
+                        key={ch.id}
+                        className="rounded-md border p-3 text-sm space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">
+                            {ch.display_phone_number || ch.phone_number_id}
+                          </span>
+                          {ch.quality_rating && (
+                            <span
+                              className={
+                                ch.quality_rating === "GREEN"
+                                  ? "text-green-600 font-medium"
+                                  : ch.quality_rating === "YELLOW"
+                                  ? "text-yellow-600 font-medium"
+                                  : "text-red-600 font-medium"
+                              }
+                            >
+                              {ch.quality_rating}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-muted-foreground">
+                          Tier:{" "}
+                          <span className="font-medium text-foreground">
+                            {ch.tier ?? "TIER_1K (padrão)"}
+                          </span>{" "}
+                          — até{" "}
+                          <span className="font-medium text-foreground">
+                            {ch.dailyLimit === Infinity
+                              ? "ilimitado"
+                              : (ch.dailyLimit ?? 1000).toLocaleString("pt-BR")}
+                          </span>{" "}
+                          disparos/dia
+                        </div>
+                        {ch.error && (
+                          <div className="text-xs text-yellow-600">
+                            ⚠ {ch.error} — limite padrão aplicado
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    <p className="text-xs text-muted-foreground">
+                      Se o número de contatos exceder o limite diário, os
+                      disparos restantes serão agendados para os dias
+                      seguintes automaticamente.
+                    </p>
+                  </div>
+                )}
+
+                {!infoLoading && campaignInfo && !campaignInfo.hasMeta && (
+                  <p className="text-sm text-muted-foreground">
+                    Canal WAHA — sem limites de tier da Meta.
+                  </p>
+                )}
+
+                {!infoLoading && !campaignInfo && (
+                  <p className="text-sm text-muted-foreground">
+                    Deseja iniciar esta campanha?
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleStartConfirm}
+              disabled={infoLoading}
+            >
+              {infoLoading ? "Consultando..." : "Iniciar campanha"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
