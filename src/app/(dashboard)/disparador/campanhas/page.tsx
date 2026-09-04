@@ -4,6 +4,7 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 import { 
   Plus, 
   Play, 
@@ -21,7 +22,9 @@ import {
   X,
   FileText,
   ArrowLeft,
-  Pencil
+  Pencil,
+  Upload,
+  Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -160,6 +163,22 @@ export default function CampanhasPage() {
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
+
+  const [wizardStep, setWizardStep] = useState(1);
+  // Step 2 — importação de base
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<Array<{
+    phone: string;
+    name?: string;
+    variables: string[];
+    raw: Record<string, string>;
+  }> | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importStats, setImportStats] = useState<{
+    total: number;
+    valid: number;
+    invalid: number;
+  } | null>(null);
   const varFieldRefs = useRef<Record<string, HTMLTextAreaElement | HTMLInputElement | null>>({});
   // Index of the message ("conteudo") field waiting for a template
   // selection, or null when the picker is closed.
@@ -455,6 +474,10 @@ export default function CampanhasPage() {
     setShowModal(false);
     setEditingId(null);
     setPendingDraft(null);
+    setWizardStep(1);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportStats(null);
   };
 
   // Delete Campaign
@@ -503,6 +526,26 @@ export default function CampanhasPage() {
     }
 
     try {
+      // Se há arquivo para importar, envia para o servidor primeiro
+      if (importFile) {
+        const formData = new FormData();
+        formData.append("file", importFile);
+        // Tag com o nome da campanha para identificar os contatos
+        formData.append("defaultTag", nome.trim());
+        const importRes = await apiFetch(
+          "/api/disparador/contacts/import",
+          { method: "POST", body: formData }
+        );
+        if (!importRes.ok) {
+          const err = await importRes.json();
+          throw new Error(err.error || "Erro ao importar contatos");
+        }
+        const importResult = await importRes.json();
+        toast.success(
+          `${importResult.results?.importados ?? 0} contatos importados!`
+        );
+      }
+
       if (editingId) {
         // Editing goes through a server route so ownership + the
         // "rascunho" status lock are re-checked there (see
@@ -582,6 +625,10 @@ export default function CampanhasPage() {
     setMensagens([{ tipo: "texto", conteudo: "" }]);
     setIntervaloMin(30);
     setIntervaloMax(60);
+    setWizardStep(1);
+    setImportFile(null);
+    setImportPreview(null);
+    setImportStats(null);
   };
 
   // Meta channels can only send approved templates — the picker needs to
@@ -590,6 +637,85 @@ export default function CampanhasPage() {
   const hasMeta = sessions
     .filter((s) => selectedSessions.includes(s.id))
     .some((s) => s.provider === "meta");
+
+  const parseImportFile = async (file: File) => {
+    setImportLoading(true);
+    setImportPreview(null);
+    setImportStats(null);
+    try {
+      const text = await file.text();
+      // Detecta separador
+      const sep = text.startsWith("sep=")
+        ? text.split("\n")[0].split("=")[1]?.trim() || ";"
+        : text.includes(";") ? ";" : ",";
+
+      const lines = text.split("\n").filter(Boolean);
+      // Remove linha sep= se existir
+      const dataLines = lines[0].toLowerCase().startsWith("sep=")
+        ? lines.slice(1)
+        : lines;
+
+      if (dataLines.length < 2) {
+        toast.error("Arquivo vazio ou sem dados");
+        return;
+      }
+
+      const headers = dataLines[0].split(sep).map(h =>
+        h.trim().toLowerCase().replace(/["\r]/g, "")
+      );
+
+      // Índices das colunas
+      const phoneIdx = headers.findIndex(h =>
+        ["contato", "telefone", "phone", "celular", "tel",
+         "fone", "whatsapp", "número", "numero"].includes(h)
+      );
+      const nameIdx = headers.findIndex(h =>
+        ["nome", "name", "cliente"].includes(h)
+      );
+      const varIndices = headers
+        .map((h, i) => h.startsWith("var") ? i : -1)
+        .filter(i => i >= 0);
+
+      if (phoneIdx === -1) {
+        toast.error("Coluna de telefone não encontrada. Use: CONTATO, telefone, phone...");
+        return;
+      }
+
+      const rows = dataLines.slice(1, 6); // preview: primeiros 5
+      const allRows = dataLines.slice(1);
+
+      const preview = rows
+        .map(line => {
+          const cols = line.split(sep).map(c => c.trim().replace(/["\r]/g, ""));
+          const phone = cols[phoneIdx] || "";
+          if (!phone) return null;
+          return {
+            phone,
+            name: nameIdx >= 0 ? cols[nameIdx] : undefined,
+            variables: varIndices.map(i => cols[i] || ""),
+            raw: Object.fromEntries(headers.map((h, i) => [h, cols[i] || ""])),
+          };
+        })
+        .filter(Boolean) as typeof importPreview;
+
+      const validCount = allRows.filter(line => {
+        const cols = line.split(sep);
+        return cols[phoneIdx]?.trim();
+      }).length;
+
+      setImportPreview(preview);
+      setImportStats({
+        total: allRows.length,
+        valid: validCount,
+        invalid: allRows.length - validCount,
+      });
+      setImportFile(file);
+    } catch (err) {
+      toast.error("Erro ao ler arquivo");
+    } finally {
+      setImportLoading(false);
+    }
+  };
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
@@ -703,13 +829,43 @@ export default function CampanhasPage() {
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
-            <header className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/20">
-              <h3 className="font-bold text-foreground">
-                {editingId ? "Editar Campanha" : "Nova Campanha de Disparo"}
-              </h3>
-              <Button size="icon" variant="ghost" onClick={closeModal} className="h-8 w-8 text-muted-foreground">
-                <X className="h-5 w-5" />
-              </Button>
+            <header className="px-6 py-4 border-b border-border bg-muted/20">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-bold text-foreground">
+                  {editingId ? "Editar Campanha" : "Nova Campanha de Disparo"}
+                </h3>
+                <Button size="icon" variant="ghost" onClick={closeModal} className="h-8 w-8 text-muted-foreground">
+                  <X className="h-5 w-5" />
+                </Button>
+              </div>
+              {/* Step indicators */}
+              <div className="flex gap-2">
+                {[
+                  { step: 1, label: "Configuração" },
+                  { step: 2, label: "Importar Base" },
+                  { step: 3, label: "Resumo" },
+                ].map(({ step, label }) => (
+                  <button
+                    key={step}
+                    type="button"
+                    onClick={() => setWizardStep(step)}
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
+                      wizardStep === step
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <span className={cn(
+                      "flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold",
+                      wizardStep === step ? "bg-primary-foreground/20" : "bg-muted-foreground/20"
+                    )}>
+                      {step}
+                    </span>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </header>
 
             {pendingDraft && !editingId && (
@@ -726,7 +882,8 @@ export default function CampanhasPage() {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-4">
+            {wizardStep === 1 && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground">Nome da Campanha</label>
@@ -1177,12 +1334,228 @@ export default function CampanhasPage() {
                   <Plus className="h-4 w-4 mr-1" /> Adicionar Mensagem Sequencial
                 </Button>
               </div>
+            </div>
+            )}
 
-              <footer className="pt-4 border-t border-border flex justify-end gap-3 bg-muted/10 p-4 rounded-b-xl -mx-6 -mb-6">
-                <Button type="button" variant="outline" onClick={closeModal}>Cancelar</Button>
-                <Button type="submit">{editingId ? "Salvar Alterações" : "Criar Campanha"}</Button>
-              </footer>
-            </form>
+            {wizardStep === 2 && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div>
+                  <h4 className="font-medium text-foreground mb-1">
+                    Importar Base de Contatos
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Opcional — se preferir usar contatos já cadastrados com tags,
+                    avance para o próximo passo.
+                  </p>
+                </div>
+
+                {/* Upload area */}
+                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
+                  <div className="flex flex-col items-center gap-1">
+                    <Upload className="h-6 w-6 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">
+                      {importFile ? importFile.name : "Clique ou arraste CSV / XLSX"}
+                    </span>
+                    {!importFile && (
+                      <span className="text-xs text-muted-foreground/70">
+                        Formatos aceitos: .csv, .xlsx, .xls
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) parseImportFile(file);
+                    }}
+                  />
+                </label>
+
+                {/* Formato esperado */}
+                <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1">
+                  <p className="font-medium text-foreground">Formatos aceitos:</p>
+                  {hasMeta ? (
+                    <>
+                      <p className="text-muted-foreground">
+                        Meta (variáveis): <code className="bg-muted px-1 rounded">
+                          CONTATO;VAR1;VAR2;VAR3
+                        </code>
+                      </p>
+                      <p className="text-muted-foreground">
+                        Padrão CRM: <code className="bg-muted px-1 rounded">
+                          telefone;nome;empresa;tags
+                        </code>
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Padrão CRM: <code className="bg-muted px-1 rounded">
+                        telefone;nome;empresa;tags
+                      </code>
+                    </p>
+                  )}
+                </div>
+
+                {importLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Lendo arquivo...
+                  </div>
+                )}
+
+                {/* Stats */}
+                {importStats && (
+                  <div className="flex gap-3">
+                    <div className="flex-1 rounded-md bg-muted/40 p-3 text-center">
+                      <p className="text-lg font-bold text-foreground">{importStats.total}</p>
+                      <p className="text-xs text-muted-foreground">Total</p>
+                    </div>
+                    <div className="flex-1 rounded-md bg-green-500/10 p-3 text-center">
+                      <p className="text-lg font-bold text-green-600">{importStats.valid}</p>
+                      <p className="text-xs text-muted-foreground">Válidos</p>
+                    </div>
+                    {importStats.invalid > 0 && (
+                      <div className="flex-1 rounded-md bg-red-500/10 p-3 text-center">
+                        <p className="text-lg font-bold text-red-600">{importStats.invalid}</p>
+                        <p className="text-xs text-muted-foreground">Inválidos</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Preview table */}
+                {importPreview && importPreview.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Preview (primeiros 5 contatos):
+                    </p>
+                    <div className="rounded-md border border-border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/40">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">Telefone</th>
+                            {importPreview[0]?.name !== undefined && (
+                              <th className="px-3 py-2 text-left font-medium">Nome</th>
+                            )}
+                            {importPreview[0]?.variables.map((_, i) => (
+                              <th key={i} className="px-3 py-2 text-left font-medium">
+                                {"{{"}{i + 1}{"}}"}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {importPreview.map((row, i) => (
+                            <tr key={i} className="border-t border-border/50">
+                              <td className="px-3 py-2 font-mono">{row.phone}</td>
+                              {row.name !== undefined && (
+                                <td className="px-3 py-2">{row.name}</td>
+                              )}
+                              {row.variables.map((v, j) => (
+                                <td key={j} className="px-3 py-2">{v}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {wizardStep === 3 && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <h4 className="font-medium text-foreground">Resumo da Campanha</h4>
+
+                <div className="space-y-3 rounded-lg border border-border p-4 bg-muted/20 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Nome</span>
+                    <span className="font-medium">{nome || "—"}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Canal</span>
+                    <span className="font-medium">
+                      {sessions
+                        .filter(s => selectedSessions.includes(s.id))
+                        .map(s => s.name)
+                        .join(", ") || "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Janela</span>
+                    <span className="font-medium">{janelaInicio} — {janelaFim}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Mensagens</span>
+                    <span className="font-medium">{mensagens.length}</span>
+                  </div>
+                  {selectedTags.length > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Filtro de tags</span>
+                      <span className="font-medium">{selectedTags.join(", ")}</span>
+                    </div>
+                  )}
+                  {importStats && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Contatos a importar</span>
+                      <span className="font-medium text-green-600">
+                        {importStats.valid} válidos
+                      </span>
+                    </div>
+                  )}
+                  {!importStats && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Contatos</span>
+                      <span className="font-medium text-muted-foreground">
+                        Via tags do CRM
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {hasMeta && !importStats && (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
+                    ⚠ Canal Meta selecionado sem base importada. Certifique-se de
+                    que os contatos já estão no CRM com as tags corretas e que
+                    o template está configurado nas mensagens.
+                  </div>
+                )}
+              </div>
+            )}
+
+            <footer className="px-6 py-4 border-t border-border flex justify-between items-center bg-muted/20">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => wizardStep === 1 ? closeModal() : setWizardStep(wizardStep - 1)}
+              >
+                {wizardStep === 1 ? "Cancelar" : "← Voltar"}
+              </Button>
+
+              <div className="flex gap-2">
+                {wizardStep < 3 && (
+                  <Button
+                    type="button"
+                    onClick={() => setWizardStep(wizardStep + 1)}
+                    disabled={wizardStep === 1 && (!nome.trim() || selectedSessions.length === 0)}
+                  >
+                    Próximo →
+                  </Button>
+                )}
+                {wizardStep === 3 && (
+                  <Button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={!nome.trim() || selectedSessions.length === 0}
+                  >
+                    {editingId ? "Salvar Alterações" : "Criar Campanha"}
+                  </Button>
+                )}
+              </div>
+            </footer>
           </div>
         </div>
       )}

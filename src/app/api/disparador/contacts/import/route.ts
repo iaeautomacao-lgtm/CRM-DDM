@@ -65,6 +65,7 @@ export async function POST(request: Request) {
     if (!file) {
       return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 });
     }
+    const defaultTag = formData.get("defaultTag") as string | null;
 
     const filename = file.name.toLowerCase();
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -171,7 +172,14 @@ export async function POST(request: Request) {
       seenInFile.add(key);
 
       const rawTags = getField(row, "tags", "tag", "etiquetas", "categorias") || "";
-      const tagsArray = rawTags ? rawTags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+      const csvTagNames = rawTags ? rawTags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+      // Inclui a tag padrão da campanha (se fornecida) em todo contato —
+      // não só nos que já têm tags no CSV, senão formatos externos sem
+      // coluna de tags (ex: CONTATO;VAR1;VAR2;VAR3 da Meta) nunca
+      // receberiam a marcação da campanha.
+      const tagsArray = defaultTag?.trim()
+        ? [...csvTagNames, defaultTag.trim()]
+        : csvTagNames;
 
       pending.push({
         phone: normalized,
