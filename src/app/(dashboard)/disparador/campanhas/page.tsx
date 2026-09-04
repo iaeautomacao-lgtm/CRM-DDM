@@ -24,7 +24,8 @@ import {
   ArrowLeft,
   Pencil,
   Upload,
-  Loader2
+  Loader2,
+  BarChart2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -223,6 +224,24 @@ export default function CampanhasPage() {
     }>;
   } | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
+
+  // Modal de métricas por campanha
+  const [metricsModal, setMetricsModal] = useState<{
+    campaignId: string;
+    nome: string;
+  } | null>(null);
+  const [metricsData, setMetricsData] = useState<{
+    total_contatos: number;
+    total_enviados: number;
+    total_entregues: number;
+    total_lidos: number;
+    total_respostas: number;
+    total_blacklist: number;
+    total_erros: number;
+    tempo_medio_resposta: number;
+    updated_at: string;
+  } | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
 
   // Auto-save the in-progress form to localStorage — creation mode only.
   // Skipped while a restore decision is pending so we don't overwrite the
@@ -717,6 +736,25 @@ export default function CampanhasPage() {
     }
   };
 
+  const handleMetricsClick = async (campaign: typeof campaigns[0]) => {
+    setMetricsModal({ campaignId: campaign.id, nome: campaign.nome });
+    setMetricsData(null);
+    setMetricsLoading(true);
+    try {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("campaign_metrics")
+        .select("*")
+        .eq("campaign_id", campaign.id)
+        .maybeSingle();
+      setMetricsData(data ?? null);
+    } catch {
+      toast.error("Erro ao carregar métricas");
+    } finally {
+      setMetricsLoading(false);
+    }
+  };
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
@@ -809,6 +847,15 @@ export default function CampanhasPage() {
                     ) : null}
                   </div>
                   <div className="flex gap-1">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => handleMetricsClick(c)}
+                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      title="Ver métricas"
+                    >
+                      <BarChart2 className="h-4 w-4" />
+                    </Button>
                     {c.status === "rascunho" && (
                       <Button size="icon" variant="ghost" onClick={() => handleEditClick(c)} className="h-8 w-8 text-muted-foreground hover:text-foreground">
                         <Pencil className="h-4 w-4" />
@@ -1711,6 +1758,122 @@ export default function CampanhasPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {metricsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border w-full max-w-md rounded-xl shadow-2xl">
+            <header className="px-6 py-4 border-b border-border flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-foreground">Métricas da Campanha</h3>
+                <p className="text-xs text-muted-foreground truncate max-w-[280px]">
+                  {metricsModal.nome}
+                </p>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => { setMetricsModal(null); setMetricsData(null); }}
+              >
+                <X className="h-5 w-5" />
+              </Button>
+            </header>
+
+            <div className="p-6">
+              {metricsLoading && (
+                <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Carregando métricas...</span>
+                </div>
+              )}
+
+              {!metricsLoading && !metricsData && (
+                <div className="text-center py-8 text-sm text-muted-foreground">
+                  Nenhuma métrica disponível para esta campanha.
+                </div>
+              )}
+
+              {!metricsLoading && metricsData && (
+                <div className="space-y-4">
+                  {/* Grid de KPIs */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground" },
+                      { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500" },
+                      { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500" },
+                      { label: "Lidos", value: metricsData.total_lidos, color: "text-purple-500" },
+                      { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500" },
+                      { label: "Blacklist", value: metricsData.total_blacklist, color: "text-yellow-500" },
+                      { label: "Erros", value: metricsData.total_erros, color: "text-red-500" },
+                      {
+                        label: "Tempo Médio Resposta",
+                        value: metricsData.tempo_medio_resposta > 0
+                          ? `${Math.round(metricsData.tempo_medio_resposta / 60)}min`
+                          : "—",
+                        color: "text-foreground",
+                      },
+                    ].map(({ label, value, color }) => (
+                      <div
+                        key={label}
+                        className="rounded-lg border border-border bg-muted/20 p-3 text-center"
+                      >
+                        <p className={`text-xl font-bold ${color}`}>{value}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Taxas */}
+                  {metricsData.total_enviados > 0 && (
+                    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                      <p className="text-xs font-medium text-foreground">Taxas</p>
+                      {[
+                        {
+                          label: "Taxa de Entrega",
+                          value: ((metricsData.total_entregues / metricsData.total_enviados) * 100).toFixed(1),
+                          color: "bg-green-500",
+                        },
+                        {
+                          label: "Taxa de Leitura",
+                          value: ((metricsData.total_lidos / metricsData.total_enviados) * 100).toFixed(1),
+                          color: "bg-purple-500",
+                        },
+                        {
+                          label: "Taxa de Resposta",
+                          value: ((metricsData.total_respostas / metricsData.total_enviados) * 100).toFixed(1),
+                          color: "bg-orange-500",
+                        },
+                      ].map(({ label, value, color }) => (
+                        <div key={label} className="space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">{label}</span>
+                            <span className="font-medium">{value}%</span>
+                          </div>
+                          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className={`h-full ${color} rounded-full`}
+                              style={{ width: `${Math.min(parseFloat(value), 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Atualizado em */}
+                  {metricsData.updated_at && (
+                    <p className="text-center text-[10px] text-muted-foreground">
+                      Atualizado em{" "}
+                      {new Date(metricsData.updated_at).toLocaleString("pt-BR", {
+                        timeZone: "America/Sao_Paulo",
+                      })}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
