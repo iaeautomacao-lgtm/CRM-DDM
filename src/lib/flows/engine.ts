@@ -871,7 +871,7 @@ async function executeHandoffAgent(
  * reliably reflect schema placement on this project (some tables were
  * applied manually before being versioned).
  */
-async function selectAgentForTeam(
+export async function selectAgentForTeam(
   db: AdminClient,
   teamId: string,
   accountId: string,
@@ -883,7 +883,26 @@ async function selectAgentForTeam(
     .order("created_at", { ascending: true });
   if (membersError || !members || members.length === 0) return null;
 
-  const memberIds = (members as { user_id: string }[]).map((m) => m.user_id);
+  const orderedMemberIds = (members as { user_id: string }[]).map((m) => m.user_id);
+
+  // Filtra para Operadores (account_role = 'agent') — administradores e
+  // owners não recebem handoffs automáticos. team_members.user_id
+  // referencia auth.users, não profiles (sem FK direta entre as duas
+  // tabelas — confirmado via PostgREST em 2026-09-05, que retorna
+  // PGRST200 para um embed profiles!inner nessa relação), então a
+  // filtragem é feita com uma query separada em vez de um join embutido.
+  const { data: agentProfiles } = await db
+    .from("profiles")
+    .select("user_id")
+    .in("user_id", orderedMemberIds)
+    .eq("account_role", "agent");
+
+  const agentIds = new Set(
+    (agentProfiles as { user_id: string }[] | null ?? []).map((p) => p.user_id),
+  );
+  const memberIds = orderedMemberIds.filter((id) => agentIds.has(id));
+  if (memberIds.length === 0) return null;
+
   const cutoff = new Date(Date.now() - 75_000).toISOString();
 
   const { data: onlineRows } = await db
