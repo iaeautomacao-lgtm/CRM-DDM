@@ -25,7 +25,8 @@ import {
   Pencil,
   Upload,
   Loader2,
-  BarChart2
+  BarChart2,
+  Search
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -160,6 +161,7 @@ export default function CampanhasPage() {
   const [objetivo, setObjetivo] = useState("");
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [tagSearch, setTagSearch] = useState("");
   const [intervaloMin, setIntervaloMin] = useState(30);
   const [intervaloMax, setIntervaloMax] = useState(60);
   const [janelaInicio, setJanelaInicio] = useState("08:00");
@@ -643,6 +645,7 @@ export default function CampanhasPage() {
     setObjetivo("");
     setSelectedSessions([]);
     setSelectedTags([]);
+    setTagSearch("");
     setMensagens([{ tipo: "texto", conteudo: "" }]);
     setIntervaloMin(30);
     setIntervaloMax(60);
@@ -1012,20 +1015,37 @@ export default function CampanhasPage() {
               {/* Filter tags */}
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Filtro de Contatos por Tags (Opcional - Vazio envia para todos)</label>
+                <div className="relative mb-2">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2
+                    h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  <input
+                    type="text"
+                    placeholder="Buscar tag..."
+                    value={tagSearch}
+                    onChange={(e) => setTagSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border
+                      border-border bg-background text-foreground placeholder:text-muted-foreground
+                      focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
                 <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-border p-2 rounded-md">
-                  {tags.map((t) => (
-                    <label key={t.id} className="flex items-center gap-1.5 bg-muted/50 border border-border rounded px-2.5 py-1 text-xs cursor-pointer hover:bg-muted text-foreground">
-                      <input
-                        type="checkbox"
-                        checked={selectedTags.includes(t.name)}
-                        onChange={(e) => {
-                          if (e.target.checked) setSelectedTags([...selectedTags, t.name]);
-                          else setSelectedTags(selectedTags.filter((name) => name !== t.name));
-                        }}
-                      />
-                      {t.name}
-                    </label>
-                  ))}
+                  {tags
+                    .filter((t) =>
+                      t.name.toLowerCase().includes(tagSearch.toLowerCase())
+                    )
+                    .map((t) => (
+                      <label key={t.id} className="flex items-center gap-1.5 bg-muted/50 border border-border rounded px-2.5 py-1 text-xs cursor-pointer hover:bg-muted text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={selectedTags.includes(t.name)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedTags([...selectedTags, t.name]);
+                            else setSelectedTags(selectedTags.filter((name) => name !== t.name));
+                          }}
+                        />
+                        {t.name}
+                      </label>
+                    ))}
                 </div>
               </div>
 
