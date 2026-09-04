@@ -287,13 +287,21 @@ async function sendViaMeta(
       ? item.template_variables.map(String)
       : [];
 
+    // Sanitiza variáveis — converte Markdown [texto](url) para url pura
+    const sanitizedVariables = variables.map(v => {
+      const mdLink = v.match(/\[.*?\]\((https?:\/\/[^)]+)\)/);
+      if (mdLink) return mdLink[1];
+      // Remove formatação Markdown residual
+      return v.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    });
+
     const result = await sendTemplateMessage({
       phoneNumberId,
       accessToken,
       to: phone,
       templateName: item.template_name,
       language: item.template_language ?? "pt_BR",
-      params: variables,
+      params: sanitizedVariables,
     });
     return result.messageId;
   }
