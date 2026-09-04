@@ -19,7 +19,7 @@ import OpenAI from "openai";
 export interface QueueItem {
   id: string;
   campaign_id: string;
-  contact_id: string;
+  contact_id: string | null;
   session_id: string;
   tipo: string;
   mensagem_final: string;
@@ -98,7 +98,11 @@ export async function processQueueItem(
     .update({ status: "enviando" })
     .eq("id", item.id);
 
-  const phone = item.contacts?.phone || item.mensagem_final;
+  // Para contatos externos (via API), contact_id é null e o
+  // telefone está em mensagem_final diretamente.
+  const phone = item.contact_id
+    ? (item.contacts?.phone || item.mensagem_final)
+    : item.mensagem_final;
 
   const { data: blacklisted } = await supabaseAdmin()
     .from("blacklist")
