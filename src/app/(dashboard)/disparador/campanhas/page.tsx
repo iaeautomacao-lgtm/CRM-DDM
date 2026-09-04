@@ -2,7 +2,7 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { 
@@ -81,6 +81,7 @@ interface WahaSession {
   phone_info?: { id: string };
   provider?: string;
   display_phone_number?: string;
+  waba_id?: string;
 }
 
 interface CampaignMessage {
@@ -341,7 +342,7 @@ export default function CampanhasPage() {
       // Load enabled WhatsApp channels (WAHA + Meta)
       const { data: configList } = await supabase
         .from("whatsapp_config")
-        .select("id, waha_session, provider, display_phone_number")
+        .select("id, waha_session, provider, display_phone_number, waba_id")
         .eq("habilitado", true);
 
       const wahaSessions = (configList ?? []).map((c) => ({
@@ -351,6 +352,7 @@ export default function CampanhasPage() {
           : (c.waha_session || "Sessão WAHA"),
         provider: c.provider,
         display_phone_number: c.display_phone_number,
+        waba_id: c.waba_id,
       }));
       setSessions(wahaSessions);
     } catch (err) {
@@ -735,6 +737,25 @@ export default function CampanhasPage() {
       setImportLoading(false);
     }
   };
+
+  // Mapa waba_id → display_phone_number para o picker de templates
+  const channelMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    sessions.forEach(s => {
+      if (s.waba_id && s.display_phone_number) {
+        map[s.waba_id] = s.display_phone_number;
+      }
+    });
+    return map;
+  }, [sessions]);
+
+  // waba_id do canal Meta selecionado (se só um selecionado)
+  const selectedMetaWabaId = useMemo(() => {
+    const metaSessions = sessions.filter(
+      s => selectedSessions.includes(s.id) && s.provider === 'meta'
+    );
+    return metaSessions.length === 1 ? metaSessions[0].waba_id : undefined;
+  }, [sessions, selectedSessions]);
 
   const handleMetricsClick = async (campaign: typeof campaigns[0]) => {
     setMetricsModal({ campaignId: campaign.id, nome: campaign.nome });
@@ -1610,6 +1631,8 @@ export default function CampanhasPage() {
       <MessageTemplatePicker
         open={templatePickerIndex !== null}
         hasMeta={hasMeta}
+        wabaId={selectedMetaWabaId}
+        channelMap={channelMap}
         onOpenChange={(next) => {
           if (!next) setTemplatePickerIndex(null);
         }}

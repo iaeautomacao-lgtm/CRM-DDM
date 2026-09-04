@@ -36,6 +36,7 @@ interface PickerTemplate {
   nome: string;
   conteudo: string;
   language?: string;
+  waba_id?: string;
 }
 
 interface MessageTemplatePickerProps {
@@ -47,6 +48,14 @@ interface MessageTemplatePickerProps {
    * when the campaign's selected sessions include a Meta channel, which
    * can only send approved templates. */
   hasMeta?: boolean;
+  /** When set, restricts the Meta catalog to templates belonging to this
+   * WABA — used when exactly one Meta channel is selected in the campaign,
+   * so a multi-WABA account doesn't offer templates it can't actually send
+   * from the chosen channel. */
+  wabaId?: string;
+  /** waba_id -> display_phone_number, purely for labeling each template
+   * with the channel it belongs to when the catalog spans multiple WABAs. */
+  channelMap?: Record<string, string>;
 }
 
 type Mode = "list" | "create";
@@ -56,6 +65,8 @@ export function MessageTemplatePicker({
   onOpenChange,
   onSelect,
   hasMeta = false,
+  wabaId,
+  channelMap,
 }: MessageTemplatePickerProps) {
   const { accountId, user } = useAuth();
   const [templates, setTemplates] = useState<PickerTemplate[]>([]);
@@ -75,12 +86,17 @@ export function MessageTemplatePicker({
     const supabase = createClient();
 
     if (hasMeta) {
-      const { data, error } = await supabase
+      let query = supabase
         .from("message_templates")
-        .select("id, name, body_text, language")
+        .select("id, name, body_text, language, waba_id")
         .eq("account_id", accountId)
-        .eq("status", "APPROVED")
-        .order("name", { ascending: true });
+        .eq("status", "APPROVED");
+
+      if (wabaId) {
+        query = query.eq("waba_id", wabaId);
+      }
+
+      const { data, error } = await query.order("name", { ascending: true });
 
       if (error) {
         console.error("Failed to fetch Meta message templates:", error);
@@ -92,6 +108,7 @@ export function MessageTemplatePicker({
             nome: t.name,
             conteudo: t.body_text,
             language: t.language,
+            waba_id: t.waba_id,
           })),
         );
       }
@@ -124,7 +141,7 @@ export function MessageTemplatePicker({
     setMode("list");
     setSearch("");
     void loadTemplates();
-  }, [open, hasMeta]);
+  }, [open, hasMeta, wabaId]);
 
   function resetCreateForm() {
     setEditingId(null);
@@ -338,8 +355,14 @@ export function MessageTemplatePicker({
                       }}
                       className="min-w-0 flex-1 text-left"
                     >
-                      <p className="truncate text-sm font-medium text-popover-foreground">
+                      <p className="truncate text-sm font-medium text-popover-foreground flex items-center gap-1.5">
                         {hasMeta && t.language ? `${t.nome} (${t.language})` : t.nome}
+                        {t.waba_id && channelMap?.[t.waba_id] && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted
+                            text-muted-foreground font-mono">
+                            {channelMap[t.waba_id]}
+                          </span>
+                        )}
                       </p>
                       <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                         {t.conteudo}

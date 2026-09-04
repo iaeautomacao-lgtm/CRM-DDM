@@ -150,11 +150,18 @@ export async function POST() {
       )
     }
 
-    const { data: config, error: configError } = await supabase
+    // Busca o canal Meta habilitado. Se a conta tiver mais de um,
+    // usa o primeiro (ordered by created_at) — sync pode ser chamada
+    // por canal no futuro, mas hoje é account-scoped.
+    const { data: configs, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', accountId)
-      .single()
+      .eq('provider', 'meta')
+      .eq('habilitado', true)
+      .order('created_at', { ascending: true })
+
+    const config = configs?.[0] ?? null
 
     if (configError || !config) {
       return NextResponse.json(
@@ -259,6 +266,7 @@ export async function POST() {
         status: normalizeStatus(t.status),
         meta_template_id: t.id,
         quality_score: normalizeQualityScore(t.quality_score),
+        waba_id: config.waba_id,
         updated_at: new Date().toISOString(),
       }
 
