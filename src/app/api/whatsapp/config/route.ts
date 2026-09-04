@@ -686,6 +686,7 @@ export async function POST(request: Request) {
       access_token: encryptedAccessToken,
       app_secret: encryptedAppSecret,
       verify_token: encryptedVerifyToken,
+      display_phone_number: phoneInfo.display_phone_number ?? null,
       status: registrationError ? 'disconnected' : 'connected',
       connected_at: registrationError ? null : new Date().toISOString(),
       registered_at: registrationError ? null : registeredAt,

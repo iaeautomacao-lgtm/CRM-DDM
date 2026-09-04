@@ -303,16 +303,27 @@ export function MessageTemplatePicker({
                   <Loader2 className="h-5 w-5 animate-spin text-primary" />
                 </div>
               ) : filtered.length === 0 ? (
-                <div className="rounded-md border border-border bg-background/50 p-6 text-center">
-                  <p className="text-sm text-popover-foreground">
-                    {hasMeta ? "Nenhum template aprovado" : "Nenhum template"}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {hasMeta
-                      ? "Aprove um template na aba Templates para usá-lo aqui."
-                      : "Crie um template manualmente ou importe de um arquivo .docx/.txt."}
-                  </p>
-                </div>
+                !hasMeta ? (
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <p className="text-sm font-medium text-foreground">
+                      Nenhum template interno cadastrado
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Para usar templates aprovados pela Meta, selecione um canal
+                      &quot;WhatsApp Oficial (Meta)&quot; na campanha antes de abrir o picker.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <p className="text-sm font-medium text-foreground">
+                      Nenhum template aprovado encontrado
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Sincronize os templates em Configurações → Templates ou aguarde
+                      a aprovação da Meta.
+                    </p>
+                  </div>
+                )
               ) : (
                 filtered.map((t) => (
                   <div

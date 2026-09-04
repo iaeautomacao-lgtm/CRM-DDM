@@ -76,6 +76,7 @@ interface WahaSession {
   name: string;
   phone_info?: { id: string };
   provider?: string;
+  display_phone_number?: string;
 }
 
 interface CampaignMessage {
@@ -302,13 +303,16 @@ export default function CampanhasPage() {
       // Load enabled WhatsApp channels (WAHA + Meta)
       const { data: configList } = await supabase
         .from("whatsapp_config")
-        .select("id, waha_session, provider")
+        .select("id, waha_session, provider, display_phone_number")
         .eq("habilitado", true);
 
       const wahaSessions = (configList ?? []).map((c) => ({
         id: c.id,
-        name: c.provider === "meta" ? "WhatsApp Oficial (Meta)" : (c.waha_session || "Sessão WAHA"),
+        name: c.provider === "meta"
+          ? `WhatsApp Oficial (Meta)${c.display_phone_number ? ` — ${c.display_phone_number}` : ""}`
+          : (c.waha_session || "Sessão WAHA"),
         provider: c.provider,
+        display_phone_number: c.display_phone_number,
       }));
       setSessions(wahaSessions);
     } catch (err) {
