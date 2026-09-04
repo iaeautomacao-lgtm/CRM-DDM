@@ -104,7 +104,7 @@ export async function POST(
     // campaign never sends to another account's contacts.
     const { data: allContacts, error: contactsError } = await supabaseAdmin()
       .from("contacts")
-      .select("id, name, phone")
+      .select("id, name, phone, company")
       .eq("account_id", accountId);
 
     if (contactsError) {
@@ -196,6 +196,24 @@ export async function POST(
         // current data and today's date rather than a snapshot from enqueue.
         const rawText = msg.conteudo || msg.prompt || "";
 
+        // Meta template fields — resolved per-contact from template_variable_map
+        // (populated in campanhas/page.tsx only when the message came from the
+        // Meta template catalog). Null for WAHA / non-template messages.
+        let templateName: string | null = null;
+        let templateLanguage: string | null = null;
+        let templateVariables: string[] | null = null;
+
+        if (msg.template_name && Array.isArray(msg.template_variable_map)) {
+          templateName = msg.template_name;
+          templateLanguage = msg.template_language || "pt_BR";
+          templateVariables = msg.template_variable_map.map((entry: any) => {
+            if (entry?.type === "contact_field") {
+              return String((contact as any)[entry.field] ?? "");
+            }
+            return String(entry?.value ?? "");
+          });
+        }
+
         queueRows.push({
           campaign_id: campaignId,
           contact_id: contact.id,
@@ -205,6 +223,9 @@ export async function POST(
           tipo: msg.tipo || "texto",
           media_url: msg.url || null,
           scheduled_at: scheduledAt,
+          template_name: templateName,
+          template_language: templateLanguage,
+          template_variables: templateVariables,
         });
         enqueued++;
       }

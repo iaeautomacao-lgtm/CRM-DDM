@@ -24,6 +24,14 @@ import {
   Pencil
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
@@ -65,6 +73,15 @@ interface CampaignMessage {
   conteudo?: string;
   prompt?: string;
   url?: string;
+  // Campos Meta template (populados pelo picker quando hasMeta = true)
+  template_name?: string;       // ex: "cruzeiroclaude_1407_1"
+  template_language?: string;   // ex: "pt_BR"
+  // Mapeamento de variáveis posicionais {{1}}, {{2}}, {{3}}...
+  // Cada entrada é ou um campo do contato ou um valor estático.
+  template_variable_map?: Array<
+    | { type: "contact_field"; field: "name" | "phone" | "company" }
+    | { type: "static"; value: string }
+  >;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -897,6 +914,59 @@ export default function CampanhasPage() {
                             Carregar de um Template
                           </button>
                         </div>
+
+                        {msg.template_name && msg.template_variable_map && msg.template_variable_map.length > 0 && (
+                          <div className="space-y-2 rounded-md border border-border bg-card p-3">
+                            <p className="text-[10px] font-bold text-muted-foreground">
+                              Variáveis do template &quot;{msg.template_name}&quot; ({msg.template_language})
+                            </p>
+                            {msg.template_variable_map.map((entry: any, varIdx: number) => (
+                              <div key={varIdx} className="flex items-center gap-2">
+                                <span className="w-10 shrink-0 font-mono text-[10px] text-muted-foreground">
+                                  {`{{${varIdx + 1}}}`}
+                                </span>
+                                <Select
+                                  value={entry.type === "contact_field" ? entry.field : "static"}
+                                  onValueChange={(val) => {
+                                    if (!val) return;
+                                    const updated = [...mensagens];
+                                    const map = [...(updated[i].template_variable_map || [])];
+                                    map[varIdx] =
+                                      val === "static"
+                                        ? { type: "static", value: "" }
+                                        : { type: "contact_field", field: val };
+                                    updated[i] = { ...updated[i], template_variable_map: map };
+                                    setMensagens(updated);
+                                  }}
+                                >
+                                  <SelectTrigger className="h-7 w-40 border-border bg-background text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent className="border-border bg-popover">
+                                    <SelectItem value="name">Nome do contato</SelectItem>
+                                    <SelectItem value="phone">Telefone</SelectItem>
+                                    <SelectItem value="company">Empresa</SelectItem>
+                                    <SelectItem value="static">Valor fixo</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                {entry.type === "static" && (
+                                  <Input
+                                    value={entry.value}
+                                    onChange={(e) => {
+                                      const updated = [...mensagens];
+                                      const map = [...(updated[i].template_variable_map || [])];
+                                      map[varIdx] = { type: "static", value: e.target.value };
+                                      updated[i] = { ...updated[i], template_variable_map: map };
+                                      setMensagens(updated);
+                                    }}
+                                    placeholder="Valor fixo..."
+                                    className="h-7 flex-1 border-border bg-background text-xs"
+                                  />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1071,10 +1141,45 @@ export default function CampanhasPage() {
         onSelect={(template) => {
           if (templatePickerIndex === null) return;
           const updated = [...mensagens];
-          updated[templatePickerIndex] = {
-            ...updated[templatePickerIndex],
-            conteudo: template.conteudo,
-          };
+          const bodyText = template.conteudo || "";
+
+          // Só popula os campos de template Meta quando o template veio
+          // do catálogo aprovado da Meta (hasMeta) — o catálogo interno
+          // (disparador_message_templates) não tem nomes reconhecidos
+          // pela Cloud API, e como uma campanha pode misturar canais
+          // WAHA/Meta (session_id sorteado em start/route.ts), marcar
+          // um template interno como se fosse Meta faria o worker tentar
+          // sendTemplateMessage com um nome que a Meta nunca aprovou.
+          if (hasMeta) {
+            // Detecta quantas variáveis posicionais existem no body do
+            // template — ex: "Olá {{1}}, débito na {{2}}" → 2 variáveis.
+            const varCount = (bodyText.match(/\{\{(\d+)\}\}/g) || []).length;
+
+            // Mapeamento padrão: {{1}} → nome do contato, demais → estático vazio
+            const defaultMap: CampaignMessage["template_variable_map"] = Array.from(
+              { length: varCount },
+              (_, idx) =>
+                idx === 0
+                  ? { type: "contact_field" as const, field: "name" as const }
+                  : { type: "static" as const, value: "" }
+            );
+
+            updated[templatePickerIndex] = {
+              ...updated[templatePickerIndex],
+              conteudo: bodyText,
+              template_name: template.nome,
+              template_language: template.language || "pt_BR",
+              template_variable_map: defaultMap,
+            };
+          } else {
+            updated[templatePickerIndex] = {
+              ...updated[templatePickerIndex],
+              conteudo: bodyText,
+              template_name: undefined,
+              template_language: undefined,
+              template_variable_map: undefined,
+            };
+          }
           setMensagens(updated);
           setTemplatePickerIndex(null);
         }}
