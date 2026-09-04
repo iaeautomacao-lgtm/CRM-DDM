@@ -93,6 +93,45 @@ export async function POST(
       );
     }
 
+    // Buscar provider de cada canal selecionado na campanha
+    const { data: channelConfigs } = await supabaseAdmin()
+      .from("whatsapp_config")
+      .select("id, provider, phone_number_id")
+      .in("id", sessionIds);
+
+    const channelMap = new Map(
+      (channelConfigs ?? []).map((c) => [c.id, c])
+    );
+
+    // IDs dos canais Meta nesta campanha
+    const metaSessionIds = (channelConfigs ?? [])
+      .filter((c) => c.provider === "meta")
+      .map((c) => c.id);
+
+    // windowMap: contact_id → Date do último inbound via canal Meta
+    // Usado para decidir template vs texto livre no loop de enfileiramento
+    const windowMap = new Map<string, Date>();
+
+    if (metaSessionIds.length > 0) {
+      const { data: lastInbounds } = await supabaseAdmin()
+        .schema("wacrm")
+        .from("messages")
+        .select("received_at, conversations!inner(contact_id, config_id)")
+        .eq("sender_type", "contact")
+        .in("conversations.config_id", metaSessionIds)
+        .order("received_at", { ascending: false });
+
+      for (const row of lastInbounds ?? []) {
+        const conv = row.conversations as unknown as {
+          contact_id: string;
+          config_id: string;
+        };
+        if (conv?.contact_id && !windowMap.has(conv.contact_id)) {
+          windowMap.set(conv.contact_id, new Date(row.received_at));
+        }
+      }
+    }
+
     // 2. Remove previously scheduled/pending items to prevent duplication
     await supabaseAdmin()
       .from("disp_message_queue")
@@ -185,6 +224,9 @@ export async function POST(
       if (i > 0 && i % 100 === 0) contactDelay += 60 * 60 * 1000; // 1 hour pause every 100 contacts
       else if (i > 0 && i % 20 === 0) contactDelay += 10 * 60 * 1000; // 10 mins pause every 20 contacts
 
+      const channel = channelMap.get(sessionId);
+      const isMetaChannel = channel?.provider === "meta";
+
       for (let j = 0; j < mensagens.length; j++) {
         const msg = mensagens[j];
         const msgDelay = contactDelay + j * intraDelay;
@@ -212,6 +254,36 @@ export async function POST(
             }
             return String(entry?.value ?? "");
           });
+        }
+
+        // Validação de janela 24h para canais Meta sem template
+        if (isMetaChannel && !templateName) {
+          const lastInbound = windowMap.get(contact.id);
+          const windowOpen =
+            lastInbound != null &&
+            Date.now() - lastInbound.getTime() < 24 * 60 * 60 * 1000;
+
+          if (!windowOpen) {
+            // Contato fora da janela e sem template — enfileira como
+            // erro imediato em vez de tentar enviar (a Meta rejeitaria
+            // com 131026). Conta para métricas e aparece na UI.
+            queueRows.push({
+              campaign_id: campaignId,
+              contact_id: contact.id,
+              session_id: sessionId,
+              mensagem_final: rawText,
+              status: "erro",
+              erro: "Janela de 24h encerrada — use um template aprovado para este contato",
+              tipo: msg.tipo || "texto",
+              media_url: msg.url || null,
+              scheduled_at: scheduledAt,
+              template_name: null,
+              template_language: null,
+              template_variables: null,
+            });
+            enqueued++;
+            continue;
+          }
         }
 
         queueRows.push({
