@@ -408,12 +408,85 @@ async function handleStatusUpdate(status: {
     console.error('Error updating message status:', msgErr)
   }
 
+  const tsIso = new Date(parseInt(status.timestamp) * 1000).toISOString()
+
+  // ── Disparador queue tracking ─────────────────────────────────────
+  // Mirror delivery status back into disp_message_queue so the
+  // campaign monitor can show delivered/read/failed per message.
+  // Uses the same status-ladder guard as broadcast_recipients. Placed
+  // before the broadcast_recipients block (not after) — a Disparador
+  // send never has a broadcast_recipients row, so it would hit that
+  // block's early `if (!recipient) return` and never reach a
+  // trailing block placed after it.
+  const { data: queueItem } = await supabaseAdmin()
+    .from('disp_message_queue')
+    .select('id, status, campaign_id')
+    .eq('waha_message_id', status.id)
+    .maybeSingle()
+
+  if (queueItem) {
+    const QUEUE_STATUS_LADDER = ['agendado', 'enviando', 'enviado', 'entregue', 'lido']
+    const currentIdx = QUEUE_STATUS_LADDER.indexOf(queueItem.status)
+
+    const incomingQueueStatus =
+      status.status === 'delivered' ? 'entregue' :
+      status.status === 'read' ? 'lido' :
+      status.status === 'failed' ? 'erro' :
+      null
+
+    if (incomingQueueStatus) {
+      // Guard: só avança (ou aceita erro a partir de enviado/entregue)
+      const isValidTransition =
+        incomingQueueStatus === 'erro'
+          ? currentIdx >= QUEUE_STATUS_LADDER.indexOf('enviado')
+          : QUEUE_STATUS_LADDER.indexOf(incomingQueueStatus) > currentIdx
+
+      if (isValidTransition) {
+        const queueUpdate: Record<string, unknown> = {
+          status: incomingQueueStatus,
+        }
+
+        // Captura motivo de falha da Meta (campo errors[])
+        if (incomingQueueStatus === 'erro') {
+          const metaErrors = (status as any).errors as
+            Array<{ code: number; title: string }> | undefined
+          if (metaErrors && metaErrors.length > 0) {
+            queueUpdate.erro = `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
+          } else {
+            queueUpdate.erro = 'Falha na entrega (Meta)'
+          }
+        }
+
+        await supabaseAdmin()
+          .from('disp_message_queue')
+          .update(queueUpdate)
+          .eq('id', queueItem.id)
+
+        // Incrementar métricas da campanha
+        if (incomingQueueStatus === 'entregue') {
+          await supabaseAdmin().rpc('increment_campaign_metric', {
+            p_campaign_id: queueItem.campaign_id,
+            p_field: 'total_entregues',
+          })
+        } else if (incomingQueueStatus === 'lido') {
+          await supabaseAdmin().rpc('increment_campaign_metric', {
+            p_campaign_id: queueItem.campaign_id,
+            p_field: 'total_lidos',
+          })
+        } else if (incomingQueueStatus === 'erro') {
+          await supabaseAdmin().rpc('increment_campaign_metric', {
+            p_campaign_id: queueItem.campaign_id,
+            p_field: 'total_erros',
+          })
+        }
+      }
+    }
+  }
+
   // 2) Mirror onto broadcast_recipients via whatsapp_message_id
   //    (added in migration 003). The aggregate trigger on
   //    broadcast_recipients re-derives the parent broadcast's
   //    sent/delivered/read/failed counts automatically.
-  const tsIso = new Date(parseInt(status.timestamp) * 1000).toISOString()
-
   const { data: recipient, error: recFetchErr } = await supabaseAdmin()
     .from('broadcast_recipients')
     .select('id, status')
