@@ -122,6 +122,33 @@ export default function DisparadorDashboardPage() {
     }
   };
 
+  const normalizarErroMeta = (erro: string | null | undefined): string => {
+    if (!erro) return "Falha desconhecida";
+
+    const codigoMatch = erro.match(/code (\d+)/);
+    const codigo = codigoMatch ? parseInt(codigoMatch[1]) : null;
+
+    const mensagens: Record<number, string> = {
+      131042: "Pendência de pagamento na conta Meta. Verifique o faturamento no Meta Business Manager.",
+      131026: "Janela de 24h encerrada. Use um template aprovado para este contato.",
+      131008: "Parâmetro obrigatório ausente. Verifique as variáveis do template.",
+      131047: "Mensagem não entregue. O número pode estar inválido ou bloqueado.",
+      131030: "Número de telefone inválido ou não registrado no WhatsApp.",
+      131031: "Conta do WhatsApp Business bloqueada pela Meta.",
+      131045: "Número de telefone não registrado no WhatsApp Business.",
+      131051: "Tipo de mensagem não suportado para este número.",
+      131052: "Mídia inválida ou inacessível.",
+      131000: "Erro genérico da Meta. Tente novamente.",
+    };
+
+    if (codigo && mensagens[codigo]) {
+      return mensagens[codigo];
+    }
+
+    // Erros não-Meta (ex: "WhatsApp WAHA connection is not active")
+    return erro;
+  };
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-6 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
@@ -241,7 +268,8 @@ export default function DisparadorDashboardPage() {
                       <p className="text-muted-foreground truncate mt-0.5 text-[10px]">{item.mensagem_final}</p>
                       {item.status === "erro" && (
                         <p className="text-red-500 text-[9px] flex items-center gap-1 mt-0.5">
-                          <AlertTriangle className="h-3 w-3" /> Erro: {item.erro || "Falha desconhecida"}
+                          <AlertTriangle className="h-3 w-3" />
+                          {normalizarErroMeta(item.erro)}
                         </p>
                       )}
                     </div>
