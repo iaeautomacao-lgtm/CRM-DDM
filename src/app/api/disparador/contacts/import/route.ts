@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
     let rows: any[] = [];
 
-    if (filename.endsWith(".csv")) {
+    if (filename.endsWith(".csv") || filename.endsWith(".txt")) {
       // Decode content removing BOM (\uFEFF)
       let content = buffer.toString("utf-8").replace(/^\uFEFF/, "");
 

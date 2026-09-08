@@ -1507,13 +1507,13 @@ export default function CampanhasPage() {
                     </span>
                     {!importFile && (
                       <span className="text-xs text-muted-foreground/70">
-                        Formatos aceitos: .csv, .xlsx, .xls
+                        Formatos aceitos: .csv, .xlsx, .xls, .txt
                       </span>
                     )}
                   </div>
                   <input
                     type="file"
-                    accept=".csv,.xlsx,.xls"
+                    accept=".csv,.xlsx,.xls,.txt"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
