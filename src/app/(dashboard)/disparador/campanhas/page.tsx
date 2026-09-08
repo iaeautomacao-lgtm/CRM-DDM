@@ -734,6 +734,60 @@ export default function CampanhasPage() {
         invalid: allRows.length - validCount,
       });
       setImportFile(file);
+
+      // Propagar variáveis estáticas do CSV para o template_variable_map
+      // Lê todos os valores de cada coluna VAR e, se for único para
+      // todos os contatos, preenche como static.value automaticamente.
+      // Se variar por contato, deixa em branco e avisa o usuário.
+      if (varIndices.length > 0) {
+        // Coletar todos os valores de cada coluna VAR para todos os contatos
+        const varValueSets: Set<string>[] = varIndices.map(() => new Set<string>());
+
+        for (const line of allRows) {
+          const cols = line.split(sep).map((c: string) => c.trim().replace(/["\r]/g, ""));
+          if (!cols[phoneIdx]?.trim()) continue;
+          varIndices.forEach((colIdx, i) => {
+            const val = cols[colIdx] || "";
+            if (val) varValueSets[i].add(val);
+          });
+        }
+
+        // Para cada mensagem que tem template_variable_map, preencher
+        // os static.value com os valores únicos do CSV
+        setMensagens(prev => prev.map(msg => {
+          if (!msg.template_name || !msg.template_variable_map) return msg;
+
+          const newMap = msg.template_variable_map.map((entry: any, idx: number) => {
+            if (entry.type !== "static") return entry;
+
+            // idx 0 = {{1}}, idx 1 = {{2}}, etc.
+            // varIndices[0] = VAR1, varIndices[1] = VAR2, etc.
+            // Mas {{1}} já é contact_field:name normalmente, então
+            // mapeamos: entry idx → varIdx com mesmo offset
+            const varIdx = idx; // VAR(idx+1) corresponde a {{idx+1}}
+            if (varIdx >= varValueSets.length) return entry;
+
+            const values = varValueSets[varIdx];
+            if (values.size === 1) {
+              // Valor único → preenche automaticamente
+              return { ...entry, value: [...values][0] };
+            }
+            // Múltiplos valores → mantém vazio (varia por contato)
+            return entry;
+          });
+
+          return { ...msg, template_variable_map: newMap };
+        }));
+
+        // Aviso se alguma variável varia por contato
+        const hasVariableVars = varValueSets.some(set => set.size > 1);
+        if (hasVariableVars) {
+          toast.warning(
+            "Algumas variáveis variam por contato no CSV. " +
+            "Use a API externa para disparos com variáveis individuais."
+          );
+        }
+      }
     } catch (err) {
       toast.error("Erro ao ler arquivo");
     } finally {
@@ -1259,8 +1313,15 @@ export default function CampanhasPage() {
                                       updated[i] = { ...updated[i], template_variable_map: map };
                                       setMensagens(updated);
                                     }}
-                                    placeholder="Valor fixo..."
-                                    className="h-7 flex-1 border-border bg-background text-xs"
+                                    placeholder={
+                                      importFile && !entry.value
+                                        ? "Será preenchido pelo CSV..."
+                                        : "Valor fixo..."
+                                    }
+                                    className={cn(
+                                      "h-7 flex-1 border-border bg-background text-xs",
+                                      importFile && !entry.value && "border-amber-500/50 placeholder:text-amber-500/70"
+                                    )}
                                   />
                                 )}
                               </div>
