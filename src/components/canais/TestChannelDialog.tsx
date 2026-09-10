@@ -48,6 +48,7 @@ export function TestChannelDialog({
   const [templates, setTemplates] = useState<ApprovedTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [templateParams, setTemplateParams] = useState<string[]>([]);
 
   useEffect(() => {
     if (!channel || channel.provider !== "meta") return;
@@ -76,6 +77,7 @@ export function TestChannelDialog({
     if (!open) {
       setPhone("");
       setSelectedTemplateId(null);
+      setTemplateParams([]);
       setTemplates([]);
       onClose();
     }
@@ -115,6 +117,7 @@ export function TestChannelDialog({
           configId: channel.id,
           phone,
           templateId: selectedTemplateId,
+          params: templateParams,
         }),
       });
       const data = await res.json();
@@ -173,7 +176,13 @@ export function TestChannelDialog({
                 <Label htmlFor="test-channel-template">Template</Label>
                 <Select
                   value={selectedTemplateId ?? ""}
-                  onValueChange={(v) => v && setSelectedTemplateId(v)}
+                  onValueChange={(v) => {
+                    if (!v) return;
+                    setSelectedTemplateId(v);
+                    const bodyText = templates.find((t) => t.id === v)?.body_text ?? "";
+                    const varCount = (bodyText.match(/\{\{(\d+)\}\}/g) ?? []).length;
+                    setTemplateParams(Array(varCount).fill(""));
+                  }}
                 >
                   <SelectTrigger id="test-channel-template" className="w-full">
                     <SelectValue placeholder="Selecione um template...">
@@ -196,6 +205,31 @@ export function TestChannelDialog({
                 <p className="text-xs text-muted-foreground bg-muted rounded p-2 whitespace-pre-wrap">
                   {selectedTemplate.body_text}
                 </p>
+              )}
+
+              {templateParams.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-foreground">
+                    Variáveis do template
+                  </p>
+                  {templateParams.map((val, idx) => (
+                    <div key={idx} className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground w-8 shrink-0">
+                        {"{{"}{idx + 1}{"}}"}
+                      </span>
+                      <Input
+                        value={val}
+                        onChange={(e) => {
+                          const updated = [...templateParams];
+                          updated[idx] = e.target.value;
+                          setTemplateParams(updated);
+                        }}
+                        placeholder={`Valor para {{${idx + 1}}}...`}
+                        className="h-7 text-xs"
+                      />
+                    </div>
+                  ))}
+                </div>
               )}
 
               <div className="space-y-1">

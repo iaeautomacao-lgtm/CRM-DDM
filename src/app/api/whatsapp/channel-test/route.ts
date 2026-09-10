@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}))
-    const { configId, phone, templateId } = body
+    const { configId, phone, templateId, params: bodyParams } = body
 
     if (!configId || !phone) {
       return NextResponse.json(
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
 
       const { data: template, error: templateError } = await supabase
         .from('message_templates')
-        .select('id, name, language')
+        .select('id, name, language, body_text')
         .eq('id', templateId)
         .eq('account_id', accountId)
         .maybeSingle()
@@ -99,7 +99,7 @@ export async function POST(request: Request) {
           to: sanitizedPhone,
           templateName: template.name,
           language: template.language,
-          params: [],
+          params: Array.isArray(bodyParams) ? bodyParams.map(String) : [],
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown Meta API error'
