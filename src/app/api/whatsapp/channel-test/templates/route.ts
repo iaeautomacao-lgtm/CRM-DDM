@@ -43,7 +43,7 @@ export async function GET(request: Request) {
 
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
-      .select('id')
+      .select('id, waba_id')
       .eq('id', configId)
       .eq('account_id', accountId)
       .maybeSingle()
@@ -52,12 +52,23 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Channel not found' }, { status: 404 })
     }
 
-    const { data: templates, error: templatesError } = await supabase
+    let templatesQuery = supabase
       .from('message_templates')
       .select('id, name, language, body_text')
       .eq('account_id', accountId)
       .eq('status', 'APPROVED')
       .order('name', { ascending: true })
+
+    // Filtra por waba_id quando disponível — garante que só
+    // templates aprovados para este canal específico aparecem.
+    // Se waba_id for null (canal antigo sem waba_id populado),
+    // retorna todos para não quebrar o teste.
+    const wabaId = (config as { id: string; waba_id: string | null }).waba_id
+    if (wabaId) {
+      templatesQuery = templatesQuery.eq('waba_id', wabaId)
+    }
+
+    const { data: templates, error: templatesError } = await templatesQuery
 
     if (templatesError) {
       console.error('[channel-test/templates] failed to load templates:', templatesError)
