@@ -193,7 +193,7 @@ export function TestChannelDialog({
 
   return (
     <Dialog open={channel !== null} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-sm">
+      <DialogContent className="sm:max-w-sm max-h-[90vh] flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="size-4" />
@@ -227,6 +227,7 @@ export function TestChannelDialog({
             </>
           ) : (
             <>
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
               <div className="space-y-1">
                 <Label htmlFor="test-channel-template">Template</Label>
                 <Select
@@ -316,6 +317,7 @@ export function TestChannelDialog({
                   {testResult.error}
                 </div>
               )}
+            </div>
 
               <DialogFooter>
                 <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={sending}>
