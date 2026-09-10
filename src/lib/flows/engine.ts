@@ -241,6 +241,20 @@ async function loadActiveRunForContact(
   // handoff in responder.ts, or a manual assign from the inbox), so
   // without this check the engine would keep feeding the customer's
   // replies to the AI even after a human has been assigned.
+  // Run sem conversation_id é órfão — encerra e ignora
+  // para não bloquear novos atendimentos para este contato.
+  if (!run.conversation_id) {
+    console.warn(
+      '[flows] run órfão encontrado (sem conversation_id), encerrando:',
+      run.id
+    )
+    await db
+      .from('flow_runs')
+      .update({ status: 'timed_out', ended_at: new Date().toISOString() })
+      .eq('id', run.id)
+    return null
+  }
+
   if (run.conversation_id) {
     const { data: conv } = await db
       .from("conversations")
@@ -2655,21 +2669,11 @@ export async function dispatchInboundToFlows(
 ): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
   try {
-    console.log('[flows:dispatch] iniciando', {
-      accountId: input.accountId,
-      contactId: input.contactId,
-      conversationId: input.conversationId,
-      configId: input.configId,
-      isFirstInboundMessage: input.isFirstInboundMessage,
-      messageKind: input.message.kind,
-    })
-
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
       input.contactId,
     );
-    console.log('[flows:dispatch] activeRun:', activeRun?.id ?? null)
 
     // Idempotency — only matters if there's already a run for this
     // contact. For new runs, the partial unique index catches duplicate
@@ -2707,10 +2711,6 @@ export async function dispatchInboundToFlows(
         .eq("id", input.conversationId)
         .maybeSingle();
       const convRow = conv as { assigned_agent_id: string | null; status: string } | null;
-      console.log('[flows:dispatch] conv check:', {
-        assigned_agent_id: convRow?.assigned_agent_id,
-        status: convRow?.status,
-      })
       if (convRow?.assigned_agent_id != null || convRow?.status === "pending") {
         console.log("[engine] Conversa em atendimento humano, ignorando trigger de fluxo");
         return { consumed: false, outcome: "no_match" };
@@ -2725,7 +2725,6 @@ export async function dispatchInboundToFlows(
       input.isFirstInboundMessage,
       input.configId,
     );
-    console.log('[flows:dispatch] flow encontrado:', flow?.id ?? null, flow?.trigger_type ?? null)
     if (!flow || !flow.entry_node_id) {
       return { consumed: false, outcome: "no_match" };
     }
