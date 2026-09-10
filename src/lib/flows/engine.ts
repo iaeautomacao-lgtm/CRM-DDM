@@ -2655,11 +2655,21 @@ export async function dispatchInboundToFlows(
 ): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
   try {
+    console.log('[flows:dispatch] iniciando', {
+      accountId: input.accountId,
+      contactId: input.contactId,
+      conversationId: input.conversationId,
+      configId: input.configId,
+      isFirstInboundMessage: input.isFirstInboundMessage,
+      messageKind: input.message.kind,
+    })
+
     const activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
       input.contactId,
     );
+    console.log('[flows:dispatch] activeRun:', activeRun?.id ?? null)
 
     // Idempotency — only matters if there's already a run for this
     // contact. For new runs, the partial unique index catches duplicate
@@ -2697,6 +2707,10 @@ export async function dispatchInboundToFlows(
         .eq("id", input.conversationId)
         .maybeSingle();
       const convRow = conv as { assigned_agent_id: string | null; status: string } | null;
+      console.log('[flows:dispatch] conv check:', {
+        assigned_agent_id: convRow?.assigned_agent_id,
+        status: convRow?.status,
+      })
       if (convRow?.assigned_agent_id != null || convRow?.status === "pending") {
         console.log("[engine] Conversa em atendimento humano, ignorando trigger de fluxo");
         return { consumed: false, outcome: "no_match" };
@@ -2711,6 +2725,7 @@ export async function dispatchInboundToFlows(
       input.isFirstInboundMessage,
       input.configId,
     );
+    console.log('[flows:dispatch] flow encontrado:', flow?.id ?? null, flow?.trigger_type ?? null)
     if (!flow || !flow.entry_node_id) {
       return { consumed: false, outcome: "no_match" };
     }
