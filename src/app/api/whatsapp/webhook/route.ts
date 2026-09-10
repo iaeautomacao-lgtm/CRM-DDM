@@ -483,6 +483,28 @@ async function handleStatusUpdate(status: {
     }
   }
 
+  // ── Channel-test tracking ─────────────────────────────────────────
+  // Mirror status into whatsapp_test_sends for one-off "Testar canal"
+  // sends (channel-test/route.ts) — those deliberately have no
+  // conversation/messages row, so the dialog polls this side table
+  // instead. Unconditional update: matches 0 rows (silently, no error)
+  // for every non-test-send status event, which is the common case.
+  const testSendUpdate: Record<string, unknown> = { status: status.status }
+  if (status.status === 'failed') {
+    const metaErrors = (status as any).errors as
+      Array<{ code: number; title: string }> | undefined
+    testSendUpdate.erro = metaErrors && metaErrors.length > 0
+      ? `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
+      : 'Falha na entrega (Meta)'
+  }
+  const { error: testSendErr } = await supabaseAdmin()
+    .from('whatsapp_test_sends')
+    .update(testSendUpdate)
+    .eq('message_id', status.id)
+  if (testSendErr) {
+    console.error('Error updating whatsapp_test_sends status:', testSendErr)
+  }
+
   // 2) Mirror onto broadcast_recipients via whatsapp_message_id
   //    (added in migration 003). The aggregate trigger on
   //    broadcast_recipients re-derives the parent broadcast's

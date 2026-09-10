@@ -92,8 +92,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Template not found' }, { status: 404 })
       }
 
+      let messageId: string
       try {
-        await sendTemplateMessage({
+        const result = await sendTemplateMessage({
           phoneNumberId: config.phone_number_id,
           accessToken: decrypt(config.access_token),
           to: sanitizedPhone,
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
           language: template.language,
           params: Array.isArray(bodyParams) ? bodyParams.map(String) : [],
         })
+        messageId = result.messageId
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown Meta API error'
         console.error('[channel-test] Meta send failed:', message)
@@ -114,7 +116,20 @@ export async function POST(request: Request) {
         )
       }
 
-      return NextResponse.json({ ok: true, provider: 'meta' })
+      // Tracked in whatsapp_test_sends (not `messages` — this send
+      // deliberately has no conversation, see this file's docstring)
+      // so the dialog can poll for the real delivered/read/failed
+      // status the webhook mirrors in later. Best-effort: a failed
+      // insert here just means the dialog's poll times out instead
+      // of resolving — it must not fail the test send itself.
+      const { error: trackError } = await supabase
+        .from('whatsapp_test_sends')
+        .insert({ account_id: accountId, config_id: configId, message_id: messageId })
+      if (trackError) {
+        console.error('[channel-test] Failed to track test send:', trackError)
+      }
+
+      return NextResponse.json({ ok: true, provider: 'meta', messageId })
     }
 
     const wahaConfig = {

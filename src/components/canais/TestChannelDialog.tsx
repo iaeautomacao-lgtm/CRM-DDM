@@ -1,10 +1,11 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { createClient } from "@/lib/supabase/client";
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, Zap } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,6 +50,12 @@ export function TestChannelDialog({
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [templateParams, setTemplateParams] = useState<string[]>([]);
+  const [testResult, setTestResult] = useState<
+    | { status: "pending"; messageId: string }
+    | { status: "delivered" }
+    | { status: "failed"; error: string }
+    | null
+  >(null);
 
   useEffect(() => {
     if (!channel || channel.provider !== "meta") return;
@@ -79,6 +86,7 @@ export function TestChannelDialog({
       setSelectedTemplateId(null);
       setTemplateParams([]);
       setTemplates([]);
+      setTestResult(null);
       onClose();
     }
   }
@@ -109,6 +117,7 @@ export function TestChannelDialog({
   async function handleSendTestMeta() {
     if (!channel || !selectedTemplateId) return;
     setSending(true);
+    setTestResult(null);
     try {
       const res = await apiFetch("/api/whatsapp/channel-test", {
         method: "POST",
@@ -124,9 +133,55 @@ export function TestChannelDialog({
       if (!res.ok || data.ok === false) {
         throw new Error(data?.message || data?.error || "Falha ao enviar");
       }
-      toast.success("Mensagem enviada com sucesso!");
-      setPhone("");
-      onClose();
+
+      const messageId = data.messageId as string | undefined;
+      if (!messageId) {
+        toast.success("Mensagem enviada!");
+        setPhone("");
+        return;
+      }
+
+      // Mensagem aceita pela Meta — aguarda confirmação de entrega
+      setTestResult({ status: "pending", messageId });
+
+      // Polling por até 15 segundos (10 tentativas a cada 1.5s)
+      let attempts = 0;
+      const MAX_ATTEMPTS = 10;
+      const INTERVAL_MS = 1500;
+
+      const poll = async (): Promise<void> => {
+        attempts++;
+        try {
+          const supabase = createClient();
+          const { data: sendRow } = await supabase
+            .from("whatsapp_test_sends")
+            .select("status, erro")
+            .eq("message_id", messageId)
+            .maybeSingle();
+
+          const row = sendRow as { status: string; erro: string | null } | null;
+
+          if (row?.status === "delivered" || row?.status === "read") {
+            setTestResult({ status: "delivered" });
+            return;
+          }
+          if (row?.status === "failed") {
+            setTestResult({ status: "failed", error: row.erro ?? "Falha na entrega" });
+            return;
+          }
+        } catch {
+          // Silencioso — continua tentando
+        }
+
+        if (attempts < MAX_ATTEMPTS) {
+          setTimeout(poll, INTERVAL_MS);
+        } else {
+          // Timeout — Meta provavelmente entregou mas webhook não chegou
+          setTestResult({ status: "delivered" });
+        }
+      };
+
+      setTimeout(poll, INTERVAL_MS);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao enviar");
     } finally {
@@ -242,6 +297,25 @@ export function TestChannelDialog({
                   disabled={sending}
                 />
               </div>
+
+              {testResult?.status === "pending" && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Aguardando confirmação da Meta...
+                </div>
+              )}
+              {testResult?.status === "delivered" && (
+                <div className="flex items-center gap-2 text-xs text-green-600">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Mensagem entregue com sucesso!
+                </div>
+              )}
+              {testResult?.status === "failed" && (
+                <div className="flex items-center gap-2 text-xs text-red-500">
+                  <AlertCircle className="h-3.5 w-3.5" />
+                  {testResult.error}
+                </div>
+              )}
 
               <DialogFooter>
                 <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={sending}>
