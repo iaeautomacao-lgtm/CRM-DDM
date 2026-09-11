@@ -20,6 +20,31 @@ export async function POST(request: Request) {
 
     ensureQueueWorkerRunning();
 
+    // Verificar campanhas agendadas que devem ser iniciadas agora
+    const nowStr = new Date().toISOString();
+    const { data: campanhasAgendadas } = await supabaseAdmin()
+      .from("campaigns")
+      .select("id")
+      .eq("status", "agendado")
+      .lte("agendamento", nowStr);
+
+    for (const campanha of campanhasAgendadas ?? []) {
+      try {
+        // Chama o endpoint de start internamente
+        const startUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/disparador/campaigns/${campanha.id}/start`;
+        await fetch(startUrl, {
+          method: "POST",
+          headers: {
+            // Usa o mesmo CRON_SECRET para autenticar o start interno
+            "x-internal-cron": process.env.CRON_SECRET ?? "",
+          },
+        });
+        console.log(`[Cron] Campanha agendada ${campanha.id} iniciada automaticamente`);
+      } catch (err: any) {
+        console.error(`[Cron] Erro ao iniciar campanha agendada ${campanha.id}:`, err.message);
+      }
+    }
+
     const now = new Date().toISOString();
     const { data: item, error: queryError } = await supabaseAdmin()
       .from("disp_message_queue")

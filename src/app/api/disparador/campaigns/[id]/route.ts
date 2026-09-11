@@ -14,6 +14,7 @@ const EDITABLE_FIELDS = [
   "intervalo_max",
   "janela_inicio",
   "janela_fim",
+  "agendamento",
 ] as const;
 
 export async function PATCH(
@@ -71,6 +72,14 @@ export async function PATCH(
     const updates: Record<string, unknown> = {};
     for (const field of EDITABLE_FIELDS) {
       if (field in body) updates[field] = body[field];
+    }
+
+    // Editar o agendamento também move o status entre rascunho/agendado —
+    // este endpoint só edita campanhas em "rascunho" (guard acima), então
+    // isso nunca sai de "agendado"/"em_execucao"/etc, só entra ou sai de
+    // "agendado" a partir de "rascunho".
+    if ("agendamento" in updates) {
+      updates.status = updates.agendamento ? "agendado" : "rascunho";
     }
 
     if (Object.keys(updates).length === 0) {

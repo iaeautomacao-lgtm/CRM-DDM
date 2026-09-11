@@ -8,37 +8,17 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
-
-    // wacrm.campaigns has no account_id column yet (see migration 040,
-    // not yet applied), so resolve the caller's account_id from their
-    // profile to scope the contacts query below.
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("account_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    const accountId = profile?.account_id;
-    if (!accountId) {
-      return NextResponse.json(
-        { error: "Seu perfil não está vinculado a uma conta." },
-        { status: 400 }
-      );
-    }
-
-    ensureQueueWorkerRunning();
     const { id: campaignId } = await params;
-    const now = new Date().toISOString();
 
-    // 1. Fetch Campaign configuration
+    // Permite chamada interna do cron (sem sessão de usuário) para
+    // disparar campanhas agendadas — ver /api/disparador/cron.
+    const internalCronSecret = request.headers.get("x-internal-cron");
+    const isInternalCall =
+      internalCronSecret === process.env.CRON_SECRET && !!process.env.CRON_SECRET;
+
+    // 1. Fetch Campaign configuration (buscado uma única vez, antes de
+    // ramificar a autenticação — a chamada interna do cron também
+    // precisa desta linha pra resolver created_by/account_id).
     const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("*")
@@ -49,22 +29,77 @@ export async function POST(
       return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
     }
 
-    // wacrm.campaigns has no account_id column (only created_by), so
-    // ownership is checked per-user rather than per-account for now.
-    if (campaign.created_by !== user.id) {
-      return NextResponse.json(
-        { error: "Você não tem permissão para executar esta campanha." },
-        { status: 403 }
-      );
+    let accountId: string;
+    if (isInternalCall) {
+      // Sem sessão de usuário — resolve a conta via created_by ->
+      // profiles.account_id. wacrm.campaigns não tem account_id
+      // (migration 040 não aplicada), então não há como ler isso
+      // direto da linha da campanha.
+      if (!campaign.created_by) {
+        return NextResponse.json(
+          { error: "Campanha sem criador definido, não é possível resolver a conta." },
+          { status: 400 }
+        );
+      }
+      const { data: creatorProfile } = await supabaseAdmin()
+        .from("profiles")
+        .select("account_id")
+        .eq("user_id", campaign.created_by)
+        .maybeSingle();
+      if (!creatorProfile?.account_id) {
+        return NextResponse.json(
+          { error: "Criador da campanha não está vinculado a uma conta." },
+          { status: 400 }
+        );
+      }
+      accountId = creatorProfile.account_id;
+    } else {
+      const supabase = await createServerClient();
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) {
+        return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+      }
+
+      // wacrm.campaigns has no account_id column yet (see migration 040,
+      // not yet applied), so resolve the caller's account_id from their
+      // profile to scope the contacts query below.
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("account_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (!profile?.account_id) {
+        return NextResponse.json(
+          { error: "Seu perfil não está vinculado a uma conta." },
+          { status: 400 }
+        );
+      }
+      accountId = profile.account_id;
+
+      // wacrm.campaigns has no account_id column (only created_by), so
+      // ownership is checked per-user rather than per-account for now.
+      if (campaign.created_by !== user.id) {
+        return NextResponse.json(
+          { error: "Você não tem permissão para executar esta campanha." },
+          { status: 403 }
+        );
+      }
     }
 
-    // Only "rascunho" (never started) and "pausada" (resuming) are valid
-    // starting points — the only 4 statuses this table ever uses are
-    // rascunho/em_execucao/pausada/encerrada (see STATUS_LABELS in
-    // campanhas/page.tsx). Enforced here, not just disabled in the UI,
-    // so a direct call to this route can't re-run a campaign that's
-    // already sending or restart one that's already closed.
-    const STARTABLE_STATUSES = ["rascunho", "pausada"];
+    ensureQueueWorkerRunning();
+    const now = new Date().toISOString();
+
+    // Only "rascunho" (never started), "pausada" (resuming) and
+    // "agendado" (scheduled start time reached, cron-triggered) are
+    // valid starting points — see STATUS_LABELS in campanhas/page.tsx.
+    // Enforced here, not just disabled in the UI, so a direct call to
+    // this route can't re-run a campaign that's already sending or
+    // restart one that's already closed.
+    const STARTABLE_STATUSES = ["rascunho", "pausada", "agendado"];
     if (!STARTABLE_STATUSES.includes(campaign.status)) {
       return NextResponse.json(
         {
@@ -207,6 +242,15 @@ export async function POST(
     const maxDelay = (campaign.intervalo_max || 300) * 1000;
     const intraDelay = 3000; // 3 seconds between messages for the same contact
 
+    // Se a campanha tem agendamento futuro, usa como base do scheduled_at
+    // (ex: start manual antecipado de uma campanha "agendado"). Senão usa
+    // Date.now() — inclui o caso normal em que o cron só chama /start
+    // depois que agendamento já passou, onde essa condição é sempre falsa.
+    const baseTime =
+      campaign.agendamento && new Date(campaign.agendamento) > new Date()
+        ? new Date(campaign.agendamento).getTime()
+        : Date.now();
+
     let contactDelay = 0;
     let enqueued = 0;
     const queueRows = [];
@@ -230,7 +274,7 @@ export async function POST(
       for (let j = 0; j < mensagens.length; j++) {
         const msg = mensagens[j];
         const msgDelay = contactDelay + j * intraDelay;
-        const scheduledAt = new Date(Date.now() + msgDelay).toISOString();
+        const scheduledAt = new Date(baseTime + msgDelay).toISOString();
 
         // Store the raw template text — {{variavel}} and legacy {nome}
         // placeholders are resolved at send time (worker.ts / cron/route.ts)

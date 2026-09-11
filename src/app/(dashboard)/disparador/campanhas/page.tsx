@@ -67,6 +67,7 @@ interface Campaign {
   intervalo_max: number;
   janela_inicio: string;
   janela_fim: string;
+  agendamento?: string | null;
   created_at: string;
 }
 
@@ -103,6 +104,7 @@ interface CampaignMessage {
 
 const STATUS_COLORS: Record<string, string> = {
   rascunho: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
+  agendado: "bg-blue-500/10 text-blue-500 border border-blue-500/20",
   em_execucao: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
   pausada: "bg-amber-500/10 text-amber-500 border border-amber-500/20",
   encerrada: "bg-zinc-500/10 text-zinc-500 border border-zinc-500/20",
@@ -110,6 +112,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   rascunho: "Rascunho",
+  agendado: "Agendado",
   em_execucao: "Em Execução",
   pausada: "Pausada",
   encerrada: "Encerrada",
@@ -166,6 +169,7 @@ export default function CampanhasPage() {
   const [intervaloMax, setIntervaloMax] = useState(60);
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
+  const [agendarPara, setAgendarPara] = useState<string>("");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
 
   const [wizardStep, setWizardStep] = useState(1);
@@ -448,6 +452,10 @@ export default function CampanhasPage() {
     setIntervaloMax(campaign.intervalo_max);
     setJanelaInicio(campaign.janela_inicio);
     setJanelaFim(campaign.janela_fim);
+    // Edição só é permitida para campanhas em "rascunho" (ver PATCH
+    // /api/disparador/campaigns/[id]), que por definição nunca têm
+    // agendamento — campo sempre reseta vazio aqui.
+    setAgendarPara("");
     setMensagens(
       campaign.mensagens && campaign.mensagens.length > 0
         ? campaign.mensagens
@@ -550,6 +558,12 @@ export default function CampanhasPage() {
       return;
     }
 
+    // Horário de Brasília — assume o fuso do navegador do usuário
+    // (datetime-local não carrega timezone própria).
+    const agendamentoISO = agendarPara
+      ? new Date(agendarPara).toISOString()
+      : null;
+
     try {
       // Se há arquivo para importar, envia para o servidor primeiro
       if (importFile) {
@@ -590,6 +604,7 @@ export default function CampanhasPage() {
             intervalo_max: intervaloMax,
             janela_inicio: janelaInicio,
             janela_fim: janelaFim,
+            agendamento: agendamentoISO,
           }),
         });
         if (!res.ok) {
@@ -620,7 +635,8 @@ export default function CampanhasPage() {
           intervalo_max: intervaloMax,
           janela_inicio: janelaInicio,
           janela_fim: janelaFim,
-          status: "rascunho",
+          agendamento: agendamentoISO,
+          status: agendamentoISO ? "agendado" : "rascunho",
           created_by: user.id,
         };
 
@@ -651,6 +667,7 @@ export default function CampanhasPage() {
     setMensagens([{ tipo: "texto", conteudo: "" }]);
     setIntervaloMin(30);
     setIntervaloMax(60);
+    setAgendarPara("");
     setWizardStep(1);
     setImportFile(null);
     setImportPreview(null);
@@ -1152,6 +1169,22 @@ export default function CampanhasPage() {
                 </div>
               </div>
 
+              {/* Agendamento futuro */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Agendar para (opcional)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={agendarPara}
+                  onChange={(e) => setAgendarPara(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Horário de Brasília. Se não preenchido, inicia imediatamente ao clicar em "Iniciar".
+                </p>
+              </div>
+
               {/* Messages bubbles configuration */}
               <div className="space-y-2 border-t border-border/40 pt-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -1639,6 +1672,21 @@ export default function CampanhasPage() {
                     <span className="text-muted-foreground">Janela</span>
                     <span className="font-medium">{janelaInicio} — {janelaFim}</span>
                   </div>
+                  {agendarPara && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Agendado para</span>
+                      <span className="font-medium">
+                        {new Date(agendarPara).toLocaleString("pt-BR", {
+                          timeZone: "America/Sao_Paulo",
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Mensagens</span>
                     <span className="font-medium">{mensagens.length}</span>
@@ -1702,7 +1750,7 @@ export default function CampanhasPage() {
                     onClick={handleSubmit}
                     disabled={!nome.trim() || selectedSessions.length === 0}
                   >
-                    {editingId ? "Salvar Alterações" : "Criar Campanha"}
+                    {editingId ? "Salvar Alterações" : agendarPara ? "Agendar Campanha" : "Criar Campanha"}
                   </Button>
                 )}
               </div>
