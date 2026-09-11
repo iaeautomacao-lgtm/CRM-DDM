@@ -1168,23 +1168,6 @@ export function MessageThread({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-              {conversation.sentiment && conversation.sentiment !== "unknown" && (
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium border select-none transition-all duration-200",
-                    conversation.sentiment === "positive" && "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-                    conversation.sentiment === "negative" && "bg-rose-500/10 text-rose-400 border-rose-500/20",
-                    conversation.sentiment === "neutral" && "bg-blue-500/10 text-blue-400 border-blue-500/20",
-                    conversation.sentiment === "mixed" && "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                  )}
-                  title={`Sentimento: ${conversation.sentiment}`}
-                >
-                  {conversation.sentiment === "positive" && "😊 Positivo"}
-                  {conversation.sentiment === "negative" && "😡 Negativo"}
-                  {conversation.sentiment === "neutral" && "😐 Neutro"}
-                  {conversation.sentiment === "mixed" && "🤔 Misto"}
-                </span>
-              )}
             </div>
             <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
           </div>
