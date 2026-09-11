@@ -981,6 +981,68 @@ export async function selectAgentForTeam(
   return memberIds.find((id) => counts.get(id) === minCount) ?? null;
 }
 
+async function selectAnyAgentForAccount(
+  db: AdminClient,
+  accountId: string,
+): Promise<string | null> {
+  // Busca todos os Operadores da conta (account_role = 'agent')
+  const { data: agents } = await db
+    .from("profiles")
+    .select("user_id")
+    .eq("account_id", accountId)
+    .eq("account_role", "agent")
+    .order("created_at", { ascending: true });
+
+  if (!agents || agents.length === 0) return null;
+
+  const agentIds = agents.map((a) => a.user_id);
+  const cutoff = new Date(Date.now() - 75_000).toISOString();
+
+  // Tenta online primeiro
+  const { data: onlineRows } = await db
+    .from("member_presence")
+    .select("user_id")
+    .in("user_id", agentIds)
+    .eq("status", "online")
+    .gte("last_seen_at", cutoff);
+
+  let eligibleIds = (onlineRows ?? []).map((r) => r.user_id);
+
+  // Fallback para away
+  if (eligibleIds.length === 0) {
+    const { data: awayRows } = await db
+      .from("member_presence")
+      .select("user_id")
+      .in("user_id", agentIds)
+      .eq("status", "away")
+      .gte("last_seen_at", cutoff);
+    eligibleIds = (awayRows ?? []).map((r) => r.user_id);
+  }
+
+  // Nenhum disponível — retorna null (conversa fica pending,
+  // retry cron tentará novamente a cada 5 minutos)
+  if (eligibleIds.length === 0) return null;
+
+  // Escolhe o de menor carga (menos conversas open/pending)
+  const { data: openConvs } = await db
+    .from("conversations")
+    .select("assigned_agent_id")
+    .in("assigned_agent_id", eligibleIds)
+    .in("status", ["open", "pending"]);
+
+  const counts = new Map<string, number>();
+  for (const id of eligibleIds) counts.set(id, 0);
+  for (const row of openConvs ?? []) {
+    if (row.assigned_agent_id && counts.has(row.assigned_agent_id)) {
+      counts.set(row.assigned_agent_id, counts.get(row.assigned_agent_id)! + 1);
+    }
+  }
+
+  const minCount = Math.min(...counts.values());
+  // Tie-break: mais antigo na conta (agentIds já está ordenado por created_at)
+  return agentIds.find((id) => counts.get(id) === minCount) ?? null;
+}
+
 /**
  * 'handoff_team' — same as `executeHandoff`, but only ever sets
  * `team_id`; `assign_to` is not part of this node's config and is
@@ -1004,6 +1066,12 @@ async function executeHandoffTeam(
     if (cfg.team_id) {
       convUpdate.team_id = cfg.team_id;
       selectedAgent = await selectAgentForTeam(db, cfg.team_id, run.account_id);
+      if (selectedAgent) convUpdate.assigned_agent_id = selectedAgent;
+    } else {
+      // Sem team_id configurado — busca qualquer Operador disponível
+      // da conta (account_role = 'agent'), por presença e menor carga.
+      // Admins nunca recebem atribuições automáticas.
+      selectedAgent = await selectAnyAgentForAccount(db, run.account_id);
       if (selectedAgent) convUpdate.assigned_agent_id = selectedAgent;
     }
     if (run.conversation_id) {
