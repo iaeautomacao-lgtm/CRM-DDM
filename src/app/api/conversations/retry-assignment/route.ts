@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
-import { selectAgentForTeam } from "@/lib/flows/engine";
+import { selectAgentForTeam, selectAnyAgentForAccount } from "@/lib/flows/engine";
 
 export async function POST(request: Request) {
   // Auth: reutiliza AUTOMATION_CRON_SECRET (mesmo padrão de
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     .select("id, team_id, account_id")
     .eq("status", "pending")
     .is("assigned_agent_id", null)
-    .not("team_id", "is", null)
+    // Removido — conversas sem team_id também precisam de retry
     .lte("updated_at", cutoff);
 
   if (error) {
@@ -41,13 +41,11 @@ export async function POST(request: Request) {
 
   for (const conv of conversations) {
     try {
-      if (!conv.team_id || !conv.account_id) continue;
+      if (!conv.account_id) continue;
 
-      const agentId = await selectAgentForTeam(
-        db,
-        conv.team_id,
-        conv.account_id
-      );
+      const agentId = conv.team_id
+        ? await selectAgentForTeam(db, conv.team_id, conv.account_id)
+        : await selectAnyAgentForAccount(db, conv.account_id);
 
       if (!agentId) continue; // ainda ninguém disponível
 

@@ -981,7 +981,7 @@ export async function selectAgentForTeam(
   return memberIds.find((id) => counts.get(id) === minCount) ?? null;
 }
 
-async function selectAnyAgentForAccount(
+export async function selectAnyAgentForAccount(
   db: AdminClient,
   accountId: string,
 ): Promise<string | null> {
@@ -1066,13 +1066,14 @@ async function executeHandoffTeam(
     if (cfg.team_id) {
       convUpdate.team_id = cfg.team_id;
       selectedAgent = await selectAgentForTeam(db, cfg.team_id, run.account_id);
-      if (selectedAgent) convUpdate.assigned_agent_id = selectedAgent;
+      convUpdate.assigned_agent_id = selectedAgent ?? null;
     } else {
       // Sem team_id configurado — busca qualquer Operador disponível
       // da conta (account_role = 'agent'), por presença e menor carga.
       // Admins nunca recebem atribuições automáticas.
       selectedAgent = await selectAnyAgentForAccount(db, run.account_id);
-      if (selectedAgent) convUpdate.assigned_agent_id = selectedAgent;
+      // Sempre seta o campo — null limpa atribuição anterior do BEN
+      convUpdate.assigned_agent_id = selectedAgent ?? null;
     }
     if (run.conversation_id) {
       await db
