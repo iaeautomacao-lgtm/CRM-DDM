@@ -26,7 +26,8 @@ import {
   Upload,
   Loader2,
   BarChart2,
-  Search
+  Search,
+  CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -178,10 +179,18 @@ export default function CampanhasPage() {
   const [importPreview, setImportPreview] = useState<Array<{
     phone: string;
     name?: string;
+    cpf?: string;
     variables: string[];
     raw: Record<string, string>;
   }> | null>(null);
+  const [importAllRows, setImportAllRows] = useState<Array<{
+    phone: string;
+    cpf?: string;
+    variables: string[];
+  }> | null>(null);
   const [importLoading, setImportLoading] = useState(false);
+  const [utmGerado, setUtmGerado] = useState(false);
+  const [utmLoading, setUtmLoading] = useState(false);
   const [importStats, setImportStats] = useState<{
     total: number;
     valid: number;
@@ -511,6 +520,9 @@ export default function CampanhasPage() {
     setImportFile(null);
     setImportPreview(null);
     setImportStats(null);
+    setImportAllRows(null);
+    setUtmGerado(false);
+    setUtmLoading(false);
   };
 
   // Delete Campaign
@@ -672,6 +684,9 @@ export default function CampanhasPage() {
     setImportFile(null);
     setImportPreview(null);
     setImportStats(null);
+    setImportAllRows(null);
+    setUtmGerado(false);
+    setUtmLoading(false);
   };
 
   // Meta channels can only send approved templates — the picker needs to
@@ -685,6 +700,8 @@ export default function CampanhasPage() {
     setImportLoading(true);
     setImportPreview(null);
     setImportStats(null);
+    setImportAllRows(null);
+    setUtmGerado(false);
     try {
       const text = await file.text();
       // Detecta separador
@@ -715,6 +732,9 @@ export default function CampanhasPage() {
       const nameIdx = headers.findIndex(h =>
         ["nome", "name", "cliente"].includes(h)
       );
+      const cpfIdx = headers.findIndex(h =>
+        ["cpf", "documento", "document"].includes(h)
+      );
       const varIndices = headers
         .map((h, i) => h.startsWith("var") ? i : -1)
         .filter(i => i >= 0);
@@ -735,6 +755,7 @@ export default function CampanhasPage() {
           return {
             phone,
             name: nameIdx >= 0 ? cols[nameIdx] : undefined,
+            cpf: cpfIdx >= 0 ? cols[cpfIdx] || undefined : undefined,
             variables: varIndices.map(i => cols[i] || ""),
             raw: Object.fromEntries(headers.map((h, i) => [h, cols[i] || ""])),
           };
@@ -807,6 +828,25 @@ export default function CampanhasPage() {
           );
         }
       }
+
+      // Armazena TODOS os contatos (não só os 5 do preview) — usado pelo
+      // lote de geração de UTM em handleGerarUTM, que precisa do CSV
+      // inteiro, não apenas da amostra exibida em tela.
+      const allContacts = allRows
+        .map(line => {
+          const cols = line.split(sep).map((c: string) =>
+            c.trim().replace(/["\r]/g, "")
+          );
+          const phone = cols[phoneIdx]?.trim();
+          if (!phone) return null;
+          return {
+            phone,
+            cpf: cpfIdx >= 0 ? cols[cpfIdx] || undefined : undefined,
+            variables: varIndices.map(i => cols[i] || ""),
+          };
+        })
+        .filter(Boolean) as Array<{ phone: string; cpf?: string; variables: string[] }>;
+      setImportAllRows(allContacts);
     } catch (err) {
       toast.error("Erro ao ler arquivo");
     } finally {
@@ -849,6 +889,110 @@ export default function CampanhasPage() {
       toast.error("Erro ao carregar métricas");
     } finally {
       setMetricsLoading(false);
+    }
+  };
+
+  // Gera links de rastreamento (UTM) via proxy server-side (/api/disparador/utm)
+  // para TODOS os contatos do CSV (importAllRows), substituindo VAR3 pelo
+  // link_curto. O linkMap resultante só é aplicado visualmente ao preview
+  // (5 primeiras linhas) — a propagação até a fila de envio ainda não está
+  // implementada (start/route.ts não consome esse mapeamento cpf→link).
+  const handleGerarUTM = async () => {
+    const source = importAllRows ?? importPreview ?? [];
+    if (source.length === 0) return;
+    if (!nome.trim()) {
+      toast.error("Preencha o nome da campanha no Step 1 antes de gerar UTM");
+      return;
+    }
+
+    // Detectar URL destino — pega VAR3 (índice 2) do primeiro contato
+    // Se variar por contato, cada um usa o seu próprio VAR3
+    const hasCpf = source.some(p => p.cpf);
+    if (!hasCpf) {
+      toast.error("CSV não tem coluna CPF/cpf/documento — necessário para gerar UTM");
+      return;
+    }
+
+    setUtmLoading(true);
+    try {
+      // Monta payload de lote — agrupa por url_destino
+      // já que a API aceita uma url_destino por chamada
+      // Se todos têm a mesma VAR3, uma chamada basta
+      // Se variam, faz uma chamada por URL única
+      const urlGroups = new Map<string, typeof source>();
+      for (const contact of source) {
+        const url = contact.variables[2] || "";
+        if (!url) continue;
+        if (!urlGroups.has(url)) urlGroups.set(url, []);
+        urlGroups.get(url)!.push(contact);
+      }
+
+      // Mapa de cpf → link_curto
+      const linkMap = new Map<string, string>();
+
+      for (const [urlDestino, contacts] of urlGroups) {
+        const alunos = contacts
+          .filter(c => c.cpf)
+          .map(c => c.cpf!);
+
+        if (alunos.length === 0) continue;
+
+        const res = await fetch("/api/disparador/utm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            canal: "whatsapp",
+            campanha: nome.trim(),
+            url_destino: urlDestino.startsWith("http")
+              ? urlDestino
+              : `https://${urlDestino}`,
+            alunos,
+          }),
+        });
+
+        if (!res.ok) {
+          console.warn("[UTM] Falha na requisição:", await res.text());
+          continue;
+        }
+
+        const data = await res.json();
+        const links: Array<{ aluno_id: string; link_curto: string }> =
+          data.links ?? [];
+
+        for (const link of links) {
+          linkMap.set(link.aluno_id, link.link_curto);
+        }
+      }
+
+      if (linkMap.size === 0) {
+        toast.error("Nenhum link UTM foi gerado. Verifique os CPFs e a URL destino.");
+        return;
+      }
+
+      // Atualizar importPreview com os link_curto no lugar de VAR3
+      setImportPreview(prev =>
+        (prev ?? []).map(contact => {
+          if (!contact.cpf) return contact;
+          const linkCurto = linkMap.get(contact.cpf);
+          if (!linkCurto) return contact; // mantém VAR3 original se falhar
+          const newVariables = [...contact.variables];
+          newVariables[2] = linkCurto; // substitui VAR3
+          return { ...contact, variables: newVariables };
+        })
+      );
+
+      // NOTA: isto só atualiza o preview (5 primeiras linhas exibidas em
+      // tela) — o import real dos contatos sobe o CSV bruto pro servidor
+      // via /api/disparador/contacts/import, que não lê importPreview.
+      // Propagar o link_curto por contato até a fila de envio
+      // (disp_message_queue) requer que start/route.ts resolva um
+      // mapeamento cpf→link por contato — não implementado nesta etapa.
+      setUtmGerado(true);
+      toast.success(`${linkMap.size} links UTM gerados com sucesso!`);
+    } catch (err: any) {
+      toast.error("Erro ao gerar links UTM: " + err.message);
+    } finally {
+      setUtmLoading(false);
     }
   };
 
@@ -1609,6 +1753,37 @@ export default function CampanhasPage() {
                   </div>
                 )}
 
+                {/* Gerar UTM */}
+                {importPreview && importPreview.some(p => p.cpf) &&
+                 importPreview.some(p => p.variables[2]) && (
+                  <div className="flex items-center justify-between rounded-md border border-border bg-muted/20 p-3">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">
+                        Links de rastreamento (UTM)
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Gera um link curto rastreável para cada aluno via VAR3
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={utmGerado ? "outline" : "default"}
+                      onClick={handleGerarUTM}
+                      disabled={utmLoading}
+                      className="shrink-0 gap-1.5"
+                    >
+                      {utmLoading ? (
+                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando...</>
+                      ) : utmGerado ? (
+                        <><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> UTM Gerado</>
+                      ) : (
+                        "🔗 Gerar UTM"
+                      )}
+                    </Button>
+                  </div>
+                )}
+
                 {/* Preview table */}
                 {importPreview && importPreview.length > 0 && (
                   <div className="space-y-2">
@@ -1623,6 +1798,11 @@ export default function CampanhasPage() {
                             {importPreview[0]?.name !== undefined && (
                               <th className="px-3 py-2 text-left font-medium">Nome</th>
                             )}
+                            {importPreview[0]?.cpf !== undefined && (
+                              <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                                CPF
+                              </th>
+                            )}
                             {importPreview[0]?.variables.map((_, i) => (
                               <th key={i} className="px-3 py-2 text-left font-medium">
                                 {"{{"}{i + 1}{"}}"}
@@ -1636,6 +1816,11 @@ export default function CampanhasPage() {
                               <td className="px-3 py-2 font-mono">{row.phone}</td>
                               {row.name !== undefined && (
                                 <td className="px-3 py-2">{row.name}</td>
+                              )}
+                              {row.cpf !== undefined && (
+                                <td className="px-3 py-2 font-mono text-muted-foreground text-[10px]">
+                                  {row.cpf}
+                                </td>
                               )}
                               {row.variables.map((v, j) => (
                                 <td key={j} className="px-3 py-2">{v}</td>
