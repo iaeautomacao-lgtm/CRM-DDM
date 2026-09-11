@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { 
@@ -43,10 +43,27 @@ export default function DisparadorDashboardPage() {
     failed: 0,
   });
 
+  // Cached once on mount — account scope doesn't change during the
+  // session, so re-deriving it every tick just costs 3 extra queries.
+  const campaignIdsRef = useRef<string[]>([]);
+
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 5000); // refresh queue status every 5s
-    return () => clearInterval(interval);
+    let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | undefined;
+
+    (async () => {
+      const supabase = createClient();
+      const { campaignIds } = await getDisparadorScope(supabase);
+      if (cancelled) return;
+      campaignIdsRef.current = campaignIds;
+      await loadData();
+      interval = setInterval(loadData, 30000); // refresh queue status every 30s
+    })();
+
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
   }, []);
 
   const loadData = async () => {
@@ -56,7 +73,7 @@ export default function DisparadorDashboardPage() {
       // wacrm.disp_message_queue has no account_id yet (migration 040 not
       // applied), so scope it through the caller's account's campaigns
       // instead of reading the whole table — see getDisparadorScope.
-      const { campaignIds } = await getDisparadorScope(supabase);
+      const campaignIds = campaignIdsRef.current;
 
       if (campaignIds.length === 0) {
         setQueue([]);
@@ -247,7 +264,7 @@ export default function DisparadorDashboardPage() {
         <header className="border-b border-border px-5 py-4 flex items-center justify-between bg-muted/20">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Monitor da Fila em Tempo Real</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">Atualização automática a cada 5 segundos</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Atualização automática a cada 30 segundos</p>
           </div>
         </header>
 

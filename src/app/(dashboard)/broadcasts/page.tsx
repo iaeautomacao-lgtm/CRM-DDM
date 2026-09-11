@@ -71,11 +71,14 @@ export default function BroadcastsPage() {
       const supabase = createClient();
       const { data, error: fetchError } = await supabase
         .from('broadcasts')
-        .select('*')
+        .select('id, name, template_name, status, total_recipients, delivered_count, read_count, created_at')
         .order('created_at', { ascending: false });
 
       if (fetchError) throw fetchError;
-      setBroadcasts(data ?? []);
+      // Poll payload omits fields unused by this table (user_id, template_language,
+      // sent_count, replied_count, failed_count) to shave egress — cast past the
+      // stricter select()-inferred type.
+      setBroadcasts((data ?? []) as Broadcast[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao carregar transmissões');
     } finally {

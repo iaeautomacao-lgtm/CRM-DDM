@@ -305,16 +305,18 @@ export default function CampanhasPage() {
         const { userIds } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("*")
+          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by")
           .in("created_by", userIds)
           .order("created_at", { ascending: false });
         if (campaignList) {
-          setCampaigns(campaignList);
+          // Poll payload omits created_at (unused by the card UI) to
+          // shave egress — cast past the stricter select()-inferred type.
+          setCampaigns(campaignList as unknown as Campaign[]);
         }
       } catch (err) {
         console.error("Failed to auto-reload campaigns:", err);
       }
-    }, 5000);
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [campaigns]);
