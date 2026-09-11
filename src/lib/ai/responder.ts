@@ -1609,6 +1609,7 @@ async function generateOpenAiResponse(
             method: toolDef.http.method,
             headers: { "Content-Type": "application/json", ...resolvedHeaders },
             ...(resolvedBody ? { body: resolvedBody } : {}),
+            signal: AbortSignal.timeout(30000),
           });
           const httpText = await httpRes.text();
           const toolDurationMs = Date.now() - toolStartedAt;
