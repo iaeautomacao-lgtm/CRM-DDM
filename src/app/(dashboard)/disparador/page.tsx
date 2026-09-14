@@ -42,10 +42,19 @@ export default function DisparadorDashboardPage() {
     success: 0,
     failed: 0,
   });
+  const [queueLimit, setQueueLimit] = useState(15);
+  const [hasMoreQueue, setHasMoreQueue] = useState(false);
 
   // Cached once on mount — account scope doesn't change during the
   // session, so re-deriving it every tick just costs 3 extra queries.
   const campaignIdsRef = useRef<string[]>([]);
+
+  // The 30s polling interval below is set up once on mount and closes
+  // over loadData from that render — reading the limit through a ref
+  // (kept in sync every render) lets each tick see the latest value
+  // from "Carregar mais" instead of the one captured at mount.
+  const queueLimitRef = useRef(queueLimit);
+  queueLimitRef.current = queueLimit;
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +74,19 @@ export default function DisparadorDashboardPage() {
       if (interval) clearInterval(interval);
     };
   }, []);
+
+  // Refetch when "Carregar mais" bumps queueLimit — skips the initial
+  // mount (already handled by the effect above) so it doesn't race
+  // loadData before campaignIdsRef is populated.
+  const isFirstQueueLimitRun = useRef(true);
+  useEffect(() => {
+    if (isFirstQueueLimitRun.current) {
+      isFirstQueueLimitRun.current = false;
+      return;
+    }
+    loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queueLimit]);
 
   const loadData = async () => {
     try {
@@ -98,7 +120,7 @@ export default function DisparadorDashboardPage() {
         `)
         .in("campaign_id", campaignIds)
         .order("scheduled_at", { ascending: false })
-        .limit(15);
+        .limit(queueLimitRef.current);
 
       if (!error && data) {
         // Map contacts schema mapping
@@ -114,6 +136,7 @@ export default function DisparadorDashboardPage() {
           campaigns: d.campaigns ? { nome: d.campaigns.nome } : undefined,
         }));
         setQueue(mappedData);
+        setHasMoreQueue(data.length >= queueLimitRef.current);
       }
 
       // Fetch Queue Stats
@@ -330,6 +353,14 @@ export default function DisparadorDashboardPage() {
                   </div>
                 </div>
               ))}
+              {hasMoreQueue && (
+                <button
+                  onClick={() => setQueueLimit(prev => prev + 15)}
+                  className="w-full py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border-t border-border/30 mt-2"
+                >
+                  Carregar mais...
+                </button>
+              )}
             </div>
           )}
         </div>
