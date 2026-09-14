@@ -712,17 +712,35 @@ export default function CampanhasPage() {
     setImportAllRows(null);
     setUtmGerado(false);
     try {
-      const text = await file.text();
-      // Detecta separador
-      const sep = text.startsWith("sep=")
-        ? text.split("\n")[0].split("=")[1]?.trim() || ";"
-        : text.includes(";") ? ";" : ",";
+      const isXlsx = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
 
-      const lines = text.split("\n").filter(Boolean);
-      // Remove linha sep= se existir
-      const dataLines = lines[0].toLowerCase().startsWith("sep=")
-        ? lines.slice(1)
-        : lines;
+      let dataLines: string[];
+      let sep = ";";
+
+      if (isXlsx) {
+        // file.text() retorna binário pra XLSX — usa a lib xlsx (já é
+        // dependência do projeto) pra ler a planilha e converter a
+        // primeira aba pra CSV com ; como separador.
+        const XLSX = await import("xlsx");
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const csv = XLSX.utils.sheet_to_csv(sheet, { FS: ";" });
+        dataLines = csv.split("\n").filter(Boolean);
+      } else {
+        const text = await file.text();
+        // Detecta separador
+        sep = text.startsWith("sep=")
+          ? text.split("\n")[0].split("=")[1]?.trim() || ";"
+          : text.includes(";") ? ";" : ",";
+
+        const lines = text.split("\n").filter(Boolean);
+        // Remove linha sep= se existir
+        dataLines = lines[0].toLowerCase().startsWith("sep=")
+          ? lines.slice(1)
+          : lines;
+      }
 
       if (dataLines.length < 2) {
         toast.error("Arquivo vazio ou sem dados");
