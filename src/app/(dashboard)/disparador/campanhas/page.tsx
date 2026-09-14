@@ -258,6 +258,15 @@ export default function CampanhasPage() {
     updated_at: string;
   } | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  const [utmMetrics, setUtmMetrics] = useState<{
+    total_cliques: number;
+    total_cliques_unicos: number;
+    total_entraram_ddmpay: number;
+    total_acordos: number;
+    total_pagaram: number;
+    valor_total: number;
+  } | null>(null);
+  const [utmMetricsLoading, setUtmMetricsLoading] = useState(false);
 
   // Auto-save the in-progress form to localStorage — creation mode only.
   // Skipped while a restore decision is pending so we don't overwrite the
@@ -889,6 +898,22 @@ export default function CampanhasPage() {
       toast.error("Erro ao carregar métricas");
     } finally {
       setMetricsLoading(false);
+    }
+
+    // Busca métricas UTM em paralelo
+    setUtmMetricsLoading(true);
+    try {
+      const utmRes = await fetch(
+        `/api/disparador/utm/metricas?campanha=${encodeURIComponent(campaign.nome)}&canal=whatsapp`
+      );
+      if (utmRes.ok) {
+        const utmData = await utmRes.json();
+        setUtmMetrics(utmData.metricas ?? null);
+      }
+    } catch {
+      // silencioso — UTM é opcional
+    } finally {
+      setUtmMetricsLoading(false);
     }
   };
 
@@ -2111,7 +2136,7 @@ export default function CampanhasPage() {
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => { setMetricsModal(null); setMetricsData(null); }}
+                onClick={() => { setMetricsModal(null); setMetricsData(null); setUtmMetrics(null); }}
               >
                 <X className="h-5 w-5" />
               </Button>
@@ -2195,6 +2220,93 @@ export default function CampanhasPage() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Seção UTM */}
+                  {(utmMetricsLoading || utmMetrics) && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-foreground border-t border-border pt-3">
+                        Rastreamento UTM
+                      </p>
+                      {utmMetricsLoading && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Carregando métricas UTM...
+                        </div>
+                      )}
+                      {!utmMetricsLoading && utmMetrics && (
+                        <>
+                          <div className="grid grid-cols-2 gap-2">
+                            {[
+                              { label: "Cliques", value: utmMetrics.total_cliques, color: "text-blue-500" },
+                              { label: "Cliques Únicos", value: utmMetrics.total_cliques_unicos, color: "text-blue-400" },
+                              { label: "Entraram no Portal", value: utmMetrics.total_entraram_ddmpay, color: "text-purple-500" },
+                              { label: "Acordos", value: utmMetrics.total_acordos, color: "text-orange-500" },
+                              { label: "Pagaram", value: utmMetrics.total_pagaram, color: "text-green-500" },
+                              {
+                                label: "Valor Total",
+                                value: utmMetrics.valor_total > 0
+                                  ? utmMetrics.valor_total.toLocaleString("pt-BR", {
+                                      style: "currency",
+                                      currency: "BRL",
+                                    })
+                                  : "R$ 0,00",
+                                color: "text-green-600",
+                              },
+                            ].map(({ label, value, color }) => (
+                              <div
+                                key={label}
+                                className="rounded-lg border border-border bg-muted/20 p-2 text-center"
+                              >
+                                <p className={`text-lg font-bold ${color}`}>{value}</p>
+                                <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Funil de conversão */}
+                          {utmMetrics.total_cliques > 0 && (
+                            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                              <p className="text-xs font-medium text-foreground">Funil</p>
+                              {[
+                                {
+                                  label: "Clique → Portal",
+                                  value: ((utmMetrics.total_entraram_ddmpay / utmMetrics.total_cliques) * 100).toFixed(1),
+                                  color: "bg-purple-500",
+                                },
+                                {
+                                  label: "Portal → Acordo",
+                                  value: utmMetrics.total_entraram_ddmpay > 0
+                                    ? ((utmMetrics.total_acordos / utmMetrics.total_entraram_ddmpay) * 100).toFixed(1)
+                                    : "0.0",
+                                  color: "bg-orange-500",
+                                },
+                                {
+                                  label: "Acordo → Pagamento",
+                                  value: utmMetrics.total_acordos > 0
+                                    ? ((utmMetrics.total_pagaram / utmMetrics.total_acordos) * 100).toFixed(1)
+                                    : "0.0",
+                                  color: "bg-green-500",
+                                },
+                              ].map(({ label, value, color }) => (
+                                <div key={label} className="space-y-1">
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-muted-foreground">{label}</span>
+                                    <span className="font-medium">{value}%</span>
+                                  </div>
+                                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full ${color} rounded-full`}
+                                      style={{ width: `${Math.min(parseFloat(value), 100)}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
 
