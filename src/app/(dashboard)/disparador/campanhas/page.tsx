@@ -191,6 +191,11 @@ export default function CampanhasPage() {
   const [importLoading, setImportLoading] = useState(false);
   const [utmGerado, setUtmGerado] = useState(false);
   const [utmLoading, setUtmLoading] = useState(false);
+  const [utmProgress, setUtmProgress] = useState<{
+    total: number;
+    gerados: number;
+    erros: number;
+  } | null>(null);
   const [importStats, setImportStats] = useState<{
     total: number;
     valid: number;
@@ -532,6 +537,7 @@ export default function CampanhasPage() {
     setImportAllRows(null);
     setUtmGerado(false);
     setUtmLoading(false);
+    setUtmProgress(null);
   };
 
   // Delete Campaign
@@ -696,6 +702,7 @@ export default function CampanhasPage() {
     setImportAllRows(null);
     setUtmGerado(false);
     setUtmLoading(false);
+    setUtmProgress(null);
   };
 
   // Meta channels can only send approved templates — the picker needs to
@@ -711,6 +718,7 @@ export default function CampanhasPage() {
     setImportStats(null);
     setImportAllRows(null);
     setUtmGerado(false);
+    setUtmProgress(null);
     try {
       const isXlsx = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
 
@@ -973,6 +981,12 @@ export default function CampanhasPage() {
       // Mapa de cpf → link_curto
       const linkMap = new Map<string, string>();
 
+      const totalAlunos = [...urlGroups.values()]
+        .flat()
+        .filter(c => c.cpf).length;
+
+      setUtmProgress({ total: totalAlunos, gerados: 0, erros: 0 });
+
       for (const [urlDestino, contacts] of urlGroups) {
         const alunos = contacts
           .filter(c => c.cpf)
@@ -995,6 +1009,9 @@ export default function CampanhasPage() {
 
         if (!res.ok) {
           console.warn("[UTM] Falha na requisição:", await res.text());
+          // Lote inteiro falhou — conta todos como erro, senão a barra
+          // de progresso trava sem nunca chegar em "total".
+          setUtmProgress(prev => prev ? { ...prev, erros: prev.erros + alunos.length } : null);
           continue;
         }
 
@@ -1005,6 +1022,16 @@ export default function CampanhasPage() {
         for (const link of links) {
           linkMap.set(link.aluno_id, link.link_curto);
         }
+
+        // Conta quantos vieram com link_curto válido
+        const geradosNesteLote = links.filter(l => l.link_curto).length;
+        const errosNesteLote = alunos.length - geradosNesteLote;
+
+        setUtmProgress(prev => prev ? {
+          ...prev,
+          gerados: prev.gerados + geradosNesteLote,
+          erros: prev.erros + errosNesteLote,
+        } : null);
       }
 
       if (linkMap.size === 0) {
@@ -1799,31 +1826,80 @@ export default function CampanhasPage() {
                 {/* Gerar UTM */}
                 {importPreview && importPreview.some(p => p.cpf) &&
                  importPreview.some(p => p.variables[2]) && (
-                  <div className="flex items-center justify-between rounded-md border border-border bg-muted/20 p-3">
-                    <div>
-                      <p className="text-xs font-medium text-foreground">
-                        Links de rastreamento (UTM)
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        Gera um link curto rastreável para cada aluno via VAR3
-                      </p>
+                  <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-medium text-foreground">
+                          Links de rastreamento (UTM)
+                        </p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Gera um link curto rastreável para cada aluno via VAR3
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={utmGerado ? "outline" : "default"}
+                        onClick={handleGerarUTM}
+                        disabled={utmLoading}
+                        className="shrink-0 gap-1.5"
+                      >
+                        {utmLoading ? (
+                          <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando...</>
+                        ) : utmGerado ? (
+                          <><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Gerado</>
+                        ) : (
+                          "🔗 Gerar UTM"
+                        )}
+                      </Button>
                     </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={utmGerado ? "outline" : "default"}
-                      onClick={handleGerarUTM}
-                      disabled={utmLoading}
-                      className="shrink-0 gap-1.5"
-                    >
-                      {utmLoading ? (
-                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando...</>
-                      ) : utmGerado ? (
-                        <><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> UTM Gerado</>
-                      ) : (
-                        "🔗 Gerar UTM"
-                      )}
-                    </Button>
+
+                    {/* Barra de progresso durante geração */}
+                    {utmLoading && utmProgress && (
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[10px] text-muted-foreground">
+                          <span>Gerando links...</span>
+                          <span>{utmProgress.gerados + utmProgress.erros} / {utmProgress.total}</span>
+                        </div>
+                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary rounded-full transition-all duration-300"
+                            style={{
+                              width: `${utmProgress.total > 0
+                                ? ((utmProgress.gerados + utmProgress.erros) / utmProgress.total) * 100
+                                : 0}%`
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Resultado após geração */}
+                    {!utmLoading && utmGerado && utmProgress && (
+                      <div className={cn(
+                        "rounded-md px-3 py-2 text-xs",
+                        utmProgress.erros > 0
+                          ? "bg-amber-500/10 border border-amber-500/20"
+                          : "bg-green-500/10 border border-green-500/20"
+                      )}>
+                        <p className={utmProgress.erros > 0 ? "text-amber-600" : "text-green-600"}>
+                          {utmProgress.gerados > 0 && (
+                            <><CheckCircle2 className="h-3.5 w-3.5 inline mr-1" />
+                            {utmProgress.gerados} link{utmProgress.gerados !== 1 ? "s" : ""} UTM gerado{utmProgress.gerados !== 1 ? "s" : ""}</>
+                          )}
+                          {utmProgress.erros > 0 && (
+                            <span className="text-amber-600 ml-2">
+                              · {utmProgress.erros} erro{utmProgress.erros !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </p>
+                        {utmProgress.erros > 0 && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5">
+                            Os erros não impactam o disparo — esses alunos receberão a URL original.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
