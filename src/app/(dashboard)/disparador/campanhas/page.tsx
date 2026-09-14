@@ -519,6 +519,13 @@ export default function CampanhasPage() {
     setJanelaFim(pendingDraft.janelaFim);
     setMensagens(pendingDraft.mensagens);
     setPendingDraft(null);
+
+    // Base importada pertence ao CSV anterior; força reimport para
+    // repropagar o template_variable_map com os valores corretos.
+    setImportFile(null);
+    setImportPreview(null);
+    setImportStats(null);
+    setImportAllRows(null);
   };
 
   const discardDraft = () => {
@@ -1746,6 +1753,19 @@ export default function CampanhasPage() {
                     avance para o próximo passo.
                   </p>
                 </div>
+
+                {mensagens.some((msg) =>
+                  msg.template_variable_map?.some(
+                    (e: any) => e.type === "static" && !e.value
+                  )
+                ) &&
+                  !importFile && (
+                    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
+                      ⚠ Rascunho restaurado com variáveis de template incompletas.
+                      Reimporte o CSV para preencher automaticamente os valores de{" "}
+                      {"{{2}}"}, {"{{3}}"}, etc.
+                    </div>
+                  )}
 
                 {/* Upload area */}
                 <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
