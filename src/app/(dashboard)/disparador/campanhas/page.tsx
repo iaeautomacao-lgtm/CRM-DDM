@@ -2142,7 +2142,7 @@ export default function CampanhasPage() {
               </Button>
             </header>
 
-            <div className="p-6">
+            <div className="p-6 overflow-y-auto max-h-[70vh]">
               {metricsLoading && (
                 <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin" />
