@@ -489,8 +489,10 @@ export default function CanaisPage() {
       <NewChannelDialog
         open={newOpen}
         onOpenChange={setNewOpen}
-        onCreated={async (provider, wahaSession) => {
+        onCreated={async (provider, wahaSession, skipConnect) => {
           const list = await fetchConfigs();
+          // Sessão existente já está WORKING — não abre o modal de QR/pairing.
+          if (skipConnect) return;
           if (provider === "waha" && wahaSession) {
             const created = list.find((c) => c.waha_session === wahaSession);
             if (created) setConnecting(created);

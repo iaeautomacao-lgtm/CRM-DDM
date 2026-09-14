@@ -98,7 +98,7 @@ export function NewChannelDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreated: (provider: Provider, wahaSession?: string) => void;
+  onCreated: (provider: Provider, wahaSession?: string, skipConnect?: boolean) => void;
 }) {
   const [step, setStep] = useState<"choose" | "form">("choose");
   const [provider, setProvider] = useState<Provider | null>(null);
@@ -184,7 +184,7 @@ export function NewChannelDialog({
       writeChannelDefaults({ wahaUrl: wahaUrl.trim() });
       toast.success(data.message || "Canal WAHA criado.");
       handleOpenChange(false);
-      onCreated("waha", session);
+      onCreated("waha", session, wahaMode === "existing");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao criar canal WAHA");
     } finally {
