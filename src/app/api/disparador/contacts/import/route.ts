@@ -36,6 +36,19 @@ function getField(row: Record<string, any>, ...keys: string[]): string | undefin
   return undefined;
 }
 
+// Column names recognized as the contact's display name — "var1" last,
+// covering the Meta CONTATO;VAR1;VAR2;VAR3 export format when no
+// standard name column exists (see tagsArray comment below).
+const NAME_FIELD_KEYS = [
+  "nome",
+  "name",
+  "nome completo",
+  "full name",
+  "cliente",
+  "contato",
+  "var1",
+];
+
 export async function POST(request: Request) {
   try {
     // 1. Authenticate user and resolve their account
@@ -116,13 +129,16 @@ export async function POST(request: Request) {
     // upserts.
     const { data: existingRows } = await supabaseAdmin()
       .from("contacts")
-      .select("phone_normalized")
+      .select("id, name, phone_normalized")
       .eq("account_id", accountId);
-    const existingPhones = new Set(
-      (existingRows ?? [])
-        .map((r: { phone_normalized: string | null }) => r.phone_normalized)
-        .filter((p): p is string => !!p)
-    );
+    const existingContactsByKey = new Map<
+      string,
+      { id: string; name: string | null }
+    >();
+    for (const r of existingRows ?? []) {
+      const key = normalizeKey(r.phone_normalized ?? "");
+      if (key) existingContactsByKey.set(key, { id: r.id, name: r.name });
+    }
 
     type PendingContact = {
       phone: string;
@@ -165,7 +181,27 @@ export async function POST(request: Request) {
       }
 
       const key = normalizeKey(normalized);
-      if (existingPhones.has(key) || seenInFile.has(key)) {
+      if (seenInFile.has(key)) {
+        results.duplicados++;
+        continue;
+      }
+
+      const existingContact = existingContactsByKey.get(key);
+      if (existingContact) {
+        // Contato já existe — só preenche o name se estiver vazio no
+        // banco, nunca sobrescreve um nome já cadastrado.
+        if (!existingContact.name) {
+          const parsedName = getField(row, ...NAME_FIELD_KEYS);
+          if (parsedName) {
+            const { error: updateErr } = await supabaseAdmin()
+              .from("contacts")
+              .update({ name: parsedName })
+              .eq("id", existingContact.id);
+            if (updateErr) {
+              console.error("[Contacts Import] Failed to backfill name:", updateErr);
+            }
+          }
+        }
         results.duplicados++;
         continue;
       }
@@ -183,20 +219,7 @@ export async function POST(request: Request) {
 
       pending.push({
         phone: normalized,
-        name:
-          // "var1" cobre o formato Meta CONTATO;VAR1;VAR2;VAR3 (ver
-          // comentário de tagsArray acima) — só é usado quando nenhuma
-          // coluna de nome padrão existe, por vir depois na ordem.
-          getField(
-            row,
-            "nome",
-            "name",
-            "nome completo",
-            "full name",
-            "cliente",
-            "contato",
-            "var1"
-          ) || null,
+        name: getField(row, ...NAME_FIELD_KEYS) || null,
         email: getField(row, "email", "e-mail", "emaill", "correio") || null,
         company:
           getField(
