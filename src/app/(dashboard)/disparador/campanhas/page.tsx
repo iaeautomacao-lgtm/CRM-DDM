@@ -272,6 +272,7 @@ export default function CampanhasPage() {
     valor_total: number;
   } | null>(null);
   const [utmMetricsLoading, setUtmMetricsLoading] = useState(false);
+  const metricsRefreshRef = useRef<NodeJS.Timeout | null>(null);
 
   // Auto-save the in-progress form to localStorage — creation mode only.
   // Skipped while a restore decision is pending so we don't overwrite the
@@ -316,6 +317,14 @@ export default function CampanhasPage() {
   // Load Data on Mount
   useEffect(() => {
     loadData();
+  }, []);
+
+  // Garante que o auto-refresh de métricas pare se o componente
+  // desmontar com o modal ainda aberto (ex: navegação para outra rota).
+  useEffect(() => {
+    return () => {
+      if (metricsRefreshRef.current) clearInterval(metricsRefreshRef.current);
+    };
   }, []);
 
   // Poll campaigns periodically if any campaign is in execution
@@ -915,29 +924,30 @@ export default function CampanhasPage() {
     return metaSessions.length === 1 ? metaSessions[0].waba_id : undefined;
   }, [sessions, selectedSessions]);
 
-  const handleMetricsClick = async (campaign: typeof campaigns[0]) => {
-    setMetricsModal({ campaignId: campaign.id, nome: campaign.nome });
-    setMetricsData(null);
-    setMetricsLoading(true);
+  // Busca métricas de campanha + UTM. `silent` evita o toast de erro nos
+  // refreshes automáticos (handleMetricsClick já mostra o toast na busca
+  // inicial) para não empilhar notificações a cada 15s de falha.
+  const fetchMetrics = async (
+    campaignId: string,
+    campaignNome: string,
+    silent = false
+  ) => {
     try {
       const supabase = createClient();
       const { data } = await supabase
         .from("campaign_metrics")
         .select("*")
-        .eq("campaign_id", campaign.id)
+        .eq("campaign_id", campaignId)
         .maybeSingle();
       setMetricsData(data ?? null);
     } catch {
-      toast.error("Erro ao carregar métricas");
-    } finally {
-      setMetricsLoading(false);
+      if (!silent) toast.error("Erro ao carregar métricas");
     }
 
-    // Busca métricas UTM em paralelo
     setUtmMetricsLoading(true);
     try {
       const utmRes = await fetch(
-        `/api/disparador/utm/metricas?campanha=${encodeURIComponent(campaign.nome)}&canal=whatsapp`
+        `/api/disparador/utm/metricas?campanha=${encodeURIComponent(campaignNome)}&canal=whatsapp`
       );
       if (utmRes.ok) {
         const utmData = await utmRes.json();
@@ -948,6 +958,20 @@ export default function CampanhasPage() {
     } finally {
       setUtmMetricsLoading(false);
     }
+  };
+
+  const handleMetricsClick = async (campaign: typeof campaigns[0]) => {
+    setMetricsModal({ campaignId: campaign.id, nome: campaign.nome });
+    setMetricsData(null);
+    setMetricsLoading(true);
+    await fetchMetrics(campaign.id, campaign.nome);
+    setMetricsLoading(false);
+
+    // Auto-refresh a cada 15 segundos enquanto o modal estiver aberto.
+    if (metricsRefreshRef.current) clearInterval(metricsRefreshRef.current);
+    metricsRefreshRef.current = setInterval(() => {
+      fetchMetrics(campaign.id, campaign.nome, true);
+    }, 15000);
   };
 
   // Gera links de rastreamento (UTM) via proxy server-side (/api/disparador/utm)
@@ -2250,7 +2274,15 @@ export default function CampanhasPage() {
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => { setMetricsModal(null); setMetricsData(null); setUtmMetrics(null); }}
+                onClick={() => {
+                  if (metricsRefreshRef.current) {
+                    clearInterval(metricsRefreshRef.current);
+                    metricsRefreshRef.current = null;
+                  }
+                  setMetricsModal(null);
+                  setMetricsData(null);
+                  setUtmMetrics(null);
+                }}
               >
                 <X className="h-5 w-5" />
               </Button>
