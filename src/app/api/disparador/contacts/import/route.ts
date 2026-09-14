@@ -184,8 +184,19 @@ export async function POST(request: Request) {
       pending.push({
         phone: normalized,
         name:
-          getField(row, "nome", "name", "nome completo", "full name", "cliente", "contato") ||
-          null,
+          // "var1" cobre o formato Meta CONTATO;VAR1;VAR2;VAR3 (ver
+          // comentário de tagsArray acima) — só é usado quando nenhuma
+          // coluna de nome padrão existe, por vir depois na ordem.
+          getField(
+            row,
+            "nome",
+            "name",
+            "nome completo",
+            "full name",
+            "cliente",
+            "contato",
+            "var1"
+          ) || null,
         email: getField(row, "email", "e-mail", "emaill", "correio") || null,
         company:
           getField(
