@@ -19,16 +19,24 @@ interface OutcomeTagPickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (tag: Tag) => void;
+  conversationId?: string;
 }
 
 export function OutcomeTagPicker({
   open,
   onOpenChange,
   onSelect,
+  conversationId,
 }: OutcomeTagPickerProps) {
   const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [aiSuggestion, setAiSuggestion] = useState<{
+    tag_id: string;
+    tag_name: string;
+    motivo: string;
+  } | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -53,13 +61,30 @@ export function OutcomeTagPicker({
       setLoading(false);
     })();
 
+    // Buscar sugestão da IA em paralelo com as tags
+    if (conversationId) {
+      setAiLoading(true);
+      setAiSuggestion(null);
+      fetch(`/api/conversations/${conversationId}/suggest-tag`)
+        .then(r => r.json())
+        .then(data => {
+          if (data.suggestion) setAiSuggestion(data.suggestion);
+        })
+        .catch(() => {})
+        .finally(() => setAiLoading(false));
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, conversationId]);
 
   function handleOpenChange(next: boolean) {
-    if (!next) setSearch("");
+    if (!next) {
+      setSearch("");
+      setAiSuggestion(null);
+      setAiLoading(false);
+    }
     onOpenChange(next);
   }
 
@@ -87,6 +112,39 @@ export function OutcomeTagPicker({
           className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
           autoFocus
         />
+
+        {/* Sugestão da IA */}
+        {(aiLoading || aiSuggestion) && (
+          <div className="mb-3">
+            {aiLoading && (
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />
+                Analisando conversa...
+              </div>
+            )}
+            {!aiLoading && aiSuggestion && (
+              <button
+                onClick={() => {
+                  const tag = tags.find(t => t.id === aiSuggestion.tag_id);
+                  if (tag) onSelect(tag);
+                }}
+                className="w-full text-left rounded-lg border border-primary/40 bg-primary/5 px-3 py-2.5 hover:bg-primary/10 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-semibold text-primary uppercase tracking-wide">
+                    ✨ Sugestão da IA
+                  </span>
+                </div>
+                <p className="text-sm font-medium text-foreground">
+                  {aiSuggestion.tag_name}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {aiSuggestion.motivo}
+                </p>
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="max-h-[50vh] space-y-1 overflow-y-auto">
           {loading ? (

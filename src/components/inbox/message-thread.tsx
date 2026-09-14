@@ -1480,6 +1480,7 @@ export function MessageThread({
         open={outcomeTagPickerOpen}
         onOpenChange={setOutcomeTagPickerOpen}
         onSelect={handleOutcomeTagSelect}
+        conversationId={conversation?.id}
       />
 
       {/* Real-time VoIP Call Popup Overlay */}
