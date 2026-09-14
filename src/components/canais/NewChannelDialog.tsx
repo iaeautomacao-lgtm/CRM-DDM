@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { normalizeSessionName } from "./types";
+import { cn } from "@/lib/utils";
 
 type Provider = "waha" | "meta";
 
@@ -104,6 +105,7 @@ export function NewChannelDialog({
   const [saving, setSaving] = useState(false);
 
   // WAHA fields
+  const [wahaMode, setWahaMode] = useState<"new" | "existing">("new");
   const [wahaSession, setWahaSession] = useState("");
   const [wahaUrl, setWahaUrl] = useState("");
   const [wahaApiKey, setWahaApiKey] = useState("");
@@ -133,6 +135,7 @@ export function NewChannelDialog({
     const defaults = readChannelDefaults();
     setStep("choose");
     setProvider(null);
+    setWahaMode("new");
     setWahaSession("");
     setWahaUrl(defaults.wahaUrl ?? "");
     setWahaApiKey("");
@@ -173,6 +176,7 @@ export function NewChannelDialog({
           waha_url: wahaUrl.trim(),
           waha_session: session,
           waha_api_key: wahaApiKey.trim() || null,
+          use_existing_session: wahaMode === "existing",
         }),
       });
       const data = await res.json();
@@ -261,12 +265,38 @@ export function NewChannelDialog({
           </div>
         ) : provider === "waha" ? (
           <div className="space-y-3">
+            <div className="flex rounded-lg border border-border overflow-hidden text-xs">
+              <button
+                type="button"
+                onClick={() => setWahaMode("new")}
+                className={cn(
+                  "flex-1 py-1.5 px-3 transition-colors",
+                  wahaMode === "new"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Nova sessão
+              </button>
+              <button
+                type="button"
+                onClick={() => setWahaMode("existing")}
+                className={cn(
+                  "flex-1 py-1.5 px-3 transition-colors",
+                  wahaMode === "existing"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Sessão existente
+              </button>
+            </div>
             <div className="space-y-1">
               <FieldLabel
                 htmlFor="new-waha-session"
                 tooltip="Identificador único desta sessão no servidor WAHA. Use letras minúsculas, números e hífens. Ex.: sessao-ddm-1"
               >
-                Nome da sessão
+                {wahaMode === "existing" ? "Nome da sessão existente" : "Nome da sessão"}
               </FieldLabel>
               <Input
                 id="new-waha-session"
@@ -275,6 +305,12 @@ export function NewChannelDialog({
                 placeholder="ex.: sessaojoao"
                 disabled={saving}
               />
+              {wahaMode === "existing" && (
+                <p className="text-[10px] text-muted-foreground">
+                  A sessão deve estar ativa (WORKING) no servidor WAHA.
+                  O CRM não irá reiniciá-la.
+                </p>
+              )}
             </div>
             <div className="space-y-1">
               <FieldLabel

@@ -276,6 +276,7 @@ export async function POST(request: Request) {
 
     const body = await request.json()
     const { id: configId, provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, app_secret, verify_token, pin } = body
+    const useExistingSession = body.use_existing_session === true
 
     const MASKED_TOKEN = '••••••••••••••••'
 
@@ -396,23 +397,45 @@ export async function POST(request: Request) {
         }
       }
 
-      // Auto-start the session in WAHA
-      try {
-        const rawApiKey = waha_api_key === MASKED_TOKEN && existing
-          ? (existing.waha_api_key ? decrypt(existing.waha_api_key) : null)
-          : waha_api_key
+      if (!useExistingSession) {
+        // Auto-start the session in WAHA (stops/recreates it to apply
+        // the webhook config — see startWahaSession).
+        try {
+          const rawApiKey = waha_api_key === MASKED_TOKEN && existing
+            ? (existing.waha_api_key ? decrypt(existing.waha_api_key) : null)
+            : waha_api_key
 
-        const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
-        const protocol = request.headers.get('x-forwarded-proto') || 'https'
-        const webhookUrl = `${protocol}://${host}/api/whatsapp/webhook/waha`
+          const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
+          const protocol = request.headers.get('x-forwarded-proto') || 'https'
+          const webhookUrl = `${protocol}://${host}/api/whatsapp/webhook/waha`
 
-        await startWahaSession({
-          waha_url,
-          waha_session,
-          waha_api_key: rawApiKey && rawApiKey !== MASKED_TOKEN ? rawApiKey : null
-        }, webhookUrl)
-      } catch (err) {
-        console.warn('Could not auto-start WAHA session:', err)
+          await startWahaSession({
+            waha_url,
+            waha_session,
+            waha_api_key: rawApiKey && rawApiKey !== MASKED_TOKEN ? rawApiKey : null
+          }, webhookUrl)
+        } catch (err) {
+          console.warn('Could not auto-start WAHA session:', err)
+        }
+      } else {
+        // Sessão existente — não recria nem reinicia, só avisa no log
+        // se ela não estiver WORKING no servidor WAHA.
+        try {
+          const rawApiKey = waha_api_key === MASKED_TOKEN && existing
+            ? (existing.waha_api_key ? decrypt(existing.waha_api_key) : null)
+            : waha_api_key
+
+          const sessionInfo = await getWahaSessionInfo({
+            waha_url,
+            waha_session,
+            waha_api_key: rawApiKey && rawApiKey !== MASKED_TOKEN ? rawApiKey : null,
+          })
+          if (sessionInfo?.status !== 'WORKING') {
+            console.warn('[WAHA] Sessão existente não está WORKING:', sessionInfo?.status)
+          }
+        } catch (err) {
+          console.warn('[WAHA] Não foi possível verificar sessão existente:', err)
+        }
       }
 
       return NextResponse.json({ success: true, message: 'WAHA configuration saved.' })
