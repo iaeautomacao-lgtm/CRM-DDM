@@ -727,7 +727,6 @@ export default function CampanhasPage() {
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
         const csv = XLSX.utils.sheet_to_csv(sheet, { FS: ";" });
-        console.log('[XLSX parse] primeiras 3 linhas:', csv.split('\n').slice(0, 3));
         dataLines = csv.split("\n").filter(Boolean);
       } else {
         const text = await file.text();
@@ -751,14 +750,12 @@ export default function CampanhasPage() {
       const headers = dataLines[0].split(sep).map(h =>
         h.trim().toLowerCase().replace(/["\r]/g, "")
       );
-      console.log('[XLSX parse] headers detectados:', headers);
 
       // Índices das colunas
       const phoneIdx = headers.findIndex(h =>
         ["contato", "telefone", "phone", "celular", "tel",
          "fone", "whatsapp", "número", "numero"].includes(h)
       );
-      console.log('[XLSX parse] phoneIdx:', phoneIdx);
       const nameIdx = headers.findIndex(h =>
         ["nome", "name", "cliente"].includes(h)
       );
