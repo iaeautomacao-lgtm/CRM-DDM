@@ -3,12 +3,14 @@ import { ok, badRequest, toApiErrorResponse } from "@/lib/api/v1/respond";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
 import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
+import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
 
 // Payload esperado pelo sistema externo (Planejamento)
 interface ExternalCampaignPayload {
   campaign_name: string;                  // obrigatório
-  template_name: string;                  // obrigatório — nome do template Meta aprovado
+  template_name?: string;                 // obrigatório para canais Meta — nome do template aprovado
   template_language?: string;             // padrão: "pt_BR"
+  message?: string;                       // obrigatório para canais WAHA — texto livre com {{1}}, {{2}}...
   channel?: string;                       // UUID do canal OU número de telefone (ex: "+55 21 3030-9159")
   contacts: Array<{
     phone: string;                        // obrigatório — número do contato (com ou sem +)
@@ -33,9 +35,6 @@ export async function POST(request: Request) {
     if (!body?.campaign_name?.trim()) {
       throw badRequest("'campaign_name' é obrigatório");
     }
-    if (!body?.template_name?.trim()) {
-      throw badRequest("'template_name' é obrigatório");
-    }
     if (!Array.isArray(body?.contacts) || body.contacts.length === 0) {
       throw badRequest("'contacts' é obrigatório e não pode ser vazio");
     }
@@ -54,6 +53,7 @@ export async function POST(request: Request) {
 
     // Resolver canal por UUID ou número de telefone
     let channelId: string | null = null;
+    let provider: "meta" | "waha" = "meta";
     if (body.channel) {
       // Tenta como UUID primeiro
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,16 +65,17 @@ export async function POST(request: Request) {
           .eq("account_id", ctx.accountId)
           .eq("habilitado", true)
           .maybeSingle();
-        if (ch?.provider !== "meta") {
-          throw badRequest("Canal não encontrado, desabilitado ou não é Meta");
+        if (!["meta", "waha"].includes(ch?.provider ?? "")) {
+          throw badRequest("Canal não encontrado, desabilitado ou provider não suportado");
         }
-        channelId = ch.id;
+        channelId = ch!.id;
+        provider = ch!.provider as "meta" | "waha";
       } else {
-        // Tenta como número de telefone — compara por dígitos apenas.
-        // display_phone_number guarda o formato bruto retornado pela
-        // Meta (ex: "+55 21 3030-9159", com espaços/hífen), que o
-        // chamador externo não necessariamente replica byte a byte —
-        // um .eq() direto no banco quase nunca daria match.
+        // Tenta como número de telefone — só se aplica a canais Meta:
+        // display_phone_number é um campo específico da Cloud API (o
+        // formato bruto retornado pela Meta, ex: "+55 21 3030-9159");
+        // sessões WAHA são identificadas por UUID, não por número, então
+        // um canal WAHA precisa ser informado via 'channel' com o UUID.
         const digitsOnly = sanitizePhoneForMeta(body.channel);
         const { data: metaChannels } = await db
           .from("whatsapp_config")
@@ -92,40 +93,56 @@ export async function POST(request: Request) {
           throw badRequest(`Canal Meta não encontrado para o número: ${body.channel}`);
         }
         channelId = match.id;
+        provider = "meta";
       }
     } else {
-      // Se não informou canal, usa o único canal Meta habilitado da conta
+      // Se não informou canal, usa o único canal habilitado (Meta ou WAHA) da conta
       const { data: channels } = await db
         .from("whatsapp_config")
-        .select("id")
+        .select("id, provider")
         .eq("account_id", ctx.accountId)
-        .eq("provider", "meta")
-        .eq("habilitado", true);
+        .eq("habilitado", true)
+        .in("provider", ["meta", "waha"]);
       if (!channels || channels.length === 0) {
-        throw badRequest("Nenhum canal Meta habilitado encontrado nesta conta");
+        throw badRequest("Nenhum canal habilitado encontrado nesta conta");
       }
       if (channels.length > 1) {
-        throw badRequest("Conta com múltiplos canais Meta — informe 'channel' (UUID ou número)");
+        throw badRequest("Conta com múltiplos canais habilitados — informe 'channel' (UUID ou número)");
       }
       channelId = channels[0].id;
+      provider = channels[0].provider as "meta" | "waha";
     }
 
-    // Validar template aprovado
-    const { data: templateRow } = await db
-      .from("message_templates")
-      .select("id, name, language")
-      .eq("name", body.template_name)
-      .eq("account_id", ctx.accountId)
-      .eq("status", "APPROVED")
-      .maybeSingle();
-
-    if (!templateRow) {
-      throw badRequest(
-        `Template '${body.template_name}' não encontrado ou não aprovado pela Meta`
-      );
+    if (provider === "meta" && !body.template_name?.trim()) {
+      throw badRequest("Campo 'template_name' é obrigatório para canais Meta");
+    }
+    if (provider === "waha" && !body.message?.trim()) {
+      throw badRequest("Campo 'message' é obrigatório para canais WAHA");
     }
 
-    const templateLanguage = body.template_language ?? templateRow.language ?? "pt_BR";
+    // Validar template aprovado — só se aplica a Meta; WAHA não tem
+    // conceito de template, o texto vem direto de body.message.
+    let templateRow: { id: string; name: string; language: string } | null = null;
+    let templateLanguage = body.template_language ?? "pt_BR";
+
+    if (provider === "meta") {
+      const { data: tpl } = await db
+        .from("message_templates")
+        .select("id, name, language")
+        .eq("name", body.template_name!)
+        .eq("account_id", ctx.accountId)
+        .eq("status", "APPROVED")
+        .maybeSingle();
+
+      if (!tpl) {
+        throw badRequest(
+          `Template '${body.template_name}' não encontrado ou não aprovado pela Meta`
+        );
+      }
+      templateRow = tpl;
+      templateLanguage = body.template_language ?? tpl.language ?? "pt_BR";
+    }
+
     const slotSize = Math.max(1, body.slot_size ?? 1000);
     const slotIntervalMs = Math.max(1, body.slot_interval_minutes ?? 30) * 60 * 1000;
     const janela_inicio = body.janela_inicio ?? "08:00";
@@ -150,14 +167,22 @@ export async function POST(request: Request) {
         intervalo_min: 0,
         intervalo_max: 0,
         callback_url: callbackUrl,
-        mensagens: [
-          {
-            tipo: "texto",
-            conteudo: `[Template: ${body.template_name}]`,
-            template_name: body.template_name,
-            template_language: templateLanguage,
-          },
-        ],
+        mensagens:
+          provider === "meta"
+            ? [
+                {
+                  tipo: "texto",
+                  conteudo: `[Template: ${body.template_name}]`,
+                  template_name: body.template_name,
+                  template_language: templateLanguage,
+                },
+              ]
+            : [
+                {
+                  tipo: "texto",
+                  conteudo: body.message ?? "",
+                },
+              ],
         created_by: ctx.createdBy,
       })
       .select("id")
@@ -196,21 +221,52 @@ export async function POST(request: Request) {
       slotIndex = Math.floor(enqueued / slotSize);
       const scheduledAt = new Date(Date.now() + slotIndex * slotIntervalMs).toISOString();
 
-      queueRows.push({
-        campaign_id: campaignId,
-        contact_id: null,           // contato externo — não existe no CRM
-        session_id: channelId,
-        // Armazena o telefone em mensagem_final como fallback para
-        // o worker resolver o destinatário (contact_id é null)
-        mensagem_final: normalizedPhone,
-        status: "agendado",
-        tipo: "texto",
-        media_url: null,
-        scheduled_at: scheduledAt,
-        template_name: body.template_name,
-        template_language: templateLanguage,
-        template_variables: Array.isArray(contact.variables) ? contact.variables : [],
-      });
+      if (provider === "meta") {
+        queueRows.push({
+          campaign_id: campaignId,
+          contact_id: null,           // contato externo — não existe no CRM
+          session_id: channelId,
+          // Armazena o telefone em mensagem_final como fallback para
+          // o worker resolver o destinatário (contact_id é null)
+          mensagem_final: normalizedPhone,
+          status: "agendado",
+          tipo: "texto",
+          media_url: null,
+          scheduled_at: scheduledAt,
+          template_name: body.template_name,
+          template_language: templateLanguage,
+          template_variables: Array.isArray(contact.variables) ? contact.variables : [],
+        });
+      } else {
+        // WAHA — texto livre com variáveis {{1}}, {{2}}... resolvidas.
+        // mensagem_final continua guardando o telefone (contact_id é
+        // null, é o único jeito do worker resolver o destinatário); o
+        // texto já resolvido vai em template_variables[0], sinalizado
+        // por EXTERNAL_WAHA_TEXT_MARKER — ver processQueueItem.
+        let resolvedMessage = body.message ?? "";
+        if (Array.isArray(contact.variables)) {
+          contact.variables.forEach((val, idx) => {
+            resolvedMessage = resolvedMessage.replace(
+              new RegExp(`\\{\\{${idx + 1}\\}\\}`, "g"),
+              val
+            );
+          });
+        }
+
+        queueRows.push({
+          campaign_id: campaignId,
+          contact_id: null,
+          session_id: channelId,
+          mensagem_final: normalizedPhone,
+          status: "agendado",
+          tipo: "texto",
+          media_url: null,
+          scheduled_at: scheduledAt,
+          template_name: EXTERNAL_WAHA_TEXT_MARKER,
+          template_language: null,
+          template_variables: [resolvedMessage],
+        });
+      }
 
       enqueued++;
     }
