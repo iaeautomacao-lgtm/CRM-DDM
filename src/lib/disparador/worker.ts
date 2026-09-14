@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import {
   processQueueItem,
   checkWithinWindow,
+  sendCampaignCallback,
   type QueueItem,
   type Campaign,
 } from "@/lib/disparador/processQueue";
@@ -69,6 +70,8 @@ export function ensureQueueWorkerRunning() {
                 .from("campaigns")
                 .update({ status: "encerrada" })
                 .eq("id", campaign.id);
+              // Dispara callback se configurado (fire-and-forget, não bloqueia o worker)
+              void sendCampaignCallback(campaign.id);
             }
             continue;
           }

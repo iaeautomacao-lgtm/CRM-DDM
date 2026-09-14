@@ -5,6 +5,7 @@ import {
   startWacallsCall,
   playWacallsAudio,
   getWacallsCallStatus,
+  assertWahaUrlIsSafe,
 } from "@/lib/whatsapp/waha-api";
 import {
   sendTemplateMessage,
@@ -337,4 +338,78 @@ async function sendViaMeta(
     text,
   });
   return result.messageId;
+}
+
+// Dispara um webhook de callback para o sistema externo quando uma
+// campanha termina de processar. Best-effort: qualquer falha (URL
+// bloqueada, timeout, erro de rede) é só logada — nunca deve derrubar
+// o worker que a chama via `void`.
+export async function sendCampaignCallback(campaignId: string): Promise<void> {
+  try {
+    const db = supabaseAdmin();
+
+    // Buscar campanha com callback_url
+    const { data: campaign } = await db
+      .from("campaigns")
+      .select("id, nome, status, callback_url")
+      .eq("id", campaignId)
+      .maybeSingle();
+
+    if (!campaign?.callback_url) return;
+
+    // Revalida a URL no momento do envio (não só na criação da
+    // campanha) — fecha a janela entre criar a campanha e o callback
+    // disparar dias depois (DNS rebinding / URL editada direto no banco).
+    try {
+      await assertWahaUrlIsSafe(campaign.callback_url);
+    } catch (err) {
+      console.error(`[Callback] Campanha ${campaignId} — callback_url bloqueada:`, err);
+      return;
+    }
+
+    // Buscar métricas da campanha
+    const { data: metrics } = await db
+      .from("campaign_metrics")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .maybeSingle();
+
+    // Buscar resumo dos itens da fila
+    const { data: queueSummary } = await db
+      .from("disp_message_queue")
+      .select("status, template_variables, mensagem_final")
+      .eq("campaign_id", campaignId);
+
+    const enviados = queueSummary?.filter(i => i.status === "enviado" || i.status === "entregue" || i.status === "lido").length ?? 0;
+    const erros = queueSummary?.filter(i => i.status === "erro").length ?? 0;
+    const bloqueados = queueSummary?.filter(i => i.status === "bloqueado").length ?? 0;
+    const cancelados = queueSummary?.filter(i => i.status === "cancelado").length ?? 0;
+
+    const payload = {
+      event: "campaign.completed",
+      campaign_id: campaign.id,
+      campaign_name: campaign.nome,
+      completed_at: new Date().toISOString(),
+      summary: {
+        total_enfileirados: queueSummary?.length ?? 0,
+        enviados,
+        entregues: metrics?.total_entregues ?? 0,
+        lidos: metrics?.total_lidos ?? 0,
+        erros,
+        bloqueados,
+        cancelados,
+      },
+    };
+
+    await fetch(campaign.callback_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    console.log(`[Callback] Campanha ${campaignId} — callback enviado para ${campaign.callback_url}`);
+  } catch (err: any) {
+    console.error(`[Callback] Campanha ${campaignId} — falha ao enviar callback:`, err.message);
+  }
 }

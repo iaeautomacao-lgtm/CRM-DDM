@@ -2,6 +2,7 @@ import { requireApiKey } from "@/lib/auth/api-context";
 import { ok, badRequest, toApiErrorResponse } from "@/lib/api/v1/respond";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
+import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
 
 // Payload esperado pelo sistema externo (Planejamento)
 interface ExternalCampaignPayload {
@@ -18,6 +19,7 @@ interface ExternalCampaignPayload {
   janela_inicio?: string;                 // ex: "08:00" (padrão: "08:00")
   janela_fim?: string;                    // ex: "18:00" (padrão: "18:00")
   objective?: string;
+  callback_url?: string;                  // URL para receber webhook ao finalizar
 }
 
 export async function POST(request: Request) {
@@ -36,6 +38,18 @@ export async function POST(request: Request) {
     }
     if (!Array.isArray(body?.contacts) || body.contacts.length === 0) {
       throw badRequest("'contacts' é obrigatório e não pode ser vazio");
+    }
+
+    const callbackUrl = body.callback_url?.trim() || null;
+    if (callbackUrl) {
+      // Mesma checagem de SSRF usada para waha_url — callback_url é
+      // buscado (fetch) pelo servidor ao final da campanha, então não
+      // pode apontar para endereços internos/privados.
+      try {
+        await assertWahaUrlIsSafe(callbackUrl);
+      } catch {
+        throw badRequest("'callback_url' inválida ou aponta para um destino não permitido");
+      }
     }
 
     // Resolver canal por UUID ou número de telefone
@@ -135,6 +149,7 @@ export async function POST(request: Request) {
         janela_fim,
         intervalo_min: 0,
         intervalo_max: 0,
+        callback_url: callbackUrl,
         mensagens: [
           {
             tipo: "texto",
