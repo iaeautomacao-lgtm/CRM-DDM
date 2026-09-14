@@ -49,8 +49,31 @@ export async function GET(
 
     const tagNames = tags.map(t => t.name).join(", ");
 
-    // Chamar OpenAI para sugestão
-    const openaiKey = process.env.OPENAI_API_KEY;
+    // Busca a chave da conta via ai_config (salva nas configurações),
+    // com fallback pra chave da plataforma. ai_config.api_key é
+    // armazenada em texto puro — mesmo padrão de resolveActiveApiKey
+    // (llm-shared.ts) e do responder.ts principal do agente de IA — e
+    // não passa pelo módulo de encryption usado pros tokens de WhatsApp
+    // (esse é um formato "iv:ciphertext:tag" incompatível; decrypt()
+    // lançaria "unrecognised format" em cima de uma chave OpenAI crua).
+    const { data: profile } = await supabaseAdmin()
+      .from("profiles")
+      .select("account_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    let openaiKey = process.env.OPENAI_API_KEY;
+    if (profile?.account_id) {
+      const { data: aiConfig } = await supabaseAdmin()
+        .from("ai_config")
+        .select("api_key, api_provider")
+        .eq("account_id", profile.account_id)
+        .maybeSingle();
+      if (aiConfig?.api_key?.trim()) {
+        openaiKey = aiConfig.api_key.trim();
+      }
+    }
+
     if (!openaiKey) {
       return NextResponse.json({ suggestion: null });
     }
