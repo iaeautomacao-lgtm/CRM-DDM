@@ -250,9 +250,11 @@ function estimarDisparo(
 
   // Pausas anti-spam — mesma regra "else if" (não cumulativa) de
   // start/route.ts: no contato 100 (múltiplo de 100 E de 20), só a pausa
-  // de 1h conta.
-  const pausas1h = Math.floor(n / 100);
-  const pausas10m = Math.floor(n / 20) - Math.floor(n / 100);
+  // de 1h conta. Suprimidas quando batchSize > 1: batchPauseSeconds já
+  // controla o ritmo do lote, e essas pausas automáticas foram desenhadas
+  // pro ritmo sequencial do WAHA (API não oficial) — redundantes aqui.
+  const pausas1h = batchSizeEfetivo > 1 ? 0 : Math.floor(n / 100);
+  const pausas10m = batchSizeEfetivo > 1 ? 0 : Math.floor(n / 20) - Math.floor(n / 100);
   const tempoPausasS = pausas1h * 3600 + pausas10m * 600;
   const tempoComPausasS = tempoBrutoS + tempoPausasS;
 
