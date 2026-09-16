@@ -167,12 +167,14 @@ export async function POST(
       }
     }
 
-    // 2. Remove previously scheduled/pending items to prevent duplication
+    // 2. Remove previously scheduled/pending items to prevent duplication.
+    // 'enviando' incluído para limpar itens travados por crash/deploy
+    // anterior (processo derrubado entre o claim e o update final).
     await supabaseAdmin()
       .from("disp_message_queue")
       .delete()
       .eq("campaign_id", campaignId)
-      .in("status", ["pendente", "agendado", "erro"]);
+      .in("status", ["pendente", "agendado", "erro", "enviando"]);
 
     // 3. Load active contacts — scoped to the caller's account so a
     // campaign never sends to another account's contacts.

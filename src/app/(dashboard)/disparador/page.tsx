@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { 
@@ -31,6 +32,38 @@ interface QueueLog {
   erro?: string;
   contacts?: { nome: string; phone: string };
   campaigns?: { nome: string };
+}
+
+// Contagem de itens por (campaign_id, status). Usa a RPC wacrm.get_campaign_stats
+// (migration 075 — agregação no servidor) quando disponível; sem a migration
+// aplicada, cai para buscar as linhas cruas e agregar no cliente (comportamento
+// atual, mais caro em volume alto mas funcionalmente idêntico).
+async function fetchCampaignStats(
+  supabase: SupabaseClient,
+  campaignIds: string[]
+): Promise<{ campaign_id: string; status: string; qty: number }[]> {
+  try {
+    const { data, error } = await supabase.rpc("get_campaign_stats", {
+      p_campaign_ids: campaignIds,
+    });
+    if (!error && data) return data;
+  } catch {
+    // RPC ainda não existe (migration 075 não aplicada) — fallback abaixo.
+  }
+
+  const { data } = await supabase
+    .from("disp_message_queue")
+    .select("campaign_id, status")
+    .in("campaign_id", campaignIds);
+
+  const acc: Record<string, Record<string, number>> = {};
+  for (const row of data ?? []) {
+    acc[row.campaign_id] ??= {};
+    acc[row.campaign_id][row.status] = (acc[row.campaign_id][row.status] ?? 0) + 1;
+  }
+  return Object.entries(acc).flatMap(([cid, ss]) =>
+    Object.entries(ss).map(([status, qty]) => ({ campaign_id: cid, status, qty }))
+  );
 }
 
 export default function DisparadorDashboardPage() {
@@ -139,22 +172,16 @@ export default function DisparadorDashboardPage() {
         setHasMoreQueue(data.length >= queueLimitRef.current);
       }
 
-      // Fetch Queue Stats
-      const { data: countData } = await supabase
-        .from("disp_message_queue")
-        .select("status")
-        .in("campaign_id", campaignIds);
-
-      if (countData) {
-        const counts = { scheduled: 0, sending: 0, success: 0, failed: 0 };
-        countData.forEach((item) => {
-          if (item.status === "agendado") counts.scheduled++;
-          else if (item.status === "enviando") counts.sending++;
-          else if (item.status === "enviado") counts.success++;
-          else if (item.status === "erro") counts.failed++;
-        });
-        setStats(counts);
-      }
+      // Fetch Queue Stats (agregado por campanha+status, ver fetchCampaignStats)
+      const statRows = await fetchCampaignStats(supabase, campaignIds);
+      const counts = { scheduled: 0, sending: 0, success: 0, failed: 0 };
+      statRows.forEach(({ status, qty }) => {
+        if (status === "agendado") counts.scheduled += qty;
+        else if (status === "enviando") counts.sending += qty;
+        else if (status === "enviado") counts.success += qty;
+        else if (status === "erro") counts.failed += qty;
+      });
+      setStats(counts);
     } catch (err) {
       console.error("Failed to load queue dashboard stats:", err);
     } finally {

@@ -10,7 +10,7 @@ export async function getDisparadorScope(supabase: SupabaseClient) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return { userIds: [], campaignIds: [] };
+  if (!user) return { userIds: [], campaignIds: [], accountId: null as string | null };
 
   const { data: profile } = await supabase
     .from("profiles")
@@ -18,11 +18,11 @@ export async function getDisparadorScope(supabase: SupabaseClient) {
     .eq("user_id", user.id)
     .maybeSingle();
 
-  const accountId = profile?.account_id;
+  const accountId = profile?.account_id ?? null;
 
   // No account on the profile: fall back to scoping by the caller alone
   // rather than failing open (showing everything).
-  if (!accountId) return { userIds: [user.id], campaignIds: [] };
+  if (!accountId) return { userIds: [user.id], campaignIds: [], accountId };
 
   const { data: members } = await supabase
     .from("profiles")
@@ -39,5 +39,5 @@ export async function getDisparadorScope(supabase: SupabaseClient) {
 
   const campaignIds = (campaigns ?? []).map((c) => c.id as string);
 
-  return { userIds, campaignIds };
+  return { userIds, campaignIds, accountId };
 }

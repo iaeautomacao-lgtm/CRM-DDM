@@ -64,6 +64,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: "idle", message: "No scheduled messages to send" });
     }
 
+    // ATENÇÃO: race condition com worker.ts — ambos consomem a mesma fila.
+    // processQueueItem já se protege contra double-send (claim atômico
+    // condicionado a status='agendado', ver processQueue.ts), então dois
+    // consumidores pegando o mesmo item não duplicam o envio — mas ainda
+    // há dois pollers independentes competindo pela fila sem coordenação.
+    // Após confirmar a migration 075 em produção e o worker estável por 7
+    // dias, remover este bloco e centralizar o consumo apenas no worker.
+    // Mantido agora como safety net para Phusion Passenger.
     console.log(`[Cron] Processing item ${item.id} for campaign ${item.campaign_id}`);
 
     const { data: campaign } = await supabaseAdmin()

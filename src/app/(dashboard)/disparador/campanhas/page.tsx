@@ -119,11 +119,14 @@ const STATUS_LABELS: Record<string, string> = {
   encerrada: "Encerrada",
 };
 
-// Fixed single-slot key — a browser-local safety net against an
-// accidentally closed creation modal, not a per-campaign or per-user
-// store. Never touched by edit mode (see editingId guards below), so
-// editing a real campaign can't clobber or be clobbered by this.
-const DRAFT_STORAGE_KEY = "disparador:campaign-draft";
+// Browser-local safety net against an accidentally closed creation modal,
+// not a per-campaign store. Never touched by edit mode (see editingId
+// guards below), so editing a real campaign can't clobber or be clobbered
+// by this. Scoped by account_id (see draftKey below) so a shared browser
+// profile logged into different accounts never bleeds a draft across them.
+function draftStorageKey(accountId: string | null): string | null {
+  return accountId ? `disparador:campaign-draft:${accountId}` : null;
+}
 
 interface CampaignDraft {
   nome: string;
@@ -156,6 +159,9 @@ export default function CampanhasPage() {
   const [loading, setLoading] = useState(true);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [sessions, setSessions] = useState<WahaSession[]>([]);
+  // Resolved once in loadData() — used to scope the localStorage draft key.
+  const [accountId, setAccountId] = useState<string | null>(null);
+  const draftKey = draftStorageKey(accountId);
 
   // Form Modal States
   const [showModal, setShowModal] = useState(false);
@@ -278,7 +284,7 @@ export default function CampanhasPage() {
   // Skipped while a restore decision is pending so we don't overwrite the
   // saved draft with the blank fields the modal opened with.
   useEffect(() => {
-    if (!showModal || editingId || pendingDraft) return;
+    if (!showModal || editingId || pendingDraft || !draftKey) return;
 
     const draft: CampaignDraft = {
       nome,
@@ -294,14 +300,15 @@ export default function CampanhasPage() {
     };
 
     if (isDraftEmpty(draft)) {
-      localStorage.removeItem(DRAFT_STORAGE_KEY);
+      localStorage.removeItem(draftKey);
     } else {
-      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+      localStorage.setItem(draftKey, JSON.stringify(draft));
     }
   }, [
     showModal,
     editingId,
     pendingDraft,
+    draftKey,
     nome,
     descricao,
     objetivo,
@@ -365,7 +372,8 @@ export default function CampanhasPage() {
       // wacrm.campaigns has no account_id yet (migration 040 not
       // applied), so scope by the caller's account via created_by —
       // see getDisparadorScope.
-      const { userIds } = await getDisparadorScope(supabase);
+      const { userIds, accountId: scopedAccountId } = await getDisparadorScope(supabase);
+      setAccountId(scopedAccountId);
 
       // Load Campaigns
       const { data: campaignList } = await supabase
@@ -504,11 +512,13 @@ export default function CampanhasPage() {
     resetForm();
 
     let draft: CampaignDraft | null = null;
-    try {
-      const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
-      draft = raw ? JSON.parse(raw) : null;
-    } catch {
-      draft = null;
+    if (draftKey) {
+      try {
+        const raw = localStorage.getItem(draftKey);
+        draft = raw ? JSON.parse(raw) : null;
+      } catch {
+        draft = null;
+      }
     }
     setPendingDraft(draft);
 
@@ -538,7 +548,7 @@ export default function CampanhasPage() {
   };
 
   const discardDraft = () => {
-    localStorage.removeItem(DRAFT_STORAGE_KEY);
+    if (draftKey) localStorage.removeItem(draftKey);
     setPendingDraft(null);
   };
 
@@ -598,6 +608,28 @@ export default function CampanhasPage() {
     }
     if (mensagens.some((m) => m.tipo === "texto" && !m.conteudo.trim())) {
       toast.error("Todas as mensagens de texto precisam de conteúdo.");
+      return;
+    }
+    if (mensagens.some((m) => m.tipo === "ia" && !m.prompt?.trim())) {
+      toast.error("O prompt da mensagem IA não pode estar vazio.");
+      return;
+    }
+    if (
+      mensagens.some(
+        (m) =>
+          ["imagem", "audio", "ligacao"].includes(m.tipo) && !m.url?.trim()
+      )
+    ) {
+      toast.error("A URL da mídia é obrigatória para este tipo de mensagem.");
+      return;
+    }
+    const timeRegex = /^\d{2}:\d{2}$/;
+    if (janelaInicio && !timeRegex.test(janelaInicio)) {
+      toast.error("Horário de início inválido — use HH:MM.");
+      return;
+    }
+    if (janelaFim && !timeRegex.test(janelaFim)) {
+      toast.error("Horário de fim inválido — use HH:MM.");
       return;
     }
 
@@ -686,7 +718,7 @@ export default function CampanhasPage() {
         const { error } = await supabase.from("campaigns").insert(campaignData);
         if (error) throw error;
 
-        localStorage.removeItem(DRAFT_STORAGE_KEY);
+        if (draftKey) localStorage.removeItem(draftKey);
         toast.success("Campanha criada!");
       }
 

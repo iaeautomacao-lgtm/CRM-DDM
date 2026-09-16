@@ -56,6 +56,101 @@ export type ProcessResult =
   | { outcome: "blocked"; reason: string }
   | { outcome: "error"; error: string };
 
+// Após esse número de tentativas, o item é marcado como erro permanente
+// em vez de reentrar no funil de reenvio (ver markQueueError).
+const MAX_TENTATIVAS = 5;
+
+// Reivindica atomicamente um item já identificado (agendado -> enviando)
+// via UPDATE condicionado a status='agendado'. Isso é o que de fato evita
+// o double-send: mesmo que worker.ts e cron/route.ts selecionem o mesmo
+// item (cada um faz seu próprio SELECT), só um deles consegue vencer esse
+// UPDATE — o outro recebe 0 linhas afetadas e desiste. Não depende de
+// nenhuma migration: um UPDATE com WHERE é atômico no Postgres por si só.
+async function claimItemAtomically(itemId: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin()
+    .from("disp_message_queue")
+    .update({ status: "enviando" })
+    .eq("id", itemId)
+    .eq("status", "agendado")
+    .select("id");
+  if (error) throw error;
+  return !!data && data.length > 0;
+}
+
+// Busca e reivindica o próximo item agendado de uma campanha. Usa a RPC
+// wacrm.claim_queue_item (migration 075 — SELECT ... FOR UPDATE SKIP LOCKED)
+// quando disponível; sem a migration aplicada, cai para um SELECT do
+// candidato seguido do mesmo claim atômico usado acima. O fallback pode
+// retornar null sob concorrência alta (perdeu a corrida) — quem chama deve
+// apenas tentar de novo no próximo ciclo, o que já é o comportamento normal
+// de worker.ts/cron ao não encontrar item.
+export async function claimQueueItem(campaignId: string): Promise<QueueItem | null> {
+  const supabase = supabaseAdmin();
+
+  try {
+    const { data, error } = await supabase.rpc("claim_queue_item", {
+      p_campaign_id: campaignId,
+    });
+    if (!error) return (data as QueueItem) ?? null;
+  } catch {
+    // RPC ainda não existe (migration 075 não aplicada) — fallback abaixo.
+  }
+
+  const now = new Date().toISOString();
+  const { data: candidates } = await supabase
+    .from("disp_message_queue")
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .eq("status", "agendado")
+    .lte("scheduled_at", now)
+    .order("scheduled_at", { ascending: true })
+    .limit(1);
+
+  const candidate = candidates?.[0];
+  if (!candidate) return null;
+
+  const claimed = await claimItemAtomically(candidate.id);
+  return claimed ? ({ ...candidate, status: "enviando" } as QueueItem) : null;
+}
+
+// Extrai um código HTTP 4xx da mensagem de erro (ex: "WAHA sendText failed
+// (404): ..."). Erros da Meta normalmente não embutem o status na mensagem
+// (ver throwMetaError em meta-api.ts), então essa checagem é best-effort:
+// quando não dá para identificar o status, assume que NÃO é permanente
+// (mais seguro deixar tentar de novo do que travar um erro transitório).
+function isPermanentSendError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  const match = message.match(/\b(4\d{2})\b/);
+  if (!match) return false;
+  const status = Number(match[1]);
+  return status >= 400 && status < 500 && status !== 429;
+}
+
+// Grava erro + tentativas no item. Tenta incluir erro_permanente; se a
+// coluna ainda não existir (migration 075 não aplicada), regrava sem ela
+// para não perder o registro do erro.
+async function markQueueError(
+  itemId: string,
+  message: string,
+  permanent: boolean,
+  tentativas?: number
+): Promise<void> {
+  const baseUpdate: Record<string, unknown> = { status: "erro", erro: message };
+  if (tentativas !== undefined) baseUpdate.tentativas = tentativas;
+
+  const { error } = await supabaseAdmin()
+    .from("disp_message_queue")
+    .update({ ...baseUpdate, erro_permanente: permanent })
+    .eq("id", itemId);
+
+  if (error) {
+    await supabaseAdmin()
+      .from("disp_message_queue")
+      .update(baseUpdate)
+      .eq("id", itemId);
+  }
+}
+
 export function checkWithinWindow(inicio: string, fim: string): boolean {
   const now = new Date();
   try {
@@ -103,10 +198,18 @@ export async function processQueueItem(
     return { outcome: "deferred", reason: "outside_window" };
   }
 
-  await supabaseAdmin()
-    .from("disp_message_queue")
-    .update({ status: "enviando" })
-    .eq("id", item.id);
+  const claimed = await claimItemAtomically(item.id);
+  if (!claimed) {
+    // Outro consumidor (worker.ts / cron) já reivindicou este item entre
+    // o SELECT do chamador e esta chamada — não reprocessa.
+    return { outcome: "deferred", reason: "already_claimed" };
+  }
+
+  const tentativasAtuais = item.tentativas ?? 0;
+  if (tentativasAtuais >= MAX_TENTATIVAS) {
+    await markQueueError(item.id, "Máximo de tentativas atingido", true, tentativasAtuais);
+    return { outcome: "error", error: "Máximo de tentativas atingido" };
+  }
 
   // Para contatos externos (via API), contact_id é null e o
   // telefone está em mensagem_final diretamente.
@@ -182,10 +285,17 @@ export async function processQueueItem(
   const normalizedPhone = phone.replace("+", "");
 
   let externalMessageId: string;
-  if (provider === "meta") {
-    externalMessageId = await sendViaMeta(config, item, normalizedPhone, cleanText, tipo);
-  } else {
-    externalMessageId = await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
+  try {
+    externalMessageId =
+      provider === "meta"
+        ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
+        : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
+  } catch (sendErr: any) {
+    const novasTentativas = tentativasAtuais + 1;
+    const permanent = isPermanentSendError(sendErr) || novasTentativas >= MAX_TENTATIVAS;
+    const message = sendErr?.message || String(sendErr);
+    await markQueueError(item.id, message, permanent, novasTentativas);
+    return { outcome: "error", error: message };
   }
 
   await supabaseAdmin()
