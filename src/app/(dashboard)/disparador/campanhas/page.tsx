@@ -204,6 +204,14 @@ const MAX_DIAS_SIMULACAO_ESTIMATIVA = 3650;
 // `janelaAtiva` usa o MESMO critério de start/route.ts (hasWindow): só
 // conta como ativa quando início e fim estão preenchidos e nenhum dos
 // dois está no valor-padrão de "sem restrição" (00:00 / 23:59).
+//
+// batchSize/batchPauseSeconds (migration 078, ver worker.ts): com
+// batchSize > 1, N contatos são processados em grupos de batchSize em
+// paralelo — o tempo do lote é o do item mais lento dele (delayPorContato,
+// não a soma), com batchPauseSeconds entre lotes consecutivos. Defaults
+// (1 / 0) reduzem a fórmula exatamente ao comportamento sequencial
+// anterior, então chamadas existentes sem esses dois argumentos continuam
+// idênticas.
 function estimarDisparo(
   n: number,
   numMensagens: number,
@@ -211,7 +219,9 @@ function estimarDisparo(
   intervaloMaxS: number,
   janelaInicio: string | null,
   janelaFim: string | null,
-  agora: Date = new Date()
+  agora: Date = new Date(),
+  batchSize: number = 1,
+  batchPauseSeconds: number = 0
 ): EstimativaDisparo {
   if (n <= 0) {
     return {
@@ -228,7 +238,15 @@ function estimarDisparo(
   const intraDelayS = 3;
   const intervaloMedioS = (intervaloMinS + intervaloMaxS) / 2;
   const delayPorContatoS = Math.max(0, numMensagens - 1) * intraDelayS + intervaloMedioS;
-  const tempoBrutoS = n * delayPorContatoS;
+
+  // Com batchSize > 1, os contatos de um lote saem em paralelo — o lote
+  // todo demora o tempo do item mais lento (delayPorContatoS), não a soma.
+  // batchSize=1 (default) reduz isso a numLotes=n e pausaEntreLotes=0,
+  // igual à fórmula sequencial anterior (n * delayPorContatoS).
+  const batchSizeEfetivo = Math.max(1, batchSize);
+  const numLotes = Math.ceil(n / batchSizeEfetivo);
+  const pausaEntreLotesS = batchPauseSeconds * Math.max(0, numLotes - 1);
+  const tempoBrutoS = numLotes * delayPorContatoS + pausaEntreLotesS;
 
   // Pausas anti-spam — mesma regra "else if" (não cumulativa) de
   // start/route.ts: no contato 100 (múltiplo de 100 E de 20), só a pausa
@@ -319,6 +337,9 @@ function estimarDisparo(
   );
 
   const detalheParts: string[] = [];
+  if (batchSizeEfetivo > 1) {
+    detalheParts.push(`Lote de ${batchSizeEfetivo}x — pausa ${batchPauseSeconds}s entre lotes`);
+  }
   if (pausas1h > 0) detalheParts.push(`${pausas1h} pausa${pausas1h > 1 ? "s" : ""} de 1h`);
   if (pausas10m > 0) detalheParts.push(`${pausas10m} pausa${pausas10m > 1 ? "s" : ""} de 10min`);
 
@@ -1055,7 +1076,10 @@ export default function CampanhasPage() {
         intervaloMin,
         intervaloMax,
         janelaInicio || null,
-        janelaFim || null
+        janelaFim || null,
+        undefined,
+        batchSize,
+        batchPauseSeconds
       )
     : null;
 
@@ -1568,7 +1592,10 @@ export default function CampanhasPage() {
                         c.intervalo_min ?? 90,
                         c.intervalo_max ?? 300,
                         c.janela_inicio || null,
-                        c.janela_fim || null
+                        c.janela_fim || null,
+                        undefined,
+                        c.batch_size,
+                        c.batch_pause_seconds
                       ).label} estimado
                     </>
                   ) : (
