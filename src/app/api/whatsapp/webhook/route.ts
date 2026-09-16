@@ -7,6 +7,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -814,6 +815,11 @@ async function processMessage(
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(accountId, contactRecord.id)
+
+  // Correlacionar resposta com campanha do Disparador (se houver) — ver
+  // reply-tracker.ts. Fire-and-forget: nunca deve atrasar/derrubar o
+  // processamento do webhook.
+  trackCampaignReply(contactRecord.id, accountId).catch(() => {})
 
   // ============================================================
   // Flow runner dispatch.

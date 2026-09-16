@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
 
 export async function POST(request: Request) {
   try {
@@ -458,6 +459,14 @@ export async function POST(request: Request) {
       if (msgInsertError) {
         console.error('[waha/webhook] Failed to insert message database error:', JSON.stringify(msgInsertError))
         return NextResponse.json({ error: 'Failed to insert message', details: msgInsertError.message }, { status: 500 })
+      }
+
+      // Correlacionar resposta com campanha do Disparador (se houver) —
+      // ver reply-tracker.ts. Só para inbound de verdade: este evento
+      // também dispara para o eco das nossas próprias mensagens enviadas
+      // (direction === 'outbound'), que não é uma resposta do contato.
+      if (direction === 'inbound' && contactId && accountId) {
+        trackCampaignReply(contactId, accountId).catch(() => {})
       }
 
       // 4. Update the conversation values
