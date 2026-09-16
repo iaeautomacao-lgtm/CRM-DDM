@@ -37,7 +37,15 @@ interface PickerTemplate {
   conteudo: string;
   language?: string;
   waba_id?: string;
+  category?: 'Marketing' | 'Utility' | 'Authentication';
 }
+
+const categoryColors: Record<string, string> = {
+  Marketing: "bg-purple-500/20 text-purple-400 border-purple-500/30",
+  Utility: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  Authentication: "bg-amber-500/20 text-amber-400 border-amber-500/30",
+};
+const categoryColorFallback = "bg-gray-500/20 text-gray-400 border-gray-500/30";
 
 interface MessageTemplatePickerProps {
   open: boolean;
@@ -88,7 +96,7 @@ export function MessageTemplatePicker({
     if (hasMeta) {
       let query = supabase
         .from("message_templates")
-        .select("id, name, body_text, language, waba_id")
+        .select("id, name, body_text, language, waba_id, category")
         .eq("account_id", accountId)
         .eq("status", "APPROVED");
 
@@ -109,6 +117,7 @@ export function MessageTemplatePicker({
             conteudo: t.body_text,
             language: t.language,
             waba_id: t.waba_id,
+            category: t.category ?? undefined,
           })),
         );
       }
@@ -357,6 +366,15 @@ export function MessageTemplatePicker({
                     >
                       <p className="truncate text-sm font-medium text-popover-foreground flex items-center gap-1.5">
                         {hasMeta && t.language ? `${t.nome} (${t.language})` : t.nome}
+                        {t.category && (
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${
+                              categoryColors[t.category] || categoryColorFallback
+                            }`}
+                          >
+                            {t.category}
+                          </span>
+                        )}
                         {t.waba_id && channelMap?.[t.waba_id] && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted
                             text-muted-foreground font-mono">
