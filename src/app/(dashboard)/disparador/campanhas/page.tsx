@@ -838,7 +838,7 @@ export default function CampanhasPage() {
       toast.error("A URL da mídia é obrigatória para este tipo de mensagem.");
       return;
     }
-    const timeRegex = /^\d{2}:\d{2}$/;
+    const timeRegex = /^\d{2}:\d{2}(:\d{2})?$/;
     if (janelaInicio && !timeRegex.test(janelaInicio)) {
       toast.error("Horário de início inválido — use HH:MM.");
       return;
