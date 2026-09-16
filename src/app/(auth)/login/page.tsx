@@ -31,15 +31,6 @@ export default function LoginPage() {
   );
 }
 
-function getSupabaseCookieNames() {
-  if (typeof document === "undefined") return [];
-
-  return document.cookie
-    .split(";")
-    .map((cookie) => cookie.trim().split("=")[0])
-    .filter((name) => name.startsWith("sb-"));
-}
-
 function LoginPageInner() {
   const searchParams = useSearchParams();
   // Forwarded from `/join/<token>` when the visitor already has an
@@ -70,15 +61,12 @@ function LoginPageInner() {
       return;
     }
 
-    console.log("[AUTH-CHECK] login session:", !!data?.session);
-    console.log("[AUTH-CHECK] sb cookies immediate:", getSupabaseCookieNames());
     logAuthFx("LOGIN", {
       phase: "after-password-login",
       ...summarizeSession(data?.session),
       cookies: summarizeSupabaseCookies(),
     });
     setTimeout(() => {
-      console.log("[AUTH-CHECK] sb cookies +1000ms:", getSupabaseCookieNames());
       logAuthFx("LOGIN", {
         phase: "+1000ms",
         cookies: summarizeSupabaseCookies(),

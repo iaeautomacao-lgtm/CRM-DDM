@@ -215,7 +215,6 @@ export function MessageComposer({
       onSend(trimmed, replyTo?.id);
       setText("");
       try {
-        console.log("[Draft] Clearing draft for:", conversationId);
         localStorage.removeItem(`wacrm:draft:${conversationId}`);
       } catch {}
       if (textareaRef.current) {
@@ -241,7 +240,6 @@ export function MessageComposer({
     if (!conversationId) return;
     try {
       const saved = localStorage.getItem(`wacrm:draft:${conversationId}`);
-      console.log("[Draft] Loaded draft for:", conversationId, "value:", saved);
       setText(saved || "");
       setTimeout(() => {
         adjustHeight();
@@ -276,10 +274,8 @@ export function MessageComposer({
       setText(val);
       try {
         if (val) {
-          console.log("[Draft] Saving draft for:", conversationId, "value:", val);
           localStorage.setItem(`wacrm:draft:${conversationId}`, val);
         } else {
-          console.log("[Draft] Removing empty draft for:", conversationId);
           localStorage.removeItem(`wacrm:draft:${conversationId}`);
         }
       } catch (err) {

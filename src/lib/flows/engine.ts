@@ -2781,6 +2781,7 @@ export async function dispatchInboundToFlows(
         .maybeSingle();
       const convRow = conv as { assigned_agent_id: string | null; status: string } | null;
       if (convRow?.assigned_agent_id != null || convRow?.status === "pending") {
+        // operacional — confirma por que um trigger de fluxo foi suprimido
         console.log("[engine] Conversa em atendimento humano, ignorando trigger de fluxo");
         return { consumed: false, outcome: "no_match" };
       }

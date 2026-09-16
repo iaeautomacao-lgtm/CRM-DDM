@@ -62,6 +62,9 @@ export function getAuthFxTabId() {
 export function logAuthFx(scope: string, data: Record<string, unknown>) {
   if (typeof window === "undefined") return;
 
+  // operacional — sink do sistema de diagnóstico de auth/cookies desta
+  // função (não é um debug avulso; ver startAuthCookieForensics abaixo e
+  // authForensicsFetch, plugado como fetch global do client Supabase).
   console.log(`[AUTH-FX][${scope}]`, {
     t: new Date().toISOString(),
     perf: Math.round(performance.now()),

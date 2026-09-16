@@ -244,15 +244,6 @@ export async function sendTextMessage(
   if (contextMessageId) {
     body.context = { message_id: contextMessageId }
   }
-  // TEMP DEBUG — remove before commit. console.error (not
-  // appendFileSync) so this file has no static `fs` import — it gets
-  // bundled by routes that may not run under a plain Node runtime.
-  console.error('[META_REQUEST]', JSON.stringify({
-    ts: new Date().toISOString(),
-    url,
-    to,
-    tokenFirst10: accessToken?.slice(0, 10),
-  }))
   const response = await fetch(url, {
     method: 'POST',
     headers: {
@@ -262,15 +253,6 @@ export async function sendTextMessage(
     body: JSON.stringify(body),
   })
   if (!response.ok) {
-    // TEMP DEBUG — remove before commit.
-    try {
-      const errorBody = await response.clone().text()
-      console.error('[META_ERROR]', JSON.stringify({
-        ts: new Date().toISOString(),
-        status: response.status,
-        body: errorBody,
-      }))
-    } catch {}
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
   const data = await response.json()

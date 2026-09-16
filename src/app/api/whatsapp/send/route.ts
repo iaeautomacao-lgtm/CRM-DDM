@@ -475,6 +475,7 @@ export async function POST(request: Request) {
     // sends go straight through. sanitizePhoneForMeta on workingPhone
     // will yield workingPhone itself, so re-storing preserves it.
     if (workingPhone !== sanitizedPhone) {
+      // operacional — registra uma correção de telefone aplicada de fato
       console.log(
         `[whatsapp/send] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`
       )

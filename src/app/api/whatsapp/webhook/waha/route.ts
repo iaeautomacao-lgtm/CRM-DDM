@@ -9,6 +9,7 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { event, session, payload } = body
 
+    // operacional — marcador leve de início de requisição (sem payload)
     console.log('[waha/webhook] Received webhook event:', event, 'for session:', session)
 
     if (!event || !session || !payload) {
@@ -60,7 +61,6 @@ export async function POST(request: Request) {
     // 1.5. Reaction Synchronization
     // ============================================================
     if (event === 'message.reaction') {
-      console.log('[waha/webhook] Reaction payload:', JSON.stringify(payload))
       const { reaction, messageKey, fromMe } = payload
       const originalMessageId = messageKey?.id
       const emoji = reaction?.text
@@ -112,7 +112,6 @@ export async function POST(request: Request) {
     // 2. Incoming and outgoing message synchronization
     // ============================================================
     if (event === 'message.any') {
-      console.log('[waha/webhook] Message event received. Payload:', JSON.stringify(payload))
       const { id: messageId, timestamp, from, to, body: textBody, fromMe, hasMedia, type, chatId } = payload
       
       let participantJid = fromMe ? to : from
@@ -338,12 +337,6 @@ export async function POST(request: Request) {
 
             const baseUrl = config.waha_url.replace(/\/$/, '')
             const fileUrl = `${baseUrl}/api/files/${fileKey}`
-            console.log('[waha/webhook] Downloading media:', {
-              url: fileUrl,
-              apiKeyLength: apiKey ? apiKey.length : 0,
-              apiKeySample: apiKey ? `${apiKey.substring(0, 8)}...${apiKey.substring(apiKey.length - 4)}` : 'null',
-              headersKeys: Object.keys(headers)
-            })
             const fileRes = await fetch(fileUrl, { headers })
             if (fileRes.ok) {
               const buffer = await fileRes.arrayBuffer()
@@ -446,15 +439,6 @@ export async function POST(request: Request) {
       }
 
       const messageDate = new Date(timestamp * 1000).toISOString()
-
-      console.log('[waha/webhook] Attempting to insert message in DB:', {
-        conversation_id: conversationId,
-        message_id: messageId,
-        sender_type: fromMe ? 'agent' : 'customer',
-        content_type: contentType,
-        media_url: mediaUrl,
-        created_at: messageDate,
-      })
 
       // 3. Insert the message record
       const { error: msgInsertError } = await db

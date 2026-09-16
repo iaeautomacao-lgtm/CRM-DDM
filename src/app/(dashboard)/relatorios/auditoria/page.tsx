@@ -134,7 +134,6 @@ export default function AuditoriaPage() {
       if (applied.resourceType !== ALL) query = query.eq("resource_type", applied.resourceType);
 
       const { data, error } = await query;
-      console.log("[audit] result:", data, error);
       if (error) throw error;
       setLogs((data ?? []) as AuditLog[]);
     } catch (err) {
