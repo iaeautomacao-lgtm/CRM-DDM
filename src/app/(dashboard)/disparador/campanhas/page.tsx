@@ -146,6 +146,22 @@ interface CampaignDraft {
   mensagens: CampaignMessage[];
 }
 
+// Formata tempo_medio_resposta (segundos) para a unidade mais legível —
+// minutos abaixo de 1h, horas+minutos abaixo de 1 dia, dias+horas acima
+// disso — em vez de sempre minutos, que fica ilegível para respostas que
+// demoram dias (ex: 4320min em vez de 3d).
+function formatResponseTime(seconds: number): string {
+  if (seconds <= 0) return "—";
+  const totalMin = Math.round(seconds / 60);
+  if (totalMin < 60) return `${totalMin}min`;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  if (hours < 24) return mins > 0 ? `${hours}h ${mins}min` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remainHours = hours % 24;
+  return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
+}
+
 function isDraftEmpty(draft: CampaignDraft): boolean {
   return (
     !draft.nome.trim() &&
@@ -2452,9 +2468,7 @@ export default function CampanhasPage() {
                       { label: "Erros", value: metricsData.total_erros, color: "text-red-500" },
                       {
                         label: "Tempo Médio Resposta",
-                        value: metricsData.tempo_medio_resposta > 0
-                          ? `${Math.round(metricsData.tempo_medio_resposta / 60)}min`
-                          : "—",
+                        value: formatResponseTime(metricsData.tempo_medio_resposta),
                         color: "text-foreground",
                       },
                     ].map(({ label, value, color }) => (
