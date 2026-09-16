@@ -11,11 +11,11 @@ import {
   sendTemplateMessage,
   sendTextMessage,
   sendMediaMessage,
+  MetaApiError,
 } from "@/lib/whatsapp/meta-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
-import { MetaApiError } from "@/lib/whatsapp/meta-api";
 import OpenAI from "openai";
 
 // Marcador usado em `template_name` para itens de fila de contatos
@@ -42,6 +42,12 @@ export interface QueueItem {
   template_name?: string;
   template_language?: string;
   template_variables?: string[];
+  // Migration 077 — índice do telefone tentado em wacrm.contact_phones
+  // (1 = contacts.phone, o principal; 2/3 = alternativos). Não precisa
+  // ser adicionado a nenhum select manualmente: worker.ts/cron/
+  // claimQueueItem já usam `select("*", ...)`, que já traz a coluna
+  // assim que a migration for aplicada — este campo é só o tipo TS.
+  phone_attempt_order?: number;
 }
 
 export interface Campaign {
@@ -178,6 +184,77 @@ async function markQueueError(
   }
 }
 
+// TELEFONE1 vive em contacts.phone (ordem 1, implícito); TELEFONE2/3 ficam
+// em wacrm.contact_phones com ordem 2/3 — ver migration 077.
+const MAX_PHONE_ATTEMPTS = 3;
+
+// Quando o envio falha com um erro de "número inválido/sem WhatsApp" da
+// Meta (ver isInvalidPhoneError), tenta escalar para o próximo telefone
+// alternativo do contato em wacrm.contact_phones. Reagenda o MESMO item
+// de fila com phone_attempt_order incrementado em vez de criar uma linha
+// nova — a resolução de qual telefone usar no reenvio é feita em
+// processQueueItem a partir desse campo (ver abaixo).
+//
+// Pula números que já estão na blacklist em vez de desistir da escada
+// inteira no primeiro bloqueado — segue tentando até achar um número
+// livre ou esgotar MAX_PHONE_ATTEMPTS.
+//
+// Retorna true se conseguiu reagendar com um próximo número; false se
+// não há contact_id, não há mais números na escada, ou o reagendamento
+// falhou (erro de banco).
+async function tryNextPhone(item: QueueItem): Promise<boolean> {
+  if (!item.contact_id) return false;
+
+  let nextOrder = (item.phone_attempt_order ?? 1) + 1;
+
+  while (nextOrder <= MAX_PHONE_ATTEMPTS) {
+    const { data: nextPhone } = await supabaseAdmin()
+      .from("contact_phones")
+      .select("phone")
+      .eq("contact_id", item.contact_id)
+      .eq("ordem", nextOrder)
+      .maybeSingle();
+
+    if (!nextPhone) {
+      nextOrder++;
+      continue;
+    }
+
+    // Mesmo campo (telefone, não phone_normalized) usado pela checagem
+    // de blacklist em processQueueItem, pra bater com o formato real
+    // gravado em wacrm.blacklist.telefone.
+    const { data: blacklistHit } = await supabaseAdmin()
+      .from("blacklist")
+      .select("id")
+      .eq("telefone", nextPhone.phone)
+      .maybeSingle();
+
+    if (blacklistHit) {
+      nextOrder++;
+      continue;
+    }
+
+    const { error } = await supabaseAdmin()
+      .from("disp_message_queue")
+      .update({
+        status: "agendado",
+        phone_attempt_order: nextOrder,
+        scheduled_at: new Date().toISOString(),
+        erro: null,
+        erro_permanente: false,
+      })
+      .eq("id", item.id);
+
+    if (error) {
+      console.error("[Disparador] tryNextPhone: falha ao reagendar item:", error.message);
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 export function checkWithinWindow(inicio: string, fim: string): boolean {
   const now = new Date();
   try {
@@ -239,10 +316,27 @@ export async function processQueueItem(
   }
 
   // Para contatos externos (via API), contact_id é null e o
-  // telefone está em mensagem_final diretamente.
-  const phone = item.contact_id
-    ? (item.contacts?.phone || item.mensagem_final)
-    : item.mensagem_final;
+  // telefone está em mensagem_final diretamente. Para contatos reais,
+  // phone_attempt_order > 1 (setado por tryNextPhone após um erro de
+  // número inválido) indica que a tentativa atual é com um telefone
+  // alternativo de wacrm.contact_phones, não o contacts.phone principal.
+  let phone: string;
+  if (item.contact_id) {
+    const attemptOrder = item.phone_attempt_order ?? 1;
+    if (attemptOrder > 1) {
+      const { data: altPhone } = await supabaseAdmin()
+        .from("contact_phones")
+        .select("phone")
+        .eq("contact_id", item.contact_id)
+        .eq("ordem", attemptOrder)
+        .maybeSingle();
+      phone = altPhone?.phone || item.contacts?.phone || item.mensagem_final;
+    } else {
+      phone = item.contacts?.phone || item.mensagem_final;
+    }
+  } else {
+    phone = item.mensagem_final;
+  }
 
   const { data: blacklisted } = await supabaseAdmin()
     .from("blacklist")
@@ -321,6 +415,19 @@ export async function processQueueItem(
     if (sendErr instanceof MetaApiError) {
       console.error(`[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`);
     }
+
+    if (isInvalidPhoneError(sendErr)) {
+      const escalated = await tryNextPhone(item);
+      if (escalated) {
+        // Item reagendado com o próximo telefone da escada — não é um
+        // erro final, só adia pro próximo ciclo do worker/cron.
+        return { outcome: "deferred", reason: "retrying_alternate_phone" };
+      }
+      // Sem mais números na escada — cai para o markQueueError abaixo,
+      // que já marca permanent=true nesse caso (isPermanentSendError
+      // também cobre os mesmos códigos de META_INVALID_PHONE_CODES).
+    }
+
     const novasTentativas = tentativasAtuais + 1;
     const permanent = isPermanentSendError(sendErr) || novasTentativas >= MAX_TENTATIVAS;
     const message = sendErr?.message || String(sendErr);

@@ -2,7 +2,7 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { 
@@ -160,6 +160,20 @@ function formatResponseTime(seconds: number): string {
   const days = Math.floor(hours / 24);
   const remainHours = hours % 24;
   return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
+}
+
+// Mesmos aliases de coluna usados no import server-side
+// (src/app/api/disparador/contacts/import/route.ts: TELEFONE2_KEYS/
+// TELEFONE3_KEYS) — duplicado aqui porque o preview do wizard faz seu
+// próprio parse client-side (parseImportFile) e guarda o CSV bruto por
+// linha em `raw`, então dá pra derivar a contagem sem re-parsear nada.
+const ALT_PHONE_COLUMN_KEYS = [
+  ["telefone2", "telefone 2", "fone2", "fone 2", "celular2", "celular 2", "whatsapp2", "whatsapp 2", "tel2", "tel 2"],
+  ["telefone3", "telefone 3", "fone3", "fone 3", "celular3", "celular 3", "whatsapp3", "whatsapp 3", "tel3", "tel 3"],
+];
+
+function countAltPhones(raw: Record<string, string>): number {
+  return ALT_PHONE_COLUMN_KEYS.filter((keys) => keys.some((k) => raw[k]?.trim())).length;
 }
 
 function isDraftEmpty(draft: CampaignDraft): boolean {
@@ -2150,22 +2164,39 @@ export default function CampanhasPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {importPreview.map((row, i) => (
-                            <tr key={i} className="border-t border-border/50">
-                              <td className="px-3 py-2 font-mono">{row.phone}</td>
-                              {row.name !== undefined && (
-                                <td className="px-3 py-2">{row.name}</td>
-                              )}
-                              {row.cpf !== undefined && (
-                                <td className="px-3 py-2 font-mono text-muted-foreground text-[10px]">
-                                  {row.cpf}
-                                </td>
-                              )}
-                              {row.variables.map((v, j) => (
-                                <td key={j} className="px-3 py-2">{v}</td>
-                              ))}
-                            </tr>
-                          ))}
+                          {importPreview.map((row, i) => {
+                            const altCount = countAltPhones(row.raw);
+                            const colCount =
+                              1 +
+                              (row.name !== undefined ? 1 : 0) +
+                              (row.cpf !== undefined ? 1 : 0) +
+                              row.variables.length;
+                            return (
+                              <Fragment key={i}>
+                                <tr className="border-t border-border/50">
+                                  <td className="px-3 py-2 font-mono">{row.phone}</td>
+                                  {row.name !== undefined && (
+                                    <td className="px-3 py-2">{row.name}</td>
+                                  )}
+                                  {row.cpf !== undefined && (
+                                    <td className="px-3 py-2 font-mono text-muted-foreground text-[10px]">
+                                      {row.cpf}
+                                    </td>
+                                  )}
+                                  {row.variables.map((v, j) => (
+                                    <td key={j} className="px-3 py-2">{v}</td>
+                                  ))}
+                                </tr>
+                                {altCount > 0 && (
+                                  <tr className="bg-muted/10">
+                                    <td colSpan={colCount} className="px-3 py-1 text-[10px] text-muted-foreground">
+                                      📱 +{altCount} número{altCount > 1 ? "s" : ""} alternativo{altCount > 1 ? "s" : ""}
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
