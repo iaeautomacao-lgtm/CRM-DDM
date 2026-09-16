@@ -331,8 +331,9 @@ export async function POST(request: Request) {
     // 4. Resolve tag names -> ids up front, scoped to this account
     const allTagNames = pending.flatMap((p) => p.tagsArray);
     let tagIdByKey = new Map<string, string>();
+    let resolvedNameByKey = new Map<string, string>();
     if (allTagNames.length > 0) {
-      ({ tagIdByKey } = await resolveImportTagIds(supabaseAdmin(), {
+      ({ tagIdByKey, resolvedNameByKey } = await resolveImportTagIds(supabaseAdmin(), {
         accountId,
         userId: user.id,
         tagNames: allTagNames,
@@ -431,7 +432,18 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, results });
+    // Nome real da tag usada no import — pode diferir de defaultTag quando
+    // já existia uma tag com o mesmo nome em outra capitalização
+    // (resolveImportTagIds casa por nome case-insensitive, mas
+    // tags_filtro em start/route.ts casa contra tags.name de forma
+    // case-sensitive). O caller deve usar este valor para preencher
+    // tags_filtro, não o nome que ele mesmo enviou.
+    const defaultTagTrimmed = defaultTag?.trim() || null;
+    const tagName = defaultTagTrimmed
+      ? resolvedNameByKey.get(defaultTagTrimmed.toLowerCase()) ?? defaultTagTrimmed
+      : null;
+
+    return NextResponse.json({ success: true, results, tagName });
   } catch (err: any) {
     console.error("[Contacts Import] Failed:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

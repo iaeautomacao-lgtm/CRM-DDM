@@ -5,6 +5,14 @@ const DEFAULT_TAG_COLOR = '#3b82f6';
 export interface ResolveImportTagsResult {
   /** Lowercase tag name → tag id. */
   tagIdByKey: Map<string, string>;
+  /** Lowercase tag name → the tag's actual stored name (original casing).
+   * Matching against an existing tag is case-insensitive (see below), so
+   * the name a caller passed in may not be the literal string that ends
+   * up linked to contacts — callers that persist a tag name elsewhere
+   * (e.g. a campaign's tags_filtro) must use this, not the input, or a
+   * later case-sensitive lookup against tags.name silently matches
+   * nothing. */
+  resolvedNameByKey: Map<string, string>;
   /** Names that could not be matched and were not created. */
   skippedNames: string[];
 }
@@ -43,7 +51,7 @@ export async function resolveImportTagIds(
   }
 
   if (uniqueNames.length === 0) {
-    return { tagIdByKey: new Map(), skippedNames: [] };
+    return { tagIdByKey: new Map(), resolvedNameByKey: new Map(), skippedNames: [] };
   }
 
   const { data: existing, error: fetchError } = await supabase
@@ -54,9 +62,13 @@ export async function resolveImportTagIds(
   if (fetchError) throw fetchError;
 
   const tagIdByKey = new Map<string, string>();
+  const resolvedNameByKey = new Map<string, string>();
   for (const tag of existing ?? []) {
     const key = tag.name.trim().toLowerCase();
-    if (!tagIdByKey.has(key)) tagIdByKey.set(key, tag.id);
+    if (!tagIdByKey.has(key)) {
+      tagIdByKey.set(key, tag.id);
+      resolvedNameByKey.set(key, tag.name);
+    }
   }
 
   const skippedNames: string[] = [];
@@ -85,11 +97,13 @@ export async function resolveImportTagIds(
     if (createError) throw createError;
 
     for (const tag of created ?? []) {
-      tagIdByKey.set(tag.name.trim().toLowerCase(), tag.id);
+      const key = tag.name.trim().toLowerCase();
+      tagIdByKey.set(key, tag.id);
+      resolvedNameByKey.set(key, tag.name);
     }
   }
 
-  return { tagIdByKey, skippedNames };
+  return { tagIdByKey, resolvedNameByKey, skippedNames };
 }
 
 export interface ContactTagAssignment {

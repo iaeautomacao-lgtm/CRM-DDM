@@ -908,7 +908,7 @@ export default function CampanhasPage() {
     // tags_filtro fica vazio e start/route.ts dispara para TODOS os
     // contatos da conta, não só os importados nesta sessão.
     const tagDoCsv = nome.trim();
-    const tagsFinais = importFile && !selectedTags.includes(tagDoCsv)
+    let tagsFinais = importFile && !selectedTags.includes(tagDoCsv)
       ? [...selectedTags, tagDoCsv]
       : selectedTags;
 
@@ -928,9 +928,30 @@ export default function CampanhasPage() {
           throw new Error(err.error || "Erro ao importar contatos");
         }
         const importResult = await importRes.json();
-        toast.success(
-          `${importResult.results?.importados ?? 0} contatos importados!`
-        );
+
+        const { importados = 0, duplicados = 0, invalidos = 0, erros = [] } = importResult.results ?? {};
+        const partes = [`${importados} importados`];
+        if (duplicados > 0) partes.push(`${duplicados} duplicados`);
+        if (invalidos > 0) partes.push(`${invalidos} inválidos`);
+        if (erros.length > 0) partes.push(`${erros.length} erros`);
+
+        if (importados > 0) {
+          toast.success(partes.join(" · "));
+        } else {
+          toast.warning(partes.join(" · ") + " — nenhum contato novo foi adicionado");
+        }
+
+        // Nome real da tag usada no import — pode diferir de tagDoCsv
+        // quando já existia uma tag com o mesmo nome em outra
+        // capitalização (a rota casa por nome case-insensitive, mas o
+        // filtro de tags_filtro em start/route.ts é case-sensitive contra
+        // tags.name). Sem isso, tagsFinais poderia guardar um nome que
+        // não bate com a tag de fato vinculada aos contatos, e a
+        // campanha dispararia para zero contatos.
+        if (importResult.tagName && importResult.tagName !== tagDoCsv) {
+          tagsFinais = tagsFinais.map((t) => (t === tagDoCsv ? importResult.tagName : t));
+        }
+
         // Repopula o seletor de tags com a tag recém-criada (útil ao
         // reabrir/editar esta campanha depois — a sessão atual já usa
         // tagsFinais acima, não depende deste reload).
