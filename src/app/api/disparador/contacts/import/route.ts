@@ -114,6 +114,11 @@ export async function POST(request: Request) {
     const filename = file.name.toLowerCase();
     const buffer = Buffer.from(await file.arrayBuffer());
     let rows: any[] = [];
+    // Diagnóstico temporário — capturado aqui (fora do bloco do parse
+    // CSV/TXT, que é onde delimiter/content/parsed existem) para poder
+    // ser incluído no retorno da rota lá embaixo. Fica null pra XLSX/XLS,
+    // que não passa por Papa.parse.
+    let importDebug: Record<string, unknown> | null = null;
 
     if (filename.endsWith(".csv") || filename.endsWith(".txt")) {
       // Decode content removing BOM (\uFEFF)
@@ -134,13 +139,13 @@ export async function POST(request: Request) {
         ...(delimiter ? { delimiter } : { delimiter: ";" }), // Default to semicolon for Brazilian Excel
       });
 
-      console.log('[IMPORT DEBUG]', {
+      importDebug = {
         delimiter,
         firstLine: content.split('\n')[0].substring(0, 100),
         totalRows: parsed.data.length,
-        firstRow: parsed.data[0],
+        firstRowKeys: Object.keys(parsed.data[0] ?? {}),
         errors: parsed.errors.slice(0, 3)
-      })
+      };
 
       rows = parsed.data;
     } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
@@ -452,7 +457,7 @@ export async function POST(request: Request) {
       ? resolvedNameByKey.get(defaultTagTrimmed.toLowerCase()) ?? defaultTagTrimmed
       : null;
 
-    return NextResponse.json({ success: true, results, tagName });
+    return NextResponse.json({ success: true, results, tagName, _debug: importDebug });
   } catch (err: any) {
     console.error("[Contacts Import] Failed:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -928,6 +928,7 @@ export default function CampanhasPage() {
           throw new Error(err.error || "Erro ao importar contatos");
         }
         const importResult = await importRes.json();
+        console.log('[IMPORT DEBUG CLIENT]', importResult._debug)
 
         const { importados = 0, duplicados = 0, invalidos = 0, erros = [] } = importResult.results ?? {};
         const partes = [`${importados} importados`];
