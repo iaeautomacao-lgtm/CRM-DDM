@@ -25,13 +25,19 @@ import { Button } from "@/components/ui/button";
 interface QueueLog {
   id: string;
   campaign_id: string;
+  contact_id?: string | null;
   mensagem_final: string;
   status: string;
   scheduled_at: string;
   sent_at?: string;
   erro?: string;
+  phone_attempt_order?: number;
   contacts?: { nome: string; phone: string };
   campaigns?: { nome: string };
+  /** Telefone real da tentativa atual quando phone_attempt_order > 1
+   * (resolvido via wacrm.contact_phones — ver loadData) — não persiste,
+   * só para exibição no monitor. */
+  _displayPhone?: string;
 }
 
 // Contagem de itens por (campaign_id, status). Usa a RPC wacrm.get_campaign_stats
@@ -143,11 +149,13 @@ export default function DisparadorDashboardPage() {
         .select(`
           id,
           campaign_id,
+          contact_id,
           mensagem_final,
           status,
           scheduled_at,
           sent_at,
           erro,
+          phone_attempt_order,
           contacts:contact_id ( name, phone ),
           campaigns:campaign_id ( nome )
         `)
@@ -160,14 +168,43 @@ export default function DisparadorDashboardPage() {
         const mappedData: QueueLog[] = data.map((d: any) => ({
           id: d.id,
           campaign_id: d.campaign_id,
+          contact_id: d.contact_id,
           mensagem_final: d.mensagem_final,
           status: d.status,
           scheduled_at: d.scheduled_at,
           sent_at: d.sent_at,
           erro: d.erro,
+          phone_attempt_order: d.phone_attempt_order,
           contacts: d.contacts ? { nome: d.contacts.name, phone: d.contacts.phone } : undefined,
           campaigns: d.campaigns ? { nome: d.campaigns.nome } : undefined,
         }));
+
+        // Itens em escada (phone_attempt_order > 1) mostram o TELEFONE1
+        // via contacts.phone — busca em lote o telefone real da tentativa
+        // atual em contact_phones pra exibir no lugar.
+        const escadaItems = mappedData.filter((i) => (i.phone_attempt_order ?? 1) > 1 && i.contact_id);
+        if (escadaItems.length > 0) {
+          const contactIds = [...new Set(escadaItems.map((i) => i.contact_id as string))];
+          const orders = [...new Set(escadaItems.map((i) => i.phone_attempt_order as number))];
+
+          const { data: altPhones } = await supabase
+            .from("contact_phones")
+            .select("contact_id, phone, ordem")
+            .in("contact_id", contactIds)
+            .in("ordem", orders);
+
+          const altPhoneMap = new Map(
+            (altPhones ?? []).map((r: any) => [`${r.contact_id}:${r.ordem}`, r.phone as string])
+          );
+
+          for (const item of mappedData) {
+            const order = item.phone_attempt_order ?? 1;
+            if (order <= 1 || !item.contact_id) continue;
+            const altPhone = altPhoneMap.get(`${item.contact_id}:${order}`);
+            if (altPhone) item._displayPhone = altPhone;
+          }
+        }
+
         setQueue(mappedData);
         setHasMoreQueue(data.length >= queueLimitRef.current);
       }
@@ -348,7 +385,13 @@ export default function DisparadorDashboardPage() {
                         <span className="font-semibold text-foreground">
                           {item.contacts?.nome || "Contato"}
                         </span>
-                        <span className="text-muted-foreground">({item.contacts?.phone || "Sem Número"})</span>
+                        <span className="text-muted-foreground">({item._displayPhone || item.contacts?.phone || "Sem Número"})</span>
+                        {(item.phone_attempt_order ?? 1) > 1 && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded border
+                            bg-amber-500/20 text-amber-400 border-amber-500/30 font-medium">
+                            Tentativa {item.phone_attempt_order}/3
+                          </span>
+                        )}
                         <span className="px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground text-[9px] uppercase font-bold">
                           {item.campaigns?.nome || "Sem Campanha"}
                         </span>
