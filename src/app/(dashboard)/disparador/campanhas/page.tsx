@@ -391,6 +391,18 @@ export default function CampanhasPage() {
     return () => clearInterval(interval);
   }, [campaigns]);
 
+  // Recarrega só a lista de tags — reutilizada por loadData() no mount e
+  // por handleSubmit() após um import de CSV bem-sucedido, para que a tag
+  // recém-criada com o nome da campanha apareça no seletor de filtros da
+  // próxima vez que o modal for aberto (na sessão atual, o próprio
+  // handleSubmit já garante o filtro certo via tagsFinais, sem depender
+  // desta lista estar atualizada).
+  const loadTags = async () => {
+    const supabase = createClient();
+    const { data: tagList } = await supabase.from("tags").select("id, name, color").order("name");
+    setTags(tagList ?? []);
+  };
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -411,8 +423,7 @@ export default function CampanhasPage() {
       setCampaigns(campaignList ?? []);
 
       // Load Tags
-      const { data: tagList } = await supabase.from("tags").select("id, name, color").order("name");
-      setTags(tagList ?? []);
+      await loadTags();
 
       // Load enabled WhatsApp channels (WAHA + Meta)
       const { data: configList } = await supabase
@@ -677,13 +688,22 @@ export default function CampanhasPage() {
       ? new Date(agendarPara).toISOString()
       : null;
 
+    // Se importou CSV, garante que o filtro da campanha inclui a tag do
+    // import (mesmo nome usado como defaultTag abaixo) — sem isso,
+    // tags_filtro fica vazio e start/route.ts dispara para TODOS os
+    // contatos da conta, não só os importados nesta sessão.
+    const tagDoCsv = nome.trim();
+    const tagsFinais = importFile && !selectedTags.includes(tagDoCsv)
+      ? [...selectedTags, tagDoCsv]
+      : selectedTags;
+
     try {
       // Se há arquivo para importar, envia para o servidor primeiro
       if (importFile) {
         const formData = new FormData();
         formData.append("file", importFile);
         // Tag com o nome da campanha para identificar os contatos
-        formData.append("defaultTag", nome.trim());
+        formData.append("defaultTag", tagDoCsv);
         const importRes = await apiFetch(
           "/api/disparador/contacts/import",
           { method: "POST", body: formData }
@@ -696,6 +716,10 @@ export default function CampanhasPage() {
         toast.success(
           `${importResult.results?.importados ?? 0} contatos importados!`
         );
+        // Repopula o seletor de tags com a tag recém-criada (útil ao
+        // reabrir/editar esta campanha depois — a sessão atual já usa
+        // tagsFinais acima, não depende deste reload).
+        await loadTags();
       }
 
       if (editingId) {
@@ -711,7 +735,7 @@ export default function CampanhasPage() {
             descricao,
             objetivo,
             session_ids: selectedSessions,
-            tags_filtro: selectedTags,
+            tags_filtro: tagsFinais,
             mensagens,
             intervalo_min: intervaloMin,
             intervalo_max: intervaloMax,
@@ -742,7 +766,7 @@ export default function CampanhasPage() {
           descricao,
           objetivo,
           session_ids: selectedSessions,
-          tags_filtro: selectedTags,
+          tags_filtro: tagsFinais,
           mensagens,
           intervalo_min: intervaloMin,
           intervalo_max: intervaloMax,
@@ -2220,6 +2244,20 @@ export default function CampanhasPage() {
                     ⚠ Canal Meta selecionado sem base importada. Certifique-se de
                     que os contatos já estão no CRM com as tags corretas e que
                     o template está configurado nas mensagens.
+                  </div>
+                )}
+
+                {/* Safety net educativo: com a Correção 1 (tagsFinais em
+                    handleSubmit) isto raramente aparece quando há import,
+                    já que a tag da campanha é adicionada automaticamente
+                    ao salvar — mas ainda vale o aviso para campanhas sem
+                    import nenhuma que também deixaram o filtro vazio. */}
+                {selectedTags.length === 0 && (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
+                    ⚠ Nenhum filtro de tag selecionado — a campanha será enviada
+                    para todos os contatos da conta. Se quiser enviar só para
+                    os contatos importados, o filtro será aplicado
+                    automaticamente ao salvar.
                   </div>
                 )}
               </div>
