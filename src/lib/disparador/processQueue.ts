@@ -296,14 +296,31 @@ export async function processQueueItem(
     janela_fim !== "23:59";
 
   if (hasWindow && !checkWithinWindow(janela_inicio!, janela_fim!)) {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+    // Constrói "amanhã às janela_inicio" no fuso America/Sao_Paulo.
+    // setHours() usa o timezone local do processo Node (UTC em produção,
+    // se TZ não estiver configurada), não Brasília — daí o bug original
+    // (warp gravava 3h adiantado em relação ao horário configurado).
+    // Resolve a data de "hoje" em Brasília via Intl e converte direto
+    // para UTC, sem round-trip por string — Brasil não tem horário de
+    // verão desde 2019, então America/Sao_Paulo é sempre UTC-3 fixo, sem
+    // ambiguidade de offset a resolver.
     const [h, m] = janela_inicio!.split(":");
-    tomorrow.setHours(parseInt(h, 10), parseInt(m, 10), 0, 0);
+    const hora = parseInt(h, 10);
+    const minuto = parseInt(m, 10);
+
+    const hojeBr = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Sao_Paulo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+    const [ano, mes, dia] = hojeBr.split("-").map(Number);
+
+    const tomorrowUtc = new Date(Date.UTC(ano, mes - 1, dia + 1, hora + 3, minuto, 0, 0));
 
     await supabaseAdmin()
       .from("disp_message_queue")
-      .update({ status: "agendado", scheduled_at: tomorrow.toISOString() })
+      .update({ status: "agendado", scheduled_at: tomorrowUtc.toISOString() })
       .eq("id", item.id);
 
     return { outcome: "deferred", reason: "outside_window" };
