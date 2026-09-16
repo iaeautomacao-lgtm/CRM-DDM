@@ -180,7 +180,7 @@ export async function POST(
     // campaign never sends to another account's contacts.
     const { data: allContacts, error: contactsError } = await supabaseAdmin()
       .from("contacts")
-      .select("id, name, phone, company")
+      .select("id, name, phone, company, phone_normalized")
       .eq("account_id", accountId);
 
     if (contactsError) {
@@ -238,6 +238,34 @@ export async function POST(
     // Fetch Blacklist to skip
     const { data: blacklist } = await supabaseAdmin().from("blacklist").select("telefone");
     const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
+
+    // Links UTM personalizados por contato (telefone normalizado -> link),
+    // gerados em campanhas/page.tsx via handleGerarUTM e persistidos em
+    // wacrm.disparador_utm_links (migration 076). Só consulta se alguma
+    // mensagem realmente usa `{ type: "utm_link" }` no template_variable_map
+    // — evita a query em campanhas sem esse recurso. Tolerante à migration
+    // não aplicada: erro aqui não derruba o início da campanha, só faz o
+    // {{n}} correspondente sair vazio (ver resolução abaixo).
+    const usaUtmLink = mensagens.some(
+      (m: any) =>
+        Array.isArray(m.template_variable_map) &&
+        m.template_variable_map.some((e: any) => e?.type === "utm_link")
+    );
+    const utmLinkByPhone = new Map<string, string>();
+    if (usaUtmLink) {
+      try {
+        const { data: utmLinks, error: utmLinksError } = await supabaseAdmin()
+          .from("disparador_utm_links")
+          .select("phone_normalized, link_curto")
+          .eq("campaign_id", campaignId);
+        if (utmLinksError) throw utmLinksError;
+        for (const row of utmLinks ?? []) {
+          if (row.phone_normalized) utmLinkByPhone.set(row.phone_normalized, row.link_curto);
+        }
+      } catch (err) {
+        console.error("[Campaign Start] Falha ao carregar disparador_utm_links:", err);
+      }
+    }
 
     // 4. Scheduling queue generation loop
     const minDelay = (campaign.intervalo_min || 90) * 1000;
@@ -297,6 +325,12 @@ export async function POST(
           templateVariables = msg.template_variable_map.map((entry: any) => {
             if (entry?.type === "contact_field") {
               return String((contact as any)[entry.field] ?? "");
+            }
+            if (entry?.type === "utm_link") {
+              // Vazio se este contato não tiver link gerado (CSV sem CPF,
+              // geração de UTM pulada, etc.) — degrada para {{n}} vazio em
+              // vez de derrubar o enfileiramento da campanha inteira.
+              return utmLinkByPhone.get((contact as any).phone_normalized) ?? "";
             }
             return String(entry?.value ?? "");
           });

@@ -52,6 +52,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
 import { getDisparadorScope } from "@/lib/disparador/scope";
+import { normalizePhone } from "@/lib/whatsapp/phone-utils";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
 
@@ -100,6 +101,10 @@ interface CampaignMessage {
   template_variable_map?: Array<
     | { type: "contact_field"; field: "name" | "phone" | "company" }
     | { type: "static"; value: string }
+    // Resolvido por contato em start/route.ts a partir de
+    // wacrm.disparador_utm_links (telefone normalizado -> link_curto),
+    // populada por handleGerarUTM — ver migration 076.
+    | { type: "utm_link" }
   >;
 }
 
@@ -162,6 +167,12 @@ export default function CampanhasPage() {
   // Resolved once in loadData() — used to scope the localStorage draft key.
   const [accountId, setAccountId] = useState<string | null>(null);
   const draftKey = draftStorageKey(accountId);
+  // Identifica esta sessão de criação de campanha antes que ela exista de
+  // fato em wacrm.campaigns (links UTM podem ser gerados no Step 2, antes
+  // do submit do Step 3) — ver handleGerarUTM/handleSubmit. Regenerado em
+  // resetForm() a cada nova sessão; não usado em modo de edição
+  // (editingId já tem o campaign_id real).
+  const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID());
 
   // Form Modal States
   const [showModal, setShowModal] = useState(false);
@@ -632,6 +643,17 @@ export default function CampanhasPage() {
       toast.error("Horário de fim inválido — use HH:MM.");
       return;
     }
+    const usaUtmLink = mensagens.some((m) =>
+      Array.isArray(m.template_variable_map) &&
+      m.template_variable_map.some((v: any) => v.type === "utm_link")
+    );
+    if (usaUtmLink && !utmGerado) {
+      toast.warning(
+        "Uma mensagem usa \"Link UTM personalizado\" mas os links ainda não " +
+        "foram gerados — clique em \"Gerar UTM\" no Step 2 antes de salvar, " +
+        "senão esses contatos não receberão link."
+      );
+    }
 
     // Horário de Brasília — assume o fuso do navegador do usuário
     // (datetime-local não carrega timezone própria).
@@ -715,8 +737,26 @@ export default function CampanhasPage() {
           created_by: user.id,
         };
 
-        const { error } = await supabase.from("campaigns").insert(campaignData);
+        const { data: newCampaign, error } = await supabase
+          .from("campaigns")
+          .insert(campaignData)
+          .select("id")
+          .single();
         if (error) throw error;
+
+        // Links UTM gerados no Step 2 (antes de a campanha existir) foram
+        // salvos sob draftId — agora que o campaign_id real existe,
+        // reatribui essas linhas para que start/route.ts consiga achá-las.
+        if (utmGerado) {
+          const { error: relinkErr } = await supabase
+            .from("disparador_utm_links")
+            .update({ campaign_id: newCampaign.id })
+            .eq("draft_id", draftId)
+            .is("campaign_id", null);
+          if (relinkErr) {
+            console.error("[UTM] Falha ao vincular links à campanha:", relinkErr);
+          }
+        }
 
         if (draftKey) localStorage.removeItem(draftKey);
         toast.success("Campanha criada!");
@@ -751,6 +791,10 @@ export default function CampanhasPage() {
     setUtmGerado(false);
     setUtmLoading(false);
     setUtmProgress(null);
+    // Nova sessão de criação — qualquer link UTM salvo sob o draftId
+    // anterior fica órfão (campaign_id nunca chegou a ser preenchido),
+    // mas isso é inofensivo: nada mais faz join por esse draftId.
+    setDraftId(crypto.randomUUID());
   };
 
   // Meta channels can only send approved templates — the picker needs to
@@ -1007,10 +1051,14 @@ export default function CampanhasPage() {
   };
 
   // Gera links de rastreamento (UTM) via proxy server-side (/api/disparador/utm)
-  // para TODOS os contatos do CSV (importAllRows), substituindo VAR3 pelo
-  // link_curto. O linkMap resultante só é aplicado visualmente ao preview
-  // (5 primeiras linhas) — a propagação até a fila de envio ainda não está
-  // implementada (start/route.ts não consome esse mapeamento cpf→link).
+  // para TODOS os contatos do CSV (importAllRows). O mapeamento cpf→link é
+  // re-chaveado por telefone normalizado e persistido em
+  // wacrm.disparador_utm_links (ver migration 076), chave por draftId
+  // enquanto a campanha ainda não existe (nova campanha) ou por
+  // campaign_id direto (editando um rascunho existente). start/route.ts lê
+  // essa tabela para resolver entradas `{ type: "utm_link" }` do
+  // template_variable_map por contato. O preview (5 primeiras linhas) é só
+  // feedback visual — quem realmente alimenta o envio é a tabela.
   const handleGerarUTM = async () => {
     const source = importAllRows ?? importPreview ?? [];
     if (source.length === 0) return;
@@ -1102,7 +1150,8 @@ export default function CampanhasPage() {
         return;
       }
 
-      // Atualizar importPreview com os link_curto no lugar de VAR3
+      // Atualizar importPreview com os link_curto no lugar de VAR3 (feedback
+      // visual das 5 primeiras linhas — não é o que alimenta o envio).
       setImportPreview(prev =>
         (prev ?? []).map(contact => {
           if (!contact.cpf) return contact;
@@ -1114,14 +1163,54 @@ export default function CampanhasPage() {
         })
       );
 
-      // NOTA: isto só atualiza o preview (5 primeiras linhas exibidas em
-      // tela) — o import real dos contatos sobe o CSV bruto pro servidor
-      // via /api/disparador/contacts/import, que não lê importPreview.
-      // Propagar o link_curto por contato até a fila de envio
-      // (disp_message_queue) requer que start/route.ts resolva um
-      // mapeamento cpf→link por contato — não implementado nesta etapa.
+      // Re-chaveia cpf→link_curto por telefone normalizado (contacts não
+      // tem coluna de CPF — ver migration 076) e persiste em
+      // disparador_utm_links, o que de fato alimenta o envio via
+      // start/route.ts. draftId enquanto a campanha ainda não existe;
+      // editingId quando estamos editando um rascunho já criado.
+      const phoneLinkRows = source
+        .filter((c) => c.cpf && linkMap.has(c.cpf))
+        .map((c) => ({
+          campaign_id: editingId ?? null,
+          draft_id: editingId ? null : draftId,
+          phone_normalized: normalizePhone(c.phone),
+          link_curto: linkMap.get(c.cpf!)!,
+        }))
+        .filter((r) => r.phone_normalized);
+
+      let saved = 0;
+      try {
+        const supabase = createClient();
+        const idColumn = editingId ? "campaign_id" : "draft_id";
+        const idValue = editingId ?? draftId;
+
+        // Substitui qualquer geração anterior desta mesma sessão/campanha
+        // (re-gerar UTM depois de reimportar o CSV não deve acumular lixo).
+        await supabase.from("disparador_utm_links").delete().eq(idColumn, idValue);
+
+        if (phoneLinkRows.length > 0) {
+          const { error: saveErr } = await supabase
+            .from("disparador_utm_links")
+            .insert(phoneLinkRows);
+          if (saveErr) throw saveErr;
+          saved = phoneLinkRows.length;
+        }
+      } catch (saveErr: any) {
+        // Tabela pode não existir ainda (migration 076 não aplicada) — não
+        // derruba a geração em si, mas os links não chegarão ao envio.
+        console.error("[UTM] Falha ao salvar disparador_utm_links:", saveErr);
+        toast.warning(
+          "Links UTM gerados, mas não foi possível salvá-los para o envio. " +
+          "Confirme se a migration 076 foi aplicada."
+        );
+      }
+
       setUtmGerado(true);
-      toast.success(`${linkMap.size} links UTM gerados com sucesso!`);
+      toast.success(
+        saved > 0
+          ? `${linkMap.size} links UTM gerados — ${saved} contatos receberão o link personalizado no envio.`
+          : `${linkMap.size} links UTM gerados com sucesso!`
+      );
     } catch (err: any) {
       toast.error("Erro ao gerar links UTM: " + err.message);
     } finally {
@@ -1592,7 +1681,13 @@ export default function CampanhasPage() {
                                   {`{{${varIdx + 1}}}`}
                                 </span>
                                 <Select
-                                  value={entry.type === "contact_field" ? entry.field : "static"}
+                                  value={
+                                    entry.type === "contact_field"
+                                      ? entry.field
+                                      : entry.type === "utm_link"
+                                        ? "utm_link"
+                                        : "static"
+                                  }
                                   onValueChange={(val) => {
                                     if (!val) return;
                                     const updated = [...mensagens];
@@ -1600,7 +1695,9 @@ export default function CampanhasPage() {
                                     map[varIdx] =
                                       val === "static"
                                         ? { type: "static", value: "" }
-                                        : { type: "contact_field", field: val };
+                                        : val === "utm_link"
+                                          ? { type: "utm_link" }
+                                          : { type: "contact_field", field: val };
                                     updated[i] = { ...updated[i], template_variable_map: map };
                                     setMensagens(updated);
                                   }}
@@ -1612,9 +1709,16 @@ export default function CampanhasPage() {
                                     <SelectItem value="name">Nome do contato</SelectItem>
                                     <SelectItem value="phone">Telefone</SelectItem>
                                     <SelectItem value="company">Empresa</SelectItem>
+                                    <SelectItem value="utm_link">Link UTM personalizado</SelectItem>
                                     <SelectItem value="static">Valor fixo</SelectItem>
                                   </SelectContent>
                                 </Select>
+                                {entry.type === "utm_link" && (
+                                  <span className="flex-1 text-[10px] text-muted-foreground">
+                                    Resolvido por contato via "Gerar UTM" no Step 2
+                                    (telefone → link_curto).
+                                  </span>
+                                )}
                                 {entry.type === "static" && (
                                   <Input
                                     value={entry.value}
