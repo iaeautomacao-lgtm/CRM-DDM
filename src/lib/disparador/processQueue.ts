@@ -15,6 +15,7 @@ import {
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { MetaApiError } from "@/lib/whatsapp/meta-api";
 import OpenAI from "openai";
 
 // Marcador usado em `template_name` para itens de fila de contatos
@@ -113,17 +114,43 @@ export async function claimQueueItem(campaignId: string): Promise<QueueItem | nu
   return claimed ? ({ ...candidate, status: "enviando" } as QueueItem) : null;
 }
 
-// Extrai um código HTTP 4xx da mensagem de erro (ex: "WAHA sendText failed
-// (404): ..."). Erros da Meta normalmente não embutem o status na mensagem
-// (ver throwMetaError em meta-api.ts), então essa checagem é best-effort:
-// quando não dá para identificar o status, assume que NÃO é permanente
-// (mais seguro deixar tentar de novo do que travar um erro transitório).
+// Códigos Meta que indicam número inválido ou sem WhatsApp — não adianta
+// retentar o mesmo número, deve ir direto para a escada de número
+// alternativo (feature ainda não implementada — ver contact_phones,
+// migration 077). 131030/131045/131047: número inválido/não registrado/
+// não entregue. 131021: remetente e destinatário são o mesmo número.
+const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131047, 131021]);
+
+// Códigos Meta que são permanentes mas NÃO são "número inválido" (ex:
+// conta suspensa, parâmetro inválido, token expirado/inválido) — sem
+// escada de número, é erro final direto.
+const META_PERMANENT_CODES = new Set([131031, 131051, 368, 190]);
+
+// Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
+// permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
+// funciona para erros da WAHA (`WAHA sendText failed (404): ...`), mas
+// nunca batia com o formato de erro da Meta (`(#131047) ...`, um código
+// de 6 dígitos, não um status HTTP de 3). Isso fazia todo erro de "número
+// sem WhatsApp" da Meta retentar até MAX_TENTATIVAS antes de virar
+// permanente. Agora usa err.metaCode (estruturado) quando disponível.
 function isPermanentSendError(err: unknown): boolean {
+  if (err instanceof MetaApiError) {
+    if (err.metaCode === null) return false;
+    return META_INVALID_PHONE_CODES.has(err.metaCode) || META_PERMANENT_CODES.has(err.metaCode);
+  }
+  // Erros WAHA: heurística original por HTTP 4xx (exceto 429) embutido na mensagem.
   const message = err instanceof Error ? err.message : String(err);
   const match = message.match(/\b(4\d{2})\b/);
   if (!match) return false;
   const status = Number(match[1]);
   return status >= 400 && status < 500 && status !== 429;
+}
+
+// Exportada para a escada de número alternativo (próxima etapa) decidir
+// se deve tentar o próximo telefone de wacrm.contact_phones em vez de só
+// marcar o item como erro permanente.
+export function isInvalidPhoneError(err: unknown): boolean {
+  return err instanceof MetaApiError && err.metaCode !== null && META_INVALID_PHONE_CODES.has(err.metaCode);
 }
 
 // Grava erro + tentativas no item. Tenta incluir erro_permanente; se a
@@ -291,6 +318,9 @@ export async function processQueueItem(
         ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
         : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
   } catch (sendErr: any) {
+    if (sendErr instanceof MetaApiError) {
+      console.error(`[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`);
+    }
     const novasTentativas = tentativasAtuais + 1;
     const permanent = isPermanentSendError(sendErr) || novasTentativas >= MAX_TENTATIVAS;
     const message = sendErr?.message || String(sendErr);

@@ -27,15 +27,37 @@ interface MetaErrorResponse {
   error?: { message?: string; code?: number; type?: string }
 }
 
+/**
+ * Thrown by every Meta Cloud API call on a non-2xx response. Carries the
+ * numeric error code Meta returns in `error.code` (e.g. 131047 = "message
+ * undeliverable") alongside the plain HTTP status, so callers that need to
+ * branch on the specific failure (retry logic, the number-ladder feature)
+ * don't have to regex-parse it back out of the message text. Extends
+ * Error, so every existing `catch (err) { err.message }` call site keeps
+ * working unchanged.
+ */
+export class MetaApiError extends Error {
+  constructor(
+    message: string,
+    public readonly metaCode: number | null,
+    public readonly httpStatus: number
+  ) {
+    super(message)
+    this.name = 'MetaApiError'
+  }
+}
+
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
+  let code: number | null = null
   try {
     const data = (await response.json()) as MetaErrorResponse
     if (data.error?.message) message = data.error.message
+    if (typeof data.error?.code === 'number') code = data.error.code
   } catch {
     // response body wasn't JSON — keep the fallback
   }
-  throw new Error(message)
+  throw new MetaApiError(message, code, response.status)
 }
 
 // ============================================================
