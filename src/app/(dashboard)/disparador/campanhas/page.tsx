@@ -162,6 +162,173 @@ function formatResponseTime(seconds: number): string {
   return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
 }
 
+interface CampaignMetrics {
+  total_contatos: number;
+  total_enviados: number;
+  total_entregues: number;
+  total_lidos: number;
+  total_respostas: number;
+  total_blacklist: number;
+  total_erros: number;
+  tempo_medio_resposta: number;
+  updated_at: string;
+}
+
+interface EstimativaDisparo {
+  totalSegundos: number;
+  pausas1h: number;
+  pausas10m: number;
+  diasNecessarios: number;
+  fimEstimado: Date;
+  label: string;
+  detalhe: string;
+  aviso?: string;
+}
+
+// Trava de segurança contra janelas configuradas de forma degenerada (ex:
+// 1 minuto de janela por dia com milhares de contatos) — sem isso o loop
+// de simulação dia-a-dia abaixo rodaria efetivamente pra sempre.
+const MAX_DIAS_SIMULACAO_ESTIMATIVA = 3650;
+
+// Replica, em tempo de estimativa, exatamente o que start/route.ts calcula
+// pra scheduled_at (delay médio por contato + pausas anti-spam a cada
+// 20/100 contatos) e o que processQueue.ts faz quando um item cai fora da
+// janela (empurra pro início da janela do dia seguinte). Pura — sem
+// fetch, sem state, só matemática a partir dos parâmetros recebidos.
+//
+// `janelaAtiva` usa o MESMO critério de start/route.ts (hasWindow): só
+// conta como ativa quando início e fim estão preenchidos e nenhum dos
+// dois está no valor-padrão de "sem restrição" (00:00 / 23:59).
+function estimarDisparo(
+  n: number,
+  numMensagens: number,
+  intervaloMinS: number,
+  intervaloMaxS: number,
+  janelaInicio: string | null,
+  janelaFim: string | null,
+  agora: Date = new Date()
+): EstimativaDisparo {
+  if (n <= 0) {
+    return {
+      totalSegundos: 0,
+      pausas1h: 0,
+      pausas10m: 0,
+      diasNecessarios: 0,
+      fimEstimado: agora,
+      label: "—",
+      detalhe: "",
+    };
+  }
+
+  const intraDelayS = 3;
+  const intervaloMedioS = (intervaloMinS + intervaloMaxS) / 2;
+  const delayPorContatoS = Math.max(0, numMensagens - 1) * intraDelayS + intervaloMedioS;
+  const tempoBrutoS = n * delayPorContatoS;
+
+  // Pausas anti-spam — mesma regra "else if" (não cumulativa) de
+  // start/route.ts: no contato 100 (múltiplo de 100 E de 20), só a pausa
+  // de 1h conta.
+  const pausas1h = Math.floor(n / 100);
+  const pausas10m = Math.floor(n / 20) - Math.floor(n / 100);
+  const tempoPausasS = pausas1h * 3600 + pausas10m * 600;
+  const tempoComPausasS = tempoBrutoS + tempoPausasS;
+
+  const janelaAtiva =
+    !!janelaInicio && !!janelaFim && janelaInicio !== "00:00" && janelaFim !== "23:59";
+
+  let fimEstimado: Date;
+  let diasNecessarios = 0;
+  let aviso: string | undefined;
+
+  if (!janelaAtiva) {
+    fimEstimado = new Date(agora.getTime() + tempoComPausasS * 1000);
+  } else {
+    const [inicioH, inicioM] = janelaInicio!.split(":").map(Number);
+    const [fimH, fimM] = janelaFim!.split(":").map(Number);
+    const inicioMin = inicioH * 60 + inicioM;
+    const fimMin = fimH * 60 + fimM;
+    const janelaSegundosPorDia = Math.max(0, (fimMin - inicioMin) * 60);
+
+    if (janelaSegundosPorDia === 0) {
+      // Janela degenerada (fim <= início) — não dá pra simular, cai pro
+      // caso sem janela em vez de travar.
+      fimEstimado = new Date(agora.getTime() + tempoComPausasS * 1000);
+      aviso = "Janela de horário inválida (fim antes do início) — estimativa ignora a janela.";
+    } else {
+      let tempoRestanteS = tempoComPausasS;
+      let cursor = new Date(agora);
+
+      while (true) {
+        if (diasNecessarios > MAX_DIAS_SIMULACAO_ESTIMATIVA) {
+          aviso = "Estimativa muito longa para a janela configurada — verifique o horário.";
+          break;
+        }
+
+        const cursorMin = cursor.getHours() * 60 + cursor.getMinutes();
+        const dentroDaJanela = cursorMin >= inicioMin && cursorMin < fimMin;
+
+        if (!dentroDaJanela) {
+          // Fora da janela agora — pula pro início da janela seguinte
+          // (hoje, se ainda não abriu; amanhã, se já fechou), igual ao
+          // "empurra pra amanhã" que processQueueItem faz por item.
+          const alvo = new Date(cursor);
+          if (cursorMin >= fimMin) alvo.setDate(alvo.getDate() + 1);
+          alvo.setHours(inicioH, inicioM, 0, 0);
+          cursor = alvo;
+          diasNecessarios += 1;
+          continue;
+        }
+
+        const restanteHojeS = (fimMin - cursorMin) * 60 - cursor.getSeconds();
+        const consumidoS = Math.min(tempoRestanteS, restanteHojeS);
+        tempoRestanteS -= consumidoS;
+        cursor = new Date(cursor.getTime() + consumidoS * 1000);
+
+        if (tempoRestanteS <= 0) break;
+
+        // Consumiu o resto da janela de hoje e ainda sobra tempo —
+        // avança pro início da janela de amanhã.
+        const amanha = new Date(cursor);
+        amanha.setDate(amanha.getDate() + 1);
+        amanha.setHours(inicioH, inicioM, 0, 0);
+        cursor = amanha;
+        diasNecessarios += 1;
+      }
+
+      fimEstimado = cursor;
+
+      // Aviso educativo: uma vez que o cronograma extrapola a janela de
+      // um dia, os itens empurrados pra amanhã perdem o espaçamento
+      // planejado (todos caem no mesmo scheduled_at, ver processQueue.ts)
+      // e saem na cadência real do worker, não em intervalo_min/max — a
+      // estimativa tende a ser otimista nesse cenário.
+      if (!aviso && diasNecessarios > 1 && tempoComPausasS > janelaSegundosPorDia * 0.8) {
+        aviso = "Estimativa aproximada — janela estreita pode alterar o espaçamento real.";
+      }
+    }
+  }
+
+  const totalSegundos = Math.max(
+    0,
+    Math.round((fimEstimado.getTime() - agora.getTime()) / 1000)
+  );
+
+  const detalheParts: string[] = [];
+  if (pausas1h > 0) detalheParts.push(`${pausas1h} pausa${pausas1h > 1 ? "s" : ""} de 1h`);
+  if (pausas10m > 0) detalheParts.push(`${pausas10m} pausa${pausas10m > 1 ? "s" : ""} de 10min`);
+
+  return {
+    totalSegundos,
+    pausas1h,
+    pausas10m,
+    diasNecessarios,
+    fimEstimado,
+    label: `~${formatResponseTime(totalSegundos)}`,
+    detalhe: detalheParts.join(" + "),
+    aviso,
+  };
+}
+
 // Mesmos aliases de coluna usados no import server-side
 // (src/app/api/disparador/contacts/import/route.ts: TELEFONE2_KEYS/
 // TELEFONE3_KEYS) — duplicado aqui porque o preview do wizard faz seu
@@ -298,18 +465,14 @@ export default function CampanhasPage() {
     campaignId: string;
     nome: string;
   } | null>(null);
-  const [metricsData, setMetricsData] = useState<{
-    total_contatos: number;
-    total_enviados: number;
-    total_entregues: number;
-    total_lidos: number;
-    total_respostas: number;
-    total_blacklist: number;
-    total_erros: number;
-    tempo_medio_resposta: number;
-    updated_at: string;
-  } | null>(null);
+  const [metricsData, setMetricsData] = useState<CampaignMetrics | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
+  // Alimentado por fetchMetrics (inicial + refresh de 15s do modal) —
+  // usado pelos cards da listagem pra mostrar tempo estimado sem
+  // disparar uma query por campanha (evita N+1 na listagem, ver Passo 3).
+  // Só tem dado pra campanhas cujo modal de métricas já foi aberto
+  // nesta sessão.
+  const [metricsMap, setMetricsMap] = useState<Record<string, CampaignMetrics>>({});
   const [utmMetrics, setUtmMetrics] = useState<{
     total_cliques: number;
     total_cliques_unicos: number;
@@ -858,6 +1021,23 @@ export default function CampanhasPage() {
     .filter((s) => selectedSessions.includes(s.id))
     .some((s) => s.provider === "meta");
 
+  // Derivado, recalculado a cada render — barato o suficiente pra não
+  // precisar de useMemo. Null quando não há CSV importado nesta sessão
+  // (campanha "via tags do CRM" não tem N conhecido no cliente antes do
+  // start de verdade — ver investigação, não existe endpoint hoje que
+  // resolva a contagem de contatos por tag sem duplicar a lógica de
+  // start/route.ts).
+  const estimativa = (importStats?.valid ?? 0) > 0
+    ? estimarDisparo(
+        importStats!.valid,
+        mensagens.length,
+        intervaloMin,
+        intervaloMax,
+        janelaInicio || null,
+        janelaFim || null
+      )
+    : null;
+
   const parseImportFile = async (file: File) => {
     setImportLoading(true);
     setImportPreview(null);
@@ -1070,6 +1250,9 @@ export default function CampanhasPage() {
         .eq("campaign_id", campaignId)
         .maybeSingle();
       setMetricsData(data ?? null);
+      if (data) {
+        setMetricsMap((prev) => ({ ...prev, [campaignId]: data }));
+      }
     } catch {
       if (!silent) toast.error("Erro ao carregar métricas");
     }
@@ -1343,6 +1526,28 @@ export default function CampanhasPage() {
                   <div className="flex items-center gap-1.5 truncate">
                     <Calendar className="h-3.5 w-3.5" /> Janela: {c.janela_inicio} - {c.janela_fim}
                   </div>
+                </div>
+
+                {/* Tempo estimado — só quando métricas dessa campanha já
+                    foram carregadas nesta sessão (usuário abriu o modal
+                    de métricas pelo menos uma vez); sem isso, "—" em vez
+                    de disparar uma query por card (evita N+1). */}
+                <div className="text-[11px] text-muted-foreground">
+                  ⏱{" "}
+                  {metricsMap[c.id]?.total_contatos ? (
+                    <>
+                      {estimarDisparo(
+                        metricsMap[c.id].total_contatos,
+                        Array.isArray(c.mensagens) ? c.mensagens.length : 1,
+                        c.intervalo_min ?? 90,
+                        c.intervalo_max ?? 300,
+                        c.janela_inicio || null,
+                        c.janela_fim || null
+                      ).label} estimado
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </div>
 
                 {/* Actions row */}
@@ -2266,6 +2471,20 @@ export default function CampanhasPage() {
                       <span className="font-medium text-muted-foreground">
                         Via tags do CRM
                       </span>
+                    </div>
+                  )}
+                  {estimativa && (
+                    <div className="flex flex-col gap-1">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground text-sm">Tempo estimado</span>
+                        <span className="font-semibold text-sm">{estimativa.label}</span>
+                      </div>
+                      {estimativa.detalhe && (
+                        <p className="text-xs text-muted-foreground text-right">{estimativa.detalhe}</p>
+                      )}
+                      {estimativa.aviso && (
+                        <p className="text-xs text-amber-500 text-right">⚠ {estimativa.aviso}</p>
+                      )}
                     </div>
                   )}
                 </div>
