@@ -15,6 +15,8 @@ const EDITABLE_FIELDS = [
   "janela_inicio",
   "janela_fim",
   "agendamento",
+  "batch_size",
+  "batch_pause_seconds",
 ] as const;
 
 export async function PATCH(

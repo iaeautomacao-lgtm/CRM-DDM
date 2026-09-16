@@ -55,6 +55,13 @@ export interface Campaign {
   status: string;
   janela_inicio?: string;
   janela_fim?: string;
+  // Migration 078 — disparo em lote (ver worker.ts). batch_size = itens
+  // processados em paralelo por tick; batch_pause_seconds = pausa entre
+  // lotes consecutivos; limite_por_hora já existia no schema mas nunca
+  // era lido antes desta feature.
+  batch_size?: number;
+  batch_pause_seconds?: number;
+  limite_por_hora?: number;
 }
 
 export type ProcessResult =

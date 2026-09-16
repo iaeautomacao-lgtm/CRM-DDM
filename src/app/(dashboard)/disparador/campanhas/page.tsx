@@ -71,6 +71,9 @@ interface Campaign {
   janela_fim: string;
   agendamento?: string | null;
   created_at: string;
+  // Migration 078 — disparo em lote (ver worker.ts)
+  batch_size?: number;
+  batch_pause_seconds?: number;
 }
 
 interface TagItem {
@@ -143,6 +146,8 @@ interface CampaignDraft {
   intervaloMax: number;
   janelaInicio: string;
   janelaFim: string;
+  batchSize: number;
+  batchPauseSeconds: number;
   mensagens: CampaignMessage[];
 }
 
@@ -384,6 +389,8 @@ export default function CampanhasPage() {
   const [intervaloMax, setIntervaloMax] = useState(60);
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
+  const [batchSize, setBatchSize] = useState(1);
+  const [batchPauseSeconds, setBatchPauseSeconds] = useState(0);
   const [agendarPara, setAgendarPara] = useState<string>("");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
 
@@ -500,6 +507,8 @@ export default function CampanhasPage() {
       intervaloMax,
       janelaInicio,
       janelaFim,
+      batchSize,
+      batchPauseSeconds,
       mensagens,
     };
 
@@ -522,6 +531,8 @@ export default function CampanhasPage() {
     intervaloMax,
     janelaInicio,
     janelaFim,
+    batchSize,
+    batchPauseSeconds,
     mensagens,
   ]);
 
@@ -552,7 +563,7 @@ export default function CampanhasPage() {
         const { userIds } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by")
+          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds")
           .in("created_by", userIds)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -707,6 +718,8 @@ export default function CampanhasPage() {
     setIntervaloMax(campaign.intervalo_max);
     setJanelaInicio(campaign.janela_inicio);
     setJanelaFim(campaign.janela_fim);
+    setBatchSize(campaign.batch_size ?? 1);
+    setBatchPauseSeconds(campaign.batch_pause_seconds ?? 0);
     // Edição só é permitida para campanhas em "rascunho" (ver PATCH
     // /api/disparador/campaigns/[id]), que por definição nunca têm
     // agendamento — campo sempre reseta vazio aqui.
@@ -751,6 +764,8 @@ export default function CampanhasPage() {
     setIntervaloMax(pendingDraft.intervaloMax);
     setJanelaInicio(pendingDraft.janelaInicio);
     setJanelaFim(pendingDraft.janelaFim);
+    setBatchSize(pendingDraft.batchSize ?? 1);
+    setBatchPauseSeconds(pendingDraft.batchPauseSeconds ?? 0);
     setMensagens(pendingDraft.mensagens);
     setPendingDraft(null);
 
@@ -918,6 +933,8 @@ export default function CampanhasPage() {
             intervalo_max: intervaloMax,
             janela_inicio: janelaInicio,
             janela_fim: janelaFim,
+            batch_size: batchSize,
+            batch_pause_seconds: batchPauseSeconds,
             agendamento: agendamentoISO,
           }),
         });
@@ -949,6 +966,8 @@ export default function CampanhasPage() {
           intervalo_max: intervaloMax,
           janela_inicio: janelaInicio,
           janela_fim: janelaFim,
+          batch_size: batchSize,
+          batch_pause_seconds: batchPauseSeconds,
           agendamento: agendamentoISO,
           status: agendamentoISO ? "agendado" : "rascunho",
           created_by: user.id,
@@ -999,6 +1018,8 @@ export default function CampanhasPage() {
     setMensagens([{ tipo: "texto", conteudo: "" }]);
     setIntervaloMin(30);
     setIntervaloMax(60);
+    setBatchSize(1);
+    setBatchPauseSeconds(0);
     setAgendarPara("");
     setWizardStep(1);
     setImportFile(null);
@@ -1526,6 +1547,11 @@ export default function CampanhasPage() {
                   <div className="flex items-center gap-1.5 truncate">
                     <Calendar className="h-3.5 w-3.5" /> Janela: {c.janela_inicio} - {c.janela_fim}
                   </div>
+                  {(c.batch_size ?? 1) > 1 && (
+                    <div className="flex items-center gap-1.5 truncate">
+                      <Layers className="h-3.5 w-3.5" /> Lote: {c.batch_size}x / pausa {c.batch_pause_seconds ?? 0}s
+                    </div>
+                  )}
                 </div>
 
                 {/* Tempo estimado — só quando métricas dessa campanha já
@@ -1792,6 +1818,47 @@ export default function CampanhasPage() {
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Batch dispatch (migration 078) */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Mensagens por lote</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={batchSize}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setBatchSize(val);
+                      // Zera a pausa quando o lote volta a 1 — evita que um
+                      // batch_pause_seconds esquecido de uma edição anterior
+                      // insira uma pausa extra no comportamento de item único.
+                      if (val <= 1) setBatchPauseSeconds(0);
+                    }}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Quantas mensagens enviar em paralelo por ciclo (default: 1).
+                  </p>
+                </div>
+                {batchSize > 1 && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground">Pausa entre lotes (segundos)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={3600}
+                      value={batchPauseSeconds}
+                      onChange={(e) => setBatchPauseSeconds(Number(e.target.value))}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                    />
+                    <p className="text-[10px] text-muted-foreground">
+                      Tempo de espera entre cada lote (0 = sem pausa extra).
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Agendamento futuro */}
