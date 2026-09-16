@@ -133,6 +133,15 @@ export async function POST(request: Request) {
         skipEmptyLines: true,
         ...(delimiter ? { delimiter } : { delimiter: ";" }), // Default to semicolon for Brazilian Excel
       });
+
+      console.log('[IMPORT DEBUG]', {
+        delimiter,
+        firstLine: content.split('\n')[0].substring(0, 100),
+        totalRows: parsed.data.length,
+        firstRow: parsed.data[0],
+        errors: parsed.errors.slice(0, 3)
+      })
+
       rows = parsed.data;
     } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
       const workbook = XLSX.read(buffer, { type: "buffer" });
