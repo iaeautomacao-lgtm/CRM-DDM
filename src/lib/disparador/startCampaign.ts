@@ -196,6 +196,30 @@ export async function startCampaign(
       }
     }
 
+    // VAR1/VAR2/VAR3 do CSV por contato (contact_id + var_index -> value),
+    // persistidas no import em wacrm.contact_import_variables (migration
+    // 079). Só consulta se alguma mensagem usa `{ type: "csv_var" }` —
+    // mesmo padrão do usaUtmLink acima.
+    const usaCsvVar = mensagens.some(
+      (m: any) =>
+        Array.isArray(m.template_variable_map) &&
+        m.template_variable_map.some((e: any) => e?.type === "csv_var")
+    );
+    const csvVarMap = new Map<string, string>();
+    if (usaCsvVar) {
+      const { data: csvVars, error: csvVarsError } = await supabaseAdmin()
+        .from("contact_import_variables")
+        .select("contact_id, var_index, value")
+        .eq("campaign_id", campaignId);
+      if (csvVarsError) {
+        console.error("[startCampaign] Falha ao carregar contact_import_variables:", csvVarsError);
+      } else {
+        for (const row of csvVars ?? []) {
+          csvVarMap.set(`${row.contact_id}:${row.var_index}`, row.value);
+        }
+      }
+    }
+
     // 4. Scheduling queue generation loop
     const minDelay = (campaign.intervalo_min || 90) * 1000;
     const maxDelay = (campaign.intervalo_max || 300) * 1000;
@@ -261,6 +285,13 @@ export async function startCampaign(
               // geração de UTM pulada, etc.) — degrada para {{n}} vazio em
               // vez de derrubar o enfileiramento da campanha inteira.
               return utmLinkByPhone.get((contact as any).phone_normalized) ?? "";
+            }
+            if (entry?.type === "csv_var") {
+              // Vazio se este contato não tiver essa coluna preenchida no
+              // CSV importado (ou se o import não tiver rodado com esta
+              // campanha/rascunho associado) — mesma degradação dos casos
+              // acima em vez de derrubar o enfileiramento inteiro.
+              return csvVarMap.get(`${contact.id}:${entry.index}`) ?? "";
             }
             return String(entry?.value ?? "");
           });

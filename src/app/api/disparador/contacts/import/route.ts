@@ -114,6 +114,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 });
     }
     const defaultTag = formData.get("defaultTag") as string | null;
+    // campaign_id só vem preenchido quando o import acontece numa edição
+    // de campanha já existente; draft_id cobre a criação de campanha nova
+    // (import roda no Step 2 do wizard, antes do insert em wacrm.campaigns
+    // no Step 3) — mesmo padrão de wacrm.disparador_utm_links (migration
+    // 076). Usado só pra persistir VAR1/VAR2/VAR3 (migration 079) — nada
+    // aqui depende disso pra continuar funcionando se vier vazio.
+    const campaignIdRaw = (formData.get("campaign_id") as string | null)?.trim() || null;
+    const draftIdRaw = (formData.get("draft_id") as string | null)?.trim() || null;
 
     const filename = file.name.toLowerCase();
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -205,14 +213,17 @@ export async function POST(request: Request) {
       company: string | null;
       cpf: string | null;
       altPhones: AltPhoneRow[];
+      csvVars: (string | undefined)[];
       tagsArray: string[];
     };
     const pending: PendingContact[] = [];
     // altPhoneAssignments cobre os dois casos: contato já existente
     // (contact_id resolvido na hora, empurrado direto aqui dentro do
     // loop) e contato novo (resolvido depois do insert em lote, igual
-    // ao padrão de tagAssignments abaixo).
+    // ao padrão de tagAssignments abaixo). csvVarAssignments segue o
+    // mesmo padrão para VAR1/VAR2/VAR3 (migration 079).
     const altPhoneAssignments: Array<{ contact_id: string; phone: string; phone_normalized: string; ordem: number }> = [];
+    const csvVarAssignments: Array<{ contact_id: string; var_index: number; value: string }> = [];
     const seenInFile = new Set<string>();
     const seenCpfInFile = new Set<string>();
 
@@ -242,6 +253,9 @@ export async function POST(request: Request) {
       }
 
       const cpfNormalized = normalizeCpf(getField(row, ...CPF_FIELD_KEYS));
+      // VAR1/VAR2/VAR3 — getField já compara case-insensitive, então
+      // "var1" cobre "VAR1"/"Var1" sem precisar listar as duas formas.
+      const csvVars = [getField(row, "var1"), getField(row, "var2"), getField(row, "var3")];
 
       const key = normalizeKey(normalized);
       const isDuplicateInFile =
@@ -325,6 +339,9 @@ export async function POST(request: Request) {
         for (const alt of altPhones) {
           altPhoneAssignments.push({ contact_id: matched.id, ...alt });
         }
+        csvVars.forEach((v, idx) => {
+          if (v) csvVarAssignments.push({ contact_id: matched.id, var_index: idx, value: v });
+        });
         results.duplicados++;
         continue;
       }
@@ -357,6 +374,7 @@ export async function POST(request: Request) {
           ) || null,
         cpf: cpfNormalized,
         altPhones,
+        csvVars,
         tagsArray,
       });
     }
@@ -413,6 +431,9 @@ export async function POST(request: Request) {
             for (const alt of source.altPhones) {
               altPhoneAssignments.push({ contact_id: singleData.id, ...alt });
             }
+            source.csvVars.forEach((v, idx) => {
+              if (v) csvVarAssignments.push({ contact_id: singleData.id, var_index: idx, value: v });
+            });
           } else if (isUniqueViolation(singleErr)) {
             results.duplicados++;
           } else {
@@ -431,6 +452,9 @@ export async function POST(request: Request) {
           for (const alt of source.altPhones) {
             altPhoneAssignments.push({ contact_id: inserted[j].id, ...alt });
           }
+          source.csvVars.forEach((v, idx) => {
+            if (v) csvVarAssignments.push({ contact_id: inserted[j].id, var_index: idx, value: v });
+          });
         }
       }
     }
@@ -462,6 +486,42 @@ export async function POST(request: Request) {
         }
       } catch (err) {
         console.error("[Contacts Import] Failed to save alternate phones:", err);
+      }
+    }
+
+    // 8. Save VAR1/VAR2/VAR3 into wacrm.contact_import_variables —
+    // permite que template_variable_map resolva `{ type: "csv_var" }` por
+    // contato em startCampaign.ts (migration 079). Best-effort, mesmo
+    // padrão do passo anterior — falha aqui não derruba o import.
+    if (csvVarAssignments.length > 0) {
+      if (!campaignIdRaw && !draftIdRaw) {
+        // Sem campaign_id nem draft_id não há como saber a qual campanha
+        // essas variáveis pertencem — não insere linhas orfãs.
+        console.error(
+          "[Contacts Import] csvVarAssignments presente mas nem campaign_id nem draft_id foram enviados — pulando."
+        );
+      } else {
+        try {
+          const varChunkSize = 100;
+          const onConflict = campaignIdRaw
+            ? "contact_id,campaign_id,var_index"
+            : "contact_id,draft_id,var_index";
+          for (let i = 0; i < csvVarAssignments.length; i += varChunkSize) {
+            const chunk = csvVarAssignments.slice(i, i + varChunkSize).map((v) => ({
+              contact_id: v.contact_id,
+              campaign_id: campaignIdRaw,
+              draft_id: campaignIdRaw ? null : draftIdRaw,
+              var_index: v.var_index,
+              value: v.value,
+            }));
+            const { error: varErr } = await supabaseAdmin()
+              .from("contact_import_variables")
+              .upsert(chunk, { onConflict });
+            if (varErr) throw varErr;
+          }
+        } catch (err) {
+          console.error("[Contacts Import] Failed to save csv import variables:", err);
+        }
       }
     }
 

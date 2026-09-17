@@ -104,10 +104,15 @@ interface CampaignMessage {
   template_variable_map?: Array<
     | { type: "contact_field"; field: "name" | "phone" | "company" }
     | { type: "static"; value: string }
-    // Resolvido por contato em start/route.ts a partir de
-    // wacrm.disparador_utm_links (telefone normalizado -> link_curto),
-    // populada por handleGerarUTM — ver migration 076.
+    // Resolvido por contato em src/lib/disparador/startCampaign.ts a
+    // partir de wacrm.disparador_utm_links (telefone normalizado ->
+    // link_curto), populada por handleGerarUTM — ver migration 076.
     | { type: "utm_link" }
+    // Resolvido por contato em startCampaign.ts a partir de
+    // wacrm.contact_import_variables (contact_id + var_index -> value),
+    // populada no import de contatos a partir das colunas VAR1/VAR2/VAR3
+    // do CSV — ver migration 079.
+    | { type: "csv_var"; index: 0 | 1 | 2 }
   >;
 }
 
@@ -934,6 +939,15 @@ export default function CampanhasPage() {
         formData.append("file", importFile);
         // Tag com o nome da campanha para identificar os contatos
         formData.append("defaultTag", tagDoCsv);
+        // campaign_id (edição) ou draft_id (criação, campanha ainda não
+        // existe) — persistem VAR1/VAR2/VAR3 em
+        // wacrm.contact_import_variables (migration 079). Mesmo padrão
+        // de idColumn/idValue usado em handleGerarUTM abaixo.
+        if (editingId) {
+          formData.append("campaign_id", editingId);
+        } else {
+          formData.append("draft_id", draftId);
+        }
         const importRes = await apiFetch(
           "/api/disparador/contacts/import",
           { method: "POST", body: formData }
@@ -1051,6 +1065,19 @@ export default function CampanhasPage() {
           if (relinkErr) {
             console.error("[UTM] Falha ao vincular links à campanha:", relinkErr);
           }
+        }
+
+        // VAR1/VAR2/VAR3 do CSV (Step 2) também foram salvas sob draftId
+        // em wacrm.contact_import_variables (migration 079) quando o
+        // import aconteceu antes de esta campanha existir — mesmo motivo
+        // do relink de UTM acima. Sem custo se nenhum import usou VARn.
+        const { error: csvVarRelinkErr } = await supabase
+          .from("contact_import_variables")
+          .update({ campaign_id: newCampaign.id })
+          .eq("draft_id", draftId)
+          .is("campaign_id", null);
+        if (csvVarRelinkErr) {
+          console.error("[Contacts Import] Falha ao vincular variáveis CSV à campanha:", csvVarRelinkErr);
         }
 
         if (draftKey) localStorage.removeItem(draftKey);
@@ -2077,18 +2104,25 @@ export default function CampanhasPage() {
                                       ? entry.field
                                       : entry.type === "utm_link"
                                         ? "utm_link"
-                                        : "static"
+                                        : entry.type === "csv_var"
+                                          ? `csv_var_${entry.index}`
+                                          : "static"
                                   }
                                   onValueChange={(val) => {
                                     if (!val) return;
                                     const updated = [...mensagens];
                                     const map = [...(updated[i].template_variable_map || [])];
-                                    map[varIdx] =
-                                      val === "static"
-                                        ? { type: "static", value: "" }
-                                        : val === "utm_link"
-                                          ? { type: "utm_link" }
-                                          : { type: "contact_field", field: val };
+                                    if (val.startsWith("csv_var_")) {
+                                      const index = parseInt(val.split("_")[2], 10) as 0 | 1 | 2;
+                                      map[varIdx] = { type: "csv_var", index };
+                                    } else {
+                                      map[varIdx] =
+                                        val === "static"
+                                          ? { type: "static", value: "" }
+                                          : val === "utm_link"
+                                            ? { type: "utm_link" }
+                                            : { type: "contact_field", field: val };
+                                    }
                                     updated[i] = { ...updated[i], template_variable_map: map };
                                     setMensagens(updated);
                                   }}
@@ -2102,12 +2136,20 @@ export default function CampanhasPage() {
                                     <SelectItem value="company">Empresa</SelectItem>
                                     <SelectItem value="utm_link">Link UTM personalizado</SelectItem>
                                     <SelectItem value="static">Valor fixo</SelectItem>
+                                    <SelectItem value="csv_var_0">VAR1 (do CSV)</SelectItem>
+                                    <SelectItem value="csv_var_1">VAR2 (do CSV)</SelectItem>
+                                    <SelectItem value="csv_var_2">VAR3 (do CSV)</SelectItem>
                                   </SelectContent>
                                 </Select>
                                 {entry.type === "utm_link" && (
                                   <span className="flex-1 text-[10px] text-muted-foreground">
                                     Resolvido por contato via "Gerar UTM" no Step 2
                                     (telefone → link_curto).
+                                  </span>
+                                )}
+                                {entry.type === "csv_var" && (
+                                  <span className="flex-1 text-[10px] text-muted-foreground">
+                                    Resolvido por contato a partir da coluna VAR{entry.index + 1} do CSV importado.
                                   </span>
                                 )}
                                 {entry.type === "static" && (
