@@ -248,6 +248,17 @@ export async function startCampaign(
     const maxDelay = (campaign.intervalo_max || 300) * 1000;
     const intraDelay = 3000; // 3 seconds between messages for the same contact
 
+    // batch_size > 1: contatos são agrupados em lotes que saem juntos (ver
+    // abaixo), e o cron processa até batch_size itens "agendado" em
+    // paralelo por tick (ver cron/route.ts). Sem agrupar aqui no
+    // enfileiramento, o pacing sequencial de intervalo_min/max abaixo
+    // nunca deixa mais de ~1 item por vez cruzar o limiar scheduled_at
+    // <= now, então batch_size nunca tinha efeito prático nenhum —
+    // confirmado ao vivo numa campanha com batch_size=10 processando 1-2
+    // itens por tick.
+    const batchSize = Math.max(1, campaign.batch_size ?? 1);
+    const batchPauseMs = (campaign.batch_pause_seconds ?? 0) * 1000;
+
     // Se a campanha tem agendamento futuro, usa como base do scheduled_at
     // (ex: start manual antecipado de uma campanha "agendado"). Senão usa
     // Date.now() — inclui o caso normal em que o cron só chama start
@@ -271,16 +282,35 @@ export async function startCampaign(
       // Select random session ID from campaign configurations
       const sessionId = sessionIds[Math.floor(Math.random() * sessionIds.length)];
 
-      // Anti-spam pauses
-      if (i > 0 && i % 100 === 0) contactDelay += 60 * 60 * 1000; // 1 hour pause every 100 contacts
-      else if (i > 0 && i % 20 === 0) contactDelay += 10 * 60 * 1000; // 10 mins pause every 20 contacts
+      let contactBaseDelay: number;
+      if (batchSize > 1) {
+        // Contatos do mesmo lote (mesmo Math.floor(i / batchSize)) recebem
+        // o mesmo scheduled_at base — só um jitter de 100ms entre eles pra
+        // desempate estável no ORDER BY scheduled_at do cron, não pra
+        // espaçar o envio de verdade (o cron já processa o lote inteiro em
+        // paralelo). O próximo lote só fica agendado batch_pause_seconds
+        // depois. Pausas anti-spam fixas (1h/100, 10min/20) NÃO se
+        // aplicam aqui — o usuário já configurou o ritmo manualmente via
+        // batch_size/batch_pause_seconds (mesma regra já usada na
+        // estimativa de tempo em campanhas/page.tsx: estimarDisparo
+        // suprime essas pausas quando batchSizeEfetivo > 1).
+        const loteIndex = Math.floor(i / batchSize);
+        const jitter = (i % batchSize) * 100;
+        contactBaseDelay = loteIndex * batchPauseMs + jitter;
+      } else {
+        // Comportamento original: pacing sequencial por contato via
+        // intervalo_min/max, com pausas anti-spam fixas.
+        if (i > 0 && i % 100 === 0) contactDelay += 60 * 60 * 1000; // 1 hour pause every 100 contacts
+        else if (i > 0 && i % 20 === 0) contactDelay += 10 * 60 * 1000; // 10 mins pause every 20 contacts
+        contactBaseDelay = contactDelay;
+      }
 
       const channel = channelMap.get(sessionId);
       const isMetaChannel = channel?.provider === "meta";
 
       for (let j = 0; j < mensagens.length; j++) {
         const msg = mensagens[j];
-        const msgDelay = contactDelay + j * intraDelay;
+        const msgDelay = contactBaseDelay + j * intraDelay;
         const scheduledAt = new Date(baseTime + msgDelay).toISOString();
 
         // Store the raw template text — {{variavel}} and legacy {nome}
@@ -366,8 +396,12 @@ export async function startCampaign(
         enqueued++;
       }
 
-      // Increment delay for the next contact
-      contactDelay += (mensagens.length - 1) * intraDelay + minDelay + Math.random() * (maxDelay - minDelay);
+      // Increment delay for the next contact — só no modo sequencial
+      // (batchSize <= 1); no modo em lote, o delay de cada contato é
+      // recalculado do zero a partir de `i` a cada iteração.
+      if (batchSize <= 1) {
+        contactDelay += (mensagens.length - 1) * intraDelay + minDelay + Math.random() * (maxDelay - minDelay);
+      }
     }
 
     if (queueRows.length > 0) {
