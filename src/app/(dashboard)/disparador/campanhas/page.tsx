@@ -876,6 +876,21 @@ export default function CampanhasPage() {
       toast.error("A URL da mídia é obrigatória para este tipo de mensagem.");
       return;
     }
+    // Validar template_variable_map — variáveis estáticas não podem estar
+    // vazias (Meta rejeita com erro #131008 no envio real).
+    for (const msg of mensagens) {
+      if (msg.template_variable_map) {
+        const variavelVazia = msg.template_variable_map.findIndex(
+          (v: any) => v.type === "static" && !v.value?.trim()
+        );
+        if (variavelVazia !== -1) {
+          toast.error(
+            `Variável {{${variavelVazia + 1}}} do template está vazia. Preencha um valor fixo ou mude para "Campo do contato".`
+          );
+          return;
+        }
+      }
+    }
     const timeRegex = /^\d{2}:\d{2}(:\d{2})?$/;
     if (janelaInicio && !timeRegex.test(janelaInicio)) {
       toast.error("Horário de início inválido — use HH:MM.");
@@ -2112,7 +2127,9 @@ export default function CampanhasPage() {
                                     }
                                     className={cn(
                                       "h-7 flex-1 border-border bg-background text-xs",
-                                      importFile && !entry.value && "border-amber-500/50 placeholder:text-amber-500/70"
+                                      importFile && !entry.value
+                                        ? "border-amber-500/50 placeholder:text-amber-500/70"
+                                        : !entry.value?.trim() && "border-red-500"
                                     )}
                                   />
                                 )}

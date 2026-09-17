@@ -88,6 +88,27 @@ export async function PATCH(
       return NextResponse.json({ error: "Nenhum campo para atualizar." }, { status: 400 });
     }
 
+    // template_variable_map com static.value vazio dispara erro #131008 na
+    // Meta no momento do envio real — bloqueia aqui, não só no wizard, já
+    // que esta rota pode ser chamada direto (client-side validation em
+    // campanhas/page.tsx pode ser contornada).
+    if (Array.isArray(updates.mensagens)) {
+      for (const msg of updates.mensagens as any[]) {
+        if (!Array.isArray(msg?.template_variable_map)) continue;
+        const variavelVazia = msg.template_variable_map.findIndex(
+          (v: any) => v?.type === "static" && !v?.value?.trim()
+        );
+        if (variavelVazia !== -1) {
+          return NextResponse.json(
+            {
+              error: `Variável {{${variavelVazia + 1}}} do template está vazia. Preencha um valor fixo ou mude para "Campo do contato".`,
+            },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
     const { error: updateError } = await supabaseAdmin()
       .from("campaigns")
       .update(updates)
