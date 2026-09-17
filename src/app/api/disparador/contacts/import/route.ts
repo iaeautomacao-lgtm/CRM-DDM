@@ -39,13 +39,17 @@ function getField(row: Record<string, any>, ...keys: string[]): string | undefin
 // Column names recognized as the contact's display name — "var1" last,
 // covering the Meta CONTATO;VAR1;VAR2;VAR3 export format when no
 // standard name column exists (see tagsArray comment below).
+//
+// "contato" NÃO entra aqui — nesse mesmo formato Meta, CONTATO é o
+// telefone (ver TELEFONE1_KEYS), não o nome. Incluí-lo faria getField
+// devolver o telefone como nome sempre que ambas as colunas existirem,
+// já que a ordem desta lista é a ordem de prioridade.
 const NAME_FIELD_KEYS = [
   "nome",
   "name",
   "nome completo",
   "full name",
   "cliente",
-  "contato",
   "var1",
 ];
 
@@ -165,20 +169,32 @@ export async function POST(request: Request) {
       .eq("account_id", accountId);
     const existingContactsByKey = new Map<
       string,
-      { id: string; name: string | null; cpf: string | null }
+      { id: string; name: string | null; cpf: string | null; phone_normalized: string | null }
     >();
     for (const r of existingRows ?? []) {
       const key = normalizeKey(r.phone_normalized ?? "");
-      if (key) existingContactsByKey.set(key, { id: r.id, name: r.name, cpf: r.cpf ?? null });
+      if (key) {
+        existingContactsByKey.set(key, {
+          id: r.id,
+          name: r.name,
+          cpf: r.cpf ?? null,
+          phone_normalized: r.phone_normalized ?? null,
+        });
+      }
     }
 
     // Contatos existentes por CPF — dedup por CPF tem prioridade sobre
     // dedup por telefone quando o CSV traz CPF (o mesmo aluno pode
     // reaparecer com um telefone novo em campanhas diferentes). Reaproveita
     // o mesmo select de existingRows acima, já filtrado por account_id.
-    const existingByCpf = new Map<string, { id: string; name: string | null }>();
+    const existingByCpf = new Map<
+      string,
+      { id: string; name: string | null; phone_normalized: string | null }
+    >();
     for (const r of existingRows ?? []) {
-      if (r.cpf) existingByCpf.set(r.cpf, { id: r.id, name: r.name });
+      if (r.cpf) {
+        existingByCpf.set(r.cpf, { id: r.id, name: r.name, phone_normalized: r.phone_normalized ?? null });
+      }
     }
 
     type AltPhoneRow = { phone: string; phone_normalized: string; ordem: number };
@@ -257,15 +273,31 @@ export async function POST(request: Request) {
         ? undefined
         : existingContactsByKey.get(key);
       const matched = existingContact
-        ? { id: existingContact.id, name: existingContact.name, cpf: cpfNormalized }
+        ? {
+            id: existingContact.id,
+            name: existingContact.name,
+            cpf: cpfNormalized,
+            phone_normalized: existingContact.phone_normalized,
+          }
         : existingByPhone
-          ? { id: existingByPhone.id, name: existingByPhone.name, cpf: existingByPhone.cpf }
+          ? {
+              id: existingByPhone.id,
+              name: existingByPhone.name,
+              cpf: existingByPhone.cpf,
+              phone_normalized: existingByPhone.phone_normalized,
+            }
           : null;
 
       if (matched) {
-        // Contato já existe — só preenche o name se estiver vazio no
-        // banco, nunca sobrescreve um nome já cadastrado.
-        if (!matched.name) {
+        // Contato já existe — preenche o name se estiver vazio, ou se o
+        // valor atual parece ser o telefone (import antigo com o alias
+        // CONTATO lido como nome, antes de virar TELEFONE1_KEYS — ver
+        // NAME_FIELD_KEYS acima). Nunca sobrescreve um nome que já parece
+        // um nome de verdade.
+        const nomePareceTelefone =
+          !!matched.name &&
+          (matched.name === matched.phone_normalized || /^\d{10,13}$/.test(matched.name));
+        if (!matched.name || nomePareceTelefone) {
           const parsedName = getField(row, ...NAME_FIELD_KEYS);
           if (parsedName) {
             const { error: updateErr } = await supabaseAdmin()
