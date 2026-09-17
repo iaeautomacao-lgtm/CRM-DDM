@@ -122,55 +122,62 @@ export async function startCampaign(
       return { ok: false, status: 400, error: "Nenhum contato ativo encontrado no CRM." };
     }
 
-    // Load contact tags relation — escopada pelos contact_ids desta conta,
-    // em chunks de 500. contact_tags não tem account_id, então uma query
-    // sem filtro nem paginação retorna no máximo db-max-rows linhas do
-    // BANCO INTEIRO (confirmado ao vivo: 1093 linhas totais no banco,
-    // cap silencioso do PostgREST em 1000) — contatos desta conta podiam
-    // ficar de fora aleatoriamente do enfileiramento sem gerar erro.
-    const contactIds = allContacts.map((c) => c.id);
-    const tagsChunkSize = 500;
-    const allTagRows: { contact_id: string; tags: unknown }[] = [];
-
-    for (let i = 0; i < contactIds.length; i += tagsChunkSize) {
-      const chunk = contactIds.slice(i, i + tagsChunkSize);
-      const { data: tagRows, error: tagRowsError } = await supabaseAdmin()
-        .from("contact_tags")
-        .select("contact_id, tags:tag_id(name)")
-        .in("contact_id", chunk);
-
-      if (tagRowsError) {
-        throw new Error(`Erro ao carregar tags dos contatos: ${tagRowsError.message}`);
-      }
-      if (tagRows) allTagRows.push(...tagRows);
-    }
-
-    const tagsMap: Record<string, string[]> = {};
-    for (const item of allTagRows) {
-      if (!item.contact_id) continue;
-      const tagName = (item.tags as any)?.name;
-      if (tagName) {
-        if (!tagsMap[item.contact_id]) {
-          tagsMap[item.contact_id] = [];
-        }
-        tagsMap[item.contact_id].push(tagName);
-      }
-    }
-
-    // Map tags to contacts in memory
-    const contactsWithTags = allContacts.map((c) => ({
-      ...c,
-      tags: tagsMap[c.id] || [],
-    }));
-
-    // Filter contacts by tag
+    // Filter contacts by tag — filtra pelo lado pequeno (nomes em
+    // tags_filtro, tipicamente 1-5) em vez de carregar contact_tags de
+    // TODOS os contatos da conta (que já foi tentado em duas voltas
+    // anteriores e falhou nas duas):
+    //   1) sem filtro nenhum: contact_tags não tem account_id, então a
+    //      query batia no cap de resposta do PostgREST (db-max-rows,
+    //      confirmado ao vivo em 1000) e truncava silenciosamente — sem
+    //      erro, só menos contatos enfileirados que o esperado.
+    //   2) com .in('contact_id', chunk) em chunks de 500: corrigia o
+    //      truncamento mas um array de centenas de UUIDs num filtro GET
+    //      gera uma URL de dezenas de KB, o que bateu em algum limite de
+    //      tamanho de URL da infra em produção ("TypeError: fetch failed").
+    // Filtrar por tag_id (poucos valores) e paginar a RESPOSTA com
+    // .range() resolve os dois problemas ao mesmo tempo: o filtro de
+    // entrada nunca é grande, e a paginação explícita nunca depende do
+    // cap implícito do PostgREST pra trazer tudo.
     const tagsFiltro = Array.isArray(campaign.tags_filtro) ? campaign.tags_filtro : [];
-    const contacts = tagsFiltro.length > 0
-      ? contactsWithTags.filter((c) => {
-          const contactTags = Array.isArray(c.tags) ? c.tags : [];
-          return tagsFiltro.some((t: string) => contactTags.includes(t));
-        })
-      : contactsWithTags;
+    let contacts = allContacts;
+
+    if (tagsFiltro.length > 0) {
+      const { data: matchingTags, error: matchingTagsError } = await supabaseAdmin()
+        .from("tags")
+        .select("id")
+        .eq("account_id", accountId)
+        .in("name", tagsFiltro);
+
+      if (matchingTagsError) {
+        throw new Error(`Erro ao resolver tags de filtro: ${matchingTagsError.message}`);
+      }
+
+      const tagIds = (matchingTags ?? []).map((t) => t.id);
+      const matchingContactIds = new Set<string>();
+
+      if (tagIds.length > 0) {
+        const pageSize = 1000;
+        let from = 0;
+        while (true) {
+          const { data: page, error: pageError } = await supabaseAdmin()
+            .from("contact_tags")
+            .select("contact_id")
+            .in("tag_id", tagIds)
+            .range(from, from + pageSize - 1);
+
+          if (pageError) {
+            throw new Error(`Erro ao carregar tags dos contatos: ${pageError.message}`);
+          }
+          for (const row of page ?? []) {
+            if (row.contact_id) matchingContactIds.add(row.contact_id);
+          }
+          if (!page || page.length < pageSize) break;
+          from += pageSize;
+        }
+      }
+
+      contacts = allContacts.filter((c) => matchingContactIds.has(c.id));
+    }
 
     if (contacts.length === 0) {
       return {
