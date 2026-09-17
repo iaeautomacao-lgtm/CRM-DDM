@@ -122,22 +122,38 @@ export async function startCampaign(
       return { ok: false, status: 400, error: "Nenhum contato ativo encontrado no CRM." };
     }
 
-    // Load contact tags relation
-    const { data: tagsList } = await supabaseAdmin()
-      .from("contact_tags")
-      .select("contact_id, tags:tag_id(name)");
+    // Load contact tags relation — escopada pelos contact_ids desta conta,
+    // em chunks de 500. contact_tags não tem account_id, então uma query
+    // sem filtro nem paginação retorna no máximo db-max-rows linhas do
+    // BANCO INTEIRO (confirmado ao vivo: 1093 linhas totais no banco,
+    // cap silencioso do PostgREST em 1000) — contatos desta conta podiam
+    // ficar de fora aleatoriamente do enfileiramento sem gerar erro.
+    const contactIds = allContacts.map((c) => c.id);
+    const tagsChunkSize = 500;
+    const allTagRows: { contact_id: string; tags: unknown }[] = [];
+
+    for (let i = 0; i < contactIds.length; i += tagsChunkSize) {
+      const chunk = contactIds.slice(i, i + tagsChunkSize);
+      const { data: tagRows, error: tagRowsError } = await supabaseAdmin()
+        .from("contact_tags")
+        .select("contact_id, tags:tag_id(name)")
+        .in("contact_id", chunk);
+
+      if (tagRowsError) {
+        throw new Error(`Erro ao carregar tags dos contatos: ${tagRowsError.message}`);
+      }
+      if (tagRows) allTagRows.push(...tagRows);
+    }
 
     const tagsMap: Record<string, string[]> = {};
-    if (tagsList) {
-      for (const item of tagsList) {
-        if (!item.contact_id) continue;
-        const tagName = (item.tags as any)?.name;
-        if (tagName) {
-          if (!tagsMap[item.contact_id]) {
-            tagsMap[item.contact_id] = [];
-          }
-          tagsMap[item.contact_id].push(tagName);
+    for (const item of allTagRows) {
+      if (!item.contact_id) continue;
+      const tagName = (item.tags as any)?.name;
+      if (tagName) {
+        if (!tagsMap[item.contact_id]) {
+          tagsMap[item.contact_id] = [];
         }
+        tagsMap[item.contact_id].push(tagName);
       }
     }
 
