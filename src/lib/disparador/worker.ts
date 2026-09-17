@@ -16,6 +16,14 @@ import {
 let isWorkerRunning = false;
 
 export function ensureQueueWorkerRunning() {
+  // Worker em memória desativado — processamento centralizado no cron
+  // (ver /api/disparador/cron/route.ts). Phusion Passenger não mantém
+  // setInterval entre requisições, então este setInterval nunca era
+  // garantido de continuar rodando em produção. Resto da função mantido
+  // abaixo (inalcançável) só como referência do que o cron replica hoje.
+  return;
+
+  // eslint-disable-next-line no-unreachable
   if (isWorkerRunning) return;
   isWorkerRunning = true;
   console.log("[Queue Worker] Global background queue worker initialized.");
