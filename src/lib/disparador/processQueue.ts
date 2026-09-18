@@ -137,7 +137,10 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131047, 131021]);
 // Códigos Meta que são permanentes mas NÃO são "número inválido" (ex:
 // conta suspensa, parâmetro inválido, token expirado/inválido) — sem
 // escada de número, é erro final direto.
-const META_PERMANENT_CODES = new Set([131031, 131051, 368, 190]);
+// 131008: Required parameter is missing — variável obrigatória do
+// template está vazia. Não adianta retentar (o parâmetro continuará
+// vazio nas próximas tentativas). Marcar como permanente imediatamente.
+const META_PERMANENT_CODES = new Set([131031, 131051, 368, 190, 131008]);
 
 // Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
 // permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
