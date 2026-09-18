@@ -51,3 +51,18 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 install-log.txt
+
+# Dumps e artefatos da migracao cPanel/MariaDB.
+# Os dumps ficam FORA do repo (CRM-DDM-backup). Estes padroes existem so como
+# rede de seguranca caso alguem copie um dump para dentro do projeto.
+/dump/
+/secrets/
+*.dump
+*.sql.gz
+auth_users*.csv
+auth_identities*.csv
+auth_mfa_factors*.csv
+storage_objects.csv
+storage_manifest.csv
+row_counts.csv
+grants.csv
