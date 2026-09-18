@@ -1370,6 +1370,11 @@ const HANDOFF_ANY_AGENT = "__any_agent__";
  * Agent↔team membership comes from `wacrm.team_members` (many-to-many),
  * NOT the deprecated scalar `profiles.team_id` — an agent can belong to
  * more than one team.
+ *
+ * `agents` is filtered to account_role='agent' — admins/owners must not
+ * be selectable as a fixed handoff_agent target, same rule the automatic
+ * assignment already enforces (selectAgentForTeam/selectAnyAgentForAccount
+ * in src/lib/flows/engine.ts).
  */
 function useHandoffOptions(): {
   teams: HandoffTeamOption[];
@@ -1399,6 +1404,7 @@ function useHandoffOptions(): {
           .from("profiles")
           .select("user_id, full_name")
           .eq("account_id", accountId)
+          .eq("account_role", "agent")
           .order("full_name"),
       ]);
       if (cancelled) return;

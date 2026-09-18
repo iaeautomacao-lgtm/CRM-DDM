@@ -647,8 +647,17 @@ export default function MonitoramentoPage() {
     ? members.find((m) => m.user_id === activeAgentId) ?? null
     : null;
 
+  // Só account_role='agent' pode ser destino de atribuição manual —
+  // admins/owners/viewers não aparecem no seletor de "Transferir para"
+  // (mesma regra que a atribuição automática já aplica, ver
+  // selectAgentForTeam/selectAnyAgentForAccount em src/lib/flows/engine.ts).
+  // /api/account/members não é filtrado (é genérico, usado também pela
+  // aba Membros), então o filtro é aplicado aqui no array resultante.
   const agentOptions: MultiSelectOption[] = useMemo(
-    () => members.map((m) => ({ id: m.user_id, label: m.full_name || m.email || "Sem nome" })),
+    () =>
+      members
+        .filter((m) => m.role === "agent")
+        .map((m) => ({ id: m.user_id, label: m.full_name || m.email || "Sem nome" })),
     [members],
   );
   const teamOptions: MultiSelectOption[] = useMemo(

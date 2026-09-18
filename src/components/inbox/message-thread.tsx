@@ -279,12 +279,18 @@ export function MessageThread({
   // Profiles are bounded by RLS to rows the current user is allowed to
   // see — today that's just the current user, but the dropdown keeps the
   // shape ready for shared-team workspaces without a refactor.
+  //
+  // Filtra por account_role='agent' — admins/owners/viewers não devem
+  // aparecer como opção de atribuição manual (mesma regra que a
+  // atribuição automática já aplica em selectAgentForTeam/
+  // selectAnyAgentForAccount, ver src/lib/flows/engine.ts).
   useEffect(() => {
     let cancelled = false;
     const supabase = createClient();
     supabase
       .from("profiles")
       .select("*")
+      .eq("account_role", "agent")
       .order("full_name")
       .then(({ data, error }) => {
         if (cancelled) return;
