@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { tryDecrypt } from "@/lib/whatsapp/encryption";
 
 /**
  * Shared building blocks behind the account's AI analysis pipelines
@@ -34,7 +35,11 @@ export async function resolveActiveApiKey(
     return null;
   }
 
-  const configKey = aiConfig.api_key?.trim();
+  // ai_config.api_key agora é gravada criptografada (ver migration 084);
+  // tryDecrypt cai pro valor bruto se ainda estiver em texto puro (chave
+  // salva antes dessa mudança).
+  const rawConfigKey = aiConfig.api_key?.trim();
+  const configKey = rawConfigKey ? tryDecrypt(rawConfigKey) : rawConfigKey;
 
   let masterKey = "";
   if (aiConfig.api_provider === "hermes") {

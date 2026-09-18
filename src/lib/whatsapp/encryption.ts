@@ -111,3 +111,19 @@ export function decrypt(encryptedText: string): string {
 export function isLegacyFormat(encryptedText: string): boolean {
   return encryptedText.split(':').length === 2
 }
+
+/**
+ * Best-effort decrypt for columns being migrated from plaintext to
+ * encrypt()'d storage in place (e.g. ai_config.api_key/elevenlabs_api_key
+ * — see migration 084). Returns the decrypted plaintext when `value` is
+ * in the encrypt() GCM/CBC shape; returns `value` unchanged (assumed to
+ * already be plaintext) when decrypt() throws — covers rows written
+ * before the column adopted encryption. Never throws.
+ */
+export function tryDecrypt(value: string): string {
+  try {
+    return decrypt(value)
+  } catch {
+    return value
+  }
+}

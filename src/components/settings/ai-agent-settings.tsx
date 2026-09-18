@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
+import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -30,6 +31,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SettingsPanelHead } from "./settings-panel-head";
+
+// Placeholder shown in api_key/elevenlabs_api_key when the account
+// already has one configured (GET /api/account/ai-config masks the real
+// value — see maskSecret there). Comparing the field against this exact
+// string on save is how we know the user left it untouched vs. typed a
+// new key — must match the literal of the same name in
+// src/app/api/account/ai-config/route.ts (duplicated on purpose: that
+// route imports server-only Node deps that can't ship to the client).
+const MASKED_SENTINEL = "••••••••";
 
 export function AiAgentSettings() {
   const supabase = createClient();
@@ -65,22 +75,23 @@ export function AiAgentSettings() {
 
   async function loadConfig() {
     try {
-      const { data, error } = await supabase
-        .from("ai_config")
-        .select("*")
-        .eq("account_id", accountId)
-        .maybeSingle();
+      // Server-side route — api_key/elevenlabs_api_key never round-trip
+      // in plaintext through the browser client anymore (see PROBLEMA 2
+      // da auditoria). Comes back masked; MASKED_SENTINEL below is what
+      // gets put in the input when a key already exists.
+      const res = await apiFetch("/api/account/ai-config");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao carregar configuração");
 
-      if (error) throw error;
       if (data) {
         setEnabled(data.enabled);
         setApiProvider(data.api_provider);
-        setApiKey(data.api_key || "");
+        setApiKey(data.api_key ? MASKED_SENTINEL : "");
         setSystemPrompt(data.system_prompt || "");
         setGoogleSearchEnabled(data.google_search_enabled || false);
         setMultimodalEnabled(data.multimodal_enabled || false);
         setElevenlabsEnabled(data.elevenlabs_enabled || false);
-        setElevenlabsApiKey(data.elevenlabs_api_key || "");
+        setElevenlabsApiKey(data.elevenlabs_api_key ? MASKED_SENTINEL : "");
         setElevenlabsVoiceId(data.elevenlabs_voice_id || "");
         setElevenlabsModelId(data.elevenlabs_model_id || "eleven_multilingual_v2");
         setSystemPrompt(`Você é o(a) Aleh, assistente comercial especializado do Grupo DDM.
@@ -165,22 +176,28 @@ Você é exclusivamente um assistente financeiro de acordos e suporte do Grupo D
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from("ai_config")
-        .upsert({
-          account_id: accountId,
+      // api_key/elevenlabs_api_key só são enviadas quando o usuário de
+      // fato digitou algo novo (valor !== MASKED_SENTINEL) — a rota
+      // trata o sentinel como "não mexeu, mantém o que já tá gravado" e
+      // criptografa server-side o que for novo.
+      const res = await apiFetch("/api/account/ai-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           enabled,
           api_provider: apiProvider,
-          api_key: apiKey.trim(),
+          api_key: apiKey,
           system_prompt: systemPrompt.trim(),
           google_search_enabled: googleSearchEnabled,
           multimodal_enabled: multimodalEnabled,
           elevenlabs_enabled: elevenlabsEnabled,
-          elevenlabs_api_key: elevenlabsApiKey.trim() || null,
+          elevenlabs_api_key: elevenlabsApiKey,
           elevenlabs_voice_id: elevenlabsVoiceId.trim() || null,
           elevenlabs_model_id: elevenlabsModelId.trim() || 'eleven_multilingual_v2',
-          updated_at: new Date().toISOString(),
-        }, { onConflict: "account_id" });
+        }),
+      });
+      const result = await res.json();
+      const error = res.ok ? null : new Error(result.error || "Falha ao salvar");
 
       if (error) throw error;
       toast.success("Configurações do Agente de IA salvas!");

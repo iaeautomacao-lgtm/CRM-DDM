@@ -1,0 +1,24 @@
+-- Migration 084: ai_config.api_key / elevenlabs_api_key passam a ser
+-- gravadas criptografadas (mesmo padrão AES-256-GCM de
+-- src/lib/whatsapp/encryption.ts, já usado em whatsapp_config).
+-- APLICAR MANUALMENTE no Supabase SQL Editor ANTES do deploy.
+--
+-- Sem ALTER TABLE — as colunas já existem como `text` (migration 031 e
+-- 034_add_elevenlabs_and_search_to_ai_config.sql) e um valor
+-- criptografado (formato "iv:ciphertext:authTag") cabe no mesmo tipo. É
+-- só documentação da mudança de comportamento da aplicação:
+--
+--   - Escrita: só via POST /api/account/ai-config (server-side) a partir
+--     de agora — o browser não grava mais api_key/elevenlabs_api_key
+--     direto na tabela. Todo valor novo salvo por esse endpoint já entra
+--     criptografado via encrypt().
+--   - Leitura: os 3 call sites que consomem essas colunas
+--     (src/lib/ai/llm-shared.ts, src/lib/ai/responder.ts,
+--     src/app/api/conversations/[id]/suggest-tag/route.ts) e a própria
+--     rota GET /api/account/ai-config usam tryDecrypt() — decripta se o
+--     valor estiver no formato encrypt(), senão devolve o valor bruto.
+--   - Retrocompatibilidade total, zero downtime: linhas já gravadas em
+--     texto puro (antes desta mudança) continuam funcionando via esse
+--     fallback, sem precisar de backfill nem de janela de manutenção.
+--     Migram pra criptografado organicamente na próxima vez que o dono
+--     da conta salvar a tela de configurações do Agente de IA.

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { tryDecrypt } from "@/lib/whatsapp/encryption";
 
 export async function GET(
   _request: Request,
@@ -50,12 +51,10 @@ export async function GET(
     const tagNames = tags.map(t => t.name).join(", ");
 
     // Busca a chave da conta via ai_config (salva nas configurações),
-    // com fallback pra chave da plataforma. ai_config.api_key é
-    // armazenada em texto puro — mesmo padrão de resolveActiveApiKey
-    // (llm-shared.ts) e do responder.ts principal do agente de IA — e
-    // não passa pelo módulo de encryption usado pros tokens de WhatsApp
-    // (esse é um formato "iv:ciphertext:tag" incompatível; decrypt()
-    // lançaria "unrecognised format" em cima de uma chave OpenAI crua).
+    // com fallback pra chave da plataforma. ai_config.api_key agora é
+    // gravada criptografada (migration 084, via /api/account/ai-config)
+    // — tryDecrypt cai pro valor bruto se ainda estiver em texto puro
+    // (chave salva antes dessa mudança, retrocompatibilidade).
     const { data: profile } = await supabaseAdmin()
       .from("profiles")
       .select("account_id")
@@ -69,8 +68,9 @@ export async function GET(
         .select("api_key, api_provider")
         .eq("account_id", profile.account_id)
         .maybeSingle();
-      if (aiConfig?.api_key?.trim()) {
-        openaiKey = aiConfig.api_key.trim();
+      const rawKey = aiConfig?.api_key?.trim();
+      if (rawKey) {
+        openaiKey = tryDecrypt(rawKey);
       }
     }
 

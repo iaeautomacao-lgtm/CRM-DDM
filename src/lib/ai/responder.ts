@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { AiAgentTool } from "@/lib/flows/types";
-import { decrypt } from "@/lib/whatsapp/encryption";
+import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
 import { sendWahaTextMessage, sendWahaMediaMessage } from "@/lib/whatsapp/waha-api";
 import {
@@ -393,7 +393,10 @@ export async function handleAiAutoResponse(
   // Order chronologically for the LLM
   const history = (messages || []).reverse();
 
-  const configKey = aiConfig.api_key?.trim();
+  // ai_config.api_key agora é gravada criptografada (migration 084);
+  // tryDecrypt cai pro valor bruto se ainda estiver em texto puro.
+  const rawConfigKey = aiConfig.api_key?.trim();
+  const configKey = rawConfigKey ? tryDecrypt(rawConfigKey) : rawConfigKey;
 
   let masterKey = "";
   if (aiConfig.api_provider === "hermes") {
@@ -1105,13 +1108,22 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   // 6. Voice Reply Generation (ElevenLabs)
   let voiceMediaUrl = "";
-  // Fallbacks hardcoded fornecidos pelo usuário
-  const elevenlabsApiKey = aiConfig.elevenlabs_api_key || "3cdc376a590ebdebe7f5979bb4422f957091cc5b7dfefc534be4b5f2d4eb7fbd";
+  // ai_config.elevenlabs_api_key agora é gravada criptografada
+  // (migration 084); tryDecrypt cai pro valor bruto se ainda estiver em
+  // texto puro. Sem fallback hardcoded — sem chave configurada pela
+  // própria conta, a geração de voz é pulada (ver throw abaixo), não
+  // usa mais uma chave compartilhada padrão.
+  const rawElevenlabsConfigKey = aiConfig.elevenlabs_api_key
+    ? tryDecrypt(aiConfig.elevenlabs_api_key)
+    : aiConfig.elevenlabs_api_key;
+  const elevenlabsApiKey: string | null = rawElevenlabsConfigKey || null;
   const elevenlabsVoiceId = aiConfig.elevenlabs_voice_id || "33B4UnXyTNbgLmdEDh5P";
-  const elevenlabsEnabled = aiConfig.elevenlabs_enabled || !!elevenlabsApiKey;
 
-  if (incomingWasAudio && elevenlabsEnabled && elevenlabsApiKey && elevenlabsVoiceId) {
+  if (incomingWasAudio && aiConfig.elevenlabs_enabled && elevenlabsVoiceId) {
     try {
+      if (!elevenlabsApiKey) {
+        throw new Error("ElevenLabs API key não configurada");
+      }
       console.log("[AI Agent] Generating voice reply with ElevenLabs...");
       const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${elevenlabsVoiceId}`;
       const ttsRes = await fetch(ttsUrl, {
