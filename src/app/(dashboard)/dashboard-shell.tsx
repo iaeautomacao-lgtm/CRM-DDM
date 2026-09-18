@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { DDM_SESSION_STORAGE_KEY, trackError, trackPageView } from "@/hooks/use-telemetry";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
@@ -41,6 +42,56 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
       if (pathname !== fallback) router.replace(fallback);
     }
   }, [accountRole, loading, pathname, profileLoading, router, user]);
+
+  // Page views — dispara a cada troca de rota dentro do dashboard.
+  // duration_ms enviado aqui é o tempo gasto na página ANTERIOR (por
+  // isso vem do ref, calculado ANTES de trackPageView, e só depois
+  // resetado pra `now`) — ver use-telemetry.ts.
+  const pageEnteredAtRef = useRef<number | null>(null);
+  const previousPathRef = useRef<string | null>(null);
+  const isAuthenticated = !!user;
+  useEffect(() => {
+    if (!isAuthenticated || !pathname) return;
+    // usePathname() só reflete navegações client-side de verdade —
+    // nunca dispara pra prefetch (invisível nesta camada, o App Router
+    // não expõe esse evento a client components) nem pra rotas de API
+    // (fora da árvore que este shell envolve). Guarda defensiva mesmo
+    // assim, caso isso mude.
+    if (pathname.startsWith("/api")) return;
+
+    const now = Date.now();
+    const durationMs =
+      pageEnteredAtRef.current != null ? now - pageEnteredAtRef.current : undefined;
+    const referrer = previousPathRef.current ?? (document.referrer || undefined);
+    const sessionId = window.localStorage.getItem(DDM_SESSION_STORAGE_KEY) ?? undefined;
+
+    trackPageView(pathname, document.title, referrer, sessionId, durationMs);
+
+    pageEnteredAtRef.current = now;
+    previousPathRef.current = pathname;
+  }, [pathname, isAuthenticated]);
+
+  // Erros que escapam da árvore de render do React (error.tsx só pega
+  // erros de render) — script solto, listener de evento, promise sem
+  // catch. Um listener global por montagem do shell, nunca em loop.
+  useEffect(() => {
+    const handleWindowError = (event: ErrorEvent) => {
+      trackError(event.message, event.error?.stack, window.location.pathname);
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      const message = reason instanceof Error ? reason.message : String(reason);
+      const stack = reason instanceof Error ? reason.stack : undefined;
+      trackError(message, stack, window.location.pathname);
+    };
+
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, []);
 
   if (loading || (user && profileLoading)) {
     return (

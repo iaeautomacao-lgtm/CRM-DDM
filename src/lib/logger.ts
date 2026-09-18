@@ -36,6 +36,7 @@ export type LogSource =
   | 'automations'
   | 'import'
   | 'system'
+  | 'frontend'
 
 export interface WriteLogParams {
   account_id?: string | null

@@ -52,6 +52,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
 import { getDisparadorScope } from "@/lib/disparador/scope";
+import { trackAction } from "@/hooks/use-telemetry";
 import { normalizePhone } from "@/lib/whatsapp/phone-utils";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
@@ -741,6 +742,7 @@ export default function CampanhasPage() {
       });
       if (res.ok) {
         toast.success("Campanha iniciada e disparos agendados!");
+        trackAction("campaign_started", { campaign_id: id });
         loadData();
       } else {
         const err = await res.json();
@@ -1042,6 +1044,11 @@ export default function CampanhasPage() {
           tagsFinais = tagsFinais.map((t) => (t === tagDoCsv ? importResult.tagName : t));
         }
 
+        trackAction("csv_imported", {
+          total_rows: importados + duplicados + invalidos + erros.length,
+          tag: importResult.tagName || tagDoCsv,
+        });
+
         // Repopula o seletor de tags com a tag recém-criada (útil ao
         // reabrir/editar esta campanha depois — a sessão atual já usa
         // tagsFinais acima, não depende deste reload).
@@ -1077,6 +1084,10 @@ export default function CampanhasPage() {
           throw new Error(err.error || "Erro ao atualizar campanha");
         }
         toast.success("Campanha atualizada!");
+        // total_contatos não é conhecido aqui — só é resolvido dentro
+        // de startCampaign() (contagem real acontece no início do
+        // envio, não na criação/edição do formulário).
+        trackAction("campaign_updated", { campaign_id: editingId, nome, total_contatos: null });
       } else {
         const supabase = createClient();
 
@@ -1154,6 +1165,9 @@ export default function CampanhasPage() {
 
         if (draftKey) localStorage.removeItem(draftKey);
         toast.success("Campanha criada!");
+        // total_contatos não é conhecido aqui — mesma observação do
+        // ramo de edição acima.
+        trackAction("campaign_created", { campaign_id: newCampaign.id, nome, total_contatos: null });
       }
 
       setShowModal(false);

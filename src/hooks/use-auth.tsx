@@ -15,6 +15,11 @@ import type { User } from "@supabase/supabase-js";
 import { DEFAULT_CURRENCY } from "@/lib/currency";
 import { logAuthFx, summarizeSession, summarizeSupabaseCookies } from "@/lib/auth/auth-forensics";
 import {
+  DDM_SESSION_STORAGE_KEY,
+  endTelemetrySession,
+  startTelemetrySession,
+} from "@/hooks/use-telemetry";
+import {
   canEditSettings as canEditSettingsFor,
   canManageMembers as canManageMembersFor,
   canSendMessages as canSendMessagesFor,
@@ -325,11 +330,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (shouldRefreshProfile) {
           fetchProfile(currentUser.id);
         }
+
+        // Telemetria de sessão (distinta da sessão do Supabase Auth) —
+        // só inicia uma nova se não houver uma guardada, porque SIGNED_IN
+        // reemite quando uma aba em segundo plano volta a ficar visível
+        // (mesmo motivo do shouldRefreshProfile acima): sem essa guarda,
+        // cada foco de aba criaria uma linha nova em user_sessions e
+        // orfanizaria o session_id anterior (nunca recebe ended_at).
+        // Fire-and-forget — não bloqueia o fluxo de auth.
+        if (event === "SIGNED_IN" && !window.localStorage.getItem(DDM_SESSION_STORAGE_KEY)) {
+          startTelemetrySession()
+            .then((id) => {
+              if (id) window.localStorage.setItem(DDM_SESSION_STORAGE_KEY, id);
+            })
+            .catch(() => {
+              // startTelemetrySession já não lança — guarda defensiva.
+            });
+        }
       } else {
         profileUserIdRef.current = null;
         setProfile(null);
         setAccount(null);
         setProfileLoading(false);
+
+        if (event === "SIGNED_OUT") {
+          const sessionId = window.localStorage.getItem(DDM_SESSION_STORAGE_KEY);
+          if (sessionId) {
+            endTelemetrySession(sessionId);
+            window.localStorage.removeItem(DDM_SESSION_STORAGE_KEY);
+          }
+        }
       }
 
       setLoading(false);

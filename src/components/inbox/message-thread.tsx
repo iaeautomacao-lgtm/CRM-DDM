@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { trackAction } from "@/hooks/use-telemetry";
 import { usePresence } from "@/hooks/use-presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
 import { presenceLabel } from "@/lib/presence";
@@ -1011,6 +1012,9 @@ export function MessageThread({
       if (!conversation) return;
       setReplyTo(null);
       enqueuePending(conversation, { kind: "text", text, replyToId });
+      // Nunca inclui `text` no payload — conteúdo de mensagem é dado
+      // sensível, não vai pra telemetria.
+      trackAction("message_sent", { conversation_id: conversation.id, has_media: false });
     },
     [conversation, enqueuePending],
   );
@@ -1020,6 +1024,7 @@ export function MessageThread({
       if (!conversation) return;
       setReplyTo(null);
       enqueuePending(conversation, { kind: "media", payload });
+      trackAction("message_sent", { conversation_id: conversation.id, has_media: true });
     },
     [conversation, enqueuePending],
   );
