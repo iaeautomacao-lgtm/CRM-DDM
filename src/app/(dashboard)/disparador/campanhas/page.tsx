@@ -74,6 +74,9 @@ interface Campaign {
   // Migration 078 — disparo em lote (ver worker.ts)
   batch_size?: number;
   batch_pause_seconds?: number;
+  // Teto de envios/hora, enforced ao vivo por worker.ts/cron/route.ts —
+  // usado pela estimativa (estimarDisparo) como piso de tempo mínimo.
+  limite_por_hora?: number;
 }
 
 interface TagItem {
@@ -237,7 +240,8 @@ function estimarDisparo(
   janelaFim: string | null,
   agora: Date = new Date(),
   batchSize: number = 1,
-  batchPauseSeconds: number = 0
+  batchPauseSeconds: number = 0,
+  limitePorHora: number = 0
 ): EstimativaDisparo {
   if (n <= 0) {
     return {
@@ -255,14 +259,31 @@ function estimarDisparo(
   const intervaloMedioS = (intervaloMinS + intervaloMaxS) / 2;
   const delayPorContatoS = Math.max(0, numMensagens - 1) * intraDelayS + intervaloMedioS;
 
-  // Com batchSize > 1, os contatos de um lote saem em paralelo — o lote
-  // todo demora o tempo do item mais lento (delayPorContatoS), não a soma.
-  // batchSize=1 (default) reduz isso a numLotes=n e pausaEntreLotes=0,
-  // igual à fórmula sequencial anterior (n * delayPorContatoS).
+  // Com batchSize > 1, os lotes saem em paralelo entre si — o tempo total
+  // é só a soma das pausas entre lotes (batchPauseSeconds), igual ao que
+  // startCampaign.ts de fato agenda (loteIndex * batchPauseMs); intervalo_
+  // min/max não são usados nesse modo, então delayPorContatoS não entra
+  // aqui. batchSize=1 (default) usa a fórmula sequencial de sempre.
   const batchSizeEfetivo = Math.max(1, batchSize);
   const numLotes = Math.ceil(n / batchSizeEfetivo);
   const pausaEntreLotesS = batchPauseSeconds * Math.max(0, numLotes - 1);
-  const tempoBrutoS = numLotes * delayPorContatoS + pausaEntreLotesS;
+  let tempoBrutoS: number;
+  if (batchSizeEfetivo > 1) {
+    // Modo lote: só conta pausa entre lotes
+    // intervalo_min/max não são usados pelo startCampaign.ts neste modo
+    tempoBrutoS = Math.max(0, numLotes - 1) * batchPauseSeconds;
+  } else {
+    // Modo sequencial: fórmula atual (não alterar)
+    tempoBrutoS = numLotes * delayPorContatoS + pausaEntreLotesS;
+  }
+
+  // limite_por_hora (teto de envios/hora, enforced ao vivo por worker.ts/
+  // cron/route.ts) — nunca reduz a estimativa, só impõe um piso quando o
+  // teto é mais restritivo que o ritmo calculado acima.
+  if (limitePorHora > 0) {
+    const tempoMinPorLimiteS = Math.ceil(n / limitePorHora) * 3600;
+    tempoBrutoS = Math.max(tempoBrutoS, tempoMinPorLimiteS);
+  }
 
   // Pausas anti-spam — mesma regra "else if" (não cumulativa) de
   // start/route.ts: no contato 100 (múltiplo de 100 E de 20), só a pausa
@@ -617,7 +638,7 @@ export default function CampanhasPage() {
         const { userIds } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds")
+          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, limite_por_hora")
           .in("created_by", userIds)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -1194,7 +1215,11 @@ export default function CampanhasPage() {
         janelaFim || null,
         undefined,
         batchSize,
-        batchPauseSeconds
+        batchPauseSeconds,
+        // Sem state de limite_por_hora no wizard hoje (campo não tem UI
+        // aqui — ver investigação) — 0 = sem teto, comportamento igual
+        // a antes desta mudança.
+        0
       )
     : null;
 
@@ -1734,7 +1759,8 @@ export default function CampanhasPage() {
                         c.janela_fim || null,
                         undefined,
                         c.batch_size,
-                        c.batch_pause_seconds
+                        c.batch_pause_seconds,
+                        c.limite_por_hora ?? 0
                       ).label} estimado
                     </>
                   ) : (
