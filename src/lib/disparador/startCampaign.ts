@@ -49,6 +49,34 @@ export async function startCampaign(
       };
     }
 
+    // Retomada de campanha pausada — caminho separado do enfileiramento
+    // do zero abaixo. Os itens que /stop?action=pause deixou com
+    // status='pausado' (ver stop/route.ts) ficavam órfãos: o worker só
+    // reivindica status='agendado' (claimQueueItem), e o passo de limpeza
+    // logo abaixo não deleta 'pausado', então reenfileirar do zero criava
+    // um segundo lote inteiro para todos os contatos em vez de continuar
+    // de onde parou. Reativa os itens pausados in-place e retorna sem
+    // tocar em mensagens/contatos/fila nova.
+    if (campaign.status === "pausada") {
+      const { data: reactivated, error: reactivateError } = await supabaseAdmin()
+        .from("disp_message_queue")
+        .update({ status: "agendado", scheduled_at: new Date().toISOString() })
+        .eq("campaign_id", campaignId)
+        .eq("status", "pausado")
+        .select("id");
+
+      if (reactivateError) {
+        return { ok: false, status: 500, error: reactivateError.message };
+      }
+
+      await supabaseAdmin()
+        .from("campaigns")
+        .update({ status: "em_execucao" })
+        .eq("id", campaignId);
+
+      return { ok: true, enqueued: reactivated?.length ?? 0 };
+    }
+
     const mensagens = Array.isArray(campaign.mensagens) ? campaign.mensagens : [];
     if (mensagens.length === 0) {
       return { ok: false, status: 400, error: "Campanha sem mensagens configuradas." };
