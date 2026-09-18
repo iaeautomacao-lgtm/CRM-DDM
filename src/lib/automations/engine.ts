@@ -676,8 +676,23 @@ async function evaluateCondition(cfg: ConditionStepConfig, args: ExecuteArgs): P
       // (supports over-midnight ranges like "18:00-09:00").
       const [from, to] = (cfg.operand ?? '').split('-')
       if (!from || !to) return false
-      const now = new Date()
-      const mins = now.getHours() * 60 + now.getMinutes()
+      // now.getHours()/getMinutes() usa o fuso do processo Node (UTC em
+      // produção), não Brasília — uma janela "09:00-18:00" configurada
+      // pelo usuário avaliaria contra 06:00-15:00 BRT. Mesmo bug já
+      // corrigido em campanhas/page.tsx (checkWithinWindow) — mesmo padrão
+      // aqui, via Intl.DateTimeFormat com timeZone explícito.
+      const formatter = new Intl.DateTimeFormat('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+      })
+      const parts = formatter.formatToParts(new Date())
+      // hour: "numeric" + hour12: false pode devolver "24" à meia-noite
+      // em algumas implementações de ICU — % 24 normaliza pra 0.
+      const brHour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24
+      const brMinute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0')
+      const mins = brHour * 60 + brMinute
       const parse = (s: string) => {
         const [h, m] = s.split(':').map(Number)
         return (h || 0) * 60 + (m || 0)

@@ -158,21 +158,50 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
     let contacts: Contact[] = [];
 
     if (audience.type === 'all') {
-      const { data, error } = await supabase.from('contacts').select('*');
-      if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
-      contacts = data ?? [];
+      // Paginado via .range() — mesmo padrão de startCampaign.ts
+      // (contact_tags) — sem isso, o cap de resposta do PostgREST (1000
+      // linhas) trunca contas com mais de 1000 contatos silenciosamente.
+      // .order('id') garante resultado determinístico entre páginas.
+      const pageSize = 1000;
+      let from = 0;
+      const allRows: Contact[] = [];
+      while (true) {
+        const { data: page, error } = await supabase
+          .from('contacts')
+          .select('*')
+          .order('id')
+          .range(from, from + pageSize - 1);
+        if (error) throw new Error(`Failed to fetch contacts: ${error.message}`);
+        allRows.push(...((page as Contact[]) ?? []));
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
+      contacts = allRows;
     } else if (
       audience.type === 'tags' &&
       audience.tagIds &&
       audience.tagIds.length > 0
     ) {
-      const { data: contactTags, error: tagError } = await supabase
-        .from('contact_tags')
-        .select('contact_id')
-        .in('tag_id', audience.tagIds);
-
-      if (tagError)
-        throw new Error(`Failed to fetch contact tags: ${tagError.message}`);
+      // Mesmo padrão de paginação — .in('tag_id', ...) sozinho também
+      // trunca em 1000 linhas numa tag popular.
+      const contactTags: { contact_id: string }[] = [];
+      {
+        const pageSize = 1000;
+        let from = 0;
+        while (true) {
+          const { data: page, error: tagError } = await supabase
+            .from('contact_tags')
+            .select('contact_id')
+            .in('tag_id', audience.tagIds)
+            .order('id')
+            .range(from, from + pageSize - 1);
+          if (tagError)
+            throw new Error(`Failed to fetch contact tags: ${tagError.message}`);
+          contactTags.push(...(page ?? []));
+          if (!page || page.length < pageSize) break;
+          from += pageSize;
+        }
+      }
 
       if (contactTags && contactTags.length > 0) {
         const uniqueContactIds = [

@@ -204,10 +204,25 @@ export async function POST(request: Request) {
     // arbiter from a bare column list — the same reason the main contacts
     // CSV importer (import-modal.tsx) pre-checks and inserts rather than
     // upserts.
-    const { data: existingRows } = await supabaseAdmin()
-      .from("contacts")
-      .select("id, name, phone_normalized, cpf")
-      .eq("account_id", accountId);
+    // Paginado via .range() — mesmo padrão de startCampaign.ts (contact_tags)
+    // — sem isso, o cap de resposta do PostgREST (1000 linhas) trunca contas
+    // com mais de 1000 contatos, e o dedup abaixo não reconhece contatos
+    // fora da primeira página, criando duplicatas silenciosamente num reimport.
+    const existingRows: any[] = [];
+    {
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page } = await supabaseAdmin()
+          .from("contacts")
+          .select("id, name, phone_normalized, cpf")
+          .eq("account_id", accountId)
+          .range(from, from + pageSize - 1);
+        existingRows.push(...(page ?? []));
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
+    }
     const existingContactsByKey = new Map<
       string,
       { id: string; name: string | null; cpf: string | null; phone_normalized: string | null }

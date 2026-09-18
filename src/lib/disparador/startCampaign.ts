@@ -130,17 +130,31 @@ export async function startCampaign(
       .in("status", ["pendente", "agendado", "erro", "enviando"]);
 
     // 3. Load active contacts — scoped to the caller's account so a
-    // campaign never sends to another account's contacts.
-    const { data: allContacts, error: contactsError } = await supabaseAdmin()
-      .from("contacts")
-      .select("id, name, phone, company, phone_normalized")
-      .eq("account_id", accountId);
+    // campaign never sends to another account's contacts. Paginado via
+    // .range() — mesmo padrão do filtro por tag abaixo (contact_tags) —
+    // sem isso, o cap de resposta do PostgREST (1000 linhas) trunca
+    // contas com mais de 1000 contatos silenciosamente.
+    const allContacts: any[] = [];
+    {
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page, error: pageError } = await supabaseAdmin()
+          .from("contacts")
+          .select("id, name, phone, company, phone_normalized")
+          .eq("account_id", accountId)
+          .range(from, from + pageSize - 1);
 
-    if (contactsError) {
-      throw new Error(`Erro ao carregar contatos: ${contactsError.message}`);
+        if (pageError) {
+          throw new Error(`Erro ao carregar contatos: ${pageError.message}`);
+        }
+        allContacts.push(...(page ?? []));
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
     }
 
-    if (!allContacts || allContacts.length === 0) {
+    if (allContacts.length === 0) {
       return { ok: false, status: 400, error: "Nenhum contato ativo encontrado no CRM." };
     }
 
