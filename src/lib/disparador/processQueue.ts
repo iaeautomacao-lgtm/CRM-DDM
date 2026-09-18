@@ -140,7 +140,15 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131047, 131021]);
 // 131008: Required parameter is missing — variável obrigatória do
 // template está vazia. Não adianta retentar (o parâmetro continuará
 // vazio nas próximas tentativas). Marcar como permanente imediatamente.
-const META_PERMANENT_CODES = new Set([131031, 131051, 368, 190, 131008]);
+// 131009: Parameter value is invalid — mesmo raciocínio do 131008, o
+// valor continuará inválido em qualquer retry.
+// 132000: Number of parameters does not match the expected number of
+// params — template inativo/não aprovado ou template_variable_map
+// desalinhado; retry não corrige.
+// 132001: Template name/language does not exist — parâmetros do
+// template incompatíveis com o que está aprovado na Meta; retry não
+// corrige.
+const META_PERMANENT_CODES = new Set([131031, 131051, 368, 190, 131008, 131009, 132000, 132001]);
 
 // Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
 // permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
