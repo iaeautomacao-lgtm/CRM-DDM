@@ -370,53 +370,6 @@ export interface Deal {
   assignee?: Profile;
 }
 
-export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
-export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
-
-export interface Broadcast {
-  id: string;
-  user_id: string;
-  name: string;
-  template_name: string;
-  template_language: string;
-  template_variables?: Record<string, unknown>;
-  audience_filter?: Record<string, unknown>;
-  scheduled_at?: string;
-  status: BroadcastStatus;
-  total_recipients: number;
-  sent_count: number;
-  delivered_count: number;
-  read_count: number;
-  replied_count: number;
-  failed_count: number;
-  created_at: string;
-}
-
-export interface BroadcastRecipient {
-  id: string;
-  broadcast_id: string;
-  /**
-   * Nullable after migration 004 — becomes NULL when the referenced
-   * contact is deleted (ON DELETE SET NULL). History preserved; the
-   * UI renders "Unknown" for orphaned rows.
-   */
-  contact_id: string | null;
-  status: RecipientStatus;
-  sent_at?: string;
-  delivered_at?: string;
-  read_at?: string;
-  replied_at?: string;
-  error_message?: string;
-  /**
-   * Meta's message id, persisted when the broadcast send succeeds so
-   * the webhook can mirror status updates back onto the recipient row.
-   * Added in migration 003.
-   */
-  whatsapp_message_id?: string;
-  created_at: string;
-  contact?: Contact;
-}
-
 // ============================================================
 // Automations (migration 006)
 // ============================================================

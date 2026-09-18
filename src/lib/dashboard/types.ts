@@ -49,7 +49,6 @@ export interface ResponseTimeSummary {
 export type ActivityKind =
   | 'message'
   | 'deal'
-  | 'broadcast'
   | 'automation'
   | 'contact'
 

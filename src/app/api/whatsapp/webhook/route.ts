@@ -362,48 +362,6 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
   }
 }
 
-// The happy-path status ladder — pending → sent → delivered → read →
-// replied. Webhook replays must never regress a recipient back down
-// this ladder.
-//
-// `failed` is NOT on this ladder. It's a terminal side branch that is
-// only valid from the early states (pending / sent) — once Meta has
-// delivered or the user has read or replied, a later "failed" status
-// event is a bug in Meta's pipeline or a spoof attempt and must be
-// ignored.
-const RECIPIENT_STATUS_LADDER = [
-  'pending',
-  'sent',
-  'delivered',
-  'read',
-  'replied',
-] as const
-
-function ladderLevel(s: string): number {
-  const idx = (RECIPIENT_STATUS_LADDER as readonly string[]).indexOf(s)
-  return idx < 0 ? -1 : idx
-}
-
-/**
- * Can a recipient transition from `current` to `incoming`?
- *   - Along the ladder, only forward moves are allowed.
- *   - `failed` is accepted only from `pending` or `sent`; it's refused
- *     once the recipient has reached any of the success states.
- */
-function isValidStatusTransition(current: string, incoming: string): boolean {
-  if (incoming === 'failed') {
-    return current === 'pending' || current === 'sent'
-  }
-  if (current === 'failed') {
-    return false // failed is terminal
-  }
-  const ci = ladderLevel(current)
-  const ii = ladderLevel(incoming)
-  if (ii < 0) return false // unknown incoming status
-  if (ci < 0) return true // unknown current — accept anything on the ladder
-  return ii > ci
-}
-
 async function handleStatusUpdate(status: {
   id: string
   status: string
@@ -421,16 +379,9 @@ async function handleStatusUpdate(status: {
     console.error('Error updating message status:', msgErr)
   }
 
-  const tsIso = new Date(parseInt(status.timestamp) * 1000).toISOString()
-
   // ── Disparador queue tracking ─────────────────────────────────────
   // Mirror delivery status back into disp_message_queue so the
   // campaign monitor can show delivered/read/failed per message.
-  // Uses the same status-ladder guard as broadcast_recipients. Placed
-  // before the broadcast_recipients block (not after) — a Disparador
-  // send never has a broadcast_recipients row, so it would hit that
-  // block's early `if (!recipient) return` and never reach a
-  // trailing block placed after it.
   const { data: queueItem } = await supabaseAdmin()
     .from('disp_message_queue')
     .select('id, status, campaign_id')
@@ -516,79 +467,6 @@ async function handleStatusUpdate(status: {
     .eq('message_id', status.id)
   if (testSendErr) {
     console.error('Error updating whatsapp_test_sends status:', testSendErr)
-  }
-
-  // 2) Mirror onto broadcast_recipients via whatsapp_message_id
-  //    (added in migration 003). The aggregate trigger on
-  //    broadcast_recipients re-derives the parent broadcast's
-  //    sent/delivered/read/failed counts automatically.
-  const { data: recipient, error: recFetchErr } = await supabaseAdmin()
-    .from('broadcast_recipients')
-    .select('id, status')
-    .eq('whatsapp_message_id', status.id)
-    .maybeSingle()
-
-  if (recFetchErr) {
-    console.error('Error fetching broadcast recipient:', recFetchErr)
-    return
-  }
-  if (!recipient) return // message wasn't part of a broadcast — fine
-
-  // Guard transitions — forward-only on the success ladder, and
-  // `failed` only from pre-delivered states.
-  if (!isValidStatusTransition(recipient.status, status.status)) return
-
-  const update: Record<string, unknown> = { status: status.status }
-  if (status.status === 'sent' && !('sent_at' in update)) update.sent_at = tsIso
-  if (status.status === 'delivered') update.delivered_at = tsIso
-  if (status.status === 'read') update.read_at = tsIso
-
-  const { error: recUpdateErr } = await supabaseAdmin()
-    .from('broadcast_recipients')
-    .update(update)
-    .eq('id', recipient.id)
-
-  if (recUpdateErr) {
-    console.error('Error updating broadcast recipient status:', recUpdateErr)
-  }
-}
-
-/**
- * If an inbound message's sender is on a still-unreplied
- * broadcast_recipients row, flip it to `replied` so the reply count
- * advances on the parent broadcast.
- *
- * Runs on a best-effort basis — failures here must not break the
- * main inbound-message flow, so errors are swallowed with a log.
- */
-async function flagBroadcastReplyIfAny(accountId: string, contactId: string) {
-  try {
-    // Most recent outbound broadcast in this account that hasn't
-    // been replied to yet. Account-scoped so a shared inbox reply
-    // marks the broadcast as replied regardless of which teammate
-    // sent it.
-    const { data: recs, error } = await supabaseAdmin()
-      .from('broadcast_recipients')
-      .select('id, status, broadcast_id, broadcasts!inner(account_id)')
-      .eq('contact_id', contactId)
-      .eq('broadcasts.account_id', accountId)
-      .in('status', ['sent', 'delivered', 'read'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-
-    if (error || !recs || recs.length === 0) return
-
-    const row = recs[0]
-    const { error: updErr } = await supabaseAdmin()
-      .from('broadcast_recipients')
-      .update({ status: 'replied', replied_at: new Date().toISOString() })
-      .eq('id', row.id)
-
-    if (updErr) {
-      console.error('Error marking broadcast recipient replied:', updErr)
-    }
-  } catch (err) {
-    console.error('flagBroadcastReplyIfAny failed:', err)
   }
 }
 
@@ -822,11 +700,6 @@ async function processMessage(
   if (convError) {
     console.error('Error updating conversation:', convError)
   }
-
-  // If this contact was a recent broadcast recipient, flag the reply
-  // so the broadcast's `replied_count` advances (via the aggregate
-  // trigger installed in migration 003).
-  await flagBroadcastReplyIfAny(accountId, contactRecord.id)
 
   // Correlacionar resposta com campanha do Disparador (se houver) — ver
   // reply-tracker.ts. Fire-and-forget: nunca deve atrasar/derrubar o
