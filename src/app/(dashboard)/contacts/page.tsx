@@ -578,7 +578,7 @@ export default function ContactsPage() {
               <TableHead className="text-muted-foreground">Nome</TableHead>
               <TableHead className="text-muted-foreground">Telefone</TableHead>
               <TableHead className="text-muted-foreground hidden md:table-cell">E-mail</TableHead>
-              <TableHead className="text-muted-foreground hidden lg:table-cell">Empresa</TableHead>
+              <TableHead className="text-muted-foreground hidden lg:table-cell">Instituição</TableHead>
               <TableHead className="text-muted-foreground hidden md:table-cell">Tags</TableHead>
               <TableHead className="text-muted-foreground hidden lg:table-cell">Criado em</TableHead>
               <TableHead className="text-muted-foreground w-12" />
@@ -642,7 +642,7 @@ export default function ContactsPage() {
                     {contact.email || <span className="text-muted-foreground">-</span>}
                   </TableCell>
                   <TableCell className="text-muted-foreground hidden lg:table-cell text-sm">
-                    {contact.company || <span className="text-muted-foreground">-</span>}
+                    {contact.instituicao || contact.company || <span className="text-muted-foreground">-</span>}
                   </TableCell>
                   <TableCell className="hidden md:table-cell">
                     <div className="flex flex-wrap gap-1">
