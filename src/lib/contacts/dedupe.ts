@@ -31,6 +31,13 @@ export interface ExistingContact {
  * or null. Pre-filters in SQL by the last-8-digit suffix (so we don't
  * pull every contact), then applies the strict `phonesMatch` in JS on
  * the small candidate set — the exact approach the webhook has used.
+ *
+ * Falls back to wacrm.contact_phones (migration 077, TELEFONE2/3) when
+ * `phone` doesn't match any contacts.phone (TELEFONE1) — sem isso, um
+ * contato respondendo de um número alternativo já cadastrado virava um
+ * contato novo e desconectado do original. Só roda quando o caminho
+ * primário (contacts.phone) não acha nada; nunca muda o resultado de um
+ * match primário.
  */
 export async function findExistingContact(
   db: SupabaseClient,
@@ -50,9 +57,33 @@ export async function findExistingContact(
 
   if (error || !data) return null;
 
-  return (
-    (data as ExistingContact[]).find((c) => phonesMatch(c.phone, phone)) ?? null
-  );
+  const primaryMatch =
+    (data as ExistingContact[]).find((c) => phonesMatch(c.phone, phone)) ?? null;
+  if (primaryMatch) return primaryMatch;
+
+  // Fallback — TELEFONE2/3: busca em contact_phones pelo mesmo
+  // normalized (não pelo sufixo/phonesMatch fuzzy do caminho primário —
+  // contact_phones.phone_normalized já é exato, gravado no import/
+  // escada, ver processQueue.ts).
+  const { data: altPhoneRow, error: altPhoneError } = await db
+    .from("contact_phones")
+    .select("contact_id")
+    .eq("phone_normalized", normalized)
+    .limit(1)
+    .maybeSingle();
+
+  if (altPhoneError || !altPhoneRow) return null;
+
+  const { data: contactRow, error: contactError } = await db
+    .from("contacts")
+    .select("*")
+    .eq("id", altPhoneRow.contact_id)
+    .eq("account_id", accountId)
+    .maybeSingle();
+
+  if (contactError || !contactRow) return null;
+
+  return contactRow as ExistingContact;
 }
 
 /**

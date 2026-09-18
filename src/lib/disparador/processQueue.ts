@@ -207,6 +207,63 @@ async function markQueueError(
 // em wacrm.contact_phones com ordem 2/3 — ver migration 077.
 const MAX_PHONE_ATTEMPTS = 3;
 
+// Marca em wacrm.contact_phones (migration 086) o telefone que acabou de
+// falhar com erro permanente de número inválido — o QUE JÁ FOI TENTADO
+// (item.phone_attempt_order atual), não o próximo da escada. Fire-and-
+// forget: chamado sem await pelo caller, nunca deve atrasar/derrubar o
+// fluxo de envio/retry.
+//
+// ordem > 1: o telefone já está em contact_phones, atualiza direto por
+// (contact_id, ordem) — não precisa nem saber o número em si.
+// ordem === 1 (TELEFONE1/contacts.phone): não existe linha em
+// contact_phones pra essa combinação por design, então busca o
+// phone_normalized de contacts e tenta casar por ele — se não achar
+// nada (o caso normal), o UPDATE só não afeta nenhuma linha.
+async function markPhoneInvalid(item: QueueItem): Promise<void> {
+  if (!item.contact_id) return;
+  const attemptOrder = item.phone_attempt_order ?? 1;
+
+  try {
+    let error;
+    if (attemptOrder > 1) {
+      ({ error } = await supabaseAdmin()
+        .from("contact_phones")
+        .update({ status: "invalido", last_attempt_at: new Date().toISOString() })
+        .eq("contact_id", item.contact_id)
+        .eq("ordem", attemptOrder));
+    } else {
+      const { data: contact } = await supabaseAdmin()
+        .from("contacts")
+        .select("phone_normalized")
+        .eq("id", item.contact_id)
+        .maybeSingle();
+      if (!contact?.phone_normalized) return;
+
+      ({ error } = await supabaseAdmin()
+        .from("contact_phones")
+        .update({ status: "invalido", last_attempt_at: new Date().toISOString() })
+        .eq("contact_id", item.contact_id)
+        .eq("phone_normalized", contact.phone_normalized));
+    }
+
+    if (error) throw error;
+  } catch (err: any) {
+    console.error("[Disparador] markPhoneInvalid: falha ao atualizar contact_phones:", err);
+    void writeLog({
+      level: "warn",
+      source: "disparador",
+      event: "contact_phone_mark_invalid_failed",
+      message: "Falha ao marcar telefone como inválido em contact_phones",
+      payload: {
+        campaign_id: item.campaign_id,
+        contact_id: item.contact_id,
+        phone_attempt_order: attemptOrder,
+        erro: err?.message || String(err),
+      },
+    });
+  }
+}
+
 // Quando o envio falha com um erro de "número inválido/sem WhatsApp" da
 // Meta (ver isInvalidPhoneError), tenta escalar para o próximo telefone
 // alternativo do contato em wacrm.contact_phones. Reagenda o MESMO item
@@ -460,6 +517,9 @@ export async function processQueueItem(
     }
 
     if (isInvalidPhoneError(sendErr)) {
+      // Fire-and-forget — marca o telefone que acabou de falhar, não
+      // bloqueia a escalada pro próximo da escada logo abaixo.
+      void markPhoneInvalid(item);
       const escalated = await tryNextPhone(item);
       if (escalated) {
         // Item reagendado com o próximo telefone da escada — não é um

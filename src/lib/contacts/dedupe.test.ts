@@ -67,15 +67,54 @@ describe("dedupeByPhone", () => {
 });
 
 describe("findExistingContact", () => {
-  // Minimal SupabaseClient stub: resolves the .from().select().eq().like()
-  // chain to a fixed candidate set.
-  function stubDb(rows: Array<{ id: string; phone: string }>): SupabaseClient {
-    const builder = {
-      select: () => builder,
-      eq: () => builder,
-      like: () => Promise.resolve({ data: rows, error: null }),
+  // Minimal SupabaseClient stub, table-aware: `contacts` resolves the
+  // .select().eq().like() chain (fuzzy suffix match, caminho primário);
+  // `contact_phones` resolves .select().eq().limit().maybeSingle()
+  // (fallback TELEFONE2/3) to a contact_id, which then round-trips
+  // through a second `contacts` lookup by id (.select().eq().eq()
+  // .maybeSingle()) to return the full contact row.
+  function stubDb(
+    contactsRows: Array<{ id: string; phone: string }>,
+    altPhoneRows: Array<{ contact_id: string; phone_normalized: string }> = [],
+  ): SupabaseClient {
+    const from = (table: string) => {
+      if (table === "contact_phones") {
+        const builder = {
+          select: () => builder,
+          eq: (_col: string, val: string) => ({
+            ...builder,
+            limit: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: altPhoneRows.find((r) => r.phone_normalized === val) ?? null,
+                  error: null,
+                }),
+            }),
+          }),
+        };
+        return builder;
+      }
+      // contacts — dois formatos de chamada usados por findExistingContact:
+      // 1) .select().eq('account_id',...).like(...)  -> caminho primário
+      // 2) .select().eq('id',...).eq('account_id',...).maybeSingle() -> fallback
+      const builder: any = {
+        select: () => builder,
+        like: () => Promise.resolve({ data: contactsRows, error: null }),
+        eq: (col: string, val: string) => {
+          if (col === "id") {
+            const found = contactsRows.find((r) => r.id === val) ?? null;
+            return {
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({ data: found, error: null }),
+              }),
+            };
+          }
+          return builder;
+        },
+      };
+      return builder;
     };
-    return { from: () => builder } as unknown as SupabaseClient;
+    return { from } as unknown as SupabaseClient;
   }
 
   it("returns a trunk-variant match via phonesMatch", async () => {
@@ -84,7 +123,7 @@ describe("findExistingContact", () => {
     expect(hit?.id).toBe("c1");
   });
 
-  it("returns null when no candidate matches", async () => {
+  it("returns null when no candidate matches in contacts.phone or contact_phones", async () => {
     const db = stubDb([{ id: "c1", phone: "15559999999" }]);
     const hit = await findExistingContact(db, "acct", "+1 555-123-4567");
     expect(hit).toBeNull();
@@ -93,5 +132,23 @@ describe("findExistingContact", () => {
   it("returns null for an empty phone without querying", async () => {
     const db = stubDb([{ id: "c1", phone: "15551234567" }]);
     expect(await findExistingContact(db, "acct", "   ")).toBeNull();
+  });
+
+  it("falls back to contact_phones (TELEFONE2/3) when contacts.phone has no match", async () => {
+    const db = stubDb(
+      [{ id: "c1", phone: "15551234567" }], // TELEFONE1 de c1 — número diferente
+      [{ contact_id: "c1", phone_normalized: "15559998888" }], // TELEFONE2 de c1
+    );
+    const hit = await findExistingContact(db, "acct", "+1 555-999-8888");
+    expect(hit?.id).toBe("c1");
+  });
+
+  it("does not touch contact_phones when contacts.phone already matched", async () => {
+    // Se o fallback rodasse aqui, o stub de contact_phones não tem
+    // linha nenhuma pra "15551234567" e devolveria null — o teste
+    // falharia se o caminho primário não retornasse antes.
+    const db = stubDb([{ id: "c1", phone: "15551234567" }], []);
+    const hit = await findExistingContact(db, "acct", "15551234567");
+    expect(hit?.id).toBe("c1");
   });
 });

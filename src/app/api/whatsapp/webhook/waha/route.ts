@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
@@ -483,7 +484,9 @@ export async function POST(request: Request) {
       // também dispara para o eco das nossas próprias mensagens enviadas
       // (direction === 'outbound'), que não é uma resposta do contato.
       if (direction === 'inbound' && contactId && accountId) {
-        trackCampaignReply(contactId, accountId).catch(() => {})
+        // `phone` vem como "+<dígitos>" (linha ~140) — normaliza pro
+        // mesmo formato de phone_normalized antes de passar adiante.
+        trackCampaignReply(contactId, accountId, normalizePhone(phone)).catch(() => {})
       }
 
       // 4. Update the conversation values

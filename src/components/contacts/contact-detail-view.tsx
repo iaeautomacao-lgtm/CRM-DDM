@@ -37,11 +37,13 @@ import {
   Trash2,
   Save,
   X,
+  Pencil,
   DollarSign,
   LayoutTemplate,
   MessageSquare,
 } from 'lucide-react';
 import { normalizeForSearch } from '@/lib/utils';
+import { normalizePhone } from '@/lib/whatsapp/phone-utils';
 import {
   TagPickerBox,
   useTagButtonRefs,
@@ -54,6 +56,40 @@ interface ContactDetailViewProps {
   onOpenChange: (open: boolean) => void;
   contactId: string | null;
   onUpdated: () => void;
+}
+
+// wacrm.contact_phones (migrations 077/086) — TELEFONE2/3+ de um contato.
+// TELEFONE1 é sempre contacts.phone e nunca aparece nesta tabela.
+interface ContactPhone {
+  id: string;
+  contact_id: string;
+  phone: string;
+  phone_normalized: string;
+  ordem: number;
+  status: 'ativo' | 'invalido' | 'respondeu';
+  last_attempt_at: string | null;
+  label: string | null;
+  created_at: string;
+}
+
+const PHONE_STATUS_BADGE: Record<
+  ContactPhone['status'],
+  { label: string; className: string }
+> = {
+  ativo: { label: 'Ativo', className: 'bg-muted text-muted-foreground' },
+  invalido: { label: 'Inválido', className: 'bg-red-500/10 text-red-400' },
+  respondeu: { label: 'Respondeu', className: 'bg-primary/10 text-primary' },
+};
+
+// Mesmo padrão de src/app/api/disparador/contacts/import/route.ts:
+// remove tudo que não é dígito e prefixa 55 se o número não trouxer
+// código de país — mantém contact_phones.phone no mesmo formato usado
+// pelo import/envio em massa.
+function formatBrazilianPhone(raw: string): string {
+  const cleaned = raw.replace(/\D/g, '');
+  if (!cleaned) return '';
+  if (cleaned.startsWith('55')) return `+${cleaned}`;
+  return `+55${cleaned}`;
 }
 
 const CPF_DIGITS_LENGTH = 11;
@@ -209,6 +245,18 @@ export function ContactDetailView({
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loadingDeals, setLoadingDeals] = useState(false);
 
+  // Phones tab (TELEFONE2/3+ — wacrm.contact_phones)
+  const [phones, setPhones] = useState<ContactPhone[]>([]);
+  const [loadingPhones, setLoadingPhones] = useState(false);
+  const [newPhoneNumber, setNewPhoneNumber] = useState('');
+  const [newPhoneLabel, setNewPhoneLabel] = useState('');
+  const [addingPhone, setAddingPhone] = useState(false);
+  const [editingPhoneId, setEditingPhoneId] = useState<string | null>(null);
+  const [editPhoneNumber, setEditPhoneNumber] = useState('');
+  const [editPhoneLabel, setEditPhoneLabel] = useState('');
+  const [savingPhoneEdit, setSavingPhoneEdit] = useState(false);
+  const [deletingPhoneId, setDeletingPhoneId] = useState<string | null>(null);
+
   const fetchContact = useCallback(async () => {
     if (!contactId) return;
     setLoading(true);
@@ -314,6 +362,18 @@ export function ContactDetailView({
     setLoadingDeals(false);
   }, [contactId, supabase]);
 
+  const fetchPhones = useCallback(async () => {
+    if (!contactId) return;
+    setLoadingPhones(true);
+    const { data } = await supabase
+      .from('contact_phones')
+      .select('*')
+      .eq('contact_id', contactId)
+      .order('ordem', { ascending: true });
+    setPhones((data ?? []) as ContactPhone[]);
+    setLoadingPhones(false);
+  }, [contactId, supabase]);
+
   useEffect(() => {
     if (open && contactId) {
       fetchContact();
@@ -321,9 +381,10 @@ export function ContactDetailView({
       fetchNotes();
       fetchCustomFields();
       fetchDeals();
+      fetchPhones();
       setTagQuery('');
     }
-  }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
+  }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals, fetchPhones]);
 
   async function copyPhone() {
     if (!contact) return;
@@ -363,6 +424,98 @@ export function ContactDetailView({
       onUpdated();
     }
     setSavingDetails(false);
+  }
+
+  async function addPhone() {
+    if (!contactId || !newPhoneNumber.trim()) return;
+    const formatted = formatBrazilianPhone(newPhoneNumber);
+    const normalized = normalizePhone(formatted);
+    if (!normalized) {
+      toast.error('Número de telefone inválido');
+      return;
+    }
+
+    setAddingPhone(true);
+    // Próxima ordem: MAX(ordem)+1 entre os telefones alternativos já
+    // cadastrados, com piso 2 (ordem 1 é sempre contacts.phone, nunca
+    // gravado em contact_phones).
+    const nextOrdem =
+      phones.length > 0 ? Math.max(...phones.map((p) => p.ordem)) + 1 : 2;
+
+    const { error } = await supabase.from('contact_phones').insert({
+      contact_id: contactId,
+      phone: formatted,
+      phone_normalized: normalized,
+      ordem: nextOrdem,
+      label: newPhoneLabel.trim() || null,
+    });
+
+    if (error) {
+      toast.error('Falha ao adicionar telefone');
+    } else {
+      toast.success('Telefone adicionado');
+      setNewPhoneNumber('');
+      setNewPhoneLabel('');
+      fetchPhones();
+    }
+    setAddingPhone(false);
+  }
+
+  function startEditPhone(phone: ContactPhone) {
+    setEditingPhoneId(phone.id);
+    setEditPhoneNumber(phone.phone);
+    setEditPhoneLabel(phone.label ?? '');
+  }
+
+  function cancelEditPhone() {
+    setEditingPhoneId(null);
+    setEditPhoneNumber('');
+    setEditPhoneLabel('');
+  }
+
+  async function saveEditPhone() {
+    if (!editingPhoneId || !editPhoneNumber.trim()) return;
+    const formatted = formatBrazilianPhone(editPhoneNumber);
+    const normalized = normalizePhone(formatted);
+    if (!normalized) {
+      toast.error('Número de telefone inválido');
+      return;
+    }
+
+    setSavingPhoneEdit(true);
+    const { error } = await supabase
+      .from('contact_phones')
+      .update({
+        phone: formatted,
+        phone_normalized: normalized,
+        label: editPhoneLabel.trim() || null,
+      })
+      .eq('id', editingPhoneId);
+
+    if (error) {
+      toast.error('Falha ao atualizar telefone');
+    } else {
+      toast.success('Telefone atualizado');
+      cancelEditPhone();
+      fetchPhones();
+    }
+    setSavingPhoneEdit(false);
+  }
+
+  async function deletePhone(phoneId: string) {
+    setDeletingPhoneId(phoneId);
+    const { error } = await supabase
+      .from('contact_phones')
+      .delete()
+      .eq('id', phoneId);
+
+    if (error) {
+      toast.error('Falha ao remover telefone');
+    } else {
+      setPhones((prev) => prev.filter((p) => p.id !== phoneId));
+      toast.success('Telefone removido');
+    }
+    setDeletingPhoneId(null);
   }
 
   async function toggleTag(tagId: string) {
@@ -621,6 +774,12 @@ export function ContactDetailView({
                   Detalhes
                 </TabsTrigger>
                 <TabsTrigger
+                  value="phones"
+                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
+                >
+                  Telefones
+                </TabsTrigger>
+                <TabsTrigger
                   value="tags"
                   className="data-active:bg-muted data-active:text-primary text-muted-foreground"
                 >
@@ -715,6 +874,175 @@ export function ContactDetailView({
                     )}
                     Salvar Alterações
                   </Button>
+                </div>
+              </TabsContent>
+
+              {/* Phones Tab */}
+              <TabsContent value="phones" className="flex-1 overflow-y-auto px-4 py-3">
+                <div className="space-y-4">
+                  {/* Seção 1 — telefone principal (contacts.phone / TELEFONE1) */}
+                  <div className="space-y-1.5">
+                    <Label className="text-muted-foreground text-xs">Telefone principal</Label>
+                    <div className="flex items-center gap-2 rounded-lg bg-muted/50 border border-border/50 px-3 py-2">
+                      <span className="text-sm text-foreground flex-1">{contact.phone}</span>
+                      <span className="rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium shrink-0">
+                        Principal
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Editável na aba Detalhes.
+                    </p>
+                  </div>
+
+                  {/* Seção 2 — telefones alternativos (contact_phones) */}
+                  <div className="space-y-1.5 pt-2 border-t border-border/50">
+                    <Label className="text-muted-foreground text-xs">Telefones alternativos</Label>
+
+                    {loadingPhones ? (
+                      <div className="flex items-center justify-center py-6">
+                        <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : phones.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-2">
+                        Nenhum telefone alternativo cadastrado.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {phones.map((phone) => {
+                          const badge = PHONE_STATUS_BADGE[phone.status];
+                          const isEditing = editingPhoneId === phone.id;
+                          return (
+                            <div
+                              key={phone.id}
+                              className="rounded-lg bg-muted/50 border border-border/50 p-3 group"
+                            >
+                              {isEditing ? (
+                                <div className="space-y-2">
+                                  <Input
+                                    value={editPhoneNumber}
+                                    onChange={(e) => setEditPhoneNumber(e.target.value)}
+                                    placeholder="Número"
+                                    className="bg-muted border-border text-foreground h-8 text-sm"
+                                  />
+                                  <Input
+                                    value={editPhoneLabel}
+                                    onChange={(e) => setEditPhoneLabel(e.target.value)}
+                                    placeholder="Rótulo (opcional)"
+                                    className="bg-muted border-border text-foreground h-8 text-sm"
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      onClick={saveEditPhone}
+                                      disabled={savingPhoneEdit || !editPhoneNumber.trim()}
+                                      size="sm"
+                                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
+                                    >
+                                      {savingPhoneEdit ? (
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                      ) : (
+                                        <Save className="size-3.5" />
+                                      )}
+                                      Salvar
+                                    </Button>
+                                    <Button
+                                      onClick={cancelEditPhone}
+                                      disabled={savingPhoneEdit}
+                                      size="sm"
+                                      variant="outline"
+                                      className="border-border text-foreground hover:bg-muted"
+                                    >
+                                      <X className="size-3.5" />
+                                      Cancelar
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex-1 min-w-0 space-y-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-sm text-foreground">{phone.phone}</span>
+                                      <span
+                                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 ${badge.className}`}
+                                      >
+                                        {badge.label}
+                                      </span>
+                                    </div>
+                                    {phone.label && (
+                                      <p className="text-xs text-muted-foreground">{phone.label}</p>
+                                    )}
+                                    {phone.last_attempt_at && (
+                                      <p className="text-xs text-muted-foreground">
+                                        Última tentativa:{' '}
+                                        {new Date(phone.last_attempt_at).toLocaleDateString('pt-BR', {
+                                          month: 'short',
+                                          day: 'numeric',
+                                          year: 'numeric',
+                                          hour: '2-digit',
+                                          minute: '2-digit',
+                                        })}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                                    <button
+                                      onClick={() => startEditPhone(phone)}
+                                      className="text-muted-foreground hover:text-primary transition-colors cursor-pointer p-1"
+                                    >
+                                      <Pencil className="size-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (window.confirm('Remover este telefone?')) {
+                                          deletePhone(phone.id);
+                                        }
+                                      }}
+                                      disabled={deletingPhoneId === phone.id}
+                                      className="text-muted-foreground hover:text-red-400 transition-colors cursor-pointer p-1"
+                                    >
+                                      {deletingPhoneId === phone.id ? (
+                                        <Loader2 className="size-3.5 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="size-3.5" />
+                                      )}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Adicionar telefone */}
+                  <div className="space-y-2 pt-2 border-t border-border/50">
+                    <Input
+                      value={newPhoneNumber}
+                      onChange={(e) => setNewPhoneNumber(e.target.value)}
+                      placeholder="Novo número"
+                      className="bg-muted border-border text-foreground h-8 text-sm placeholder:text-muted-foreground"
+                    />
+                    <Input
+                      value={newPhoneLabel}
+                      onChange={(e) => setNewPhoneLabel(e.target.value)}
+                      placeholder="Rótulo (opcional)"
+                      className="bg-muted border-border text-foreground h-8 text-sm placeholder:text-muted-foreground"
+                    />
+                    <Button
+                      onClick={addPhone}
+                      disabled={!newPhoneNumber.trim() || addingPhone}
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground w-full"
+                      size="sm"
+                    >
+                      {addingPhone ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Plus className="size-3.5" />
+                      )}
+                      Adicionar telefone
+                    </Button>
+                  </div>
                 </div>
               </TabsContent>
 

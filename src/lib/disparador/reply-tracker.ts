@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { writeLog } from "@/lib/logger";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -40,9 +41,47 @@ const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 // webhook que chama esta função.
 export async function trackCampaignReply(
   contactId: string,
-  accountId: string
+  accountId: string,
+  // Telefone normalizado (mesmo formato de phone_normalized) de onde a
+  // resposta veio — opcional pra não quebrar chamadas antigas, mas os
+  // dois webhooks (Meta/WAHA) já passam. Usado só pra marcar
+  // contact_phones.status = 'respondeu' (migration 086), independente
+  // da correlação de campanha abaixo.
+  replyPhoneNormalized?: string
 ): Promise<void> {
   void accountId;
+
+  // Marca o telefone que respondeu em wacrm.contact_phones. Se o número
+  // for contacts.phone (TELEFONE1), não existe linha em contact_phones
+  // pra essa combinação por design (ver processQueue.ts) — o UPDATE
+  // então não afeta nenhuma linha, silenciosamente, sem precisar checar
+  // isso antes. Bloco próprio, fora do try principal: uma falha aqui não
+  // pode pular a correlação de campanha abaixo nem vice-versa.
+  if (replyPhoneNormalized) {
+    try {
+      const { error: phoneUpdateError } = await supabaseAdmin()
+        .from("contact_phones")
+        .update({ status: "respondeu" })
+        .eq("contact_id", contactId)
+        .eq("phone_normalized", replyPhoneNormalized);
+
+      if (phoneUpdateError) {
+        console.error(
+          "[trackCampaignReply] falha ao marcar contact_phones como respondeu:",
+          phoneUpdateError.message
+        );
+        void writeLog({
+          level: "warn",
+          source: "disparador",
+          event: "contact_phone_mark_replied_failed",
+          message: "Falha ao marcar telefone como respondido em contact_phones",
+          payload: { contact_id: contactId, erro: phoneUpdateError.message },
+        });
+      }
+    } catch (err) {
+      console.error("[trackCampaignReply] erro inesperado ao marcar contact_phones:", err);
+    }
+  }
 
   try {
     const sevenDaysAgo = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();

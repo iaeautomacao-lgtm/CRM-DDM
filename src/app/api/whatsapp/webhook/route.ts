@@ -704,7 +704,7 @@ async function processMessage(
   // Correlacionar resposta com campanha do Disparador (se houver) — ver
   // reply-tracker.ts. Fire-and-forget: nunca deve atrasar/derrubar o
   // processamento do webhook.
-  trackCampaignReply(contactRecord.id, accountId).catch(() => {})
+  trackCampaignReply(contactRecord.id, accountId, senderPhone).catch(() => {})
 
   // ============================================================
   // Flow runner dispatch.
