@@ -775,7 +775,12 @@ export default function ContactsPage() {
       />
 
       {/* Contact Detail Sheet */}
+      {/* key força remount completo ao trocar de contato — zera todo o
+          state (tabs, fetches em voo) em vez de reaproveitar a mesma
+          instância, que é o que permitia dados do contato anterior
+          vazarem por cima do novo numa troca rápida. */}
       <ContactDetailView
+        key={detailContactId ?? 'none'}
         open={detailOpen}
         onOpenChange={setDetailOpen}
         contactId={detailContactId}

@@ -553,31 +553,60 @@ export async function processQueueItem(
     return { outcome: "error", error: message };
   }
 
-  await supabaseAdmin()
-    .from("disp_message_queue")
-    .update({
-      status: "enviado",
-      sent_at: new Date().toISOString(),
-      waha_message_id: externalMessageId,
-      tentativas: (item.tentativas || 0) + 1,
-    })
-    .eq("id", item.id);
-
-  await supabaseAdmin().from("message_logs").insert({
-    queue_id: item.id,
-    campaign_id: item.campaign_id,
-    contact_id: item.contact_id,
-    session_id: item.session_id,
-    direcao: "saida",
-    mensagem: cleanText,
-    status: "enviado",
-    waha_message_id: externalMessageId,
-  });
-
-  await supabaseAdmin().rpc("increment_campaign_metric", {
+  // Atômico via RPC (migration 091) — antes eram 3 escritas sequenciais
+  // sem transação (UPDATE disp_message_queue -> INSERT message_logs ->
+  // RPC increment_campaign_metric); um crash/restart entre a 1ª e a 3ª
+  // deixava a mensagem marcada 'enviado' mas sem log de auditoria e/ou
+  // sem incrementar campaign_metrics.total_enviados, sem reconciliação
+  // possível depois.
+  const { error: markSentError } = await supabaseAdmin().rpc("mark_queue_item_sent", {
+    p_item_id: item.id,
     p_campaign_id: item.campaign_id,
-    p_field: "total_enviados",
+    p_contact_id: item.contact_id,
+    p_session_id: item.session_id,
+    p_mensagem: cleanText,
+    p_waha_message_id: externalMessageId,
+    p_tentativas: (item.tentativas || 0) + 1,
   });
+
+  if (markSentError) {
+    // Migration 091 ainda não aplicada (RPC não existe) ou erro
+    // transitório — cai pro caminho antigo (3 escritas separadas,
+    // mesmo bug de não-atomicidade que a RPC resolve) em vez de deixar
+    // o item preso em 'enviando' pra sempre: claimItemAtomically já
+    // marcou status='enviando' antes deste ponto, então SEM nenhuma
+    // escrita de sucesso o item nunca mais seria reivindicado (o claim
+    // só seleciona status='agendado').
+    console.error(
+      "[Disparador] mark_queue_item_sent falhou (migration 091 não aplicada?) — usando fallback não-atômico:",
+      markSentError.message
+    );
+    await supabaseAdmin()
+      .from("disp_message_queue")
+      .update({
+        status: "enviado",
+        sent_at: new Date().toISOString(),
+        waha_message_id: externalMessageId,
+        tentativas: (item.tentativas || 0) + 1,
+      })
+      .eq("id", item.id);
+
+    await supabaseAdmin().from("message_logs").insert({
+      queue_id: item.id,
+      campaign_id: item.campaign_id,
+      contact_id: item.contact_id,
+      session_id: item.session_id,
+      direcao: "saida",
+      mensagem: cleanText,
+      status: "enviado",
+      waha_message_id: externalMessageId,
+    });
+
+    await supabaseAdmin().rpc("increment_campaign_metric", {
+      p_campaign_id: item.campaign_id,
+      p_field: "total_enviados",
+    });
+  }
 
   return { outcome: "sent", messageId: externalMessageId };
 }

@@ -728,13 +728,20 @@ async function appendResults(
 ) {
   if (!logId) return
   const db = supabaseAdmin()
-  const { data: existing } = await db
+  const { data: existing, error: existingError } = await db
     .from('automation_logs')
     .select('steps_executed, status')
     .eq('id', logId)
     .single()
+  if (existingError || !existing) {
+    // Aborta o append inteiro em vez de seguir com existing=undefined —
+    // isso faria `merged` virar só `newItems`, descartando em silêncio
+    // todo o steps_executed já acumulado (rastro de auditoria truncado).
+    console.error('[automations] failed to load execution log', logId, existingError)
+    return
+  }
   const merged = [
-    ...((existing?.steps_executed as AutomationLogStepResult[] | undefined) ?? []),
+    ...((existing.steps_executed as AutomationLogStepResult[] | undefined) ?? []),
     ...newItems,
   ]
   const update: Record<string, unknown> = { steps_executed: merged }

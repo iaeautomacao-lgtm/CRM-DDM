@@ -497,8 +497,6 @@ export async function POST(request: Request) {
       }
 
       if (direction === 'inbound') {
-        updates.unread_count = (conversation?.unread_count || 0) + 1
-
         // A customer replying to a closed/tabulated conversation is a
         // fresh contact, not a continuation of the resolved one — surface
         // it back in the working queues (conversation-list.tsx's default
@@ -516,6 +514,20 @@ export async function POST(request: Request) {
 
       if (convUpdateError) {
         console.error('[waha/webhook] Failed to update conversation values:', convUpdateError)
+      }
+
+      if (direction === 'inbound') {
+        // Increment atômico via RPC (migration 088) — o valor antigo
+        // (`(conversation?.unread_count || 0) + 1`) lia unread_count uma
+        // vez no início do handler e escrevia o calculado, então duas
+        // mensagens do mesmo contato chegando em rajada podiam perder um
+        // incremento (lost update). Mesma correção do webhook Meta.
+        const { error: unreadError } = await db.rpc('increment_unread_count', {
+          conversation_id: conversationId,
+        })
+        if (unreadError) {
+          console.error('[waha/webhook] Failed to increment unread_count:', unreadError)
+        }
       }
 
       // ============================================================

@@ -672,6 +672,15 @@ async function processMessage(
   })
 
   if (msgError) {
+    // 23505 = unique_violation na migration 088 (idx_messages_message_id_unique)
+    // — Meta reentregou um evento que já processamos (retry por timeout/rede).
+    // Não é um erro de verdade, só o sinal de "já inserida, não faz nada de
+    // novo" — sem isso, redelivery duplicava a mensagem no inbox e incrementava
+    // unread_count duas vezes.
+    if (msgError.code === '23505') {
+      console.log('[webhook] Mensagem duplicada ignorada (já processada):', message.id)
+      return
+    }
     console.error('Error inserting message:', msgError)
     return
   }
@@ -686,7 +695,6 @@ async function processMessage(
   const convUpdates: Record<string, unknown> = {
     last_message_text: contentText || `[${message.type}]`,
     last_message_at: new Date().toISOString(),
-    unread_count: (conversation.unread_count || 0) + 1,
     updated_at: new Date().toISOString(),
   }
   if (conversation.status === 'closed') {
@@ -699,6 +707,18 @@ async function processMessage(
 
   if (convError) {
     console.error('Error updating conversation:', convError)
+  }
+
+  // Increment atômico via RPC (migration 088) — o valor antigo
+  // (`(conversation.unread_count || 0) + 1`) lia unread_count uma vez no
+  // início da função e escrevia o calculado, então duas mensagens do
+  // mesmo contato chegando em rajada podiam ler o mesmo valor base e uma
+  // escrita perder o incremento da outra (lost update).
+  const { error: unreadError } = await supabaseAdmin().rpc('increment_unread_count', {
+    conversation_id: conversation.id,
+  })
+  if (unreadError) {
+    console.error('Error incrementing unread_count:', unreadError)
   }
 
   // Correlacionar resposta com campanha do Disparador (se houver) — ver

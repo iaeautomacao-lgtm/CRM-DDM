@@ -2849,24 +2849,82 @@ export async function dispatchInboundToFlows(
  * customer sent last, combined turn included.
  */
 const AI_AGENT_REPLY_DEBOUNCE_MS = 4000;
-const aiAgentReplyDebounceTimers = new Map<
+
+// Fallback legado — só coordena dentro do processo Node atual (a
+// limitação original que a migration 090 resolve). Mantido só pro
+// caso de debounceAiAgentReply rodar antes da migration 090 ter sido
+// aplicada (bump_ai_agent_debounce ainda não existe no banco); nesse
+// intervalo, ao menos a coalescência dentro de um único worker
+// continua funcionando, em vez de cair pra "sempre responde". Remover
+// junto com o branch de fallback em debounceAiAgentReply quando a
+// migration estiver confirmada em produção.
+const aiAgentReplyDebounceTimersFallback = new Map<
   string,
   { timer: ReturnType<typeof setTimeout>; resolve: (proceed: boolean) => void }
 >();
 
-function debounceAiAgentReply(runId: string): Promise<boolean> {
-  const pending = aiAgentReplyDebounceTimers.get(runId);
+function debounceAiAgentReplyInMemory(runId: string): Promise<boolean> {
+  const pending = aiAgentReplyDebounceTimersFallback.get(runId);
   if (pending) {
     clearTimeout(pending.timer);
     pending.resolve(false);
   }
   return new Promise<boolean>((resolve) => {
     const timer = setTimeout(() => {
-      aiAgentReplyDebounceTimers.delete(runId);
+      aiAgentReplyDebounceTimersFallback.delete(runId);
       resolve(true);
     }, AI_AGENT_REPLY_DEBOUNCE_MS);
-    aiAgentReplyDebounceTimers.set(runId, { timer, resolve });
+    aiAgentReplyDebounceTimersFallback.set(runId, { timer, resolve });
   });
+}
+
+/**
+ * Debounce coordenado via wacrm.flow_runs.debounce_until (migration 090)
+ * em vez do Map em memória de antes — o Map só coordenava duas
+ * mensagens do mesmo cliente se ambas as requisições caíssem no MESMO
+ * processo Node; com mais de um worker Phusion Passenger, cada
+ * processo tinha seu próprio Map vazio e a IA podia responder duas
+ * vezes à mesma janela de mensagens.
+ *
+ * "Bump-and-compare": a RPC bump_ai_agent_debounce sempre regrava
+ * debounce_until = now() + 4s (sem condição — toda mensagem nova
+ * reinicia a janela, igual ao clearTimeout+restart de antes) e
+ * retorna o valor gravado. Depois de esperar a janela inteira, o
+ * caller relê debounce_until do banco: se ainda for exatamente o
+ * valor que ele mesmo gravou, nenhuma mensagem mais nova chegou nesse
+ * meio-tempo — ele foi o último da janela e prossegue. Se o valor
+ * mudou, uma mensagem mais nova o superou (mesma semântica do
+ * `pending.resolve(false)` de antes) e ele desiste sem chamar a IA.
+ *
+ * Diferença observável do Map em memória: uma chamada superada agora
+ * só descobre que perdeu depois de esperar a janela inteira (~4s),
+ * em vez de ser cancelada na hora — não há como notificar outro
+ * processo instantaneamente sem um mecanismo de pub/sub, e essa
+ * espera extra roda em background (pós-resposta do webhook), sem
+ * bloquear nada visível pro atendente/cliente.
+ */
+async function debounceAiAgentReply(db: AdminClient, runId: string): Promise<boolean> {
+  const { data: myDeadline, error } = await db.rpc("bump_ai_agent_debounce", {
+    p_run_id: runId,
+  });
+
+  if (error || !myDeadline) {
+    console.error(
+      "[debounceAiAgentReply] RPC bump_ai_agent_debounce indisponível (migration 090 não aplicada?) — usando fallback em memória:",
+      error?.message
+    );
+    return debounceAiAgentReplyInMemory(runId);
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, AI_AGENT_REPLY_DEBOUNCE_MS));
+
+  const { data: row } = await db
+    .from("flow_runs")
+    .select("debounce_until")
+    .eq("id", runId)
+    .maybeSingle();
+
+  return (row as { debounce_until: string } | null)?.debounce_until === myDeadline;
 }
 
 async function handleReplyForActiveRun(
@@ -2965,7 +3023,7 @@ async function handleReplyForActiveRun(
     // Debounce — see debounceAiAgentReply's own comment. If a newer
     // reply for this run supersedes us before the window elapses, bail
     // without touching turns/vars/events; the newer call handles it.
-    const shouldProceed = await debounceAiAgentReply(run.id);
+    const shouldProceed = await debounceAiAgentReply(db, run.id);
     if (!shouldProceed) {
       return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
     }

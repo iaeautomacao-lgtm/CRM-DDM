@@ -510,6 +510,14 @@ export function MessageThread({
     setReplyTo(null);
   }, [conversationId]);
 
+  // Same reasoning as replyTo above — a recalled "Desfazer Envio" text
+  // being edited in conversation A shouldn't bleed into conversation B's
+  // composer if the agent switches conversations before resending/
+  // canceling it.
+  useEffect(() => {
+    setRecall(null);
+  }, [conversationId]);
+
   // Reset the server-side unread_count to 0 whenever an unread count
   // surfaces on the active conversation — covers both (a) opening a
   // conversation that had unread messages and (b) new messages arriving

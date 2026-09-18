@@ -50,6 +50,32 @@ import {
   RATE_LIMITS,
 } from "@/lib/rate-limit";
 
+// Best-effort rollback for the "auth user created, but a later step in
+// the same row failed" window (profile lookup or the account_id/role
+// repoint below) — without this, a failed row still left a valid login
+// stranded on its auto-created personal account: invisible in this
+// account's Members tab, but re-importing the same email later fails
+// on Auth's own duplicate-email constraint with no way to recover it
+// from here. Never throws — a failed rollback just means a stray user
+// to clean up manually, which is strictly better than silently leaving
+// no trace that one exists.
+async function rollbackOrphanedAuthUser(
+  admin: ReturnType<typeof supabaseAdmin>,
+  userId: string,
+  email: string,
+  reason: string,
+): Promise<void> {
+  const { error: deleteErr } = await admin.auth.admin.deleteUser(userId);
+  if (deleteErr) {
+    console.error(
+      `[bulk-invite] rollback failed for ${email} (user_id=${userId}) after ${reason} — orphaned auth user left behind:`,
+      deleteErr,
+    );
+  } else {
+    console.error(`[bulk-invite] rolled back auth user for ${email} after ${reason}`);
+  }
+}
+
 const MAX_MEMBERS_PER_IMPORT = 200;
 const MIN_PASSWORD_LENGTH = 6;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -210,9 +236,15 @@ export async function POST(request: Request) {
           .maybeSingle();
 
         if (profileErr || !freshProfile) {
+          await rollbackOrphanedAuthUser(
+            admin,
+            newUserId,
+            row.email,
+            "falha ao buscar o perfil recém-criado",
+          );
           errors.push({
             email: row.email,
-            reason: "Usuário criado, mas o perfil não foi encontrado para vincular à conta",
+            reason: "Falha ao vincular usuário à conta (usuário revertido, pode reimportar)",
           });
           continue;
         }
@@ -225,9 +257,15 @@ export async function POST(request: Request) {
           .eq("user_id", newUserId);
 
         if (updateErr) {
+          await rollbackOrphanedAuthUser(
+            admin,
+            newUserId,
+            row.email,
+            "falha ao vincular o perfil à conta (UPDATE account_id/account_role)",
+          );
           errors.push({
             email: row.email,
-            reason: "Usuário criado, mas falhou ao vincular à conta",
+            reason: "Falha ao vincular usuário à conta (usuário revertido, pode reimportar)",
           });
           continue;
         }

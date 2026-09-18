@@ -257,7 +257,7 @@ export function ContactDetailView({
   const [savingPhoneEdit, setSavingPhoneEdit] = useState(false);
   const [deletingPhoneId, setDeletingPhoneId] = useState<string | null>(null);
 
-  const fetchContact = useCallback(async () => {
+  const fetchContact = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoading(true);
     setLoadingCsvVars(true);
@@ -270,6 +270,8 @@ export function ContactDetailView({
         .eq('contact_id', contactId)
         .order('created_at', { ascending: false }),
     ]);
+
+    if (isCancelled()) return;
 
     if (data) {
       setContact(data);
@@ -299,7 +301,7 @@ export function ContactDetailView({
     setLoadingCsvVars(false);
   }, [contactId, supabase]);
 
-  const fetchTags = useCallback(async () => {
+  const fetchTags = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
 
     const [tagsRes, contactTagsRes] = await Promise.all([
@@ -307,13 +309,15 @@ export function ContactDetailView({
       supabase.from('contact_tags').select('tag_id').eq('contact_id', contactId),
     ]);
 
+    if (isCancelled()) return;
+
     if (tagsRes.data) setAllTags(tagsRes.data);
     if (contactTagsRes.data) {
       setContactTagIds(contactTagsRes.data.map((ct) => ct.tag_id));
     }
   }, [contactId, supabase]);
 
-  const fetchNotes = useCallback(async () => {
+  const fetchNotes = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingNotes(true);
 
@@ -323,11 +327,13 @@ export function ContactDetailView({
       .eq('contact_id', contactId)
       .order('created_at', { ascending: false });
 
+    if (isCancelled()) return;
+
     if (data) setNotes(data);
     setLoadingNotes(false);
   }, [contactId, supabase]);
 
-  const fetchCustomFields = useCallback(async () => {
+  const fetchCustomFields = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingCustom(true);
 
@@ -338,6 +344,8 @@ export function ContactDetailView({
         .select('*')
         .eq('contact_id', contactId),
     ]);
+
+    if (isCancelled()) return;
 
     if (fieldsRes.data) setCustomFields(fieldsRes.data);
     if (valuesRes.data) {
@@ -350,7 +358,7 @@ export function ContactDetailView({
     setLoadingCustom(false);
   }, [contactId, supabase]);
 
-  const fetchDeals = useCallback(async () => {
+  const fetchDeals = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingDeals(true);
     const { data } = await supabase
@@ -358,11 +366,14 @@ export function ContactDetailView({
       .select('*, stage:pipeline_stages(*)')
       .eq('contact_id', contactId)
       .order('created_at', { ascending: false });
+
+    if (isCancelled()) return;
+
     setDeals((data ?? []) as Deal[]);
     setLoadingDeals(false);
   }, [contactId, supabase]);
 
-  const fetchPhones = useCallback(async () => {
+  const fetchPhones = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingPhones(true);
     const { data } = await supabase
@@ -370,19 +381,37 @@ export function ContactDetailView({
       .select('*')
       .eq('contact_id', contactId)
       .order('ordem', { ascending: true });
+
+    if (isCancelled()) return;
+
     setPhones((data ?? []) as ContactPhone[]);
     setLoadingPhones(false);
   }, [contactId, supabase]);
 
+  // Guard defensivo contra a troca rápida de contato: o remount via
+  // key={contactId} no pai (contacts/page.tsx) já é a correção
+  // principal (zera o state inteiro), mas entre o clique em outro
+  // contato e o React efetivamente desmontar essa instância ainda cabe
+  // um setState de um fetch em voo do contato anterior. `cancelled`
+  // fecha essa janela: nenhum dos 6 fetches aplica seu resultado depois
+  // que este efeito for limpo (troca de contactId/open, ou unmount).
+  // Mesmo padrão de src/components/inbox/message-thread.tsx:363-397.
   useEffect(() => {
     if (open && contactId) {
-      fetchContact();
-      fetchTags();
-      fetchNotes();
-      fetchCustomFields();
-      fetchDeals();
-      fetchPhones();
+      let cancelled = false;
+      const isCancelled = () => cancelled;
+
+      fetchContact(isCancelled);
+      fetchTags(isCancelled);
+      fetchNotes(isCancelled);
+      fetchCustomFields(isCancelled);
+      fetchDeals(isCancelled);
+      fetchPhones(isCancelled);
       setTagQuery('');
+
+      return () => {
+        cancelled = true;
+      };
     }
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals, fetchPhones]);
 

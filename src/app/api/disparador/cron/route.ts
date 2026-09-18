@@ -8,6 +8,7 @@ import {
 } from "@/lib/disparador/processQueue";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { writeLog } from "@/lib/logger";
 
 // Consumidor principal (e único) da fila do Disparador. Phusion Passenger
 // não mantém setInterval em memória entre requisições, então o antigo
@@ -64,6 +65,35 @@ export async function POST(request: Request) {
       } catch (err: any) {
         console.error(`[Cron] Erro ao iniciar campanha agendada ${campanha.id}:`, err.message);
       }
+    }
+
+    // 1.5. Retry de erros transitórios — itens que falharam com erro NÃO
+    // permanente (rede instável, 5xx da Meta/WAHA, etc.) ficavam presos em
+    // status='erro' pra sempre: o claim só seleciona status='agendado', e
+    // nada reagendava um item de volta de 'erro'. RPC wacrm.
+    // retry_transient_queue_errors (migration 089) reagenda com backoff
+    // exponencial, uma vez por tick, antes do loop de processamento
+    // abaixo — não mexe no claim/processamento em si. Tolerante à
+    // migration não aplicada (mesmo padrão de claimQueueItem em
+    // processQueue.ts): se a RPC ainda não existir, só loga e segue o
+    // tick normalmente.
+    try {
+      const { data: retriedCount, error: retryError } = await supabaseAdmin().rpc(
+        "retry_transient_queue_errors"
+      );
+      if (retryError) throw retryError;
+      if ((retriedCount ?? 0) > 0) {
+        console.log(`[Cron] ${retriedCount} item(ns) de erro transitório reagendado(s) para retry.`);
+        void writeLog({
+          level: "info",
+          source: "disparador",
+          event: "queue_transient_errors_retried",
+          message: "Itens de erro transitório reagendados para retry",
+          payload: { count: retriedCount },
+        });
+      }
+    } catch (err: any) {
+      console.error("[Cron] Falha ao rodar retry_transient_queue_errors:", err.message || err);
     }
 
     // 2. Processar itens da fila para campanhas em execução — mesma lógica
