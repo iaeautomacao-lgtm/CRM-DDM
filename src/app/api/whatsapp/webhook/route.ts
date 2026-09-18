@@ -988,6 +988,100 @@ async function processMessage(
   }
 }
 
+// Extensão de arquivo a partir do content-type — usada só pro nome do
+// objeto no Storage, não precisa ser exaustiva (fallbackExt cobre o resto).
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'audio/ogg': 'ogg',
+  'audio/mpeg': 'mp3',
+  'audio/mp3': 'mp3',
+  'audio/mp4': 'm4a',
+  'audio/amr': 'amr',
+  'audio/aac': 'aac',
+}
+
+function extensionForMimeType(mimeType: string, fallbackExt: string): string {
+  const base = mimeType.split(';')[0].trim().toLowerCase()
+  return MIME_EXTENSION_MAP[base] || fallbackExt
+}
+
+// 5MB — restrição explícita do fix (só se aplica a imagem, ver chamada
+// abaixo). 25MB é o limite documentado do Whisper (audio/transcriptions)
+// — não faz sentido subir um áudio que a transcrição vai rejeitar de
+// qualquer forma.
+const MAX_META_IMAGE_BYTES = 5 * 1024 * 1024
+const MAX_META_AUDIO_BYTES = 25 * 1024 * 1024
+
+// Baixa mídia da Meta (URL de CDN curta e autenticada, só resolvível com
+// o access_token do canal) e reenvia pro bucket público `chat-media` do
+// Supabase Storage, no mesmo padrão já usado pelo webhook WAHA. Sem isso,
+// `messages.media_url` fica só com a rota /api/whatsapp/media/[mediaId]
+// (protegida por sessão de usuário) — inacessível pra qualquer coisa que
+// não seja o browser autenticado do CRM, incluindo a OpenAI (vision) e o
+// Whisper (transcrição), que buscam a URL sem cookie nenhum.
+//
+// Retorna null em qualquer falha (mídia acima do limite, erro de rede,
+// upload falho) — o caller cai de volta pra rota /api/whatsapp/media
+// de sempre (ver verifyAndBuildUrl), preservando o comportamento atual.
+async function downloadAndStoreMetaMedia(
+  mediaId: string,
+  accessToken: string,
+  maxBytes: number,
+  fallbackExt: string
+): Promise<string | null> {
+  try {
+    const mediaInfo = await getMediaUrl({ mediaId, accessToken })
+    const { buffer, contentType } = await downloadMedia({
+      downloadUrl: mediaInfo.url,
+      accessToken,
+    })
+
+    if (buffer.byteLength > maxBytes) {
+      console.warn(
+        `[webhook] Meta media ${mediaId} exceeds size limit (${buffer.byteLength} bytes > ${maxBytes}) — falling back to proxy URL.`
+      )
+      return null
+    }
+
+    const finalContentType = contentType || mediaInfo.mimeType || 'application/octet-stream'
+    const ext = extensionForMimeType(finalContentType, fallbackExt)
+    const storagePath = `meta/${mediaId}.${ext}`
+
+    const { error: uploadError } = await supabaseAdmin()
+      .storage.from('chat-media')
+      .upload(storagePath, buffer, { contentType: finalContentType, upsert: true })
+
+    if (uploadError) {
+      console.error(`[webhook] Failed to upload Meta media ${mediaId} to Storage:`, uploadError.message)
+      void writeLog({
+        level: 'warn',
+        source: 'webhook_meta',
+        event: 'media_upload_failed',
+        message: `Falha ao subir mídia ${mediaId} para o Storage`,
+        payload: { media_id: mediaId, erro: uploadError.message },
+      })
+      return null
+    }
+
+    const { data } = supabaseAdmin().storage.from('chat-media').getPublicUrl(storagePath)
+    return data.publicUrl
+  } catch (err: any) {
+    console.error(`[webhook] Failed to download/store Meta media ${mediaId}:`, err)
+    void writeLog({
+      level: 'warn',
+      source: 'webhook_meta',
+      event: 'media_upload_failed',
+      message: `Falha ao baixar/armazenar mídia ${mediaId} da Meta`,
+      payload: { media_id: mediaId, erro: err instanceof Error ? err.message : String(err) },
+    })
+    return null
+  }
+}
+
 async function parseMessageContent(
   message: WhatsAppMessage,
   accessToken: string
@@ -1038,10 +1132,20 @@ async function parseMessageContent(
 
     case 'image':
       if (message.image?.id) {
+        const mediaId = message.image.id
+        // Tenta baixar + reenviar pro Storage público primeiro (necessário
+        // pro agente de IA conseguir ver a imagem); cai pro proxy
+        // autenticado de sempre se falhar por qualquer motivo.
+        const storedUrl = await downloadAndStoreMetaMedia(
+          mediaId,
+          accessToken,
+          MAX_META_IMAGE_BYTES,
+          'jpg'
+        )
         return {
           ...empty,
           contentText: message.image.caption || null,
-          mediaUrl: await verifyAndBuildUrl(message.image.id),
+          mediaUrl: storedUrl ?? (await verifyAndBuildUrl(mediaId)),
           mediaType: message.image.mime_type,
         }
       }
@@ -1072,9 +1176,19 @@ async function parseMessageContent(
 
     case 'audio':
       if (message.audio?.id) {
+        const mediaId = message.audio.id
+        // Mesmo fix da imagem — responder.ts:420-433 (transcrição Whisper)
+        // depende de media_url ser uma URL pública, mesmo problema de
+        // /api/whatsapp/media/[mediaId] exigir sessão de usuário.
+        const storedUrl = await downloadAndStoreMetaMedia(
+          mediaId,
+          accessToken,
+          MAX_META_AUDIO_BYTES,
+          'ogg'
+        )
         return {
           ...empty,
-          mediaUrl: await verifyAndBuildUrl(message.audio.id),
+          mediaUrl: storedUrl ?? (await verifyAndBuildUrl(mediaId)),
           mediaType: message.audio.mime_type,
         }
       }
