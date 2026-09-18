@@ -56,6 +56,33 @@ interface ContactDetailViewProps {
   onUpdated: () => void;
 }
 
+const CPF_DIGITS_LENGTH = 11;
+
+function onlyDigits(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+// Mascara progressiva 000.000.000-00 — não usa regex de substituição única
+// pra não depender do CPF estar completo (funciona enquanto o usuário digita).
+function formatCpf(value: string): string {
+  const d = onlyDigits(value).slice(0, CPF_DIGITS_LENGTH);
+  let out = d.slice(0, 3);
+  if (d.length > 3) out += `.${d.slice(3, 6)}`;
+  if (d.length > 6) out += `.${d.slice(6, 9)}`;
+  if (d.length > 9) out += `-${d.slice(9, 11)}`;
+  return out;
+}
+
+// var_index em wacrm.contact_import_variables (migration 079):
+// 0 = VAR1, 1 = VAR2, 2 = VAR3. Rótulos fixos do domínio DDM (cobrança
+// educacional) — somente leitura no painel, nunca editados aqui.
+const CSV_VAR_LABELS: Record<number, string> = {
+  0: 'Nome do Devedor',
+  1: 'Instituição de Ensino',
+  2: 'Link de Acordo',
+};
+const CSV_VAR_INDICES = [0, 1, 2];
+
 export function ContactDetailView({
   open,
   onOpenChange,
@@ -143,7 +170,15 @@ export function ContactDetailView({
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editCompany, setEditCompany] = useState('');
+  // editCpf guarda só dígitos — a máscara 000.000.000-00 é aplicada na
+  // exibição (formatCpf), nunca persistida no state.
+  const [editCpf, setEditCpf] = useState('');
+  const [editInstituicao, setEditInstituicao] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
+  // VAR1/VAR2/VAR3 do CSV importado (wacrm.contact_import_variables) —
+  // somente leitura, carregadas junto com o contato em fetchContact().
+  const [csvVars, setCsvVars] = useState<Record<number, string>>({});
+  const [loadingCsvVars, setLoadingCsvVars] = useState(false);
 
   // Tags tab
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -177,12 +212,16 @@ export function ContactDetailView({
   const fetchContact = useCallback(async () => {
     if (!contactId) return;
     setLoading(true);
+    setLoadingCsvVars(true);
 
-    const { data } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('id', contactId)
-      .single();
+    const [{ data }, { data: csvVarRows }] = await Promise.all([
+      supabase.from('contacts').select('*').eq('id', contactId).single(),
+      supabase
+        .from('contact_import_variables')
+        .select('var_index, value, created_at')
+        .eq('contact_id', contactId)
+        .order('created_at', { ascending: false }),
+    ]);
 
     if (data) {
       setContact(data);
@@ -190,8 +229,26 @@ export function ContactDetailView({
       setEditPhone(data.phone);
       setEditEmail(data.email ?? '');
       setEditCompany(data.company ?? '');
+      setEditCpf(onlyDigits(data.cpf ?? ''));
+      setEditInstituicao(data.instituicao ?? '');
     }
+
+    // Um contato pode ter mais de uma linha por var_index — a constraint
+    // única é por (contact_id, campaign_id, var_index) ou (contact_id,
+    // draft_id, var_index), não global (migration 079), então o mesmo
+    // contato importado em campanhas diferentes gera linhas diferentes.
+    // Já veio ordenado por created_at desc, então a primeira ocorrência de
+    // cada var_index é a mais recente.
+    const latestByIndex: Record<number, string> = {};
+    for (const row of csvVarRows ?? []) {
+      if (!(row.var_index in latestByIndex)) {
+        latestByIndex[row.var_index] = row.value;
+      }
+    }
+    setCsvVars(latestByIndex);
+
     setLoading(false);
+    setLoadingCsvVars(false);
   }, [contactId, supabase]);
 
   const fetchTags = useCallback(async () => {
@@ -287,8 +344,13 @@ export function ContactDetailView({
       .update({
         name: editName.trim() || null,
         phone: editPhone.trim(),
+        // email/company não têm mais input nesta aba, mas seguem no
+        // UPDATE com o valor carregado de fetchContact — não pode zerar
+        // dado de contato que já tinha isso preenchido antes desta mudança.
         email: editEmail.trim() || null,
         company: editCompany.trim() || null,
+        cpf: onlyDigits(editCpf) || null,
+        instituicao: editInstituicao.trim() || null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId);
@@ -606,21 +668,40 @@ export function ContactDetailView({
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">E-mail</Label>
+                    <Label className="text-muted-foreground text-xs">CPF</Label>
                     <Input
-                      value={editEmail}
-                      onChange={(e) => setEditEmail(e.target.value)}
+                      value={formatCpf(editCpf)}
+                      onChange={(e) => setEditCpf(onlyDigits(e.target.value).slice(0, CPF_DIGITS_LENGTH))}
+                      placeholder="000.000.000-00"
+                      inputMode="numeric"
                       className="bg-muted border-border text-foreground h-8 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">Empresa</Label>
+                    <Label className="text-muted-foreground text-xs">Instituição</Label>
                     <Input
-                      value={editCompany}
-                      onChange={(e) => setEditCompany(e.target.value)}
+                      value={editInstituicao}
+                      onChange={(e) => setEditInstituicao(e.target.value)}
                       className="bg-muted border-border text-foreground h-8 text-sm"
                     />
                   </div>
+
+                  <div className="space-y-1.5 pt-2 border-t border-border/50">
+                    <Label className="text-muted-foreground text-xs">Dados do CSV importado</Label>
+                  </div>
+                  {CSV_VAR_INDICES.map((idx) => (
+                    <div key={idx} className="space-y-1.5">
+                      <Label className="text-muted-foreground text-xs">{CSV_VAR_LABELS[idx]}</Label>
+                      <Input
+                        value={loadingCsvVars ? '' : csvVars[idx] ?? ''}
+                        readOnly
+                        disabled
+                        placeholder={loadingCsvVars ? 'Carregando...' : '—'}
+                        className="bg-muted/50 border-border text-muted-foreground h-8 text-sm"
+                      />
+                    </div>
+                  ))}
+
                   <Button
                     onClick={saveDetails}
                     disabled={savingDetails}

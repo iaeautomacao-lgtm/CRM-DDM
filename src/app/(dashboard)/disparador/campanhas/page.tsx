@@ -141,6 +141,17 @@ function draftStorageKey(accountId: string | null): string | null {
   return accountId ? `disparador:campaign-draft:${accountId}` : null;
 }
 
+// Campos DDM do sub-step de mapeamento de colunas (Step 2, após a prévia
+// do CSV) — chave bate com o que import/route.ts espera em column_map.
+const COLUMN_MAP_FIELDS: Array<{ key: string; label: string }> = [
+  { key: "name", label: "Nome" },
+  { key: "phone", label: "Telefone Principal" },
+  { key: "cpf", label: "CPF" },
+  { key: "var1", label: "VAR1" },
+  { key: "var2", label: "VAR2" },
+  { key: "var3", label: "VAR3" },
+];
+
 interface CampaignDraft {
   nome: string;
   descricao: string;
@@ -455,6 +466,16 @@ export default function CampanhasPage() {
     valid: number;
     invalid: number;
   } | null>(null);
+  // Mapeamento manual de colunas (Correção 3) — headers do CSV pra
+  // popular os selects, e o mapeamento em si (campo DDM -> nome da coluna
+  // no CSV), pré-preenchido pela heurística de parseImportFile e ajustável
+  // pelo usuário antes de confirmar o import. Enviado como column_map
+  // (JSON) pra import/route.ts; se nunca for tocado ainda é enviado com os
+  // valores detectados automaticamente, então o backend sempre recebe um
+  // mapeamento explícito quando há CSV (a heurística do backend só entra
+  // em campos deixados em branco no select).
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [columnMap, setColumnMap] = useState<Record<string, string>>({});
   const varFieldRefs = useRef<Record<string, HTMLTextAreaElement | HTMLInputElement | null>>({});
   // Index of the message ("conteudo") field waiting for a template
   // selection, or null when the picker is closed.
@@ -808,6 +829,8 @@ export default function CampanhasPage() {
     setImportPreview(null);
     setImportStats(null);
     setImportAllRows(null);
+    setCsvHeaders([]);
+    setColumnMap({});
   };
 
   const discardDraft = () => {
@@ -827,6 +850,8 @@ export default function CampanhasPage() {
     setUtmGerado(false);
     setUtmLoading(false);
     setUtmProgress(null);
+    setCsvHeaders([]);
+    setColumnMap({});
   };
 
   // Delete Campaign
@@ -954,6 +979,14 @@ export default function CampanhasPage() {
           formData.append("campaign_id", editingId);
         } else {
           formData.append("draft_id", draftId);
+        }
+        // Mapeamento de colunas confirmado/ajustado no Step 2 (Correção 3)
+        // — só envia se o usuário chegou a importar um CSV com colunas
+        // detectadas (columnMap fica vazio se parseImportFile nunca rodou,
+        // ex: reimportação de um estado antigo). Vazio → import/route.ts
+        // cai 100% na heurística de sempre (retrocompat).
+        if (Object.keys(columnMap).length > 0) {
+          formData.append("column_map", JSON.stringify(columnMap));
         }
         const importRes = await apiFetch(
           "/api/disparador/contacts/import",
@@ -1130,6 +1163,8 @@ export default function CampanhasPage() {
     setUtmGerado(false);
     setUtmLoading(false);
     setUtmProgress(null);
+    setCsvHeaders([]);
+    setColumnMap({});
     // Nova sessão de criação — qualquer link UTM salvo sob o draftId
     // anterior fica órfão (campaign_id nunca chegou a ser preenchido),
     // mas isso é inofensivo: nada mais faz join por esse draftId.
@@ -1170,6 +1205,8 @@ export default function CampanhasPage() {
     setImportAllRows(null);
     setUtmGerado(false);
     setUtmProgress(null);
+    setCsvHeaders([]);
+    setColumnMap({});
     try {
       const isXlsx = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
 
@@ -1215,8 +1252,11 @@ export default function CampanhasPage() {
         ["contato", "telefone", "phone", "celular", "tel",
          "fone", "whatsapp", "número", "numero"].includes(h)
       );
+      // Mesma lista de NAME_FIELD_KEYS do backend (import/route.ts) — "var1"
+      // por último, cobrindo o formato Meta CONTATO;VAR1;VAR2;VAR3 quando
+      // não há coluna de nome padrão.
       const nameIdx = headers.findIndex(h =>
-        ["nome", "name", "cliente"].includes(h)
+        ["nome", "name", "nome completo", "full name", "cliente", "var1"].includes(h)
       );
       const cpfIdx = headers.findIndex(h =>
         ["cpf", "documento", "document"].includes(h)
@@ -1229,6 +1269,25 @@ export default function CampanhasPage() {
         toast.error("Coluna de telefone não encontrada. Use: CONTATO, telefone, phone...");
         return;
       }
+
+      // Mapeamento manual (Correção 3) — pré-seleciona com base na mesma
+      // heurística usada acima (Nome/Telefone/CPF) e, para VAR1/2/3,
+      // procura a coluna com o nome literal exato (mesmo critério do
+      // getField(row, "var1") no backend), não apenas "começa com var" —
+      // varIndices abaixo é só pra prévia/propagação de template, cobre
+      // qualquer coluna "varN".
+      const var1Idx = headers.findIndex(h => h === "var1");
+      const var2Idx = headers.findIndex(h => h === "var2");
+      const var3Idx = headers.findIndex(h => h === "var3");
+      const detectedMap: Record<string, string> = {};
+      if (phoneIdx >= 0) detectedMap.phone = headers[phoneIdx];
+      if (nameIdx >= 0) detectedMap.name = headers[nameIdx];
+      if (cpfIdx >= 0) detectedMap.cpf = headers[cpfIdx];
+      if (var1Idx >= 0) detectedMap.var1 = headers[var1Idx];
+      if (var2Idx >= 0) detectedMap.var2 = headers[var2Idx];
+      if (var3Idx >= 0) detectedMap.var3 = headers[var3Idx];
+      setCsvHeaders(headers);
+      setColumnMap(detectedMap);
 
       const rows = dataLines.slice(1, 6); // preview: primeiros 5
       const allRows = dataLines.slice(1);
@@ -2450,6 +2509,55 @@ export default function CampanhasPage() {
                         <p className="text-xs text-muted-foreground">Inválidos</p>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Mapeamento de colunas (Correção 3) — sub-step depois da
+                    prévia, corrige a heurística automática antes do import
+                    de verdade em handleSubmit. */}
+                {csvHeaders.length > 0 && (
+                  <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">
+                        Mapeamento de colunas
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Detectado automaticamente a partir do cabeçalho do CSV — corrija se
+                        alguma coluna estiver errada antes de criar a campanha.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {COLUMN_MAP_FIELDS.map((field) => (
+                        <div key={field.key}>
+                          <label className="mb-1 block text-[10px] text-muted-foreground">
+                            {field.label}
+                          </label>
+                          <Select
+                            value={columnMap[field.key] || "__none__"}
+                            onValueChange={(val) => {
+                              setColumnMap((prev) => {
+                                const next = { ...prev };
+                                if (!val || val === "__none__") delete next[field.key];
+                                else next[field.key] = val;
+                                return next;
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-8 w-full border-border bg-background text-xs">
+                              <SelectValue placeholder="Não mapeado" />
+                            </SelectTrigger>
+                            <SelectContent className="border-border bg-popover">
+                              <SelectItem value="__none__">Não mapeado</SelectItem>
+                              {csvHeaders.map((h) => (
+                                <SelectItem key={h} value={h}>
+                                  {h}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 

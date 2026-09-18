@@ -116,6 +116,12 @@ export interface Contact {
   name?: string;
   email?: string;
   company?: string;
+  /** Migration 077. Chave de identidade do aluno para contexto de
+   *  cobrança educacional. */
+  cpf?: string | null;
+  /** Migration 081. Instituição de ensino do aluno — campo DDM
+   *  específico, distinto de `company` (mantido por compatibilidade). */
+  instituicao?: string | null;
   avatar_url?: string;
   created_at: string;
   updated_at: string;

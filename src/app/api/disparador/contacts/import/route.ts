@@ -36,6 +36,25 @@ function getField(row: Record<string, any>, ...keys: string[]): string | undefin
   return undefined;
 }
 
+// column_map opcional enviado pelo wizard (Step 2 do campanhas/page.tsx) —
+// cada chave é um campo DDM, o valor é o nome exato da coluna do CSV que o
+// usuário escolheu para ele (case-insensitive, mesma normalização de
+// getField). Quando presente para um campo, substitui a heurística daquele
+// campo por completo (não é fallback por linha) — é uma escolha explícita
+// do usuário, não deve voltar a adivinhar. Ausente/omitido em um campo
+// específico → mantém a heurística de sempre (retrocompatibilidade total
+// com imports que nunca mandaram column_map).
+type ColumnMap = Partial<Record<"name" | "phone" | "cpf" | "var1" | "var2" | "var3", string>>;
+
+function resolveField(
+  row: Record<string, any>,
+  mappedKey: string | undefined,
+  fallbackKeys: string[]
+): string | undefined {
+  if (mappedKey && mappedKey.trim()) return getField(row, mappedKey);
+  return getField(row, ...fallbackKeys);
+}
+
 // Column names recognized as the contact's display name — "var1" last,
 // covering the Meta CONTATO;VAR1;VAR2;VAR3 export format when no
 // standard name column exists (see tagsArray comment below).
@@ -122,6 +141,20 @@ export async function POST(request: Request) {
     // aqui depende disso pra continuar funcionando se vier vazio.
     const campaignIdRaw = (formData.get("campaign_id") as string | null)?.trim() || null;
     const draftIdRaw = (formData.get("draft_id") as string | null)?.trim() || null;
+
+    // column_map (Correção 3) — JSON opcional { name, phone, cpf, var1,
+    // var2, var3 } vindo do sub-step de mapeamento do wizard. JSON
+    // inválido ou ausente cai no comportamento heurístico de sempre.
+    const columnMapRaw = (formData.get("column_map") as string | null) || null;
+    let columnMap: ColumnMap = {};
+    if (columnMapRaw) {
+      try {
+        const parsed = JSON.parse(columnMapRaw);
+        if (parsed && typeof parsed === "object") columnMap = parsed;
+      } catch {
+        console.error("[Contacts Import] column_map recebido não é JSON válido — ignorando.");
+      }
+    }
 
     const filename = file.name.toLowerCase();
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -228,7 +261,10 @@ export async function POST(request: Request) {
     const seenCpfInFile = new Set<string>();
 
     for (const row of rows) {
-      const t1 = getField(row, ...TELEFONE1_KEYS);
+      // t2/t3 (telefones alternativos) não fazem parte dos campos do
+      // mapeamento manual (Correção 3 só cobre Nome/Telefone
+      // Principal/CPF/VAR1-3) — seguem 100% heurísticos.
+      const t1 = resolveField(row, columnMap.phone, TELEFONE1_KEYS);
       const t2 = getField(row, ...TELEFONE2_KEYS);
       const t3 = getField(row, ...TELEFONE3_KEYS);
       // TELEFONE1 é o principal por padrão; se estiver vazio mas TELEFONE2
@@ -252,10 +288,15 @@ export async function POST(request: Request) {
         continue;
       }
 
-      const cpfNormalized = normalizeCpf(getField(row, ...CPF_FIELD_KEYS));
-      // VAR1/VAR2/VAR3 — getField já compara case-insensitive, então
-      // "var1" cobre "VAR1"/"Var1" sem precisar listar as duas formas.
-      const csvVars = [getField(row, "var1"), getField(row, "var2"), getField(row, "var3")];
+      const cpfNormalized = normalizeCpf(resolveField(row, columnMap.cpf, CPF_FIELD_KEYS));
+      // VAR1/VAR2/VAR3 — sem column_map, cai no literal "var1"/"var2"/"var3"
+      // (getField já compara case-insensitive, então "VAR1"/"Var1" batem
+      // sem precisar listar as duas formas).
+      const csvVars = [
+        resolveField(row, columnMap.var1, ["var1"]),
+        resolveField(row, columnMap.var2, ["var2"]),
+        resolveField(row, columnMap.var3, ["var3"]),
+      ];
 
       const key = normalizeKey(normalized);
       const isDuplicateInFile =
@@ -312,7 +353,7 @@ export async function POST(request: Request) {
           !!matched.name &&
           (matched.name === matched.phone_normalized || /^\d{10,13}$/.test(matched.name));
         if (!matched.name || nomePareceTelefone) {
-          const parsedName = getField(row, ...NAME_FIELD_KEYS);
+          const parsedName = resolveField(row, columnMap.name, NAME_FIELD_KEYS);
           if (parsedName) {
             const { error: updateErr } = await supabaseAdmin()
               .from("contacts")
@@ -360,7 +401,7 @@ export async function POST(request: Request) {
 
       pending.push({
         phone: normalized,
-        name: getField(row, ...NAME_FIELD_KEYS) || null,
+        name: resolveField(row, columnMap.name, NAME_FIELD_KEYS) || null,
         email: getField(row, "email", "e-mail", "emaill", "correio") || null,
         company:
           getField(
@@ -494,15 +535,47 @@ export async function POST(request: Request) {
     // contato em startCampaign.ts (migration 079). Best-effort, mesmo
     // padrão do passo anterior — falha aqui não derruba o import.
     if (csvVarAssignments.length > 0) {
+      const varChunkSize = 100;
       if (!campaignIdRaw && !draftIdRaw) {
-        // Sem campaign_id nem draft_id não há como saber a qual campanha
-        // essas variáveis pertencem — não insere linhas orfãs.
-        console.error(
-          "[Contacts Import] csvVarAssignments presente mas nem campaign_id nem draft_id foram enviados — pulando."
-        );
+        // Import standalone (disparador/contatos, sem wizard de campanha)
+        // — grava com campaign_id/draft_id NULL em vez de descartar, pra
+        // aparecer no painel de perfil do contato (contact-detail-view.tsx).
+        // Não dá pra usar upsert com onConflict aqui: as constraints
+        // UNIQUE(contact_id, campaign_id, var_index) e
+        // UNIQUE(contact_id, draft_id, var_index) nunca consideram duas
+        // linhas NULL/NULL como conflitantes (semântica padrão de UNIQUE
+        // no Postgres), então um upsert nunca faria merge — só acumularia
+        // uma linha nova a cada reimport do mesmo contato. Substitui
+        // explicitamente (delete das linhas NULL/NULL existentes desses
+        // contatos + insert) pra manter só a versão mais recente.
+        try {
+          const affectedContactIds = Array.from(new Set(csvVarAssignments.map((v) => v.contact_id)));
+          const { error: deleteErr } = await supabaseAdmin()
+            .from("contact_import_variables")
+            .delete()
+            .in("contact_id", affectedContactIds)
+            .is("campaign_id", null)
+            .is("draft_id", null);
+          if (deleteErr) throw deleteErr;
+
+          for (let i = 0; i < csvVarAssignments.length; i += varChunkSize) {
+            const chunk = csvVarAssignments.slice(i, i + varChunkSize).map((v) => ({
+              contact_id: v.contact_id,
+              campaign_id: null,
+              draft_id: null,
+              var_index: v.var_index,
+              value: v.value,
+            }));
+            const { error: insertErr } = await supabaseAdmin()
+              .from("contact_import_variables")
+              .insert(chunk);
+            if (insertErr) throw insertErr;
+          }
+        } catch (err) {
+          console.error("[Contacts Import] Failed to save csv import variables (sem campaign/draft):", err);
+        }
       } else {
         try {
-          const varChunkSize = 100;
           const onConflict = campaignIdRaw
             ? "contact_id,campaign_id,var_index"
             : "contact_id,draft_id,var_index";
