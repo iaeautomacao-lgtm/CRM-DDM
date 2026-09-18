@@ -399,6 +399,7 @@ export async function startCampaign(
             // com 131026). Conta para métricas e aparece na UI.
             queueRows.push({
               campaign_id: campaignId,
+              account_id: accountId,
               contact_id: contact.id,
               session_id: sessionId,
               mensagem_final: rawText,
@@ -418,6 +419,7 @@ export async function startCampaign(
 
         queueRows.push({
           campaign_id: campaignId,
+          account_id: accountId,
           contact_id: contact.id,
           session_id: sessionId,
           mensagem_final: rawText,
@@ -463,6 +465,7 @@ export async function startCampaign(
       .from("campaign_metrics")
       .upsert({
         campaign_id: campaignId,
+        account_id: accountId,
         total_contatos: contacts.length,
       }, { onConflict: "campaign_id" });
 

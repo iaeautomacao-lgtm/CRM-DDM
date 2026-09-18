@@ -161,6 +161,9 @@ export async function POST(request: Request) {
         nome: body.campaign_name,
         objetivo: body.objective ?? null,
         status: "rascunho",
+        // Necessário pra migration 040 (RLS do Disparador) poder ser
+        // aplicada — ctx.accountId já vem resolvido por requireApiKey.
+        account_id: ctx.accountId,
         session_ids: [channelId],
         janela_inicio,
         janela_fim,

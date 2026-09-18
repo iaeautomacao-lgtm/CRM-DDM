@@ -1,3 +1,9 @@
+-- ⚠️  SUBSTITUÍDA PELA MIGRATION 085 — NÃO APLICAR.
+-- Esta migration foi bloqueada porque o código não setava account_id
+-- nos INSERTs. A 085_enable_disparador_rls.sql cobre todo o escopo
+-- desta migration com segurança adicional (IF NOT EXISTS em tudo,
+-- cabeçalho pós-deploy). Manter este arquivo só para histórico.
+
 -- ============================================================
 -- 040_disparador_account_scoping
 --

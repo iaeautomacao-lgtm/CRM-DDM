@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { getDisparadorScope } from "@/lib/disparador/scope";
 import { 
   ShieldAlert, 
   Plus, 
@@ -37,6 +38,10 @@ export default function BlacklistPage() {
   const [filteredList, setFilteredList] = useState<BlacklistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // Resolvido em loadBlacklist() — mesmo padrão de campanhas/page.tsx
+  // (getDisparadorScope). Necessário pra migration 040/085 (RLS do
+  // Disparador) poder ser aplicada.
+  const [accountId, setAccountId] = useState<string | null>(null);
 
   // Modal Form States
   const [showModal, setShowModal] = useState(false);
@@ -52,11 +57,14 @@ export default function BlacklistPage() {
     setLoading(true);
     try {
       const supabase = createClient();
+      const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
+      setAccountId(scopedAccountId);
+
       const { data, error } = await supabase
         .from("blacklist")
         .select("*")
         .order("data_bloqueio", { ascending: false });
-      
+
       if (error) throw error;
       setBlacklist(data ?? []);
       setFilteredList(data ?? []);
@@ -104,6 +112,10 @@ export default function BlacklistPage() {
       toast.error("Insira o número do telefone.");
       return;
     }
+    if (!accountId) {
+      toast.error("Conta não resolvida — recarregue a página e tente de novo.");
+      return;
+    }
 
     // Sanitize phone input
     let cleanPhone = telefone.replace(/\D/g, "");
@@ -118,6 +130,7 @@ export default function BlacklistPage() {
         motivo,
         mensagem_detectada: mensagemDetectada || null,
         bloqueado_por: "Painel CRM",
+        account_id: accountId,
       });
 
       if (error) {

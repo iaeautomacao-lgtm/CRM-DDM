@@ -1088,6 +1088,10 @@ export default function CampanhasPage() {
         } = await supabase.auth.getSession();
         const user = session?.user;
         if (!user) throw new Error("Não autenticado");
+        // accountId resolvido em loadData() via getDisparadorScope (mesmo
+        // padrão já usado pelo resto do arquivo) — necessário pra migration
+        // 040 (RLS do Disparador) poder ser aplicada depois.
+        if (!accountId) throw new Error("Conta não resolvida — recarregue a página e tente de novo.");
 
         const campaignData = {
           nome,
@@ -1105,6 +1109,7 @@ export default function CampanhasPage() {
           agendamento: agendamentoISO,
           status: agendamentoISO ? "agendado" : "rascunho",
           created_by: user.id,
+          account_id: accountId,
           // Migration 080 — grava o draftId usado no import (Step 3 acima)
           // para que startCampaign.ts consiga relinkar
           // contact_import_variables de forma determinística no start,
