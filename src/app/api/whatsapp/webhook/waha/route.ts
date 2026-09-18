@@ -4,6 +4,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
+import { writeLog, maskPhone } from '@/lib/logger'
 
 export async function POST(request: Request) {
   try {
@@ -260,6 +261,14 @@ export async function POST(request: Request) {
 
         if (contactCreateError) {
           console.error('[waha/webhook] Failed to create contact:', contactCreateError)
+          void writeLog({
+            account_id: accountId,
+            level: 'error',
+            source: 'webhook_waha',
+            event: 'contact_creation_failed',
+            message: 'Falha ao criar contato a partir de mensagem inbound WAHA',
+            payload: { phone: maskPhone(phone), erro: contactCreateError.message },
+          })
           return NextResponse.json({ error: 'Failed to synchronize contact' }, { status: 500 })
         }
         contactId = newContact.id
@@ -302,6 +311,14 @@ export async function POST(request: Request) {
 
         if (convCreateError) {
           console.error('[waha/webhook] Failed to create conversation:', convCreateError)
+          void writeLog({
+            account_id: accountId,
+            level: 'error',
+            source: 'webhook_waha',
+            event: 'contact_creation_failed',
+            message: 'Falha ao criar conversa a partir de mensagem inbound WAHA',
+            payload: { contact_id: contactId, erro: convCreateError.message },
+          })
           return NextResponse.json({ error: 'Failed to synchronize conversation' }, { status: 500 })
         }
         conversationId = newConv.id
@@ -576,7 +593,21 @@ export async function POST(request: Request) {
               undefined, // nodeKey
               config.id,
             )
-              .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
+              .catch((err) => {
+                console.error('[AI Agent] handleAiAutoResponse failed:', err)
+                void writeLog({
+                  account_id: accountId,
+                  level: 'error',
+                  source: 'ai_agent',
+                  event: 'ai_agent_error',
+                  message: 'handleAiAutoResponse falhou no webhook WAHA',
+                  payload: {
+                    contact_id: contactId,
+                    conversation_id: conversationId,
+                    erro: err instanceof Error ? err.message : String(err),
+                  },
+                })
+              })
           }
         }
 

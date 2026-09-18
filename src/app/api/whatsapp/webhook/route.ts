@@ -8,6 +8,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
+import { writeLog, maskPhone } from '@/lib/logger'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -229,6 +230,17 @@ export async function POST(request: Request) {
     // loudly if a misconfiguration causes signatures to stop matching,
     // rather than silently eating events.
     console.warn('[webhook] rejected request with invalid signature')
+    // Fire-and-forget — não faz sentido atrasar a resposta 401 pra Meta
+    // esperando o insert do log.
+    void writeLog({
+      level: 'warn',
+      source: 'webhook_meta',
+      event: 'hmac_rejected',
+      message: 'Assinatura HMAC inválida rejeitada no webhook Meta',
+      // phone_number_id é o identificador do canal Meta, não o telefone de
+      // um contato — não precisa de mascaramento (ver maskPhone).
+      payload: { phone_number_id: phoneNumberId ?? null },
+    })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -898,7 +910,21 @@ async function processMessage(
         undefined, // nodeKey
         configId,
       )
-        .catch((err) => console.error('[AI Agent] handleAiAutoResponse failed:', err))
+        .catch((err) => {
+          console.error('[AI Agent] handleAiAutoResponse failed:', err)
+          void writeLog({
+            account_id: accountId,
+            level: 'error',
+            source: 'ai_agent',
+            event: 'ai_agent_error',
+            message: 'handleAiAutoResponse falhou no webhook Meta',
+            payload: {
+              contact_id: contactRecord.id,
+              conversation_id: conversation.id,
+              erro: err instanceof Error ? err.message : String(err),
+            },
+          })
+        })
     }
 
     // Trigger Sentiment and Auto-Tagging Analysis
@@ -944,7 +970,21 @@ async function processMessage(
         message_text: inboundText,
         conversation_id: conversation.id,
       },
-    }).catch((err) => console.error('[automations] dispatch failed:', err))
+    }).catch((err) => {
+      console.error('[automations] dispatch failed:', err)
+      void writeLog({
+        account_id: accountId,
+        level: 'error',
+        source: 'automations',
+        event: 'automation_dispatch_error',
+        message: `Falha ao disparar automações para o trigger "${triggerType}"`,
+        payload: {
+          contact_id: contactRecord.id,
+          trigger_type: triggerType,
+          erro: err instanceof Error ? err.message : String(err),
+        },
+      })
+    })
   }
 }
 
@@ -1157,6 +1197,14 @@ async function findOrCreateContact(
       if (raced) return { contact: raced, wasCreated: false }
     }
     console.error('Error creating contact:', createError)
+    void writeLog({
+      account_id: accountId,
+      level: 'error',
+      source: 'webhook_meta',
+      event: 'contact_creation_failed',
+      message: 'Falha ao criar contato a partir de mensagem inbound Meta',
+      payload: { phone: maskPhone(phone), erro: createError.message },
+    })
     return null
   }
 
@@ -1213,6 +1261,14 @@ async function findOrCreateConversation(
 
   if (createError) {
     console.error('Error creating conversation:', createError)
+    void writeLog({
+      account_id: accountId,
+      level: 'error',
+      source: 'webhook_meta',
+      event: 'contact_creation_failed',
+      message: 'Falha ao criar conversa a partir de mensagem inbound Meta',
+      payload: { contact_id: contactId, erro: createError.message },
+    })
     return null
   }
 

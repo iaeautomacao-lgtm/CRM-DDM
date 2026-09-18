@@ -34,6 +34,7 @@
 
 import { handleAiAutoResponse } from "@/lib/ai/responder";
 import { supabaseAdmin } from "./admin-client";
+import { writeLog } from "@/lib/logger";
 import {
   engineMetaSendTemplate,
   engineSendInteractiveButtons,
@@ -337,6 +338,15 @@ async function logEvent(
   if (error) {
     // Logging failure is non-fatal — surface but don't throw.
     console.error("[flows] logEvent error:", error.message);
+    // Sem account_id disponível nesta assinatura (logEvent só recebe
+    // flowRunId/event_type/node_key/payload) — grava sem ele.
+    void writeLog({
+      level: "error",
+      source: "flows",
+      event: "event_log_failed",
+      message: "Falha ao gravar evento em flow_run_events (logEvent)",
+      payload: { flow_run_id: flowRunId, event_type, erro: error.message },
+    });
   }
 }
 
@@ -386,6 +396,19 @@ async function logRunEvent(
   if (error) {
     // Logging failure is non-fatal — surface but don't throw.
     console.error("[flows] logRunEvent error:", error.message);
+    void writeLog({
+      account_id: event.account_id,
+      level: "error",
+      source: "flows",
+      event: "event_log_failed",
+      message: "Falha ao gravar evento em flow_run_events (logRunEvent)",
+      payload: {
+        flow_run_id: event.run_id,
+        flow_id: event.flow_id,
+        event_type: event.event_type,
+        erro: error.message,
+      },
+    });
   }
 }
 
@@ -3277,6 +3300,19 @@ async function startNewRun(
       return { consumed: true, outcome: "duplicate_inbound_ignored" };
     }
     console.error("[flows] startNewRun insert error:", insErr.message);
+    void writeLog({
+      account_id: flow.account_id,
+      level: "error",
+      source: "flows",
+      event: "flow_start_failed",
+      message: `Falha ao iniciar run do flow "${flow.name}"`,
+      payload: {
+        flow_id: flow.id,
+        contact_id: input.contactId,
+        conversation_id: input.conversationId,
+        erro: insErr.message,
+      },
+    });
     return { consumed: false, outcome: "no_match" };
   }
   const run = inserted as FlowRunRow;

@@ -16,6 +16,7 @@ import {
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { writeLog, maskPhone } from "@/lib/logger";
 import OpenAI from "openai";
 
 // Marcador usado em `template_name` para itens de fila de contatos
@@ -265,6 +266,13 @@ async function tryNextPhone(item: QueueItem): Promise<boolean> {
 
     if (error) {
       console.error("[Disparador] tryNextPhone: falha ao reagendar item:", error.message);
+      void writeLog({
+        level: "info",
+        source: "disparador",
+        event: "phone_fallback",
+        message: "Falha ao reagendar item da fila para o próximo telefone da escada",
+        payload: { campaign_id: item.campaign_id, contact_id: item.contact_id },
+      });
       return false;
     }
     return true;
@@ -466,6 +474,21 @@ export async function processQueueItem(
     const novasTentativas = tentativasAtuais + 1;
     const permanent = isPermanentSendError(sendErr) || novasTentativas >= MAX_TENTATIVAS;
     const message = sendErr?.message || String(sendErr);
+    if (isPermanentSendError(sendErr)) {
+      void writeLog({
+        level: "warn",
+        source: "disparador",
+        event: "message_permanent_error",
+        message: "Item da fila marcado como erro permanente — código Meta não retenta",
+        payload: {
+          campaign_id: item.campaign_id,
+          contact_id: item.contact_id,
+          phone: maskPhone(normalizedPhone),
+          metaCode: sendErr instanceof MetaApiError ? sendErr.metaCode : null,
+          erro: message,
+        },
+      });
+    }
     await markQueueError(item.id, message, permanent, novasTentativas);
     return { outcome: "error", error: message };
   }
@@ -681,6 +704,17 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
     const erros = queueSummary?.filter(i => i.status === "erro").length ?? 0;
     const bloqueados = queueSummary?.filter(i => i.status === "bloqueado").length ?? 0;
     const cancelados = queueSummary?.filter(i => i.status === "cancelado").length ?? 0;
+
+    // Nota: só roda quando a campanha tem callback_url configurado (early
+    // return na linha acima) — campanhas sem callback externo não geram
+    // este evento hoje. Ver ressalva no PASSO 4 da instrumentação.
+    void writeLog({
+      level: "info",
+      source: "disparador",
+      event: "campaign_finished",
+      message: `Campanha ${campaign.nome} finalizada`,
+      payload: { campaign_id: campaign.id, total_erros: erros },
+    });
 
     const payload = {
       event: "campaign.completed",
