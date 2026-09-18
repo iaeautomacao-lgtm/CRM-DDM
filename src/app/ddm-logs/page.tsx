@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { LogLevel, LogSource } from "@/lib/logger";
 
 interface LogRow {
@@ -93,6 +93,41 @@ function highlightJson(value: unknown): string {
   );
 }
 
+// Threshold de agrupamento — 2 repetições consecutivas ficam separadas,
+// só a partir de 3 vira um grupo colapsado.
+const GROUP_MIN_SIZE = 3;
+
+type DisplayItem =
+  | { type: "single"; log: LogRow }
+  | { type: "group"; key: string; logs: LogRow[] };
+
+// Agrupa só corridas CONSECUTIVAS de source+event+message idênticos —
+// `logs` já vem ordenado por created_at DESC da API, então "consecutivo"
+// aqui é adjacência na lista, não repetição em qualquer posição.
+function groupConsecutiveLogs(logs: LogRow[]): DisplayItem[] {
+  const items: DisplayItem[] = [];
+  let i = 0;
+  while (i < logs.length) {
+    let j = i + 1;
+    while (
+      j < logs.length &&
+      logs[j].source === logs[i].source &&
+      logs[j].event === logs[i].event &&
+      logs[j].message === logs[i].message
+    ) {
+      j++;
+    }
+    const run = logs.slice(i, j);
+    if (run.length >= GROUP_MIN_SIZE) {
+      items.push({ type: "group", key: `grp_${run[0].id}`, logs: run });
+    } else {
+      for (const log of run) items.push({ type: "single", log });
+    }
+    i = j;
+  }
+  return items;
+}
+
 export default function DdmLogsPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [levelFilter, setLevelFilter] = useState("");
@@ -105,8 +140,11 @@ export default function DdmLogsPage() {
   const [hasMore, setHasMore] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+
+  const displayItems = useMemo(() => groupConsecutiveLogs(logs), [logs]);
 
   const periodMs =
     PERIOD_OPTIONS.find((p) => p.value === period)?.ms ?? 24 * 60 * 60 * 1000;
@@ -182,6 +220,77 @@ export default function DdmLogsPage() {
       else next.add(id);
       return next;
     });
+  };
+
+  const toggleGroup = (key: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // Reaproveitada tanto pras linhas não agrupadas quanto pelas linhas
+  // individuais de um grupo expandido — mesmo comportamento de
+  // clique-pra-expandir-payload nos dois casos.
+  const renderLogRow = (log: LogRow) => {
+    const isExpanded = expanded.has(log.id);
+    const isErrorish = log.level === "error" || log.level === "critical";
+    return (
+      <Fragment key={log.id}>
+        <tr
+          onClick={() => toggleExpand(log.id)}
+          className={`cursor-pointer border-b border-white/5 transition-colors hover:bg-white/[0.04] ${
+            isErrorish ? "bg-red-500/[0.06]" : ""
+          }`}
+        >
+          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+            {formatTimestamp(log.created_at)}
+          </td>
+          <td className="px-3 py-2">
+            <span
+              className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                LEVEL_BADGE_STYLES[log.level] ?? LEVEL_BADGE_STYLES.info
+              }`}
+            >
+              {log.level}
+            </span>
+          </td>
+          <td className="px-3 py-2">
+            <span
+              className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium ${SOURCE_BADGE_STYLE}`}
+            >
+              {log.source}
+            </span>
+          </td>
+          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
+            {log.event}
+          </td>
+          <td className="max-w-md truncate px-3 py-2 text-zinc-200">{log.message}</td>
+        </tr>
+        {isExpanded && (
+          <tr className="border-b border-white/5 bg-black/40">
+            <td colSpan={5} className="px-3 py-3">
+              {log.account_id && (
+                <p className="mb-2 font-mono text-[11px] text-zinc-500">
+                  account_id: {log.account_id}
+                </p>
+              )}
+              <pre
+                className="overflow-x-auto rounded-md bg-black/60 p-3 font-mono text-[11px] leading-relaxed text-zinc-300"
+                // Seguro: highlightJson escapa &/</> antes de envolver em
+                // <span> com classes fixas — não há atributo/HTML
+                // controlado pelo payload.
+                dangerouslySetInnerHTML={{
+                  __html: highlightJson(log.payload ?? {}),
+                }}
+              />
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
   };
 
   return (
@@ -300,63 +409,55 @@ export default function DdmLogsPage() {
                 </tr>
               </thead>
               <tbody>
-                {logs.map((log) => {
-                  const isExpanded = expanded.has(log.id);
-                  const isErrorish = log.level === "error" || log.level === "critical";
+                {displayItems.map((item) => {
+                  if (item.type === "single") {
+                    return renderLogRow(item.log);
+                  }
+
+                  const { key, logs: groupLogs } = item;
+                  const isGroupExpanded = expandedGroups.has(key);
+                  const first = groupLogs[0];
+                  const isErrorish = first.level === "error" || first.level === "critical";
+
                   return (
-                    <Fragment key={log.id}>
+                    <Fragment key={key}>
                       <tr
-                        onClick={() => toggleExpand(log.id)}
+                        onClick={() => toggleGroup(key)}
                         className={`cursor-pointer border-b border-white/5 transition-colors hover:bg-white/[0.04] ${
                           isErrorish ? "bg-red-500/[0.06]" : ""
                         }`}
                       >
                         <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
-                          {formatTimestamp(log.created_at)}
+                          {formatTimestamp(groupLogs[groupLogs.length - 1].created_at)} →{" "}
+                          {formatTimestamp(first.created_at)}
                         </td>
                         <td className="px-3 py-2">
                           <span
                             className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${
-                              LEVEL_BADGE_STYLES[log.level] ?? LEVEL_BADGE_STYLES.info
+                              LEVEL_BADGE_STYLES[first.level] ?? LEVEL_BADGE_STYLES.info
                             }`}
                           >
-                            {log.level}
+                            {first.level}
                           </span>
                         </td>
                         <td className="px-3 py-2">
                           <span
                             className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium ${SOURCE_BADGE_STYLE}`}
                           >
-                            {log.source}
+                            {first.source}
                           </span>
                         </td>
                         <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
-                          {log.event}
+                          {first.event}
                         </td>
                         <td className="max-w-md truncate px-3 py-2 text-zinc-200">
-                          {log.message}
+                          <span className="mr-2 inline-block rounded-full border border-[#FF5706]/60 bg-[#FF5706] px-2 py-0.5 text-[10px] font-bold text-white">
+                            ×{groupLogs.length}
+                          </span>
+                          {first.message}
                         </td>
                       </tr>
-                      {isExpanded && (
-                        <tr className="border-b border-white/5 bg-black/40">
-                          <td colSpan={5} className="px-3 py-3">
-                            {log.account_id && (
-                              <p className="mb-2 font-mono text-[11px] text-zinc-500">
-                                account_id: {log.account_id}
-                              </p>
-                            )}
-                            <pre
-                              className="overflow-x-auto rounded-md bg-black/60 p-3 font-mono text-[11px] leading-relaxed text-zinc-300"
-                              // Seguro: highlightJson escapa &/</> antes de
-                              // envolver em <span> com classes fixas — não
-                              // há atributo/HTML controlado pelo payload.
-                              dangerouslySetInnerHTML={{
-                                __html: highlightJson(log.payload ?? {}),
-                              }}
-                            />
-                          </td>
-                        </tr>
-                      )}
+                      {isGroupExpanded && groupLogs.map((log) => renderLogRow(log))}
                     </Fragment>
                   );
                 })}
