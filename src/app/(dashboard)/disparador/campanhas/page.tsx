@@ -1044,6 +1044,12 @@ export default function CampanhasPage() {
           agendamento: agendamentoISO,
           status: agendamentoISO ? "agendado" : "rascunho",
           created_by: user.id,
+          // Migration 080 — grava o draftId usado no import (Step 3 acima)
+          // para que startCampaign.ts consiga relinkar
+          // contact_import_variables de forma determinística no start,
+          // mesmo se o relink abaixo (best-effort, client-side) já tiver
+          // rodado ou tiver falhado silenciosamente.
+          import_draft_id: draftId,
         };
 
         const { data: newCampaign, error } = await supabase

@@ -59,6 +59,28 @@ export async function startCampaign(
       return { ok: false, status: 400, error: "Campanha sem sessões de WhatsApp selecionadas." };
     }
 
+    // Relink de segurança: VAR1/VAR2/VAR3 do CSV (Step 2 do wizard) podem
+    // ter sido salvas sob campaign.import_draft_id (migration 080) sem
+    // nunca terem sido reatribuídas ao campaign_id real — o relink
+    // client-side em campanhas/page.tsx é best-effort e pode falhar
+    // silenciosamente (ex: duplo-submit, RLS). Roda ANTES da leitura de
+    // csvVarMap abaixo, que é o ponto onde os valores (vazios ou não)
+    // ficam congelados em disp_message_queue — depois disso é tarde
+    // demais. Usa import_draft_id (gravado na própria campanha), não uma
+    // busca por "draft mais recente da conta": múltiplos rascunhos/
+    // campanhas podem ter linhas órfãs ao mesmo tempo, e vincular pelo
+    // mais recente arriscaria trazer variáveis de OUTRO CSV/campanha.
+    if (campaign.import_draft_id) {
+      const { error: csvVarRelinkErr } = await supabaseAdmin()
+        .from("contact_import_variables")
+        .update({ campaign_id: campaignId })
+        .eq("draft_id", campaign.import_draft_id)
+        .is("campaign_id", null);
+      if (csvVarRelinkErr) {
+        console.error("[startCampaign] Falha ao relinkar contact_import_variables:", csvVarRelinkErr);
+      }
+    }
+
     // Buscar provider de cada canal selecionado na campanha
     const { data: channelConfigs } = await supabaseAdmin()
       .from("whatsapp_config")
