@@ -6,4 +6,9 @@ deployment:
     - nvm use 20.19.0
     - npm install --no-audit --no-fund
     - npm run build
-    - mkdir -p $HOME/apps/omnichannel/tmp && touch $HOME/apps/omnichannel/tmp/restart.txt
+    # O Passenger recarrega quando tmp/restart.txt muda na raiz DESTA aplicacao.
+    # $PWD e o diretorio onde o cPanel fez o deploy, entao cada dominio reinicia
+    # o proprio app. Antes havia um caminho fixo ($HOME/apps/omnichannel), que
+    # em um dominio novo reiniciaria a aplicacao errada: o deploy passava verde e
+    # a aplicacao nova nunca recarregava.
+    - mkdir -p "$PWD/tmp" && touch "$PWD/tmp/restart.txt"

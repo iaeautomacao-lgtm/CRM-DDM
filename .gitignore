@@ -35,6 +35,7 @@ yarn-error.log*
 # keep example files so forkers have a template to copy
 !.env.local.example
 !.env.example
+!.env.homologacao.example
 
 # vercel
 .vercel
