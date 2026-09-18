@@ -407,6 +407,11 @@ export default function CampanhasPage() {
   // Form Modal States
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Evita duplo-submit de handleSubmit (double-click / rede lenta) — sem
+  // isso, dois inserts concorrentes em wacrm.campaigns competem pelo
+  // mesmo relink de contact_import_variables/disparador_utm_links (ver
+  // investigação do incidente de VAR2 vazio).
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [nome, setNome] = useState("");
   const [descricao, setDescricao] = useState("");
   const [objetivo, setObjetivo] = useState("");
@@ -856,6 +861,7 @@ export default function CampanhasPage() {
   // Submit Form
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!nome.trim()) {
       toast.error("Insira o nome da campanha.");
       return;
@@ -932,6 +938,7 @@ export default function CampanhasPage() {
       ? [...selectedTags, tagDoCsv]
       : selectedTags;
 
+    setIsSubmitting(true);
     try {
       // Se há arquivo para importar, envia para o servidor primeiro
       if (importFile) {
@@ -1097,6 +1104,8 @@ export default function CampanhasPage() {
       loadData();
     } catch (err: any) {
       toast.error(err.message || "Erro ao salvar campanha");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -2718,9 +2727,15 @@ export default function CampanhasPage() {
                   <Button
                     type="button"
                     onClick={handleSubmit}
-                    disabled={!nome.trim() || selectedSessions.length === 0}
+                    disabled={isSubmitting || !nome.trim() || selectedSessions.length === 0}
+                    className={isSubmitting ? "opacity-50 cursor-not-allowed gap-1.5" : "gap-1.5"}
                   >
-                    {editingId ? "Salvar Alterações" : agendarPara ? "Agendar Campanha" : "Criar Campanha"}
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {editingId ? "Salvando..." : agendarPara ? "Agendando..." : "Criando..."}
+                      </>
+                    ) : editingId ? "Salvar Alterações" : agendarPara ? "Agendar Campanha" : "Criar Campanha"}
                   </Button>
                 )}
               </div>
