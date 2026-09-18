@@ -1,7 +1,11 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = 'https://rpjyrsjozybeerwkndcc.supabase.co';
-const serviceRoleKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJwanlyc2pvenliZWVyd2tuZGNjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzAzODY3NiwiZXhwIjoyMDkyNjE0Njc2fQ.nhb-ttlTOzq0L45ao8C0_mqThdRhqjvRWc4l21tsTiI';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !serviceRoleKey) {
+  throw new Error('Configure NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no ambiente.');
+}
 
 async function check() {
   const options = {
