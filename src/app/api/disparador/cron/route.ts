@@ -163,7 +163,37 @@ export async function POST(request: Request) {
             .eq("campaign_id", campaign.id)
             .eq("status", "agendado");
 
-          if (count === 0) {
+          // Itens 'erro' com erro_permanente=false e tentativas<5 ainda
+          // são candidatos a retry_transient_queue_errors (migration 089,
+          // chamada no passo 1.5 acima) — são a MESMA condição de
+          // elegibilidade daquela RPC. Sem essa contagem aqui, uma
+          // campanha com só esses itens "sobrando" (0 agendado) encerrava
+          // como concluída, e a RPC nunca mais reagenda itens de campanha
+          // que não está 'em_execucao' — os itens ficavam presos em
+          // 'erro' pra sempre, mesmo não sendo erro permanente e ainda
+          // tendo tentativas disponíveis. Tolerante à coluna
+          // erro_permanente não existir (migration 075 não aplicada,
+          // mesmo padrão de markQueueError em processQueue.ts): erro na
+          // query não deve travar o cron, só faz essa contagem cair pra 0
+          // (comportamento anterior a este fix).
+          let pendingRetryableErrors = 0;
+          const { count: retryableCount, error: retryableError } = await supabaseAdmin()
+            .from("disp_message_queue")
+            .select("*", { count: "exact", head: true })
+            .eq("campaign_id", campaign.id)
+            .eq("status", "erro")
+            .eq("erro_permanente", false)
+            .lt("tentativas", 5);
+          if (retryableError) {
+            console.error(
+              `[Cron] Falha ao contar itens de erro retry-elegíveis da campanha ${campaign.id} (coluna erro_permanente pode não existir):`,
+              retryableError.message
+            );
+          } else {
+            pendingRetryableErrors = retryableCount ?? 0;
+          }
+
+          if (count === 0 && pendingRetryableErrors === 0) {
             console.log(`[Cron] Campaign ${campaign.id} completed.`);
             await supabaseAdmin()
               .from("campaigns")
