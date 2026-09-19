@@ -1,0 +1,274 @@
+import { timingSafeEqual, createHmac } from "node:crypto";
+import { NextResponse } from "next/server";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { writeLog } from "@/lib/logger";
+
+// ============================================================
+// POST /api/stress/run — health check automatizado de produção.
+//
+// Pensado pra rodar via crontab (uma vez por dia, ver README.md) e sob
+// demanda pelo botão "Rodar agora" em /ddm-logs (aba Testes). Cada
+// execução grava UM registro em wacrm.system_logs (event =
+// 'automated_health_check') — é isso que a aba Testes lista.
+//
+// Autenticação: header x-stress-secret == env STRESS_RUN_SECRET.
+// Mesmo padrão de comparação em tempo constante já usado em
+// /api/flows/cron e /api/automations/cron.
+// ============================================================
+
+let _adminClient: SupabaseClient | null = null;
+function supabaseAdmin(): SupabaseClient {
+  if (!_adminClient) {
+    _adminClient = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+      process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+      { db: { schema: "wacrm" } }
+    ) as any;
+  }
+  return _adminClient!;
+}
+
+function getBaseUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL || "https://omnicrm.grupoddm.ia.br";
+}
+
+type TestStatus = "pass" | "fail" | "warn";
+
+interface TestResult {
+  name: string;
+  status: TestStatus;
+  duration_ms: number;
+  message: string;
+}
+
+interface TestOutcome {
+  status: TestStatus;
+  message: string;
+}
+
+// Timeout por teste via AbortController — tanto fetch() quanto o
+// .abortSignal() do supabase-js respeitam o mesmo signal, então o
+// mesmo helper cobre os dois tipos de teste (HTTP e DB direto).
+async function runTest(
+  name: string,
+  timeoutMs: number,
+  fn: (signal: AbortSignal) => Promise<TestOutcome>
+): Promise<TestResult> {
+  const start = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const { status, message } = await fn(controller.signal);
+    return { name, status, duration_ms: Date.now() - start, message };
+  } catch (err: any) {
+    const isAbort = err?.name === "AbortError";
+    return {
+      name,
+      status: "fail",
+      duration_ms: Date.now() - start,
+      message: isAbort ? `timeout após ${timeoutMs}ms` : err?.message || String(err),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function signMetaPayload(rawBody: string, secret: string): string {
+  return "sha256=" + createHmac("sha256", secret).update(rawBody).digest("hex");
+}
+
+// ---- 1. smoke_webhook ----
+// Payload com entry:[] é inerte no processWebhook (o loop `for (const
+// entry of body.entry)` não itera nada) — seguro de chamar de verdade,
+// sem risco de criar contato/mensagem nem de qualquer efeito colateral.
+// Só tem phone_number_id quando o payload tem uma entry de verdade, o
+// que não é o caso aqui — então a verificação de assinatura SEMPRE cai
+// no fallback global META_APP_SECRET (nunca no app_secret por canal).
+// Se a conta só usa app_secret por canal e nunca configurou o fallback
+// global, este teste falha mesmo com o webhook saudável pra tráfego
+// real — falso negativo conhecido, não indica problema de verdade.
+async function testSmokeWebhook(signal: AbortSignal): Promise<TestOutcome> {
+  const secret = process.env.META_APP_SECRET;
+  if (!secret) {
+    return {
+      status: "fail",
+      message:
+        "META_APP_SECRET não configurado (fallback global) — canais com app_secret próprio podem estar OK mesmo assim",
+    };
+  }
+  const body = JSON.stringify({ object: "whatsapp_business_account", entry: [] });
+  const signature = signMetaPayload(body, secret);
+  const res = await fetch(`${getBaseUrl()}/api/whatsapp/webhook`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-hub-signature-256": signature },
+    body,
+    signal,
+  });
+  if (res.status !== 200) {
+    return { status: "fail", message: `status ${res.status} (esperado 200)` };
+  }
+  return { status: "pass", message: "Webhook respondeu 200" };
+}
+
+// ---- 2. smoke_cron_disparador ----
+// Chama a rota de produção de verdade — não é um mock. processQueueItem
+// já é seguro sob invocações concorrentes (claim atômico via UPDATE
+// condicional, ver processQueue.ts), então rodar isso a mais (fora do
+// crontab de ~60s que já existe) não introduz risco de double-send.
+async function testSmokeCronDisparador(signal: AbortSignal): Promise<TestOutcome> {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    return { status: "fail", message: "CRON_SECRET não configurado no servidor" };
+  }
+  const res = await fetch(`${getBaseUrl()}/api/disparador/cron`, {
+    method: "POST",
+    headers: { "x-cron-secret": secret },
+    signal,
+  });
+  if (res.status !== 200) {
+    return { status: "fail", message: `status ${res.status} (esperado 200)` };
+  }
+  return { status: "pass", message: "Cron do disparador respondeu 200" };
+}
+
+// ---- 3. smoke_cron_flows ----
+// Idem — chama /api/flows/cron de verdade. Efeito colateral desejável:
+// esse sweep (timeout de flow_runs travados) hoje só roda quando algo
+// bate essa rota; incluir aqui + o crontab diário do README passa a dar
+// a ele uma execução garantida por dia, mesmo que nenhum outro agendador
+// externo esteja configurado.
+async function testSmokeCronFlows(signal: AbortSignal): Promise<TestOutcome> {
+  const secret = process.env.AUTOMATION_CRON_SECRET;
+  if (!secret) {
+    return { status: "fail", message: "AUTOMATION_CRON_SECRET não configurado no servidor" };
+  }
+  const res = await fetch(`${getBaseUrl()}/api/flows/cron`, {
+    method: "GET",
+    headers: { "x-cron-secret": secret },
+    signal,
+  });
+  if (res.status !== 200) {
+    return { status: "fail", message: `status ${res.status} (esperado 200)` };
+  }
+  return { status: "pass", message: "Cron de flows respondeu 200" };
+}
+
+// ---- 4. smoke_db ----
+async function testSmokeDb(signal: AbortSignal): Promise<TestOutcome> {
+  const { count, error } = await supabaseAdmin()
+    .from("contacts")
+    .select("id", { count: "exact", head: true })
+    .abortSignal(signal);
+  if (error) return { status: "fail", message: error.message };
+  return { status: "pass", message: `${count ?? 0} contatos no banco` };
+}
+
+// ---- 5. queue_health ----
+// CAVEAT conhecido (ver memória do projeto): disp_message_queue.updated_at
+// não é mantida por nenhum trigger — nada reescreve essa coluna quando um
+// item vira 'enviando'. Na prática ela reflete o momento em que a LINHA
+// foi criada (enqueue), não quando o processamento começou. Isso pode
+// gerar falso-positivo de "travado" pra itens que só estão demorando o
+// pacing normal entre enqueue e claim. Implementado literalmente como
+// pedido; se virar ruído no dashboard, o fix correto é trocar por uma
+// coluna mantida de verdade (ex: um trigger dedicado), não ajustar o
+// threshold aqui.
+async function testQueueHealth(signal: AbortSignal): Promise<TestOutcome> {
+  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { count, error } = await supabaseAdmin()
+    .from("disp_message_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "enviando")
+    .lt("updated_at", cutoff)
+    .abortSignal(signal);
+  if (error) return { status: "fail", message: error.message };
+  const n = count ?? 0;
+  if (n > 0) return { status: "warn", message: `${n} itens presos em enviando` };
+  return { status: "pass", message: "Nenhum item preso em enviando" };
+}
+
+// ---- 6. flow_runs_health ----
+// last_advanced_at É mantida de verdade (confirmado ao vivo) — diferente
+// do caveat acima, este check é confiável.
+async function testFlowRunsHealth(signal: AbortSignal): Promise<TestOutcome> {
+  const cutoff = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabaseAdmin()
+    .from("flow_runs")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "active")
+    .lt("last_advanced_at", cutoff)
+    .abortSignal(signal);
+  if (error) return { status: "fail", message: error.message };
+  const n = count ?? 0;
+  if (n > 0) return { status: "warn", message: `${n} flow_runs travados além do timeout` };
+  return { status: "pass", message: "Nenhum flow_run travado" };
+}
+
+// ---- 7. pending_conversations ----
+async function testPendingConversations(signal: AbortSignal): Promise<TestOutcome> {
+  const cutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { count, error } = await supabaseAdmin()
+    .from("conversations")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending")
+    .lt("updated_at", cutoff)
+    .abortSignal(signal);
+  if (error) return { status: "fail", message: error.message };
+  const n = count ?? 0;
+  if (n > 5) return { status: "warn", message: `${n} conversas pendentes sem agente` };
+  return { status: "pass", message: `${n} conversa(s) pendente(s) (dentro do normal)` };
+}
+
+export async function POST(request: Request) {
+  const expected = process.env.STRESS_RUN_SECRET;
+  if (!expected) {
+    return NextResponse.json({ error: "STRESS_RUN_SECRET não configurado" }, { status: 503 });
+  }
+
+  const supplied = request.headers.get("x-stress-secret") ?? "";
+  const suppliedBuf = Buffer.from(supplied);
+  const expectedBuf = Buffer.from(expected);
+  const authorized =
+    suppliedBuf.length === expectedBuf.length && timingSafeEqual(suppliedBuf, expectedBuf);
+  if (!authorized) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const overallStart = Date.now();
+
+  // Sequencial de propósito (não Promise.all) — os testes de cron
+  // batem endpoints que fazem trabalho real; rodar em paralelo
+  // multiplicaria a carga simultânea à toa sem nenhum ganho pro
+  // objetivo do health check.
+  const results: TestResult[] = [];
+  results.push(await runTest("smoke_webhook", 2000, testSmokeWebhook));
+  results.push(await runTest("smoke_cron_disparador", 3000, testSmokeCronDisparador));
+  results.push(await runTest("smoke_cron_flows", 3000, testSmokeCronFlows));
+  results.push(await runTest("smoke_db", 5000, testSmokeDb));
+  results.push(await runTest("queue_health", 5000, testQueueHealth));
+  results.push(await runTest("flow_runs_health", 5000, testFlowRunsHealth));
+  results.push(await runTest("pending_conversations", 5000, testPendingConversations));
+
+  const duration_total_ms = Date.now() - overallStart;
+
+  const hasFail = results.some((r) => r.status === "fail");
+  const hasWarn = results.some((r) => r.status === "warn");
+  const overall: TestStatus = hasFail ? "fail" : hasWarn ? "warn" : "pass";
+
+  const passCount = results.filter((r) => r.status === "pass").length;
+  const warnCount = results.filter((r) => r.status === "warn").length;
+  const failCount = results.filter((r) => r.status === "fail").length;
+
+  const level = overall === "pass" ? "info" : overall === "warn" ? "warn" : "error";
+  const message = `Health check: ${passCount}/7 pass, ${warnCount} warn, ${failCount} fail`;
+
+  await writeLog({
+    level,
+    source: "system",
+    event: "automated_health_check",
+    message,
+    payload: { results, duration_total_ms },
+  });
+
+  return NextResponse.json({ overall, results, duration_total_ms, message });
+}

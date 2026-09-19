@@ -18,6 +18,43 @@ identificar e apagar depois com `npm run stress:cleanup`.
 Ordem recomendada: `generate` → `import` → `queue` → `webhook` → `report` →
 `cleanup`.
 
+## Health check automatizado (produção)
+
+Diferente dos scripts acima (manuais, sob demanda, usam dados fictícios),
+`POST /api/stress/run` é um health check leve pensado pra rodar sozinho
+todo dia em produção — sem CSV, sem dado fictício, só smoke tests e
+contagens de saúde do banco. Resultado aparece na aba **Testes** de
+`/ddm-logs` (histórico das últimas 50 execuções, com botão "Rodar agora").
+
+Protegido por header `x-stress-secret` (env `STRESS_RUN_SECRET` — ver
+`.env.local.example`). Sem essa env configurada, a rota responde 503;
+com o header ausente ou errado, 401.
+
+### Configurar o crontab do servidor
+
+Adicione ao crontab (cPanel → Cron Jobs, ou `crontab -e` direto no
+servidor) — roda todo dia às 2h:
+
+```
+0 2 * * * curl -s -X POST \
+  -H "x-stress-secret: <STRESS_RUN_SECRET>" \
+  https://omnicrm.grupoddm.ia.br/api/stress/run \
+  >/dev/null 2>&1
+```
+
+Troque `<STRESS_RUN_SECRET>` pelo valor real configurado no `.env` de
+produção. O `>/dev/null 2>&1` é só pra não gerar e-mail de cron a cada
+execução — o resultado já fica gravado em `system_logs` e visível na
+aba Testes, não precisa do output do curl.
+
+**Nota:** dois dos sete testes (`smoke_cron_disparador`,
+`smoke_cron_flows`) chamam as rotas de cron reais de produção, não um
+mock — isso é intencional (ver comentários em
+`src/app/api/stress/run/route.ts`). `smoke_cron_flows` em particular dá
+ao sweep de timeout de flows (`/api/flows/cron`) uma execução garantida
+por dia mesmo que nenhum outro agendador externo esteja configurado
+pra ele.
+
 ## Variáveis de ambiente
 
 Nenhum script lê `.env` automaticamente — exporte as variáveis no seu

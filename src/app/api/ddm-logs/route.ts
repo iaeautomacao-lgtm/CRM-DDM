@@ -94,8 +94,8 @@ const VALID_SOURCES = new Set([
   "frontend",
 ]);
 
-type Tab = "events" | "users" | "sessions" | "actions";
-const VALID_TABS = new Set<Tab>(["events", "users", "sessions", "actions"]);
+type Tab = "events" | "users" | "sessions" | "actions" | "tests";
+const VALID_TABS = new Set<Tab>(["events", "users", "sessions", "actions", "tests"]);
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
@@ -143,6 +143,9 @@ export async function GET(request: Request) {
     }
     if (tab === "actions") {
       return await getActionsTab(db, { from, cursor, limit, userId, action });
+    }
+    if (tab === "tests") {
+      return await getTestsTab(db);
     }
     return await getEventsTab(db, { source, level, from, to, cursor, limit, userId });
   } catch (err: any) {
@@ -395,5 +398,27 @@ async function getActionsTab(
     count: page.length,
     hasMore,
     nextCursor,
+  });
+}
+
+// ------------------------------------------------------------
+// tab=tests — histórico de execuções do health check automatizado
+// (POST /api/stress/run). Cada linha de system_logs com event=
+// 'automated_health_check' é UMA execução inteira (payload.results
+// tem os 7 testes individuais) — sem paginação por cursor, só as 50
+// mais recentes, igual à aba Por Usuário.
+// ------------------------------------------------------------
+async function getTestsTab(db: SupabaseClient): Promise<NextResponse> {
+  const { data, error } = await db
+    .from("system_logs")
+    .select("*")
+    .eq("event", "automated_health_check")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw error;
+
+  return NextResponse.json({
+    runs: data ?? [],
+    count: (data ?? []).length,
   });
 }

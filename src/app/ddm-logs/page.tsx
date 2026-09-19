@@ -83,6 +83,34 @@ interface SessionsResponse {
   error?: string;
 }
 
+// Formato de cada teste individual dentro de uma execução — espelha
+// TestResult em src/app/api/stress/run/route.ts.
+type TestStatus = "pass" | "warn" | "fail";
+interface TestResult {
+  name: string;
+  status: TestStatus;
+  duration_ms: number;
+  message: string;
+}
+
+// Uma linha de system_logs com event='automated_health_check' — payload
+// já vem no formato { results: TestResult[], duration_total_ms: number }
+// (ver route.ts). id/created_at/level/message são as colunas nativas de
+// system_logs, iguais a qualquer outra aba.
+interface TestRunRow {
+  id: string;
+  created_at: string;
+  level: string;
+  message: string;
+  payload: { results: TestResult[]; duration_total_ms: number } | null;
+}
+
+interface TestsResponse {
+  runs: TestRunRow[];
+  count: number;
+  error?: string;
+}
+
 const SOURCE_OPTIONS: LogSource[] = [
   "disparador",
   "webhook_meta",
@@ -115,13 +143,33 @@ const LEVEL_BADGE_STYLES: Record<string, string> = {
 const SOURCE_BADGE_STYLE =
   "bg-[#FF5706]/15 text-[#FF5706] border-[#FF5706]/40";
 
-type Tab = "events" | "users" | "sessions" | "actions";
+// Aba Testes — badge do status geral/individual e cor de fundo do card
+// por execução (ver overall em route.ts: 'pass' se todos pass, 'warn'
+// se algum warn e nenhum fail, 'fail' se algum fail).
+const TEST_STATUS_BADGE: Record<TestStatus, string> = {
+  pass: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
+  warn: "bg-amber-500/20 text-amber-300 border-amber-500/40",
+  fail: "bg-red-600/25 text-red-300 border-red-500/50",
+};
+const TEST_STATUS_LABEL: Record<TestStatus, string> = {
+  pass: "✅ PASS",
+  warn: "⚠️ WARN",
+  fail: "❌ FAIL",
+};
+const TEST_CARD_BG: Record<TestStatus, string> = {
+  pass: "border-emerald-800/40 bg-emerald-950/40",
+  warn: "border-amber-800/40 bg-amber-950/40",
+  fail: "border-red-800/40 bg-red-950/40",
+};
+
+type Tab = "events" | "users" | "sessions" | "actions" | "tests";
 
 const TAB_OPTIONS: { value: Tab; label: string }[] = [
   { value: "events", label: "Eventos" },
   { value: "users", label: "Por Usuário" },
   { value: "sessions", label: "Sessões" },
   { value: "actions", label: "Ações" },
+  { value: "tests", label: "Testes" },
 ];
 
 function formatTimestamp(iso: string): string {
@@ -309,6 +357,14 @@ export default function DdmLogsPage() {
   // colapsar pra uma única opção.
   const [knownActionTypes, setKnownActionTypes] = useState<Set<string>>(new Set());
 
+  // ---- Aba Testes ----
+  const [testRuns, setTestRuns] = useState<TestRunRow[]>([]);
+  const [testsLoading, setTestsLoading] = useState(false);
+  const [testsError, setTestsError] = useState<string | null>(null);
+  const [expandedTestRuns, setExpandedTestRuns] = useState<Set<string>>(new Set());
+  const [runningNow, setRunningNow] = useState(false);
+  const [runNowError, setRunNowError] = useState<string | null>(null);
+
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -381,6 +437,12 @@ export default function DdmLogsPage() {
     },
     [userIdFilter, actionTypeFilter, fromIso]
   );
+
+  const buildTestsUrl = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("tab", "tests");
+    return `/api/ddm-logs?${params.toString()}`;
+  }, []);
 
   // Fetch autenticado compartilhado por todas as abas — trata 401 num
   // único lugar: limpa a credencial guardada e volta pro formulário de
@@ -553,6 +615,62 @@ export default function DdmLogsPage() {
     }
   }, [actionsCursor, actionsLoadingMore, authHeader, authorizedFetch, buildActionsUrl]);
 
+  // ---- Testes: load ----
+  const loadTestsFirstPage = useCallback(async () => {
+    if (!authHeader) return;
+    setTestsLoading(true);
+    setTestsError(null);
+    try {
+      const res = await authorizedFetch(buildTestsUrl());
+      if (!res) return;
+      const data: TestsResponse = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao carregar testes");
+      setTestRuns(data.runs);
+      setLastUpdated(new Date());
+    } catch (err: any) {
+      setTestsError(err.message || "Erro ao carregar testes");
+    } finally {
+      setTestsLoading(false);
+    }
+  }, [authHeader, authorizedFetch, buildTestsUrl]);
+
+  // "Rodar agora" — pede o secret via prompt (nunca fica salvo em lugar
+  // nenhum, nem localStorage; é um secret de operação, não de login) e
+  // chama POST /api/stress/run diretamente. Não usa authorizedFetch —
+  // essa rota não é protegida pelo Basic Auth do /api/ddm-logs, usa seu
+  // próprio header x-stress-secret. Ao terminar, recarrega a lista pra
+  // mostrar a execução que acabou de rodar.
+  const runHealthCheckNow = useCallback(async () => {
+    const secret = window.prompt("Digite o STRESS_RUN_SECRET:");
+    if (!secret) return;
+    setRunningNow(true);
+    setRunNowError(null);
+    try {
+      const res = await fetch("/api/stress/run", {
+        method: "POST",
+        headers: { "x-stress-secret": secret },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || `Falha ao rodar (status ${res.status})`);
+      }
+      await loadTestsFirstPage();
+    } catch (err: any) {
+      setRunNowError(err.message || "Erro ao rodar health check");
+    } finally {
+      setRunningNow(false);
+    }
+  }, [loadTestsFirstPage]);
+
+  const toggleTestRun = (id: string) => {
+    setExpandedTestRuns((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   // Recarrega a aba Eventos quando seus filtros mudam — mesmo efeito de
   // antes, só com `tab`/`userIdFilter` a mais na guarda/dependências
   // (não dispara se outra aba estiver ativa).
@@ -580,6 +698,12 @@ export default function DdmLogsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period, authHeader, tab, userIdFilter, actionTypeFilter]);
 
+  useEffect(() => {
+    if (!authHeader || tab !== "tests") return;
+    loadTestsFirstPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authHeader, tab]);
+
   // Auto-refresh — recarrega a aba ativa no momento do tick. Sempre
   // reseta pra primeira página de cada aba (novos dados mudam a
   // ordenação, não faz sentido só anexar ao final).
@@ -590,9 +714,18 @@ export default function DdmLogsPage() {
       else if (tab === "users") loadUsers();
       else if (tab === "sessions") loadSessionsFirstPage();
       else if (tab === "actions") loadActionsFirstPage();
+      else if (tab === "tests") loadTestsFirstPage();
     }, 30000);
     return () => clearInterval(id);
-  }, [autoRefresh, tab, loadFirstPage, loadUsers, loadSessionsFirstPage, loadActionsFirstPage]);
+  }, [
+    autoRefresh,
+    tab,
+    loadFirstPage,
+    loadUsers,
+    loadSessionsFirstPage,
+    loadActionsFirstPage,
+    loadTestsFirstPage,
+  ]);
 
   // Otimista: só grava a credencial e deixa authHeader mudar disparar o
   // fetch (efeitos acima). Se estiver errada, authorizedFetch pega o
@@ -820,7 +953,9 @@ export default function DdmLogsPage() {
         ? users.length
         : tab === "sessions"
           ? sessions.length
-          : actionLogs.length;
+          : tab === "actions"
+            ? actionLogs.length
+            : testRuns.length;
 
   const activeLoading =
     tab === "events"
@@ -829,7 +964,9 @@ export default function DdmLogsPage() {
         ? usersLoading
         : tab === "sessions"
           ? sessionsLoading
-          : actionsLoading;
+          : tab === "actions"
+            ? actionsLoading
+            : testsLoading;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -845,6 +982,16 @@ export default function DdmLogsPage() {
             <span className="hidden text-xs text-zinc-500 sm:inline">
               Atualizado às {formatTimestamp(lastUpdated.toISOString())}
             </span>
+          )}
+          {tab === "tests" && (
+            <button
+              type="button"
+              onClick={() => runHealthCheckNow()}
+              disabled={runningNow}
+              className="rounded-md border border-emerald-500/50 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {runningNow ? "Rodando..." : "Rodar agora"}
+            </button>
           )}
           <button
             type="button"
@@ -863,7 +1010,8 @@ export default function DdmLogsPage() {
               if (tab === "events") loadFirstPage();
               else if (tab === "users") loadUsers();
               else if (tab === "sessions") loadSessionsFirstPage();
-              else loadActionsFirstPage();
+              else if (tab === "actions") loadActionsFirstPage();
+              else loadTestsFirstPage();
             }}
             disabled={activeLoading}
             className="rounded-md bg-[#FF5706] px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1319,6 +1467,109 @@ export default function DdmLogsPage() {
                 >
                   {actionsLoadingMore ? "Carregando..." : "Carregar mais"}
                 </button>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ---- Aba Testes ---- */}
+        {tab === "tests" && (
+          <>
+            {runNowError && (
+              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {runNowError}
+              </div>
+            )}
+            {testsError && (
+              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {testsError}
+              </div>
+            )}
+
+            {testsLoading && testRuns.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+                Carregando execuções...
+              </div>
+            ) : testRuns.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+                Nenhuma execução de health check ainda. Clique em &quot;Rodar agora&quot; ou
+                aguarde o crontab diário (ver README de tests/stress).
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {testRuns.map((run) => {
+                  const overall: TestStatus =
+                    run.level === "error" ? "fail" : run.level === "warn" ? "warn" : "pass";
+                  const results = run.payload?.results ?? [];
+                  const passCount = results.filter((r) => r.status === "pass").length;
+                  const isExpanded = expandedTestRuns.has(run.id);
+
+                  return (
+                    <div
+                      key={run.id}
+                      className={`overflow-hidden rounded-lg border ${TEST_CARD_BG[overall]}`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleTestRun(run.id)}
+                        className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.03]"
+                      >
+                        <span className="font-mono text-xs text-zinc-400">
+                          {formatTimestamp(run.created_at)}
+                        </span>
+                        <span
+                          className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold ${TEST_STATUS_BADGE[overall]}`}
+                        >
+                          {TEST_STATUS_LABEL[overall]}
+                        </span>
+                        <span className="text-xs text-zinc-400">
+                          {run.payload?.duration_total_ms ?? 0}ms total
+                        </span>
+                        <span className="text-xs text-zinc-400">
+                          {passCount}/{results.length || 7} testes
+                        </span>
+                        <span className="ml-auto text-xs text-zinc-500">
+                          {isExpanded ? "▲ recolher" : "▼ expandir"}
+                        </span>
+                      </button>
+
+                      {isExpanded && (
+                        <div className="border-t border-white/10 bg-black/20 px-4 py-3">
+                          <table className="w-full border-collapse text-left text-sm">
+                            <thead>
+                              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-zinc-500">
+                                <th className="px-3 py-2 font-medium">Teste</th>
+                                <th className="px-3 py-2 font-medium">Status</th>
+                                <th className="px-3 py-2 font-medium">Duração</th>
+                                <th className="px-3 py-2 font-medium">Mensagem</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {results.map((r) => (
+                                <tr key={r.name} className="border-b border-white/5">
+                                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
+                                    {r.name}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <span
+                                      className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${TEST_STATUS_BADGE[r.status]}`}
+                                    >
+                                      {r.status}
+                                    </span>
+                                  </td>
+                                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+                                    {r.duration_ms}ms
+                                  </td>
+                                  <td className="px-3 py-2 text-zinc-200">{r.message}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </>
