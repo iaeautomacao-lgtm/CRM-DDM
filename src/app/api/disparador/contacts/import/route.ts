@@ -3,7 +3,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
-import { normalizeKey } from "@/lib/contacts/dedupe";
+import { isUniqueViolation, normalizeKey } from "@/lib/contacts/dedupe";
 import {
   resolveImportTagIds,
   assignImportedContactTags,
@@ -197,12 +197,62 @@ export async function POST(request: Request) {
     const { data: blacklist } = await supabaseAdmin().from("blacklist").select("telefone");
     const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
 
-    // Dedup de contato (por telefone e por CPF) roda direto no banco via
-    // wacrm.bulk_upsert_contacts (migration 098) — nada de carregar a
-    // base inteira em memória aqui. Ver migration 098 para o porquê de
-    // precisar ser uma RPC (índice parcial em phone_normalized + falta
-    // de UNIQUE em cpf, nenhum dos dois cabe num .upsert() simples do
-    // client) e para as regras de negócio de name/cpf replicadas lá.
+    // Existing contacts for this account, keyed by normalized phone. Used
+    // instead of a DB-level upsert because the real unique constraint,
+    // idx_contacts_account_phone_normalized, is a *partial* index (WHERE
+    // phone_normalized <> ''), which Postgres won't infer as an ON CONFLICT
+    // arbiter from a bare column list — the same reason the main contacts
+    // CSV importer (import-modal.tsx) pre-checks and inserts rather than
+    // upserts.
+    // Paginado via .range() — mesmo padrão de startCampaign.ts (contact_tags)
+    // — sem isso, o cap de resposta do PostgREST (1000 linhas) trunca contas
+    // com mais de 1000 contatos, e o dedup abaixo não reconhece contatos
+    // fora da primeira página, criando duplicatas silenciosamente num reimport.
+    const existingRows: any[] = [];
+    {
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page } = await supabaseAdmin()
+          .from("contacts")
+          .select("id, name, phone_normalized, cpf")
+          .eq("account_id", accountId)
+          .range(from, from + pageSize - 1);
+        existingRows.push(...(page ?? []));
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
+    }
+    const existingContactsByKey = new Map<
+      string,
+      { id: string; name: string | null; cpf: string | null; phone_normalized: string | null }
+    >();
+    for (const r of existingRows ?? []) {
+      const key = normalizeKey(r.phone_normalized ?? "");
+      if (key) {
+        existingContactsByKey.set(key, {
+          id: r.id,
+          name: r.name,
+          cpf: r.cpf ?? null,
+          phone_normalized: r.phone_normalized ?? null,
+        });
+      }
+    }
+
+    // Contatos existentes por CPF — dedup por CPF tem prioridade sobre
+    // dedup por telefone quando o CSV traz CPF (o mesmo aluno pode
+    // reaparecer com um telefone novo em campanhas diferentes). Reaproveita
+    // o mesmo select de existingRows acima, já filtrado por account_id.
+    const existingByCpf = new Map<
+      string,
+      { id: string; name: string | null; phone_normalized: string | null }
+    >();
+    for (const r of existingRows ?? []) {
+      if (r.cpf) {
+        existingByCpf.set(r.cpf, { id: r.id, name: r.name, phone_normalized: r.phone_normalized ?? null });
+      }
+    }
+
     type AltPhoneRow = { phone: string; phone_normalized: string; ordem: number };
     type PendingContact = {
       phone: string;
@@ -215,12 +265,11 @@ export async function POST(request: Request) {
       tagsArray: string[];
     };
     const pending: PendingContact[] = [];
-    // altPhoneAssignments/csvVarAssignments só são preenchidos DEPOIS da
-    // chamada a bulk_upsert_contacts (passo 5) — contact_id (novo ou
-    // existente) só é conhecido quando a RPC responde, então não tem mais
-    // o caminho "imediato" que existia quando contatos já existentes eram
-    // resolvidos em memória. csvVarAssignments segue o mesmo padrão para
-    // VAR1/VAR2/VAR3 (migration 079).
+    // altPhoneAssignments cobre os dois casos: contato já existente
+    // (contact_id resolvido na hora, empurrado direto aqui dentro do
+    // loop) e contato novo (resolvido depois do insert em lote, igual
+    // ao padrão de tagAssignments abaixo). csvVarAssignments segue o
+    // mesmo padrão para VAR1/VAR2/VAR3 (migration 079).
     const altPhoneAssignments: Array<{ contact_id: string; phone: string; phone_normalized: string; ordem: number }> = [];
     const csvVarAssignments: Array<{ contact_id: string; var_index: number; value: string }> = [];
     const seenInFile = new Set<string>();
@@ -271,17 +320,6 @@ export async function POST(request: Request) {
         results.duplicados++;
         continue;
       }
-      // Precisa marcar como visto ANTES de decidir novo-vs-existente —
-      // diferente do código anterior (que só marcava linhas não
-      // encontradas no banco), aqui o match com um contato já existente
-      // só é resolvido depois, dentro de bulk_upsert_contacts (migration
-      // 098). Sem isso, duas linhas do mesmo CSV com o mesmo telefone/CPF
-      // (ambas batendo num contato já existente) virariam duas linhas no
-      // mesmo lote de upsert mirando a mesma constraint — o Postgres
-      // rejeita isso com "ON CONFLICT DO UPDATE command cannot affect row
-      // a second time".
-      seenInFile.add(key);
-      if (cpfNormalized) seenCpfInFile.add(cpfNormalized);
 
       // Telefones alternativos (TELEFONE2/3) — exclui o que virou
       // principal (rawPhone) pra não duplicar o mesmo número como
@@ -296,6 +334,75 @@ export async function POST(request: Request) {
           return { phone: altNormalized, phone_normalized: normalizeKey(altNormalized), ordem };
         })
         .filter((v): v is AltPhoneRow => v !== null);
+
+      // Dedup por CPF tem prioridade sobre dedup por telefone.
+      const existingContact = cpfNormalized
+        ? existingByCpf.get(cpfNormalized)
+        : undefined;
+      const existingByPhone = existingContact
+        ? undefined
+        : existingContactsByKey.get(key);
+      const matched = existingContact
+        ? {
+            id: existingContact.id,
+            name: existingContact.name,
+            cpf: cpfNormalized,
+            phone_normalized: existingContact.phone_normalized,
+          }
+        : existingByPhone
+          ? {
+              id: existingByPhone.id,
+              name: existingByPhone.name,
+              cpf: existingByPhone.cpf,
+              phone_normalized: existingByPhone.phone_normalized,
+            }
+          : null;
+
+      if (matched) {
+        // Contato já existe — preenche o name se estiver vazio, ou se o
+        // valor atual parece ser o telefone (import antigo com o alias
+        // CONTATO lido como nome, antes de virar TELEFONE1_KEYS — ver
+        // NAME_FIELD_KEYS acima). Nunca sobrescreve um nome que já parece
+        // um nome de verdade.
+        const nomePareceTelefone =
+          !!matched.name &&
+          (matched.name === matched.phone_normalized || /^\d{10,13}$/.test(matched.name));
+        if (!matched.name || nomePareceTelefone) {
+          const parsedName = resolveField(row, columnMap.name, NAME_FIELD_KEYS);
+          if (parsedName) {
+            const { error: updateErr } = await supabaseAdmin()
+              .from("contacts")
+              .update({ name: parsedName })
+              .eq("id", matched.id);
+            if (updateErr) {
+              console.error("[Contacts Import] Failed to backfill name:", updateErr);
+            }
+          }
+        }
+        // Backfill de CPF: só quando o contato foi encontrado por
+        // telefone e ainda não tinha CPF gravado — se foi encontrado
+        // por CPF, ele já tem exatamente esse CPF.
+        if (!existingContact && cpfNormalized && !matched.cpf) {
+          const { error: cpfErr } = await supabaseAdmin()
+            .from("contacts")
+            .update({ cpf: cpfNormalized })
+            .eq("id", matched.id)
+            .is("cpf", null);
+          if (cpfErr) {
+            console.error("[Contacts Import] Failed to backfill cpf:", cpfErr);
+          }
+        }
+        for (const alt of altPhones) {
+          altPhoneAssignments.push({ contact_id: matched.id, ...alt });
+        }
+        csvVars.forEach((v, idx) => {
+          if (v) csvVarAssignments.push({ contact_id: matched.id, var_index: idx, value: v });
+        });
+        results.duplicados++;
+        continue;
+      }
+      seenInFile.add(key);
+      if (cpfNormalized) seenCpfInFile.add(cpfNormalized);
 
       const rawTags = getField(row, "tags", "tag", "etiquetas", "categorias") || "";
       const csvTagNames = rawTags ? rawTags.split(",").map((t) => t.trim()).filter(Boolean) : [];
@@ -341,33 +448,16 @@ export async function POST(request: Request) {
       }));
     }
 
-    // 5. Upsert contacts em lote via wacrm.bulk_upsert_contacts (migration
-    // 098) — a RPC decide internamente novo-vs-existente (por CPF primeiro,
-    // depois por telefone) e devolve is_new pra cada linha. chunkSize=500
-    // é o mesmo tamanho já usado alhures neste arquivo (contact_phones,
-    // contact_import_variables) — grande o bastante pra não gerar muitos
-    // round-trips, pequeno o bastante pra não montar um payload jsonb
-    // gigante numa única chamada.
-    //
-    // Correspondência posicional: jsonb_array_elements() preserva a ordem
-    // do array de entrada, e a RPC usa RETURN NEXT dentro de um loop sobre
-    // esses elementos — a linha N da resposta corresponde sempre à linha N
-    // enviada. Não dá pra religar pelo phone_normalized devolvido: quando
-    // o match é por CPF com um telefone novo no CSV, o valor devolvido é o
-    // telefone ANTIGO já gravado (a RPC nunca atualiza o telefone de um
-    // contato existente — mesmo comportamento do código anterior).
+    // 5. Insert contacts in chunks; a chunk failure retries row-by-row so
+    // one bad/duplicate row doesn't sink the whole batch.
     const tagAssignments: ContactTagAssignment[] = [];
-    const chunkSize = 500;
-
-    interface BulkUpsertResult {
-      out_contact_id: string | null;
-      out_phone_normalized: string | null;
-      out_is_new: boolean;
-    }
+    const chunkSize = 50;
 
     for (let i = 0; i < pending.length; i += chunkSize) {
       const chunk = pending.slice(i, i + chunkSize);
-      const rpcRows = chunk.map((p) => ({
+      const insertRows = chunk.map((p) => ({
+        user_id: user.id,
+        account_id: accountId,
         phone: p.phone,
         name: p.name,
         email: p.email,
@@ -375,49 +465,53 @@ export async function POST(request: Request) {
         cpf: p.cpf,
       }));
 
-      const { data, error } = await supabaseAdmin().rpc("bulk_upsert_contacts", {
-        p_account_id: accountId,
-        p_user_id: user.id,
-        p_rows: rpcRows,
-      });
+      const { data, error } = await supabaseAdmin()
+        .from("contacts")
+        .insert(insertRows)
+        .select("id");
 
       if (error) {
-        // Falha na chamada inteira (RPC ausente/migration 098 não
-        // aplicada, parâmetro malformado etc.) — sem resultado nenhum pra
-        // correlacionar, registra erro genérico por linha do lote em vez
-        // de derrubar o import inteiro.
-        console.error("[Contacts Import] bulk_upsert_contacts falhou para o lote:", error.message);
-        for (const source of chunk) {
-          results.erros.push(`${source.phone}: ${error.message}`);
-        }
-        continue;
-      }
+        for (let j = 0; j < insertRows.length; j++) {
+          const source = chunk[j];
+          const { data: singleData, error: singleErr } = await supabaseAdmin()
+            .from("contacts")
+            .insert(insertRows[j])
+            .select("id")
+            .single();
 
-      const rpcResults = (data ?? []) as BulkUpsertResult[];
-      for (let j = 0; j < chunk.length; j++) {
-        const source = chunk[j];
-        const outcome: BulkUpsertResult | undefined = rpcResults[j];
-
-        if (!outcome || !outcome.out_contact_id) {
-          results.erros.push(`${source.phone}: falha ao gravar contato (ver logs do servidor)`);
-          continue;
+          if (!singleErr && singleData) {
+            results.importados++;
+            if (source.tagsArray.length > 0) {
+              tagAssignments.push({ contactId: singleData.id, tagNames: source.tagsArray });
+            }
+            for (const alt of source.altPhones) {
+              altPhoneAssignments.push({ contact_id: singleData.id, ...alt });
+            }
+            source.csvVars.forEach((v, idx) => {
+              if (v) csvVarAssignments.push({ contact_id: singleData.id, var_index: idx, value: v });
+            });
+          } else if (isUniqueViolation(singleErr)) {
+            results.duplicados++;
+          } else {
+            results.erros.push(`${source.phone}: ${singleErr?.message}`);
+          }
         }
-
-        if (outcome.out_is_new) {
-          results.importados++;
-        } else {
-          results.duplicados++;
+      } else {
+        const inserted = data ?? [];
+        results.importados += inserted.length;
+        for (let j = 0; j < inserted.length; j++) {
+          const source = chunk[j];
+          if (!source) continue;
+          if (source.tagsArray.length > 0) {
+            tagAssignments.push({ contactId: inserted[j].id, tagNames: source.tagsArray });
+          }
+          for (const alt of source.altPhones) {
+            altPhoneAssignments.push({ contact_id: inserted[j].id, ...alt });
+          }
+          source.csvVars.forEach((v, idx) => {
+            if (v) csvVarAssignments.push({ contact_id: inserted[j].id, var_index: idx, value: v });
+          });
         }
-
-        if (source.tagsArray.length > 0) {
-          tagAssignments.push({ contactId: outcome.out_contact_id, tagNames: source.tagsArray });
-        }
-        for (const alt of source.altPhones) {
-          altPhoneAssignments.push({ contact_id: outcome.out_contact_id, ...alt });
-        }
-        source.csvVars.forEach((v, idx) => {
-          if (v) csvVarAssignments.push({ contact_id: outcome.out_contact_id!, var_index: idx, value: v });
-        });
       }
     }
 
