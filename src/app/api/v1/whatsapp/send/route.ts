@@ -7,7 +7,6 @@
 // provider (WAHA or Meta), and records the message in the database.
 // ============================================================
 
-import { NextResponse } from 'next/server';
 import { requireApiKey } from '@/lib/auth/api-context';
 import { sendTextMessage } from '@/lib/whatsapp/meta-api';
 import { sendWahaTextMessage } from '@/lib/whatsapp/waha-api';
@@ -18,7 +17,7 @@ import {
   phoneVariants,
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils';
-import { ok, toApiErrorResponse } from '@/lib/api/v1/respond';
+import { ok, badRequest, ApiError, toApiErrorResponse } from '@/lib/api/v1/respond';
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 
 export async function POST(request: Request) {
@@ -34,19 +33,13 @@ export async function POST(request: Request) {
     const targetText = message || text;
 
     if (!targetPhone || !targetText) {
-      return NextResponse.json(
-        { error: 'Both phone (or to) and text (or message) are required' },
-        { status: 400 }
-      );
+      throw badRequest('Both phone (or to) and text (or message) are required');
     }
 
     // 3. Sanitize and validate phone number
     const sanitizedPhone = sanitizePhoneForMeta(targetPhone);
     if (!isValidE164(sanitizedPhone)) {
-      return NextResponse.json(
-        { error: 'Invalid phone number format. Must be in E.164 format (ex: +5527999991212)' },
-        { status: 400 }
-      );
+      throw badRequest('Invalid phone number format. Must be in E.164 format (ex: +5527999991212)');
     }
 
     // 4. Fetch WhatsApp config for this account
@@ -57,10 +50,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (configError || !config) {
-      return NextResponse.json(
-        { error: 'WhatsApp is not configured for this account.' },
-        { status: 400 }
-      );
+      throw badRequest('WhatsApp is not configured for this account.');
     }
 
     // 5. Find or create Contact
@@ -96,10 +86,7 @@ export async function POST(request: Request) {
         }
         
         if (!contactRow) {
-          return NextResponse.json(
-            { error: `Failed to create contact: ${createContactErr?.message}` },
-            { status: 500 }
-          );
+          throw new ApiError('internal', `Failed to create contact: ${createContactErr?.message}`, 500);
         }
       } else {
         contactRow = newContact;
@@ -116,10 +103,7 @@ export async function POST(request: Request) {
     );
 
     if (!conversation) {
-      return NextResponse.json(
-        { error: 'Failed to open a conversation for this contact.' },
-        { status: 500 }
-      );
+      throw new ApiError('internal', 'Failed to open a conversation for this contact.', 500);
     }
 
     // 7. Send the message via active provider (WAHA or Meta API)
@@ -173,10 +157,7 @@ export async function POST(request: Request) {
       if (lastError) throw lastError;
     } catch (sendErr: any) {
       const msg = sendErr instanceof Error ? sendErr.message : 'Unknown send error';
-      return NextResponse.json(
-        { error: `WhatsApp sending failed: ${msg}` },
-        { status: 502 }
-      );
+      throw new ApiError('internal', `WhatsApp sending failed: ${msg}`, 502);
     }
 
     // 8. Record the sent message in the database
@@ -195,10 +176,7 @@ export async function POST(request: Request) {
       .single();
 
     if (msgInsertErr || !messageRecord) {
-      return NextResponse.json(
-        { error: `Message sent but failed to save in database: ${msgInsertErr?.message}` },
-        { status: 500 }
-      );
+      throw new ApiError('internal', `Message sent but failed to save in database: ${msgInsertErr?.message}`, 500);
     }
 
     // 9. Update last message state in conversation
@@ -217,17 +195,8 @@ export async function POST(request: Request) {
       whatsapp_message_id: waMessageId,
     });
 
-  } catch (err: any) {
-    console.error('[api/v1/whatsapp/send] Error:', err);
-    return NextResponse.json(
-      { 
-        error: { 
-          code: 'internal_detailed', 
-          message: err instanceof Error ? `${err.name}: ${err.message}` : String(err) 
-        } 
-      },
-      { status: 500 }
-    );
+  } catch (err) {
+    return toApiErrorResponse(err);
   }
 }
 

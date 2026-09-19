@@ -4,10 +4,11 @@ The public API lets you drive your wacrm instance from your own
 scripts and automations — send messages, manage contacts, launch
 broadcasts — without going through the dashboard UI.
 
-> **Status:** groundwork release. Authentication, scopes, rate
-> limiting, and the `GET /api/v1/me` probe ship now. The data
-> endpoints (`messages`, `contacts`, …) land one at a time in
-> follow-up releases — see [Roadmap](#roadmap).
+> **Status:** authentication, scopes, rate limiting, `GET /api/v1/me`,
+> `POST /api/v1/whatsapp/send`, and `POST /api/v1/disparador/campaigns`
+> ship now. The remaining data endpoints (`contacts`, `conversations`,
+> …) land one at a time in follow-up releases — see
+> [Roadmap](#roadmap).
 
 ## Authentication
 
@@ -49,7 +50,7 @@ it. Grant the minimum.
 | `contacts:read`      | List and read contacts                   |
 | `contacts:write`     | Create and update contacts               |
 | `conversations:read` | List and read conversations              |
-| `broadcasts:send`    | Launch broadcast campaigns               |
+| `campaigns:write`    | Create and enqueue Disparador campaigns  |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -115,16 +116,100 @@ curl https://your-crm.example.com/api/v1/me \
 }
 ```
 
+### `POST /api/v1/whatsapp/send`
+
+Sends a WhatsApp text message. Requires `messages:send`. Finds or
+creates the target contact and conversation on your active channel
+(WAHA or Meta, whichever this account has configured) before sending.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone": "+5527999991212",
+    "text": "Hello from the API",
+    "name": "Optional contact display name"
+  }'
+```
+
+`phone` accepts the alias `to`; `text` accepts the alias `message`.
+`phone` must resolve to a valid E.164 number. `name` is optional —
+only applied when creating a new contact or renaming an existing one.
+
+```json
+{
+  "data": {
+    "success": true,
+    "message_id": "…",
+    "whatsapp_message_id": "wamid.…"
+  }
+}
+```
+
+Errors: `bad_request` (400) for a missing `phone`/`text`, an invalid
+phone format, or no WhatsApp channel configured for the account;
+`internal` (500/502) if the send or the database write fails after
+the message was accepted by the provider.
+
+### `POST /api/v1/disparador/campaigns`
+
+Creates a Disparador campaign and enqueues it immediately (status
+goes straight to `em_execucao` — there is no draft/review step via
+this endpoint). Requires `campaigns:write`.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/disparador/campaigns \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "campaign_name": "September promo",
+    "channel": "+5521999998888",
+    "template_name": "promo_september",
+    "contacts": [
+      { "phone": "+5527999991212", "variables": ["Ana", "10%"] }
+    ]
+  }'
+```
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `campaign_name` | yes | |
+| `channel` | no | Channel UUID or the Meta number's display phone. Omit only if the account has exactly one enabled channel. |
+| `template_name` | Meta channels only | Must already be an **approved** template on that account. |
+| `message` | WAHA channels only | Free text; use `{{1}}`, `{{2}}`, … for positional variables. |
+| `contacts` | yes | Array of `{ phone, variables: string[] }`. External contacts — not matched against your CRM's contact list. |
+| `slot_size` / `slot_interval_minutes` | no | Defaults `1000` / `30`. Contacts beyond one slot are scheduled in later slots at this interval. |
+| `janela_inicio` / `janela_fim` | no | Defaults `08:00` / `18:00`. |
+| `callback_url` | no | Fetched by the server when the campaign finishes. Rejected if it resolves to a private/internal address. |
+
+```json
+{
+  "data": {
+    "campaign_id": "…",
+    "enqueued": 1,
+    "skipped": 0,
+    "slots": 1,
+    "slot_size": 1000,
+    "slot_interval_minutes": 30,
+    "estimated_completion_minutes": 0
+  }
+}
+```
+
+`skipped` counts contacts dropped for having no phone or being on the
+blacklist. Errors: `bad_request` (400) for a missing `campaign_name`/
+`contacts`, an unresolvable `channel`, a missing/unapproved
+`template_name` on a Meta channel, a missing `message` on a WAHA
+channel, or an unsafe `callback_url`.
+
 ## Roadmap
 
 Planned endpoints, shipping one per release (tracked in
 [#245](https://github.com/ArnasDon/wacrm/issues/245)):
 
-- `POST /api/v1/messages` — send a message to a phone number
-  (`messages:send`)
 - `GET/POST /api/v1/contacts`, `GET/PATCH /api/v1/contacts/{id}`
   (`contacts:read` / `contacts:write`)
 - `GET /api/v1/conversations` (`conversations:read`)
-- `POST /api/v1/broadcasts` (`broadcasts:send`)
 - Outbound event webhooks (so automations can react to inbound
   messages)
