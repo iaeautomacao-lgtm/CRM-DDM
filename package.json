@@ -37,7 +37,14 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "stress:generate": "tsx tests/stress/generate-csv.ts",
+    "stress:import": "tsx tests/stress/test-import.ts",
+    "stress:queue": "tsx tests/stress/test-queue.ts",
+    "stress:webhook": "tsx tests/stress/test-webhook.ts",
+    "stress:e2e": "tsx tests/stress/test-e2e.ts",
+    "stress:report": "tsx tests/stress/report.ts",
+    "stress:cleanup": "tsx tests/stress/cleanup.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -68,15 +75,18 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^25",
+    "@types/node": "^25.9.8",
     "@types/papaparse": "^5.5.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "axios": "^1.20.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
+    "form-data": "^4.0.6",
     "prettier": "^3.8.4",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^6",
     "vitest": "^4.1.9"
   },

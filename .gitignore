@@ -49,3 +49,10 @@ install-log.txt
 
 # supabase CLI local cache/state
 supabase/.temp/
+
+# stress test generated artifacts (CSVs, JSON results) — reproducible via
+# npm run stress:generate / stress:import / stress:queue / stress:webhook
+tests/stress/data/
+tests/stress/results/
+# stress test session cookie (see tests/stress/README.md) — a live credential
+tests/stress/.session-token
