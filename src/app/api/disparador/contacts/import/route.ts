@@ -360,9 +360,9 @@ export async function POST(request: Request) {
     const chunkSize = 500;
 
     interface BulkUpsertResult {
-      contact_id: string | null;
-      phone_normalized: string | null;
-      is_new: boolean;
+      out_contact_id: string | null;
+      out_phone_normalized: string | null;
+      out_is_new: boolean;
     }
 
     for (let i = 0; i < pending.length; i += chunkSize) {
@@ -398,25 +398,25 @@ export async function POST(request: Request) {
         const source = chunk[j];
         const outcome: BulkUpsertResult | undefined = rpcResults[j];
 
-        if (!outcome || !outcome.contact_id) {
+        if (!outcome || !outcome.out_contact_id) {
           results.erros.push(`${source.phone}: falha ao gravar contato (ver logs do servidor)`);
           continue;
         }
 
-        if (outcome.is_new) {
+        if (outcome.out_is_new) {
           results.importados++;
         } else {
           results.duplicados++;
         }
 
         if (source.tagsArray.length > 0) {
-          tagAssignments.push({ contactId: outcome.contact_id, tagNames: source.tagsArray });
+          tagAssignments.push({ contactId: outcome.out_contact_id, tagNames: source.tagsArray });
         }
         for (const alt of source.altPhones) {
-          altPhoneAssignments.push({ contact_id: outcome.contact_id, ...alt });
+          altPhoneAssignments.push({ contact_id: outcome.out_contact_id, ...alt });
         }
         source.csvVars.forEach((v, idx) => {
-          if (v) csvVarAssignments.push({ contact_id: outcome.contact_id!, var_index: idx, value: v });
+          if (v) csvVarAssignments.push({ contact_id: outcome.out_contact_id!, var_index: idx, value: v });
         });
       }
     }

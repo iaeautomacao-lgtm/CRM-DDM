@@ -14,7 +14,9 @@
 --   literalmente o mesmo WHERE; o método .upsert() do client só aceita
 --   uma lista de colunas em onConflict, sem jeito de anexar um WHERE.
 --   Não dá pra fazer esse upsert específico via REST — só via SQL bruto
---   (RPC).
+--   (RPC). Confirmado ao vivo: um .upsert() sem o WHERE falha com
+--   42P10 "no unique or exclusion constraint matching the ON CONFLICT
+--   specification".
 --
 -- Por que a prioridade CPF-antes-de-telefone não cabe num único
 -- ON CONFLICT:
@@ -48,21 +50,39 @@
 -- linha N do resultado corresponde sempre à linha N de p_rows. O
 -- caller (route.ts) usa essa correspondência posicional pra religar
 -- contact_phones/contact_import_variables/tags ao contato certo, não
--- o valor de phone_normalized (que, no caso de match por CPF com
+-- o valor de out_phone_normalized (que, no caso de match por CPF com
 -- telefone novo, reflete o telefone ANTIGO já gravado, não o do CSV).
 --
 -- Isolamento por linha: uma exceção numa linha (ex: violação de CHECK
 -- constraint inesperada) não derruba o lote inteiro — captura, faz
 -- ROLLBACK só daquela linha via savepoint implícito do bloco
--- EXCEPTION, e devolve contact_id NULL pra essa posição, que o caller
--- interpreta como erro daquela linha especificamente (mesmo espírito
--- do fallback linha-a-linha que existia em route.ts).
+-- EXCEPTION, e devolve out_contact_id NULL pra essa posição, que o
+-- caller interpreta como erro daquela linha especificamente (mesmo
+-- espírito do fallback linha-a-linha que existia em route.ts).
+--
+-- Nomes de retorno com prefixo out_ (out_contact_id/out_phone_normalized/
+-- out_is_new) em vez de contact_id/phone_normalized/is_new: os nomes
+-- antigos colidiam textualmente com colunas reais de wacrm.contacts
+-- referenciadas dentro da função (c.phone_normalized) — mesmo com toda
+-- referência de origem qualificada pelo alias `c`, e mesmo passando a
+-- capturar o RETURNING em variáveis v_ intermediárias antes de atribuir
+-- aos parâmetros de saída, a função continuava devolvendo tudo NULL em
+-- produção (confirmado com casos de teste isolados: INSERT direto
+-- funciona, upsert com o mesmo ON CONFLICT+WHERE funciona quando testado
+-- fora da function, só a function em si devolve NULL). Prefixar os
+-- parâmetros de saída para não colidir com NENHUM nome de coluna da
+-- tabela remove essa ambiguidade de uma vez por todas. RETURNS TABLE
+-- muda de assinatura (nomes das colunas de saída fazem parte do tipo de
+-- retorno) — precisa de DROP FUNCTION antes do CREATE, senão o Postgres
+-- rejeita com "cannot change return type of existing function".
+DROP FUNCTION IF EXISTS wacrm.bulk_upsert_contacts(uuid, uuid, jsonb);
+
 CREATE OR REPLACE FUNCTION wacrm.bulk_upsert_contacts(
   p_account_id uuid,
   p_user_id uuid,
   p_rows jsonb
 )
-RETURNS TABLE(contact_id uuid, phone_normalized text, is_new boolean)
+RETURNS TABLE(out_contact_id uuid, out_phone_normalized text, out_is_new boolean)
 LANGUAGE plpgsql
 AS $$
 DECLARE
@@ -73,6 +93,9 @@ DECLARE
   v_company text;
   v_cpf text;
   v_matched_by_cpf boolean;
+  v_contact_id uuid;
+  v_phone_norm text;
+  v_is_new boolean;
 BEGIN
   FOR v_row IN SELECT * FROM jsonb_array_elements(p_rows)
   LOOP
@@ -82,9 +105,12 @@ BEGIN
     v_company := v_row->>'company';
     v_cpf := v_row->>'cpf';
     v_matched_by_cpf := false;
-    contact_id := NULL;
-    phone_normalized := NULL;
-    is_new := false;
+    v_contact_id := NULL;
+    v_phone_norm := NULL;
+    v_is_new := false;
+    out_contact_id := NULL;
+    out_phone_normalized := NULL;
+    out_is_new := false;
 
     BEGIN
       IF v_cpf IS NOT NULL THEN
@@ -98,11 +124,11 @@ BEGIN
                    ELSE c.name
                  END
         WHERE c.account_id = p_account_id AND c.cpf = v_cpf
-        RETURNING c.id, c.phone_normalized INTO contact_id, phone_normalized;
+        RETURNING c.id, c.phone_normalized INTO v_contact_id, v_phone_norm;
 
         IF FOUND THEN
           v_matched_by_cpf := true;
-          is_new := false;
+          v_is_new := false;
         END IF;
       END IF;
 
@@ -119,13 +145,17 @@ BEGIN
                    ELSE c.name
                  END,
           cpf = COALESCE(c.cpf, EXCLUDED.cpf)
-        RETURNING c.id, c.phone_normalized, (xmax = 0) INTO contact_id, phone_normalized, is_new;
+        RETURNING c.id, c.phone_normalized, (xmax = 0) INTO v_contact_id, v_phone_norm, v_is_new;
       END IF;
+
+      out_contact_id := v_contact_id;
+      out_phone_normalized := v_phone_norm;
+      out_is_new := v_is_new;
     EXCEPTION WHEN OTHERS THEN
       RAISE WARNING 'bulk_upsert_contacts: falha na linha (phone=%, cpf=%): %', v_phone, v_cpf, SQLERRM;
-      contact_id := NULL;
-      phone_normalized := NULL;
-      is_new := false;
+      out_contact_id := NULL;
+      out_phone_normalized := NULL;
+      out_is_new := false;
     END;
 
     RETURN NEXT;
