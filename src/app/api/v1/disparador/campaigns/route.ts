@@ -171,6 +171,10 @@ export async function POST(request: Request) {
         // Necessário pra migration 040 (RLS do Disparador) poder ser
         // aplicada — ctx.accountId já vem resolvido por requireApiKey.
         account_id: ctx.accountId,
+        // Migration 100 — distingue de campanhas criadas pelo wizard do
+        // dashboard (startCampaign.ts, que não seta este campo e cai no
+        // DEFAULT 'dashboard'). Usado pelo teste 12 do health check.
+        source: "api_v1",
         session_ids: [channelId],
         janela_inicio,
         janela_fim,

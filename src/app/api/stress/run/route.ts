@@ -282,6 +282,46 @@ async function testApiV1WhatsappSend(signal: AbortSignal): Promise<TestOutcome> 
   return testApiV1Unauthorized("POST", "/api/v1/whatsapp/send", signal);
 }
 
+// ---- 12. api_v1_campaign_status ----
+// Teste de negócio (não só de auth): confirma que GET /api/v1/disparador/
+// campaigns/{id} funciona de ponta a ponta contra uma campanha real,
+// criada de verdade via API — não um mock. Depende de wacrm.campaigns.
+// source (migration 100), que distingue campanhas criadas por esta rota
+// pública de campanhas criadas pelo wizard do dashboard (created_by
+// sozinho não serve: as duas o preenchem).
+async function testApiV1CampaignStatus(signal: AbortSignal): Promise<TestOutcome> {
+  const apiKey = process.env.STRESS_API_KEY;
+  if (!apiKey) {
+    return { status: "fail", message: "STRESS_API_KEY não configurado no servidor" };
+  }
+
+  const { data: campaign, error } = await supabaseAdmin()
+    .from("campaigns")
+    .select("id")
+    .eq("source", "api_v1")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .abortSignal(signal)
+    .maybeSingle();
+  if (error) return { status: "fail", message: error.message };
+  if (!campaign) {
+    return { status: "warn", message: "Nenhuma campanha via API encontrada para testar" };
+  }
+
+  const res = await fetch(`${getBaseUrl()}/api/v1/disparador/campaigns/${campaign.id}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal,
+  });
+  if (res.status !== 200) {
+    return { status: "fail", message: `status ${res.status} (esperado 200)` };
+  }
+  const body = await res.json().catch(() => null);
+  if (!body?.data?.campaign_id) {
+    return { status: "fail", message: "200 mas data.campaign_id ausente" };
+  }
+  return { status: "pass", message: `Campanha ${campaign.id} consultada com sucesso` };
+}
+
 export async function POST(request: Request) {
   const expected = process.env.STRESS_RUN_SECRET;
   if (!expected) {
@@ -315,6 +355,7 @@ export async function POST(request: Request) {
   results.push(await runTest("api_v1_me", 5000, testApiV1Me));
   results.push(await runTest("api_v1_campaigns", 5000, testApiV1Campaigns));
   results.push(await runTest("api_v1_whatsapp_send", 5000, testApiV1WhatsappSend));
+  results.push(await runTest("api_v1_campaign_status", 5000, testApiV1CampaignStatus));
 
   const duration_total_ms = Date.now() - overallStart;
 
@@ -327,7 +368,7 @@ export async function POST(request: Request) {
   const failCount = results.filter((r) => r.status === "fail").length;
 
   const level = overall === "pass" ? "info" : overall === "warn" ? "warn" : "error";
-  const message = `Health check: ${passCount}/11 pass, ${warnCount} warn, ${failCount} fail`;
+  const message = `Health check: ${passCount}/12 pass, ${warnCount} warn, ${failCount} fail`;
 
   await writeLog({
     level,
