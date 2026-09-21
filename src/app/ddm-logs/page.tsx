@@ -164,7 +164,7 @@ const TEST_CARD_BG: Record<TestStatus, string> = {
   fail: "border-red-800/40 bg-red-950/40",
 };
 
-type Tab = "events" | "users" | "sessions" | "actions" | "tests";
+type Tab = "events" | "users" | "sessions" | "actions" | "tests" | "feedback";
 
 const TAB_OPTIONS: { value: Tab; label: string }[] = [
   { value: "events", label: "Eventos" },
@@ -172,6 +172,7 @@ const TAB_OPTIONS: { value: Tab; label: string }[] = [
   { value: "sessions", label: "Sessões" },
   { value: "actions", label: "Ações" },
   { value: "tests", label: "Testes" },
+  { value: "feedback", label: "Feedbacks" },
 ];
 
 function formatTimestamp(iso: string): string {
@@ -367,6 +368,17 @@ export default function DdmLogsPage() {
   const [runningNow, setRunningNow] = useState(false);
   const [runNowError, setRunNowError] = useState<string | null>(null);
 
+  // ---- Aba Feedbacks ----
+  const [feedbackLogs, setFeedbackLogs] = useState<LogRow[]>([]);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackLoadingMore, setFeedbackLoadingMore] = useState(false);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackHasMore, setFeedbackHasMore] = useState(false);
+  const [feedbackCursor, setFeedbackCursor] = useState<string | null>(null);
+  const [expandedFeedbackUserAgents, setExpandedFeedbackUserAgents] = useState<Set<string>>(
+    new Set()
+  );
+
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -445,6 +457,18 @@ export default function DdmLogsPage() {
     params.set("tab", "tests");
     return `/api/ddm-logs?${params.toString()}`;
   }, []);
+
+  const buildFeedbackUrl = useCallback(
+    (cursorParam?: string | null) => {
+      const params = new URLSearchParams();
+      params.set("tab", "feedback");
+      params.set("from", fromIso);
+      params.set("limit", "200");
+      if (cursorParam) params.set("cursor", cursorParam);
+      return `/api/ddm-logs?${params.toString()}`;
+    },
+    [fromIso]
+  );
 
   // Fetch autenticado compartilhado por todas as abas — trata 401 num
   // único lugar: limpa a credencial guardada e volta pro formulário de
@@ -636,6 +660,54 @@ export default function DdmLogsPage() {
     }
   }, [authHeader, authorizedFetch, buildTestsUrl]);
 
+  // ---- Feedbacks: load ----
+  const loadFeedbackFirstPage = useCallback(async () => {
+    if (!authHeader) return;
+    setFeedbackLoading(true);
+    setFeedbackError(null);
+    try {
+      const res = await authorizedFetch(buildFeedbackUrl());
+      if (!res) return;
+      const data: LogsResponse = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao carregar feedbacks");
+      setFeedbackLogs(data.logs);
+      setFeedbackHasMore(data.hasMore);
+      setFeedbackCursor(data.nextCursor);
+      setLastUpdated(new Date());
+    } catch (err: any) {
+      setFeedbackError(err.message || "Erro ao carregar feedbacks");
+    } finally {
+      setFeedbackLoading(false);
+    }
+  }, [authHeader, authorizedFetch, buildFeedbackUrl]);
+
+  const loadFeedbackMore = useCallback(async () => {
+    if (!feedbackCursor || feedbackLoadingMore || !authHeader) return;
+    setFeedbackLoadingMore(true);
+    try {
+      const res = await authorizedFetch(buildFeedbackUrl(feedbackCursor));
+      if (!res) return;
+      const data: LogsResponse = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao carregar feedbacks");
+      setFeedbackLogs((prev) => [...prev, ...data.logs]);
+      setFeedbackHasMore(data.hasMore);
+      setFeedbackCursor(data.nextCursor);
+    } catch (err: any) {
+      setFeedbackError(err.message || "Erro ao carregar feedbacks");
+    } finally {
+      setFeedbackLoadingMore(false);
+    }
+  }, [feedbackCursor, feedbackLoadingMore, authHeader, authorizedFetch, buildFeedbackUrl]);
+
+  const toggleFeedbackUserAgent = (id: string) => {
+    setExpandedFeedbackUserAgents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   // "Rodar agora" — pede o secret via prompt (nunca fica salvo em lugar
   // nenhum, nem localStorage; é um secret de operação, não de login) e
   // chama POST /api/stress/run diretamente. Não usa authorizedFetch —
@@ -706,6 +778,12 @@ export default function DdmLogsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authHeader, tab]);
 
+  useEffect(() => {
+    if (!authHeader || tab !== "feedback") return;
+    loadFeedbackFirstPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period, authHeader, tab]);
+
   // Auto-refresh — recarrega a aba ativa no momento do tick. Sempre
   // reseta pra primeira página de cada aba (novos dados mudam a
   // ordenação, não faz sentido só anexar ao final).
@@ -717,6 +795,7 @@ export default function DdmLogsPage() {
       else if (tab === "sessions") loadSessionsFirstPage();
       else if (tab === "actions") loadActionsFirstPage();
       else if (tab === "tests") loadTestsFirstPage();
+      else if (tab === "feedback") loadFeedbackFirstPage();
     }, 30000);
     return () => clearInterval(id);
   }, [
@@ -727,6 +806,7 @@ export default function DdmLogsPage() {
     loadSessionsFirstPage,
     loadActionsFirstPage,
     loadTestsFirstPage,
+    loadFeedbackFirstPage,
   ]);
 
   // Otimista: só grava a credencial e deixa authHeader mudar disparar o
@@ -957,7 +1037,9 @@ export default function DdmLogsPage() {
           ? sessions.length
           : tab === "actions"
             ? actionLogs.length
-            : testRuns.length;
+            : tab === "tests"
+              ? testRuns.length
+              : feedbackLogs.length;
 
   const activeLoading =
     tab === "events"
@@ -968,7 +1050,9 @@ export default function DdmLogsPage() {
           ? sessionsLoading
           : tab === "actions"
             ? actionsLoading
-            : testsLoading;
+            : tab === "tests"
+              ? testsLoading
+              : feedbackLoading;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -1013,7 +1097,8 @@ export default function DdmLogsPage() {
               else if (tab === "users") loadUsers();
               else if (tab === "sessions") loadSessionsFirstPage();
               else if (tab === "actions") loadActionsFirstPage();
-              else loadTestsFirstPage();
+              else if (tab === "tests") loadTestsFirstPage();
+              else loadFeedbackFirstPage();
             }}
             disabled={activeLoading}
             className="rounded-md bg-[#FF5706] px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1036,7 +1121,7 @@ export default function DdmLogsPage() {
                 : "border-transparent text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            {t.label}
+            {t.value === "feedback" ? `${t.label} (${feedbackLogs.length})` : t.label}
           </button>
         ))}
       </div>
@@ -1572,6 +1657,100 @@ export default function DdmLogsPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ---- Aba Feedbacks ---- */}
+        {tab === "feedback" && (
+          <>
+            {feedbackError && (
+              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {feedbackError}
+              </div>
+            )}
+
+            {feedbackLoading && feedbackLogs.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+                Carregando feedbacks...
+              </div>
+            ) : feedbackLogs.length === 0 ? (
+              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+                Nenhum problema reportado. 🎉
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {feedbackLogs.map((f) => {
+                  const userAgent =
+                    typeof (f.payload as any)?.user_agent === "string"
+                      ? ((f.payload as any).user_agent as string)
+                      : null;
+                  const page = f.page || (f.payload as any)?.page || null;
+                  const userLabel =
+                    f.user_name || f.user_email || (f.user_id ? f.user_id.slice(0, 8) : "desconhecido");
+                  const isUaExpanded = expandedFeedbackUserAgents.has(f.id);
+
+                  return (
+                    <div
+                      key={f.id}
+                      className="overflow-hidden rounded-lg border border-amber-800/40 bg-amber-950/10"
+                    >
+                      <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+                        <span className="font-mono text-xs text-zinc-400">
+                          {formatTimestamp(f.created_at)}
+                        </span>
+                        <span
+                          className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase ${LEVEL_BADGE_STYLES[f.level] ?? LEVEL_BADGE_STYLES.warn}`}
+                        >
+                          {f.level}
+                        </span>
+                        <span className="text-xs text-zinc-300">{userLabel}</span>
+                        {page && (
+                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[11px] text-zinc-400">
+                            {page}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="border-t border-white/10 bg-black/20 px-4 py-3">
+                        <p className="whitespace-pre-wrap break-words text-sm text-zinc-100">
+                          {f.message}
+                        </p>
+
+                        {userAgent && (
+                          <div className="mt-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleFeedbackUserAgent(f.id)}
+                              className="text-[11px] text-zinc-500 hover:text-zinc-300"
+                            >
+                              {isUaExpanded ? "▲ recolher user agent" : "▼ ver user agent"}
+                            </button>
+                            {isUaExpanded && (
+                              <p className="mt-1 break-all font-mono text-[11px] text-zinc-500">
+                                {userAgent}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {feedbackHasMore && (
+              <div className="mt-4 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => loadFeedbackMore()}
+                  disabled={feedbackLoadingMore}
+                  className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {feedbackLoadingMore ? "Carregando..." : "Carregar mais"}
+                </button>
               </div>
             )}
           </>

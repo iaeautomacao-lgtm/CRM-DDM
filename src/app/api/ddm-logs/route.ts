@@ -96,8 +96,15 @@ const VALID_SOURCES = new Set([
   "feedback",
 ]);
 
-type Tab = "events" | "users" | "sessions" | "actions" | "tests";
-const VALID_TABS = new Set<Tab>(["events", "users", "sessions", "actions", "tests"]);
+type Tab = "events" | "users" | "sessions" | "actions" | "tests" | "feedback";
+const VALID_TABS = new Set<Tab>([
+  "events",
+  "users",
+  "sessions",
+  "actions",
+  "tests",
+  "feedback",
+]);
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
@@ -148,6 +155,9 @@ export async function GET(request: Request) {
     }
     if (tab === "tests") {
       return await getTestsTab(db);
+    }
+    if (tab === "feedback") {
+      return await getFeedbackTab(db, { from, cursor, limit });
     }
     return await getEventsTab(db, { source, level, from, to, cursor, limit, userId });
   } catch (err: any) {
@@ -422,5 +432,38 @@ async function getTestsTab(db: SupabaseClient): Promise<NextResponse> {
   return NextResponse.json({
     runs: data ?? [],
     count: (data ?? []).length,
+  });
+}
+
+// ------------------------------------------------------------
+// tab=feedback — reports enviados pelo botão de feedback flutuante
+// (POST /api/feedback, source='feedback'). Via RPC (migration 102):
+// LEFT JOIN em profiles pra trazer user_name/user_email, mesmo padrão
+// da aba Ações (get_action_logs, migration 097) — system_logs.user_id
+// não tem FK exposta a profiles pro PostgREST embedar automático.
+// ------------------------------------------------------------
+async function getFeedbackTab(
+  db: SupabaseClient,
+  params: { from: string; cursor: string | null; limit: number }
+): Promise<NextResponse> {
+  const { from, cursor, limit } = params;
+
+  const { data, error } = await db.rpc("get_feedback_logs", {
+    p_from: from,
+    p_cursor: cursor,
+    p_limit: limit + 1,
+  });
+  if (error) throw error;
+
+  const rows = (data ?? []) as any[];
+  const hasMore = rows.length > limit;
+  const page = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore ? page[page.length - 1]?.created_at ?? null : null;
+
+  return NextResponse.json({
+    logs: page,
+    count: page.length,
+    hasMore,
+    nextCursor,
   });
 }
