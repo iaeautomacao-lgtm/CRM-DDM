@@ -297,7 +297,8 @@ export async function startCampaign(
       const { data: csvVars, error: csvVarsError } = await supabaseAdmin()
         .from("contact_import_variables")
         .select("contact_id, var_index, value")
-        .eq("campaign_id", campaignId);
+        .eq("campaign_id", campaignId)
+        .not("value", "eq", "");
       if (csvVarsError) {
         console.error("[startCampaign] Falha ao carregar contact_import_variables:", csvVarsError);
       } else {
