@@ -244,6 +244,44 @@ async function testDdmApiHealth(signal: AbortSignal): Promise<TestOutcome> {
   return { status: "warn", message: "API DDM respondeu 200 com formato inesperado" };
 }
 
+// ---- 9/10/11. api_v1_* ----
+// Smoke test de autenticação da API pública: bate cada rota sem
+// Authorization header e espera 401 unauthorized (não 500). Não é um
+// teste de negócio (não manda bearer válido) — só confirma que o
+// plumbing de auth (requireApiKey) está de pé antes de qualquer
+// integrador real depender dele. Mesmo padrão de resposta esperado
+// pelas 3 rotas, então usa um helper único.
+async function testApiV1Unauthorized(
+  method: "GET" | "POST",
+  path: string,
+  signal: AbortSignal
+): Promise<TestOutcome> {
+  const res = await fetch(`${getBaseUrl()}${path}`, { method, signal });
+  if (res.status !== 401) {
+    return { status: "fail", message: `status ${res.status} (esperado 401)` };
+  }
+  const body = await res.json().catch(() => null);
+  if (body?.error?.code !== "unauthorized") {
+    return {
+      status: "fail",
+      message: `401 mas error.code inesperado: ${body?.error?.code ?? "(sem body)"}`,
+    };
+  }
+  return { status: "pass", message: "401 unauthorized como esperado" };
+}
+
+async function testApiV1Me(signal: AbortSignal): Promise<TestOutcome> {
+  return testApiV1Unauthorized("GET", "/api/v1/me", signal);
+}
+
+async function testApiV1Campaigns(signal: AbortSignal): Promise<TestOutcome> {
+  return testApiV1Unauthorized("POST", "/api/v1/disparador/campaigns", signal);
+}
+
+async function testApiV1WhatsappSend(signal: AbortSignal): Promise<TestOutcome> {
+  return testApiV1Unauthorized("POST", "/api/v1/whatsapp/send", signal);
+}
+
 export async function POST(request: Request) {
   const expected = process.env.STRESS_RUN_SECRET;
   if (!expected) {
@@ -274,6 +312,9 @@ export async function POST(request: Request) {
   results.push(await runTest("flow_runs_health", 5000, testFlowRunsHealth));
   results.push(await runTest("pending_conversations", 5000, testPendingConversations));
   results.push(await runTest("ddm_api_health", 5000, testDdmApiHealth));
+  results.push(await runTest("api_v1_me", 5000, testApiV1Me));
+  results.push(await runTest("api_v1_campaigns", 5000, testApiV1Campaigns));
+  results.push(await runTest("api_v1_whatsapp_send", 5000, testApiV1WhatsappSend));
 
   const duration_total_ms = Date.now() - overallStart;
 
@@ -286,7 +327,7 @@ export async function POST(request: Request) {
   const failCount = results.filter((r) => r.status === "fail").length;
 
   const level = overall === "pass" ? "info" : overall === "warn" ? "warn" : "error";
-  const message = `Health check: ${passCount}/8 pass, ${warnCount} warn, ${failCount} fail`;
+  const message = `Health check: ${passCount}/11 pass, ${warnCount} warn, ${failCount} fail`;
 
   await writeLog({
     level,
