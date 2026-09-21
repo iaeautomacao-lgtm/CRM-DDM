@@ -36,14 +36,11 @@ export async function PATCH(
     const { id: campaignId } = await params;
     const body = await request.json();
 
-    // wacrm.campaigns has no account_id column yet (migration 040 not
-    // applied), so scope ownership through created_by -> profiles.account_id
-    // — same as the DELETE route above and the campanhas list reads.
-    const { userIds } = await getDisparadorScope(supabase);
+    const { accountId } = await getDisparadorScope(supabase);
 
     const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
-      .select("id, created_by, status")
+      .select("id, account_id, status")
       .eq("id", campaignId)
       .single();
 
@@ -51,7 +48,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
     }
 
-    if (!campaign.created_by || !userIds.includes(campaign.created_by)) {
+    if (!campaign.account_id || campaign.account_id !== accountId) {
       return NextResponse.json(
         { error: "Você não tem permissão para editar esta campanha." },
         { status: 403 }
@@ -142,14 +139,11 @@ export async function DELETE(
 
     const { id: campaignId } = await params;
 
-    // wacrm.campaigns has no account_id column yet (migration 040 not
-    // applied), so scope ownership through created_by -> profiles.account_id
-    // — same as the campanhas/disparador list reads (see getDisparadorScope).
-    const { userIds } = await getDisparadorScope(supabase);
+    const { accountId } = await getDisparadorScope(supabase);
 
     const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
-      .select("id, created_by, status")
+      .select("id, account_id, status")
       .eq("id", campaignId)
       .single();
 
@@ -157,7 +151,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
     }
 
-    if (!campaign.created_by || !userIds.includes(campaign.created_by)) {
+    if (!campaign.account_id || campaign.account_id !== accountId) {
       return NextResponse.json(
         { error: "Você não tem permissão para deletar esta campanha." },
         { status: 403 }

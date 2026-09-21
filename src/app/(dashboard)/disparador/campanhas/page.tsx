@@ -633,14 +633,11 @@ export default function CampanhasPage() {
     const interval = setInterval(async () => {
       try {
         const supabase = createClient();
-        // wacrm.campaigns has no account_id yet (migration 040 not
-        // applied), so scope by the caller's account via created_by —
-        // see getDisparadorScope.
-        const { userIds } = await getDisparadorScope(supabase);
+        const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
           .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, limite_por_hora")
-          .in("created_by", userIds)
+          .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
           // Poll payload omits created_at (unused by the card UI) to
@@ -672,17 +669,14 @@ export default function CampanhasPage() {
     try {
       const supabase = createClient();
 
-      // wacrm.campaigns has no account_id yet (migration 040 not
-      // applied), so scope by the caller's account via created_by —
-      // see getDisparadorScope.
-      const { userIds, accountId: scopedAccountId } = await getDisparadorScope(supabase);
+      const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
       setAccountId(scopedAccountId);
 
       // Load Campaigns
       const { data: campaignList } = await supabase
         .from("campaigns")
         .select("*")
-        .in("created_by", userIds)
+        .eq("account_id", scopedAccountId)
         .order("created_at", { ascending: false });
       setCampaigns(campaignList ?? []);
 
