@@ -288,8 +288,10 @@ export interface SendMediaMessageArgs {
   accessToken: string
   to: string
   kind: MediaKind
-  /** Public URL Meta fetches at send time. */
-  link: string
+  /** Public URL Meta fetches at send time. Mutually exclusive with `id` — pass exactly one. */
+  link?: string
+  /** Media id from a prior `uploadMedia()` call. Mutually exclusive with `link` — pass exactly one. */
+  id?: string
   /** Optional caption — Meta caps at 1024 chars. Documents + images + videos accept it; audio does NOT. */
   caption?: string
   /** Document-only. Shown in the recipient's chat as the file name. Ignored for image/video/audio. */
@@ -298,28 +300,29 @@ export interface SendMediaMessageArgs {
 }
 
 /**
- * Send an image, video, document, or audio (voice note) via a public URL.
+ * Send an image, video, document, or audio (voice note) by public URL or
+ * by a previously uploaded media id (see `uploadMedia`).
  *
  * Used by the Flows engine's `send_media` node and the inbox composer's
  * agent-initiated media sends. Mirrors `sendTextMessage` — single fetch,
  * throws on non-2xx, returns Meta's message id.
  *
  * Audio is special-cased: Meta rejects `caption` and `filename` on audio
- * messages, so we send `{ link }` only. WhatsApp auto-renders an
+ * messages, so we send `{ link }`/`{ id }` only. WhatsApp auto-renders an
  * OGG/Opus file as a playable voice note (waveform) rather than a file
  * attachment.
  */
 export async function sendMediaMessage(
   args: SendMediaMessageArgs,
 ): Promise<MetaSendResult> {
-  const { phoneNumberId, accessToken, to, kind, link, caption, filename, contextMessageId } = args
-  if (!link) throw new Error('sendMediaMessage requires a link.')
+  const { phoneNumberId, accessToken, to, kind, link, id, caption, filename, contextMessageId } = args
+  if (!link && !id) throw new Error('sendMediaMessage requires a link or an id.')
   const url = `${META_API_BASE}/${phoneNumberId}/messages`
 
   // Audio accepts neither caption nor filename per Meta's spec — adding
   // either yields a 400. image/video/document accept a caption; only
   // document accepts a filename.
-  const media: Record<string, unknown> = { link }
+  const media: Record<string, unknown> = link ? { link } : { id }
   if (caption && kind !== 'audio') media.caption = caption
   if (kind === 'document' && filename) media.filename = filename
 
@@ -345,6 +348,43 @@ export async function sendMediaMessage(
   }
   const data = await response.json()
   return { messageId: data.messages[0].id }
+}
+
+export interface UploadMediaArgs {
+  phoneNumberId: string
+  accessToken: string
+  buffer: Buffer
+  mimeType: string
+  filename: string
+}
+
+/**
+ * Upload raw bytes to the phone-number-scoped Media endpoint
+ * (`POST /{phone_number_id}/media`), returning a media id usable in
+ * `sendMediaMessage`'s `id` field. Distinct from `uploadResumableMedia`
+ * below (app-scoped Resumable Upload API, template header handles
+ * only, different endpoint family entirely) — this is the endpoint for
+ * media actually sent to a recipient.
+ */
+export async function uploadMedia(args: UploadMediaArgs): Promise<{ mediaId: string }> {
+  const { phoneNumberId, accessToken, buffer, mimeType, filename } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/media`
+
+  const form = new FormData()
+  form.append('messaging_product', 'whatsapp')
+  form.append('type', mimeType)
+  form.append('file', new Blob([new Uint8Array(buffer)], { type: mimeType }), filename)
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { mediaId: data.id }
 }
 
 import type { MessageTemplate } from '@/types'

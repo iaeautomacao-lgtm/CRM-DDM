@@ -71,9 +71,27 @@ describe("sendMediaMessage — payload shape", () => {
     expect(captured?.audio).toEqual({ link: BASE.link });
   });
 
-  it("throws when no link is provided", async () => {
+  it("throws when neither link nor id is provided", async () => {
     await expect(
       sendMediaMessage({ ...BASE, link: "", kind: "image" }),
     ).rejects.toThrow(/requires a link/);
+  });
+
+  it("sends by media id instead of link when id is provided", async () => {
+    await sendMediaMessage({
+      phoneNumberId: BASE.phoneNumberId,
+      accessToken: BASE.accessToken,
+      to: BASE.to,
+      kind: "image",
+      id: "media-123",
+      caption: "hello",
+    });
+    expect(captured?.type).toBe("image");
+    expect(captured?.image).toEqual({ id: "media-123", caption: "hello" });
+  });
+
+  it("prefers link over id when both are somehow provided", async () => {
+    await sendMediaMessage({ ...BASE, id: "media-123", kind: "image" });
+    expect(captured?.image).toEqual({ link: BASE.link });
   });
 });

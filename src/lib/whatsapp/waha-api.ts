@@ -325,6 +325,57 @@ export async function sendWahaMediaMessage(
   };
 }
 
+export interface WahaMediaBase64 {
+  /** Base64 payload, no `data:` prefix. */
+  data: string;
+  mimetype: string;
+  filename?: string;
+}
+
+/**
+ * Send an image/video/document via base64 (no hosted URL) — WAHA's
+ * `/api/sendFile` accepts `file.data`+`file.mimetype` as an alternative
+ * to `file.url`. Kept separate from `sendWahaMediaMessage` (used by
+ * processQueue.ts, flows, the AI responder, and the internal dashboard
+ * send route — 8 call sites) rather than changing its signature, so
+ * this addition can't affect any of those.
+ */
+export async function sendWahaMediaMessageBase64(
+  config: WahaConfig,
+  to: string,
+  media: WahaMediaBase64,
+  caption?: string
+): Promise<WahaSendResult> {
+  const chatId = to.includes('@') ? to : `${to.replace(/\D/g, '')}@c.us`;
+
+  const payload = {
+    chatId,
+    file: {
+      mimetype: media.mimetype,
+      filename: media.filename || `file_${Date.now()}`,
+      data: media.data,
+    },
+    caption: caption || '',
+    session: config.waha_session,
+  };
+
+  const res = await wahaFetch(config, '/api/sendFile', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`WAHA sendFile failed (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  return {
+    messageId: data.id || '',
+  };
+}
+
 export async function getWahaProfilePicture(
   config: WahaConfig,
   phone: string
@@ -488,5 +539,40 @@ export async function sendWahaVoiceMessage(
   };
 }
 
+/** Base64 counterpart of `sendWahaVoiceMessage` — see WahaMediaBase64 /
+ *  sendWahaMediaMessageBase64 above for why this is a separate function
+ *  rather than an overload of the URL-based one. */
+export async function sendWahaVoiceMessageBase64(
+  config: WahaConfig,
+  to: string,
+  media: { data: string; mimetype: string }
+): Promise<WahaSendResult> {
+  const chatId = to.includes('@') ? to : `${to.replace(/\D/g, '')}@c.us`;
+
+  const payload = {
+    chatId,
+    file: {
+      mimetype: media.mimetype,
+      data: media.data,
+    },
+    session: config.waha_session,
+  };
+
+  const res = await wahaFetch(config, '/api/sendVoice', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`WAHA sendVoice failed (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  return {
+    messageId: data.id || '',
+  };
+}
 
 

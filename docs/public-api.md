@@ -119,9 +119,10 @@ curl https://your-crm.example.com/api/v1/me \
 
 ### `POST /api/v1/whatsapp/send`
 
-Sends a WhatsApp text message. Requires `messages:send`. Finds or
-creates the target contact and conversation on your active channel
-(WAHA or Meta, whichever this account has configured) before sending.
+Sends a WhatsApp text and/or media message. Requires `messages:send`.
+Finds or creates the target contact and conversation on your active
+channel (WAHA or Meta, whichever this account has configured) before
+sending.
 
 ```bash
 curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
@@ -137,6 +138,8 @@ curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
 `phone` accepts the alias `to`; `text` accepts the alias `message`.
 `phone` must resolve to a valid E.164 number. `name` is optional —
 only applied when creating a new contact or renaming an existing one.
+`text` is required unless a media field (below) is present — a media
+message can be sent with no separate text, just a caption.
 
 ```json
 {
@@ -148,10 +151,79 @@ only applied when creating a new contact or renaming an existing one.
 }
 ```
 
-Errors: `bad_request` (400) for a missing `phone`/`text`, an invalid
-phone format, or no WhatsApp channel configured for the account;
-`internal` (500/502) if the send or the database write fails after
-the message was accepted by the provider.
+Errors: `bad_request` (400) for a missing `phone`/`text` (when no
+media is present), an invalid phone format, or no WhatsApp channel
+configured for the account; `internal` (500/502) if the send or the
+database write fails after the message was accepted by the provider.
+
+#### Media
+
+Send an image, video, audio, or document alongside (or instead of)
+text, via a hosted URL or raw base64. Never send both `media_url` and
+`media_base64` in the same request.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `media_url` | no | Public URL, must start with `https://`. Fetched directly by the provider — nothing is uploaded. |
+| `media_base64` | no | Raw base64, **no** `data:` prefix. Uploaded to Meta's media endpoint first (WAHA takes it inline). Max 16MB decoded. |
+| `media_type` | required with `media_base64`, optional with `media_url` | MIME type — see the accepted list below. With `media_url`, omitting it falls back to guessing from the URL's extension. |
+| `media_caption` | no | Caption — only applied for `image`/`video`; silently ignored for `audio`/`document`. Max 1024 chars. |
+
+Accepted `media_type` values: `image/jpeg`, `image/png`,
+`image/webp`, `image/gif`, `video/mp4`, `audio/ogg`, `audio/mpeg`,
+`application/pdf`.
+
+```bash
+# By URL
+curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone": "+5527999991212",
+    "media_url": "https://example.com/invoice.pdf",
+    "media_type": "application/pdf",
+    "media_caption": "Your invoice is attached"
+  }'
+```
+
+```bash
+# By base64
+curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone": "+5527999991212",
+    "media_base64": "iVBORw0KGgoAAAANSUhEUgAA...",
+    "media_type": "image/png",
+    "media_caption": "Optional caption"
+  }'
+```
+
+`media_id` is only present in the response when a `media_base64`
+upload actually happened (Meta channels — the id returned by Meta's
+media endpoint):
+
+```json
+{
+  "data": {
+    "success": true,
+    "message_id": "…",
+    "whatsapp_message_id": "wamid.…",
+    "media_id": "123456789"
+  }
+}
+```
+
+**A `media_base64` send has no hosted copy of the file** — the CRM
+inbox stores no URL for it and can't render a thumbnail/preview for
+that message. If you need the file to show up properly in the inbox
+UI, host it yourself and use `media_url` instead.
+
+Errors: `bad_request` (400) for sending both `media_url` and
+`media_base64`, a missing `media_type` with `media_base64`, an
+unrecognized `media_type`, a `media_url` not starting with `https://`,
+a `media_caption` over 1024 characters, or `media_base64` decoding to
+more than 16MB or to nothing at all.
 
 ### `POST /api/v1/disparador/campaigns`
 
