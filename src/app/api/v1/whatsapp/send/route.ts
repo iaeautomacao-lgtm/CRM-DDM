@@ -152,11 +152,19 @@ export async function POST(request: Request) {
       throw badRequest('Invalid phone number format. Must be in E.164 format (ex: +5527999991212)');
     }
 
-    // 4. Fetch WhatsApp config for this account
+    // 4. Fetch WhatsApp config for this account — only enabled channels,
+    // oldest first. Without the habilitado filter, an account with more
+    // than one whatsapp_config row (enabled or not) made maybeSingle()
+    // return PGRST116 ("multiple rows returned") instead of picking
+    // one, surfacing as a misleading "not configured" error even when
+    // a working channel existed.
     const { data: config, error: configError } = await ctx.supabase
       .from('whatsapp_config')
       .select('*')
       .eq('account_id', ctx.accountId)
+      .eq('habilitado', true)
+      .order('created_at', { ascending: true })
+      .limit(1)
       .maybeSingle();
 
     if (configError || !config) {
