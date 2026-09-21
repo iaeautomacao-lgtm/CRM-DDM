@@ -93,6 +93,7 @@ const VALID_SOURCES = new Set([
   "system",
   "frontend",
   "api_v1",
+  "feedback",
 ]);
 
 type Tab = "events" | "users" | "sessions" | "actions" | "tests";

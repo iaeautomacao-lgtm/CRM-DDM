@@ -38,6 +38,7 @@ export type LogSource =
   | 'system'
   | 'frontend'
   | 'api_v1'
+  | 'feedback'
 
 export interface WriteLogParams {
   account_id?: string | null

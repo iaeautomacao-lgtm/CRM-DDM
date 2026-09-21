@@ -122,6 +122,7 @@ const SOURCE_OPTIONS: LogSource[] = [
   "system",
   "frontend",
   "api_v1",
+  "feedback",
 ];
 
 const LEVEL_OPTIONS: LogLevel[] = ["debug", "info", "warn", "error", "critical"];
@@ -819,7 +820,7 @@ export default function DdmLogsPage() {
           </td>
           <td className="px-3 py-2">
             <span
-              className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium ${SOURCE_BADGE_STYLE}`}
+              className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase ${SOURCE_BADGE_STYLE}`}
             >
               {log.source}
             </span>
@@ -1190,7 +1191,7 @@ export default function DdmLogsPage() {
                             </td>
                             <td className="px-3 py-2">
                               <span
-                                className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium ${SOURCE_BADGE_STYLE}`}
+                                className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase ${SOURCE_BADGE_STYLE}`}
                               >
                                 {first.source}
                               </span>
