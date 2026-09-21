@@ -1,5 +1,5 @@
 import { requireApiKey } from "@/lib/auth/api-context";
-import { ok, badRequest, toApiErrorResponse } from "@/lib/api/v1/respond";
+import { ok, badRequest, toApiErrorResponse, type ApiCallLogContext } from "@/lib/api/v1/respond";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
 import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
@@ -25,8 +25,15 @@ interface ExternalCampaignPayload {
 }
 
 export async function POST(request: Request) {
+  const logCtx: ApiCallLogContext = {
+    method: "POST",
+    route: "/api/v1/disparador/campaigns",
+    startedAt: Date.now(),
+  };
   try {
     const ctx = await requireApiKey(request, "campaigns:write");
+    logCtx.accountId = ctx.accountId;
+    logCtx.keyId = ctx.keyId;
     const db = supabaseAdmin();
 
     const body = (await request.json().catch(() => null)) as ExternalCampaignPayload | null;
@@ -305,17 +312,21 @@ export async function POST(request: Request) {
     const totalSlots = Math.ceil(enqueued / slotSize);
     const estimatedMinutes = (totalSlots - 1) * (body.slot_interval_minutes ?? 30);
 
-    return ok({
-      campaign_id: campaignId,
-      enqueued,
-      skipped,
-      slots: totalSlots,
-      slot_size: slotSize,
-      slot_interval_minutes: body.slot_interval_minutes ?? 30,
-      estimated_completion_minutes: estimatedMinutes,
-    }, 201);
+    return ok(
+      {
+        campaign_id: campaignId,
+        enqueued,
+        skipped,
+        slots: totalSlots,
+        slot_size: slotSize,
+        slot_interval_minutes: body.slot_interval_minutes ?? 30,
+        estimated_completion_minutes: estimatedMinutes,
+      },
+      201,
+      logCtx
+    );
 
   } catch (err) {
-    return toApiErrorResponse(err);
+    return toApiErrorResponse(err, logCtx);
   }
 }

@@ -17,13 +17,20 @@ import {
   phoneVariants,
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils';
-import { ok, badRequest, ApiError, toApiErrorResponse } from '@/lib/api/v1/respond';
+import { ok, badRequest, ApiError, toApiErrorResponse, type ApiCallLogContext } from '@/lib/api/v1/respond';
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe';
 
 export async function POST(request: Request) {
+  const logCtx: ApiCallLogContext = {
+    method: 'POST',
+    route: '/api/v1/whatsapp/send',
+    startedAt: Date.now(),
+  };
   try {
     // 1. Authenticate API Key with 'messages:send' scope
     const ctx = await requireApiKey(request, 'messages:send');
+    logCtx.accountId = ctx.accountId;
+    logCtx.keyId = ctx.keyId;
 
     // 2. Parse request body
     const body = await request.json();
@@ -189,14 +196,18 @@ export async function POST(request: Request) {
       })
       .eq('id', conversation.id);
 
-    return ok({
-      success: true,
-      message_id: messageRecord.id,
-      whatsapp_message_id: waMessageId,
-    });
+    return ok(
+      {
+        success: true,
+        message_id: messageRecord.id,
+        whatsapp_message_id: waMessageId,
+      },
+      200,
+      logCtx
+    );
 
   } catch (err) {
-    return toApiErrorResponse(err);
+    return toApiErrorResponse(err, logCtx);
   }
 }
 

@@ -98,11 +98,14 @@ export async function requireApiKey(
   // scope caller still can't hammer the endpoint for free.
   const limit = checkRateLimit(`apikey:${row.id}`, RATE_LIMITS.publicApi);
   if (!limit.success) {
-    throw rateLimited(limit);
+    throw rateLimited(limit, { accountId: row.account_id, keyId: row.id });
   }
 
   if (scope && !hasScope(row.scopes, scope)) {
-    throw forbidden(`This API key is missing the '${scope}' scope`);
+    throw forbidden(`This API key is missing the '${scope}' scope`, {
+      accountId: row.account_id,
+      keyId: row.id,
+    });
   }
 
   touchLastUsed(row.id);

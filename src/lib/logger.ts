@@ -37,6 +37,7 @@ export type LogSource =
   | 'import'
   | 'system'
   | 'frontend'
+  | 'api_v1'
 
 export interface WriteLogParams {
   account_id?: string | null

@@ -15,17 +15,28 @@
 
 import { requireApiKey } from '@/lib/auth/api-context';
 import { getAccountName } from '@/lib/api-keys/store';
-import { ok, toApiErrorResponse } from '@/lib/api/v1/respond';
+import { ok, toApiErrorResponse, type ApiCallLogContext } from '@/lib/api/v1/respond';
 
 export async function GET(request: Request) {
+  const logCtx: ApiCallLogContext = {
+    method: 'GET',
+    route: '/api/v1/me',
+    startedAt: Date.now(),
+  };
   try {
     const ctx = await requireApiKey(request);
+    logCtx.accountId = ctx.accountId;
+    logCtx.keyId = ctx.keyId;
     const name = await getAccountName(ctx.accountId);
-    return ok({
-      account: { id: ctx.accountId, name },
-      key: { id: ctx.keyId, scopes: ctx.scopes },
-    });
+    return ok(
+      {
+        account: { id: ctx.accountId, name },
+        key: { id: ctx.keyId, scopes: ctx.scopes },
+      },
+      200,
+      logCtx
+    );
   } catch (err) {
-    return toApiErrorResponse(err);
+    return toApiErrorResponse(err, logCtx);
   }
 }

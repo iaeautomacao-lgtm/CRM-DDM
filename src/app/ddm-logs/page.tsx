@@ -121,6 +121,7 @@ const SOURCE_OPTIONS: LogSource[] = [
   "import",
   "system",
   "frontend",
+  "api_v1",
 ];
 
 const LEVEL_OPTIONS: LogLevel[] = ["debug", "info", "warn", "error", "critical"];
