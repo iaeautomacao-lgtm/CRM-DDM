@@ -227,6 +227,7 @@ export async function POST(request: Request) {
       if (provider === "meta") {
         queueRows.push({
           campaign_id: campaignId,
+          account_id: ctx.accountId,
           contact_id: null,           // contato externo — não existe no CRM
           session_id: channelId,
           // Armazena o telefone em mensagem_final como fallback para
@@ -258,6 +259,7 @@ export async function POST(request: Request) {
 
         queueRows.push({
           campaign_id: campaignId,
+          account_id: ctx.accountId,
           contact_id: null,
           session_id: channelId,
           mensagem_final: normalizedPhone,
@@ -296,7 +298,7 @@ export async function POST(request: Request) {
     await db
       .from("campaign_metrics")
       .upsert(
-        { campaign_id: campaignId, total_contatos: enqueued },
+        { campaign_id: campaignId, account_id: ctx.accountId, total_contatos: enqueued },
         { onConflict: "campaign_id" }
       );
 
