@@ -219,6 +219,31 @@ async function testPendingConversations(signal: AbortSignal): Promise<TestOutcom
   return { status: "pass", message: `${n} conversa(s) pendente(s) (dentro do normal)` };
 }
 
+// ---- 8. ddm_api_health ----
+// Health check de um sistema externo do mesmo grupo (ddmacordos.com),
+// não do próprio CRM — verifica se a API de débitos está respondendo
+// antes de qualquer integração do disparador/CRM depender dela.
+async function testDdmApiHealth(signal: AbortSignal): Promise<TestOutcome> {
+  const token = process.env.DDM_ACORDOS_API_TOKEN;
+  if (!token) {
+    return { status: "fail", message: "DDM_ACORDOS_API_TOKEN não configurado no servidor" };
+  }
+  const idDev = "1599911302107525132";
+  const url = `https://ddmacordos.com/calc/?tk=${token}&idDev=${idDev}&cli=ddm`;
+  const res = await fetch(url, { signal });
+  if (res.status !== 200) {
+    return { status: "fail", message: `status ${res.status} (esperado 200)` };
+  }
+  const body = await res.json().catch(() => null);
+  if (body && typeof body === "object" && !Array.isArray(body) && (body as any).error === "invalid_client") {
+    return { status: "fail", message: "API DDM retornou invalid_client" };
+  }
+  if (Array.isArray(body)) {
+    return { status: "pass", message: "API DDM respondendo corretamente" };
+  }
+  return { status: "warn", message: "API DDM respondeu 200 com formato inesperado" };
+}
+
 export async function POST(request: Request) {
   const expected = process.env.STRESS_RUN_SECRET;
   if (!expected) {
@@ -248,6 +273,7 @@ export async function POST(request: Request) {
   results.push(await runTest("queue_health", 5000, testQueueHealth));
   results.push(await runTest("flow_runs_health", 5000, testFlowRunsHealth));
   results.push(await runTest("pending_conversations", 5000, testPendingConversations));
+  results.push(await runTest("ddm_api_health", 5000, testDdmApiHealth));
 
   const duration_total_ms = Date.now() - overallStart;
 
@@ -260,7 +286,7 @@ export async function POST(request: Request) {
   const failCount = results.filter((r) => r.status === "fail").length;
 
   const level = overall === "pass" ? "info" : overall === "warn" ? "warn" : "error";
-  const message = `Health check: ${passCount}/7 pass, ${warnCount} warn, ${failCount} fail`;
+  const message = `Health check: ${passCount}/8 pass, ${warnCount} warn, ${failCount} fail`;
 
   await writeLog({
     level,
