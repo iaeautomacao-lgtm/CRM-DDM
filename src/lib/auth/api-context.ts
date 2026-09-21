@@ -67,11 +67,13 @@ function extractKey(request: Request): string | null {
 
 /**
  * Authenticate a public-API request and (optionally) enforce a
- * single scope. Throws an `ApiError` (mapped to the envelope by
- * `toApiErrorResponse`) on any failure:
+ * scope. Passing an array requires only ONE of them (e.g. a route
+ * readable by either a read-only or a write-capable key) — passing a
+ * single scope requires exactly that one. Throws an `ApiError`
+ * (mapped to the envelope by `toApiErrorResponse`) on any failure:
  *
  *   401 unauthorized — no key, malformed, unknown, revoked, expired
- *   403 forbidden    — valid key without the required scope
+ *   403 forbidden    — valid key without any of the required scope(s)
  *   429 rate_limited — per-key budget exhausted
  *
  * On success, bumps `last_used_at` (fire-and-forget) and returns the
@@ -79,7 +81,7 @@ function extractKey(request: Request): string | null {
  */
 export async function requireApiKey(
   request: Request,
-  scope?: ApiScope
+  scope?: ApiScope | ApiScope[]
 ): Promise<ApiKeyContext> {
   const presented = extractKey(request);
   if (!presented || !looksLikeApiKey(presented)) {
@@ -101,11 +103,15 @@ export async function requireApiKey(
     throw rateLimited(limit, { accountId: row.account_id, keyId: row.id });
   }
 
-  if (scope && !hasScope(row.scopes, scope)) {
-    throw forbidden(`This API key is missing the '${scope}' scope`, {
-      accountId: row.account_id,
-      keyId: row.id,
-    });
+  if (scope) {
+    const required = Array.isArray(scope) ? scope : [scope];
+    const satisfied = required.some((s) => hasScope(row.scopes, s));
+    if (!satisfied) {
+      throw forbidden(
+        `This API key is missing one of the required scopes: ${required.join(', ')}`,
+        { accountId: row.account_id, keyId: row.id }
+      );
+    }
   }
 
   touchLastUsed(row.id);

@@ -20,6 +20,7 @@ export const API_SCOPES = [
   'contacts:write',
   'conversations:read',
   'campaigns:write',
+  'campaigns:read',
 ] as const;
 
 export type ApiScope = (typeof API_SCOPES)[number];
@@ -32,6 +33,7 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'contacts:write': 'Create and update contacts',
   'conversations:read': 'List and read conversations',
   'campaigns:write': 'Create and enqueue Disparador campaigns',
+  'campaigns:read': 'Read Disparador campaign status and metrics',
 };
 
 /** Type-narrow an unknown value into a valid `ApiScope`. */

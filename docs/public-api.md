@@ -5,10 +5,10 @@ scripts and automations — send messages, manage contacts, launch
 broadcasts — without going through the dashboard UI.
 
 > **Status:** authentication, scopes, rate limiting, `GET /api/v1/me`,
-> `POST /api/v1/whatsapp/send`, and `POST /api/v1/disparador/campaigns`
-> ship now. The remaining data endpoints (`contacts`, `conversations`,
-> …) land one at a time in follow-up releases — see
-> [Roadmap](#roadmap).
+> `POST /api/v1/whatsapp/send`, `POST /api/v1/disparador/campaigns`,
+> and `GET /api/v1/disparador/campaigns/{id}` ship now. The remaining
+> data endpoints (`contacts`, `conversations`, …) land one at a time
+> in follow-up releases — see [Roadmap](#roadmap).
 
 ## Authentication
 
@@ -51,6 +51,7 @@ it. Grant the minimum.
 | `contacts:write`     | Create and update contacts               |
 | `conversations:read` | List and read conversations              |
 | `campaigns:write`    | Create and enqueue Disparador campaigns  |
+| `campaigns:read`     | Read Disparador campaign status and metrics |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -202,6 +203,51 @@ blacklist. Errors: `bad_request` (400) for a missing `campaign_name`/
 `contacts`, an unresolvable `channel`, a missing/unapproved
 `template_name` on a Meta channel, a missing `message` on a WAHA
 channel, or an unsafe `callback_url`.
+
+### `GET /api/v1/disparador/campaigns/{id}`
+
+Returns a campaign's status and delivery metrics. Requires
+`campaigns:read` **or** `campaigns:write` (a key that can create
+campaigns can also read them back). Only sees campaigns belonging to
+the key's own account — a campaign from another account (or an
+unknown id) returns `not_found`, not `forbidden`, so a caller can't
+tell the two apart.
+
+```bash
+curl https://your-crm.example.com/api/v1/disparador/campaigns/f68ec309-5022-484e-98fe-0df10fbdd490 \
+  -H "Authorization: Bearer wacrm_live_xxx"
+```
+
+```json
+{
+  "data": {
+    "campaign_id": "f68ec309-5022-484e-98fe-0df10fbdd490",
+    "name": "September promo",
+    "status": "em_execucao",
+    "created_at": "2026-09-19T23:17:05.616Z",
+    "window": { "start": "08:00", "end": "18:00" },
+    "metrics": {
+      "total_contacts": 1000,
+      "sent": 450,
+      "delivered": 440,
+      "read": 200,
+      "errors": 10,
+      "pending": 550
+    },
+    "queue": {
+      "agendado": 550,
+      "enviando": 0,
+      "entregue": 440,
+      "erro": 10,
+      "cancelado": 0
+    }
+  }
+}
+```
+
+`metrics.pending` mirrors `queue.agendado` — how many contacts are
+still waiting to be sent. Errors: `not_found` (404) if the campaign
+doesn't exist or belongs to another account.
 
 ## Roadmap
 
