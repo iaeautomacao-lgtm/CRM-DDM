@@ -217,7 +217,8 @@ export async function POST(request: Request) {
       ctx.accountId,
       config.user_id, // Passa o user_id da config
       contactRow.id,
-      config.provider === 'waha' ? config.waha_session : undefined
+      config.provider === 'waha' ? config.waha_session : undefined,
+      config.provider === 'meta' ? config.id : undefined
     );
 
     if (!conversation) {
@@ -418,21 +419,36 @@ async function findOrCreateConversation(
   accountId: string,
   userId: string,
   contactId: string,
-  wahaSession?: string
+  wahaSession?: string,
+  configId?: string
 ) {
   let query = supabase
     .from('conversations')
     .select('*, contact:contacts(*)')
     .eq('account_id', accountId)
-    .eq('contact_id', contactId);
+    .eq('contact_id', contactId)
+    .in('status', ['open', 'pending']);
 
   if (wahaSession) {
     query = query.eq('waha_session', wahaSession);
   } else {
     query = query.is('waha_session', null);
   }
+  if (configId) {
+    query = query.eq('config_id', configId);
+  }
 
-  const { data: existing } = await query.maybeSingle();
+  const { data: existing, error: findError } = await query
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (findError) {
+    // Não derruba o fluxo — segue pro insert abaixo, mesmo comportamento
+    // de antes (que também nunca falhava aqui), só que agora com o erro
+    // logado em vez de silenciosamente ignorado.
+    console.error('Error finding existing conversation in API send:', findError.message);
+  }
   if (existing) return existing;
 
   const insertObj: any = {
@@ -442,6 +458,9 @@ async function findOrCreateConversation(
   };
   if (wahaSession) {
     insertObj.waha_session = wahaSession;
+  }
+  if (configId) {
+    insertObj.config_id = configId;
   }
 
   const { data: created, error } = await supabase
