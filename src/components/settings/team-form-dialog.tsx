@@ -17,15 +17,16 @@
 
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Search, X } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api-fetch';
+import { normalizeForSearch } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { ROLE_META } from './role-meta';
 import {
   Select,
   SelectContent,
@@ -114,15 +115,25 @@ export function TeamFormDialog({
   // — no separate "save members" step, mirroring the toggle-is-the-
   // save pattern already used for role changes in members-tab.tsx.
   // ----------------------------------------------------------
+  // `agents` (role === 'agent') is the addable pool — unchanged from
+  // before. `allAccountMembers` is the full, unfiltered roster, kept
+  // separately so a current member whose role isn't 'agent' (added
+  // through some other path — team_members has no role constraint of
+  // its own) still resolves to a name/avatar/role instead of silently
+  // disappearing from the "current members" list.
   const [agents, setAgents] = useState<AccountMember[]>([]);
+  const [allAccountMembers, setAllAccountMembers] = useState<AccountMember[]>([]);
   const [memberUserIds, setMemberUserIds] = useState<Set<string>>(new Set());
   const [membersLoading, setMembersLoading] = useState(false);
   const [pendingMemberId, setPendingMemberId] = useState<string | null>(null);
+  const [memberSearch, setMemberSearch] = useState('');
 
   useEffect(() => {
     if (!open || !team) {
       setAgents([]);
+      setAllAccountMembers([]);
       setMemberUserIds(new Set());
+      setMemberSearch('');
       return;
     }
     let cancelled = false;
@@ -137,6 +148,7 @@ export function TeamFormDialog({
 
         if (membersRes.ok) {
           const data = (await membersRes.json()) as { members?: AccountMember[] };
+          setAllAccountMembers(data.members ?? []);
           setAgents((data.members ?? []).filter((m) => m.role === 'agent'));
         } else {
           toast.error('Failed to load agents');
@@ -161,6 +173,20 @@ export function TeamFormDialog({
       cancelled = true;
     };
   }, [open, team]);
+
+  const currentMembers = allAccountMembers.filter((m) => memberUserIds.has(m.user_id));
+
+  // Available-to-add pool: agents (the only role this dialog lets you
+  // add — unchanged), already-members excluded, filtered by the
+  // search box against name and email.
+  const normalizedSearch = normalizeForSearch(memberSearch.trim());
+  const availableAgents = agents
+    .filter((a) => !memberUserIds.has(a.user_id))
+    .filter((a) => {
+      if (!normalizedSearch) return true;
+      const haystack = normalizeForSearch(`${a.full_name} ${a.email ?? ''}`);
+      return haystack.includes(normalizedSearch);
+    });
 
   async function handleToggleMember(agentId: string, checked: boolean) {
     if (!team) return;
@@ -332,53 +358,123 @@ export function TeamFormDialog({
           {/* Create mode has no team row yet to link agents against —
               this section only renders once a team exists in the DB. */}
           {team && (
-            <div className="space-y-2">
-              <Label>Membros</Label>
-              {membersLoading ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Membros atuais</Label>
+                {membersLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  </div>
+                ) : currentMembers.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhum membro nesta equipe ainda.
+                  </p>
+                ) : (
+                  <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+                    {currentMembers.map((member) => {
+                      const isPending = pendingMemberId === member.user_id;
+                      const displayName = member.full_name || member.email || 'Sem nome';
+                      const roleMeta = ROLE_META[member.role];
+                      return (
+                        <div
+                          key={member.user_id}
+                          className="flex items-center gap-2.5 rounded-md px-2 py-1.5"
+                        >
+                          <Avatar className="size-6 shrink-0">
+                            {member.avatar_url ? (
+                              <AvatarImage src={member.avatar_url} alt={displayName} />
+                            ) : null}
+                            <AvatarFallback className="bg-primary/10 text-[10px] font-medium text-primary">
+                              {displayName.charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                            {displayName}
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {roleMeta.label}
+                          </span>
+                          {isPending ? (
+                            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => handleToggleMember(member.user_id, false)}
+                              title="Remover da equipe"
+                              aria-label="Remover da equipe"
+                              className="shrink-0 text-muted-foreground hover:text-destructive"
+                            >
+                              <X className="size-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>Adicionar membro</Label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder="Buscar por nome ou e-mail..."
+                    className="pl-8"
+                    disabled={agents.length === 0}
+                  />
                 </div>
-              ) : agents.length === 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Nenhum agente na conta ainda.
-                </p>
-              ) : (
-                <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
-                  {agents.map((agent) => {
-                    const checked = memberUserIds.has(agent.user_id);
-                    const isPending = pendingMemberId === agent.user_id;
-                    const displayName = agent.full_name || agent.email || 'Sem nome';
-                    return (
-                      <label
-                        key={agent.user_id}
-                        className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
-                      >
-                        <Checkbox
-                          checked={checked}
+                {agents.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhum operador na conta ainda.
+                  </p>
+                ) : availableAgents.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {memberSearch.trim()
+                      ? 'Nenhum operador encontrado para essa busca.'
+                      : 'Todos os operadores já estão nesta equipe.'}
+                  </p>
+                ) : (
+                  <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+                    {availableAgents.map((agent) => {
+                      const isPending = pendingMemberId === agent.user_id;
+                      const displayName = agent.full_name || agent.email || 'Sem nome';
+                      const roleMeta = ROLE_META[agent.role];
+                      return (
+                        <button
+                          type="button"
+                          key={agent.user_id}
                           disabled={isPending}
-                          onCheckedChange={(next) =>
-                            handleToggleMember(agent.user_id, next === true)
-                          }
-                        />
-                        <Avatar className="size-6 shrink-0">
-                          {agent.avatar_url ? (
-                            <AvatarImage src={agent.avatar_url} alt={displayName} />
-                          ) : null}
-                          <AvatarFallback className="bg-primary/10 text-[10px] font-medium text-primary">
-                            {displayName.charAt(0).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                          {displayName}
-                        </span>
-                        {isPending && (
-                          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                        )}
-                      </label>
-                    );
-                  })}
-                </div>
-              )}
+                          onClick={() => handleToggleMember(agent.user_id, true)}
+                          className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Avatar className="size-6 shrink-0">
+                            {agent.avatar_url ? (
+                              <AvatarImage src={agent.avatar_url} alt={displayName} />
+                            ) : null}
+                            <AvatarFallback className="bg-primary/10 text-[10px] font-medium text-primary">
+                              {displayName.charAt(0).toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                            {displayName}
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {roleMeta.label}
+                          </span>
+                          {isPending && (
+                            <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

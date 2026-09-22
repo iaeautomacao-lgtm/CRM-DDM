@@ -13,13 +13,20 @@ import type { AccountRole } from "@/lib/auth/roles";
 //
 // Per-role reach, owner aside (owner always passes in canAccessRoute
 // before this table is even consulted):
-//   admin  → /dashboard, /monitoramento, /inbox, /relatorios
+//   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings
 //   agent  → /inbox only
 //   viewer → /dashboard only
 // Routes no role above claims (/canais, /contacts, /pipelines,
-// /flows, /disparador, /settings, /ajuda) are owner-only. Adding a
-// new nav route = one new ROUTE_ALLOWLIST entry, or isRouteGated
-// silently stops covering it.
+// /flows, /disparador, /ajuda) are owner-only. Adding a new nav
+// route = one new ROUTE_ALLOWLIST entry, or isRouteGated silently
+// stops covering it.
+//
+// /settings was owner-only until admin was added here to match
+// several settings panels' own internal gating (TeamsPanel,
+// api-keys-settings, members-tab all already wrap their write
+// actions in <RequireRole min="admin">) — those checks were
+// unreachable dead code for admins as long as the page itself
+// redirected them to /unauthorized before ever rendering.
 // ============================================================
 
 /** Alias of AccountRole — kept separate so route-gating call sites
@@ -38,8 +45,9 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/pipelines": ["owner"],
   "/flows": ["owner"],
   "/disparador": ["owner"],
-  "/settings": ["owner"],
   "/ajuda": ["owner"],
+
+  "/settings": ["owner", "admin"],
 };
 
 /** True if `pathname` matches a prefix this table restricts. Used to
