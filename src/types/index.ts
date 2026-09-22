@@ -316,6 +316,9 @@ export interface MessageTemplate {
   folder_id?: string | null;
   position?: number;
   channel_tags?: string[];
+  /** Which WABA (Meta channel) this template was submitted to —
+   *  migration 073. Used to pre-select the channel on edit. */
+  waba_id?: string;
 }
 
 export interface TemplateFolder {

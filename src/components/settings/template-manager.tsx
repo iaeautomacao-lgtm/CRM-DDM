@@ -17,6 +17,10 @@ import {
   Folder,
   GripVertical,
   MoreVertical,
+  Eye,
+  Image as ImageIcon,
+  Video,
+  FileText,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -100,6 +104,10 @@ interface TemplateFormData {
   footer_text: string;
   buttons: TemplateButton[];
   channel_tags: string[];
+  /** whatsapp_config.id of the Meta channel this template targets —
+   *  required for new templates, pre-filled on edit from the row's
+   *  waba_id. Only sent to the server on create (see handleSubmit). */
+  channel_id: string;
 }
 
 const emptyForm: TemplateFormData = {
@@ -115,6 +123,38 @@ const emptyForm: TemplateFormData = {
   footer_text: '',
   buttons: [],
   channel_tags: [],
+  channel_id: '',
+};
+
+interface TemplateChannel {
+  id: string;
+  display_phone_number: string | null;
+  waba_id: string | null;
+}
+
+/** name is NOT a column on wacrm.whatsapp_config — the Select falls
+ *  back to display_phone_number, matching the label convention
+ *  already used for Meta channels in /canais (channelName()). */
+function channelLabel(c: TemplateChannel): string {
+  return c.display_phone_number || `Canal ${c.id.slice(0, 8)}`;
+}
+
+/** Replaces {{1}}, {{2}}, ... with the matching sample value — left
+ *  as-is (literal "{{n}}") when no sample exists for that index, per
+ *  the preview's own spec. 1-indexed, matching Meta's own convention
+ *  (same indexing extractVariableIndices already uses elsewhere). */
+function substituteVars(text: string, samples: string[] | undefined): string {
+  return text.replace(/\{\{(\d+)\}\}/g, (match, indexStr: string) => {
+    const value = samples?.[Number(indexStr) - 1];
+    return value && value.trim() ? value : match;
+  });
+}
+
+const BUTTON_TYPE_LABELS: Record<TemplateButton['type'], string> = {
+  QUICK_REPLY: 'Resposta rápida',
+  URL: 'Link',
+  PHONE_NUMBER: 'Ligar',
+  COPY_CODE: 'Copiar código',
 };
 
 const COMMON_LANGUAGE_CODES = [
@@ -152,11 +192,13 @@ function emptyButton(type: TemplateButton['type']): TemplateButton {
 
 export function TemplateManager() {
   const supabase = createClient();
-  const { user, loading: authLoading } = useAuth();
+  const { user, accountId, loading: authLoading } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [folders, setFolders] = useState<TemplateFolder[]>([]);
+  const [channels, setChannels] = useState<TemplateChannel[]>([]);
+  const [previewTemplate, setPreviewTemplate] = useState<MessageTemplate | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -227,6 +269,29 @@ export function TemplateManager() {
     fetchFolders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id]);
+
+  // Enabled Meta channels for the "Canal" select — direct Supabase
+  // read (RLS already scopes whatsapp_config to account members), same
+  // pattern as the /canais teams fetch. `name` isn't a real column on
+  // whatsapp_config, so it's deliberately not in the select list here.
+  useEffect(() => {
+    if (!accountId) return;
+    supabase
+      .from('whatsapp_config')
+      .select('id, display_phone_number, waba_id')
+      .eq('account_id', accountId)
+      .eq('provider', 'meta')
+      .eq('habilitado', true)
+      .order('display_phone_number', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[TemplateManager] failed to load channels:', error);
+          return;
+        }
+        setChannels((data ?? []) as TemplateChannel[]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
   async function fetchTemplates(userId: string) {
     try {
@@ -488,6 +553,9 @@ export function TemplateManager() {
 
   function openEdit(template: MessageTemplate) {
     setEditingId(template.id);
+    const matchingChannel = template.waba_id
+      ? channels.find((c) => c.waba_id === template.waba_id)
+      : undefined;
     setForm({
       name: template.name,
       category: template.category,
@@ -501,6 +569,7 @@ export function TemplateManager() {
       footer_text: template.footer_text ?? '',
       buttons: template.buttons ?? [],
       channel_tags: template.channel_tags ?? [],
+      channel_id: matchingChannel?.id ?? '',
     });
     setChannelTagInput('');
     setDialogOpen(true);
@@ -508,7 +577,12 @@ export function TemplateManager() {
 
   function openCreate() {
     setEditingId(null);
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      // Convenience only — still requires an explicit pick when there's
+      // more than one channel, never silently guesses among several.
+      channel_id: channels.length === 1 ? channels[0].id : '',
+    });
     setChannelTagInput('');
     setDialogOpen(true);
   }
@@ -517,16 +591,26 @@ export function TemplateManager() {
     // AUTHENTICATION is blocked by the persistent banner + disabled
     // submit button; this is a defensive second line of defense.
     if (form.category === 'Authentication') return;
+    const isEdit = editingId !== null;
+    // Required for new templates only — edits keep whichever channel
+    // the template was originally submitted to (see openEdit).
+    if (!isEdit && !form.channel_id) {
+      toast.error('Selecione um canal');
+      return;
+    }
     try {
       setSubmitting(true);
-      const isEdit = editingId !== null;
       const url = isEdit
         ? `/api/whatsapp/templates/${editingId}`
         : '/api/whatsapp/templates/submit';
+      const payload = buildSubmitPayload();
       const res = await apiFetch(url, {
         method: isEdit ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildSubmitPayload()),
+        // channel_id only makes sense on create — POST /submit is the
+        // only route that reads it; PATCH /[id] doesn't touch the
+        // channel a template was originally submitted to.
+        body: JSON.stringify(isEdit ? payload : { ...payload, channel_id: form.channel_id }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1111,6 +1195,17 @@ export function TemplateManager() {
                           )}
                         </div>
                         <div className="flex items-center gap-1 shrink-0 ml-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setPreviewTemplate(template)}
+                            title="Ver prévia do template"
+                            aria-label="Prévia do template"
+                            className="text-muted-foreground hover:text-foreground hover:bg-muted h-8 px-2"
+                          >
+                            <Eye className="size-3.5" />
+                            Prévia
+                          </Button>
                           {statusKey === 'APPROVED' && (
                             <Button
                               variant="ghost"
@@ -1219,6 +1314,44 @@ export function TemplateManager() {
                 {editingId
                   ? 'O nome é fixo depois que o template existe no Meta — crie um novo template para alterá-lo.'
                   : 'Apenas letras minúsculas, dígitos e sublinhados.'}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">Canal</Label>
+              <Select
+                value={form.channel_id}
+                onValueChange={(val) => val && setForm({ ...form, channel_id: val })}
+              >
+                <SelectTrigger
+                  className="w-full bg-muted border-border text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
+                  disabled={editingId !== null}
+                >
+                  <SelectValue placeholder="Selecione um canal">
+                    {(val: string) => {
+                      const selected = channels.find((c) => c.id === val);
+                      return selected ? channelLabel(selected) : val;
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  {channels.map((c) => (
+                    <SelectItem
+                      key={c.id}
+                      value={c.id}
+                      className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                    >
+                      {channelLabel(c)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                {editingId
+                  ? 'O canal é fixo depois que o template existe no Meta.'
+                  : channels.length === 0
+                    ? 'Nenhum canal Meta habilitado nesta conta — conecte um em Canais.'
+                    : 'A qual canal Meta este template será enviado.'}
               </p>
             </div>
 
@@ -1737,6 +1870,91 @@ export function TemplateManager() {
               className="bg-red-600 hover:bg-red-700 text-white"
             >
               Excluir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Preview — simple WhatsApp-bubble mock, not a pixel-accurate
+          client render. Variables with no sample value stay literal
+          ({{n}}) per spec, via substituteVars' fallback. */}
+      <Dialog
+        open={previewTemplate !== null}
+        onOpenChange={(open) => {
+          if (!open) setPreviewTemplate(null);
+        }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground">
+              Prévia {previewTemplate ? `— ${previewTemplate.name}` : ''}
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Variáveis sem valor de exemplo aparecem como {'{{n}}'}.
+            </DialogDescription>
+          </DialogHeader>
+
+          {previewTemplate && (
+            <div className="rounded-lg bg-[#0b141a] p-4">
+              <div className="max-w-[90%] rounded-lg rounded-tl-none bg-[#005c4b] px-3 py-2 text-sm text-white shadow">
+                {previewTemplate.header_type === 'text' && previewTemplate.header_content && (
+                  <p className="mb-1 font-semibold">
+                    {substituteVars(
+                      previewTemplate.header_content,
+                      previewTemplate.sample_values?.header,
+                    )}
+                  </p>
+                )}
+                {previewTemplate.header_type &&
+                  previewTemplate.header_type !== 'text' && (
+                    <div className="mb-2 flex h-24 items-center justify-center rounded-md bg-black/20">
+                      {previewTemplate.header_type === 'image' && (
+                        <ImageIcon className="size-8 text-white/70" />
+                      )}
+                      {previewTemplate.header_type === 'video' && (
+                        <Video className="size-8 text-white/70" />
+                      )}
+                      {previewTemplate.header_type === 'document' && (
+                        <FileText className="size-8 text-white/70" />
+                      )}
+                    </div>
+                  )}
+
+                <p className="whitespace-pre-wrap">
+                  {substituteVars(
+                    previewTemplate.body_text,
+                    previewTemplate.sample_values?.body,
+                  )}
+                </p>
+
+                {previewTemplate.footer_text && (
+                  <p className="mt-1 text-xs text-white/60">{previewTemplate.footer_text}</p>
+                )}
+              </div>
+
+              {previewTemplate.buttons && previewTemplate.buttons.length > 0 && (
+                <div className="mt-2 max-w-[90%] divide-y divide-white/10 overflow-hidden rounded-lg bg-[#1f2c34]">
+                  {previewTemplate.buttons.map((btn, i) => (
+                    <div
+                      key={i}
+                      className="px-3 py-2 text-center text-xs font-medium text-[#53bdeb]"
+                      title={BUTTON_TYPE_LABELS[btn.type]}
+                    >
+                      {btn.text || BUTTON_TYPE_LABELS[btn.type]}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="bg-popover border-border">
+            <Button
+              variant="outline"
+              onClick={() => setPreviewTemplate(null)}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>
