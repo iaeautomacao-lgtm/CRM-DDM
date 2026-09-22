@@ -24,6 +24,7 @@ function buildUpsertRow(
     status: 'DRAFT' | string
     metaTemplateId: string | null
     submissionError: string | null
+    wabaId: string | null
   },
 ) {
   return {
@@ -49,6 +50,9 @@ function buildUpsertRow(
     status: extras.status,
     meta_template_id: extras.metaTemplateId,
     submission_error: extras.submissionError,
+    // Which WABA (i.e. which Meta channel) this template was submitted
+    // to — null for a dry run, where no real channel is ever resolved.
+    waba_id: extras.wabaId,
     // Clear stale rejection_reason whenever we re-submit; the
     // webhook will set it again if Meta still rejects.
     rejection_reason: extras.submissionError ? null : null,
@@ -113,8 +117,16 @@ export async function POST(request: Request) {
     }
 
     let payload: TemplatePayload
+    // channel_id: optional, lets the caller target a specific Meta
+    // channel instead of "whichever enabled one comes first" — pulled
+    // off the raw body separately so it doesn't leak into
+    // TemplatePayload (validateTemplatePayload/buildMetaTemplatePayload
+    // don't know about it and shouldn't need to).
+    let channelId: string | undefined
     try {
-      payload = (await request.json()) as TemplatePayload
+      const body = (await request.json()) as TemplatePayload & { channel_id?: unknown }
+      channelId = typeof body.channel_id === 'string' && body.channel_id.trim() ? body.channel_id : undefined
+      payload = body
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
     }
@@ -144,25 +156,43 @@ export async function POST(request: Request) {
 
     let metaTemplateId: string
     let metaStatus: string
+    // Resolved once the channel lookup below succeeds — null for a dry
+    // run (no real channel ever gets looked up) or, in principle, if
+    // the code path errors out first (all of those `return` before
+    // this would be read).
+    let resolvedWabaId: string | null = null
 
     if (dryRun) {
       metaTemplateId = `dry-run-${crypto.randomUUID()}`
       metaStatus = 'PENDING'
     } else {
-      const { data: config, error: configError } = await supabase
+      let configQuery = supabase
         .from('whatsapp_config')
         .select('*')
         .eq('account_id', accountId)
-        .single()
+        .eq('provider', 'meta')
+
+      // channel_id given: use exactly that channel (still scoped to
+      // this account — a cross-account id simply matches no row below).
+      // Otherwise: the account's oldest enabled Meta channel, same
+      // "pick the primary one" convention as /api/v1/whatsapp/send and
+      // the whatsapp_config PATCH handler.
+      configQuery = channelId
+        ? configQuery.eq('id', channelId)
+        : configQuery.eq('habilitado', true).order('created_at', { ascending: true }).limit(1)
+
+      const { data: config, error: configError } = await configQuery.maybeSingle()
       if (configError || !config) {
         return NextResponse.json(
           {
-            error:
-              'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
+            error: channelId
+              ? 'Channel not found in your account.'
+              : 'No enabled Meta channel found for this account. Connect and enable a Meta WhatsApp channel in Canais first.',
           },
           { status: 400 },
         )
       }
+      resolvedWabaId = config.waba_id ?? null
       if (!config.waba_id) {
         return NextResponse.json(
           {
@@ -207,6 +237,7 @@ export async function POST(request: Request) {
             status: 'DRAFT',
             metaTemplateId: null,
             submissionError: message,
+            wabaId: resolvedWabaId,
           }),
         )
         const isRateLimit = /\b429\b/.test(message)
@@ -227,6 +258,7 @@ export async function POST(request: Request) {
         status: normalizeStatus(metaStatus),
         metaTemplateId,
         submissionError: null,
+        wabaId: resolvedWabaId,
       }),
     )
 
