@@ -145,6 +145,7 @@ export async function GET() {
               flow_id: config.flow_id,
               receptivo: config.receptivo,
               habilitado: config.habilitado,
+              team_id: config.team_id,
               phone_info: {
                 id: config.waha_session,
                 display_phone_number: displayPhone,
@@ -166,6 +167,7 @@ export async function GET() {
               flow_id: config.flow_id,
               receptivo: config.receptivo,
               habilitado: config.habilitado,
+              team_id: config.team_id,
               reason: 'waha_api_error',
               message: 'Could not connect to the WAHA server. Please check the configured URL and try again.',
               phone_info: {
@@ -188,6 +190,7 @@ export async function GET() {
               flow_id: config.flow_id,
               receptivo: config.receptivo,
               habilitado: config.habilitado,
+              team_id: config.team_id,
               reason: 'token_corrupted',
               needs_reset: true,
               message: 'The stored access token cannot be decrypted.'
@@ -206,6 +209,7 @@ export async function GET() {
               flow_id: config.flow_id,
               receptivo: config.receptivo,
               habilitado: config.habilitado,
+              team_id: config.team_id,
               phone_info: phoneInfo
             }
           } catch (err) {
@@ -217,6 +221,7 @@ export async function GET() {
               flow_id: config.flow_id,
               receptivo: config.receptivo,
               habilitado: config.habilitado,
+              team_id: config.team_id,
               reason: 'meta_api_error',
               message: `Meta API rejected credentials: ${message}`
             }
@@ -872,7 +877,7 @@ export async function PATCH(request: Request) {
     }
 
     const body = await request.json()
-    const { id, flow_id, receptivo, habilitado } = body
+    const { id, flow_id, receptivo, habilitado, team_id } = body
 
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 })
@@ -882,10 +887,11 @@ export async function PATCH(request: Request) {
     if (flow_id !== undefined) update.flow_id = flow_id
     if (receptivo !== undefined) update.receptivo = receptivo
     if (habilitado !== undefined) update.habilitado = habilitado
+    if (team_id !== undefined) update.team_id = team_id
 
     if (Object.keys(update).length === 0) {
       return NextResponse.json(
-        { error: 'At least one of flow_id, receptivo, habilitado is required' },
+        { error: 'At least one of flow_id, receptivo, habilitado, team_id is required' },
         { status: 400 },
       )
     }
@@ -914,6 +920,26 @@ export async function PATCH(request: Request) {
       }
       if (!flow) {
         return NextResponse.json({ error: 'Flow not found in your account' }, { status: 404 })
+      }
+    }
+
+    // Same reasoning as flow_id above — a channel pointed at another
+    // account's team would leak which team it routes conversations to
+    // (or worse, once something downstream acts on it) across the
+    // account boundary.
+    if (update.team_id) {
+      const { data: team, error: teamError } = await supabase
+        .from('teams')
+        .select('id')
+        .eq('id', update.team_id)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      if (teamError) {
+        console.error('Error validating team_id ownership:', teamError)
+        return NextResponse.json({ error: 'Failed to validate team' }, { status: 500 })
+      }
+      if (!team) {
+        return NextResponse.json({ error: 'Team not found in your account' }, { status: 404 })
       }
     }
 

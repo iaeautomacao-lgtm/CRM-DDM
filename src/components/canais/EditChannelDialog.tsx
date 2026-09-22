@@ -45,22 +45,26 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { MASKED_TOKEN, normalizeSessionName, type ChannelConfig } from "./types";
 
 const NO_FLOW = "__none__";
+const NO_TEAM = "__none__";
 
 export function EditChannelDialog({
   config,
   flows,
+  teams,
   open,
   onOpenChange,
   onSaved,
 }: {
   config: ChannelConfig | null;
   flows: { id: string; name: string }[];
+  teams: { id: string; name: string }[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [flowId, setFlowId] = useState<string>(NO_FLOW);
+  const [teamId, setTeamId] = useState<string>(NO_TEAM);
   // Shared by both providers (same whatsapp_config columns, same PATCH
   // endpoint the /canais table's inline toggles use).
   const [receptivo, setReceptivo] = useState(true);
@@ -87,6 +91,7 @@ export function EditChannelDialog({
   useEffect(() => {
     if (!config) return;
     setFlowId(config.flow_id ?? NO_FLOW);
+    setTeamId(config.team_id ?? NO_TEAM);
     setReceptivo(config.receptivo);
     setHabilitado(config.habilitado);
     if (config.provider === "waha") {
@@ -139,11 +144,15 @@ export function EditChannelDialog({
   async function syncSettings() {
     if (!config) return;
     const nextFlowId = flowId === NO_FLOW ? null : flowId;
+    const nextTeamId = teamId === NO_TEAM ? null : teamId;
     const patch: Record<string, unknown> = {
       receptivo,
       habilitado,
     };
     if (nextFlowId !== (config.flow_id ?? null)) patch.flow_id = nextFlowId;
+    // Same diff-check as flow_id, same reason — the backend validates
+    // team ownership on every PATCH that includes it.
+    if (nextTeamId !== (config.team_id ?? null)) patch.team_id = nextTeamId;
     try {
       const res = await apiFetch("/api/whatsapp/config", {
         method: "PATCH",
@@ -322,6 +331,24 @@ export function EditChannelDialog({
                 </SelectContent>
               </Select>
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-waha-team">Equipe (opcional)</Label>
+              <Select value={teamId} onValueChange={(v) => v && setTeamId(v)}>
+                <SelectTrigger id="edit-waha-team" className="w-full" disabled={saving}>
+                  <SelectValue>
+                    {(v: string) => (v === NO_TEAM ? "Sem equipe" : teams.find((t) => t.id === v)?.name ?? v)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="z-50">
+                  <SelectItem value={NO_TEAM}>Sem equipe</SelectItem>
+                  {teams.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex justify-between pt-2">
               <Button
                 type="button"
@@ -442,6 +469,24 @@ export function EditChannelDialog({
                   {flows.map((f) => (
                     <SelectItem key={f.id} value={f.id}>
                       {f.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-meta-team">Equipe (opcional)</Label>
+              <Select value={teamId} onValueChange={(v) => v && setTeamId(v)}>
+                <SelectTrigger id="edit-meta-team" className="w-full" disabled={saving}>
+                  <SelectValue>
+                    {(v: string) => (v === NO_TEAM ? "Sem equipe" : teams.find((t) => t.id === v)?.name ?? v)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="z-50">
+                  <SelectItem value={NO_TEAM}>Sem equipe</SelectItem>
+                  {teams.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

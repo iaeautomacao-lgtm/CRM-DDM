@@ -26,6 +26,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, MessageCircle, MoreVertical, Plus, Search, Trash2, Zap } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -114,8 +116,10 @@ function searchHaystack(c: ChannelConfig): string {
 }
 
 export default function CanaisPage() {
+  const { accountId } = useAuth();
   const [configs, setConfigs] = useState<ChannelConfig[]>([]);
   const [flows, setFlows] = useState<{ id: string; name: string }[]>([]);
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
@@ -161,7 +165,30 @@ export default function CanaisPage() {
       .catch((err) => console.error("[canais] failed to load flows:", err));
   }, []);
 
+  // Direct Supabase read (teams_select RLS already allows any account
+  // member — same pattern TeamsPanel uses), not a new API route.
+  // team_id has no join on the GET /api/whatsapp/config response
+  // (same reason as flow_id/flow_name — see ChannelConfig comment),
+  // so team_name is resolved here too.
+  useEffect(() => {
+    if (!accountId) return;
+    const supabase = createClient();
+    supabase
+      .from("teams")
+      .select("id, name")
+      .eq("account_id", accountId)
+      .order("name", { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("[canais] failed to load teams:", error);
+          return;
+        }
+        setTeams((data ?? []) as { id: string; name: string }[]);
+      });
+  }, [accountId]);
+
   const flowNameById = useMemo(() => new Map(flows.map((f) => [f.id, f.name])), [flows]);
+  const teamNameById = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
 
   const filteredConfigs = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -352,6 +379,7 @@ export default function CanaisPage() {
                 <TableHead>Status</TableHead>
                 <TableHead>Sessão/Número</TableHead>
                 <TableHead>Fluxo</TableHead>
+                <TableHead>Equipe</TableHead>
                 <TableHead>Receptivo</TableHead>
                 <TableHead>Habilitado</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -420,6 +448,7 @@ export default function CanaisPage() {
                   </TableCell>
                   <TableCell>{sessionOrNumber(c)}</TableCell>
                   <TableCell>{c.flow_id ? flowNameById.get(c.flow_id) ?? "—" : "—"}</TableCell>
+                  <TableCell>{c.team_id ? teamNameById.get(c.team_id) ?? "—" : "—"}</TableCell>
                   <TableCell>
                     <Switch
                       checked={c.receptivo}
@@ -503,6 +532,7 @@ export default function CanaisPage() {
       <EditChannelDialog
         config={editing}
         flows={flows}
+        teams={teams}
         open={editing !== null}
         onOpenChange={(open) => !open && setEditing(null)}
         onSaved={() => {

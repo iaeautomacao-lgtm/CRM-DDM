@@ -32,6 +32,12 @@ export interface ChannelConfig {
   habilitado: boolean;
   /** Resolved client-side, not returned by the API — see comment above. */
   flow_name?: string;
+  /** team_id (migration 103) — raw passthrough column, same treatment
+   *  as flow_id: no live verification needed, just forwarded by GET. */
+  team_id: string | null;
+  /** Resolved client-side from a teams fetch, keyed by team_id — same
+   *  pattern as flow_name (no API-side join). */
+  team_name?: string;
 }
 
 export const MASKED_TOKEN = "••••••••••••••••";
