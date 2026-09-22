@@ -438,10 +438,7 @@ async function findOrCreateConversation(
     query = query.eq('config_id', configId);
   }
 
-  const { data: existing, error: findError } = await query
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const { data: candidates, error: findError } = await query.order('created_at', { ascending: false });
 
   if (findError) {
     // Não derruba o fluxo — segue pro insert abaixo, mesmo comportamento
@@ -449,6 +446,43 @@ async function findOrCreateConversation(
     // logado em vez de silenciosamente ignorado.
     console.error('Error finding existing conversation in API send:', findError.message);
   }
+
+  // Fallback: candidata open/pending mais recentemente criada (comportamento
+  // anterior). Só reavaliada abaixo se houver mais de uma candidata — nesse
+  // caso comum (0 ou 1) a query extra de mensagens nunca roda.
+  let existing = candidates?.[0] ?? null;
+
+  if (candidates && candidates.length > 1) {
+    // Mais de uma conversa aberta/pendente para este contato+canal —
+    // prioriza a que tem mensagem do cliente dentro da janela de 24h da
+    // Meta (sender_type='customer', valor confirmado ao vivo contra
+    // wacrm.messages — 'contact' nunca aparece lá; ver mesmo bug corrigido
+    // em startCampaign.ts). received_at (não created_at) é o timestamp de
+    // quando o webhook processou a mensagem, mesmo campo já usado pelo
+    // windowMap de startCampaign.ts.
+    const candidateIds = candidates.map((c: { id: string }) => c.id);
+    const { data: lastCustomerMsgs } = await supabase
+      .from('messages')
+      .select('conversation_id, received_at')
+      .in('conversation_id', candidateIds)
+      .eq('sender_type', 'customer')
+      .order('received_at', { ascending: false });
+
+    const lastByConversation = new Map<string, number>();
+    for (const row of lastCustomerMsgs ?? []) {
+      if (!lastByConversation.has(row.conversation_id)) {
+        lastByConversation.set(row.conversation_id, new Date(row.received_at).getTime());
+      }
+    }
+
+    const now = Date.now();
+    const active = candidates.find(
+      (c: { id: string }) =>
+        lastByConversation.has(c.id) && now - lastByConversation.get(c.id)! < 24 * 60 * 60 * 1000
+    );
+    if (active) existing = active;
+  }
+
   if (existing) return existing;
 
   const insertObj: any = {

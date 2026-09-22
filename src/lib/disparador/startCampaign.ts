@@ -133,7 +133,13 @@ export async function startCampaign(
         .schema("wacrm")
         .from("messages")
         .select("received_at, conversations!inner(contact_id, config_id)")
-        .eq("sender_type", "contact")
+        // 'contact' nunca existe em wacrm.messages.sender_type (valores reais:
+        // 'customer'/'agent'/'bot', confirmado ao vivo) — com 'contact', esta
+        // query sempre voltava vazia, então windowMap ficava sempre vazio e
+        // todo envio Meta sem template caía permanentemente no ramo "fora da
+        // janela de 24h" (erro 131026), mesmo pra contatos que responderam há
+        // minutos.
+        .eq("sender_type", "customer")
         .in("conversations.config_id", metaSessionIds)
         .order("received_at", { ascending: false });
 
