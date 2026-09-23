@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import {
+  AlertTriangle,
   ArrowLeft,
   ChevronRight,
   LayoutTemplate,
@@ -79,6 +80,13 @@ export function TemplatePicker({
   onSelect,
 }: TemplatePickerProps) {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  // True when the caller's team has an active team_allowed_templates
+  // restriction (migration 106) but none of the account's APPROVED
+  // templates survive it — distinct from "no templates approved at
+  // all" so the empty state can point at the actual cause (equipe
+  // misconfiguration) instead of the generic "sync your templates"
+  // copy.
+  const [restrictedEmpty, setRestrictedEmpty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MessageTemplate | null>(null);
   const [params, setParams] = useState<string[]>([]);
@@ -99,6 +107,7 @@ export function TemplatePicker({
       if (!user) {
         if (!cancelled) {
           setTemplates([]);
+          setRestrictedEmpty(false);
           setLoading(false);
         }
         return;
@@ -118,6 +127,7 @@ export function TemplatePicker({
       if (error) {
         console.error("Failed to fetch templates:", error);
         setTemplates([]);
+        setRestrictedEmpty(false);
         setLoading(false);
         return;
       }
@@ -140,6 +150,7 @@ export function TemplatePicker({
 
       if (!teamId) {
         setTemplates(approved);
+        setRestrictedEmpty(false);
         setLoading(false);
         return;
       }
@@ -152,7 +163,15 @@ export function TemplatePicker({
       if (cancelled) return;
 
       const allowedIds = new Set((allowed ?? []).map((r) => r.template_id as string));
-      setTemplates(allowedIds.size > 0 ? approved.filter((t) => allowedIds.has(t.id)) : approved);
+      if (allowedIds.size === 0) {
+        // No restriction configured for this team — unrestricted.
+        setTemplates(approved);
+        setRestrictedEmpty(false);
+      } else {
+        const filtered = approved.filter((t) => allowedIds.has(t.id));
+        setTemplates(filtered);
+        setRestrictedEmpty(filtered.length === 0);
+      }
       setLoading(false);
     })();
 
@@ -236,6 +255,14 @@ export function TemplatePicker({
             {loading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              </div>
+            ) : restrictedEmpty ? (
+              <div className="flex flex-col items-center gap-2 rounded-md border border-border bg-background/50 p-6 text-center">
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+                <p className="text-sm text-popover-foreground">
+                  Nenhum template disponível para sua equipe. Solicite ao seu supervisor que
+                  configure os templates permitidos em Equipes.
+                </p>
               </div>
             ) : templates.length === 0 ? (
               <div className="rounded-md border border-border bg-background/50 p-6 text-center">
