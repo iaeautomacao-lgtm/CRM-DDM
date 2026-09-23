@@ -109,13 +109,13 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           <DropdownMenuItem
             render={
               <Link
-                href="/settings?tab=profile"
+                href="/perfil"
                 className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
               />
             }
           >
             <User className="size-4" />
-            Perfil
+            Meu Perfil
           </DropdownMenuItem>
           <DropdownMenuItem
             render={

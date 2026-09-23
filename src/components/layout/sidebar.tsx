@@ -416,14 +416,14 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               <DropdownMenuItem
                 render={
                   <Link
-                    href="/settings?tab=profile"
+                    href="/perfil"
                     onClick={onClose}
                     className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
                   />
                 }
               >
                 <User className="size-4" />
-                Perfil
+                Meu Perfil
               </DropdownMenuItem>
               <DropdownMenuItem
                 render={
