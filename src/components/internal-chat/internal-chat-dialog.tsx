@@ -99,6 +99,38 @@ function formatDuration(totalSeconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+// mp4 (Safari) / ogg (Firefox) first — both are already in chat-media's
+// allowed_mime_types (023_chat_media.sql) without needing migration 111.
+// webm is last on purpose: it's the only container Chrome/Edge/Opera's
+// MediaRecorder can produce at all, so it's the fallback that actually
+// matters in practice, not a preferred choice.
+const AUDIO_MIME_PREFERENCE = ["audio/mp4", "audio/ogg", "audio/webm"];
+
+function pickSupportedAudioMimeType(): string {
+  for (const type of AUDIO_MIME_PREFERENCE) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return "";
+}
+
+// MediaRecorder.mimeType commonly reports codec params back (e.g.
+// "audio/webm;codecs=opus") even when a bare type was requested — the
+// bucket's allowed_mime_types (023_chat_media.sql) are exact strings
+// with no codec suffix, so uploading the untrimmed value 404s against
+// the allow-list even for a type that IS actually permitted.
+function baseMimeType(mime: string): string {
+  return mime.split(";")[0].trim();
+}
+
+// Keeps the staged file's extension truthful to what was actually
+// recorded — previously hardcoded to .webm regardless of format, which
+// was harmless while webm was the only output but became actively
+// misleading once mp4/ogg became reachable via AUDIO_MIME_PREFERENCE.
+function extensionForAudioMime(mime: string): string {
+  const subtype = mime.split("/")[1] ?? "webm";
+  return subtype === "mp4" ? "m4a" : subtype;
+}
+
 /** Renders a message's attached media inline, per media_type — mirrors
  *  the four buckets message-composer.tsx's MediaDraftPreview covers. */
 function MessageMedia({ url, type }: { url: string; type: string | null | undefined }) {
@@ -446,8 +478,10 @@ export function InternalChatDialog({
   // ---- voice recording (native MediaRecorder — no opus-recorder; no
   // WhatsApp-compatibility requirement here) ----
   const finalizeRecording = useCallback(async (blob: Blob) => {
-    const mimeType = blob.type || "audio/webm";
-    const file = new File([blob], `audio-${Date.now()}.webm`, { type: mimeType });
+    const mimeType = baseMimeType(blob.type || "audio/webm");
+    const file = new File([blob], `audio-${Date.now()}.${extensionForAudioMime(mimeType)}`, {
+      type: mimeType,
+    });
     if (file.size > MEDIA_MAX_BYTES_BY_KIND.audio) {
       toast.error(
         `Áudio tem ${(file.size / 1024 / 1024).toFixed(1)} MB — limite é ${Math.round(MEDIA_MAX_BYTES_BY_KIND.audio / 1024 / 1024)} MB.`,
@@ -474,11 +508,7 @@ export function InternalChatDialog({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
-        ? "audio/webm"
-        : MediaRecorder.isTypeSupported("audio/ogg")
-          ? "audio/ogg"
-          : "";
+      const mimeType = pickSupportedAudioMimeType();
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       audioChunksRef.current = [];
       recordingCancelledRef.current = false;
