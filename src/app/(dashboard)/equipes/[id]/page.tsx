@@ -319,6 +319,8 @@ export default function EquipeDetailPage({
   const [unlinkedChannelsLoading, setUnlinkedChannelsLoading] = useState(false);
   const [selectedChannelIds, setSelectedChannelIds] = useState<Set<string>>(new Set());
   const [addingChannel, setAddingChannel] = useState(false);
+  const [removeChannelTarget, setRemoveChannelTarget] = useState<LinkedChannel | null>(null);
+  const [removingChannel, setRemovingChannel] = useState(false);
 
   // ---- Tabulações — every kind='outcome' tag in the account, checkbox
   // reflects a row existing in wacrm.team_outcome_tags for (this team,
@@ -694,6 +696,30 @@ export default function EquipeDetailPage({
     }
   }
 
+  async function handleRemoveChannel() {
+    if (!removeChannelTarget) return;
+    setRemovingChannel(true);
+    try {
+      const res = await apiFetch("/api/whatsapp/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: removeChannelTarget.id, team_id: null }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Falha ao remover canal da equipe");
+      }
+      setChannels((prev) => prev.filter((c) => c.id !== removeChannelTarget.id));
+      toast.success("Canal removido da equipe");
+      setRemoveChannelTarget(null);
+    } catch (err) {
+      console.error("[EquipeDetail] remove channel error:", err);
+      toast.error(err instanceof Error ? err.message : "Falha ao remover canal da equipe");
+    } finally {
+      setRemovingChannel(false);
+    }
+  }
+
   async function handleCreateTabulacao() {
     const name = newTabulacaoName.trim();
     if (!name) {
@@ -994,6 +1020,17 @@ export default function EquipeDetailPage({
                         <Badge className={`text-xs ${statusBadge.className}`}>
                           {statusBadge.label}
                         </Badge>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => setRemoveChannelTarget(c)}
+                          title="Remover canal da equipe"
+                          aria-label="Remover canal da equipe"
+                          className="shrink-0 text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="size-3.5" />
+                        </Button>
                       </div>
                     );
                   })}
@@ -1426,6 +1463,45 @@ export default function EquipeDetailPage({
                 </>
               ) : (
                 `Adicionar selecionados${selectedChannelIds.size > 0 ? ` (${selectedChannelIds.size})` : ""}`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remover canal */}
+      <Dialog
+        open={removeChannelTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveChannelTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Remover canal da equipe</DialogTitle>
+            <DialogDescription>
+              Remover canal da equipe? &quot;
+              {removeChannelTarget?.display_phone_number ||
+                `Canal ${removeChannelTarget?.id.slice(0, 8)}`}
+              &quot; fica sem equipe, mas continua habilitado normalmente.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setRemoveChannelTarget(null)}
+              disabled={removingChannel}
+            >
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={handleRemoveChannel} disabled={removingChannel}>
+              {removingChannel ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Removendo…
+                </>
+              ) : (
+                "Remover canal"
               )}
             </Button>
           </DialogFooter>
