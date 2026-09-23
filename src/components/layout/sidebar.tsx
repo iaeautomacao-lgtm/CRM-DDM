@@ -130,7 +130,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   // "Trocar senha" opens this inline instead of routing anywhere.
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [internalChatOpen, setInternalChatOpen] = useState(false);
-  const unreadInternalMessages = useUnreadInternalMessages(accountRole === "agent");
+  const unreadInternalMessages = useUnreadInternalMessages(true);
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
@@ -308,6 +308,27 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       </li>
                     </>
                   )}
+                  {item.href === "/inbox" &&
+                    (accountRole === "admin" || accountRole === "owner") && (
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => setInternalChatOpen(true)}
+                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:py-2"
+                        >
+                          <Headphones className="h-4 w-4" />
+                          <span className="flex-1">Mensagens internas</span>
+                          {unreadInternalMessages > 0 && (
+                            <span
+                              aria-label={`${unreadInternalMessages} mensagem${unreadInternalMessages === 1 ? "" : "s"} não lida${unreadInternalMessages === 1 ? "" : "s"}`}
+                              className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[#FF5706] px-1 text-[10px] font-semibold text-white"
+                            >
+                              {unreadInternalMessages > 99 ? "99+" : unreadInternalMessages}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    )}
                 </Fragment>
               );
             })}
@@ -496,7 +517,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       </aside>
 
       <ChangePasswordDialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen} />
-      <InternalChatDialog open={internalChatOpen} onOpenChange={setInternalChatOpen} />
+      <InternalChatDialog
+        open={internalChatOpen}
+        onOpenChange={setInternalChatOpen}
+        mode={accountRole === "agent" ? "operator" : "supervisor"}
+      />
     </>
   );
 }

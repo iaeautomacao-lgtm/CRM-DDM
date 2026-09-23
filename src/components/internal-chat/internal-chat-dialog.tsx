@@ -1,12 +1,22 @@
 "use client";
 
 // InternalChatDialog — 1:1 staff chat (operador <-> supervisor),
-// wacrm.internal_messages (migration 109). Two steps: pick a
-// supervisor (team_members-derived, falling back to account-wide
-// admins/owners for an agent with no team), then a plain thread for
-// that pair. No conversation/thread row — a "thread" is just every
-// internal_messages row where the two users are sender+recipient of
-// each other, queried directly.
+// wacrm.internal_messages (migration 109). Two steps: pick a contact,
+// then a plain thread for that pair. No conversation/thread row — a
+// "thread" is just every internal_messages row where the two users
+// are sender+recipient of each other, queried directly (symmetric —
+// doesn't care which side of the pair is "me").
+//
+// `mode` picks who step 1 offers as contacts:
+//   'operator'   (agent)          — supervisors reachable from my team
+//                                    (team_members-derived, falling back
+//                                    to account-wide admins/owners for
+//                                    an agent with no team)
+//   'supervisor' (admin/owner)    — operators who have actually messaged
+//                                    me (DISTINCT sender_id from rows
+//                                    where I'm recipient), since a
+//                                    supervisor has no fixed "my team"
+//                                    the way an operator does
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -27,30 +37,37 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { InternalMessage } from "@/types";
 
+type InternalChatMode = "operator" | "supervisor";
+
 interface InternalChatDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  mode?: InternalChatMode;
 }
 
-interface SupervisorProfile {
+interface ChatContact {
   user_id: string;
   full_name: string | null;
   email: string | null;
   avatar_url: string | null;
 }
 
-function displayNameOf(p: SupervisorProfile): string {
+function displayNameOf(p: ChatContact): string {
   return p.full_name || p.email || "Sem nome";
 }
 
-export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogProps) {
+export function InternalChatDialog({
+  open,
+  onOpenChange,
+  mode = "operator",
+}: InternalChatDialogProps) {
   const { user, accountId } = useAuth();
   const myUserId = user?.id;
 
   const [step, setStep] = useState<"list" | "thread">("list");
-  const [supervisors, setSupervisors] = useState<SupervisorProfile[]>([]);
-  const [supervisorsLoading, setSupervisorsLoading] = useState(false);
-  const [selectedSupervisor, setSelectedSupervisor] = useState<SupervisorProfile | null>(null);
+  const [contacts, setContacts] = useState<ChatContact[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
   const [messages, setMessages] = useState<InternalMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [draft, setDraft] = useState("");
@@ -60,23 +77,54 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
   function handleOpenChange(next: boolean) {
     if (!next) {
       setStep("list");
-      setSelectedSupervisor(null);
+      setSelectedContact(null);
       setMessages([]);
       setDraft("");
     }
     onOpenChange(next);
   }
 
-  // Step 1 — supervisor list. Two team_members.user_id has no FK to
-  // profiles (confirmed dead end in flows/engine.ts — PGRST200 on an
-  // embedded profiles!inner there), so this is two queries + a JS
-  // join, same shape already used across the codebase for this exact
-  // relation.
-  const fetchSupervisors = useCallback(async () => {
+  // Step 1 — contact list.
+  //
+  // 'supervisor': DISTINCT sender_id from internal_messages where I'm
+  // recipient — PostgREST has no SELECT DISTINCT, so this fetches
+  // every matching row and dedupes client-side via Set, same as the
+  // 'operator' branch below already does for team_members rows.
+  //
+  // 'operator': team_members.user_id has no FK to profiles (confirmed
+  // dead end in flows/engine.ts — PGRST200 on an embedded
+  // profiles!inner there), so this is two queries + a JS join, same
+  // shape already used across the codebase for this exact relation.
+  const fetchContacts = useCallback(async () => {
     if (!myUserId || !accountId) return;
-    setSupervisorsLoading(true);
+    setContactsLoading(true);
     try {
       const supabase = createClient();
+
+      if (mode === "supervisor") {
+        const { data: sent, error } = await supabase
+          .from("internal_messages")
+          .select("sender_id")
+          .eq("recipient_id", myUserId);
+        if (error) throw error;
+
+        const senderIds = Array.from(
+          new Set((sent ?? []).map((r) => r.sender_id as string)),
+        );
+        if (senderIds.length === 0) {
+          setContacts([]);
+          return;
+        }
+
+        const { data, error: profilesError } = await supabase
+          .from("profiles")
+          .select("user_id, full_name, email, avatar_url")
+          .in("user_id", senderIds);
+        if (profilesError) throw profilesError;
+        setContacts((data ?? []) as ChatContact[]);
+        return;
+      }
+
       const { data: myTeams, error: myTeamsError } = await supabase
         .from("team_members")
         .select("team_id")
@@ -93,7 +141,7 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
           .in("account_role", ["admin", "owner"])
           .neq("user_id", myUserId);
         if (error) throw error;
-        setSupervisors((data ?? []) as SupervisorProfile[]);
+        setContacts((data ?? []) as ChatContact[]);
         return;
       }
 
@@ -107,7 +155,7 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
         new Set((teammates ?? []).map((t) => t.user_id as string)),
       ).filter((id) => id !== myUserId);
       if (candidateIds.length === 0) {
-        setSupervisors([]);
+        setContacts([]);
         return;
       }
 
@@ -117,28 +165,32 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
         .in("user_id", candidateIds)
         .eq("account_role", "admin");
       if (error) throw error;
-      setSupervisors((data ?? []) as SupervisorProfile[]);
+      setContacts((data ?? []) as ChatContact[]);
     } catch (err) {
-      console.error("[InternalChatDialog] failed to load supervisors:", err);
-      toast.error("Falha ao carregar supervisores");
-      setSupervisors([]);
+      console.error("[InternalChatDialog] failed to load contacts:", err);
+      toast.error(
+        mode === "supervisor" ? "Falha ao carregar operadores" : "Falha ao carregar supervisores",
+      );
+      setContacts([]);
     } finally {
-      setSupervisorsLoading(false);
+      setContactsLoading(false);
     }
-  }, [myUserId, accountId]);
+  }, [myUserId, accountId, mode]);
 
   useEffect(() => {
     if (!open) return;
     setStep("list");
-    setSelectedSupervisor(null);
+    setSelectedContact(null);
     setMessages([]);
-    fetchSupervisors();
-  }, [open, fetchSupervisors]);
+    fetchContacts();
+  }, [open, fetchContacts]);
 
   // Step 2 — thread for the selected pair, plus marking any unread
-  // messages from that supervisor as read now that they're visible.
+  // messages from that contact as read now that they're visible. The
+  // query and the mark-as-read are already symmetric in sender/
+  // recipient terms, so this needs no mode branching at all.
   useEffect(() => {
-    if (!open || step !== "thread" || !selectedSupervisor || !myUserId || !accountId) return;
+    if (!open || step !== "thread" || !selectedContact || !myUserId || !accountId) return;
     let cancelled = false;
     const supabase = createClient();
 
@@ -150,7 +202,7 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
           .select("*")
           .eq("account_id", accountId)
           .or(
-            `and(sender_id.eq.${myUserId},recipient_id.eq.${selectedSupervisor.user_id}),and(sender_id.eq.${selectedSupervisor.user_id},recipient_id.eq.${myUserId})`,
+            `and(sender_id.eq.${myUserId},recipient_id.eq.${selectedContact.user_id}),and(sender_id.eq.${selectedContact.user_id},recipient_id.eq.${myUserId})`,
           )
           .order("created_at", { ascending: true });
         if (cancelled) return;
@@ -161,7 +213,7 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
           .from("internal_messages")
           .update({ read_at: new Date().toISOString() })
           .eq("recipient_id", myUserId)
-          .eq("sender_id", selectedSupervisor.user_id)
+          .eq("sender_id", selectedContact.user_id)
           .is("read_at", null);
         if (readError) {
           console.error("[InternalChatDialog] failed to mark messages read:", readError);
@@ -179,29 +231,29 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
     return () => {
       cancelled = true;
     };
-  }, [open, step, selectedSupervisor, myUserId, accountId]);
+  }, [open, step, selectedContact, myUserId, accountId]);
 
   // Live updates for the open thread — two listeners (sender_id /
   // recipient_id) since a single postgres_changes filter can't
   // express OR; RLS (internal_messages_select) is the real boundary,
-  // this is just routing. Re-subscribes per selected supervisor
-  // rather than juggling a ref, same trade-off contact-sidebar's
-  // effects make elsewhere in this codebase.
+  // this is just routing. Re-subscribes per selected contact rather
+  // than juggling a ref, same trade-off contact-sidebar's effects
+  // make elsewhere in this codebase.
   useEffect(() => {
-    if (!open || step !== "thread" || !selectedSupervisor || !myUserId || !accountId) return;
+    if (!open || step !== "thread" || !selectedContact || !myUserId || !accountId) return;
     const supabase = createClient();
-    const supervisorId = selectedSupervisor.user_id;
+    const contactId = selectedContact.user_id;
 
     const handleInsert = (payload: { new: InternalMessage }) => {
       const row = payload.new;
       const belongsToThread =
-        (row.sender_id === myUserId && row.recipient_id === supervisorId) ||
-        (row.sender_id === supervisorId && row.recipient_id === myUserId);
+        (row.sender_id === myUserId && row.recipient_id === contactId) ||
+        (row.sender_id === contactId && row.recipient_id === myUserId);
       if (!belongsToThread) return;
 
       setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
 
-      if (row.sender_id === supervisorId && row.recipient_id === myUserId) {
+      if (row.sender_id === contactId && row.recipient_id === myUserId) {
         supabase
           .from("internal_messages")
           .update({ read_at: new Date().toISOString() })
@@ -241,27 +293,27 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [open, step, selectedSupervisor, myUserId, accountId]);
+  }, [open, step, selectedContact, myUserId, accountId]);
 
   useEffect(() => {
     scrollBottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
-  function openThread(supervisor: SupervisorProfile) {
-    setSelectedSupervisor(supervisor);
+  function openThread(contact: ChatContact) {
+    setSelectedContact(contact);
     setMessages([]);
     setStep("thread");
   }
 
   function backToList() {
     setStep("list");
-    setSelectedSupervisor(null);
+    setSelectedContact(null);
     setMessages([]);
   }
 
   async function handleSend() {
     const content = draft.trim();
-    if (!content || !selectedSupervisor || !myUserId || !accountId || sending) return;
+    if (!content || !selectedContact || !myUserId || !accountId || sending) return;
     setSending(true);
     try {
       const supabase = createClient();
@@ -270,7 +322,7 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
         .insert({
           account_id: accountId,
           sender_id: myUserId,
-          recipient_id: selectedSupervisor.user_id,
+          recipient_id: selectedContact.user_id,
           content,
         })
         .select()
@@ -288,36 +340,40 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
     }
   }
 
+  const listTitle = mode === "supervisor" ? "Mensagens internas" : "Conversar com supervisor";
+  const emptyListMessage =
+    mode === "supervisor" ? "Nenhuma mensagem recebida ainda." : "Nenhum supervisor disponível.";
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex h-[32rem] flex-col border-border bg-background p-0 sm:max-w-sm">
         {step === "list" ? (
           <>
             <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
-              <DialogTitle className="text-foreground">Conversar com supervisor</DialogTitle>
+              <DialogTitle className="text-foreground">{listTitle}</DialogTitle>
             </DialogHeader>
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-0.5 p-2">
-                {supervisorsLoading ? (
+                {contactsLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
-                ) : supervisors.length === 0 ? (
+                ) : contacts.length === 0 ? (
                   <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-                    Nenhum supervisor disponível.
+                    {emptyListMessage}
                   </p>
                 ) : (
-                  supervisors.map((s) => {
-                    const name = displayNameOf(s);
+                  contacts.map((c) => {
+                    const name = displayNameOf(c);
                     return (
                       <button
-                        key={s.user_id}
+                        key={c.user_id}
                         type="button"
-                        onClick={() => openThread(s)}
+                        onClick={() => openThread(c)}
                         className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted"
                       >
                         <Avatar className="size-8 shrink-0">
-                          {s.avatar_url ? <AvatarImage src={s.avatar_url} alt={name} /> : null}
+                          {c.avatar_url ? <AvatarImage src={c.avatar_url} alt={name} /> : null}
                           <AvatarFallback className="bg-primary/10 text-xs font-medium text-primary">
                             {name.charAt(0).toUpperCase()}
                           </AvatarFallback>
@@ -333,7 +389,7 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
             </ScrollArea>
           </>
         ) : (
-          selectedSupervisor && (
+          selectedContact && (
             <>
               <DialogHeader className="flex-row items-center gap-2 space-y-0 border-b border-border px-2 pb-3 pt-4">
                 <Button
@@ -347,18 +403,18 @@ export function InternalChatDialog({ open, onOpenChange }: InternalChatDialogPro
                   <ArrowLeft className="size-4" />
                 </Button>
                 <Avatar className="size-7 shrink-0">
-                  {selectedSupervisor.avatar_url ? (
+                  {selectedContact.avatar_url ? (
                     <AvatarImage
-                      src={selectedSupervisor.avatar_url}
-                      alt={displayNameOf(selectedSupervisor)}
+                      src={selectedContact.avatar_url}
+                      alt={displayNameOf(selectedContact)}
                     />
                   ) : null}
                   <AvatarFallback className="bg-primary/10 text-xs font-medium text-primary">
-                    {displayNameOf(selectedSupervisor).charAt(0).toUpperCase()}
+                    {displayNameOf(selectedContact).charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <DialogTitle className="min-w-0 flex-1 truncate text-left text-sm text-foreground">
-                  {displayNameOf(selectedSupervisor)}
+                  {displayNameOf(selectedContact)}
                 </DialogTitle>
               </DialogHeader>
 
