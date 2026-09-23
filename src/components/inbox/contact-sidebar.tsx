@@ -3,6 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
@@ -19,12 +20,29 @@ import {
   Plus,
   Brain,
   RefreshCw,
+  History,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Contact, Deal, ContactNote, Tag, Conversation } from "@/types";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import {
+  loadContactConversations,
+  type TimelineConversation,
+} from "@/lib/contact-timeline/queries";
+import { ConversationCard } from "@/components/contact-timeline/ConversationCard";
+
+// One more than the display cap — same "fetch cap+1 to detect more
+// without a second COUNT query" shape loadConversationMessages uses.
+// Not perfectly precise once the current conversation happens to be
+// among the fetched rows (it gets filtered out below, so "more than
+// 5 remain" can under-count by one in that specific case) — an
+// acceptable trade-off for a sidebar convenience link, not worth a
+// second round trip to get exactly right.
+const HISTORY_FETCH_LIMIT = 6;
+const HISTORY_DISPLAY_LIMIT = 5;
 
 interface ContactSidebarProps {
   contact: Contact | null;
@@ -49,6 +67,9 @@ export function ContactSidebar({
   const [analyzing, setAnalyzing] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
+  const [history, setHistory] = useState<TimelineConversation[]>([]);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     if (contact) {
@@ -154,6 +175,36 @@ export function ContactSidebar({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContactData();
   }, [fetchContactData]);
+
+  const fetchHistory = useCallback(async () => {
+    if (!contact || !accountId) {
+      setHistory([]);
+      setHistoryHasMore(false);
+      return;
+    }
+    setHistoryLoading(true);
+    try {
+      const supabase = createClient();
+      const rows = await loadContactConversations(supabase, {
+        accountId,
+        contactId: contact.id,
+        limit: HISTORY_FETCH_LIMIT,
+      });
+      const withoutCurrent = rows.filter((c) => c.id !== conversation?.id);
+      setHistory(withoutCurrent.slice(0, HISTORY_DISPLAY_LIMIT));
+      setHistoryHasMore(withoutCurrent.length > HISTORY_DISPLAY_LIMIT);
+    } catch (err) {
+      console.error("[ContactSidebar] failed to load conversation history:", err);
+      setHistory([]);
+      setHistoryHasMore(false);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [contact, accountId, conversation?.id]);
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
 
   const handleCopyPhone = useCallback(async () => {
     if (!contact?.phone) return;
@@ -506,6 +557,48 @@ export function ContactSidebar({
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* History — reuses loadContactConversations/ConversationCard
+              from the /historico feature as-is, just capped to 5 and
+              excluding the currently-open conversation. */}
+          <div>
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                <History className="h-3 w-3" />
+                Histórico
+              </div>
+              {historyHasMore && (
+                <Link
+                  href="/historico"
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Ver todos
+                </Link>
+              )}
+            </div>
+            <div className="mt-2 space-y-2">
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : history.length === 0 ? (
+                <p className="px-1 text-xs text-muted-foreground">Nenhuma conversa anterior</p>
+              ) : (
+                history.map((c) => (
+                  <ConversationCard
+                    key={c.id}
+                    conversation={c}
+                    agentName={null}
+                    teamName={null}
+                    contactInitial={initials}
+                  />
+                ))
+              )}
             </div>
           </div>
         </div>
