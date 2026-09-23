@@ -44,7 +44,7 @@ interface HeaderProps {
 
 export function Header({ onOpenSidebar }: HeaderProps) {
   const pathname = usePathname();
-  const { profile, signOut } = useAuth();
+  const { profile, accountRole, signOut } = useAuth();
   const title = getPageTitle(pathname);
 
   const initial =
@@ -106,17 +106,19 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             </p>
           </div>
           <DropdownMenuSeparator className="bg-border" />
-          <DropdownMenuItem
-            render={
-              <Link
-                href="/perfil"
-                className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
-              />
-            }
-          >
-            <User className="size-4" />
-            Meu Perfil
-          </DropdownMenuItem>
+          {accountRole !== "agent" && (
+            <DropdownMenuItem
+              render={
+                <Link
+                  href="/perfil"
+                  className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
+                />
+              }
+            >
+              <User className="size-4" />
+              Meu Perfil
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             render={
               <Link

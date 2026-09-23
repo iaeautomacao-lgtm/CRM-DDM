@@ -14,6 +14,7 @@ import {
   Download,
   GitBranch,
   Headphones,
+  KeyRound,
   LayoutDashboard,
   LogOut,
   Megaphone,
@@ -36,6 +37,8 @@ import type { AccountRole } from "@/lib/auth/roles";
 import { canAccessRoute, isRouteGated } from "@/lib/role-utils";
 import { ROLE_META } from "@/components/settings/role-meta";
 import { DdmLogo } from "@/components/ui/ddm-logo";
+import { ChangePasswordDialog } from "@/components/layout/change-password-dialog";
+import { toast } from "sonner";
 import {
   Avatar,
   AvatarFallback,
@@ -122,6 +125,9 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   // Auto-expanded when already on a Relatórios page; otherwise the
   // user opens it manually, same as MonitorFiltersPanel's toggle.
   const [reportsOpen, setReportsOpen] = useState(isReportsActive);
+  // Operators (role='agent') have no /perfil or /settings access —
+  // "Trocar senha" opens this inline instead of routing anywhere.
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
@@ -413,18 +419,20 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               sideOffset={6}
               className="min-w-56 bg-popover text-popover-foreground ring-border"
             >
-              <DropdownMenuItem
-                render={
-                  <Link
-                    href="/perfil"
-                    onClick={onClose}
-                    className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
-                  />
-                }
-              >
-                <User className="size-4" />
-                Meu Perfil
-              </DropdownMenuItem>
+              {accountRole !== "agent" && (
+                <DropdownMenuItem
+                  render={
+                    <Link
+                      href="/perfil"
+                      onClick={onClose}
+                      className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
+                    />
+                  }
+                >
+                  <User className="size-4" />
+                  Meu Perfil
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 render={
                   <Link
@@ -447,8 +455,31 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {accountRole === "agent" && (
+            <div className="mt-1 space-y-0.5 px-1">
+              <button
+                type="button"
+                onClick={() => setPasswordDialogOpen(true)}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              >
+                <KeyRound className="size-3.5" />
+                Trocar senha
+              </button>
+              <button
+                type="button"
+                onClick={() => toast("Em breve")}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+              >
+                <Headphones className="size-3.5" />
+                Conversar com supervisor
+              </button>
+            </div>
+          )}
         </div>
       </aside>
+
+      <ChangePasswordDialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen} />
     </>
   );
 }

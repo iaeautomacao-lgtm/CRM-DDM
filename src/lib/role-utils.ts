@@ -14,13 +14,14 @@ import type { AccountRole } from "@/lib/auth/roles";
 // Per-role reach, owner aside (owner always passes in canAccessRoute
 // before this table is even consulted):
 //   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings, /equipes, /perfil
-//   agent  → /inbox, /perfil
-//   viewer → /dashboard, /perfil
-// /perfil is the one route every role reaches — self-service profile +
-// security (ProfileForm/SecurityPanel, the same components /settings
-// already renders), carved out specifically so agent/viewer aren't
-// stuck behind /settings' owner/admin gate just to change their own
-// password.
+//   agent  → /inbox
+//   viewer → /dashboard
+// /perfil (ProfileForm/SecurityPanel, same components /settings
+// renders) is owner/admin only — agents get an inline "Trocar senha"
+// dialog straight from the sidebar footer instead (no route needed);
+// viewer currently has no self-service password change path at all
+// as a result of this narrowing (flagged, not something this change
+// added a replacement for).
 // Routes no role above claims (/canais, /contacts, /pipelines,
 // /flows, /disparador, /ajuda) are owner-only. Adding a new nav
 // route = one new ROUTE_ALLOWLIST entry, or isRouteGated silently
@@ -54,7 +55,7 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
 
   "/settings": ["owner", "admin"],
   "/equipes": ["owner", "admin"],
-  "/perfil": ["owner", "admin", "agent", "viewer"],
+  "/perfil": ["owner", "admin"],
 };
 
 /** True if `pathname` matches a prefix this table restricts. Used to
