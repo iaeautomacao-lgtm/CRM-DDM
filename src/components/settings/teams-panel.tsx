@@ -104,12 +104,8 @@ export function TeamsPanel() {
           ? supabase.from('whatsapp_config').select('id, team_id').in('team_id', teamIds)
           : Promise.resolve({ data: [] as { id: string; team_id: string }[], error: null }),
         teamIds.length > 0
-          ? supabase
-              .from('tags')
-              .select('id, team_id')
-              .eq('kind', 'outcome')
-              .in('team_id', teamIds)
-          : Promise.resolve({ data: [] as { id: string; team_id: string }[], error: null }),
+          ? supabase.from('team_outcome_tags').select('team_id, tag_id').in('team_id', teamIds)
+          : Promise.resolve({ data: [] as { team_id: string; tag_id: string }[], error: null }),
       ]);
 
       if (!teamMembersRes.error) {

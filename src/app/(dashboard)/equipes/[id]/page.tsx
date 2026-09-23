@@ -13,8 +13,10 @@
 // Visão Geral / Tabulações / Templates are tabs (Tabs, uncontrolled
 // defaultValue — same pattern as monitoramento/page.tsx) — Visão Geral
 // is everything the page already had before this became a 3-tab
-// layout; Tabulações (migration 105: tags.team_id) and Templates
-// (migration 106: team_allowed_templates) are new.
+// layout; Tabulações (migration 107: team_outcome_tags, N:N — this
+// superseded migration 105's tags.team_id, which could only record one
+// team per tag) and Templates (migration 106: team_allowed_templates)
+// are new.
 // ============================================================
 
 import { use, useCallback, useEffect, useState } from "react";
@@ -319,9 +321,17 @@ export default function EquipeDetailPage({
   const [addingChannel, setAddingChannel] = useState(false);
 
   // ---- Tabulações — every kind='outcome' tag in the account, checkbox
-  // reflects tag.team_id === this team (migration 105: scalar column,
-  // one team per tag, not a junction table). ----
+  // reflects a row existing in wacrm.team_outcome_tags for (this team,
+  // tag) — migration 107's N:N junction table, replacing migration
+  // 105's tags.team_id scalar column (which could only ever record one
+  // team per tag). tabulacaoTeamIds = tag_ids assigned to THIS team;
+  // tabulacaoOtherTeamCount = how many OTHER teams also have each tag,
+  // for the "+N equipes" badge. ----
   const [tabulacoes, setTabulacoes] = useState<Tag[]>([]);
+  const [tabulacaoTeamIds, setTabulacaoTeamIds] = useState<Set<string>>(new Set());
+  const [tabulacaoOtherTeamCount, setTabulacaoOtherTeamCount] = useState<Map<string, number>>(
+    new Map(),
+  );
   const [tabulacoesLoading, setTabulacoesLoading] = useState(true);
   const [tabulacaoSearch, setTabulacaoSearch] = useState("");
   const [newTabulacaoName, setNewTabulacaoName] = useState("");
@@ -427,29 +437,44 @@ export default function EquipeDetailPage({
     };
   }, [id]);
 
-  // Tabulações — every kind='outcome' tag in the account. Checkbox
-  // state (per row, in the render) reflects team_id === this team;
-  // toggling reassigns team_id directly since there's no junction
-  // table (migration 105 is a scalar column).
+  // Tabulações — every kind='outcome' tag in the account, plus every
+  // team_outcome_tags row for the account. No explicit account_id
+  // filter needed on team_outcome_tags — its SELECT RLS (migration
+  // 107) already scopes it to teams in the caller's account, same as
+  // tags itself.
   const fetchTabulacoes = useCallback(async () => {
     if (!accountId) return;
     setTabulacoesLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("tags")
-        .select("*")
-        .eq("account_id", accountId)
-        .eq("kind", "outcome")
-        .order("name", { ascending: true });
-      if (error) throw error;
-      setTabulacoes((data ?? []) as Tag[]);
+      const [tagsRes, assignmentsRes] = await Promise.all([
+        supabase
+          .from("tags")
+          .select("*")
+          .eq("account_id", accountId)
+          .eq("kind", "outcome")
+          .order("name", { ascending: true }),
+        supabase.from("team_outcome_tags").select("team_id, tag_id"),
+      ]);
+      if (tagsRes.error) throw tagsRes.error;
+      setTabulacoes((tagsRes.data ?? []) as Tag[]);
+
+      if (!assignmentsRes.error) {
+        const mine = new Set<string>();
+        const otherCounts = new Map<string, number>();
+        for (const row of assignmentsRes.data ?? []) {
+          if (row.team_id === id) mine.add(row.tag_id);
+          else otherCounts.set(row.tag_id, (otherCounts.get(row.tag_id) ?? 0) + 1);
+        }
+        setTabulacaoTeamIds(mine);
+        setTabulacaoOtherTeamCount(otherCounts);
+      }
     } catch (err) {
       console.error("[EquipeDetail] tabulacoes fetch error:", err);
       toast.error("Falha ao carregar tabulações");
     } finally {
       setTabulacoesLoading(false);
     }
-  }, [accountId, supabase]);
+  }, [accountId, id, supabase]);
 
   useEffect(() => {
     void fetchTabulacoes();
@@ -678,7 +703,7 @@ export default function EquipeDetailPage({
     if (!accountId || !user) return;
     setCreatingTabulacao(true);
     try {
-      const { data, error } = await supabase
+      const { data: tagRow, error: tagError } = await supabase
         .from("tags")
         .insert({
           account_id: accountId,
@@ -686,14 +711,18 @@ export default function EquipeDetailPage({
           name,
           color: newTabulacaoColor,
           kind: "outcome",
-          team_id: id,
         })
         .select()
         .single();
-      if (error) throw error;
+      if (tagError) throw tagError;
+      const { error: linkError } = await supabase
+        .from("team_outcome_tags")
+        .insert({ team_id: id, tag_id: tagRow.id });
+      if (linkError) throw linkError;
       setTabulacoes((prev) =>
-        [...prev, data as Tag].sort((a, b) => a.name.localeCompare(b.name)),
+        [...prev, tagRow as Tag].sort((a, b) => a.name.localeCompare(b.name)),
       );
+      setTabulacaoTeamIds((prev) => new Set(prev).add(tagRow.id));
       setNewTabulacaoName("");
       toast.success("Tabulação criada");
     } catch (err) {
@@ -705,19 +734,34 @@ export default function EquipeDetailPage({
   }
 
   async function handleToggleTabulacaoTeam(tagId: string, checked: boolean) {
-    const prevTeamId = tabulacoes.find((t) => t.id === tagId)?.team_id ?? null;
-    const nextTeamId = checked ? id : null;
     setPendingTabulacaoId(tagId);
-    setTabulacoes((prev) =>
-      prev.map((t) => (t.id === tagId ? { ...t, team_id: nextTeamId } : t)),
-    );
+    setTabulacaoTeamIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(tagId);
+      else next.delete(tagId);
+      return next;
+    });
     try {
-      const { error } = await supabase.from("tags").update({ team_id: nextTeamId }).eq("id", tagId);
-      if (error) throw error;
+      if (checked) {
+        const { error } = await supabase
+          .from("team_outcome_tags")
+          .insert({ team_id: id, tag_id: tagId });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("team_outcome_tags")
+          .delete()
+          .eq("team_id", id)
+          .eq("tag_id", tagId);
+        if (error) throw error;
+      }
     } catch (err) {
-      setTabulacoes((prev) =>
-        prev.map((t) => (t.id === tagId ? { ...t, team_id: prevTeamId } : t)),
-      );
+      setTabulacaoTeamIds((prev) => {
+        const next = new Set(prev);
+        if (checked) next.delete(tagId);
+        else next.add(tagId);
+        return next;
+      });
       console.error("[EquipeDetail] toggle tabulacao team error:", err);
       toast.error("Falha ao atualizar tabulação");
     } finally {
@@ -731,6 +775,16 @@ export default function EquipeDetailPage({
       const { error } = await supabase.from("tags").delete().eq("id", tagId);
       if (error) throw error;
       setTabulacoes((prev) => prev.filter((t) => t.id !== tagId));
+      setTabulacaoTeamIds((prev) => {
+        const next = new Set(prev);
+        next.delete(tagId);
+        return next;
+      });
+      setTabulacaoOtherTeamCount((prev) => {
+        const next = new Map(prev);
+        next.delete(tagId);
+        return next;
+      });
       toast.success("Tabulação removida");
     } catch (err) {
       console.error("[EquipeDetail] delete tabulacao error:", err);
@@ -1022,7 +1076,10 @@ export default function EquipeDetailPage({
 
               <div className="flex items-start gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
                 <Info className="size-3.5 mt-0.5 shrink-0" />
-                <span>Uma tabulação só pode pertencer a uma equipe por vez — marcar aqui move a tabulação para esta equipe, mesmo que já esteja em outra.</span>
+                <span>
+                  Uma tabulação pode pertencer a várias equipes ao mesmo tempo — marcar aqui
+                  adiciona esta equipe, sem afetar as demais que já a usam.
+                </span>
               </div>
 
               <div className="relative">
@@ -1057,10 +1114,8 @@ export default function EquipeDetailPage({
                   return (
                     <div className="max-h-96 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
                       {filtered.map((tab) => {
-                        const belongsHere = tab.team_id === id;
-                        const otherTeamName = tab.team_id && !belongsHere
-                          ? otherTeams.find((t) => t.id === tab.team_id)?.name
-                          : null;
+                        const belongsHere = tabulacaoTeamIds.has(tab.id);
+                        const otherTeamCount = tabulacaoOtherTeamCount.get(tab.id) ?? 0;
                         const isPending = pendingTabulacaoId === tab.id;
                         const isDeleting = deletingTabulacaoId === tab.id;
                         return (
@@ -1082,9 +1137,9 @@ export default function EquipeDetailPage({
                             <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                               {tab.name}
                             </span>
-                            {otherTeamName ? (
+                            {otherTeamCount > 0 ? (
                               <Badge className="border border-border bg-muted text-xs text-muted-foreground">
-                                {otherTeamName}
+                                +{otherTeamCount} {otherTeamCount === 1 ? "equipe" : "equipes"}
                               </Badge>
                             ) : null}
                             {isPending ? (
