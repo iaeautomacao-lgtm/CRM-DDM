@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import {
@@ -120,7 +121,7 @@ interface SidebarProps {
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const { user, profile, profileLoading, account, accountRole, signOut } = useAuth();
   const totalUnread = useTotalUnread();
   const isReportsActive = pathname.startsWith("/relatorios");
   // Auto-expanded when already on a Relatórios page; otherwise the
@@ -131,6 +132,38 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [internalChatOpen, setInternalChatOpen] = useState(false);
   const unreadInternalMessages = useUnreadInternalMessages(true);
+
+  // Team name(s) shown under the agent's name in the footer — direct
+  // team_members -> teams lookup (no embedded join: team_members.user_id
+  // has no FK to profiles, and the same dead-end shape applies to teams,
+  // so this is two plain queries same as InternalChatDialog's contact
+  // lookups). Owner/admin/viewer don't have a "my team" concept, so this
+  // stays empty (and unrendered) for them.
+  const [teamNames, setTeamNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (accountRole !== "agent" || !user?.id) return;
+    let cancelled = false;
+    const supabase = createClient();
+    (async () => {
+      const { data: memberships } = await supabase
+        .from("team_members")
+        .select("team_id")
+        .eq("user_id", user.id);
+      const teamIds = (memberships ?? []).map((m) => m.team_id as string);
+      if (teamIds.length === 0) {
+        if (!cancelled) setTeamNames([]);
+        return;
+      }
+      const { data: teamRows } = await supabase
+        .from("teams")
+        .select("name")
+        .in("id", teamIds);
+      if (!cancelled) setTeamNames((teamRows ?? []).map((t) => t.name as string));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accountRole, user?.id]);
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
@@ -469,6 +502,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 <p className="truncate text-xs text-muted-foreground">
                   {profile?.email ?? ""}
                 </p>
+                {teamNames.length > 0 && (
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {teamNames.join(", ")}
+                  </p>
+                )}
               </div>
             </DropdownMenuTrigger>
             <DropdownMenuContent

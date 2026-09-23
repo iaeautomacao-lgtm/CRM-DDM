@@ -244,6 +244,10 @@ export interface InternalMessage {
   sender_id: string;
   recipient_id: string;
   content: string;
+  /** Migration 110. Public chat-media URL — null for text-only messages. */
+  media_url?: string | null;
+  /** Migration 110. MIME type of media_url (e.g. "image/jpeg", "audio/webm"). */
+  media_type?: string | null;
   read_at: string | null;
   created_at: string;
 }

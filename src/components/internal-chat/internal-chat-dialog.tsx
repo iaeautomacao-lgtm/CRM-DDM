@@ -1,11 +1,11 @@
 "use client";
 
 // InternalChatDialog — 1:1 staff chat (operador <-> supervisor),
-// wacrm.internal_messages (migration 109). Two steps: pick a contact,
-// then a plain thread for that pair. No conversation/thread row — a
-// "thread" is just every internal_messages row where the two users
-// are sender+recipient of each other, queried directly (symmetric —
-// doesn't care which side of the pair is "me").
+// wacrm.internal_messages (migrations 109 + 110). Two steps: pick a
+// contact, then a plain thread for that pair. No conversation/thread
+// row — a "thread" is just every internal_messages row where the two
+// users are sender+recipient of each other, queried directly
+// (symmetric — doesn't care which side of the pair is "me").
 //
 // `mode` picks who step 1 offers as contacts:
 //   'operator'   (agent)          — supervisors reachable from my team
@@ -17,14 +17,31 @@
 //                                    where I'm recipient), since a
 //                                    supervisor has no fixed "my team"
 //                                    the way an operator does
+//
+// Media: reuses uploadAccountMedia/deleteAccountMedia against the same
+// `chat-media` bucket the inbox composer already writes to (its RLS is
+// generic per-account, nothing WhatsApp-specific — see upload-media.ts).
+// Voice notes use the browser's native MediaRecorder here (not
+// opus-recorder, which the inbox composer uses for WhatsApp-compatible
+// Ogg/Opus) since internal chat has no Meta-compatibility requirement.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Send } from "lucide-react";
+import {
+  ArrowLeft,
+  FileText,
+  Loader2,
+  Mic,
+  Paperclip,
+  Send,
+  Square,
+  X,
+} from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { uploadAccountMedia, deleteAccountMedia, MEDIA_MAX_BYTES_BY_KIND } from "@/lib/storage/upload-media";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +54,11 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { InternalMessage } from "@/types";
 
+const CHAT_MEDIA_BUCKET = "chat-media";
+const MAX_RECORDING_SECONDS = 5 * 60;
+
 type InternalChatMode = "operator" | "supervisor";
+type StagedMediaKind = "image" | "video" | "document" | "audio";
 
 interface InternalChatDialogProps {
   open: boolean;
@@ -52,8 +73,56 @@ interface ChatContact {
   avatar_url: string | null;
 }
 
+interface StagedMedia {
+  kind: StagedMediaKind;
+  mediaUrl: string;
+  mediaType: string;
+  /** Storage path — lets us GC the object if the draft is discarded. */
+  path: string;
+  filename: string;
+}
+
 function displayNameOf(p: ChatContact): string {
   return p.full_name || p.email || "Sem nome";
+}
+
+function kindOfMime(mime: string): StagedMediaKind {
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  return "document";
+}
+
+function formatDuration(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/** Renders a message's attached media inline, per media_type — mirrors
+ *  the four buckets message-composer.tsx's MediaDraftPreview covers. */
+function MessageMedia({ url, type }: { url: string; type: string | null | undefined }) {
+  if (type?.startsWith("image/")) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt="" className="max-w-full rounded-md" />;
+  }
+  if (type?.startsWith("video/")) {
+    return <video src={url} controls className="max-w-full rounded-md" />;
+  }
+  if (type?.startsWith("audio/")) {
+    return <audio src={url} controls className="max-w-full" />;
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-1.5 text-sm underline underline-offset-2"
+    >
+      <FileText className="size-4 shrink-0" />
+      Baixar arquivo
+    </a>
+  );
 }
 
 export function InternalChatDialog({
@@ -74,12 +143,30 @@ export function InternalChatDialog({
   const [sending, setSending] = useState(false);
   const scrollBottomRef = useRef<HTMLDivElement>(null);
 
+  // ---- media ----
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [stagedMedia, setStagedMedia] = useState<StagedMedia | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingCancelledRef = useRef(false);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function resetMediaState() {
+    setStagedMedia(null);
+    setUploading(false);
+  }
+
   function handleOpenChange(next: boolean) {
     if (!next) {
       setStep("list");
       setSelectedContact(null);
       setMessages([]);
       setDraft("");
+      resetMediaState();
     }
     onOpenChange(next);
   }
@@ -299,6 +386,17 @@ export function InternalChatDialog({
     scrollBottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
+  // Tear down any live recording/stream on unmount so a mid-record
+  // navigation away doesn't leave the mic hot — same concern
+  // message-composer.tsx's own cleanup effect guards against.
+  useEffect(() => {
+    return () => {
+      if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+      mediaRecorderRef.current?.stop();
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
   function openThread(contact: ChatContact) {
     setSelectedContact(contact);
     setMessages([]);
@@ -309,11 +407,134 @@ export function InternalChatDialog({
     setStep("list");
     setSelectedContact(null);
     setMessages([]);
+    resetMediaState();
   }
+
+  function discardStagedMedia() {
+    if (stagedMedia) {
+      deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch((err) => {
+        console.error("[InternalChatDialog] failed to GC staged media:", err);
+      });
+    }
+    setStagedMedia(null);
+  }
+
+  async function handleFilePicked(file: File | undefined) {
+    if (!file) return;
+    const kind = kindOfMime(file.type);
+    const max = MEDIA_MAX_BYTES_BY_KIND[kind];
+    if (file.size > max) {
+      toast.error(
+        `Arquivo tem ${(file.size / 1024 / 1024).toFixed(1)} MB — limite para ${kind} é ${Math.round(max / 1024 / 1024)} MB.`,
+      );
+      return;
+    }
+    setUploading(true);
+    try {
+      const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+      if (stagedMedia) {
+        deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch(() => {});
+      }
+      setStagedMedia({ kind, mediaUrl: publicUrl, mediaType: file.type, path, filename: file.name });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha no upload");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  // ---- voice recording (native MediaRecorder — no opus-recorder; no
+  // WhatsApp-compatibility requirement here) ----
+  const finalizeRecording = useCallback(async (blob: Blob) => {
+    const mimeType = blob.type || "audio/webm";
+    const file = new File([blob], `audio-${Date.now()}.webm`, { type: mimeType });
+    if (file.size > MEDIA_MAX_BYTES_BY_KIND.audio) {
+      toast.error(
+        `Áudio tem ${(file.size / 1024 / 1024).toFixed(1)} MB — limite é ${Math.round(MEDIA_MAX_BYTES_BY_KIND.audio / 1024 / 1024)} MB.`,
+      );
+      return;
+    }
+    setUploading(true);
+    try {
+      const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+      setStagedMedia({ kind: "audio", mediaUrl: publicUrl, mediaType: mimeType, path, filename: file.name });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha no upload do áudio");
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    if (recording || uploading || sending) return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      toast.error("Gravação de áudio não suportada neste navegador");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/ogg")
+          ? "audio/ogg"
+          : "";
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recordingCancelledRef.current = false;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+        if (recordingCancelledRef.current) {
+          recordingCancelledRef.current = false;
+          return;
+        }
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        void finalizeRecording(blob);
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+      setRecordSeconds(0);
+      recordTimerRef.current = setInterval(() => setRecordSeconds((s) => s + 1), 1000);
+    } catch (err) {
+      console.error("[InternalChatDialog] failed to start recording:", err);
+      toast.error("Não foi possível acessar o microfone");
+    }
+  }, [recording, uploading, sending, finalizeRecording]);
+
+  const stopRecording = useCallback(() => {
+    if (!recording) return;
+    setRecording(false);
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    mediaRecorderRef.current?.stop();
+  }, [recording]);
+
+  const cancelRecording = useCallback(() => {
+    if (!recording) return;
+    recordingCancelledRef.current = true;
+    setRecording(false);
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    mediaRecorderRef.current?.stop();
+  }, [recording]);
+
+  // Auto-stop at the cap, mirroring message-composer.tsx's own guard.
+  useEffect(() => {
+    if (recording && recordSeconds >= MAX_RECORDING_SECONDS) {
+      stopRecording();
+    }
+  }, [recording, recordSeconds, stopRecording]);
 
   async function handleSend() {
     const content = draft.trim();
-    if (!content || !selectedContact || !myUserId || !accountId || sending) return;
+    if ((!content && !stagedMedia) || !selectedContact || !myUserId || !accountId || sending) {
+      return;
+    }
     setSending(true);
     try {
       const supabase = createClient();
@@ -324,6 +545,8 @@ export function InternalChatDialog({
           sender_id: myUserId,
           recipient_id: selectedContact.user_id,
           content,
+          media_url: stagedMedia?.mediaUrl ?? null,
+          media_type: stagedMedia?.mediaType ?? null,
         })
         .select()
         .single();
@@ -332,6 +555,7 @@ export function InternalChatDialog({
         prev.some((m) => m.id === data.id) ? prev : [...prev, data as InternalMessage],
       );
       setDraft("");
+      setStagedMedia(null);
     } catch (err) {
       console.error("[InternalChatDialog] failed to send message:", err);
       toast.error("Falha ao enviar mensagem");
@@ -343,6 +567,7 @@ export function InternalChatDialog({
   const listTitle = mode === "supervisor" ? "Mensagens internas" : "Conversar com supervisor";
   const emptyListMessage =
     mode === "supervisor" ? "Nenhuma mensagem recebida ainda." : "Nenhum supervisor disponível.";
+  const composerDisabled = sending || uploading || recording;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -443,7 +668,12 @@ export function InternalChatDialog({
                                 : "border border-border bg-muted text-foreground"
                             }`}
                           >
-                            <p className="whitespace-pre-wrap">{m.content}</p>
+                            {m.media_url && (
+                              <div className={m.content ? "mb-1.5" : undefined}>
+                                <MessageMedia url={m.media_url} type={m.media_type} />
+                              </div>
+                            )}
+                            {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
                             <p
                               className={`mt-1 text-[10px] ${
                                 mine ? "text-primary-foreground/70" : "text-muted-foreground"
@@ -463,33 +693,131 @@ export function InternalChatDialog({
                 </div>
               </ScrollArea>
 
-              <div className="flex items-center gap-2 border-t border-border p-3">
-                <Input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend();
-                    }
+              <div className="border-t border-border p-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,video/*,application/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleFilePicked(e.target.files?.[0]);
+                    e.target.value = "";
                   }}
-                  placeholder="Escreva uma mensagem..."
-                  disabled={sending}
-                  className="flex-1"
                 />
-                <Button
-                  type="button"
-                  size="icon"
-                  onClick={handleSend}
-                  disabled={sending || !draft.trim()}
-                  aria-label="Enviar mensagem"
-                >
-                  {sending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <Send className="size-4" />
-                  )}
-                </Button>
+
+                {stagedMedia && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-2">
+                    <div className="min-w-0 flex-1">
+                      {stagedMedia.kind === "image" ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={stagedMedia.mediaUrl}
+                          alt={stagedMedia.filename}
+                          className="h-16 rounded-md object-cover"
+                        />
+                      ) : stagedMedia.kind === "video" ? (
+                        <video src={stagedMedia.mediaUrl} controls className="h-16 rounded-md" />
+                      ) : stagedMedia.kind === "audio" ? (
+                        <audio src={stagedMedia.mediaUrl} controls className="w-full" />
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-sm text-foreground">
+                          <FileText className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{stagedMedia.filename}</span>
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={discardStagedMedia}
+                      aria-label="Remover anexo"
+                      className="shrink-0 text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  </div>
+                )}
+
+                {recording ? (
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-muted px-3 py-2">
+                    <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+                    <span className="flex-1 text-sm text-foreground">
+                      Gravando… {formatDuration(recordSeconds)} / {formatDuration(MAX_RECORDING_SECONDS)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={cancelRecording}
+                      className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-background hover:text-foreground"
+                    >
+                      Cancelar
+                    </button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      onClick={stopRecording}
+                      aria-label="Parar gravação"
+                      className="shrink-0"
+                    >
+                      <Square className="size-4" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={composerDisabled}
+                      aria-label="Anexar arquivo"
+                      className="shrink-0 text-muted-foreground"
+                    >
+                      {uploading ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Paperclip className="size-4" />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => void startRecording()}
+                      disabled={composerDisabled}
+                      aria-label="Gravar áudio"
+                      className="shrink-0 text-muted-foreground"
+                    >
+                      <Mic className="size-4" />
+                    </Button>
+                    <Input
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend();
+                        }
+                      }}
+                      placeholder="Escreva uma mensagem..."
+                      disabled={composerDisabled}
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      size="icon"
+                      onClick={handleSend}
+                      disabled={composerDisabled || (!draft.trim() && !stagedMedia)}
+                      aria-label="Enviar mensagem"
+                    >
+                      {sending ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Send className="size-4" />
+                      )}
+                    </Button>
+                  </div>
+                )}
               </div>
             </>
           )
