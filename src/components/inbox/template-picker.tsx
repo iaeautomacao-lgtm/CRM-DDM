@@ -80,12 +80,13 @@ export function TemplatePicker({
   onSelect,
 }: TemplatePickerProps) {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
-  // True when the caller's team has an active team_allowed_templates
-  // restriction (migration 106) but none of the account's APPROVED
-  // templates survive it — distinct from "no templates approved at
-  // all" so the empty state can point at the actual cause (equipe
-  // misconfiguration) instead of the generic "sync your templates"
-  // copy.
+  // True when the caller belongs to a team and team_allowed_templates
+  // (migration 106) has no rows that match an APPROVED template for
+  // it — including having zero rows at all, since "has a team" is now
+  // itself the restriction (empty = nothing allowed). Distinct from
+  // "no templates approved at all" so the empty state can point at
+  // the actual cause (equipe misconfiguration) instead of the generic
+  // "sync your templates" copy.
   const [restrictedEmpty, setRestrictedEmpty] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<MessageTemplate | null>(null);
@@ -135,9 +136,13 @@ export function TemplatePicker({
       const approved = (data as MessageTemplate[]) ?? [];
 
       // team_allowed_templates (migration 106) restricts which approved
-      // templates a team's operators may use — an empty/missing set for
-      // the caller's team (or no team at all) means unrestricted, same
-      // rule the "Templates" tab in /equipes/[id] enforces.
+      // templates a team's operators may use. Having a team at all is
+      // now itself the restriction: an empty/missing set for the
+      // caller's team means NO templates are allowed (inverted from
+      // the original "empty = unrestricted" rule) — a supervisor must
+      // explicitly opt templates in via /equipes/[id]'s Templates tab.
+      // No team at all is the one case that stays unrestricted, since
+      // there's no equipe whose supervisor could configure anything.
       const { data: membership } = await supabase
         .from("team_members")
         .select("team_id")
@@ -163,15 +168,9 @@ export function TemplatePicker({
       if (cancelled) return;
 
       const allowedIds = new Set((allowed ?? []).map((r) => r.template_id as string));
-      if (allowedIds.size === 0) {
-        // No restriction configured for this team — unrestricted.
-        setTemplates(approved);
-        setRestrictedEmpty(false);
-      } else {
-        const filtered = approved.filter((t) => allowedIds.has(t.id));
-        setTemplates(filtered);
-        setRestrictedEmpty(filtered.length === 0);
-      }
+      const filtered = approved.filter((t) => allowedIds.has(t.id));
+      setTemplates(filtered);
+      setRestrictedEmpty(filtered.length === 0);
       setLoading(false);
     })();
 

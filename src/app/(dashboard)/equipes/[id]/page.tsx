@@ -1282,8 +1282,8 @@ export default function EquipeDetailPage({
                 <div className="flex items-start gap-2 rounded-md border border-[#FF5706]/30 bg-[#FF5706]/10 px-3 py-2 text-xs text-[#FF5706]">
                   <AlertTriangle className="size-3.5 mt-0.5 shrink-0" />
                   <span>
-                    Atenção: nenhum template permitido — operadores desta equipe não podem
-                    iniciar conversas.
+                    Se nenhum template estiver marcado, operadores desta equipe não terão
+                    acesso a nenhum template.
                   </span>
                 </div>
               ) : (
