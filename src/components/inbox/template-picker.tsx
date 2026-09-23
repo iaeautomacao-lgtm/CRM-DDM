@@ -118,9 +118,41 @@ export function TemplatePicker({
       if (error) {
         console.error("Failed to fetch templates:", error);
         setTemplates([]);
-      } else {
-        setTemplates((data as MessageTemplate[]) ?? []);
+        setLoading(false);
+        return;
       }
+
+      const approved = (data as MessageTemplate[]) ?? [];
+
+      // team_allowed_templates (migration 106) restricts which approved
+      // templates a team's operators may use — an empty/missing set for
+      // the caller's team (or no team at all) means unrestricted, same
+      // rule the "Templates" tab in /equipes/[id] enforces.
+      const { data: membership } = await supabase
+        .from("team_members")
+        .select("team_id")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true })
+        .limit(1);
+      const teamId = membership?.[0]?.team_id as string | undefined;
+
+      if (cancelled) return;
+
+      if (!teamId) {
+        setTemplates(approved);
+        setLoading(false);
+        return;
+      }
+
+      const { data: allowed } = await supabase
+        .from("team_allowed_templates")
+        .select("template_id")
+        .eq("team_id", teamId);
+
+      if (cancelled) return;
+
+      const allowedIds = new Set((allowed ?? []).map((r) => r.template_id as string));
+      setTemplates(allowedIds.size > 0 ? approved.filter((t) => allowedIds.has(t.id)) : approved);
       setLoading(false);
     })();
 

@@ -5,11 +5,20 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import type { Conversation, Message, Contact, ConversationStatus, Tag } from "@/types";
+import type {
+  Conversation,
+  Message,
+  Contact,
+  ConversationStatus,
+  MessageTemplate,
+  Tag,
+} from "@/types";
 import { useRealtime } from "@/hooks/use-realtime";
 import { ConversationList } from "@/components/inbox/conversation-list";
 import { MessageThread } from "@/components/inbox/message-thread";
 import { ContactSidebar } from "@/components/inbox/contact-sidebar";
+import { ContactSearchPicker } from "@/components/inbox/contact-search-picker";
+import { TemplatePicker, type TemplateSendValues } from "@/components/inbox/template-picker";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -55,6 +64,15 @@ export default function InboxPage() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+
+  // "Nova conversa" flow: pick a contact, then pick + fill a template
+  // to send it with — mirrors message-thread.tsx's handleSendTemplate,
+  // but keyed off contact_id (no conversation yet) instead of
+  // conversation_id.
+  const [contactPickerOpen, setContactPickerOpen] = useState(false);
+  const [newConvTemplatePickerOpen, setNewConvTemplatePickerOpen] = useState(false);
+  const [newConvContact, setNewConvContact] = useState<Contact | null>(null);
+  const [sendingNewConvTemplate, setSendingNewConvTemplate] = useState(false);
   useEffect(() => {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
@@ -574,6 +592,51 @@ export default function InboxPage() {
     [router]
   );
 
+  const handleContactPicked = useCallback((contact: Contact) => {
+    setNewConvContact(contact);
+    setContactPickerOpen(false);
+    setNewConvTemplatePickerOpen(true);
+  }, []);
+
+  const handleSendNewConversationTemplate = useCallback(
+    async (template: MessageTemplate, values: TemplateSendValues) => {
+      if (!newConvContact || sendingNewConvTemplate) return;
+      setSendingNewConvTemplate(true);
+      try {
+        const res = await apiFetch("/api/whatsapp/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contact_id: newConvContact.id,
+            message_type: "template",
+            template_name: template.name,
+            template_language: template.language,
+            template_message_params: {
+              body: values.body,
+              headerText: values.headerText,
+              buttonParams: values.buttonParams,
+            },
+            template_params: values.body,
+          }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(payload?.error || `HTTP ${res.status}`);
+        }
+        toast.success("Conversa iniciada");
+        setNewConvContact(null);
+        setResyncToken((prev) => prev + 1);
+      } catch (err) {
+        console.error("Failed to start conversation:", err);
+        const reason = err instanceof Error ? err.message : "erro de rede";
+        toast.error(`Falha ao iniciar conversa: ${reason}`);
+      } finally {
+        setSendingNewConvTemplate(false);
+      }
+    },
+    [newConvContact, sendingNewConvTemplate]
+  );
+
   // On mobile (<lg) we show a SINGLE pane — either the list or the
   // thread — rather than cramming both side-by-side. Selecting a
   // conversation slides the thread in; the thread's back button pops
@@ -610,6 +673,7 @@ export default function InboxPage() {
             conversations={conversations}
             onConversationsLoaded={handleConversationsLoaded}
             resyncToken={resyncToken}
+            onCreateConversation={() => setContactPickerOpen(true)}
           />
         </div>
 
@@ -675,6 +739,17 @@ export default function InboxPage() {
           </div>
         )}
       </div>
+
+      <ContactSearchPicker
+        open={contactPickerOpen}
+        onOpenChange={setContactPickerOpen}
+        onSelect={handleContactPicked}
+      />
+      <TemplatePicker
+        open={newConvTemplatePickerOpen}
+        onOpenChange={setNewConvTemplatePickerOpen}
+        onSelect={handleSendNewConversationTemplate}
+      />
     </div>
   );
 }
