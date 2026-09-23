@@ -19,6 +19,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { Loader2, Pencil, Plus, Trash2, Users as UsersIcon } from 'lucide-react';
 
@@ -218,9 +219,12 @@ export function TeamsPanel() {
                     className="flex flex-wrap items-center gap-3 px-4 py-3"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-foreground">
+                      <Link
+                        href={`/equipes/${team.id}`}
+                        className="block truncate text-sm font-medium text-foreground hover:text-primary hover:underline"
+                      >
                         {team.name}
-                      </p>
+                      </Link>
                       {(team.session_timeout_minutes || overflowTeam) && (
                         <div className="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
                           {team.session_timeout_minutes ? (

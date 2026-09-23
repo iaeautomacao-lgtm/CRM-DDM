@@ -13,7 +13,7 @@ import type { AccountRole } from "@/lib/auth/roles";
 //
 // Per-role reach, owner aside (owner always passes in canAccessRoute
 // before this table is even consulted):
-//   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings
+//   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings, /equipes
 //   agent  → /inbox only
 //   viewer → /dashboard only
 // Routes no role above claims (/canais, /contacts, /pipelines,
@@ -48,6 +48,7 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/ajuda": ["owner"],
 
   "/settings": ["owner", "admin"],
+  "/equipes": ["owner", "admin"],
 };
 
 /** True if `pathname` matches a prefix this table restricts. Used to

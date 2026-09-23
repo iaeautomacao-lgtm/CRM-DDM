@@ -15,7 +15,6 @@ import { TemplateManager } from '@/components/settings/template-manager';
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
 import { MembersTab } from '@/components/settings/members-tab';
-import { TeamsPanel } from '@/components/settings/teams-panel';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import {
@@ -62,7 +61,6 @@ function SettingsContent() {
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
     members: <MembersTab />,
-    teams: <TeamsPanel />,
     api: <ApiKeysSettings />,
     ai: <AiAgentSettings />,
   };

@@ -1334,7 +1334,16 @@ export function TemplateManager() {
                     }}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
+                {/* alignItemWithTrigger={false}: this Select is Base UI, not
+                    Radix — there's no position="popper" prop here. The
+                    default (true) tries to align the currently-selected
+                    item over the trigger, which is what made the popup
+                    overlap the Idioma field below it. false falls back to
+                    simple anchor-below positioning. */}
+                <SelectContent
+                  alignItemWithTrigger={false}
+                  className="bg-popover border-border"
+                >
                   {channels.map((c) => (
                     <SelectItem
                       key={c.id}
