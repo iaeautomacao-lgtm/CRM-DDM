@@ -206,7 +206,7 @@ export function MessageThread({
   whatsappProvider = "meta",
   onDeleteConversation,
 }: MessageThreadProps) {
-  const { user, accountId } = useAuth();
+  const { user, accountId, accountRole } = useAuth();
   const [voipSession, setVoipSession] = useState<string>("default");
 
   useEffect(() => {
@@ -1267,7 +1267,7 @@ export function MessageThread({
             </button>
           )}
 
-          {onDeleteConversation && conversation && (
+          {onDeleteConversation && conversation && accountRole !== "agent" && (
             <button
               type="button"
               onClick={handleDeleteClick}

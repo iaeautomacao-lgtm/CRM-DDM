@@ -69,6 +69,7 @@ export function ConversationList({
   onConversationsLoaded,
   resyncToken = 0,
 }: ConversationListProps) {
+  const { accountRole } = useAuth();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<InboxFilter>("all");
   const [selectedLine, setSelectedLine] = useState<string>("all");
@@ -293,7 +294,7 @@ export function ConversationList({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {configs.length > 0 && (
+          {configs.length > 0 && accountRole !== "agent" && (
             <DropdownMenu>
               <DropdownMenuTrigger className="inline-flex items-center justify-center h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground rounded-md hover:bg-muted truncate max-w-[150px]">
                   Linha: {selectedLine === "all" ? "Todas" : (configs.find(c => c.waha_session === selectedLine)?.phone_info?.display_phone_number || selectedLine)}
