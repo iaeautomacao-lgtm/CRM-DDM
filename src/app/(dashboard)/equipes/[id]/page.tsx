@@ -22,13 +22,19 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   ArrowLeft,
+  Eye,
+  FileText,
+  Image as ImageIcon,
   Info,
   Loader2,
   MessageCircle,
   Pencil,
   Plus,
   Search,
+  Trash2,
+  Video,
   X,
 } from "lucide-react";
 
@@ -62,6 +68,26 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { AccountMember, MessageTemplate, Tag, Team } from "@/types";
 
+/** Replaces {{1}}, {{2}}, ... with the matching sample value — left as
+ *  literal "{{n}}" when no sample exists, mirroring template-manager's
+ *  own preview (not re-exported from there, so duplicated verbatim). */
+function substituteVars(text: string, samples: string[] | undefined): string {
+  return text.replace(/\{\{(\d+)\}\}/g, (match, indexStr: string) => {
+    const value = samples?.[Number(indexStr) - 1];
+    return value && value.trim() ? value : match;
+  });
+}
+
+const TEMPLATE_BUTTON_TYPE_LABELS: Record<string, string> = {
+  QUICK_REPLY: "Resposta rápida",
+  URL: "Link",
+  PHONE_NUMBER: "Ligar",
+  COPY_CODE: "Copiar código",
+};
+
+const ACTIVE_TAB_CLASS =
+  "rounded-none border-none bg-transparent px-1 pb-2 text-muted-foreground shadow-none transition-colors duration-200 hover:text-foreground data-active:bg-transparent data-active:text-[#FF5706] data-active:shadow-none data-active:after:bg-[#FF5706]";
+
 const NO_OVERFLOW = "__none__";
 
 // Same 8-color palette tag-manager.tsx offers for contact tags,
@@ -81,6 +107,7 @@ interface LinkedChannel {
   provider: "meta" | "waha";
   display_phone_number: string | null;
   habilitado: boolean;
+  waba_id: string | null;
 }
 
 interface UnlinkedChannel {
@@ -288,22 +315,28 @@ export default function EquipeDetailPage({
   const [addChannelOpen, setAddChannelOpen] = useState(false);
   const [unlinkedChannels, setUnlinkedChannels] = useState<UnlinkedChannel[]>([]);
   const [unlinkedChannelsLoading, setUnlinkedChannelsLoading] = useState(false);
-  const [selectedChannelToAdd, setSelectedChannelToAdd] = useState("");
+  const [selectedChannelIds, setSelectedChannelIds] = useState<Set<string>>(new Set());
   const [addingChannel, setAddingChannel] = useState(false);
 
-  // ---- Tabulações ----
+  // ---- Tabulações — every kind='outcome' tag in the account, checkbox
+  // reflects tag.team_id === this team (migration 105: scalar column,
+  // one team per tag, not a junction table). ----
   const [tabulacoes, setTabulacoes] = useState<Tag[]>([]);
   const [tabulacoesLoading, setTabulacoesLoading] = useState(true);
+  const [tabulacaoSearch, setTabulacaoSearch] = useState("");
   const [newTabulacaoName, setNewTabulacaoName] = useState("");
   const [newTabulacaoColor, setNewTabulacaoColor] = useState(TABULACAO_COLORS[0].value);
   const [creatingTabulacao, setCreatingTabulacao] = useState(false);
   const [deletingTabulacaoId, setDeletingTabulacaoId] = useState<string | null>(null);
+  const [pendingTabulacaoId, setPendingTabulacaoId] = useState<string | null>(null);
 
   // ---- Templates permitidos ----
   const [approvedTemplates, setApprovedTemplates] = useState<MessageTemplate[]>([]);
   const [allowedTemplateIds, setAllowedTemplateIds] = useState<Set<string>>(new Set());
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [previewTemplate, setPreviewTemplate] = useState<MessageTemplate | null>(null);
 
   const fetchTeam = useCallback(async () => {
     if (!accountId) return;
@@ -318,7 +351,7 @@ export default function EquipeDetailPage({
           .order("name", { ascending: true }),
         supabase
           .from("whatsapp_config")
-          .select("id, provider, display_phone_number, habilitado")
+          .select("id, provider, display_phone_number, habilitado, waba_id")
           .eq("team_id", id)
           .order("display_phone_number", { ascending: true }),
       ]);
@@ -394,8 +427,10 @@ export default function EquipeDetailPage({
     };
   }, [id]);
 
-  // Tabulações — kind='outcome' tags scoped to this team OR global
-  // (team_id IS NULL, read-only here).
+  // Tabulações — every kind='outcome' tag in the account. Checkbox
+  // state (per row, in the render) reflects team_id === this team;
+  // toggling reassigns team_id directly since there's no junction
+  // table (migration 105 is a scalar column).
   const fetchTabulacoes = useCallback(async () => {
     if (!accountId) return;
     setTabulacoesLoading(true);
@@ -405,7 +440,6 @@ export default function EquipeDetailPage({
         .select("*")
         .eq("account_id", accountId)
         .eq("kind", "outcome")
-        .or(`team_id.eq.${id},team_id.is.null`)
         .order("name", { ascending: true });
       if (error) throw error;
       setTabulacoes((data ?? []) as Tag[]);
@@ -415,7 +449,7 @@ export default function EquipeDetailPage({
     } finally {
       setTabulacoesLoading(false);
     }
-  }, [accountId, id, supabase]);
+  }, [accountId, supabase]);
 
   useEffect(() => {
     void fetchTabulacoes();
@@ -492,6 +526,17 @@ export default function EquipeDetailPage({
   );
   const supervisorPool = allAccountMembers.filter(
     (m) => m.role === "admin" && !memberUserIds.has(m.user_id),
+  );
+
+  // Templates tab: a template can only be picked if it belongs to a
+  // waba_id this team actually has a channel for — legacy templates
+  // with no waba_id stay visible (flagged "Canal não identificado")
+  // rather than hidden, since we can't tell which channel they're for.
+  const linkedWabaIds = new Set(
+    channels.map((c) => c.waba_id).filter((w): w is string => !!w),
+  );
+  const channelFilteredTemplates = approvedTemplates.filter(
+    (t) => !t.waba_id || linkedWabaIds.has(t.waba_id),
   );
 
   async function handleToggleMember(userId: string, checked: boolean) {
@@ -582,26 +627,43 @@ export default function EquipeDetailPage({
     }
   }
 
-  async function handleAddChannel() {
-    if (!selectedChannelToAdd) return;
+  function toggleSelectedChannel(channelId: string, checked: boolean) {
+    setSelectedChannelIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(channelId);
+      else next.delete(channelId);
+      return next;
+    });
+  }
+
+  async function handleAddChannels() {
+    if (selectedChannelIds.size === 0) return;
     setAddingChannel(true);
     try {
-      const res = await apiFetch("/api/whatsapp/config", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: selectedChannelToAdd, team_id: id }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Falha ao vincular canal");
+      const results = await Promise.all(
+        Array.from(selectedChannelIds).map((channelId) =>
+          apiFetch("/api/whatsapp/config", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: channelId, team_id: id }),
+          }),
+        ),
+      );
+      const failed = results.filter((res) => !res.ok);
+      if (failed.length > 0) {
+        throw new Error(
+          `Falha ao vincular ${failed.length} de ${results.length} canal(is) selecionado(s)`,
+        );
       }
-      toast.success("Canal vinculado à equipe");
+      toast.success(
+        results.length === 1 ? "Canal vinculado à equipe" : `${results.length} canais vinculados à equipe`,
+      );
       setAddChannelOpen(false);
-      setSelectedChannelToAdd("");
+      setSelectedChannelIds(new Set());
       await fetchTeam();
     } catch (err) {
-      console.error("[EquipeDetail] add channel error:", err);
-      toast.error(err instanceof Error ? err.message : "Falha ao vincular canal");
+      console.error("[EquipeDetail] add channels error:", err);
+      toast.error(err instanceof Error ? err.message : "Falha ao vincular canais");
     } finally {
       setAddingChannel(false);
     }
@@ -639,6 +701,27 @@ export default function EquipeDetailPage({
       toast.error("Falha ao criar tabulação");
     } finally {
       setCreatingTabulacao(false);
+    }
+  }
+
+  async function handleToggleTabulacaoTeam(tagId: string, checked: boolean) {
+    const prevTeamId = tabulacoes.find((t) => t.id === tagId)?.team_id ?? null;
+    const nextTeamId = checked ? id : null;
+    setPendingTabulacaoId(tagId);
+    setTabulacoes((prev) =>
+      prev.map((t) => (t.id === tagId ? { ...t, team_id: nextTeamId } : t)),
+    );
+    try {
+      const { error } = await supabase.from("tags").update({ team_id: nextTeamId }).eq("id", tagId);
+      if (error) throw error;
+    } catch (err) {
+      setTabulacoes((prev) =>
+        prev.map((t) => (t.id === tagId ? { ...t, team_id: prevTeamId } : t)),
+      );
+      console.error("[EquipeDetail] toggle tabulacao team error:", err);
+      toast.error("Falha ao atualizar tabulação");
+    } finally {
+      setPendingTabulacaoId(null);
     }
   }
 
@@ -766,10 +849,16 @@ export default function EquipeDetailPage({
       </div>
 
       <Tabs defaultValue="overview">
-        <TabsList>
-          <TabsTrigger value="overview">Visão Geral</TabsTrigger>
-          <TabsTrigger value="tabulacoes">Tabulações</TabsTrigger>
-          <TabsTrigger value="templates">Templates</TabsTrigger>
+        <TabsList variant="line" className="h-auto w-full justify-start gap-6 border-b border-border bg-transparent p-0">
+          <TabsTrigger value="overview" className={ACTIVE_TAB_CLASS}>
+            Visão Geral
+          </TabsTrigger>
+          <TabsTrigger value="tabulacoes" className={ACTIVE_TAB_CLASS}>
+            Tabulações
+          </TabsTrigger>
+          <TabsTrigger value="templates" className={ACTIVE_TAB_CLASS}>
+            Templates
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
@@ -926,9 +1015,24 @@ export default function EquipeDetailPage({
               <div>
                 <h2 className="text-sm font-semibold text-foreground">Tabulações</h2>
                 <p className="text-xs text-muted-foreground">
-                  Tags de encerramento (kind=&quot;outcome&quot;) desta equipe, mais as globais da
-                  conta.
+                  Todas as tags de encerramento (kind=&quot;outcome&quot;) da conta. Marque as que
+                  pertencem a esta equipe.
                 </p>
+              </div>
+
+              <div className="flex items-start gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                <Info className="size-3.5 mt-0.5 shrink-0" />
+                <span>Uma tabulação só pode pertencer a uma equipe por vez — marcar aqui move a tabulação para esta equipe, mesmo que já esteja em outra.</span>
+              </div>
+
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={tabulacaoSearch}
+                  onChange={(e) => setTabulacaoSearch(e.target.value)}
+                  placeholder="Buscar tabulação..."
+                  className="pl-8"
+                />
               </div>
 
               {tabulacoesLoading ? (
@@ -938,42 +1042,77 @@ export default function EquipeDetailPage({
               ) : tabulacoes.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Nenhuma tabulação ainda.</p>
               ) : (
-                <div className="space-y-0.5 rounded-lg border border-border p-1.5">
-                  {tabulacoes.map((tab) => {
-                    const isGlobal = !tab.team_id;
-                    const isDeleting = deletingTabulacaoId === tab.id;
+                (() => {
+                  const normalizedSearch = normalizeForSearch(tabulacaoSearch.trim());
+                  const filtered = tabulacoes.filter(
+                    (t) => !normalizedSearch || normalizeForSearch(t.name).includes(normalizedSearch),
+                  );
+                  if (filtered.length === 0) {
                     return (
-                      <div key={tab.id} className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
-                        <span
-                          className="size-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: tab.color }}
-                        />
-                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                          {tab.name}
-                        </span>
-                        {isGlobal ? (
-                          <Badge className="border border-border bg-muted text-xs text-muted-foreground">
-                            Global
-                          </Badge>
-                        ) : isDeleting ? (
-                          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            onClick={() => handleDeleteTabulacao(tab.id)}
-                            title="Remover tabulação"
-                            aria-label="Remover tabulação"
-                            className="shrink-0 text-muted-foreground hover:text-destructive"
-                          >
-                            <X className="size-3.5" />
-                          </Button>
-                        )}
-                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Nenhuma tabulação encontrada para essa busca.
+                      </p>
                     );
-                  })}
-                </div>
+                  }
+                  return (
+                    <div className="max-h-96 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+                      {filtered.map((tab) => {
+                        const belongsHere = tab.team_id === id;
+                        const otherTeamName = tab.team_id && !belongsHere
+                          ? otherTeams.find((t) => t.id === tab.team_id)?.name
+                          : null;
+                        const isPending = pendingTabulacaoId === tab.id;
+                        const isDeleting = deletingTabulacaoId === tab.id;
+                        return (
+                          <label
+                            key={tab.id}
+                            className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                          >
+                            <Checkbox
+                              checked={belongsHere}
+                              disabled={isPending}
+                              onCheckedChange={(next) =>
+                                handleToggleTabulacaoTeam(tab.id, next === true)
+                              }
+                            />
+                            <span
+                              className="size-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: tab.color }}
+                            />
+                            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                              {tab.name}
+                            </span>
+                            {otherTeamName ? (
+                              <Badge className="border border-border bg-muted text-xs text-muted-foreground">
+                                {otherTeamName}
+                              </Badge>
+                            ) : null}
+                            {isPending ? (
+                              <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                            ) : isDeleting ? (
+                              <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                            ) : (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon-xs"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  handleDeleteTabulacao(tab.id);
+                                }}
+                                title="Excluir tabulação"
+                                aria-label="Excluir tabulação"
+                                className="shrink-0 text-muted-foreground hover:text-destructive"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </Button>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
               )}
 
               <div className="space-y-2 border-t border-border pt-4">
@@ -1037,13 +1176,45 @@ export default function EquipeDetailPage({
                 </p>
               </div>
 
-              <div className="flex items-start gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                <Info className="size-3.5 mt-0.5 shrink-0" />
-                <span>
-                  Se nenhum template estiver marcado, todos os templates aprovados ficam
-                  liberados para esta equipe (sem restrição).
-                </span>
-              </div>
+              {channels.length === 0 && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-500">
+                  <AlertTriangle className="size-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    Vincule pelo menos um canal à equipe antes de selecionar templates
+                    permitidos.
+                  </span>
+                </div>
+              )}
+
+              {allowedTemplateIds.size === 0 ? (
+                <div className="flex items-start gap-2 rounded-md border border-[#FF5706]/30 bg-[#FF5706]/10 px-3 py-2 text-xs text-[#FF5706]">
+                  <AlertTriangle className="size-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    Atenção: nenhum template permitido — operadores desta equipe não podem
+                    iniciar conversas.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                  <Info className="size-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    {allowedTemplateIds.size} de {approvedTemplates.length} templates aprovados
+                    liberados para esta equipe. Os demais ficam bloqueados para operadores dela.
+                  </span>
+                </div>
+              )}
+
+              {channelFilteredTemplates.length > 0 && (
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={templateSearch}
+                    onChange={(e) => setTemplateSearch(e.target.value)}
+                    placeholder="Buscar template..."
+                    className="pl-8"
+                  />
+                </div>
+              )}
 
               {templatesLoading ? (
                 <div className="flex items-center justify-center py-8">
@@ -1053,38 +1224,74 @@ export default function EquipeDetailPage({
                 <p className="text-xs text-muted-foreground">
                   Nenhum template aprovado nesta conta ainda.
                 </p>
+              ) : channelFilteredTemplates.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Nenhum template aprovado para os canais vinculados a esta equipe.
+                </p>
               ) : (
-                <div className="space-y-0.5 rounded-lg border border-border p-1.5">
-                  {approvedTemplates.map((tpl) => {
-                    const checked = allowedTemplateIds.has(tpl.id);
-                    const isPending = pendingTemplateId === tpl.id;
+                (() => {
+                  const normalizedSearch = normalizeForSearch(templateSearch.trim());
+                  const filtered = channelFilteredTemplates.filter(
+                    (t) => !normalizedSearch || normalizeForSearch(t.name).includes(normalizedSearch),
+                  );
+                  if (filtered.length === 0) {
                     return (
-                      <label
-                        key={tpl.id}
-                        className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
-                      >
-                        <Checkbox
-                          checked={checked}
-                          disabled={isPending}
-                          onCheckedChange={(next) =>
-                            handleToggleAllowedTemplate(tpl.id, next === true)
-                          }
-                        />
-                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                          {tpl.name}
-                        </span>
-                        {tpl.language && (
-                          <span className="shrink-0 text-xs uppercase text-muted-foreground">
-                            {tpl.language}
-                          </span>
-                        )}
-                        {isPending && (
-                          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                        )}
-                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        Nenhum template encontrado para essa busca.
+                      </p>
                     );
-                  })}
-                </div>
+                  }
+                  return (
+                    <div className="max-h-96 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+                      {filtered.map((tpl) => {
+                        const checked = allowedTemplateIds.has(tpl.id);
+                        const isPending = pendingTemplateId === tpl.id;
+                        return (
+                          <div
+                            key={tpl.id}
+                            className="flex items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                          >
+                            <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5">
+                              <Checkbox
+                                checked={checked}
+                                disabled={isPending || channels.length === 0}
+                                onCheckedChange={(next) =>
+                                  handleToggleAllowedTemplate(tpl.id, next === true)
+                                }
+                              />
+                              <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                                {tpl.name}
+                              </span>
+                              {!tpl.waba_id && (
+                                <Badge className="border border-border bg-muted text-xs text-muted-foreground">
+                                  Canal não identificado
+                                </Badge>
+                              )}
+                              {tpl.language && (
+                                <span className="shrink-0 text-xs uppercase text-muted-foreground">
+                                  {tpl.language}
+                                </span>
+                              )}
+                            </label>
+                            {isPending && (
+                              <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setPreviewTemplate(tpl)}
+                              className="shrink-0 text-muted-foreground"
+                            >
+                              <Eye className="size-3.5" />
+                              Prévia
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()
               )}
             </CardContent>
           </Card>
@@ -1092,7 +1299,13 @@ export default function EquipeDetailPage({
       </Tabs>
 
       {/* Adicionar canal */}
-      <Dialog open={addChannelOpen} onOpenChange={setAddChannelOpen}>
+      <Dialog
+        open={addChannelOpen}
+        onOpenChange={(open) => {
+          setAddChannelOpen(open);
+          if (!open) setSelectedChannelIds(new Set());
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Adicionar canal</DialogTitle>
@@ -1109,24 +1322,35 @@ export default function EquipeDetailPage({
               Nenhum canal sem equipe disponível nesta conta.
             </p>
           ) : (
-            <Select value={selectedChannelToAdd} onValueChange={(v) => v && setSelectedChannelToAdd(v)}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Selecione um canal">
-                  {(v: string) => {
-                    const c = unlinkedChannels.find((ch) => ch.id === v);
-                    return c ? c.display_phone_number || `Canal ${c.id.slice(0, 8)}` : v;
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent alignItemWithTrigger={false}>
-                {unlinkedChannels.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.display_phone_number || `Canal ${c.id.slice(0, 8)}`} ·{" "}
-                    {c.provider === "waha" ? "WAHA" : "Meta"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+              {unlinkedChannels.map((c) => {
+                const checked = selectedChannelIds.has(c.id);
+                return (
+                  <label
+                    key={c.id}
+                    className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={(next) => toggleSelectedChannel(c.id, next === true)}
+                    />
+                    <MessageCircle className="size-4 shrink-0 text-[#25D366]" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                      {c.display_phone_number || `Canal ${c.id.slice(0, 8)}`}
+                    </span>
+                    <Badge
+                      className={
+                        c.provider === "waha"
+                          ? "border border-border bg-muted text-xs text-muted-foreground"
+                          : "bg-[#14532D] text-xs text-white"
+                      }
+                    >
+                      {c.provider === "waha" ? "WAHA" : "Meta"}
+                    </Badge>
+                  </label>
+                );
+              })}
+            </div>
           )}
           <DialogFooter>
             <Button
@@ -1137,8 +1361,8 @@ export default function EquipeDetailPage({
               Cancelar
             </Button>
             <Button
-              onClick={handleAddChannel}
-              disabled={addingChannel || !selectedChannelToAdd}
+              onClick={handleAddChannels}
+              disabled={addingChannel || selectedChannelIds.size === 0}
             >
               {addingChannel ? (
                 <>
@@ -1146,8 +1370,88 @@ export default function EquipeDetailPage({
                   Vinculando…
                 </>
               ) : (
-                "Vincular canal"
+                `Adicionar selecionados${selectedChannelIds.size > 0 ? ` (${selectedChannelIds.size})` : ""}`
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Prévia do template — simple WhatsApp-bubble mock, same
+          rendering as template-manager.tsx's own preview dialog. */}
+      <Dialog
+        open={previewTemplate !== null}
+        onOpenChange={(open) => {
+          if (!open) setPreviewTemplate(null);
+        }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground">
+              Prévia {previewTemplate ? `— ${previewTemplate.name}` : ""}
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              Variáveis sem valor de exemplo aparecem como {"{{n}}"}.
+            </DialogDescription>
+          </DialogHeader>
+
+          {previewTemplate && (
+            <div className="rounded-lg bg-[#0b141a] p-4">
+              <div className="max-w-[90%] rounded-lg rounded-tl-none bg-[#005c4b] px-3 py-2 text-sm text-white shadow">
+                {previewTemplate.header_type === "text" && previewTemplate.header_content && (
+                  <p className="mb-1 font-semibold">
+                    {substituteVars(
+                      previewTemplate.header_content,
+                      previewTemplate.sample_values?.header,
+                    )}
+                  </p>
+                )}
+                {previewTemplate.header_type && previewTemplate.header_type !== "text" && (
+                  <div className="mb-2 flex h-24 items-center justify-center rounded-md bg-black/20">
+                    {previewTemplate.header_type === "image" && (
+                      <ImageIcon className="size-8 text-white/70" />
+                    )}
+                    {previewTemplate.header_type === "video" && (
+                      <Video className="size-8 text-white/70" />
+                    )}
+                    {previewTemplate.header_type === "document" && (
+                      <FileText className="size-8 text-white/70" />
+                    )}
+                  </div>
+                )}
+
+                <p className="whitespace-pre-wrap">
+                  {substituteVars(previewTemplate.body_text, previewTemplate.sample_values?.body)}
+                </p>
+
+                {previewTemplate.footer_text && (
+                  <p className="mt-1 text-xs text-white/60">{previewTemplate.footer_text}</p>
+                )}
+              </div>
+
+              {previewTemplate.buttons && previewTemplate.buttons.length > 0 && (
+                <div className="mt-2 max-w-[90%] divide-y divide-white/10 overflow-hidden rounded-lg bg-[#1f2c34]">
+                  {previewTemplate.buttons.map((btn, i) => (
+                    <div
+                      key={i}
+                      className="px-3 py-2 text-center text-xs font-medium text-[#53bdeb]"
+                      title={TEMPLATE_BUTTON_TYPE_LABELS[btn.type]}
+                    >
+                      {btn.text || TEMPLATE_BUTTON_TYPE_LABELS[btn.type]}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter className="bg-popover border-border">
+            <Button
+              variant="outline"
+              onClick={() => setPreviewTemplate(null)}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>

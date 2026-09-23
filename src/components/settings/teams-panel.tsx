@@ -21,14 +21,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Loader2, Pencil, Plus, Trash2, Users as UsersIcon } from 'lucide-react';
+import {
+  Loader2,
+  MessageCircle,
+  Pencil,
+  Plus,
+  Tag as TagIcon,
+  Trash2,
+  Users as UsersIcon,
+} from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { RequireRole } from '@/components/auth/require-role';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   Dialog,
   DialogContent,
@@ -39,14 +46,7 @@ import {
 } from '@/components/ui/dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { TeamFormDialog } from './team-form-dialog';
-import { ROLE_META } from './role-meta';
-import type { AccountMember, Team } from '@/types';
-
-// Cards show at most this many member chips before collapsing the
-// rest into a "+N mais" pill — keeps a team with a large roster from
-// blowing out the card height on the list view (the full roster is
-// still editable in TeamFormDialog).
-const MAX_VISIBLE_MEMBERS = 5;
+import type { Team } from '@/types';
 
 interface DeleteCounts {
   agents: number;
@@ -60,13 +60,20 @@ export function TeamsPanel() {
   const [loading, setLoading] = useState(true);
   const [teams, setTeams] = useState<Team[]>([]);
 
-  // Full account roster (for name/avatar/role) + team_id -> user_id[]
-  // membership, fetched alongside the team list so each card can show
-  // its members without a per-team round trip. team_members SELECT is
-  // open to any account member (migration 062), same as teams itself,
-  // so this is a direct Supabase read like fetchTeams below.
-  const [members, setMembers] = useState<AccountMember[]>([]);
+  // team_id -> user_id[] membership, fetched alongside the team list so
+  // each card can show its member count without a per-team round trip.
+  // team_members SELECT is open to any account member (migration 062),
+  // same as teams itself, so this is a direct Supabase read like
+  // fetchTeams below.
   const [membershipByTeam, setMembershipByTeam] = useState<Map<string, string[]>>(new Map());
+
+  // Channel / tabulação counts per team — same "fetch rows, reduce
+  // client-side" shape as membershipByTeam above, just two more
+  // parallel queries in fetchTeams. Counts only (id not needed).
+  const [channelCountByTeam, setChannelCountByTeam] = useState<Map<string, number>>(new Map());
+  const [tabulacaoCountByTeam, setTabulacaoCountByTeam] = useState<Map<string, number>>(
+    new Map(),
+  );
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
@@ -89,17 +96,21 @@ export function TeamsPanel() {
       setTeams(teamRows);
 
       const teamIds = teamRows.map((t) => t.id);
-      const [membersRes, teamMembersRes] = await Promise.all([
-        fetch('/api/account/members', { cache: 'no-store' }),
+      const [teamMembersRes, channelsRes, tagsRes] = await Promise.all([
         teamIds.length > 0
           ? supabase.from('team_members').select('team_id, user_id').in('team_id', teamIds)
           : Promise.resolve({ data: [] as { team_id: string; user_id: string }[], error: null }),
+        teamIds.length > 0
+          ? supabase.from('whatsapp_config').select('id, team_id').in('team_id', teamIds)
+          : Promise.resolve({ data: [] as { id: string; team_id: string }[], error: null }),
+        teamIds.length > 0
+          ? supabase
+              .from('tags')
+              .select('id, team_id')
+              .eq('kind', 'outcome')
+              .in('team_id', teamIds)
+          : Promise.resolve({ data: [] as { id: string; team_id: string }[], error: null }),
       ]);
-
-      if (membersRes.ok) {
-        const payload = (await membersRes.json()) as { members?: AccountMember[] };
-        setMembers(payload.members ?? []);
-      }
 
       if (!teamMembersRes.error) {
         const byTeam = new Map<string, string[]>();
@@ -109,6 +120,22 @@ export function TeamsPanel() {
           byTeam.set(row.team_id, list);
         }
         setMembershipByTeam(byTeam);
+      }
+
+      if (!channelsRes.error) {
+        const counts = new Map<string, number>();
+        for (const row of channelsRes.data ?? []) {
+          counts.set(row.team_id, (counts.get(row.team_id) ?? 0) + 1);
+        }
+        setChannelCountByTeam(counts);
+      }
+
+      if (!tagsRes.error) {
+        const counts = new Map<string, number>();
+        for (const row of tagsRes.data ?? []) {
+          counts.set(row.team_id, (counts.get(row.team_id) ?? 0) + 1);
+        }
+        setTabulacaoCountByTeam(counts);
       }
     } catch (err) {
       console.error('[TeamsPanel] fetch error:', err);
@@ -207,12 +234,9 @@ export function TeamsPanel() {
             <ul className="divide-y divide-border">
               {teams.map((team) => {
                 const overflowTeam = teams.find((t) => t.id === team.overflow_team_id);
-                const memberIds = membershipByTeam.get(team.id) ?? [];
-                const teamMembers = memberIds
-                  .map((id) => members.find((m) => m.user_id === id))
-                  .filter((m): m is AccountMember => !!m);
-                const visibleMembers = teamMembers.slice(0, MAX_VISIBLE_MEMBERS);
-                const hiddenCount = teamMembers.length - visibleMembers.length;
+                const memberCount = (membershipByTeam.get(team.id) ?? []).length;
+                const channelCount = channelCountByTeam.get(team.id) ?? 0;
+                const tabulacaoCount = tabulacaoCountByTeam.get(team.id) ?? 0;
                 return (
                   <li
                     key={team.id}
@@ -221,7 +245,7 @@ export function TeamsPanel() {
                     <div className="min-w-0 flex-1">
                       <Link
                         href={`/equipes/${team.id}`}
-                        className="block truncate text-sm font-medium text-foreground hover:text-primary hover:underline"
+                        className="block truncate text-base font-semibold text-foreground hover:text-primary hover:underline"
                       >
                         {team.name}
                       </Link>
@@ -239,44 +263,20 @@ export function TeamsPanel() {
                           ) : null}
                         </div>
                       )}
-                      {teamMembers.length > 0 ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
-                          {visibleMembers.map((member) => {
-                            const roleMeta = ROLE_META[member.role];
-                            const displayName = member.full_name || member.email || 'Sem nome';
-                            return (
-                              <div
-                                key={member.user_id}
-                                className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 py-0.5 pl-0.5 pr-2"
-                              >
-                                <Avatar className="size-5 shrink-0">
-                                  {member.avatar_url ? (
-                                    <AvatarImage src={member.avatar_url} alt={displayName} />
-                                  ) : null}
-                                  <AvatarFallback className="bg-primary/10 text-[9px] font-medium text-primary">
-                                    {displayName.charAt(0).toUpperCase()}
-                                  </AvatarFallback>
-                                </Avatar>
-                                <span className="max-w-[10rem] truncate text-xs text-foreground">
-                                  {displayName}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground">
-                                  {roleMeta.label}
-                                </span>
-                              </div>
-                            );
-                          })}
-                          {hiddenCount > 0 ? (
-                            <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                              +{hiddenCount} mais
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          Nenhum membro nesta equipe ainda.
-                        </p>
-                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <UsersIcon className="size-3.5" />
+                          {memberCount} {memberCount === 1 ? 'membro' : 'membros'}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <MessageCircle className="size-3.5" />
+                          {channelCount} {channelCount === 1 ? 'canal' : 'canais'}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <TagIcon className="size-3.5" />
+                          {tabulacaoCount} {tabulacaoCount === 1 ? 'tabulação' : 'tabulações'}
+                        </span>
+                      </div>
                     </div>
                     <RequireRole min="admin">
                       <div className="flex items-center gap-1.5">
