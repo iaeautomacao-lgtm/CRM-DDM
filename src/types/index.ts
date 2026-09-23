@@ -234,6 +234,20 @@ export interface Message {
   waha_session?: string;
 }
 
+/** wacrm.internal_messages (migration 109) — 1:1 staff chat between an
+ *  operator and a supervisor, separate from the WhatsApp-facing
+ *  Message/Conversation above. No thread id: a thread is just every
+ *  row where the two users are sender+recipient of each other. */
+export interface InternalMessage {
+  id: string;
+  account_id: string;
+  sender_id: string;
+  recipient_id: string;
+  content: string;
+  read_at: string | null;
+  created_at: string;
+}
+
 export type ReactionActor = 'customer' | 'agent';
 
 export interface MessageReaction {
