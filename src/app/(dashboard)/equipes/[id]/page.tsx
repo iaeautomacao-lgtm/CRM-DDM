@@ -793,7 +793,7 @@ export default function EquipeDetailPage({
   if (!team) return null;
 
   return (
-    <div className="space-y-6 p-4 lg:p-6">
+    <div className="space-y-6">
       <div className="flex items-center gap-3">
         <button
           type="button"
