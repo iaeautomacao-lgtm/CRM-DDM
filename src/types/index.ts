@@ -137,6 +137,10 @@ export interface Tag {
   /** Tabulação code, for the future Olos integration. */
   codigo_tabulacao?: number;
   created_at: string;
+  /** Team this outcome tag is scoped to — migration 105. Null = global
+   *  (visible/usable by every team in the account), only meaningful
+   *  for kind === 'outcome'. */
+  team_id?: string | null;
 }
 
 export interface ContactTag {
