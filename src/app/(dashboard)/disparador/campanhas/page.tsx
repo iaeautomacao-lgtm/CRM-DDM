@@ -163,7 +163,7 @@ const COLUMN_MAP_FIELDS: Array<{ key: keyof ImportColumnMap; label: string }> = 
   { key: "var3", label: "Variável do template {{3}}" },
 ];
 
-function displayedMappingColumn(value: string | undefined): string {
+function formatColumnLabel(value: string | null | undefined): string {
   return !value || value === "__none__" ? "Nenhum" : value;
 }
 
@@ -2591,13 +2591,15 @@ export default function CampanhasPage() {
                             }}
                           >
                             <SelectTrigger className="h-8 w-full border-border bg-background text-xs">
-                              <SelectValue placeholder="Nenhum" />
+                              <SelectValue placeholder="Nenhum">
+                                {formatColumnLabel(columnMap[field.key])}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent className="border-border bg-popover">
-                              <SelectItem value="__none__">Nenhum</SelectItem>
+                              <SelectItem value="__none__">{formatColumnLabel("__none__")}</SelectItem>
                               {csvHeaders.map((h) => (
                                 <SelectItem key={h} value={h}>
-                                  {h}
+                                  {formatColumnLabel(h)}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -2607,10 +2609,10 @@ export default function CampanhasPage() {
                     </div>
                     <div className="rounded-md border border-border/60 bg-background/50 p-2 text-[10px] text-muted-foreground">
                       <p className="mb-1 font-medium text-foreground">Mapeamento aplicado</p>
-                      <p>{"{{1}}"} ← {displayedMappingColumn(columnMap.var1)}</p>
-                      <p>{"{{2}}"} ← {displayedMappingColumn(columnMap.var2)}</p>
-                      <p>CPF ← {displayedMappingColumn(columnMap.cpf)}</p>
-                      <p>{"{{3}}"} ← {displayedMappingColumn(columnMap.var3)}</p>
+                      <p>{"{{1}}"} ← {formatColumnLabel(columnMap.var1)}</p>
+                      <p>{"{{2}}"} ← {formatColumnLabel(columnMap.var2)}</p>
+                      <p>CPF ← {formatColumnLabel(columnMap.cpf)}</p>
+                      <p>{"{{3}}"} ← {formatColumnLabel(columnMap.var3)}</p>
                     </div>
                     <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
                       <p className="text-[10px] text-muted-foreground">
