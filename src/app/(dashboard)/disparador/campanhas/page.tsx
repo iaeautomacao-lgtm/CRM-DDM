@@ -164,7 +164,7 @@ const COLUMN_MAP_FIELDS: Array<{ key: keyof ImportColumnMap; label: string }> = 
 ];
 
 function displayedMappingColumn(value: string | undefined): string {
-  return value || "Nenhum";
+  return !value || value === "__none__" ? "Nenhum" : value;
 }
 
 interface CampaignDraft {
@@ -1663,6 +1663,16 @@ export default function CampanhasPage() {
     }
   };
 
+  const selectedTemplates = mensagens
+    .filter((message) => message.template_name)
+    .map((message) => ({
+      name: message.template_name as string,
+      language: message.template_language as string | undefined,
+      variableCount: Array.isArray(message.template_variable_map)
+        ? message.template_variable_map.length
+        : 0,
+    }));
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
@@ -2567,7 +2577,7 @@ export default function CampanhasPage() {
                             {field.label}
                           </label>
                           <Select
-                            value={columnMap[field.key] || "__none__"}
+                            value={columnMap[field.key] === "__none__" ? undefined : columnMap[field.key] || undefined}
                             onValueChange={(val) => {
                               const nextMap = (() => {
                                 const next = { ...columnMap };
@@ -2581,7 +2591,7 @@ export default function CampanhasPage() {
                             }}
                           >
                             <SelectTrigger className="h-8 w-full border-border bg-background text-xs">
-                              <SelectValue placeholder="Não mapeado" />
+                              <SelectValue placeholder="Nenhum" />
                             </SelectTrigger>
                             <SelectContent className="border-border bg-popover">
                               <SelectItem value="__none__">Nenhum</SelectItem>
@@ -2801,6 +2811,29 @@ export default function CampanhasPage() {
                           hour: "2-digit",
                           minute: "2-digit",
                         })}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Template</span>
+                    <span className="text-right font-medium">
+                      {selectedTemplates.length > 0
+                        ? selectedTemplates.map((template) => (
+                            `${template.name}${template.language ? ` · ${template.language}` : ""}`
+                          )).join(", ")
+                        : "Nenhum template selecionado"}
+                    </span>
+                  </div>
+                  {selectedTemplates.length > 0 && (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Variáveis</span>
+                      <span className="text-right font-medium">
+                        {selectedTemplates
+                          .flatMap((template) => Array.from(
+                            { length: template.variableCount },
+                            (_, index) => `{{${index + 1}}}`
+                          ))
+                          .join(", ") || "Nenhuma"}
                       </span>
                     </div>
                   )}
