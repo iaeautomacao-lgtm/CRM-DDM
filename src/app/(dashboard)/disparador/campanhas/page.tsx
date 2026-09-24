@@ -155,13 +155,17 @@ function draftStorageKey(accountId: string | null): string | null {
 // Campos DDM do sub-step de mapeamento de colunas (Step 2, após a prévia
 // do CSV) — chave bate com o que import/route.ts espera em column_map.
 const COLUMN_MAP_FIELDS: Array<{ key: keyof ImportColumnMap; label: string }> = [
-  { key: "name", label: "Nome" },
-  { key: "phone", label: "Telefone Principal" },
+  { key: "name", label: "Nome do contato" },
+  { key: "phone", label: "Telefone principal" },
   { key: "cpf", label: "CPF" },
-  { key: "var1", label: "VAR1" },
-  { key: "var2", label: "VAR2" },
-  { key: "var3", label: "VAR3" },
+  { key: "var1", label: "Variável do template {{1}}" },
+  { key: "var2", label: "Variável do template {{2}}" },
+  { key: "var3", label: "Variável do template {{3}}" },
 ];
+
+function displayedMappingColumn(value: string | undefined): string {
+  return value || "Nenhum";
+}
 
 interface CampaignDraft {
   nome: string;
@@ -2548,14 +2552,18 @@ export default function CampanhasPage() {
                         Mapeamento de colunas
                       </p>
                       <p className="text-[10px] text-muted-foreground">
-                        Detectado automaticamente a partir do cabeçalho do CSV — corrija se
-                        alguma coluna estiver errada antes de criar a campanha.
+                        Escolha qual coluna da sua planilha alimenta cada campo do CRM e cada variável do template aprovado no WhatsApp.
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        As variáveis {"{{1}}"}, {"{{2}}"} e {"{{3}}"} seguem exatamente a ordem do template aprovado.
                       </p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-3 gap-y-2">
+                      <div className="text-[10px] font-medium text-muted-foreground">Campo do CRM / Template</div>
+                      <div className="text-[10px] font-medium text-muted-foreground">Coluna da planilha</div>
                       {COLUMN_MAP_FIELDS.map((field) => (
-                        <div key={field.key}>
-                          <label className="mb-1 block text-[10px] text-muted-foreground">
+                        <div key={field.key} className="col-span-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-3">
+                          <label className="block text-xs text-foreground">
                             {field.label}
                           </label>
                           <Select
@@ -2576,7 +2584,7 @@ export default function CampanhasPage() {
                               <SelectValue placeholder="Não mapeado" />
                             </SelectTrigger>
                             <SelectContent className="border-border bg-popover">
-                              <SelectItem value="__none__">Não mapeado</SelectItem>
+                              <SelectItem value="__none__">Nenhum</SelectItem>
                               {csvHeaders.map((h) => (
                                 <SelectItem key={h} value={h}>
                                   {h}
@@ -2586,6 +2594,13 @@ export default function CampanhasPage() {
                           </Select>
                         </div>
                       ))}
+                    </div>
+                    <div className="rounded-md border border-border/60 bg-background/50 p-2 text-[10px] text-muted-foreground">
+                      <p className="mb-1 font-medium text-foreground">Mapeamento aplicado</p>
+                      <p>{"{{1}}"} ← {displayedMappingColumn(columnMap.var1)}</p>
+                      <p>{"{{2}}"} ← {displayedMappingColumn(columnMap.var2)}</p>
+                      <p>CPF ← {displayedMappingColumn(columnMap.cpf)}</p>
+                      <p>{"{{3}}"} ← {displayedMappingColumn(columnMap.var3)}</p>
                     </div>
                     <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
                       <p className="text-[10px] text-muted-foreground">
@@ -2688,7 +2703,7 @@ export default function CampanhasPage() {
                 {importPreview && importPreview.length > 0 && (
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-muted-foreground">
-                      Preview (primeiros 5 contatos):
+                      Preview com mapeamento aplicado (primeiros 5 contatos):
                     </p>
                     <div className="rounded-md border border-border overflow-hidden">
                       <table className="w-full text-xs">
