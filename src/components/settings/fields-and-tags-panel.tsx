@@ -13,13 +13,13 @@ import { TagManager } from './tag-manager';
  * hidden-tab behaviour). `custom_fields` RLS rejects non-admin writes
  * regardless.
  */
-export function FieldsAndTagsPanel() {
+export function FieldsAndTagsPanel({ title = 'Campos e tags' }: { title?: string } = {}) {
   const canEditSettings = useCan('edit-settings');
 
   return (
     <section className="max-w-3xl animate-in fade-in-50 space-y-4 duration-200">
       <SettingsPanelHead
-        title="Campos e tags"
+        title={title}
         description="Configure campos personalizados para guardar variáveis estruturadas e gerencie etiquetas de controle manual."
       />
       <TagManager />

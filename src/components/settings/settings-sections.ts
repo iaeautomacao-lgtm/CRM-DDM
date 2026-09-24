@@ -1,14 +1,9 @@
 import {
-  Coins,
-  FileText,
   KeyRound,
   LayoutGrid,
   Palette,
-  PlugZap,
   Shield,
-  Tags,
   User,
-  UsersRound,
   Bot,
   type LucideIcon,
 } from 'lucide-react';
@@ -20,17 +15,20 @@ import {
  * landing. The URL query param stays `?tab=` (deep-linkable, and it
  * keeps the existing links in sidebar.tsx / header.tsx working) — we
  * just map the old values onto the new sections.
+ *
+ * whatsapp/templates/fields/deals/members moved out to their own
+ * top-level routes (/canais already existed; /templates, /tabulacoes,
+ * /membros are new — see sidebar.tsx + role-utils.ts) — 'whatsapp' and
+ * 'deals' have no new route at all, just removed from here per this
+ * task. The underlying components (WhatsAppConfig, TemplateManager,
+ * FieldsAndTagsPanel, DealsSettings, MembersTab) are untouched; only
+ * unlinked from /settings.
  */
 export const SETTINGS_SECTIONS = [
   'overview',
   'profile',
   'security',
   'appearance',
-  'whatsapp',
-  'templates',
-  'fields',
-  'deals',
-  'members',
   'api',
   'ai',
 ] as const;
@@ -55,11 +53,6 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   profile: { id: 'profile', label: 'Seu perfil', icon: User, group: 'account' },
   security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
-  whatsapp: { id: 'whatsapp', label: 'WhatsApp', icon: PlugZap, group: 'workspace' },
-  templates: { id: 'templates', label: 'Templates', icon: FileText, group: 'workspace' },
-  fields: { id: 'fields', label: 'Campos e tags', icon: Tags, group: 'workspace' },
-  deals: { id: 'deals', label: 'Negócios e moeda', icon: Coins, group: 'workspace' },
-  members: { id: 'members', label: 'Membros da equipe', icon: UsersRound, group: 'workspace' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace' },
   ai: { id: 'ai', label: 'Agente de IA', icon: Bot, group: 'workspace', ownerOnly: true },
 };
@@ -75,13 +68,12 @@ function isSection(value: string | null): value is SettingsSection {
 }
 
 /**
- * Resolve a raw `?tab=` value to a section. Legacy tabs from the old
- * flat layout collapse onto their new home (Tags + Custom fields → the
- * merged "Fields & tags" section). Anything unknown falls back to the
- * Overview landing.
+ * Resolve a raw `?tab=` value to a section. Anything unknown — including
+ * 'tags'/'custom-fields'/'fields'/'whatsapp'/'templates'/'deals'/'members',
+ * all legacy values from before those sections moved to their own
+ * routes — falls back to the Overview landing.
  */
 export function resolveSection(raw: string | null): SettingsSection {
-  if (raw === 'tags' || raw === 'custom-fields') return 'fields';
   if (isSection(raw)) return raw;
   return DEFAULT_SECTION;
 }

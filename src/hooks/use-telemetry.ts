@@ -68,13 +68,22 @@ export function trackAction(
   });
 }
 
-/** Registra um erro de frontend (error boundary, listener global, etc.). */
-export function trackError(message: string, stack?: string, page?: string): void {
+/** Registra um erro de frontend (error boundary, listener global, etc.).
+ *  `payload` é opcional — usado por components/error-boundary.tsx para
+ *  anexar o componentStack do React, que error.tsx/global-error.tsx
+ *  (baseados no `error` prop do Next.js) nunca recebem. */
+export function trackError(
+  message: string,
+  stack?: string,
+  page?: string,
+  payload?: Record<string, unknown>,
+): void {
   void postTelemetry({
     type: "error",
     error_message: message,
     error_stack: stack ?? null,
     path: page ?? null,
+    payload: payload ?? null,
   });
 }
 

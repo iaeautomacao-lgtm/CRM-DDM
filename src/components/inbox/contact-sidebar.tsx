@@ -120,7 +120,7 @@ export function ContactSidebar({
     }
   }, [conversation, onUpdateConversation]);
 
-  const fetchContactData = useCallback(async () => {
+  const fetchContactData = useCallback(async (isCancelled: () => boolean) => {
     if (!contact) return;
 
     const supabase = createClient();
@@ -142,6 +142,12 @@ export function ContactSidebar({
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
     ]);
+
+    // contact (and thus this whole fetch) may be stale by the time the
+    // network round-trip resolves — e.g. the operator switched to a
+    // different conversation, or closed the panel — so nothing below
+    // should touch state if that happened.
+    if (isCancelled()) return;
 
     if (dealsRes.error) {
       console.error("[ContactSidebar] failed to load deals:", dealsRes.error);
@@ -170,13 +176,18 @@ export function ContactSidebar({
   }, [contact]);
 
   // Load on contact change. setContactData/setTags run inside async
-  // Supabase callbacks, not synchronously in the effect body.
+  // Supabase callbacks, not synchronously in the effect body. `cancelled`
+  // guards against the response landing after `contact` has already
+  // moved on (fast conversation switching) or the panel unmounted.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    fetchContactData();
+    let cancelled = false;
+    fetchContactData(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, [fetchContactData]);
 
-  const fetchHistory = useCallback(async () => {
+  const fetchHistory = useCallback(async (isCancelled: () => boolean) => {
     if (!contact || !accountId) {
       setHistory([]);
       setHistoryHasMore(false);
@@ -190,20 +201,27 @@ export function ContactSidebar({
         contactId: contact.id,
         limit: HISTORY_FETCH_LIMIT,
       });
+      if (isCancelled()) return;
       const withoutCurrent = rows.filter((c) => c.id !== conversation?.id);
       setHistory(withoutCurrent.slice(0, HISTORY_DISPLAY_LIMIT));
       setHistoryHasMore(withoutCurrent.length > HISTORY_DISPLAY_LIMIT);
     } catch (err) {
       console.error("[ContactSidebar] failed to load conversation history:", err);
-      setHistory([]);
-      setHistoryHasMore(false);
+      if (!isCancelled()) {
+        setHistory([]);
+        setHistoryHasMore(false);
+      }
     } finally {
-      setHistoryLoading(false);
+      if (!isCancelled()) setHistoryLoading(false);
     }
   }, [contact, accountId, conversation?.id]);
 
   useEffect(() => {
-    fetchHistory();
+    let cancelled = false;
+    fetchHistory(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, [fetchHistory]);
 
   const handleCopyPhone = useCallback(async () => {

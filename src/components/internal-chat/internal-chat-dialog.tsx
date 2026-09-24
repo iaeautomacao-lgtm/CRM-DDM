@@ -186,6 +186,11 @@ export function InternalChatDialog({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingCancelledRef = useRef(false);
   const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Dialog stays mounted the whole time (sidebar just toggles `open`),
+  // so a pending deferred reset (see handleOpenChange below) must be
+  // cancellable — otherwise a rapid close→reopen could still let a
+  // stale timeout clobber state the reopen just set.
+  const closeResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function resetMediaState() {
     setStagedMedia(null);
@@ -194,11 +199,41 @@ export function InternalChatDialog({
 
   function handleOpenChange(next: boolean) {
     if (!next) {
-      setStep("list");
-      setSelectedContact(null);
-      setMessages([]);
-      setDraft("");
-      resetMediaState();
+      // Stop any live recording before anything else — closing mid-
+      // recording used to leave the mic hot and the recorder in a
+      // state where a later start/unmount could call .stop() twice.
+      if (recording) {
+        cancelRecording();
+      }
+      // GC a staged-but-unsent upload so it doesn't linger as an
+      // orphan in chat-media.
+      if (stagedMedia) {
+        deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch((err) => {
+          console.error("[InternalChatDialog] failed to GC staged media on close:", err);
+        });
+      }
+      // Defer the state reset until after the Dialog's own exit
+      // animation finishes. Base UI's Popup (dialog.tsx) keeps the
+      // node mounted for ~100ms of animate-out on close — resetting
+      // step/selectedContact/messages synchronously here unmounts the
+      // thread subtree (including scrollBottomRef's div) via React's
+      // reconciler WHILE Base UI is still mid-animation on that same
+      // subtree, which is what produced React error #310 (removeChild
+      // on a node that isn't a child of the parent anymore).
+      if (closeResetTimeoutRef.current) clearTimeout(closeResetTimeoutRef.current);
+      closeResetTimeoutRef.current = setTimeout(() => {
+        setStep("list");
+        setSelectedContact(null);
+        setMessages([]);
+        setDraft("");
+        resetMediaState();
+        closeResetTimeoutRef.current = null;
+      }, 150);
+    } else if (closeResetTimeoutRef.current) {
+      // Reopened before the deferred reset fired — cancel it so it
+      // doesn't wipe out whatever the reopen is about to show.
+      clearTimeout(closeResetTimeoutRef.current);
+      closeResetTimeoutRef.current = null;
     }
     onOpenChange(next);
   }
@@ -415,17 +450,30 @@ export function InternalChatDialog({
   }, [open, step, selectedContact, myUserId, accountId]);
 
   useEffect(() => {
+    // Only scroll while the dialog is actually open/visible — closing
+    // resets `messages` (via the deferred handleOpenChange reset
+    // above), which would otherwise re-fire this against a ref whose
+    // subtree may already be mid-unmount.
+    if (!open) return;
     scrollBottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+  }, [messages, open]);
 
   // Tear down any live recording/stream on unmount so a mid-record
   // navigation away doesn't leave the mic hot — same concern
-  // message-composer.tsx's own cleanup effect guards against.
+  // message-composer.tsx's own cleanup effect guards against. The
+  // try/catch guards against MediaRecorder.stop() throwing
+  // InvalidStateError if it was already stopped (e.g. handleOpenChange
+  // already called cancelRecording() before this ever runs).
   useEffect(() => {
     return () => {
       if (recordTimerRef.current) clearInterval(recordTimerRef.current);
-      mediaRecorderRef.current?.stop();
+      try {
+        mediaRecorderRef.current?.stop();
+      } catch {
+        // Already inactive — nothing to do.
+      }
       mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+      if (closeResetTimeoutRef.current) clearTimeout(closeResetTimeoutRef.current);
     };
   }, []);
 

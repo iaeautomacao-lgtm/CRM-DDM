@@ -13,9 +13,14 @@ import type { AccountRole } from "@/lib/auth/roles";
 //
 // Per-role reach, owner aside (owner always passes in canAccessRoute
 // before this table is even consulted):
-//   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings, /equipes, /perfil
+//   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings,
+//            /equipes, /perfil, /templates, /tabulacoes, /membros
 //   agent  → /inbox
 //   viewer → /dashboard
+// /templates, /tabulacoes, /membros are TemplateManager/
+// FieldsAndTagsPanel/MembersTab moved out of /settings onto their own
+// routes (settings-sections.ts no longer registers those sections) —
+// owner/admin only, same reach as /settings itself already had.
 // /perfil (ProfileForm/SecurityPanel, same components /settings
 // renders) is owner/admin only — agents get an inline "Trocar senha"
 // dialog straight from the sidebar footer instead (no route needed);
@@ -26,6 +31,11 @@ import type { AccountRole } from "@/lib/auth/roles";
 // /flows, /disparador, /ajuda) are owner-only. Adding a new nav
 // route = one new ROUTE_ALLOWLIST entry, or isRouteGated silently
 // stops covering it.
+//
+// /pipelines was pulled from the sidebar's navItems only — it stays in
+// ROUTE_ALLOWLIST as owner-only, so a direct URL visit still redirects
+// non-owners same as before; this is purely a nav-visibility change,
+// not a permission change.
 //
 // /settings was owner-only until admin was added here to match
 // several settings panels' own internal gating (TeamsPanel,
@@ -56,6 +66,9 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/settings": ["owner", "admin"],
   "/equipes": ["owner", "admin"],
   "/perfil": ["owner", "admin"],
+  "/templates": ["owner", "admin"],
+  "/tabulacoes": ["owner", "admin"],
+  "/membros": ["owner", "admin"],
 };
 
 /** True if `pathname` matches a prefix this table restricts. Used to

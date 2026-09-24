@@ -10,11 +10,6 @@ import { SettingsOverview } from '@/components/settings/settings-overview';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
-import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
-import { TemplateManager } from '@/components/settings/template-manager';
-import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
-import { DealsSettings } from '@/components/settings/deals-settings';
-import { MembersTab } from '@/components/settings/members-tab';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import {
@@ -63,11 +58,6 @@ function SettingsContent() {
     profile: <ProfileForm />,
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
-    whatsapp: <WhatsAppConfig />,
-    templates: <TemplateManager />,
-    fields: <FieldsAndTagsPanel />,
-    deals: <DealsSettings />,
-    members: <MembersTab />,
     api: <ApiKeysSettings />,
     ai: <AiAgentSettings />,
   };

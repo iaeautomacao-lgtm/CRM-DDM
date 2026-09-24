@@ -1,13 +1,13 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { ChevronRight, Loader2 } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronRight, FileText, Loader2, PlugZap, Tags, UsersRound, type LucideIcon } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from '@/hooks/use-theme';
 import { THEMES } from '@/lib/themes';
-import { CURRENCIES } from '@/lib/currency';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -35,8 +35,7 @@ export function SettingsOverview({
 }: {
   onSelect: (section: SettingsSection) => void;
 }) {
-  const { user, profile, accountId, accountRole, defaultCurrency, canManageMembers } =
-    useAuth();
+  const { user, profile, accountId, accountRole, canManageMembers } = useAuth();
   const { mode, theme } = useTheme();
 
   const [counts, setCounts] = useState<OverviewCounts | null>(null);
@@ -150,20 +149,28 @@ export function SettingsOverview({
   const roleMeta = accountRole ? ROLE_META[accountRole] : null;
   const RoleIcon = roleMeta?.icon;
 
-  const currencyLabel =
-    CURRENCIES.find((c) => c.code === defaultCurrency)?.label ?? defaultCurrency;
   const themeName = THEMES.find((t) => t.id === theme)?.name ?? theme;
-  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+  // Tiles still living inside /settings navigate the rail (onSelect);
+  // members/templates/fields moved to their own top-level routes
+  // (/membros, /templates, /tabulacoes — see sidebar.tsx + role-utils.ts)
+  // so those are plain links instead. whatsapp links out to /canais,
+  // the page that already fully replaced WhatsAppConfig's role. deals
+  // (Negócios e moeda) had no replacement route — dropped entirely,
+  // per this task's "remove from /settings" instruction for it.
+  type OverviewTile =
+    | { kind: 'section'; key: SettingsSection; section: SettingsSection; loading: boolean; subtitle: ReactNode }
+    | { kind: 'link'; key: string; href: string; icon: LucideIcon; label: string; loading: boolean; subtitle: ReactNode };
 
   // Per-tile loading + subtitle. `null` counts render as a graceful
   // fallback so a single failed query never blanks a tile.
-  const tiles: {
-    section: SettingsSection;
-    loading: boolean;
-    subtitle: ReactNode;
-  }[] = [
+  const tiles: OverviewTile[] = [
     {
-      section: 'whatsapp',
+      kind: 'link',
+      key: 'whatsapp',
+      href: '/canais',
+      icon: PlugZap,
+      label: 'WhatsApp',
       loading: whatsappLoading,
       subtitle: !whatsapp?.configured ? (
         'Não configurado'
@@ -178,7 +185,11 @@ export function SettingsOverview({
       ),
     },
     {
-      section: 'members',
+      kind: 'link',
+      key: 'members',
+      href: '/membros',
+      icon: UsersRound,
+      label: 'Membros da equipe',
       loading: countsLoading,
       subtitle:
         counts?.members == null
@@ -192,7 +203,11 @@ export function SettingsOverview({
             }`,
     },
     {
-      section: 'templates',
+      kind: 'link',
+      key: 'templates',
+      href: '/templates',
+      icon: FileText,
+      label: 'Templates',
       loading: countsLoading,
       subtitle:
         counts?.templates == null
@@ -204,12 +219,11 @@ export function SettingsOverview({
             }`,
     },
     {
-      section: 'deals',
-      loading: false,
-      subtitle: `${defaultCurrency} — ${currencyLabel}`,
-    },
-    {
-      section: 'fields',
+      kind: 'link',
+      key: 'fields',
+      href: '/tabulacoes',
+      icon: Tags,
+      label: 'Tabulações',
       loading: countsLoading,
       subtitle:
         counts?.tags == null && counts?.customFields == null
@@ -219,11 +233,15 @@ export function SettingsOverview({
             } campo${counts?.customFields === 1 ? '' : 's'} personalizado${counts?.customFields === 1 ? '' : 's'}`,
     },
     {
+      kind: 'section',
+      key: 'appearance',
       section: 'appearance',
       loading: false,
       subtitle: `Modo ${mode === 'dark' ? 'escuro' : mode === 'light' ? 'claro' : mode} · destaque ${themeName}`,
     },
     {
+      kind: 'section',
+      key: 'ai',
       section: 'ai',
       loading: aiLoading,
       subtitle: aiEnabled ? 'Ativo e respondendo' : 'Desativado',
@@ -262,37 +280,48 @@ export function SettingsOverview({
 
       {/* Status tiles */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {tiles.map(({ section, loading, subtitle }) => {
-          const meta = SECTION_META[section];
-          const Icon = meta.icon;
-          return (
-            <button
-              key={section}
-              type="button"
-              onClick={() => onSelect(section)}
-              className={cn(
-                'group flex items-start gap-3.5 rounded-xl border border-border bg-card p-4 text-left transition-colors',
-                'hover:border-primary-soft-2 hover:bg-card-2',
-              )}
-            >
+        {tiles.map((tile) => {
+          const Icon = tile.kind === 'section' ? SECTION_META[tile.section].icon : tile.icon;
+          const label = tile.kind === 'section' ? SECTION_META[tile.section].label : tile.label;
+          const inner = (
+            <>
               <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
                 <Icon className="size-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-semibold text-foreground">
-                  {meta.label}
-                </span>
+                <span className="block text-sm font-semibold text-foreground">{label}</span>
                 <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  {loading ? (
+                  {tile.loading ? (
                     <>
                       <Loader2 className="size-3 animate-spin" /> Carregando…
                     </>
                   ) : (
-                    subtitle
+                    tile.subtitle
                   )}
                 </span>
               </span>
               <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+            </>
+          );
+          const className = cn(
+            'group flex items-start gap-3.5 rounded-xl border border-border bg-card p-4 text-left transition-colors',
+            'hover:border-primary-soft-2 hover:bg-card-2',
+          );
+          if (tile.kind === 'link') {
+            return (
+              <Link key={tile.key} href={tile.href} className={className}>
+                {inner}
+              </Link>
+            );
+          }
+          return (
+            <button
+              key={tile.key}
+              type="button"
+              onClick={() => onSelect(tile.section)}
+              className={className}
+            >
+              {inner}
             </button>
           );
         })}
