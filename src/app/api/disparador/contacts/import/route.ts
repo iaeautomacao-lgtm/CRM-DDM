@@ -146,6 +146,10 @@ export async function POST(request: Request) {
     // var2, var3 } vindo do sub-step de mapeamento do wizard. JSON
     // inválido ou ausente cai no comportamento heurístico de sempre.
     const columnMapRaw = (formData.get("column_map") as string | null) || null;
+    const mappingConfirmed = formData.get("mapping_confirmed") === "true";
+    const mappingConfirmationProvided = formData.has("mapping_confirmed");
+    const hasHeader = formData.get("has_header") !== "false";
+    const columnHeadersRaw = (formData.get("column_headers") as string | null) || null;
     let columnMap: ColumnMap = {};
     if (columnMapRaw) {
       try {
@@ -153,6 +157,21 @@ export async function POST(request: Request) {
         if (parsed && typeof parsed === "object") columnMap = parsed;
       } catch {
         console.error("[Contacts Import] column_map recebido não é JSON válido — ignorando.");
+      }
+    }
+    if (mappingConfirmationProvided && (!mappingConfirmed || !columnMap.phone?.trim())) {
+      return NextResponse.json(
+        { error: "Selecione e confirme a coluna de contato antes de importar." },
+        { status: 400 }
+      );
+    }
+    let columnHeaders: string[] = [];
+    if (columnHeadersRaw) {
+      try {
+        const parsedHeaders = JSON.parse(columnHeadersRaw);
+        if (Array.isArray(parsedHeaders)) columnHeaders = parsedHeaders.map(String);
+      } catch {
+        return NextResponse.json({ error: "Não foi possível ler o cabeçalho do arquivo." }, { status: 400 });
       }
     }
 
@@ -174,18 +193,40 @@ export async function POST(request: Request) {
       }
 
       const parsed = Papa.parse(content, {
-        header: true,
+        header: hasHeader,
         skipEmptyLines: true,
         ...(delimiter ? { delimiter } : { delimiter: ";" }), // Default to semicolon for Brazilian Excel
       });
-
-      rows = parsed.data;
+      rows = hasHeader
+        ? parsed.data
+        : (parsed.data as string[][]).map((values) =>
+            Object.fromEntries((columnHeaders.length > 0 ? columnHeaders : values.map((_, i) => `coluna_${i + 1}`))
+              .map((header, index) => [header, values[index] ?? ""]))
+          );
     } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
       const workbook = XLSX.read(buffer, { type: "buffer" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      rows = XLSX.utils.sheet_to_json(sheet);
+      if (hasHeader) {
+        rows = XLSX.utils.sheet_to_json(sheet);
+      } else {
+        const values = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: "" });
+        rows = values.map((row) =>
+          Object.fromEntries((columnHeaders.length > 0 ? columnHeaders : row.map((_, i) => `coluna_${i + 1}`))
+            .map((header, index) => [header, row[index] ?? ""]))
+        );
+      }
     } else {
       return NextResponse.json({ error: "Formato de arquivo inválido. Envie um CSV ou XLSX." }, { status: 400 });
+    }
+
+    if (mappingConfirmed) {
+      const hasResolvedContact = rows.some((row) => resolveField(row, columnMap.phone, [])?.trim());
+      if (!hasResolvedContact) {
+        return NextResponse.json(
+          { error: "A coluna de contato selecionada não contém nenhum telefone válido." },
+          { status: 400 }
+        );
+      }
     }
 
     // 3. Process imported rows

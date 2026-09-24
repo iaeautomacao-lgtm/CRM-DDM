@@ -56,6 +56,13 @@ import { trackAction } from "@/hooks/use-telemetry";
 import { normalizePhone } from "@/lib/whatsapp/phone-utils";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
+import {
+  looksLikeImportHeader,
+  normalizeImportHeader,
+  resolveImportRows,
+  suggestImportColumnMap,
+  type ImportColumnMap,
+} from "@/lib/disparador/import-mapping";
 
 interface Campaign {
   id: string;
@@ -147,7 +154,7 @@ function draftStorageKey(accountId: string | null): string | null {
 
 // Campos DDM do sub-step de mapeamento de colunas (Step 2, após a prévia
 // do CSV) — chave bate com o que import/route.ts espera em column_map.
-const COLUMN_MAP_FIELDS: Array<{ key: string; label: string }> = [
+const COLUMN_MAP_FIELDS: Array<{ key: keyof ImportColumnMap; label: string }> = [
   { key: "name", label: "Nome" },
   { key: "phone", label: "Telefone Principal" },
   { key: "cpf", label: "CPF" },
@@ -497,7 +504,13 @@ export default function CampanhasPage() {
   // mapeamento explícito quando há CSV (a heurística do backend só entra
   // em campos deixados em branco no select).
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
-  const [columnMap, setColumnMap] = useState<Record<string, string>>({});
+  const [columnMap, setColumnMap] = useState<ImportColumnMap>({});
+  const [mappingConfirmed, setMappingConfirmed] = useState(false);
+  const [parsedImportData, setParsedImportData] = useState<{
+    headers: string[];
+    rows: string[][];
+    hasHeader: boolean;
+  } | null>(null);
   const varFieldRefs = useRef<Record<string, HTMLTextAreaElement | HTMLInputElement | null>>({});
   // Index of the message ("conteudo") field waiting for a template
   // selection, or null when the picker is closed.
@@ -848,6 +861,8 @@ export default function CampanhasPage() {
     setImportAllRows(null);
     setCsvHeaders([]);
     setColumnMap({});
+    setMappingConfirmed(false);
+    setParsedImportData(null);
   };
 
   const discardDraft = () => {
@@ -869,6 +884,8 @@ export default function CampanhasPage() {
     setUtmProgress(null);
     setCsvHeaders([]);
     setColumnMap({});
+    setMappingConfirmed(false);
+    setParsedImportData(null);
   };
 
   // Delete Campaign
@@ -918,6 +935,10 @@ export default function CampanhasPage() {
     }
     if (mensagens.some((m) => m.tipo === "ia" && !m.prompt?.trim())) {
       toast.error("O prompt da mensagem IA não pode estar vazio.");
+      return;
+    }
+    if (importFile && (!mappingConfirmed || !columnMap.phone)) {
+      toast.error("Confirme o mapeamento e selecione a coluna de contato antes de importar.");
       return;
     }
     if (
@@ -1005,6 +1026,9 @@ export default function CampanhasPage() {
         if (Object.keys(columnMap).length > 0) {
           formData.append("column_map", JSON.stringify(columnMap));
         }
+        formData.append("mapping_confirmed", mappingConfirmed ? "true" : "false");
+        formData.append("has_header", parsedImportData?.hasHeader ? "true" : "false");
+        formData.append("column_headers", JSON.stringify(csvHeaders));
         const importRes = await apiFetch(
           "/api/disparador/contacts/import",
           { method: "POST", body: formData }
@@ -1199,6 +1223,8 @@ export default function CampanhasPage() {
     setUtmProgress(null);
     setCsvHeaders([]);
     setColumnMap({});
+    setMappingConfirmed(false);
+    setParsedImportData(null);
     // Nova sessão de criação — qualquer link UTM salvo sob o draftId
     // anterior fica órfão (campaign_id nunca chegou a ser preenchido),
     // mas isso é inofensivo: nada mais faz join por esse draftId.
@@ -1236,6 +1262,22 @@ export default function CampanhasPage() {
       )
     : null;
 
+  const refreshImportResolution = (nextMap: ImportColumnMap) => {
+    if (!parsedImportData) return;
+    const resolved = resolveImportRows(parsedImportData.headers, parsedImportData.rows, nextMap);
+    setImportPreview(resolved.rows.slice(0, 5));
+    setImportStats({
+      total: parsedImportData.rows.length,
+      valid: resolved.rows.length,
+      invalid: resolved.invalidRows,
+    });
+    setImportAllRows(resolved.rows.map((row) => ({
+      phone: row.phone,
+      cpf: row.cpf,
+      variables: [...row.variables],
+    })));
+  };
+
   const parseImportFile = async (file: File) => {
     setImportLoading(true);
     setImportPreview(null);
@@ -1245,6 +1287,8 @@ export default function CampanhasPage() {
     setUtmProgress(null);
     setCsvHeaders([]);
     setColumnMap({});
+    setMappingConfirmed(false);
+    setParsedImportData(null);
     try {
       const isXlsx = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
 
@@ -1281,80 +1325,28 @@ export default function CampanhasPage() {
         return;
       }
 
-      const headers = dataLines[0].split(sep).map(h =>
-        h.trim().toLowerCase().replace(/["\r]/g, "")
+      const firstValues = dataLines[0].split(sep).map(value => value.trim().replace(/["\r]/g, ""));
+      const hasHeader = looksLikeImportHeader(firstValues);
+      const headers = (hasHeader ? firstValues : firstValues.map((_, index) => `coluna_${index + 1}`))
+        .map(normalizeImportHeader);
+      const allRows = (hasHeader ? dataLines.slice(1) : dataLines).map(line =>
+        line.split(sep).map(value => value.trim().replace(/["\r]/g, ""))
       );
-
-      // Índices das colunas
-      const phoneIdx = headers.findIndex(h =>
-        ["contato", "telefone", "phone", "celular", "tel",
-         "fone", "whatsapp", "número", "numero"].includes(h)
-      );
-      // Mesma lista de NAME_FIELD_KEYS do backend (import/route.ts) — "var1"
-      // por último, cobrindo o formato Meta CONTATO;VAR1;VAR2;VAR3 quando
-      // não há coluna de nome padrão.
-      const nameIdx = headers.findIndex(h =>
-        ["nome", "name", "nome completo", "full name", "cliente", "var1"].includes(h)
-      );
-      const cpfIdx = headers.findIndex(h =>
-        ["cpf", "documento", "document"].includes(h)
-      );
-      const varIndices = headers
-        .map((h, i) => h.startsWith("var") ? i : -1)
-        .filter(i => i >= 0);
-
-      if (phoneIdx === -1) {
-        toast.error("Coluna de telefone não encontrada. Use: CONTATO, telefone, phone...");
-        return;
-      }
-
-      // Mapeamento manual (Correção 3) — pré-seleciona com base na mesma
-      // heurística usada acima (Nome/Telefone/CPF) e, para VAR1/2/3,
-      // procura a coluna com o nome literal exato (mesmo critério do
-      // getField(row, "var1") no backend), não apenas "começa com var" —
-      // varIndices abaixo é só pra prévia/propagação de template, cobre
-      // qualquer coluna "varN".
-      const var1Idx = headers.findIndex(h => h === "var1");
-      const var2Idx = headers.findIndex(h => h === "var2");
-      const var3Idx = headers.findIndex(h => h === "var3");
-      const detectedMap: Record<string, string> = {};
-      if (phoneIdx >= 0) detectedMap.phone = headers[phoneIdx];
-      if (nameIdx >= 0) detectedMap.name = headers[nameIdx];
-      if (cpfIdx >= 0) detectedMap.cpf = headers[cpfIdx];
-      if (var1Idx >= 0) detectedMap.var1 = headers[var1Idx];
-      if (var2Idx >= 0) detectedMap.var2 = headers[var2Idx];
-      if (var3Idx >= 0) detectedMap.var3 = headers[var3Idx];
+      const detectedMap = suggestImportColumnMap(headers);
       setCsvHeaders(headers);
       setColumnMap(detectedMap);
+      setMappingConfirmed(false);
+      setParsedImportData({ headers, rows: allRows, hasHeader });
 
-      const rows = dataLines.slice(1, 6); // preview: primeiros 5
-      const allRows = dataLines.slice(1);
-
-      const preview = rows
-        .map(line => {
-          const cols = line.split(sep).map(c => c.trim().replace(/["\r]/g, ""));
-          const phone = cols[phoneIdx] || "";
-          if (!phone) return null;
-          return {
-            phone,
-            name: nameIdx >= 0 ? cols[nameIdx] : undefined,
-            cpf: cpfIdx >= 0 ? cols[cpfIdx] || undefined : undefined,
-            variables: varIndices.map(i => cols[i] || ""),
-            raw: Object.fromEntries(headers.map((h, i) => [h, cols[i] || ""])),
-          };
-        })
-        .filter(Boolean) as typeof importPreview;
-
-      const validCount = allRows.filter(line => {
-        const cols = line.split(sep);
-        return cols[phoneIdx]?.trim();
-      }).length;
+      const resolved = resolveImportRows(headers, allRows, detectedMap);
+      const preview = resolved.rows.slice(0, 5);
+      const validCount = resolved.rows.length;
 
       setImportPreview(preview);
       setImportStats({
         total: allRows.length,
         valid: validCount,
-        invalid: allRows.length - validCount,
+        invalid: resolved.invalidRows,
       });
       setImportFile(file);
 
@@ -1362,14 +1354,16 @@ export default function CampanhasPage() {
       // Lê todos os valores de cada coluna VAR e, se for único para
       // todos os contatos, preenche como static.value automaticamente.
       // Se variar por contato, deixa em branco e avisa o usuário.
-      if (varIndices.length > 0) {
+      const mappedVariableIndexes = [detectedMap.var1, detectedMap.var2, detectedMap.var3]
+        .map((header) => header ? headers.indexOf(header) : -1)
+        .filter((index) => index >= 0);
+      if (mappedVariableIndexes.length > 0) {
         // Coletar todos os valores de cada coluna VAR para todos os contatos
-        const varValueSets: Set<string>[] = varIndices.map(() => new Set<string>());
+        const varValueSets: Set<string>[] = mappedVariableIndexes.map(() => new Set<string>());
 
-        for (const line of allRows) {
-          const cols = line.split(sep).map((c: string) => c.trim().replace(/["\r]/g, ""));
-          if (!cols[phoneIdx]?.trim()) continue;
-          varIndices.forEach((colIdx, i) => {
+        for (const cols of allRows) {
+          if (!resolved.rows.some((row) => row.raw[headers[0]] === cols[0])) continue;
+          mappedVariableIndexes.forEach((colIdx, i) => {
             const val = cols[colIdx] || "";
             if (val) varValueSets[i].add(val);
           });
@@ -1384,9 +1378,6 @@ export default function CampanhasPage() {
             if (entry.type !== "static") return entry;
 
             // idx 0 = {{1}}, idx 1 = {{2}}, etc.
-            // varIndices[0] = VAR1, varIndices[1] = VAR2, etc.
-            // Mas {{1}} já é contact_field:name normalmente, então
-            // mapeamos: entry idx → varIdx com mesmo offset
             const varIdx = idx; // VAR(idx+1) corresponde a {{idx+1}}
             if (varIdx >= varValueSets.length) return entry;
 
@@ -1415,20 +1406,11 @@ export default function CampanhasPage() {
       // Armazena TODOS os contatos (não só os 5 do preview) — usado pelo
       // lote de geração de UTM em handleGerarUTM, que precisa do CSV
       // inteiro, não apenas da amostra exibida em tela.
-      const allContacts = allRows
-        .map(line => {
-          const cols = line.split(sep).map((c: string) =>
-            c.trim().replace(/["\r]/g, "")
-          );
-          const phone = cols[phoneIdx]?.trim();
-          if (!phone) return null;
-          return {
-            phone,
-            cpf: cpfIdx >= 0 ? cols[cpfIdx] || undefined : undefined,
-            variables: varIndices.map(i => cols[i] || ""),
-          };
-        })
-        .filter(Boolean) as Array<{ phone: string; cpf?: string; variables: string[] }>;
+      const allContacts = resolved.rows.map((row) => ({
+        phone: row.phone,
+        cpf: row.cpf,
+        variables: [...row.variables],
+      }));
       setImportAllRows(allContacts);
     } catch (err) {
       toast.error("Erro ao ler arquivo");
@@ -2550,6 +2532,11 @@ export default function CampanhasPage() {
                     )}
                   </div>
                 )}
+                {importStats && importStats.invalid > 0 && (
+                  <p className="text-xs text-amber-600">
+                    {importStats.invalid} linha{importStats.invalid > 1 ? "s" : ""} sem contato resolvido foi{importStats.invalid > 1 ? "ram" : ""} excluída{importStats.invalid > 1 ? "s" : ""} da prévia e da importação.
+                  </p>
+                )}
 
                 {/* Mapeamento de colunas (Correção 3) — sub-step depois da
                     prévia, corrige a heurística automática antes do import
@@ -2574,12 +2561,15 @@ export default function CampanhasPage() {
                           <Select
                             value={columnMap[field.key] || "__none__"}
                             onValueChange={(val) => {
-                              setColumnMap((prev) => {
-                                const next = { ...prev };
-                                if (!val || val === "__none__") delete next[field.key];
-                                else next[field.key] = val;
+                              const nextMap = (() => {
+                                const next = { ...columnMap };
+                                if (!val || val === "__none__") delete next[field.key as keyof ImportColumnMap];
+                                else next[field.key as keyof ImportColumnMap] = val;
                                 return next;
-                              });
+                              })();
+                              setColumnMap(nextMap);
+                              setMappingConfirmed(false);
+                              refreshImportResolution(nextMap);
                             }}
                           >
                             <SelectTrigger className="h-8 w-full border-border bg-background text-xs">
@@ -2596,6 +2586,20 @@ export default function CampanhasPage() {
                           </Select>
                         </div>
                       ))}
+                    </div>
+                    <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
+                      <p className="text-[10px] text-muted-foreground">
+                        O contato é obrigatório. A prévia acima usa exatamente este mapa.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={mappingConfirmed ? "outline" : "default"}
+                        disabled={!columnMap.phone}
+                        onClick={() => setMappingConfirmed(true)}
+                      >
+                        {mappingConfirmed ? "Mapeamento confirmado" : "Confirmar mapeamento"}
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -2864,7 +2868,13 @@ export default function CampanhasPage() {
                 {wizardStep < 3 && (
                   <Button
                     type="button"
-                    onClick={() => setWizardStep(wizardStep + 1)}
+                    onClick={() => {
+                      if (wizardStep === 2 && importFile && (!mappingConfirmed || !columnMap.phone)) {
+                        toast.error("Confirme o mapeamento e selecione a coluna de contato antes de continuar.");
+                        return;
+                      }
+                      setWizardStep(wizardStep + 1);
+                    }}
                     disabled={wizardStep === 1 && (!nome.trim() || selectedSessions.length === 0)}
                   >
                     Próximo →
@@ -2874,7 +2884,7 @@ export default function CampanhasPage() {
                   <Button
                     type="button"
                     onClick={handleSubmit}
-                    disabled={isSubmitting || !nome.trim() || selectedSessions.length === 0}
+                    disabled={isSubmitting || !nome.trim() || selectedSessions.length === 0 || Boolean(importFile && (!mappingConfirmed || !columnMap.phone))}
                     className={isSubmitting ? "opacity-50 cursor-not-allowed gap-1.5" : "gap-1.5"}
                   >
                     {isSubmitting ? (
