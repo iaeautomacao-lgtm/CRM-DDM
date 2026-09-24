@@ -1,6 +1,11 @@
 export type ImportColumnMap = Partial<Record<"name" | "phone" | "cpf" | "var1" | "var2" | "var3", string>>;
+export const NO_MAPPING_VALUE = "__none__";
+export const NO_MAPPING_LABEL = "Nenhum";
 
-const PHONE_HEADERS = ["contato", "telefone", "celular", "whatsapp", "phone", "tel", "fone", "número", "numero"];
+const PHONE_HEADERS = [
+  "contato", "telefone", "celular", "whatsapp", "phone", "tel", "fone", "número", "numero",
+  "telefone1", "telefone 1", "celular1", "celular 1", "whatsapp1", "whatsapp 1", "tel1", "tel 1",
+];
 const NAME_HEADERS = ["nome", "name", "nome completo", "full name", "cliente"];
 const CPF_HEADERS = ["cpf", "cpf_aluno", "documento", "document"];
 
@@ -27,11 +32,11 @@ export function suggestImportColumnMap(headers: string[]): ImportColumnMap {
 
   const map: ImportColumnMap = {};
   map.phone = find(PHONE_HEADERS) ?? headers[0];
-  const name = find(NAME_HEADERS);
-  const cpf = find(CPF_HEADERS);
   const var1 = find(["var1"]);
   const var2 = find(["var2"]);
   const var3 = find(["var3"]);
+  const name = find(NAME_HEADERS) ?? var1;
+  const cpf = find(CPF_HEADERS);
   if (name) map.name = name;
   if (cpf) map.cpf = cpf;
   if (var1) map.var1 = var1;
