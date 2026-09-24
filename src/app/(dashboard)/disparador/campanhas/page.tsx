@@ -2078,7 +2078,7 @@ export default function CampanhasPage() {
                   className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <p className="text-[10px] text-muted-foreground">
-                  Horário de Brasília. Se não preenchido, inicia imediatamente ao clicar em "Iniciar".
+                  Horário de Brasília. Se não preenchido, inicia imediatamente ao clicar em &quot;Iniciar&quot;.
                 </p>
               </div>
 
@@ -2256,7 +2256,7 @@ export default function CampanhasPage() {
                                 </Select>
                                 {entry.type === "utm_link" && (
                                   <span className="flex-1 text-[10px] text-muted-foreground">
-                                    Resolvido por contato via "Gerar UTM" no Step 2
+                                    Resolvido por contato via &quot;Gerar UTM&quot; no Step 2
                                     (telefone → link_curto).
                                   </span>
                                 )}

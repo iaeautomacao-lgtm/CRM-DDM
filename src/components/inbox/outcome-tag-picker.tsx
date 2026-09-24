@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Tag } from "@/types";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,21 @@ export function OutcomeTagPicker({
   } | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
+  const loadAiSuggestion = useCallback(async (selectedConversationId: string) => {
+    setAiLoading(true);
+    setAiSuggestion(null);
+
+    try {
+      const response = await fetch(`/api/conversations/${selectedConversationId}/suggest-tag`);
+      const data = await response.json();
+      if (data.suggestion) setAiSuggestion(data.suggestion);
+    } catch {
+      // Ignore AI suggestion fetch failures; the user can still pick a tag manually.
+    } finally {
+      setAiLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!open) return;
 
@@ -63,21 +78,13 @@ export function OutcomeTagPicker({
 
     // Buscar sugestão da IA em paralelo com as tags
     if (conversationId) {
-      setAiLoading(true);
-      setAiSuggestion(null);
-      fetch(`/api/conversations/${conversationId}/suggest-tag`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.suggestion) setAiSuggestion(data.suggestion);
-        })
-        .catch(() => {})
-        .finally(() => setAiLoading(false));
+      void loadAiSuggestion(conversationId);
     }
 
     return () => {
       cancelled = true;
     };
-  }, [open, conversationId]);
+  }, [open, conversationId, loadAiSuggestion]);
 
   function handleOpenChange(next: boolean) {
     if (!next) {

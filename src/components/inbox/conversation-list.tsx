@@ -81,20 +81,25 @@ export function ConversationList({
   const [loading, setLoading] = useState(true);
 
   // Section collapse state — defaults to expanded, reconciled from
-  // localStorage after mount (see SECTION_STORAGE_KEY comment above).
-  const [openSectionExpanded, setOpenSectionExpanded] = useState(true);
-  const [pendingSectionExpanded, setPendingSectionExpanded] = useState(true);
-
-  useEffect(() => {
+  // localStorage on the client so we avoid direct setState calls in an effect.
+  const [openSectionExpanded, setOpenSectionExpanded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
     try {
-      const storedOpen = localStorage.getItem(SECTION_STORAGE_KEY.open);
-      if (storedOpen !== null) setOpenSectionExpanded(storedOpen === "true");
-      const storedPending = localStorage.getItem(SECTION_STORAGE_KEY.pending);
-      if (storedPending !== null) setPendingSectionExpanded(storedPending === "true");
+      const storedOpen = window.localStorage.getItem(SECTION_STORAGE_KEY.open);
+      return storedOpen === null ? true : storedOpen === "true";
     } catch {
-      // localStorage can throw in private-browsing / sandboxed contexts.
+      return true;
     }
-  }, []);
+  });
+  const [pendingSectionExpanded, setPendingSectionExpanded] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const storedPending = window.localStorage.getItem(SECTION_STORAGE_KEY.pending);
+      return storedPending === null ? true : storedPending === "true";
+    } catch {
+      return true;
+    }
+  });
 
   const handleToggleOpenSection = useCallback(() => {
     setOpenSectionExpanded((prev) => {

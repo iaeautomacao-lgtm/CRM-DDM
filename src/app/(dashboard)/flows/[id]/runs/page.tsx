@@ -2,7 +2,7 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 
-import { useEffect, useState } from "react";
+import { createElement, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -957,7 +957,7 @@ function EventLine({
   onSelect: () => void;
 }) {
   const cls = getEventColor(ev);
-  const Icon = getEventIcon(ev);
+  const iconComponent = getEventIcon(ev);
   const isError = ev.event_type === "node_error" || ev.event_type === "run_error";
   const isNodeError = ev.event_type === "node_error";
   return (
@@ -976,7 +976,9 @@ function EventLine({
       )}
     >
       <div className="flex items-start gap-2">
-        <Icon className={cn("mt-0.5 h-3 w-3 shrink-0", cls)} />
+        {createElement(iconComponent, {
+          className: cn("mt-0.5 h-3 w-3 shrink-0", cls),
+        })}
         <span className="w-28 shrink-0 text-[10px] text-muted-foreground">
           {format(new Date(ev.created_at), "HH:mm:ss")}
         </span>
@@ -1148,7 +1150,7 @@ function EventDetailSheet({
       </Sheet>
     );
   }
-  const Icon = getEventIcon(ev);
+  const iconComponent = getEventIcon(ev);
   const cls = getEventColor(ev);
   const statusMeta = ev.status ? STATUS_BADGE[ev.status] : null;
   const StatusIcon = statusMeta?.icon;
@@ -1160,7 +1162,9 @@ function EventDetailSheet({
       >
         <SheetHeader className="border-b border-border px-5 py-4">
           <SheetTitle className="flex items-center gap-2 text-sm">
-            <Icon className={cn("h-4 w-4 shrink-0", cls)} />
+            {createElement(iconComponent, {
+              className: cn("h-4 w-4 shrink-0", cls),
+            })}
             <span className={cn("font-mono", cls)}>{ev.event_type}</span>
           </SheetTitle>
           <SheetDescription className="flex flex-wrap items-center gap-2 pt-1">
