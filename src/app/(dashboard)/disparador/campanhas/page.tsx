@@ -61,8 +61,6 @@ import {
   normalizeImportHeader,
   resolveImportRows,
   suggestImportColumnMap,
-  NO_MAPPING_LABEL,
-  NO_MAPPING_VALUE,
   type ImportColumnMap,
 } from "@/lib/disparador/import-mapping";
 
@@ -157,17 +155,13 @@ function draftStorageKey(accountId: string | null): string | null {
 // Campos DDM do sub-step de mapeamento de colunas (Step 2, após a prévia
 // do CSV) — chave bate com o que import/route.ts espera em column_map.
 const COLUMN_MAP_FIELDS: Array<{ key: keyof ImportColumnMap; label: string }> = [
-  { key: "name", label: "Nome do contato" },
+  { key: "name", label: "Nome" },
   { key: "phone", label: "Telefone Principal" },
   { key: "cpf", label: "CPF" },
-  { key: "var1", label: "Variável do template {{1}}" },
-  { key: "var2", label: "Variável do template {{2}}" },
-  { key: "var3", label: "Variável do template {{3}}" },
+  { key: "var1", label: "VAR1" },
+  { key: "var2", label: "VAR2" },
+  { key: "var3", label: "VAR3" },
 ];
-
-function formatMappedColumn(header: string | undefined): string {
-  return header ? header.toUpperCase() : "não mapeada";
-}
 
 interface CampaignDraft {
   nome: string;
@@ -2557,24 +2551,19 @@ export default function CampanhasPage() {
                         Detectado automaticamente a partir do cabeçalho do CSV — corrija se
                         alguma coluna estiver errada antes de criar a campanha.
                       </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        Escolha qual coluna da sua planilha alimenta cada campo do disparo. As variáveis {"{{1}}"}, {"{{2}}"} e {"{{3}}"} seguem a ordem do template aprovado no WhatsApp.
-                      </p>
                     </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-3 gap-y-2">
-                      <div className="text-[10px] font-medium text-muted-foreground">Campo do Disparador</div>
-                      <div className="text-[10px] font-medium text-muted-foreground">Coluna da planilha</div>
+                    <div className="grid grid-cols-2 gap-2">
                       {COLUMN_MAP_FIELDS.map((field) => (
-                        <Fragment key={field.key}>
-                          <label className="flex items-center text-xs text-foreground">
+                        <div key={field.key}>
+                          <label className="mb-1 block text-[10px] text-muted-foreground">
                             {field.label}
                           </label>
                           <Select
-                            value={columnMap[field.key] || NO_MAPPING_VALUE}
+                            value={columnMap[field.key] || "__none__"}
                             onValueChange={(val) => {
                               const nextMap = (() => {
                                 const next = { ...columnMap };
-                                if (!val || val === NO_MAPPING_VALUE) delete next[field.key as keyof ImportColumnMap];
+                                if (!val || val === "__none__") delete next[field.key as keyof ImportColumnMap];
                                 else next[field.key as keyof ImportColumnMap] = val;
                                 return next;
                               })();
@@ -2587,7 +2576,7 @@ export default function CampanhasPage() {
                               <SelectValue placeholder="Não mapeado" />
                             </SelectTrigger>
                             <SelectContent className="border-border bg-popover">
-                              <SelectItem value={NO_MAPPING_VALUE}>{NO_MAPPING_LABEL}</SelectItem>
+                              <SelectItem value="__none__">Não mapeado</SelectItem>
                               {csvHeaders.map((h) => (
                                 <SelectItem key={h} value={h}>
                                   {h}
@@ -2595,14 +2584,8 @@ export default function CampanhasPage() {
                               ))}
                             </SelectContent>
                           </Select>
-                        </Fragment>
+                        </div>
                       ))}
-                    </div>
-                    <div className="rounded-md border border-border/60 bg-background/50 p-2 text-[10px] text-muted-foreground">
-                      <p className="mb-1 font-medium text-foreground">Mapeamento aplicado</p>
-                      <p>{"{{1}}"} ← {formatMappedColumn(columnMap.var1)}</p>
-                      <p>{"{{2}}"} ← {formatMappedColumn(columnMap.var2)}</p>
-                      <p>{"{{3}}"} ← {formatMappedColumn(columnMap.var3)}</p>
                     </div>
                     <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
                       <p className="text-[10px] text-muted-foreground">
@@ -2712,23 +2695,19 @@ export default function CampanhasPage() {
                         <thead className="bg-muted/40">
                           <tr>
                             <th className="px-3 py-2 text-left font-medium">Telefone</th>
-                            <th className="px-3 py-2 text-left font-medium">Nome</th>
+                            {importPreview[0]?.name !== undefined && (
+                              <th className="px-3 py-2 text-left font-medium">Nome</th>
+                            )}
                             {importPreview[0]?.cpf !== undefined && (
                               <th className="px-3 py-2 text-left font-medium text-muted-foreground">
                                 CPF
                               </th>
                             )}
-                            {importPreview[0]?.variables.map((_, i) => {
-                              const variableKey = `var${i + 1}` as keyof ImportColumnMap;
-                              return (
-                                <th key={i} className="px-3 py-2 text-left font-medium">
-                                  <div>{"{{"}{i + 1}{"}}"}</div>
-                                  <div className="text-[10px] font-normal text-muted-foreground">
-                                    ← {formatMappedColumn(columnMap[variableKey])}
-                                  </div>
-                                </th>
-                              );
-                            })}
+                            {importPreview[0]?.variables.map((_, i) => (
+                              <th key={i} className="px-3 py-2 text-left font-medium">
+                                {"{{"}{i + 1}{"}}"}
+                              </th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
@@ -2736,14 +2715,16 @@ export default function CampanhasPage() {
                             const altCount = countAltPhones(row.raw);
                             const colCount =
                               1 +
-                              1 +
+                              (row.name !== undefined ? 1 : 0) +
                               (row.cpf !== undefined ? 1 : 0) +
                               row.variables.length;
                             return (
                               <Fragment key={i}>
                                 <tr className="border-t border-border/50">
                                   <td className="px-3 py-2 font-mono">{row.phone}</td>
-                                  <td className="px-3 py-2">{row.name || "—"}</td>
+                                  {row.name !== undefined && (
+                                    <td className="px-3 py-2">{row.name}</td>
+                                  )}
                                   {row.cpf !== undefined && (
                                     <td className="px-3 py-2 font-mono text-muted-foreground text-[10px]">
                                       {row.cpf}
