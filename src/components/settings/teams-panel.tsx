@@ -55,7 +55,7 @@ interface DeleteCounts {
 
 export function TeamsPanel() {
   const supabase = createClient();
-  const { accountId } = useAuth();
+  const { accountId, accountRole, user } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -86,11 +86,36 @@ export function TeamsPanel() {
     if (!accountId) return;
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      // Admin sees only the teams they supervise (team_members
+      // membership) — owner still sees every team in the account.
+      // Read-only scoping only; RLS itself still allows an admin to
+      // SELECT any team in the account.
+      let myTeamIds: string[] | null = null;
+      if (accountRole === 'admin' && user?.id) {
+        const { data: myMemberships, error: myMembershipsError } = await supabase
+          .from('team_members')
+          .select('team_id')
+          .eq('user_id', user.id);
+        if (myMembershipsError) throw myMembershipsError;
+        myTeamIds = (myMemberships ?? []).map((m) => m.team_id as string);
+        if (myTeamIds.length === 0) {
+          setTeams([]);
+          setMembershipByTeam(new Map());
+          setChannelCountByTeam(new Map());
+          setTabulacaoCountByTeam(new Map());
+          return;
+        }
+      }
+
+      let teamsQuery = supabase
         .from('teams')
         .select('*')
         .eq('account_id', accountId)
         .order('name', { ascending: true });
+      if (myTeamIds) {
+        teamsQuery = teamsQuery.in('id', myTeamIds);
+      }
+      const { data, error } = await teamsQuery;
       if (error) throw error;
       const teamRows = (data ?? []) as Team[];
       setTeams(teamRows);
@@ -140,7 +165,7 @@ export function TeamsPanel() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId]);
+  }, [accountId, accountRole, user?.id]);
 
   useEffect(() => {
     void fetchTeams();
@@ -204,7 +229,7 @@ export function TeamsPanel() {
         title="Equipes"
         description="Filas nomeadas para rotear conversas. Tempo de sessão e transbordo ficam salvos aqui, mas nenhuma automação os usa ainda — isso vem em fases futuras."
         action={
-          <RequireRole min="admin">
+          <RequireRole min="owner">
             <Button onClick={openCreate}>
               <Plus className="size-4" />
               Nova equipe
@@ -274,7 +299,7 @@ export function TeamsPanel() {
                         </span>
                       </div>
                     </div>
-                    <RequireRole min="admin">
+                    <RequireRole min="owner">
                       <div className="flex items-center gap-1.5">
                         <Button
                           variant="ghost"

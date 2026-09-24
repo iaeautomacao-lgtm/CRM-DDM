@@ -179,9 +179,15 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
   // RBAC: hide the handful of routes ROUTE_ALLOWLIST restricts for the
   // current role. Everything else passes through unfiltered.
-  const visibleNavItems = navItems.filter((item) =>
-    isNavItemVisible(item.href, accountRole, profileLoading),
-  );
+  //
+  // "Agente de IA" needs a second, more specific filter on top:
+  // ROUTE_ALLOWLIST gates /settings as a whole (owner+admin), but this
+  // one tab within it is owner-only — isNavItemVisible only ever sees
+  // the path, not the ?tab= query string, so it can't tell this item
+  // apart from any other /settings link.
+  const visibleNavItems = navItems
+    .filter((item) => isNavItemVisible(item.href, accountRole, profileLoading))
+    .filter((item) => item.href !== "/settings?tab=ai" || accountRole !== "admin");
   const visibleReportNavItems = reportNavItems.filter((item) =>
     isNavItemVisible(item.href, accountRole, profileLoading),
   );
@@ -362,6 +368,18 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                         </button>
                       </li>
                     )}
+                  {item.href === "/inbox" && accountRole === "admin" && (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => setPasswordDialogOpen(true)}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:py-2"
+                      >
+                        <KeyRound className="h-4 w-4" />
+                        <span className="flex-1">Trocar senha</span>
+                      </button>
+                    </li>
+                  )}
                 </Fragment>
               );
             })}

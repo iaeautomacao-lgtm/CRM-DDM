@@ -139,6 +139,7 @@ function MemberRoleSection({
   onSearchChange,
   pendingMemberId,
   onToggle,
+  readOnly,
 }: {
   title: string;
   roleLabelSingular: string;
@@ -150,6 +151,8 @@ function MemberRoleSection({
   onSearchChange: (v: string) => void;
   pendingMemberId: string | null;
   onToggle: (userId: string, checked: boolean) => void;
+  /** Supervisor (admin) view — same data, add/remove controls hidden. */
+  readOnly: boolean;
 }) {
   const normalizedSearch = normalizeForSearch(search.trim());
   const filteredPool = pool.filter((a) => {
@@ -195,7 +198,7 @@ function MemberRoleSection({
                     {displayName}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">{roleMeta.label}</span>
-                  {isPending ? (
+                  {readOnly ? null : isPending ? (
                     <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                   ) : (
                     <Button
@@ -216,65 +219,67 @@ function MemberRoleSection({
           </div>
         )}
 
-        <div className="space-y-2">
-          <Label>Adicionar {roleLabelSingular}</Label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Buscar por nome ou e-mail..."
-              className="pl-8"
-              disabled={pool.length === 0}
-            />
-          </div>
-          {pool.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Nenhum {roleLabelSingular} na conta ainda.
-            </p>
-          ) : filteredPool.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {search.trim()
-                ? `Nenhum ${roleLabelSingular} encontrado para essa busca.`
-                : `Todos os ${roleLabelPlural} já estão nesta equipe.`}
-            </p>
-          ) : (
-            <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
-              {filteredPool.map((member) => {
-                const isPending = pendingMemberId === member.user_id;
-                const displayName = member.full_name || member.email || "Sem nome";
-                const roleMeta = ROLE_META[member.role];
-                return (
-                  <button
-                    type="button"
-                    key={member.user_id}
-                    disabled={isPending}
-                    onClick={() => onToggle(member.user_id, true)}
-                    className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Avatar className="size-6 shrink-0">
-                      {member.avatar_url ? (
-                        <AvatarImage src={member.avatar_url} alt={displayName} />
-                      ) : null}
-                      <AvatarFallback className="bg-primary/10 text-[10px] font-medium text-primary">
-                        {displayName.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                      {displayName}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {roleMeta.label}
-                    </span>
-                    {isPending && (
-                      <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    )}
-                  </button>
-                );
-              })}
+        {readOnly ? null : (
+          <div className="space-y-2">
+            <Label>Adicionar {roleLabelSingular}</Label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder="Buscar por nome ou e-mail..."
+                className="pl-8"
+                disabled={pool.length === 0}
+              />
             </div>
-          )}
-        </div>
+            {pool.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Nenhum {roleLabelSingular} na conta ainda.
+              </p>
+            ) : filteredPool.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {search.trim()
+                  ? `Nenhum ${roleLabelSingular} encontrado para essa busca.`
+                  : `Todos os ${roleLabelPlural} já estão nesta equipe.`}
+              </p>
+            ) : (
+              <div className="max-h-48 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+                {filteredPool.map((member) => {
+                  const isPending = pendingMemberId === member.user_id;
+                  const displayName = member.full_name || member.email || "Sem nome";
+                  const roleMeta = ROLE_META[member.role];
+                  return (
+                    <button
+                      type="button"
+                      key={member.user_id}
+                      disabled={isPending}
+                      onClick={() => onToggle(member.user_id, true)}
+                      className="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Avatar className="size-6 shrink-0">
+                        {member.avatar_url ? (
+                          <AvatarImage src={member.avatar_url} alt={displayName} />
+                        ) : null}
+                        <AvatarFallback className="bg-primary/10 text-[10px] font-medium text-primary">
+                          {displayName.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                        {displayName}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {roleMeta.label}
+                      </span>
+                      {isPending && (
+                        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -288,7 +293,11 @@ export default function EquipeDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const supabase = createClient();
-  const { user, accountId } = useAuth();
+  const { user, accountId, accountRole } = useAuth();
+  // Supervisor (admin) view: read-only. Owner keeps full edit access.
+  // UI-only — RLS still allows admin writes where migrations already
+  // granted them; this just hides the controls per this task's scope.
+  const isReadOnly = accountRole === "admin";
 
   const [loading, setLoading] = useState(true);
   const [team, setTeam] = useState<Team | null>(null);
@@ -958,6 +967,7 @@ export default function EquipeDetailPage({
                 onSearchChange={setSupervisorSearch}
                 pendingMemberId={pendingMemberId}
                 onToggle={handleToggleMember}
+                readOnly={isReadOnly}
               />
 
               <MemberRoleSection
@@ -970,6 +980,7 @@ export default function EquipeDetailPage({
                 onSearchChange={setOperatorSearch}
                 pendingMemberId={pendingMemberId}
                 onToggle={handleToggleMember}
+                readOnly={isReadOnly}
               />
             </>
           )}
@@ -980,15 +991,17 @@ export default function EquipeDetailPage({
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-semibold text-foreground">Canais vinculados</h2>
                 <div className="flex items-center gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setAddChannelOpen(true)}
-                  >
-                    <Plus className="size-3.5" />
-                    Adicionar canal
-                  </Button>
+                  {isReadOnly ? null : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAddChannelOpen(true)}
+                    >
+                      <Plus className="size-3.5" />
+                      Adicionar canal
+                    </Button>
+                  )}
                   <Link href="/canais" className="text-xs text-primary hover:underline">
                     Gerenciar canais
                   </Link>
@@ -1020,17 +1033,19 @@ export default function EquipeDetailPage({
                         <Badge className={`text-xs ${statusBadge.className}`}>
                           {statusBadge.label}
                         </Badge>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => setRemoveChannelTarget(c)}
-                          title="Remover canal da equipe"
-                          aria-label="Remover canal da equipe"
-                          className="shrink-0 text-muted-foreground hover:text-destructive"
-                        >
-                          <X className="size-3.5" />
-                        </Button>
+                        {isReadOnly ? null : (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => setRemoveChannelTarget(c)}
+                            title="Remover canal da equipe"
+                            aria-label="Remover canal da equipe"
+                            className="shrink-0 text-muted-foreground hover:text-destructive"
+                          >
+                            <X className="size-3.5" />
+                          </Button>
+                        )}
                       </div>
                     );
                   })}
@@ -1162,7 +1177,7 @@ export default function EquipeDetailPage({
                           >
                             <Checkbox
                               checked={belongsHere}
-                              disabled={isPending}
+                              disabled={isPending || isReadOnly}
                               onCheckedChange={(next) =>
                                 handleToggleTabulacaoTeam(tab.id, next === true)
                               }
@@ -1179,11 +1194,9 @@ export default function EquipeDetailPage({
                                 +{otherTeamCount} {otherTeamCount === 1 ? "equipe" : "equipes"}
                               </Badge>
                             ) : null}
-                            {isPending ? (
+                            {isPending || isDeleting ? (
                               <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                            ) : isDeleting ? (
-                              <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                            ) : (
+                            ) : isReadOnly ? null : (
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -1207,6 +1220,7 @@ export default function EquipeDetailPage({
                 })()
               )}
 
+              {isReadOnly ? null : (
               <div className="space-y-2 border-t border-border pt-4">
                 <Label>Nova tabulação</Label>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1254,6 +1268,7 @@ export default function EquipeDetailPage({
                   </Button>
                 </div>
               </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1346,7 +1361,7 @@ export default function EquipeDetailPage({
                             <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5">
                               <Checkbox
                                 checked={checked}
-                                disabled={isPending || channels.length === 0}
+                                disabled={isPending || channels.length === 0 || isReadOnly}
                                 onCheckedChange={(next) =>
                                   handleToggleAllowedTemplate(tpl.id, next === true)
                                 }
