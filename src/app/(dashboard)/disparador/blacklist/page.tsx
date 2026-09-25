@@ -33,6 +33,27 @@ const MOTIVO_LABELS: Record<string, string> = {
   resposta_negativa: "Resposta Negativa",
 };
 
+function getBlacklistOrigin(entry: BlacklistEntry): string {
+  if (entry.mensagem_detectada?.trim()) {
+    return `Opt-out: ${entry.mensagem_detectada.trim()}`;
+  }
+
+  const motivo = entry.motivo.toLowerCase();
+  if (motivo.includes("131026")) {
+    return "Automático — Meta 131026";
+  }
+
+  if (entry.bloqueado_por === "sistema") {
+    return "Automático";
+  }
+
+  if (entry.bloqueado_por?.trim() || entry.motivo === "bloqueio_manual") {
+    return "Manual";
+  }
+
+  return "Não informado";
+}
+
 export default function BlacklistPage() {
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
   const [filteredList, setFilteredList] = useState<BlacklistEntry[]>([]);
@@ -213,7 +234,7 @@ export default function BlacklistPage() {
                 <tr>
                   <th className="px-5 py-3.5">Telefone</th>
                   <th className="px-5 py-3.5">Motivo</th>
-                  <th className="px-5 py-3.5">Mensagem opt-out</th>
+                  <th className="px-5 py-3.5">Origem</th>
                   <th className="px-5 py-3.5">Data do bloqueio</th>
                   <th className="px-5 py-3.5 text-right">Ações</th>
                 </tr>
@@ -228,7 +249,7 @@ export default function BlacklistPage() {
                       </span>
                     </td>
                     <td className="px-5 py-4 max-w-xs truncate text-muted-foreground italic">
-                      {entry.mensagem_detectada || "Bloqueio Manual"}
+                      {getBlacklistOrigin(entry)}
                     </td>
                     <td className="px-5 py-4 text-muted-foreground">
                       {new Date(entry.data_bloqueio).toLocaleString()}
