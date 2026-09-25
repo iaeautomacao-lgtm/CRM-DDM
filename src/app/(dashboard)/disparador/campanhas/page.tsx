@@ -1431,6 +1431,32 @@ export default function CampanhasPage() {
     })));
   };
 
+  const VAR_COLUMN_KEYS = ["var1", "var2", "var3"] as const;
+
+  // Auto-promoção: quando o Step 2 mapeia uma coluna var1/2/3 do CSV mas o
+  // {{n}} correspondente no Step 1 ainda está como "valor fixo" vazio
+  // (default de onSelect do MessageTemplatePicker para {{2}}, {{3}}, ...),
+  // promove esse slot pra csv_var em vez de exigir que o usuário repita
+  // manualmente no Step 1 uma escolha que já fez no Step 2 — sem isso o
+  // submit bloqueia com "Variável {{n}} do template está vazia" mesmo com
+  // o CSV corretamente mapeado (ver investigação). Não toca entries que já
+  // têm valor (static preenchido) nem outros tipos (contact_field/
+  // utm_link/csv_var já setado).
+  const autoPromoteTemplateVars = (map: ImportColumnMap) => {
+    setMensagens((prev) =>
+      prev.map((msg) => {
+        if (!Array.isArray(msg.template_variable_map)) return msg;
+        const newMap = msg.template_variable_map.map((entry: any, idx: number) => {
+          if (entry?.type !== "static" || entry.value?.trim()) return entry;
+          const columnKey = VAR_COLUMN_KEYS[idx];
+          if (!columnKey || !map[columnKey]) return entry;
+          return { type: "csv_var", index: idx as 0 | 1 | 2 };
+        });
+        return { ...msg, template_variable_map: newMap };
+      })
+    );
+  };
+
   const parseImportFile = async (file: File) => {
     setImportLoading(true);
     setImportPreview(null);
@@ -1546,12 +1572,15 @@ export default function CampanhasPage() {
           return { ...msg, template_variable_map: newMap };
         }));
 
-        // Aviso se alguma variável varia por contato
+        // Variável varia por contato → não dá pra preencher um static.value
+        // único acima; promove pra csv_var (resolvido por contato em
+        // startCampaign.ts) em vez de deixar {{n}} vazio.
         const hasVariableVars = varValueSets.some(set => set.size > 1);
         if (hasVariableVars) {
+          autoPromoteTemplateVars(detectedMap);
           toast.warning(
-            "Algumas variáveis variam por contato no CSV. " +
-            "Use a API externa para disparos com variáveis individuais."
+            "Variáveis com valores diferentes por contato foram mapeadas " +
+            "automaticamente para as colunas do CSV."
           );
         }
       }
@@ -2855,7 +2884,10 @@ export default function CampanhasPage() {
                         size="sm"
                         variant={mappingConfirmed ? "outline" : "default"}
                         disabled={!columnMap.phone}
-                        onClick={() => setMappingConfirmed(true)}
+                        onClick={() => {
+                          setMappingConfirmed(true);
+                          autoPromoteTemplateVars(columnMap);
+                        }}
                       >
                         {mappingConfirmed ? "Mapeamento confirmado" : "Confirmar mapeamento"}
                       </Button>
