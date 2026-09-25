@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { 
@@ -24,6 +24,15 @@ interface BlacklistEntry {
   mensagem_detectada?: string;
 }
 
+type BlacklistType = "opt_out" | "manual" | "meta_131026" | "automatic" | "unknown";
+
+interface BlacklistClassification {
+  type: BlacklistType;
+  label: string;
+  severity: "Forte" | "Preventivo" | "Indefinida";
+  description: string;
+}
+
 const MOTIVO_LABELS: Record<string, string> = {
   opt_out: "Pediu para sair (Opt-out)",
   bloqueio_manual: "Bloqueio Manual",
@@ -33,25 +42,56 @@ const MOTIVO_LABELS: Record<string, string> = {
   resposta_negativa: "Resposta Negativa",
 };
 
-function getBlacklistOrigin(entry: BlacklistEntry): string {
-  if (entry.mensagem_detectada?.trim()) {
-    return `Opt-out: ${entry.mensagem_detectada.trim()}`;
+function classifyBlacklistEntry(entry: BlacklistEntry): BlacklistClassification {
+  if (entry.mensagem_detectada?.trim() || entry.motivo === "opt_out") {
+    return {
+      type: "opt_out",
+      label: "Opt-out",
+      severity: "Forte",
+      description: "Contato pediu para não receber mensagens",
+    };
   }
 
   const motivo = entry.motivo.toLowerCase();
   if (motivo.includes("131026")) {
-    return "Automático — Meta 131026";
+    return {
+      type: "meta_131026",
+      label: "Automático — Meta 131026",
+      severity: "Preventivo",
+      description: "Falha de entrega pela Meta neste envio",
+    };
   }
 
   if (entry.bloqueado_por === "sistema") {
-    return "Automático";
+    return {
+      type: "automatic",
+      label: "Automático",
+      severity: "Preventivo",
+      description: "Bloqueio automático do sistema",
+    };
   }
 
   if (entry.bloqueado_por?.trim() || entry.motivo === "bloqueio_manual") {
-    return "Manual";
+    return {
+      type: "manual",
+      label: "Manual",
+      severity: "Forte",
+      description: "Bloqueado manualmente por operador",
+    };
   }
 
-  return "Não informado";
+  return {
+    type: "unknown",
+    label: "Não informado",
+    severity: "Indefinida",
+    description: "Não foi possível determinar a origem",
+  };
+}
+
+function severityClass(severity: BlacklistClassification["severity"]): string {
+  if (severity === "Forte") return "bg-red-500/10 text-red-600 border-red-500/20";
+  if (severity === "Preventivo") return "bg-amber-500/10 text-amber-600 border-amber-500/20";
+  return "bg-zinc-500/10 text-zinc-600 border-zinc-500/20";
 }
 
 export default function BlacklistPage() {
@@ -60,6 +100,7 @@ export default function BlacklistPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [originFilter, setOriginFilter] = useState<BlacklistType | "all">("all");
   // Resolvido em loadBlacklist() — mesmo padrão de campanhas/page.tsx
   // (getDisparadorScope). Necessário pra migration 040/085 (RLS do
   // Disparador) poder ser aplicada.
@@ -102,22 +143,51 @@ export default function BlacklistPage() {
   // Filter List based on Search Query
   useEffect(() => {
     const query = search.trim().toLowerCase();
-    if (!query) {
-      setFilteredList(blacklist);
-    } else {
-      setFilteredList(
-        blacklist.filter(
-          (b) =>
-            b.telefone.toLowerCase().includes(query) ||
-            (b.mensagem_detectada && b.mensagem_detectada.toLowerCase().includes(query))
-        )
-      );
-    }
-  }, [search, blacklist]);
+    setFilteredList(
+      blacklist.filter((entry) => {
+        const matchesSearch =
+          !query ||
+          entry.telefone.toLowerCase().includes(query) ||
+          entry.mensagem_detectada?.toLowerCase().includes(query) ||
+          entry.motivo.toLowerCase().includes(query);
+        const matchesOrigin =
+          originFilter === "all" || classifyBlacklistEntry(entry).type === originFilter;
+        return Boolean(matchesSearch && matchesOrigin);
+      })
+    );
+  }, [search, blacklist, originFilter]);
+
+  const originFilters: Array<{ key: BlacklistType | "all"; label: string }> = [
+    { key: "all", label: "Todos" },
+    { key: "opt_out", label: "Opt-out" },
+    { key: "manual", label: "Manual" },
+    { key: "meta_131026", label: "Meta 131026" },
+    { key: "automatic", label: "Automático" },
+    { key: "unknown", label: "Não informado" },
+  ];
+  const originCounts = useMemo(() => {
+    const counts: Record<BlacklistType, number> = {
+      opt_out: 0,
+      manual: 0,
+      meta_131026: 0,
+      automatic: 0,
+      unknown: 0,
+    };
+    blacklist.forEach((entry) => {
+      counts[classifyBlacklistEntry(entry).type] += 1;
+    });
+    return counts;
+  }, [blacklist]);
 
   // Remove from Blacklist
   const handleRemove = async (id: string) => {
-    if (!confirm("Tem certeza que deseja remover este número da blacklist? Ele voltará a receber disparos.")) return;
+    const entry = blacklist.find((item) => item.id === id);
+    const classification = entry ? classifyBlacklistEntry(entry) : null;
+    const confirmation =
+      classification?.type === "opt_out"
+        ? "Este contato pediu para não receber mensagens. Remover este bloqueio pode causar envio indevido. Deseja continuar?"
+        : "Tem certeza que deseja remover este número da blacklist? Ele voltará a receber disparos.";
+    if (!confirm(confirmation)) return;
     try {
       const supabase = createClient();
       const { error } = await supabase.from("blacklist").delete().eq("id", id);
@@ -206,6 +276,31 @@ export default function BlacklistPage() {
         />
       </div>
 
+      <div className="space-y-2">
+        <div className="flex flex-wrap gap-2">
+          {originFilters.map((filter) => {
+            const count = filter.key === "all" ? blacklist.length : originCounts[filter.key];
+            const active = originFilter === filter.key;
+            return (
+              <Button
+                key={filter.key}
+                type="button"
+                size="sm"
+                variant={active ? "secondary" : "outline"}
+                onClick={() => setOriginFilter(filter.key)}
+                className="gap-1.5"
+              >
+                {filter.label}
+                <span className="text-[10px] text-muted-foreground">({count})</span>
+              </Button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Bloqueios por opt-out e manuais são fortes. Falhas Meta 131026 são preventivas e indicam que a Meta não conseguiu entregar naquele envio.
+        </p>
+      </div>
+
       {/* Blacklist List */}
       <div className="flex-1 overflow-y-auto pr-2">
         {loading ? (
@@ -248,8 +343,28 @@ export default function BlacklistPage() {
                         <AlertOctagon className="h-3 w-3" /> {MOTIVO_LABELS[entry.motivo] || entry.motivo}
                       </span>
                     </td>
-                    <td className="px-5 py-4 max-w-xs truncate text-muted-foreground italic">
-                      {getBlacklistOrigin(entry)}
+                    <td className="px-5 py-4 max-w-xs">
+                      {(() => {
+                        const classification = classifyBlacklistEntry(entry);
+                        return (
+                          <div className="space-y-1">
+                            <div className="font-medium text-foreground">{classification.label}</div>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${severityClass(classification.severity)}`}>
+                                {classification.severity}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">
+                                {classification.description}
+                              </span>
+                            </div>
+                            {classification.type === "opt_out" && entry.mensagem_detectada && (
+                              <p className="truncate text-[10px] italic text-muted-foreground">
+                                “{entry.mensagem_detectada}”
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-5 py-4 text-muted-foreground">
                       {new Date(entry.data_bloqueio).toLocaleString()}
