@@ -23,6 +23,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import {
+  Ban,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -31,7 +32,9 @@ import {
   Info,
   Search,
   SlidersHorizontal,
+  UserX,
 } from "lucide-react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -63,6 +66,7 @@ import { Skeleton } from "@/components/dashboard/skeleton";
 import { buildPageList } from "@/lib/relatorios/pagination";
 import { exportWithHistory } from "@/lib/relatorios/export-with-history";
 import { MessageModal } from "@/components/relatorios/MessageModal";
+import { normalizarErroMeta, extrairCodigoMetaErro } from "@/lib/disparador/normalize-meta-error";
 
 const ALL = "all";
 const PAGE_SIZE = 60;
@@ -83,6 +87,18 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   erro: { label: "Erro", className: "bg-[#FEE2E2] text-[#B91C1C]" },
   cancelado: { label: "Cancelado", className: "bg-[#F3F4F6] text-[#374151]" },
 };
+
+// Filtro "Tipo de erro" — aplicado client-side sobre os itens já
+// carregados (ver visibleItems), não gera nova chamada de RPC. "all"
+// (Todos os erros) não restringe nada; as demais opções escondem
+// qualquer linha que não seja status=erro com o código correspondente.
+const ERROR_TYPE_OPTIONS = [
+  { value: "all", label: "Todos os erros" },
+  { value: "131026", label: "Janela 24h (131026)" },
+  { value: "131009", label: "Número inválido (131009)" },
+  { value: "outros", label: "Outros" },
+] as const;
+type ErrorTypeFilter = (typeof ERROR_TYPE_OPTIONS)[number]["value"];
 
 function n(value: string | number | null | undefined): number {
   return Number(value ?? 0) || 0;
@@ -226,6 +242,9 @@ export default function EnvioEmLotePage() {
   const [draft, setDraft] = useState<ItemFilters>(defaultItemFilters);
   const [applied, setApplied] = useState<ItemFilters>(defaultItemFilters);
   const [page, setPage] = useState(1);
+  // Client-side only — não faz parte de ItemFilters/buildItemsParams
+  // porque não gera uma nova chamada de RPC (ver visibleItems abaixo).
+  const [errorTypeFilter, setErrorTypeFilter] = useState<ErrorTypeFilter>("all");
 
   const [items, setItems] = useState<QueueItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -315,6 +334,7 @@ export default function EnvioEmLotePage() {
     }
     setDraft(defaultItemFilters());
     setApplied(defaultItemFilters());
+    setErrorTypeFilter("all");
     setPage(1);
     loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -328,6 +348,20 @@ export default function EnvioEmLotePage() {
   const pageList = useMemo(() => buildPageList(page, totalPages), [page, totalPages]);
   const rangeStart = totalCount === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, totalCount);
+
+  // "Tipo de erro" — reaplica sobre os itens já carregados desta página
+  // (sem nova RPC), então rangeStart/rangeEnd/totalCount acima continuam
+  // refletindo a página crua do servidor, não a contagem pós-filtro.
+  const visibleItems = useMemo(() => {
+    if (errorTypeFilter === "all") return items;
+    return items.filter((it) => {
+      if (it.status !== "erro") return false;
+      const codigo = extrairCodigoMetaErro(it.erro);
+      if (errorTypeFilter === "131026") return codigo === 131026;
+      if (errorTypeFilter === "131009") return codigo === 131009;
+      return codigo !== 131026 && codigo !== 131009;
+    });
+  }, [items, errorTypeFilter]);
 
   function handlePesquisar() {
     setApplied(draft);
@@ -372,6 +406,47 @@ export default function EnvioEmLotePage() {
     } finally {
       setExporting(false);
     }
+  }
+
+  // Mesma sanitização/insert de src/app/(dashboard)/disparador/blacklist/
+  // page.tsx (handleSubmit) — bloqueio manual disparado a partir de uma
+  // linha de erro do relatório, em vez de abrir a página de blacklist.
+  async function handleAddToBlacklist(item: QueueItem) {
+    if (!accountId) {
+      toast.error("Conta não resolvida — recarregue a página e tente de novo.");
+      return;
+    }
+    if (!item.contactPhone) {
+      toast.error("Telefone não disponível para este contato.");
+      return;
+    }
+    let cleanPhone = item.contactPhone.replace(/\D/g, "");
+    if (!cleanPhone.startsWith("+")) cleanPhone = "+" + cleanPhone;
+
+    try {
+      const db = createClient();
+      const { error } = await db.from("blacklist").insert({
+        telefone: cleanPhone,
+        motivo: "bloqueio_manual",
+        mensagem_detectada: item.erro || null,
+        bloqueado_por: "Painel CRM",
+        account_id: accountId,
+      });
+      if (error) {
+        if (error.code === "23505") throw new Error("Este número já está na blacklist.");
+        throw error;
+      }
+      toast.success("Número adicionado à blacklist!");
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao adicionar à blacklist.");
+    }
+  }
+
+  // Placeholder — remoção em massa de contatos com falha ainda não tem
+  // fluxo definido (exclusão de contatos tem efeitos em outras telas do
+  // CRM, não só no Disparador). Só a UI por enquanto, conforme pedido.
+  function handleRemoveFromBase() {
+    toast.info("Em breve — exportar a lista de falhas e remover manualmente.");
   }
 
   function campaignLabel(id: string | null) {
@@ -446,6 +521,27 @@ export default function EnvioEmLotePage() {
                     </SelectTrigger>
                     <SelectContent className="z-50">
                       {STATUS_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Tipo de erro</label>
+                  <Select
+                    value={errorTypeFilter}
+                    onValueChange={(v) => v && setErrorTypeFilter(v as ErrorTypeFilter)}
+                  >
+                    <SelectTrigger className="w-48" disabled={!campaignId}>
+                      <SelectValue>
+                        {(v: string) => ERROR_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="z-50">
+                      {ERROR_TYPE_OPTIONS.map((o) => (
                         <SelectItem key={o.value} value={o.value}>
                           {o.label}
                         </SelectItem>
@@ -534,7 +630,7 @@ export default function EnvioEmLotePage() {
                   <Skeleton key={i} className="h-10 w-full rounded-lg" />
                 ))}
               </div>
-            ) : items.length === 0 ? (
+            ) : visibleItems.length === 0 ? (
               <div className="p-4">
                 <EmptyState
                   icon={Search}
@@ -555,7 +651,7 @@ export default function EnvioEmLotePage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {items.map((item) => {
+                    {visibleItems.map((item) => {
                       const badge = STATUS_BADGE[item.status] ?? {
                         label: item.status,
                         className: "bg-muted text-muted-foreground",
@@ -584,21 +680,45 @@ export default function EnvioEmLotePage() {
                                     <Info className="h-3.5 w-3.5" />
                                   </TooltipTrigger>
                                   <TooltipContent side="top" className="max-w-xs text-left">
-                                    {item.erro}
+                                    {normalizarErroMeta(item.erro)}
                                   </TooltipContent>
                                 </Tooltip>
                               )}
                             </span>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setViewingMessage(item.mensagemFinal)}
-                            >
-                              <Eye className="size-4" />
-                              Visualizar
-                            </Button>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setViewingMessage(item.mensagemFinal)}
+                              >
+                                <Eye className="size-4" />
+                                Visualizar
+                              </Button>
+                              {item.status === "erro" && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleAddToBlacklist(item)}
+                                    className="rounded-md p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+                                    title="Adicionar à blacklist"
+                                    aria-label="Adicionar à blacklist"
+                                  >
+                                    <Ban className="size-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={handleRemoveFromBase}
+                                    className="rounded-md p-1.5 text-muted-foreground hover:bg-muted"
+                                    title="Remover da base"
+                                    aria-label="Remover da base"
+                                  >
+                                    <UserX className="size-4" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );

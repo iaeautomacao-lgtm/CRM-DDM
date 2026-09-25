@@ -9,6 +9,7 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
 import { writeLog, maskPhone } from '@/lib/logger'
+import { autoBlacklistOn131026 } from '@/lib/disparador/auto-blacklist'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -411,10 +412,12 @@ async function handleStatusUpdate(status: {
         }
 
         // Captura motivo de falha da Meta (campo errors[])
+        let failedMetaCode: number | null = null
         if (incomingQueueStatus === 'erro') {
           const metaErrors = (status as any).errors as
             Array<{ code: number; title: string }> | undefined
           if (metaErrors && metaErrors.length > 0) {
+            failedMetaCode = metaErrors[0].code
             queueUpdate.erro = `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
           } else {
             queueUpdate.erro = 'Falha na entrega (Meta)'
@@ -425,6 +428,14 @@ async function handleStatusUpdate(status: {
           .from('disp_message_queue')
           .update(queueUpdate)
           .eq('id', queueItem.id)
+
+        // 131026 (janela de 24h encerrada) reportado pelo status de
+        // entrega assíncrono — bloqueia o número automaticamente pra não
+        // repetir a mesma falha em campanhas futuras. Fire-and-forget:
+        // nunca deve atrasar/derrubar o processamento do webhook.
+        if (incomingQueueStatus === 'erro' && failedMetaCode === 131026) {
+          void autoBlacklistOn131026(status.recipient_id, queueItem.campaign_id ?? null)
+        }
 
         // Incrementar métricas da campanha
         if (incomingQueueStatus === 'entregue') {

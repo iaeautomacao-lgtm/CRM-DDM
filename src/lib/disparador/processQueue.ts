@@ -17,6 +17,7 @@ import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { writeLog, maskPhone } from "@/lib/logger";
+import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
 import OpenAI from "openai";
 
 // Marcador usado em `template_name` para itens de fila de contatos
@@ -514,6 +515,12 @@ export async function processQueueItem(
   } catch (sendErr: any) {
     if (sendErr instanceof MetaApiError) {
       console.error(`[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`);
+      // 131026 (janela de 24h encerrada) rejeitado direto pela Meta no
+      // POST /messages — mesma blacklist automática do caminho
+      // assíncrono (webhook de status "failed"), fire-and-forget.
+      if (sendErr.metaCode === 131026) {
+        void autoBlacklistOn131026(phone, item.campaign_id ?? null);
+      }
     }
 
     if (isInvalidPhoneError(sendErr)) {
