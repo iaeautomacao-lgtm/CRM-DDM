@@ -37,6 +37,7 @@ export default function BlacklistPage() {
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
   const [filteredList, setFilteredList] = useState<BlacklistEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   // Resolvido em loadBlacklist() — mesmo padrão de campanhas/page.tsx
   // (getDisparadorScope). Necessário pra migration 040/085 (RLS do
@@ -55,6 +56,7 @@ export default function BlacklistPage() {
 
   const loadBlacklist = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const supabase = createClient();
       const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
@@ -70,6 +72,7 @@ export default function BlacklistPage() {
       setFilteredList(data ?? []);
     } catch (err) {
       console.error("Failed to load blacklist:", err);
+      setLoadError("Não foi possível carregar a blacklist. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -187,6 +190,15 @@ export default function BlacklistPage() {
         {loading ? (
           <div className="flex h-48 items-center justify-center text-muted-foreground">
             Carregando blacklist...
+          </div>
+        ) : loadError ? (
+          <div className="flex h-48 flex-col items-center justify-center text-center text-muted-foreground border border-dashed border-border rounded-xl">
+            <AlertOctagon className="h-10 w-10 text-amber-500/50 mb-2" />
+            <h4 className="font-semibold text-foreground">Não foi possível carregar a blacklist</h4>
+            <p className="text-xs max-w-xs mt-1">Tente novamente.</p>
+            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={loadBlacklist}>
+              Tentar novamente
+            </Button>
           </div>
         ) : filteredList.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center text-center text-muted-foreground border border-dashed border-border rounded-xl">

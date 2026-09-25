@@ -33,15 +33,51 @@ export async function autoBlacklistOn131026(
 
   try {
     const db = supabaseAdmin();
-    const { data: existing } = await db
+    if (!campaignId) {
+      console.warn("[Disparador] autoBlacklistOn131026: campanha ausente; blacklist não inserida");
+      return;
+    }
+
+    const { data: campaign, error: campaignError } = await db
+      .from("campaigns")
+      .select("account_id")
+      .eq("id", campaignId)
+      .maybeSingle();
+    if (campaignError) {
+      console.error("[Disparador] autoBlacklistOn131026: falha ao resolver account_id da campanha:", campaignError);
+      return;
+    }
+    if (!campaign?.account_id) {
+      console.warn("[Disparador] autoBlacklistOn131026: campanha sem account_id; blacklist não inserida", campaignId);
+      return;
+    }
+
+    const accountId = campaign.account_id;
+    const { data: existing, error: existingError } = await db
       .from("blacklist")
-      .select("id")
+      .select("id, account_id, campaign_id")
       .eq("telefone", telefone)
       .maybeSingle();
+    if (existingError) {
+      console.error("[Disparador] autoBlacklistOn131026: falha ao consultar blacklist:", existingError);
+      return;
+    }
+    if (existing && !existing.account_id && existing.campaign_id === campaignId) {
+      const { error: repairError } = await db
+        .from("blacklist")
+        .update({ account_id: accountId })
+        .eq("id", existing.id)
+        .is("account_id", null);
+      if (repairError) {
+        console.error("[Disparador] autoBlacklistOn131026: falha ao reparar account_id órfão:", repairError);
+      }
+      return;
+    }
     if (existing) return;
 
     const { error } = await db.from("blacklist").insert({
       telefone,
+      account_id: accountId,
       motivo: ERROR_131026_MOTIVO,
       campaign_id: campaignId,
       bloqueado_por: "sistema",
@@ -59,6 +95,7 @@ export async function autoBlacklistOn131026(
     }
 
     void writeLog({
+      account_id: accountId,
       level: "info",
       source: "disparador",
       event: "blacklist_auto",
