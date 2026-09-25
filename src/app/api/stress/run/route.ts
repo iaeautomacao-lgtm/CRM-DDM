@@ -2,6 +2,8 @@ import { timingSafeEqual, createHmac } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { writeLog } from "@/lib/logger";
+import { findActiveKeyByHash } from "@/lib/api-keys/store";
+import { hashApiKey } from "@/lib/api-keys/keys";
 
 // ============================================================
 // POST /api/stress/run — health check automatizado de produção.
@@ -295,17 +297,26 @@ async function testApiV1CampaignStatus(signal: AbortSignal): Promise<TestOutcome
     return { status: "fail", message: "STRESS_API_KEY não configurado no servidor" };
   }
 
+  const apiKeyRow = await findActiveKeyByHash(hashApiKey(apiKey));
+  if (!apiKeyRow) {
+    return { status: "fail", message: "STRESS_API_KEY inválido, revogado ou expirado" };
+  }
+
   const { data: campaign, error } = await supabaseAdmin()
     .from("campaigns")
     .select("id")
     .eq("source", "api_v1")
+    .eq("account_id", apiKeyRow.account_id)
     .order("created_at", { ascending: false })
     .limit(1)
     .abortSignal(signal)
     .maybeSingle();
   if (error) return { status: "fail", message: error.message };
   if (!campaign) {
-    return { status: "warn", message: "Nenhuma campanha via API encontrada para testar" };
+    return {
+      status: "warn",
+      message: "Nenhuma campanha api_v1 encontrada para a conta da STRESS_API_KEY",
+    };
   }
 
   const res = await fetch(`${getBaseUrl()}/api/v1/disparador/campaigns/${campaign.id}`, {
