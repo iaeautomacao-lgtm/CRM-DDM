@@ -143,6 +143,72 @@ const STATUS_LABELS: Record<string, string> = {
   encerrada: "Encerrada",
 };
 
+type DispatchMode = "imediato" | "balanceado" | "cauteloso" | "personalizado";
+
+interface DispatchModeOption {
+  key: DispatchMode;
+  emoji: string;
+  label: string;
+  description: string;
+  // Ausente só em "personalizado" — os campos técnicos ficam sob controle
+  // manual do usuário nesse caso, em vez de serem sobrescritos ao trocar
+  // de modo.
+  preset?: { batchSize: number; batchPauseSeconds: number; intervaloMin: number; intervaloMax: number };
+}
+
+const DISPATCH_MODES: DispatchModeOption[] = [
+  {
+    key: "imediato",
+    emoji: "🚀",
+    label: "Imediato",
+    description: "Sem pausas, envia tudo de uma vez",
+    // batchSize bem acima de qualquer lista real — na prática todos os
+    // contatos caem num lote só (ver estimarDisparo/startCampaign.ts).
+    preset: { batchSize: 999999, batchPauseSeconds: 0, intervaloMin: 0, intervaloMax: 0 },
+  },
+  {
+    key: "balanceado",
+    emoji: "⚖️",
+    label: "Balanceado",
+    description: "Pausas automáticas anti-spam ativadas",
+    preset: { batchSize: 1, batchPauseSeconds: 0, intervaloMin: 1, intervaloMax: 3 },
+  },
+  {
+    key: "cauteloso",
+    emoji: "🐢",
+    label: "Cauteloso",
+    description: "Pausas longas entre mensagens",
+    preset: { batchSize: 1, batchPauseSeconds: 0, intervaloMin: 5, intervaloMax: 15 },
+  },
+  {
+    key: "personalizado",
+    emoji: "⚙️",
+    label: "Personalizado",
+    description: "Configuração manual dos campos técnicos",
+  },
+];
+
+// Reconstrói o modo a partir dos valores técnicos salvos (edição de
+// campanha existente ou draft antigo sem dispatchMode gravado) — cai em
+// "personalizado" quando a combinação não bate exatamente com nenhum
+// preset (campanha criada antes desta mudança, ou ajustada manualmente).
+function inferDispatchMode(
+  batchSize: number,
+  batchPauseSeconds: number,
+  intervaloMin: number,
+  intervaloMax: number
+): DispatchMode {
+  const found = DISPATCH_MODES.find(
+    (m) =>
+      m.preset &&
+      m.preset.batchSize === batchSize &&
+      m.preset.batchPauseSeconds === batchPauseSeconds &&
+      m.preset.intervaloMin === intervaloMin &&
+      m.preset.intervaloMax === intervaloMax
+  );
+  return found?.key ?? "personalizado";
+}
+
 // Browser-local safety net against an accidentally closed creation modal,
 // not a per-campaign store. Never touched by edit mode (see editingId
 // guards below), so editing a real campaign can't clobber or be clobbered
@@ -179,6 +245,7 @@ interface CampaignDraft {
   janelaFim: string;
   batchSize: number;
   batchPauseSeconds: number;
+  dispatchMode: DispatchMode;
   mensagens: CampaignMessage[];
 }
 
@@ -462,12 +529,16 @@ export default function CampanhasPage() {
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [tagSearch, setTagSearch] = useState("");
-  const [intervaloMin, setIntervaloMin] = useState(30);
-  const [intervaloMax, setIntervaloMax] = useState(60);
+  // Defaults batem com o preset "balanceado" (DISPATCH_MODES) — dispatchMode
+  // já nasce "balanceado" abaixo, então os valores técnicos precisam
+  // concordar mesmo antes de resetForm()/handleDispatchModeChange() rodar.
+  const [intervaloMin, setIntervaloMin] = useState(1);
+  const [intervaloMax, setIntervaloMax] = useState(3);
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
   const [batchSize, setBatchSize] = useState(1);
   const [batchPauseSeconds, setBatchPauseSeconds] = useState(0);
+  const [dispatchMode, setDispatchMode] = useState<DispatchMode>("balanceado");
   const [agendarPara, setAgendarPara] = useState<string>("");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
 
@@ -539,6 +610,20 @@ export default function CampanhasPage() {
     });
   };
 
+  // Troca de "Modo de disparo": aplica os valores técnicos do preset
+  // (delay/lote) de uma vez, exceto em "personalizado" — nesse caso os
+  // campos ficam como estavam para o usuário ajustar manualmente.
+  const handleDispatchModeChange = (mode: DispatchMode) => {
+    setDispatchMode(mode);
+    const preset = DISPATCH_MODES.find((m) => m.key === mode)?.preset;
+    if (preset) {
+      setBatchSize(preset.batchSize);
+      setBatchPauseSeconds(preset.batchPauseSeconds);
+      setIntervaloMin(preset.intervaloMin);
+      setIntervaloMax(preset.intervaloMax);
+    }
+  };
+
   // Draft found in localStorage when the creation modal was opened, still
   // awaiting the user's "Restaurar" / "Descartar" decision.
   const [pendingDraft, setPendingDraft] = useState<CampaignDraft | null>(null);
@@ -602,6 +687,7 @@ export default function CampanhasPage() {
       janelaFim,
       batchSize,
       batchPauseSeconds,
+      dispatchMode,
       mensagens,
     };
 
@@ -626,6 +712,7 @@ export default function CampanhasPage() {
     janelaFim,
     batchSize,
     batchPauseSeconds,
+    dispatchMode,
     mensagens,
   ]);
 
@@ -808,6 +895,14 @@ export default function CampanhasPage() {
     setJanelaFim(campaign.janela_fim);
     setBatchSize(campaign.batch_size ?? 1);
     setBatchPauseSeconds(campaign.batch_pause_seconds ?? 0);
+    setDispatchMode(
+      inferDispatchMode(
+        campaign.batch_size ?? 1,
+        campaign.batch_pause_seconds ?? 0,
+        campaign.intervalo_min,
+        campaign.intervalo_max
+      )
+    );
     // Edição só é permitida para campanhas em "rascunho" (ver PATCH
     // /api/disparador/campaigns/[id]), que por definição nunca têm
     // agendamento — campo sempre reseta vazio aqui.
@@ -854,6 +949,17 @@ export default function CampanhasPage() {
     setJanelaFim(pendingDraft.janelaFim);
     setBatchSize(pendingDraft.batchSize ?? 1);
     setBatchPauseSeconds(pendingDraft.batchPauseSeconds ?? 0);
+    // Drafts salvos antes desta mudança não têm dispatchMode gravado —
+    // reconstrói a partir dos valores técnicos nesse caso.
+    setDispatchMode(
+      pendingDraft.dispatchMode ??
+        inferDispatchMode(
+          pendingDraft.batchSize ?? 1,
+          pendingDraft.batchPauseSeconds ?? 0,
+          pendingDraft.intervaloMin,
+          pendingDraft.intervaloMax
+        )
+    );
     setMensagens(pendingDraft.mensagens);
     setPendingDraft(null);
 
@@ -1212,10 +1318,13 @@ export default function CampanhasPage() {
     setSelectedTags([]);
     setTagSearch("");
     setMensagens([{ tipo: "texto", conteudo: "" }]);
-    setIntervaloMin(30);
-    setIntervaloMax(60);
-    setBatchSize(1);
-    setBatchPauseSeconds(0);
+    // "Balanceado" é o modo default do formulário — ver DISPATCH_MODES.
+    setDispatchMode("balanceado");
+    const balanceadoPreset = DISPATCH_MODES.find((m) => m.key === "balanceado")!.preset!;
+    setIntervaloMin(balanceadoPreset.intervaloMin);
+    setIntervaloMax(balanceadoPreset.intervaloMax);
+    setBatchSize(balanceadoPreset.batchSize);
+    setBatchPauseSeconds(balanceadoPreset.batchPauseSeconds);
     setAgendarPara("");
     setWizardStep(1);
     setImportFile(null);
@@ -1974,93 +2083,127 @@ export default function CampanhasPage() {
                 </div>
               </div>
 
-              {/* Delays and Windows */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">Delay Min (seg)</label>
-                    <input
-                      type="number"
-                      value={intervaloMin}
-                      onChange={(e) => setIntervaloMin(Number(e.target.value))}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">Delay Max (seg)</label>
-                    <input
-                      type="number"
-                      value={intervaloMax}
-                      onChange={(e) => setIntervaloMax(Number(e.target.value))}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                    />
-                  </div>
+              {/* Modo de disparo */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Modo de disparo</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {DISPATCH_MODES.map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => handleDispatchModeChange(m.key)}
+                      className={cn(
+                        "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
+                        dispatchMode === m.key
+                          ? "border-primary bg-primary/10"
+                          : "border-input bg-background hover:bg-muted/50"
+                      )}
+                    >
+                      <span className="text-sm font-medium">
+                        {m.emoji} {m.label}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">{m.description}</span>
+                    </button>
+                  ))}
                 </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">Janela Início</label>
-                    <input
-                      type="text"
-                      value={janelaInicio}
-                      onChange={(e) => setJanelaInicio(e.target.value)}
-                      placeholder="08:00"
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">Janela Fim</label>
-                    <input
-                      type="text"
-                      value={janelaFim}
-                      onChange={(e) => setJanelaFim(e.target.value)}
-                      placeholder="18:00"
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Batch dispatch (migration 078) */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Mensagens por lote</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={batchSize}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setBatchSize(val);
-                      // Zera a pausa quando o lote volta a 1 — evita que um
-                      // batch_pause_seconds esquecido de uma edição anterior
-                      // insira uma pausa extra no comportamento de item único.
-                      if (val <= 1) setBatchPauseSeconds(0);
-                    }}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    Quantas mensagens enviar em paralelo por ciclo (default: 1).
+                {dispatchMode === "imediato" && (
+                  <p className="text-xs text-amber-500">
+                    ⚠️ Sem proteção anti-spam. Recomendado apenas para listas pequenas ou canais
+                    com histórico saudável.
                   </p>
-                </div>
-                {batchSize > 1 && (
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">Pausa entre lotes (segundos)</label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={3600}
-                      value={batchPauseSeconds}
-                      onChange={(e) => setBatchPauseSeconds(Number(e.target.value))}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                    />
-                    <p className="text-[10px] text-muted-foreground">
-                      Tempo de espera entre cada lote (0 = sem pausa extra).
-                    </p>
-                  </div>
                 )}
               </div>
+
+              {/* Janela de horário — independente do modo de disparo */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Janela Início</label>
+                  <input
+                    type="text"
+                    value={janelaInicio}
+                    onChange={(e) => setJanelaInicio(e.target.value)}
+                    placeholder="08:00"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Janela Fim</label>
+                  <input
+                    type="text"
+                    value={janelaFim}
+                    onChange={(e) => setJanelaFim(e.target.value)}
+                    placeholder="18:00"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
+                  />
+                </div>
+              </div>
+
+              {/* Campos técnicos — só em modo "Personalizado" */}
+              {dispatchMode === "personalizado" && (
+                <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Delay Min (seg)</label>
+                      <input
+                        type="number"
+                        value={intervaloMin}
+                        onChange={(e) => setIntervaloMin(Number(e.target.value))}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Delay Max (seg)</label>
+                      <input
+                        type="number"
+                        value={intervaloMax}
+                        onChange={(e) => setIntervaloMax(Number(e.target.value))}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Batch dispatch (migration 078) */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Mensagens por lote</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={batchSize}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setBatchSize(val);
+                          // Zera a pausa quando o lote volta a 1 — evita que um
+                          // batch_pause_seconds esquecido de uma edição anterior
+                          // insira uma pausa extra no comportamento de item único.
+                          if (val <= 1) setBatchPauseSeconds(0);
+                        }}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Quantas mensagens enviar em paralelo por ciclo (default: 1).
+                      </p>
+                    </div>
+                    {batchSize > 1 && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Pausa entre lotes (segundos)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={3600}
+                          value={batchPauseSeconds}
+                          onChange={(e) => setBatchPauseSeconds(Number(e.target.value))}
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Tempo de espera entre cada lote (0 = sem pausa extra).
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Agendamento futuro */}
               <div className="space-y-1">
@@ -2795,6 +2938,13 @@ export default function CampanhasPage() {
                         .filter(s => selectedSessions.includes(s.id))
                         .map(s => s.name)
                         .join(", ") || "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Modo de disparo</span>
+                    <span className="font-medium">
+                      {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.emoji}{" "}
+                      {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.label}
                     </span>
                   </div>
                   <div className="flex justify-between">
