@@ -192,10 +192,28 @@ export async function POST(request: Request) {
         content = content.slice(firstLineEnd + 1);
       }
 
+      // Sem linha sep= — detecta pela primeira linha de dados, contando
+      // ocorrências de cada candidato (mesma heurística do preview no
+      // cliente, ver parseImportFile em campanhas/page.tsx). Sem isso o
+      // servidor sempre assumia ";" fixo, então um CSV separado por vírgula
+      // (sem "sep=") era reparseado com um delimitador diferente do usado
+      // pelo cliente pra montar column_map — as colunas mapeadas na prévia
+      // (ex: columnMap.phone = "contato") nunca batiam com as chaves reais
+      // do row aqui, e o import falhava com "nenhum telefone válido" mesmo
+      // com o mapeamento correto. Empate ou nenhum encontrado → ";"
+      // (compatibilidade com Excel brasileiro, que é o caso mais comum).
+      if (!delimiter) {
+        const sampleLineEnd = content.indexOf("\n");
+        const sampleLine = sampleLineEnd >= 0 ? content.slice(0, sampleLineEnd) : content;
+        const semicolons = (sampleLine.match(/;/g) || []).length;
+        const commas = (sampleLine.match(/,/g) || []).length;
+        delimiter = commas > semicolons ? "," : ";";
+      }
+
       const parsed = Papa.parse(content, {
         header: hasHeader,
         skipEmptyLines: true,
-        ...(delimiter ? { delimiter } : { delimiter: ";" }), // Default to semicolon for Brazilian Excel
+        delimiter,
       });
       rows = hasHeader
         ? parsed.data
