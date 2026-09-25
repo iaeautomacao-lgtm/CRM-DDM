@@ -2266,7 +2266,12 @@ export default function CampanhasPage() {
               {/* Messages bubbles configuration */}
               <div className="space-y-2 border-t border-border/40 pt-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-                  <Layers className="h-3.5 w-3.5" /> Mensagens Sequenciais
+                  <Layers className="h-3.5 w-3.5" />{" "}
+                  {templateMode === "rotacao"
+                    ? "Templates de Rotação"
+                    : templateMode === "aleatorio"
+                      ? "Templates Aleatórios"
+                      : "Mensagens Sequenciais"}
                 </h4>
                 <p className="text-[11px] text-muted-foreground">
                   Clique em uma variável abaixo do campo de texto para inseri-la na posição do
@@ -2298,12 +2303,20 @@ export default function CampanhasPage() {
                       ⚠ Cada contato receberá apenas 1 template.
                     </p>
                   )}
+                  {templateMode !== "sequencia" && mensagens.length < 2 && (
+                    <p className="text-xs text-amber-500">
+                      ⚠️ Adicione pelo menos 2 templates para que a rotação/aleatório funcione.
+                      Com apenas 1, todos os contatos receberão o mesmo template.
+                    </p>
+                  )}
                 </div>
 
                 {mensagens.map((msg, i) => (
                   <div key={i} className="rounded-lg border border-border p-4 bg-muted/20 relative space-y-3">
                     <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-bold text-muted-foreground">Mensagem #{i + 1}</span>
+                      <span className="text-[10px] font-bold text-muted-foreground">
+                        {templateMode !== "sequencia" ? `Template #${i + 1}` : `Mensagem #${i + 1}`}
+                      </span>
                       {mensagens.length > 1 && (
                         <Button
                           type="button"
@@ -2316,6 +2329,12 @@ export default function CampanhasPage() {
                         </Button>
                       )}
                     </div>
+                    {templateMode === "rotacao" && mensagens.length > 1 && (
+                      <p className="text-[10px] text-muted-foreground -mt-2">
+                        Contatos: {[0, 1, 2].map((k) => i + 1 + k * mensagens.length).join(", ")}...
+                        {" "}(posição {i + 1} no round-robin)
+                      </p>
+                    )}
 
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                       <button
@@ -2652,7 +2671,8 @@ export default function CampanhasPage() {
                   onClick={() => setMensagens([...mensagens, { tipo: "texto", conteudo: "" }])}
                   className="w-full border-dashed border-border"
                 >
-                  <Plus className="h-4 w-4 mr-1" /> Adicionar Mensagem Sequencial
+                  <Plus className="h-4 w-4 mr-1" />{" "}
+                  {templateMode !== "sequencia" ? "Adicionar Template" : "Adicionar Mensagem Sequencial"}
                 </Button>
               </div>
             </div>
