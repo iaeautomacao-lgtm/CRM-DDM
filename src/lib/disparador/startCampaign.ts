@@ -1,5 +1,18 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 
+type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
+
+// campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
+// lida por este código — reaproveitada para guardar o modo de alternância
+// de templates sem precisar de uma migration nova (ver EDITABLE_FIELDS em
+// api/disparador/campaigns/[id]/route.ts e campanhas/page.tsx). Linhas
+// antigas ainda têm o array-default [1,2,3,4,5,6]; qualquer valor que não
+// seja "rotacao"/"aleatorio" cai em "sequencia" (comportamento original:
+// todas as mensagens enviadas em sequência para cada contato).
+function parseTemplateMode(raw: unknown): TemplateMode {
+  return raw === "rotacao" || raw === "aleatorio" ? raw : "sequencia";
+}
+
 export type StartCampaignResult =
   | { ok: true; enqueued: number }
   | { ok: false; status: number; error: string };
@@ -81,6 +94,7 @@ export async function startCampaign(
     if (mensagens.length === 0) {
       return { ok: false, status: 400, error: "Campanha sem mensagens configuradas." };
     }
+    const templateMode = parseTemplateMode(campaign.dias_permitidos);
 
     const sessionIds = Array.isArray(campaign.session_ids) ? campaign.session_ids : [];
     if (sessionIds.length === 0) {
@@ -350,8 +364,10 @@ export async function startCampaign(
       // Skip if phone is blacklisted
       if (contact.phone && blacklistSet.has(contact.phone)) continue;
 
-      // Select random session ID from campaign configurations
-      const sessionId = sessionIds[Math.floor(Math.random() * sessionIds.length)];
+      // Distribuição round-robin entre os canais selecionados — cada canal
+      // recebe uma fatia igual dos contatos, em vez do sorteio aleatório
+      // anterior (só estatisticamente uniforme, sem garantia de balanço).
+      const sessionId = sessionIds[i % sessionIds.length];
 
       let contactBaseDelay: number;
       if (batchSize > 1) {
@@ -379,8 +395,22 @@ export async function startCampaign(
       const channel = channelMap.get(sessionId);
       const isMetaChannel = channel?.provider === "meta";
 
-      for (let j = 0; j < mensagens.length; j++) {
-        const msg = mensagens[j];
+      // template_mode "sequencia" (default) manda todas as mensagens
+      // configuradas, em ordem, para cada contato — comportamento
+      // original. "rotacao"/"aleatorio" mandam só UMA mensagem por
+      // contato, escolhida entre as configuradas (round-robin por índice
+      // do contato, ou sorteio) — pensado para alternar templates
+      // diferentes entre contatos, não para uma sequência ao mesmo
+      // contato.
+      const messagesToSend =
+        templateMode === "sequencia"
+          ? mensagens
+          : templateMode === "rotacao"
+            ? [mensagens[i % mensagens.length]]
+            : [mensagens[Math.floor(Math.random() * mensagens.length)]];
+
+      for (let j = 0; j < messagesToSend.length; j++) {
+        const msg = messagesToSend[j];
         const msgDelay = contactBaseDelay + j * intraDelay;
         const scheduledAt = new Date(baseTime + msgDelay).toISOString();
 
@@ -471,9 +501,12 @@ export async function startCampaign(
 
       // Increment delay for the next contact — só no modo sequencial
       // (batchSize <= 1); no modo em lote, o delay de cada contato é
-      // recalculado do zero a partir de `i` a cada iteração.
+      // recalculado do zero a partir de `i` a cada iteração. Usa
+      // messagesToSend.length (não mensagens.length) para refletir quantas
+      // mensagens ESTE contato recebeu — em rotacao/aleatorio é sempre 1,
+      // então não soma intraDelay extra que nunca é usado.
       if (batchSize <= 1) {
-        contactDelay += (mensagens.length - 1) * intraDelay + minDelay + Math.random() * (maxDelay - minDelay);
+        contactDelay += (messagesToSend.length - 1) * intraDelay + minDelay + Math.random() * (maxDelay - minDelay);
       }
     }
 

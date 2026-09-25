@@ -17,6 +17,12 @@ const EDITABLE_FIELDS = [
   "agendamento",
   "batch_size",
   "batch_pause_seconds",
+  // Coluna jsonb legada ("dias da semana permitidos") nunca lida por este
+  // código — reaproveitada para guardar o modo de alternância de
+  // templates (template_mode: "sequencia" | "rotacao" | "aleatorio") sem
+  // precisar de uma migration nova. Ver parseTemplateMode em
+  // campanhas/page.tsx e startCampaign.ts.
+  "dias_permitidos",
 ] as const;
 
 export async function PATCH(

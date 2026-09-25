@@ -85,6 +85,9 @@ interface Campaign {
   // Teto de envios/hora, enforced ao vivo por worker.ts/cron/route.ts —
   // usado pela estimativa (estimarDisparo) como piso de tempo mínimo.
   limite_por_hora?: number;
+  // Reaproveitada para template_mode — ver parseTemplateMode. Tipo bruto
+  // porque linhas antigas ainda têm o array-default [1,2,3,4,5,6].
+  dias_permitidos?: unknown;
 }
 
 interface TagItem {
@@ -209,6 +212,25 @@ function inferDispatchMode(
   return found?.key ?? "personalizado";
 }
 
+type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
+
+const TEMPLATE_MODE_OPTIONS: Array<{ key: TemplateMode; label: string; description: string }> = [
+  { key: "sequencia", label: "Sequência", description: "Todas as mensagens, em ordem, para cada contato" },
+  { key: "rotacao", label: "Rotação", description: "1 mensagem por contato, alternando em round-robin" },
+  { key: "aleatorio", label: "Aleatório", description: "1 mensagem por contato, sorteada entre as configuradas" },
+];
+
+// campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
+// lida por este código — reaproveitada para guardar o modo de alternância
+// de templates sem precisar de uma migration nova (ver EDITABLE_FIELDS em
+// api/disparador/campaigns/[id]/route.ts e a mesma lógica em
+// startCampaign.ts). Linhas antigas ainda têm o array-default
+// [1,2,3,4,5,6]; qualquer valor que não seja "rotacao"/"aleatorio" cai em
+// "sequencia" (comportamento original).
+function parseTemplateMode(raw: unknown): TemplateMode {
+  return raw === "rotacao" || raw === "aleatorio" ? raw : "sequencia";
+}
+
 // Browser-local safety net against an accidentally closed creation modal,
 // not a per-campaign store. Never touched by edit mode (see editingId
 // guards below), so editing a real campaign can't clobber or be clobbered
@@ -246,6 +268,7 @@ interface CampaignDraft {
   batchSize: number;
   batchPauseSeconds: number;
   dispatchMode: DispatchMode;
+  templateMode: TemplateMode;
   mensagens: CampaignMessage[];
 }
 
@@ -539,6 +562,7 @@ export default function CampanhasPage() {
   const [batchSize, setBatchSize] = useState(1);
   const [batchPauseSeconds, setBatchPauseSeconds] = useState(0);
   const [dispatchMode, setDispatchMode] = useState<DispatchMode>("balanceado");
+  const [templateMode, setTemplateMode] = useState<TemplateMode>("sequencia");
   const [agendarPara, setAgendarPara] = useState<string>("");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
 
@@ -688,6 +712,7 @@ export default function CampanhasPage() {
       batchSize,
       batchPauseSeconds,
       dispatchMode,
+      templateMode,
       mensagens,
     };
 
@@ -713,6 +738,7 @@ export default function CampanhasPage() {
     batchSize,
     batchPauseSeconds,
     dispatchMode,
+    templateMode,
     mensagens,
   ]);
 
@@ -740,7 +766,7 @@ export default function CampanhasPage() {
         const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, limite_por_hora")
+          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, limite_por_hora, dias_permitidos")
           .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -903,6 +929,7 @@ export default function CampanhasPage() {
         campaign.intervalo_max
       )
     );
+    setTemplateMode(parseTemplateMode(campaign.dias_permitidos));
     // Edição só é permitida para campanhas em "rascunho" (ver PATCH
     // /api/disparador/campaigns/[id]), que por definição nunca têm
     // agendamento — campo sempre reseta vazio aqui.
@@ -960,6 +987,8 @@ export default function CampanhasPage() {
           pendingDraft.intervaloMax
         )
     );
+    // Drafts salvos antes desta mudança não têm templateMode gravado.
+    setTemplateMode(pendingDraft.templateMode ?? "sequencia");
     setMensagens(pendingDraft.mensagens);
     setPendingDraft(null);
 
@@ -1204,6 +1233,8 @@ export default function CampanhasPage() {
             janela_fim: janelaFim,
             batch_size: batchSize,
             batch_pause_seconds: batchPauseSeconds,
+            // Reaproveita a coluna dias_permitidos — ver parseTemplateMode.
+            dias_permitidos: templateMode,
             agendamento: agendamentoISO,
           }),
         });
@@ -1245,6 +1276,8 @@ export default function CampanhasPage() {
           janela_fim: janelaFim,
           batch_size: batchSize,
           batch_pause_seconds: batchPauseSeconds,
+          // Reaproveita a coluna dias_permitidos — ver parseTemplateMode.
+          dias_permitidos: templateMode,
           agendamento: agendamentoISO,
           status: agendamentoISO ? "agendado" : "rascunho",
           created_by: user.id,
@@ -1325,6 +1358,7 @@ export default function CampanhasPage() {
     setIntervaloMax(balanceadoPreset.intervaloMax);
     setBatchSize(balanceadoPreset.batchSize);
     setBatchPauseSeconds(balanceadoPreset.batchPauseSeconds);
+    setTemplateMode("sequencia");
     setAgendarPara("");
     setWizardStep(1);
     setImportFile(null);
@@ -1357,10 +1391,16 @@ export default function CampanhasPage() {
   // start de verdade — ver investigação, não existe endpoint hoje que
   // resolva a contagem de contatos por tag sem duplicar a lógica de
   // start/route.ts).
+  // "rotacao"/"aleatorio" mandam só 1 mensagem por contato (ver
+  // startCampaign.ts: messagesToSend) — a estimativa precisa refletir isso
+  // pra não superestimar o tempo com o intraDelay de uma sequência que não
+  // vai acontecer.
+  const numMensagensPorContato = templateMode === "sequencia" ? mensagens.length : 1;
+
   const estimativa = (importStats?.valid ?? 0) > 0
     ? estimarDisparo(
         importStats!.valid,
-        mensagens.length,
+        numMensagensPorContato,
         intervaloMin,
         intervaloMax,
         janelaInicio || null,
@@ -1870,7 +1910,9 @@ export default function CampanhasPage() {
                     <>
                       {estimarDisparo(
                         metricsMap[c.id].total_contatos,
-                        Array.isArray(c.mensagens) ? c.mensagens.length : 1,
+                        parseTemplateMode(c.dias_permitidos) === "sequencia"
+                          ? (Array.isArray(c.mensagens) ? c.mensagens.length : 1)
+                          : 1,
                         c.intervalo_min ?? 90,
                         c.intervalo_max ?? 300,
                         c.janela_inicio || null,
@@ -2230,6 +2272,33 @@ export default function CampanhasPage() {
                   Clique em uma variável abaixo do campo de texto para inseri-la na posição do
                   cursor — elas são substituídas pelos dados do contato no momento do envio.
                 </p>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Modo de templates</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TEMPLATE_MODE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setTemplateMode(opt.key)}
+                        className={cn(
+                          "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
+                          templateMode === opt.key
+                            ? "border-primary bg-primary/10"
+                            : "border-input bg-background hover:bg-muted/50"
+                        )}
+                      >
+                        <span className="text-xs font-medium">{opt.label}</span>
+                        <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {templateMode !== "sequencia" && (
+                    <p className="text-xs text-amber-500">
+                      ⚠ Cada contato receberá apenas 1 template.
+                    </p>
+                  )}
+                </div>
 
                 {mensagens.map((msg, i) => (
                   <div key={i} className="rounded-lg border border-border p-4 bg-muted/20 relative space-y-3">
@@ -2945,6 +3014,12 @@ export default function CampanhasPage() {
                     <span className="font-medium">
                       {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.emoji}{" "}
                       {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.label}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Modo de templates</span>
+                    <span className="font-medium">
+                      {TEMPLATE_MODE_OPTIONS.find((m) => m.key === templateMode)?.label}
                     </span>
                   </div>
                   <div className="flex justify-between">
