@@ -314,15 +314,37 @@ export async function startCampaign(
     );
     const csvVarMap = new Map<string, string>();
     if (usaCsvVar) {
-      const { data: csvVars, error: csvVarsError } = await supabaseAdmin()
-        .from("contact_import_variables")
-        .select("contact_id, var_index, value")
-        .eq("campaign_id", campaignId)
-        .not("value", "eq", "");
+      // Paginado via .range() — mesmo padrão de allContacts (acima) e do
+      // filtro por tag (abaixo). Esta tabela tem uma linha por var_index,
+      // não por contato — uma campanha com 1000 contatos usando VAR1/2/3
+      // já soma 3000 linhas, o que sem paginação batia no cap de resposta
+      // do PostgREST (1000) e truncava silenciosamente: só os primeiros
+      // ~333 contatos ficavam com entradas no csvVarMap, e os outros
+      // ~667 recebiam template_variables vazio (confirmado ao vivo,
+      // campaign_id d5aba714-a8d1-4579-8ab1-15a62e9cfcc7, 3000 linhas).
+      const csvVars: Array<{ contact_id: string; var_index: number; value: string }> = [];
+      const pageSize = 1000;
+      let from = 0;
+      let csvVarsError: { message: string } | null = null;
+      while (true) {
+        const { data: page, error: pageError } = await supabaseAdmin()
+          .from("contact_import_variables")
+          .select("contact_id, var_index, value")
+          .eq("campaign_id", campaignId)
+          .not("value", "eq", "")
+          .range(from, from + pageSize - 1);
+        if (pageError) {
+          csvVarsError = pageError;
+          break;
+        }
+        csvVars.push(...(page ?? []));
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
       if (csvVarsError) {
-        console.error("[startCampaign] Falha ao carregar contact_import_variables:", csvVarsError);
+        console.error("[startCampaign] Falha ao carregar contact_import_variables:", csvVarsError.message);
       } else {
-        for (const row of csvVars ?? []) {
+        for (const row of csvVars) {
           csvVarMap.set(`${row.contact_id}:${row.var_index}`, row.value);
         }
       }
