@@ -114,9 +114,6 @@ export async function POST(request: Request) {
     if (hasMediaUrl && !media_url.startsWith('https://')) {
       throw badRequest("'media_url' deve ser uma URL pública iniciando com https://");
     }
-    if (typeof media_caption === 'string' && media_caption.length > MAX_CAPTION_LENGTH) {
-      throw badRequest(`'media_caption' excede o limite de ${MAX_CAPTION_LENGTH} caracteres`);
-    }
 
     let mediaBuffer: Buffer | null = null;
     if (hasMediaBase64) {
@@ -141,10 +138,20 @@ export async function POST(request: Request) {
       : null;
     // Caption only applies to image/video per the field's documented
     // scope — silently dropped for audio/document rather than rejected.
+    // Falls back to targetText when media_caption isn't sent, so a
+    // caller that just sends media_url + text doesn't have its text
+    // silently discarded (text is otherwise unused whenever mediaKind
+    // is set — see attemptSend below).
     const mediaCaption: string | undefined =
-      hasMedia && (mediaKind === 'image' || mediaKind === 'video') && media_caption
-        ? media_caption
+      hasMedia && (mediaKind === 'image' || mediaKind === 'video')
+        ? (media_caption || targetText || undefined)
         : undefined;
+    // Validado aqui (pós-derivação), não só sobre o media_caption bruto,
+    // pra cobrir também o caso em que targetText foi promovido a caption
+    // acima.
+    if (mediaCaption && mediaCaption.length > MAX_CAPTION_LENGTH) {
+      throw badRequest(`Caption excede ${MAX_CAPTION_LENGTH} caracteres.`);
+    }
 
     // 3. Sanitize and validate phone number
     const sanitizedPhone = sanitizePhoneForMeta(targetPhone);
