@@ -15,6 +15,13 @@
 export interface ChannelConfig {
   id: string;
   connected: boolean;
+  /** Derived third state (migration 113) — computed live on every GET,
+   *  never read from the raw DB column. 'warning' is a substate of
+   *  `connected: true` (session/token check still passed) with a
+   *  degradation signal on top — see warning_reason/warning_message. */
+  status?: "connected" | "disconnected" | "warning";
+  warning_reason?: "stale_activity" | "registration_error";
+  warning_message?: string;
   provider: "waha" | "meta";
   session_status?: string;
   waha_session?: string;

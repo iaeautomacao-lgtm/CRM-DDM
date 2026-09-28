@@ -14,11 +14,18 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Cloud, Info, MessageCircle } from "lucide-react";
+import { ChevronDown, ChevronUp, Cloud, Info, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Tooltip,
   TooltipContent,
@@ -29,6 +36,14 @@ import { normalizeSessionName } from "./types";
 import { cn } from "@/lib/utils";
 
 type Provider = "waha" | "meta";
+
+const NO_TEAM = "__none__";
+
+// Matches the tooltip's own instruction ("Use o valor configurado no
+// CRM: omnicrm_ddm_webhook_2026") — pre-filled so most users never
+// have to type it, but still a plain editable Input for whoever runs
+// a different webhook verify token.
+const DEFAULT_VERIFY_TOKEN = "omnicrm_ddm_webhook_2026";
 
 // ------------------------------------------------------------
 // Non-sensitive form-field persistence — remembers wahaUrl/
@@ -95,14 +110,17 @@ export function NewChannelDialog({
   open,
   onOpenChange,
   onCreated,
+  teams,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (provider: Provider, wahaSession?: string, skipConnect?: boolean) => void;
+  teams: { id: string; name: string }[];
 }) {
   const [step, setStep] = useState<"choose" | "form">("choose");
   const [provider, setProvider] = useState<Provider | null>(null);
   const [saving, setSaving] = useState(false);
+  const [teamId, setTeamId] = useState(NO_TEAM);
 
   // WAHA fields
   const [wahaMode, setWahaMode] = useState<"new" | "existing">("new");
@@ -115,7 +133,12 @@ export function NewChannelDialog({
   const [wabaId, setWabaId] = useState("");
   const [accessToken, setAccessToken] = useState("");
   const [appSecret, setAppSecret] = useState("");
-  const [verifyToken, setVerifyToken] = useState("");
+  const [appSecretError, setAppSecretError] = useState<string | null>(null);
+  const [verifyToken, setVerifyToken] = useState(DEFAULT_VERIFY_TOKEN);
+  // "Configurações avançadas" — App Secret + ID WABA start collapsed so
+  // the main form only shows what's strictly needed to get going.
+  // Forced open on a failed-validation submit (see handleCreateMeta).
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Prefill the non-sensitive fields on first mount — this dialog is
   // rendered once by the /canais page and toggled via `open`, so this
@@ -135,6 +158,7 @@ export function NewChannelDialog({
     const defaults = readChannelDefaults();
     setStep("choose");
     setProvider(null);
+    setTeamId(NO_TEAM);
     setWahaMode("new");
     setWahaSession("");
     setWahaUrl(defaults.wahaUrl ?? "");
@@ -143,7 +167,9 @@ export function NewChannelDialog({
     setWabaId(defaults.wabaId ?? "");
     setAccessToken("");
     setAppSecret("");
-    setVerifyToken("");
+    setAppSecretError(null);
+    setVerifyToken(DEFAULT_VERIFY_TOKEN);
+    setAdvancedOpen(false);
   }
 
   function handleOpenChange(next: boolean) {
@@ -177,6 +203,7 @@ export function NewChannelDialog({
           waha_session: session,
           waha_api_key: wahaApiKey.trim() || null,
           use_existing_session: wahaMode === "existing",
+          team_id: teamId === NO_TEAM ? null : teamId,
         }),
       });
       const data = await res.json();
@@ -202,9 +229,15 @@ export function NewChannelDialog({
       return;
     }
     if (!appSecret.trim()) {
+      // Lives inside "Configurações avançadas" — force it open so the
+      // error (and the field itself) is actually visible, not just a
+      // toast pointing at a collapsed section.
+      setAdvancedOpen(true);
+      setAppSecretError("App Secret é obrigatório");
       toast.error("App Secret é obrigatório");
       return;
     }
+    setAppSecretError(null);
     setSaving(true);
     try {
       const res = await apiFetch("/api/whatsapp/config", {
@@ -217,6 +250,7 @@ export function NewChannelDialog({
           access_token: accessToken.trim(),
           app_secret: appSecret.trim(),
           verify_token: verifyToken.trim() || null,
+          team_id: teamId === NO_TEAM ? null : teamId,
         }),
       });
       const data = await res.json();
@@ -343,6 +377,24 @@ export function NewChannelDialog({
                 disabled={saving}
               />
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="new-waha-team">Equipe (opcional)</Label>
+              <Select value={teamId} onValueChange={(v) => v && setTeamId(v)}>
+                <SelectTrigger id="new-waha-team" className="w-full" disabled={saving}>
+                  <SelectValue>
+                    {(v: string) => (v === NO_TEAM ? "Sem equipe" : teams.find((t) => t.id === v)?.name ?? v)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="z-50">
+                  <SelectItem value={NO_TEAM}>Sem equipe</SelectItem>
+                  {teams.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setStep("choose")} disabled={saving}>
                 Voltar
@@ -374,21 +426,6 @@ export function NewChannelDialog({
             </div>
             <div className="space-y-1">
               <FieldLabel
-                htmlFor="new-meta-waba-id"
-                tooltip="ID da conta WhatsApp Business. Encontre ao lado do Phone Number ID no painel do Meta Developers."
-              >
-                ID WABA
-              </FieldLabel>
-              <Input
-                id="new-meta-waba-id"
-                value={wabaId}
-                onChange={(e) => setWabaId(e.target.value)}
-                placeholder="(opcional)"
-                disabled={saving}
-              />
-            </div>
-            <div className="space-y-1">
-              <FieldLabel
                 htmlFor="new-meta-token"
                 tooltip="Token permanente de um Usuário do Sistema com permissões whatsapp_business_messaging e whatsapp_business_management. Gere em: Meta Business Manager → Usuários do sistema."
               >
@@ -404,23 +441,8 @@ export function NewChannelDialog({
             </div>
             <div className="space-y-1">
               <FieldLabel
-                htmlFor="new-meta-app-secret"
-                tooltip="Encontrado em developers.facebook.com → Seu App → Configurações → Básico → App Secret"
-              >
-                App Secret
-              </FieldLabel>
-              <Input
-                id="new-meta-app-secret"
-                type="password"
-                value={appSecret}
-                onChange={(e) => setAppSecret(e.target.value)}
-                disabled={saving}
-              />
-            </div>
-            <div className="space-y-1">
-              <FieldLabel
                 htmlFor="new-meta-verify"
-                tooltip="String definida por você para validar o webhook. Use o valor configurado no CRM: omnicrm_ddm_webhook_2026"
+                tooltip="String definida por você para validar o webhook. Já vem preenchido com o valor configurado no CRM — só altere se o seu app usa outro."
               >
                 Verificar token
               </FieldLabel>
@@ -428,10 +450,87 @@ export function NewChannelDialog({
                 id="new-meta-verify"
                 value={verifyToken}
                 onChange={(e) => setVerifyToken(e.target.value)}
-                placeholder="(opcional)"
                 disabled={saving}
               />
             </div>
+
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((v) => !v)}
+              className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            >
+              {advancedOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              {advancedOpen ? "Ocultar configurações avançadas" : "Mostrar configurações avançadas"}
+            </button>
+
+            {!advancedOpen && (
+              <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                <Info className="mt-0.5 size-3 shrink-0" />
+                Necessário para verificação de webhooks.
+              </p>
+            )}
+
+            {advancedOpen && (
+              <div className="space-y-3 rounded-lg border border-border p-3">
+                <div className="space-y-1">
+                  <FieldLabel
+                    htmlFor="new-meta-waba-id"
+                    tooltip="ID da conta WhatsApp Business. Encontre ao lado do Phone Number ID no painel do Meta Developers."
+                  >
+                    ID WABA
+                  </FieldLabel>
+                  <Input
+                    id="new-meta-waba-id"
+                    value={wabaId}
+                    onChange={(e) => setWabaId(e.target.value)}
+                    placeholder="(opcional)"
+                    disabled={saving}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <FieldLabel
+                    htmlFor="new-meta-app-secret"
+                    tooltip="Encontrado em developers.facebook.com → Seu App → Configurações → Básico → App Secret"
+                  >
+                    App Secret
+                  </FieldLabel>
+                  <Input
+                    id="new-meta-app-secret"
+                    type="password"
+                    value={appSecret}
+                    onChange={(e) => {
+                      setAppSecret(e.target.value);
+                      if (appSecretError) setAppSecretError(null);
+                    }}
+                    aria-invalid={appSecretError !== null}
+                    disabled={saving}
+                  />
+                  {appSecretError && (
+                    <p className="text-[11px] text-destructive">{appSecretError}</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <Label htmlFor="new-meta-team">Equipe (opcional)</Label>
+              <Select value={teamId} onValueChange={(v) => v && setTeamId(v)}>
+                <SelectTrigger id="new-meta-team" className="w-full" disabled={saving}>
+                  <SelectValue>
+                    {(v: string) => (v === NO_TEAM ? "Sem equipe" : teams.find((t) => t.id === v)?.name ?? v)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="z-50">
+                  <SelectItem value={NO_TEAM}>Sem equipe</SelectItem>
+                  {teams.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="flex justify-between pt-2">
               <Button variant="outline" onClick={() => setStep("choose")} disabled={saving}>
                 Voltar

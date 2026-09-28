@@ -415,7 +415,23 @@ export default function CanaisPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {c.connected ? (
+                    {c.status === "warning" ? (
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <span className="inline-flex cursor-help items-center gap-1 rounded-full bg-[#FEF3C7] px-2 py-0.5 text-xs font-medium text-[#92400E]">
+                                <AlertTriangle className="size-3" />
+                                Atenção
+                              </span>
+                            }
+                          />
+                          <TooltipContent className="max-w-[260px] text-xs">
+                            {c.warning_message || "Sinal de degradação detectado neste canal."}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    ) : c.connected ? (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-[#DCFCE7] px-2 py-0.5 text-xs font-medium text-[#14532D]">
                         <span className="relative flex size-2">
                           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#14532D] opacity-75" />
@@ -518,6 +534,7 @@ export default function CanaisPage() {
       <NewChannelDialog
         open={newOpen}
         onOpenChange={setNewOpen}
+        teams={teams}
         onCreated={async (provider, wahaSession, skipConnect) => {
           const list = await fetchConfigs();
           // Sessão existente já está WORKING — não abre o modal de QR/pairing.

@@ -13,6 +13,11 @@ import {
   startWahaSession,
 } from '@/lib/whatsapp/waha-api'
 
+// Migration 113 — a WAHA session with no message activity for longer
+// than this is flagged 'warning' rather than plain 'connected', even
+// though the session itself is technically WORKING.
+const WARNING_STALE_ACTIVITY_MS = 24 * 60 * 60 * 1000
+
 /**
  * Resolve the caller's account_id from their profile. Inlined here
  * (rather than going through `@/lib/auth/account.getCurrentAccount`)
@@ -113,6 +118,27 @@ export async function GET() {
       )
     }
 
+    // Last message activity per config, for the WAHA 'warning' check
+    // below — a session can be WORKING (connected) yet have gone quiet.
+    // Only rows that ever had a message are considered; a brand-new
+    // channel with no history yet is not flagged (nothing to compare
+    // against).
+    const configIds = configs.map((c: any) => c.id)
+    const { data: activityRows } = await supabase
+      .from('conversations')
+      .select('config_id, last_message_at')
+      .in('config_id', configIds)
+      .not('config_id', 'is', null)
+      .not('last_message_at', 'is', null)
+      .order('last_message_at', { ascending: false })
+
+    const lastActivityByConfig = new Map<string, string>()
+    for (const row of activityRows ?? []) {
+      if (!lastActivityByConfig.has(row.config_id)) {
+        lastActivityByConfig.set(row.config_id, row.last_message_at)
+      }
+    }
+
     const configsWithStatus = await Promise.all(
       configs.map(async (config: any) => {
         if (config.provider === 'waha') {
@@ -135,9 +161,28 @@ export async function GET() {
             }
 
             const connected = status === 'WORKING'
+
+            // 'warning' — connected, but no message activity in the
+            // last 24h (see WARNING_STALE_ACTIVITY_MS).
+            let derivedStatus: 'connected' | 'disconnected' | 'warning' =
+              connected ? 'connected' : 'disconnected'
+            let warning_reason: string | undefined
+            let warning_message: string | undefined
+            if (connected) {
+              const lastActivity = lastActivityByConfig.get(config.id)
+              if (lastActivity && Date.now() - new Date(lastActivity).getTime() > WARNING_STALE_ACTIVITY_MS) {
+                derivedStatus = 'warning'
+                warning_reason = 'stale_activity'
+                warning_message = 'Última atividade há mais de 24h'
+              }
+            }
+
             return {
               id: config.id,
               connected,
+              status: derivedStatus,
+              warning_reason,
+              warning_message,
               provider: 'waha',
               session_status: status,
               waha_session: config.waha_session,
@@ -160,6 +205,7 @@ export async function GET() {
             return {
               id: config.id,
               connected: false,
+              status: 'disconnected' as const,
               provider: 'waha',
               session_status: 'UNKNOWN',
               waha_session: config.waha_session,
@@ -186,6 +232,7 @@ export async function GET() {
             return {
               id: config.id,
               connected: false,
+              status: 'disconnected' as const,
               provider: 'meta',
               flow_id: config.flow_id,
               receptivo: config.receptivo,
@@ -202,9 +249,18 @@ export async function GET() {
               phoneNumberId: config.phone_number_id,
               accessToken,
             })
+
+            // 'warning' — token verifies fine (connected), but the last
+            // /register call (webhook routing) failed, so inbound
+            // messages may not actually reach this app even though the
+            // channel "looks" healthy.
+            const hasRegistrationError = !!config.last_registration_error
             return {
               id: config.id,
               connected: true,
+              status: (hasRegistrationError ? 'warning' : 'connected') as 'connected' | 'warning',
+              warning_reason: hasRegistrationError ? 'registration_error' : undefined,
+              warning_message: hasRegistrationError ? 'Erro de registro detectado' : undefined,
               provider: 'meta',
               flow_id: config.flow_id,
               receptivo: config.receptivo,
@@ -217,6 +273,7 @@ export async function GET() {
             return {
               id: config.id,
               connected: false,
+              status: 'disconnected' as const,
               provider: 'meta',
               flow_id: config.flow_id,
               receptivo: config.receptivo,
@@ -280,10 +337,33 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { id: configId, provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, app_secret, verify_token, pin } = body
+    const { id: configId, provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, app_secret, verify_token, pin, team_id } = body
     const useExistingSession = body.use_existing_session === true
 
     const MASKED_TOKEN = '••••••••••••••••'
+
+    // Same reasoning as the PATCH handler's team_id check — a channel
+    // pointed at another account's team would leak which team it routes
+    // conversations to across the account boundary. Only validated when
+    // provided and non-null; omitted (undefined) leaves the column
+    // untouched on an update, per the `team_id: ... : undefined` spread
+    // below (JSON.stringify drops undefined keys, so the column is
+    // simply not part of the PATCH-equivalent update payload).
+    if (team_id) {
+      const { data: team, error: teamError } = await supabase
+        .from('teams')
+        .select('id')
+        .eq('id', team_id)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      if (teamError) {
+        console.error('Error validating team_id ownership:', teamError)
+        return NextResponse.json({ error: 'Failed to validate team' }, { status: 500 })
+      }
+      if (!team) {
+        return NextResponse.json({ error: 'Team not found in your account' }, { status: 404 })
+      }
+    }
 
     if (provider === 'waha') {
       if (!waha_url || !waha_session) {
@@ -352,7 +432,11 @@ export async function POST(request: Request) {
         access_token: 'waha-placeholder', // Mock access_token for not null constraints
         status: 'disconnected', // Initially disconnected, user starts it manually
         account_id: accountId,
-        user_id: user.id
+        user_id: user.id,
+        // Omitted (undefined) when not sent — JSON.stringify drops it,
+        // so an edit that doesn't touch team assignment leaves the
+        // existing column alone instead of nulling it out.
+        team_id: team_id !== undefined ? (team_id || null) : undefined,
       }
 
       let existing = null
@@ -721,6 +805,8 @@ export async function POST(request: Request) {
       subscribed_apps_at: subscribedAppsAt ?? null,
       last_registration_error: registrationError,
       updated_at: new Date().toISOString(),
+      // Same "omitted means untouched" behavior as the WAHA branch above.
+      team_id: team_id !== undefined ? (team_id || null) : undefined,
     }
 
     if (existing) {
