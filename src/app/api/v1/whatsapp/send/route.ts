@@ -15,6 +15,17 @@
 // to render a thumbnail from. That's a deliberate scope cut, not an
 // oversight: turning this into a real hosted attachment would mean
 // also uploading to Supabase Storage, which nothing here asked for.
+//
+// salvar_bd: false — for external integrations that only want the
+// WhatsApp send itself (e.g. a transactional notification) and have no
+// use for the CRM inbox. Skips contacts/conversations/messages entirely
+// (find, insert, and update) and returns only whatsapp_message_id +
+// saved: false. Does NOT touch the Disparador's own tables
+// (disp_message_queue/campaign_metrics) — this route never writes to
+// those; campaign sends go through startCampaign.ts/processQueue.ts,
+// an entirely separate path. Omitted or true → current behavior,
+// unchanged (default kept for backward compatibility with existing
+// integrations).
 // ============================================================
 
 import { requireApiKey } from '@/lib/auth/api-context';
@@ -91,6 +102,9 @@ export async function POST(request: Request) {
 
     const targetPhone = phone || to;
     const targetText = message || text;
+    // true por default — omitido/true = comportamento atual (grava
+    // contacts/conversations/messages); false = pula essas 3 tabelas.
+    const salvarBd = body.salvar_bd !== false;
 
     const hasMediaUrl = typeof media_url === 'string' && media_url.length > 0;
     const hasMediaBase64 = typeof media_base64 === 'string' && media_base64.length > 0;
@@ -178,58 +192,66 @@ export async function POST(request: Request) {
       throw badRequest('WhatsApp is not configured for this account.');
     }
 
-    // 5. Find or create Contact
-    let contactRow = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone) as any;
+    // 5. Find or create Contact — pulado quando salvar_bd: false (ver
+    // header do arquivo). Nada no envio em si (attemptSend abaixo)
+    // depende de contactRow — só existe pra alimentar conversation/messages.
+    let contactRow: any = null;
+    if (salvarBd) {
+      contactRow = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone) as any;
 
-    if (contactRow) {
-      // Se o contato existe, atualiza o nome dele se tiver sido enviado um novo diferente
-      if (name && name !== contactRow.name) {
-        await ctx.supabase
-          .from('contacts')
-          .update({ name, updated_at: new Date().toISOString() })
-          .eq('id', contactRow.id);
-      }
-    } else {
-      const { data: newContact, error: createContactErr } = await ctx.supabase
-        .from('contacts')
-        .insert({
-          account_id: ctx.accountId,
-          user_id: config.user_id, // Atribui ao criador da configuração do WhatsApp
-          phone: sanitizedPhone,
-          name: name || 'API Lead',
-        })
-        .select()
-        .single();
-
-      if (createContactErr) {
-        // Se ocorreu um erro de chave duplicada (corrida/concorrência), tente buscar o contato existente novamente
-        if (isUniqueViolation(createContactErr)) {
-          const raced = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone);
-          if (raced) {
-            contactRow = raced;
-          }
-        }
-        
-        if (!contactRow) {
-          throw new ApiError('internal', `Failed to create contact: ${createContactErr?.message}`, 500);
+      if (contactRow) {
+        // Se o contato existe, atualiza o nome dele se tiver sido enviado um novo diferente
+        if (name && name !== contactRow.name) {
+          await ctx.supabase
+            .from('contacts')
+            .update({ name, updated_at: new Date().toISOString() })
+            .eq('id', contactRow.id);
         }
       } else {
-        contactRow = newContact;
+        const { data: newContact, error: createContactErr } = await ctx.supabase
+          .from('contacts')
+          .insert({
+            account_id: ctx.accountId,
+            user_id: config.user_id, // Atribui ao criador da configuração do WhatsApp
+            phone: sanitizedPhone,
+            name: name || 'API Lead',
+          })
+          .select()
+          .single();
+
+        if (createContactErr) {
+          // Se ocorreu um erro de chave duplicada (corrida/concorrência), tente buscar o contato existente novamente
+          if (isUniqueViolation(createContactErr)) {
+            const raced = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone);
+            if (raced) {
+              contactRow = raced;
+            }
+          }
+
+          if (!contactRow) {
+            throw new ApiError('internal', `Failed to create contact: ${createContactErr?.message}`, 500);
+          }
+        } else {
+          contactRow = newContact;
+        }
       }
     }
 
-    // 6. Find or create Conversation
-    const conversation = await findOrCreateConversation(
-      ctx.supabase,
-      ctx.accountId,
-      config.user_id, // Passa o user_id da config
-      contactRow.id,
-      config.provider === 'waha' ? config.waha_session : undefined,
-      config.provider === 'meta' ? config.id : undefined
-    );
+    // 6. Find or create Conversation — pulado quando salvar_bd: false.
+    let conversation: any = null;
+    if (salvarBd) {
+      conversation = await findOrCreateConversation(
+        ctx.supabase,
+        ctx.accountId,
+        config.user_id, // Passa o user_id da config
+        contactRow.id,
+        config.provider === 'waha' ? config.waha_session : undefined,
+        config.provider === 'meta' ? config.id : undefined
+      );
 
-    if (!conversation) {
-      throw new ApiError('internal', 'Failed to open a conversation for this contact.', 500);
+      if (!conversation) {
+        throw new ApiError('internal', 'Failed to open a conversation for this contact.', 500);
+      }
     }
 
     // 7. Send the message via active provider (WAHA or Meta API)
@@ -373,45 +395,57 @@ export async function POST(request: Request) {
       throw new ApiError('internal', `WhatsApp sending failed: ${msg}`, 502);
     }
 
-    // 8. Record the sent message in the database
-    const { data: messageRecord, error: msgInsertErr } = await ctx.supabase
-      .from('messages')
-      .insert({
-        conversation_id: conversation.id,
-        sender_type: 'bot',
-        content_type: mediaKind ?? 'text',
-        content_text: mediaKind ? mediaCaption ?? null : targetText,
-        // Only hasMediaUrl gives us a fetchable URL to store — a
-        // media_base64 send has no hosted copy (see file header comment).
-        media_url: hasMediaUrl ? media_url : null,
-        message_id: waMessageId,
-        status: 'sent',
-        waha_session: config.provider === 'waha' ? config.waha_session : null,
-      })
-      .select()
-      .single();
+    // 8. Record the sent message in the database — pulado quando salvar_bd: false.
+    let messageRecord: any = null;
+    if (salvarBd) {
+      const { data, error: msgInsertErr } = await ctx.supabase
+        .from('messages')
+        .insert({
+          conversation_id: conversation.id,
+          sender_type: 'bot',
+          content_type: mediaKind ?? 'text',
+          content_text: mediaKind ? mediaCaption ?? null : targetText,
+          // Only hasMediaUrl gives us a fetchable URL to store — a
+          // media_base64 send has no hosted copy (see file header comment).
+          media_url: hasMediaUrl ? media_url : null,
+          message_id: waMessageId,
+          status: 'sent',
+          waha_session: config.provider === 'waha' ? config.waha_session : null,
+        })
+        .select()
+        .single();
 
-    if (msgInsertErr || !messageRecord) {
-      throw new ApiError('internal', `Message sent but failed to save in database: ${msgInsertErr?.message}`, 500);
+      if (msgInsertErr || !data) {
+        throw new ApiError('internal', `Message sent but failed to save in database: ${msgInsertErr?.message}`, 500);
+      }
+      messageRecord = data;
+
+      // 9. Update last message state in conversation
+      await ctx.supabase
+        .from('conversations')
+        .update({
+          last_message_text: mediaKind ? mediaCaption ?? `[${mediaKind}]` : targetText,
+          last_message_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', conversation.id);
     }
 
-    // 9. Update last message state in conversation
-    await ctx.supabase
-      .from('conversations')
-      .update({
-        last_message_text: mediaKind ? mediaCaption ?? `[${mediaKind}]` : targetText,
-        last_message_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversation.id);
-
     return ok(
-      {
-        success: true,
-        message_id: messageRecord.id,
-        whatsapp_message_id: waMessageId,
-        ...(uploadedMediaId ? { media_id: uploadedMediaId } : {}),
-      },
+      salvarBd
+        ? {
+            success: true,
+            saved: true,
+            message_id: messageRecord.id,
+            whatsapp_message_id: waMessageId,
+            ...(uploadedMediaId ? { media_id: uploadedMediaId } : {}),
+          }
+        : {
+            success: true,
+            saved: false,
+            whatsapp_message_id: waMessageId,
+            media_id: uploadedMediaId ?? null,
+          },
       200,
       logCtx
     );
