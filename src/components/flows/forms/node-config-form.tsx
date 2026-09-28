@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import { createClient } from "@/lib/supabase/client";
@@ -2483,6 +2484,7 @@ interface AiAgentCfg {
   next_node_key?: string;
   max_turns?: number;
   tools?: AiAgentTool[];
+  herdar_contexto_anterior?: boolean;
 }
 
 const AI_AGENT_MODE_OPTIONS: Array<{
@@ -2571,6 +2573,47 @@ function AiAgentForm({
           </p>
         </div>
       )}
+
+      {(() => {
+        // Sem system_prompt_override, a injeção de contexto (engine.ts:
+        // runAiAgentCore) vira o prompt inteiro do nó, substituindo o
+        // prompt padrão da conta — desabilita o switch até o autor
+        // configurar um prompt próprio, em vez de deixar ativar uma
+        // combinação que provavelmente não é o que ele quer.
+        const promptOverrideVazio = !cfg.system_prompt_override?.trim();
+        const herdarSwitch = (
+          <Switch
+            checked={cfg.herdar_contexto_anterior ?? false}
+            disabled={promptOverrideVazio}
+            onCheckedChange={(checked) =>
+              onUpdateConfig({ herdar_contexto_anterior: checked })
+            }
+          />
+        );
+        return (
+          <div className="flex items-center gap-2">
+            {promptOverrideVazio ? (
+              <Tooltip>
+                <TooltipTrigger render={<span className="inline-flex" />}>
+                  {herdarSwitch}
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  Configure um &quot;System prompt override&quot; acima para habilitar esta opção.
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              herdarSwitch
+            )}
+            <label className="text-xs text-muted-foreground">
+              Herdar contexto do agente anterior
+            </label>
+          </div>
+        );
+      })()}
+      <p className="-mt-2 text-[10px] text-muted-foreground">
+        Injeta os resultados de ferramentas do nó de IA anterior nesta conversa.
+        Requer que este nó tenha um prompt próprio configurado.
+      </p>
 
       {mode !== "takeover" && (
         <NextNodeRow

@@ -376,6 +376,10 @@ export interface AiAgentNodeConfig {
   /** Safety cap for `loop` mode. Defaults to 20 when unset. */
   max_turns?: number;
   tools?: AiAgentTool[]; // ← novo campo
+  /** When true, injects tool_results logged by OTHER ai_agent nodes in
+   *  this same run (flow_run_events, event_type='tool_result') into this
+   *  node's system prompt — see runAiAgentCore in engine.ts. */
+  herdar_contexto_anterior?: boolean;
 }
 
 export interface AiAgentToolParameter {

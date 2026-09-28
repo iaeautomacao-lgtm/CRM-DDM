@@ -1540,6 +1540,11 @@ async function runAiAgentCore(
   // is already accurate (e.g. handleReplyForActiveRun, which loads the
   // node run is already parked at) can omit it and rely on the fallback.
   currentNodeKeyOverride?: string,
+  // cfg.herdar_contexto_anterior (AiAgentNodeConfig) — quando true, injeta
+  // os tool_results de OUTROS nós ai_agent deste run (gravados em
+  // flow_run_events, ver os callbacks onToolResult abaixo) no system
+  // prompt deste nó, antes de chamar handleAiAutoResponse.
+  herdarContextoAnterior?: boolean,
 ): Promise<
   | {
       ok: true;
@@ -1626,6 +1631,42 @@ async function runAiAgentCore(
     // for no extra protection.
     const beforeAiCall = new Date().toISOString();
 
+    // herdar_contexto_anterior: injeta no system prompt os tool_results
+    // gravados por OUTROS nós ai_agent deste mesmo run (node_key != o
+    // deste nó) — mesmo padrão de leitura de canonicalizeAgreementArgsFromRun
+    // acima, generalizado pra qualquer tool em vez de só localizar_devedor.
+    // Sem tool_results anteriores, não altera nada (comportamento
+    // idêntico a antes desta feature).
+    let enrichedSystemPromptOverride = systemPromptOverride;
+    if (herdarContextoAnterior) {
+      const nodeKeyAtual = currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia";
+      const { data: previousToolResults } = await db
+        .from("flow_run_events")
+        .select("payload")
+        .eq("flow_run_id", run.id)
+        .eq("event_type", "tool_result")
+        .neq("node_key", nodeKeyAtual)
+        .order("created_at", { ascending: true });
+
+      const MAX_RESULT_CHARS = 3000;
+      const blocos = (previousToolResults ?? [])
+        .map((event) => {
+          const payload = event.payload as { tool_name?: string; result?: string } | null;
+          if (!payload?.tool_name || !payload.result) return null;
+          const result =
+            payload.result.length > MAX_RESULT_CHARS
+              ? payload.result.slice(0, MAX_RESULT_CHARS) + "…"
+              : payload.result;
+          return `[tool: ${payload.tool_name}]\n${result}`;
+        })
+        .filter((b): b is string => b !== null);
+
+      if (blocos.length > 0) {
+        const contextoAnterior = "## Contexto do agente anterior\n" + blocos.join("\n");
+        enrichedSystemPromptOverride = (systemPromptOverride ?? "") + "\n\n---\n" + contextoAnterior;
+      }
+    }
+
     // Raw (untruncated) tool_result payloads collected as the tool-call
     // loop runs inside handleAiAutoResponse, for the #NEGOCIACAO
     // auto-exit check below — the log payload truncates to 500 chars,
@@ -1637,7 +1678,7 @@ async function runAiAgentCore(
       run.contact_id!,
       run.conversation_id!,
       incomingText,
-      systemPromptOverride,
+      enrichedSystemPromptOverride,
       true, // skipDebounce
       historyAfter,
       historyBefore,
@@ -1668,8 +1709,16 @@ async function runAiAgentCore(
       },
       async (toolName, result, durationMs) => {
         collectedToolResults.push({ toolName, result });
-        // Truncate result to 500 chars for readability in logs
-        const truncated = result.length > 500 ? result.slice(0, 500) + "…" : result;
+        // Truncate result to 8000 chars for readability in logs — 500 era
+        // curto demais pra respostas grandes (ex: consultar_debitos da API
+        // DDM), que só trazem os campos de cálculo (Calculos, PgtoAvista,
+        // PercDesconto etc.) depois dos primeiros ~500 chars. Nota: isto só
+        // afeta o payload gravado em flow_run_events (debug/auditoria) — o
+        // valor enviado de volta ao modelo é `result`, sem truncamento
+        // nenhum (ver messages.push({role:"tool", content: toolResult})
+        // em src/lib/ai/responder.ts), e collectedToolResults acima também
+        // guarda o `result` cru, não `truncated`.
+        const truncated = result.length > 8000 ? result.slice(0, 8000) + "…" : result;
         await logRunEvent(db, {
           run_id: run.id,
           flow_id: run.flow_id,
@@ -2546,6 +2595,7 @@ export async function advanceFromNodeKey(
         // um nó suspende/termina, então pode estar apontando pro nó
         // anterior. node.node_key é o valor correto para este turno.
         node.node_key,
+        cfg.herdar_contexto_anterior,
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
@@ -3038,6 +3088,8 @@ async function handleReplyForActiveRun(
       run.started_at,  // historyAfter — exclui runs anteriores
       undefined,       // historyBefore — sem corte superior, agente vê histórico completo da run
       cfg.tools,
+      undefined,       // currentNodeKeyOverride — run.current_node_key já é o nó certo aqui
+      cfg.herdar_contexto_anterior,
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
