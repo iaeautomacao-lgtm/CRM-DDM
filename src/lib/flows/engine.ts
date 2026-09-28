@@ -1649,10 +1649,17 @@ async function runAiAgentCore(
         .order("created_at", { ascending: true });
 
       const MAX_RESULT_CHARS = 3000;
+      // Nomes das tools já chamadas, coletados junto com os blocos —
+      // usados abaixo pra proibir explicitamente essas MESMAS tools de
+      // serem chamadas de novo (dinâmico, não hardcoded: funciona pra
+      // qualquer combinação de tools de qualquer flow, não só
+      // localizar_devedor/consultar_debitos do fluxo BEN/Aleh).
+      const toolNames = new Set<string>();
       const blocos = (previousToolResults ?? [])
         .map((event) => {
           const payload = event.payload as { tool_name?: string; result?: string } | null;
           if (!payload?.tool_name || !payload.result) return null;
+          toolNames.add(payload.tool_name);
           const result =
             payload.result.length > MAX_RESULT_CHARS
               ? payload.result.slice(0, MAX_RESULT_CHARS) + "…"
@@ -1662,7 +1669,18 @@ async function runAiAgentCore(
         .filter((b): b is string => b !== null);
 
       if (blocos.length > 0) {
-        const contextoAnterior = "## Contexto do agente anterior\n" + blocos.join("\n");
+        // Instrução explícita proibindo re-chamar as ferramentas já
+        // executadas — só mostrar o resultado anterior não bastava: o
+        // modelo não reconhecia aquilo como "já feito" e chamava a
+        // mesma tool de novo.
+        const listaFerramentas = [...toolNames].join(", ");
+        const contextoAnterior =
+          "## DADOS JÁ OBTIDOS — NÃO CHAME AS FERRAMENTAS NOVAMENTE\n\n" +
+          "As ferramentas abaixo já foram executadas nesta conversa. " +
+          `Use exclusivamente estes dados. NÃO chame ${listaFerramentas} novamente:\n\n` +
+          blocos.join("\n") +
+          "\n\nREGRA ABSOLUTA: Com estes dados disponíveis, prossiga diretamente " +
+          "para a próxima fase sem chamar nenhuma ferramenta de consulta.";
         enrichedSystemPromptOverride = (systemPromptOverride ?? "") + "\n\n---\n" + contextoAnterior;
       }
     }
