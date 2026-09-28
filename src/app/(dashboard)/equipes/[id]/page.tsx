@@ -425,14 +425,14 @@ export default function EquipeDetailPage({
           const data = (await membersRes.json()) as { members?: AccountMember[] };
           setAllAccountMembers(data.members ?? []);
         } else {
-          toast.error("Falha ao carregar membros da conta");
+          toast.error("Falha ao carregar usuários da conta");
         }
 
         if (teamMembersRes.ok) {
           const data = (await teamMembersRes.json()) as { userIds?: string[] };
           setMemberUserIds(new Set(data.userIds ?? []));
         } else {
-          toast.error("Falha ao carregar membros da equipe");
+          toast.error("Falha ao carregar usuários da equipe");
         }
       } catch (err) {
         if (!cancelled) {

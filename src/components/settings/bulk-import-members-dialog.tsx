@@ -287,7 +287,7 @@ export function BulkImportMembersDialog({
       const payload = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        toast.error(payload.error || 'Falha ao importar membros');
+        toast.error(payload.error || 'Falha ao importar usuários');
         return;
       }
 
@@ -297,7 +297,7 @@ export function BulkImportMembersDialog({
 
       if (imported > 0) {
         toast.success(
-          `${imported} membro${imported !== 1 ? 's' : ''} importado${imported !== 1 ? 's' : ''}`,
+          `${imported} usuário${imported !== 1 ? 's' : ''} importado${imported !== 1 ? 's' : ''}`,
         );
         onImported();
       }
@@ -320,7 +320,7 @@ export function BulkImportMembersDialog({
         <div className="shrink-0 space-y-4 border-b border-border px-6 pt-6 pb-5">
           <DialogHeader className="gap-1.5">
             <DialogTitle className="text-lg text-popover-foreground">
-              Importar membros
+              Importar usuários
             </DialogTitle>
             <DialogDescription className="leading-relaxed text-muted-foreground">
               Envie um CSV ou XLSX com as colunas{' '}
@@ -470,7 +470,7 @@ export function BulkImportMembersDialog({
                   )}
                   {existingDuplicateCount > 0 && (
                     <span>
-                      {existingDuplicateCount} membro{existingDuplicateCount !== 1 ? 's' : ''} já cadastrado
+                      {existingDuplicateCount} usuário{existingDuplicateCount !== 1 ? 's' : ''} já cadastrado
                       {existingDuplicateCount !== 1 ? 's' : ''} ignorado{existingDuplicateCount !== 1 ? 's' : ''}
                     </span>
                   )}
@@ -536,7 +536,7 @@ export function BulkImportMembersDialog({
               className="bg-primary hover:bg-primary/90 text-primary-foreground"
             >
               {importing && <Loader2 className="size-4 animate-spin" />}
-              Importar {rows.length > 0 ? rows.length : ''} membro{rows.length !== 1 ? 's' : ''}
+              Importar {rows.length > 0 ? rows.length : ''} usuário{rows.length !== 1 ? 's' : ''}
             </Button>
           )}
         </DialogFooter>

@@ -77,7 +77,7 @@ const navItems: NavItem[] = [
   { href: "/equipes", label: "Equipes", icon: Users },
   { href: "/templates", label: "Templates", icon: FileText },
   { href: "/tabulacoes", label: "Tabulações", icon: Tags },
-  { href: "/membros", label: "Membros", icon: UsersRound },
+  { href: "/usuarios", label: "Usuários", icon: UsersRound },
   { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot },
 ];
 

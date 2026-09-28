@@ -1,17 +1,8 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { MembersTab } from "@/components/settings/members-tab";
-
-// /membros — standalone route hosting MembersTab, moved out of
-// /settings?tab=members (settings-sections.ts no longer registers a
-// 'members' section). MembersTab itself is untouched — it already owns
-// its own header (SettingsPanelHead); this page only supplies the
-// page-level padding, matching /equipes' container convention instead
-// of settings' narrower panel context.
+// /membros — renamed to /usuarios (see usuarios/page.tsx). Kept as a
+// server-side redirect, not deleted, so old bookmarks/links still
+// resolve instead of 404ing.
 export default function MembrosPage() {
-  return (
-    <div className="p-4 lg:p-6">
-      <MembersTab />
-    </div>
-  );
+  redirect("/usuarios");
 }

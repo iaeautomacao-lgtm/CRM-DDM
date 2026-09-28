@@ -7,10 +7,6 @@
 // Nothing here reads those last two fields automatically yet — they're
 // saved for later phases (3b assignment, 3c overflow) to consume.
 //
-// Membership (which agent belongs to this team) is edited from
-// Settings → Team members instead (a second Select next to Role) —
-// deliberately not duplicated here, per the phase 3a plan.
-//
 // CRUD goes straight through the Supabase client, no API route: RLS
 // (migration 049) already restricts INSERT/UPDATE/DELETE to admin+
 // and SELECT to any account member, the same shape as tags
@@ -287,7 +283,7 @@ export function TeamsPanel() {
                       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1">
                           <UsersIcon className="size-3.5" />
-                          {memberCount} {memberCount === 1 ? 'membro' : 'membros'}
+                          {memberCount} {memberCount === 1 ? 'usuário' : 'usuários'}
                         </span>
                         <span className="inline-flex items-center gap-1">
                           <MessageCircle className="size-3.5" />

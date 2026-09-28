@@ -184,7 +184,7 @@ export function MembersTab() {
 
       if (!mres.ok) {
         const payload = await mres.json().catch(() => ({}));
-        toast.error(payload.error || 'Falha ao carregar membros');
+        toast.error(payload.error || 'Falha ao carregar usuários');
         return;
       }
       const mdata = (await mres.json()) as { members: Member[] };
@@ -247,7 +247,7 @@ export function MembersTab() {
         return;
       }
       toast.success(
-        `${member.full_name || 'Membro'} atualizado para ${ROLE_META[nextRole].label}`,
+        `${member.full_name || 'Usuário'} atualizado para ${ROLE_META[nextRole].label}`,
       );
     } catch (err) {
       // Same revert on network failure.
@@ -272,10 +272,10 @@ export function MembersTab() {
       );
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Falha ao remover membro');
+        toast.error(payload.error || 'Falha ao remover usuário');
         return;
       }
-      toast.success(`${removingMember.full_name || 'Membro'} removido`);
+      toast.success(`${removingMember.full_name || 'Usuário'} removido`);
       setMembers((prev) =>
         prev.filter((m) => m.user_id !== removingMember.user_id),
       );
@@ -319,7 +319,7 @@ export function MembersTab() {
         toast.error(payload.error || 'Falha ao redefinir senha');
         return;
       }
-      toast.success(`Senha de ${resetPasswordMember.full_name || 'membro'} redefinida`);
+      toast.success(`Senha de ${resetPasswordMember.full_name || 'usuário'} redefinida`);
       closeResetPasswordDialog();
     } catch (err) {
       console.error('[MembersTab] reset password error:', err);
@@ -368,8 +368,8 @@ export function MembersTab() {
   return (
     <section className="animate-in fade-in-50 space-y-6 duration-200">
       <SettingsPanelHead
-        title="Membros da equipe"
-        description="Pessoas com acesso a esta conta. Os papéis controlam o que cada membro pode fazer."
+        title="Usuários"
+        description="Pessoas com acesso a esta conta. Os papéis controlam o que cada usuário pode fazer."
         action={
           <RequireRole min="admin">
             <div className="flex items-center gap-2">
@@ -379,11 +379,11 @@ export function MembersTab() {
                 className="border-border text-muted-foreground hover:bg-muted"
               >
                 <Upload className="size-4" />
-                Importar membros
+                Importar usuários
               </Button>
               <Button onClick={() => setInviteOpen(true)}>
                 <Plus className="size-4" />
-                Convidar membro
+                Convidar usuário
               </Button>
             </div>
           </RequireRole>
@@ -410,7 +410,7 @@ export function MembersTab() {
                 {counts.offline} offline
               </span>
               <span className="text-muted-foreground/70">
-                · {members.length} membro{members.length === 1 ? '' : 's'}
+                · {members.length} usuário{members.length === 1 ? '' : 's'}
               </span>
             </div>
           );
@@ -458,7 +458,7 @@ export function MembersTab() {
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <UsersRound className="size-6 text-muted-foreground" />
               <p className="mt-2 text-sm text-muted-foreground">
-                Nenhum membro encontrado.
+                Nenhum usuário encontrado.
               </p>
             </div>
           ) : (
@@ -495,7 +495,7 @@ export function MembersTab() {
                             {member.avatar_url ? (
                               <AvatarImage
                                 src={member.avatar_url}
-                                alt={member.full_name || 'Membro'}
+                                alt={member.full_name || 'Usuário'}
                               />
                             ) : null}
                             <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
@@ -681,7 +681,7 @@ export function MembersTab() {
                   Nenhum convite pendente.
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Clique em <span className="text-muted-foreground">Convidar membro</span>{' '}
+                  Clique em <span className="text-muted-foreground">Convidar usuário</span>{' '}
                   acima para gerar um link compartilhável.
                 </p>
               </CardContent>
@@ -760,12 +760,12 @@ export function MembersTab() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-popover-foreground">
               <AlertTriangle className="size-4 text-amber-400" />
-              Remover membro
+              Remover usuário
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
               Remover{' '}
               <span className="font-medium text-muted-foreground">
-                {removingMember?.full_name || 'este membro'}
+                {removingMember?.full_name || 'este usuário'}
               </span>{' '}
               da conta? A pessoa será desconectada desta conta e receberá
               uma nova conta pessoal no próximo login. O login dela não
@@ -791,7 +791,7 @@ export function MembersTab() {
                   Removendo...
                 </>
               ) : (
-                'Remover membro'
+                'Remover usuário'
               )}
             </Button>
           </DialogFooter>
@@ -813,7 +813,7 @@ export function MembersTab() {
             <DialogDescription className="text-muted-foreground">
               Defina uma nova senha para{' '}
               <span className="font-medium text-muted-foreground">
-                {resetPasswordMember?.full_name || 'este membro'}
+                {resetPasswordMember?.full_name || 'este usuário'}
               </span>
               . A pessoa poderá usá-la a partir do próximo login.
             </DialogDescription>

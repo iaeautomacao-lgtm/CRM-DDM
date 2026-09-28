@@ -153,7 +153,7 @@ export function SettingsOverview({
 
   // Tiles still living inside /settings navigate the rail (onSelect);
   // members/templates/fields moved to their own top-level routes
-  // (/membros, /templates, /tabulacoes — see sidebar.tsx + role-utils.ts)
+  // (/usuarios, /templates, /tabulacoes — see sidebar.tsx + role-utils.ts)
   // so those are plain links instead. whatsapp links out to /canais,
   // the page that already fully replaced WhatsAppConfig's role. deals
   // (Negócios e moeda) had no replacement route — dropped entirely,
@@ -187,14 +187,14 @@ export function SettingsOverview({
     {
       kind: 'link',
       key: 'members',
-      href: '/membros',
+      href: '/usuarios',
       icon: UsersRound,
-      label: 'Membros da equipe',
+      label: 'Usuários',
       loading: countsLoading,
       subtitle:
         counts?.members == null
-          ? 'Ver membros da equipe'
-          : `${counts.members} membro${counts.members === 1 ? '' : 's'}${
+          ? 'Ver usuários'
+          : `${counts.members} usuário${counts.members === 1 ? '' : 's'}${
               counts.pendingInvites
                 ? ` · ${counts.pendingInvites} convite${
                     counts.pendingInvites === 1 ? '' : 's'

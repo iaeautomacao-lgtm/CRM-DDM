@@ -16,6 +16,7 @@
 // ============================================================
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Loader2, Search, X } from 'lucide-react';
 
@@ -23,6 +24,7 @@ import { createClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api-fetch';
 import { normalizeForSearch } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -84,6 +86,7 @@ export function TeamFormDialog({
   onSaved,
 }: TeamFormDialogProps) {
   const supabase = createClient();
+  const router = useRouter();
   const [form, setForm] = useState<TeamFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
@@ -254,19 +257,29 @@ export function TeamFormDialog({
           .eq('id', team.id);
         if (error) throw error;
         toast.success('Team updated');
+        await onSaved();
+        onOpenChange(false);
       } else {
         if (!accountId) throw new Error('Not authenticated');
-        const { error } = await supabase.from('teams').insert({
-          account_id: accountId,
-          name: trimmedName,
-          session_timeout_minutes: sessionTimeoutMinutes,
-          overflow_team_id: overflowTeamId,
-        });
+        const { data: created, error } = await supabase
+          .from('teams')
+          .insert({
+            account_id: accountId,
+            name: trimmedName,
+            session_timeout_minutes: sessionTimeoutMinutes,
+            overflow_team_id: overflowTeamId,
+          })
+          .select('id')
+          .single();
         if (error) throw error;
-        toast.success('Team created');
+        toast.success('Equipe criada! Configure os membros, canais e tabulações abaixo.');
+        await onSaved();
+        onOpenChange(false);
+        // /equipes/[id] already has everything (Visão Geral with
+        // Membros+Canais, Tabulações, Templates) — no need to duplicate
+        // that here, just hand off to it once the row exists.
+        router.push(`/equipes/${created.id}`);
       }
-      await onSaved();
-      onOpenChange(false);
     } catch (err) {
       console.error('[TeamFormDialog] save error:', err);
       const msg = err instanceof Error ? err.message : 'Failed to save team';
@@ -360,14 +373,14 @@ export function TeamFormDialog({
           {team && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Membros atuais</Label>
+                <Label>Usuários atuais</Label>
                 {membersLoading ? (
                   <div className="flex items-center justify-center py-4">
                     <Loader2 className="size-4 animate-spin text-muted-foreground" />
                   </div>
                 ) : currentMembers.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    Nenhum membro nesta equipe ainda.
+                    Nenhum usuário nesta equipe ainda.
                   </p>
                 ) : (
                   <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
@@ -391,9 +404,9 @@ export function TeamFormDialog({
                           <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                             {displayName}
                           </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
+                          <Badge className={`shrink-0 ${roleMeta.className}`}>
                             {roleMeta.label}
-                          </span>
+                          </Badge>
                           {isPending ? (
                             <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                           ) : (
@@ -417,7 +430,7 @@ export function TeamFormDialog({
               </div>
 
               <div className="space-y-2">
-                <Label>Adicionar membro</Label>
+                <Label>Adicionar usuário</Label>
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -463,9 +476,9 @@ export function TeamFormDialog({
                           <span className="min-w-0 flex-1 truncate text-sm text-foreground">
                             {displayName}
                           </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
+                          <Badge className={`shrink-0 ${roleMeta.className}`}>
                             {roleMeta.label}
-                          </span>
+                          </Badge>
                           {isPending && (
                             <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                           )}

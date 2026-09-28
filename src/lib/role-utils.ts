@@ -14,10 +14,10 @@ import type { AccountRole } from "@/lib/auth/roles";
 // Per-role reach, owner aside (owner always passes in canAccessRoute
 // before this table is even consulted):
 //   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings,
-//            /equipes, /perfil, /templates, /tabulacoes, /membros
+//            /equipes, /perfil, /templates, /tabulacoes, /usuarios
 //   agent  → /inbox
 //   viewer → /dashboard
-// /templates, /tabulacoes, /membros are TemplateManager/
+// /templates, /tabulacoes, /usuarios are TemplateManager/
 // FieldsAndTagsPanel/MembersTab moved out of /settings onto their own
 // routes (settings-sections.ts no longer registers those sections) —
 // owner/admin only, same reach as /settings itself already had.
@@ -68,6 +68,10 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/perfil": ["owner", "admin"],
   "/templates": ["owner", "admin"],
   "/tabulacoes": ["owner", "admin"],
+  "/usuarios": ["owner", "admin"],
+  // /membros itself now just redirects to /usuarios (kept for old
+  // links/bookmarks) — still gated here too, defense in depth, even
+  // though the redirect fires before this table is ever consulted.
   "/membros": ["owner", "admin"],
 };
 
