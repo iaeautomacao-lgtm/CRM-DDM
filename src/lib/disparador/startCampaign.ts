@@ -435,8 +435,11 @@ export async function startCampaign(
     }
 
     // 4. Scheduling queue generation loop
-    const minDelay = (campaign.intervalo_min || 90) * 1000;
-    const maxDelay = (campaign.intervalo_max || 300) * 1000;
+    // ?? (não ||) — intervalo_min/max=0 é um valor legítimo (modo
+    // "Personalizado" com delay zero intencional), e || trataria esse 0
+    // como falsy e silenciosamente forçaria os defaults de 90s/300s.
+    const minDelay = (campaign.intervalo_min ?? 90) * 1000;
+    const maxDelay = (campaign.intervalo_max ?? 300) * 1000;
     const intraDelay = 3000; // 3 seconds between messages for the same contact
 
     // batch_size > 1: contatos são agrupados em lotes que saem juntos (ver

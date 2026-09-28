@@ -196,7 +196,13 @@ export function isInvalidPhoneError(err: unknown): boolean {
 // etc.) nunca incrementavam esse contador; só o webhook assíncrono de
 // status "failed" da Meta fazia isso, deixando total_erros sistematicamente
 // subcontado pra qualquer falha síncrona ou de WAHA.
-async function markQueueError(
+//
+// Exportada para o catch externo do Promise.all em cron/route.ts (exceções
+// lançadas de partes de processQueueItem fora do try/catch interno de
+// envio — ex: claimItemAtomically, o throw de "Canal não encontrado") usar
+// o mesmo caminho em vez de um UPDATE manual que não setava
+// erro_permanente nem incrementava total_erros.
+export async function markQueueError(
   itemId: string,
   message: string,
   permanent: boolean,

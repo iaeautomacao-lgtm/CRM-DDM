@@ -3,6 +3,7 @@ import {
   processQueueItem,
   checkWithinWindow,
   sendCampaignCallback,
+  markQueueError,
   type QueueItem,
   type Campaign,
 } from "@/lib/disparador/processQueue";
@@ -264,14 +265,17 @@ export async function POST(request: Request) {
               }
             } catch (itemErr: any) {
               console.error(`[Cron] Exception on item ${item.id}:`, itemErr.message);
-              await supabaseAdmin()
-                .from("disp_message_queue")
-                .update({
-                  status: "erro",
-                  erro: itemErr.message || String(itemErr),
-                  tentativas: (item.tentativas || 0) + 1,
-                })
-                .eq("id", item.id);
+              // permanent=false — erro de infra (ex: claimItemAtomically,
+              // "Canal não encontrado"), não uma rejeição de negócio;
+              // markQueueError também seta erro_permanente e incrementa
+              // total_erros, o que o UPDATE manual anterior não fazia.
+              await markQueueError(
+                item.id,
+                itemErr.message || String(itemErr),
+                false,
+                item.campaign_id,
+                (item.tentativas || 0) + 1
+              );
             }
           })
         );
