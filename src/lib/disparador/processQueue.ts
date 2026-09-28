@@ -181,11 +181,17 @@ export function isInvalidPhoneError(err: unknown): boolean {
 
 // Grava erro + tentativas no item. Tenta incluir erro_permanente; se a
 // coluna ainda não existir (migration 075 não aplicada), regrava sem ela
-// para não perder o registro do erro.
+// para não perder o registro do erro. Quando permanent=true, também
+// incrementa campaign_metrics.total_erros — antes desta correção, erros
+// síncronos (falha imediata do POST /messages, número esgotou tentativas,
+// etc.) nunca incrementavam esse contador; só o webhook assíncrono de
+// status "failed" da Meta fazia isso, deixando total_erros sistematicamente
+// subcontado pra qualquer falha síncrona ou de WAHA.
 async function markQueueError(
   itemId: string,
   message: string,
   permanent: boolean,
+  campaignId: string,
   tentativas?: number
 ): Promise<void> {
   const baseUpdate: Record<string, unknown> = { status: "erro", erro: message };
@@ -201,6 +207,16 @@ async function markQueueError(
       .from("disp_message_queue")
       .update(baseUpdate)
       .eq("id", itemId);
+  }
+
+  if (permanent) {
+    const { error: metricError } = await supabaseAdmin().rpc("increment_campaign_metric", {
+      p_campaign_id: campaignId,
+      p_field: "total_erros",
+    });
+    if (metricError) {
+      console.error("[Disparador] markQueueError: falha ao incrementar total_erros:", metricError.message);
+    }
   }
 }
 
@@ -412,7 +428,7 @@ export async function processQueueItem(
 
   const tentativasAtuais = item.tentativas ?? 0;
   if (tentativasAtuais >= MAX_TENTATIVAS) {
-    await markQueueError(item.id, "Máximo de tentativas atingido", true, tentativasAtuais);
+    await markQueueError(item.id, "Máximo de tentativas atingido", true, item.campaign_id, tentativasAtuais);
     return { outcome: "error", error: "Máximo de tentativas atingido" };
   }
 
@@ -450,6 +466,15 @@ export async function processQueueItem(
       .from("disp_message_queue")
       .update({ status: "bloqueado", erro: "Número na Blacklist" })
       .eq("id", item.id);
+    // Antes desta correção, nada incrementava total_blacklist —
+    // campaign_metrics nunca refletia quantos itens foram bloqueados.
+    const { error: metricError } = await supabaseAdmin().rpc("increment_campaign_metric", {
+      p_campaign_id: item.campaign_id,
+      p_field: "total_blacklist",
+    });
+    if (metricError) {
+      console.error("[Disparador] processQueueItem: falha ao incrementar total_blacklist:", metricError.message);
+    }
     return { outcome: "blocked", reason: "blacklisted" };
   }
 
@@ -556,7 +581,7 @@ export async function processQueueItem(
         },
       });
     }
-    await markQueueError(item.id, message, permanent, novasTentativas);
+    await markQueueError(item.id, message, permanent, item.campaign_id, novasTentativas);
     return { outcome: "error", error: message };
   }
 
@@ -790,16 +815,35 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       .eq("campaign_id", campaignId)
       .maybeSingle();
 
-    // Buscar resumo dos itens da fila
-    const { data: queueSummary } = await db
-      .from("disp_message_queue")
-      .select("status, template_variables, mensagem_final")
-      .eq("campaign_id", campaignId);
+    // Buscar resumo dos itens da fila — paginado via .range(), mesmo
+    // padrão de startCampaign.ts (allContacts/contact_import_variables):
+    // sem paginação, uma campanha com mais de 1000 itens batia no cap de
+    // resposta do PostgREST e o resumo abaixo (enviados/erros/bloqueados/
+    // cancelados) vinha truncado e incorreto no payload do callback.
+    const queueSummary: Array<{ status: string }> = [];
+    {
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page, error: pageError } = await db
+          .from("disp_message_queue")
+          .select("status")
+          .eq("campaign_id", campaignId)
+          .range(from, from + pageSize - 1);
+        if (pageError) {
+          console.error(`[Callback] Campanha ${campaignId} — falha ao paginar disp_message_queue:`, pageError.message);
+          break;
+        }
+        queueSummary.push(...(page ?? []));
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
+    }
 
-    const enviados = queueSummary?.filter(i => i.status === "enviado" || i.status === "entregue" || i.status === "lido").length ?? 0;
-    const erros = queueSummary?.filter(i => i.status === "erro").length ?? 0;
-    const bloqueados = queueSummary?.filter(i => i.status === "bloqueado").length ?? 0;
-    const cancelados = queueSummary?.filter(i => i.status === "cancelado").length ?? 0;
+    const enviados = queueSummary.filter(i => i.status === "enviado" || i.status === "entregue" || i.status === "lido").length;
+    const erros = queueSummary.filter(i => i.status === "erro").length;
+    const bloqueados = queueSummary.filter(i => i.status === "bloqueado").length;
+    const cancelados = queueSummary.filter(i => i.status === "cancelado").length;
 
     // Nota: só roda quando a campanha tem callback_url configurado (early
     // return na linha acima) — campanhas sem callback externo não geram
@@ -818,7 +862,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       campaign_name: campaign.nome,
       completed_at: new Date().toISOString(),
       summary: {
-        total_enfileirados: queueSummary?.length ?? 0,
+        total_enfileirados: queueSummary.length,
         enviados,
         entregues: metrics?.total_entregues ?? 0,
         lidos: metrics?.total_lidos ?? 0,

@@ -199,6 +199,22 @@ export async function POST(request: Request) {
               .from("campaigns")
               .update({ status: "encerrada" })
               .eq("id", campaign.id);
+            // Recalcula campaign_metrics do zero a partir de
+            // disp_message_queue (migration 112) antes do callback —
+            // corrige qualquer drift acumulado por increment_campaign_metric
+            // ter perdido algum evento ao longo da campanha. Aguardado
+            // (não fire-and-forget) pra garantir que sendCampaignCallback
+            // logo abaixo já leia métricas frescas.
+            const { error: recalcError } = await supabaseAdmin().rpc(
+              "recalculate_campaign_metrics",
+              { p_campaign_id: campaign.id }
+            );
+            if (recalcError) {
+              console.error(
+                `[Cron] Falha ao recalcular métricas da campanha ${campaign.id}:`,
+                recalcError.message
+              );
+            }
             void sendCampaignCallback(campaign.id);
           }
           continue;
