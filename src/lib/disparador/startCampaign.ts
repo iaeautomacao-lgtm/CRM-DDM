@@ -172,28 +172,62 @@ export async function startCampaign(
     const windowMap = new Map<string, Date>();
 
     if (metaSessionIds.length > 0) {
-      const { data: lastInbounds } = await supabaseAdmin()
-        .schema("wacrm")
-        .from("messages")
-        .select("received_at, conversations!inner(contact_id, config_id)")
-        // 'contact' nunca existe em wacrm.messages.sender_type (valores reais:
-        // 'customer'/'agent'/'bot', confirmado ao vivo) — com 'contact', esta
-        // query sempre voltava vazia, então windowMap ficava sempre vazio e
-        // todo envio Meta sem template caía permanentemente no ramo "fora da
-        // janela de 24h" (erro 131026), mesmo pra contatos que responderam há
-        // minutos.
-        .eq("sender_type", "customer")
-        .in("conversations.config_id", metaSessionIds)
-        .order("received_at", { ascending: false });
+      // Paginado via .range() — mesmo padrão de allContacts/blacklist
+      // acima. Sem paginação, uma conta com mais de 1000 mensagens de
+      // clientes no histórico batia no cap de resposta do PostgREST: só
+      // as 1000 mais recentes (globalmente, não por contato) vinham,
+      // então contatos cujo último inbound estava fora desse corte
+      // ficavam de fora do windowMap e caíam no ramo "janela de 24h
+      // encerrada" mesmo tendo respondido há minutos.
+      //
+      // A ordenação DESC por received_at é preservada entre páginas — o
+      // Postgres ordena o resultado inteiro antes de paginar, não cada
+      // página isoladamente — então a primeira ocorrência de cada
+      // contact_id ao longo de TODAS as páginas continua sendo a mais
+      // recente. windowMap.has() abaixo só grava essa primeira ocorrência
+      // por contato, exatamente como antes; só precisou passar a rodar
+      // por página em vez de sobre o array inteiro de uma vez.
+      //
+      // Erro aqui não aborta o início da campanha (nunca abortou, mesmo
+      // antes desta correção) — windowMap fica com o que já foi
+      // acumulado até a página que falhou, e contatos ainda não vistos
+      // degradam para "janela fechada" (mesmo comportamento de sempre
+      // pra um contato sem entrada no Map).
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page, error: pageError } = await supabaseAdmin()
+          .schema("wacrm")
+          .from("messages")
+          .select("received_at, conversations!inner(contact_id, config_id)")
+          // 'contact' nunca existe em wacrm.messages.sender_type (valores reais:
+          // 'customer'/'agent'/'bot', confirmado ao vivo) — com 'contact', esta
+          // query sempre voltava vazia, então windowMap ficava sempre vazio e
+          // todo envio Meta sem template caía permanentemente no ramo "fora da
+          // janela de 24h" (erro 131026), mesmo pra contatos que responderam há
+          // minutos.
+          .eq("sender_type", "customer")
+          .in("conversations.config_id", metaSessionIds)
+          .order("received_at", { ascending: false })
+          .range(from, from + pageSize - 1);
 
-      for (const row of lastInbounds ?? []) {
-        const conv = row.conversations as unknown as {
-          contact_id: string;
-          config_id: string;
-        };
-        if (conv?.contact_id && !windowMap.has(conv.contact_id)) {
-          windowMap.set(conv.contact_id, new Date(row.received_at));
+        if (pageError) {
+          console.error("[startCampaign] Falha ao paginar histórico de mensagens (janela 24h):", pageError.message);
+          break;
         }
+
+        for (const row of page ?? []) {
+          const conv = row.conversations as unknown as {
+            contact_id: string;
+            config_id: string;
+          };
+          if (conv?.contact_id && !windowMap.has(conv.contact_id)) {
+            windowMap.set(conv.contact_id, new Date(row.received_at));
+          }
+        }
+
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
       }
     }
 

@@ -82,10 +82,19 @@ const MAX_TENTATIVAS = 5;
 // item (cada um faz seu próprio SELECT), só um deles consegue vencer esse
 // UPDATE — o outro recebe 0 linhas afetadas e desiste. Não depende de
 // nenhuma migration: um UPDATE com WHERE é atômico no Postgres por si só.
+//
+// updated_at é setado explicitamente aqui — a coluna não tem trigger
+// nenhum mantendo ela em disp_message_queue (confirmado: um UPDATE que
+// não a menciona deixa o valor antigo, geralmente o de quando a linha foi
+// inserida, não o do claim). A varredura de itens presos em 'enviando'
+// (cron/route.ts) depende de updated_at refletir o momento do claim, não
+// o do enfileiramento — sem este carimbo aqui, ela resetaria pra
+// 'agendado' itens só recém-reivindicados cujo scheduled_at original é
+// antigo, reintroduzindo risco de double-send.
 async function claimItemAtomically(itemId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin()
     .from("disp_message_queue")
-    .update({ status: "enviando" })
+    .update({ status: "enviando", updated_at: new Date().toISOString() })
     .eq("id", itemId)
     .eq("status", "agendado")
     .select("id");

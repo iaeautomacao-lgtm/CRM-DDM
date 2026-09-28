@@ -108,6 +108,35 @@ export async function POST(request: Request) {
 
     for (const campaign of (campanhasAtivas ?? []) as Campaign[]) {
       try {
+        // Itens presos em 'enviando' — se o processo cair entre
+        // claimItemAtomically (marca 'enviando') e a escrita final de
+        // sucesso/erro, o item ficava travado ali pra sempre: o claim só
+        // reivindica status='agendado' (nunca mais pega esse item de
+        // volta), retry_transient_queue_errors (migration 089) só cobre
+        // status='erro', e o check de "campanha completa" abaixo só
+        // conta 'agendado' e 'erro' elegível — um item 'enviando' órfão é
+        // invisível pra ele, então a campanha fecha como "encerrada" com
+        // esse item permanentemente pendurado, fora de qualquer métrica.
+        // 5 minutos é seguro: claim + envio + escrita final não passam de
+        // 1-2 minutos em condições normais. Depende de updated_at
+        // refletir o momento do claim, não do enfileiramento — ver
+        // claimItemAtomically em processQueue.ts, que agora carimba essa
+        // coluna explicitamente por não haver trigger mantendo ela.
+        const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const { error: staleResetError } = await supabaseAdmin()
+          .from("disp_message_queue")
+          .update({ status: "agendado", scheduled_at: new Date().toISOString() })
+          .eq("campaign_id", campaign.id)
+          .eq("status", "enviando")
+          .lt("updated_at", staleThreshold);
+
+        if (staleResetError) {
+          console.error(
+            `[Cron] Falha ao resetar itens presos em 'enviando' da campanha ${campaign.id}:`,
+            staleResetError.message
+          );
+        }
+
         const hasWindow =
           campaign.janela_inicio &&
           campaign.janela_fim &&
