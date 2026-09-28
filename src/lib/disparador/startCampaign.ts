@@ -233,12 +233,19 @@ export async function startCampaign(
 
     // 2. Remove previously scheduled/pending items to prevent duplication.
     // 'enviando' incluído para limpar itens travados por crash/deploy
-    // anterior (processo derrubado entre o claim e o update final).
-    await supabaseAdmin()
+    // anterior (processo derrubado entre o claim e o update final). Erro
+    // checado — se essa limpeza falhar silenciosamente, linhas velhas
+    // convivem com o lote novo inserido mais abaixo e contatos podem
+    // receber a mensagem duplicada.
+    const { error: cleanupError } = await supabaseAdmin()
       .from("disp_message_queue")
       .delete()
       .eq("campaign_id", campaignId)
       .in("status", ["pendente", "agendado", "erro", "enviando"]);
+
+    if (cleanupError) {
+      return { ok: false, status: 500, error: cleanupError.message };
+    }
 
     // 3. Load active contacts — scoped to the caller's account so a
     // campaign never sends to another account's contacts. Paginado via
@@ -359,6 +366,36 @@ export async function startCampaign(
     }
     const blacklistSet = new Set(blacklist.map((b) => b.telefone));
 
+    // Contatos que já receberam com sucesso numa tentativa anterior desta
+    // campanha (ex: a campanha falhou no meio — chunk de insert quebrou,
+    // deploy no meio do processamento — e o usuário reiniciou). O DELETE
+    // de limpeza acima só remove pendente/agendado/erro/enviando; linhas
+    // já enviadas ficam intactas e são a fonte da verdade de "quem já foi
+    // contatado" — sem isso, reiniciar uma campanha reenvia pra todo
+    // mundo, inclusive quem já recebeu. Paginado via .range() — mesmo
+    // padrão do restante do arquivo.
+    const alreadySentContactIds = new Set<string>();
+    {
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page, error: pageError } = await supabaseAdmin()
+          .from("disp_message_queue")
+          .select("contact_id")
+          .eq("campaign_id", campaignId)
+          .in("status", ["enviado", "entregue", "lido"])
+          .range(from, from + pageSize - 1);
+        if (pageError) {
+          throw new Error(`Erro ao carregar contatos já enviados: ${pageError.message}`);
+        }
+        for (const row of page ?? []) {
+          if (row.contact_id) alreadySentContactIds.add(row.contact_id);
+        }
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
+    }
+
     // Links UTM personalizados por contato (telefone normalizado -> link),
     // gerados em campanhas/page.tsx via handleGerarUTM e persistidos em
     // wacrm.disparador_utm_links (migration 076). Só consulta se alguma
@@ -374,13 +411,25 @@ export async function startCampaign(
     const utmLinkByPhone = new Map<string, string>();
     if (usaUtmLink) {
       try {
-        const { data: utmLinks, error: utmLinksError } = await supabaseAdmin()
-          .from("disparador_utm_links")
-          .select("phone_normalized, link_curto")
-          .eq("campaign_id", campaignId);
-        if (utmLinksError) throw utmLinksError;
-        for (const row of utmLinks ?? []) {
-          if (row.phone_normalized) utmLinkByPhone.set(row.phone_normalized, row.link_curto);
+        // Paginado via .range() — mesmo padrão do restante do arquivo.
+        // Uma campanha grande com UTM pra todo mundo pode passar de 1000
+        // linhas e, sem paginação, deixar {{utm_link}} vazio pros
+        // contatos fora do corte (mesma classe de bug já corrigida em
+        // blacklist/contacts/contact_import_variables acima).
+        const pageSize = 1000;
+        let from = 0;
+        while (true) {
+          const { data: page, error: utmLinksError } = await supabaseAdmin()
+            .from("disparador_utm_links")
+            .select("phone_normalized, link_curto")
+            .eq("campaign_id", campaignId)
+            .range(from, from + pageSize - 1);
+          if (utmLinksError) throw utmLinksError;
+          for (const row of page ?? []) {
+            if (row.phone_normalized) utmLinkByPhone.set(row.phone_normalized, row.link_curto);
+          }
+          if (!page || page.length < pageSize) break;
+          from += pageSize;
         }
       } catch (err) {
         console.error("[startCampaign] Falha ao carregar disparador_utm_links:", err);
@@ -472,6 +521,10 @@ export async function startCampaign(
 
       // Skip if phone is blacklisted
       if (contact.phone && blacklistSet.has(contact.phone)) continue;
+
+      // Skip contatos que já receberam com sucesso numa tentativa
+      // anterior desta mesma campanha (ver alreadySentContactIds acima).
+      if (alreadySentContactIds.has(contact.id)) continue;
 
       // Distribuição round-robin entre os canais selecionados — cada canal
       // recebe uma fatia igual dos contatos, em vez do sorteio aleatório

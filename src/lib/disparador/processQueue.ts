@@ -688,6 +688,17 @@ async function sendViaWaha(
     waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
   };
 
+  // Mesma validação do caminho Meta (sendViaMeta, abaixo) — sem isso,
+  // item.media_url! (non-null assertion sem checagem em runtime) deixava
+  // passar undefined pro WAHA em silêncio em vez de falhar com uma
+  // mensagem clara.
+  if (
+    (tipo === "imagem" || tipo === "video" || tipo === "audio" || tipo === "arquivo") &&
+    !item.media_url
+  ) {
+    throw new Error(`Item ${item.id} do tipo ${tipo} não tem media_url`);
+  }
+
   if (tipo === "imagem") {
     const res = await sendWahaMediaMessage(wahaConfig, phone, item.media_url!, "image", "imagem.png", text);
     return res.messageId;
