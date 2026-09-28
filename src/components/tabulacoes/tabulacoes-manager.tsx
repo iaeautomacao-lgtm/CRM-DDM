@@ -22,6 +22,7 @@ import { normalizeForSearch } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -80,6 +81,12 @@ export function TabulacoesManager() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [form, setForm] = useState<TabulacaoFormState>(EMPTY_FORM);
+  // Create mode only — lets a new tabulação start out already linked to
+  // one or more teams (one insert into team_outcome_tags per team,
+  // right after the tag itself is created). Edit mode never touches
+  // this: per-team linkage stays owned by /equipes/[id]'s own
+  // Tabulações tab, same as before.
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<Tag | null>(null);
@@ -153,6 +160,7 @@ export function TabulacoesManager() {
   function openCreate() {
     setEditingTag(null);
     setForm(EMPTY_FORM);
+    setSelectedTeamIds(new Set());
     setFormOpen(true);
   }
 
@@ -160,6 +168,15 @@ export function TabulacoesManager() {
     setEditingTag(tag);
     setForm({ name: tag.name, color: tag.color });
     setFormOpen(true);
+  }
+
+  function toggleTeamSelection(teamId: string, checked: boolean) {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(teamId);
+      else next.delete(teamId);
+      return next;
+    });
   }
 
   async function handleSave() {
@@ -180,15 +197,33 @@ export function TabulacoesManager() {
         if (error) throw error;
         toast.success('Tabulação atualizada');
       } else {
-        const { error } = await supabase.from('tags').insert({
-          account_id: accountId,
-          user_id: user.id,
-          name: trimmed,
-          color: form.color,
-          kind: 'outcome',
-        });
+        const { data: created, error } = await supabase
+          .from('tags')
+          .insert({
+            account_id: accountId,
+            user_id: user.id,
+            name: trimmed,
+            color: form.color,
+            kind: 'outcome',
+          })
+          .select('id')
+          .single();
         if (error) throw error;
-        toast.success('Tabulação criada');
+
+        if (selectedTeamIds.size > 0) {
+          const rows = Array.from(selectedTeamIds).map((teamId) => ({
+            team_id: teamId,
+            tag_id: created.id,
+          }));
+          const { error: linkError } = await supabase.from('team_outcome_tags').insert(rows);
+          if (linkError) throw linkError;
+        }
+
+        toast.success(
+          selectedTeamIds.size > 0
+            ? `Tabulação criada e vinculada a ${selectedTeamIds.size} equipe${selectedTeamIds.size === 1 ? '' : 's'}`
+            : 'Tabulação criada',
+        );
       }
       setFormOpen(false);
       await fetchData();
@@ -376,6 +411,44 @@ export function TabulacoesManager() {
                 ))}
               </div>
             </div>
+
+            {/* Create mode only — edit mode's team linkage stays owned
+                by /equipes/[id]'s own Tabulações tab. */}
+            {!editingTag && (
+              <div className="space-y-2">
+                <Label>
+                  Vincular a equipes{' '}
+                  <span className="text-xs text-muted-foreground">(opcional)</span>
+                </Label>
+                {teams.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhuma equipe criada ainda.
+                  </p>
+                ) : (
+                  <div className="max-h-40 space-y-0.5 overflow-y-auto rounded-lg border border-border p-1.5">
+                    {teams.map((team) => {
+                      const checked = selectedTeamIds.has(team.id);
+                      return (
+                        <label
+                          key={team.id}
+                          className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(next) =>
+                              toggleTeamSelection(team.id, next === true)
+                            }
+                          />
+                          <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                            {team.name}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setFormOpen(false)} disabled={saving}>

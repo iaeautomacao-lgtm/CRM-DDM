@@ -21,6 +21,7 @@ import {
   Image as ImageIcon,
   Video,
   FileText,
+  Search,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -59,6 +60,8 @@ import {
 } from '@/components/ui/select';
 import type {
   MessageTemplate,
+  MessageTemplateStatus,
+  Team,
   TemplateButton,
   TemplateFolder,
   TemplateSampleValues,
@@ -88,7 +91,11 @@ const categoryColors: Record<string, string> = {
 
 // Sidebar sentinel folder selections — not real folder ids.
 type FolderFilter = 'all' | 'unorganized' | string;
-type StatusFilter = 'all' | 'APPROVED' | 'DISABLED';
+type StatusFilter = 'all' | MessageTemplateStatus;
+// 'all' sentinels for the Canal / Equipe selects — same shape as
+// StatusFilter above, just over a different id space.
+type ChannelFilter = 'all' | string;
+type TeamFilter = 'all' | string;
 const FOLDER_NAME_MAX_LENGTH = 50;
 
 interface TemplateFormData {
@@ -198,6 +205,11 @@ export function TemplateManager() {
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [folders, setFolders] = useState<TemplateFolder[]>([]);
   const [channels, setChannels] = useState<TemplateChannel[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  // team_id -> Set<template_id>, from team_allowed_templates — read-only
+  // here (linking a template to a team stays owned by /equipes/[id]'s
+  // own Templates tab); only used to power the "Equipe" filter below.
+  const [templateIdsByTeam, setTemplateIdsByTeam] = useState<Map<string, Set<string>>>(new Map());
   const [previewTemplate, setPreviewTemplate] = useState<MessageTemplate | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -223,7 +235,9 @@ export function TemplateManager() {
   // ---- Folders sidebar / filters / drag & drop ----
   const [activeFolder, setActiveFolder] = useState<FolderFilter>('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
-  const [filterChannelTag, setFilterChannelTag] = useState('');
+  const [filterChannelId, setFilterChannelId] = useState<ChannelFilter>('all');
+  const [filterTeamId, setFilterTeamId] = useState<TeamFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [draggingTemplate, setDraggingTemplate] = useState<string | null>(null);
   const [draggingFolder, setDraggingFolder] = useState<string | null>(null);
   const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
@@ -289,6 +303,43 @@ export function TemplateManager() {
           return;
         }
         setChannels((data ?? []) as TemplateChannel[]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountId]);
+
+  // Teams + their allowed-templates links — powers the "Equipe" filter
+  // only. No account_id filter needed on team_allowed_templates itself;
+  // its SELECT RLS already scopes it to teams in the caller's account,
+  // same as equipes/[id]'s own Templates tab relies on.
+  useEffect(() => {
+    if (!accountId) return;
+    supabase
+      .from('teams')
+      .select('*')
+      .eq('account_id', accountId)
+      .order('name', { ascending: true })
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[TemplateManager] failed to load teams:', error);
+          return;
+        }
+        setTeams((data ?? []) as Team[]);
+      });
+    supabase
+      .from('team_allowed_templates')
+      .select('team_id, template_id')
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('[TemplateManager] failed to load team_allowed_templates:', error);
+          return;
+        }
+        const byTeam = new Map<string, Set<string>>();
+        for (const row of data ?? []) {
+          const set = byTeam.get(row.team_id) ?? new Set<string>();
+          set.add(row.template_id);
+          byTeam.set(row.team_id, set);
+        }
+        setTemplateIdsByTeam(byTeam);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
@@ -504,6 +555,11 @@ export function TemplateManager() {
   );
 
   const filteredTemplates = useMemo(() => {
+    const normalizedSearch = searchQuery.trim().toLowerCase();
+    const selectedChannel =
+      filterChannelId === 'all' ? null : (channels.find((c) => c.id === filterChannelId) ?? null);
+    const teamTemplateIds = filterTeamId === 'all' ? null : templateIdsByTeam.get(filterTeamId);
+
     return templates.filter((t) => {
       if (activeFolder === 'unorganized' && t.folder_id) return false;
       if (
@@ -514,14 +570,21 @@ export function TemplateManager() {
         return false;
       }
       if (filterStatus !== 'all' && (t.status || 'DRAFT') !== filterStatus) return false;
-      if (filterChannelTag.trim()) {
-        const needle = filterChannelTag.trim().toLowerCase();
-        const tags = t.channel_tags ?? [];
-        if (!tags.some((tag) => tag.toLowerCase().includes(needle))) return false;
-      }
+      if (normalizedSearch && !t.name.toLowerCase().includes(normalizedSearch)) return false;
+      if (selectedChannel && t.waba_id !== selectedChannel.waba_id) return false;
+      if (teamTemplateIds && !teamTemplateIds.has(t.id)) return false;
       return true;
     });
-  }, [templates, activeFolder, filterStatus, filterChannelTag]);
+  }, [
+    templates,
+    activeFolder,
+    filterStatus,
+    searchQuery,
+    filterChannelId,
+    channels,
+    filterTeamId,
+    templateIdsByTeam,
+  ]);
 
   function buildSubmitPayload() {
     const sample_values: TemplateSampleValues = {};
@@ -1049,6 +1112,15 @@ export function TemplateManager() {
 
           <div className="flex-1 min-w-0 space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative w-56">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por nome..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-8 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                />
+              </div>
               <Select
                 value={filterStatus}
                 onValueChange={(val) => setFilterStatus((val || 'all') as StatusFilter)}
@@ -1070,26 +1142,115 @@ export function TemplateManager() {
                     Aprovados
                   </SelectItem>
                   <SelectItem
+                    value="PENDING"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Aguardando
+                  </SelectItem>
+                  <SelectItem
+                    value="REJECTED"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Rejeitado
+                  </SelectItem>
+                  <SelectItem
+                    value="PAUSED"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Pausado
+                  </SelectItem>
+                  <SelectItem
                     value="DISABLED"
                     className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
                   >
                     Desativados
                   </SelectItem>
+                  <SelectItem
+                    value="IN_APPEAL"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Em recurso
+                  </SelectItem>
+                  <SelectItem
+                    value="PENDING_DELETION"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Aguardando exclusão
+                  </SelectItem>
                 </SelectContent>
               </Select>
-              <Input
-                placeholder="Filtrar por tag de canal"
-                value={filterChannelTag}
-                onChange={(e) => setFilterChannelTag(e.target.value)}
-                className="w-56 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
-              />
-              {(filterStatus !== 'all' || filterChannelTag) && (
+              <Select
+                value={filterChannelId}
+                onValueChange={(val) => setFilterChannelId((val || 'all') as ChannelFilter)}
+              >
+                <SelectTrigger className="w-44 bg-muted border-border text-foreground h-8 text-xs">
+                  <SelectValue>
+                    {(val: string) => {
+                      if (val === 'all') return 'Todos os canais';
+                      const c = channels.find((ch) => ch.id === val);
+                      return c ? channelLabel(c) : val;
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  <SelectItem
+                    value="all"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Todos os canais
+                  </SelectItem>
+                  {channels.map((c) => (
+                    <SelectItem
+                      key={c.id}
+                      value={c.id}
+                      className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                    >
+                      {channelLabel(c)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={filterTeamId}
+                onValueChange={(val) => setFilterTeamId((val || 'all') as TeamFilter)}
+              >
+                <SelectTrigger className="w-44 bg-muted border-border text-foreground h-8 text-xs">
+                  <SelectValue>
+                    {(val: string) =>
+                      val === 'all' ? 'Todas as equipes' : (teams.find((t) => t.id === val)?.name ?? val)
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent className="bg-popover border-border">
+                  <SelectItem
+                    value="all"
+                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                  >
+                    Todas as equipes
+                  </SelectItem>
+                  {teams.map((t) => (
+                    <SelectItem
+                      key={t.id}
+                      value={t.id}
+                      className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
+                    >
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(filterStatus !== 'all' ||
+                filterChannelId !== 'all' ||
+                filterTeamId !== 'all' ||
+                searchQuery) && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => {
                     setFilterStatus('all');
-                    setFilterChannelTag('');
+                    setFilterChannelId('all');
+                    setFilterTeamId('all');
+                    setSearchQuery('');
                   }}
                   className="h-8 text-xs text-muted-foreground"
                 >
@@ -1145,6 +1306,12 @@ export function TemplateManager() {
                             <Badge className={`text-xs border ${status.classes}`}>
                               {status.label}
                             </Badge>
+                            {!template.waba_id && (
+                              <Badge className="gap-1 border border-border bg-muted text-xs text-muted-foreground">
+                                <AlertCircle className="size-3" />
+                                Canal não identificado
+                              </Badge>
+                            )}
                             {template.language && (
                               <span className="text-xs text-muted-foreground uppercase">
                                 {template.language}

@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import {
+  FileText,
   Loader2,
   MessageCircle,
   Pencil,
@@ -63,13 +64,14 @@ export function TeamsPanel() {
   // fetchTeams below.
   const [membershipByTeam, setMembershipByTeam] = useState<Map<string, string[]>>(new Map());
 
-  // Channel / tabulação counts per team — same "fetch rows, reduce
-  // client-side" shape as membershipByTeam above, just two more
+  // Channel / tabulação / template counts per team — same "fetch rows,
+  // reduce client-side" shape as membershipByTeam above, just more
   // parallel queries in fetchTeams. Counts only (id not needed).
   const [channelCountByTeam, setChannelCountByTeam] = useState<Map<string, number>>(new Map());
   const [tabulacaoCountByTeam, setTabulacaoCountByTeam] = useState<Map<string, number>>(
     new Map(),
   );
+  const [templateCountByTeam, setTemplateCountByTeam] = useState<Map<string, number>>(new Map());
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
@@ -99,6 +101,7 @@ export function TeamsPanel() {
           setMembershipByTeam(new Map());
           setChannelCountByTeam(new Map());
           setTabulacaoCountByTeam(new Map());
+          setTemplateCountByTeam(new Map());
           return;
         }
       }
@@ -117,7 +120,7 @@ export function TeamsPanel() {
       setTeams(teamRows);
 
       const teamIds = teamRows.map((t) => t.id);
-      const [teamMembersRes, channelsRes, tagsRes] = await Promise.all([
+      const [teamMembersRes, channelsRes, tagsRes, templatesRes] = await Promise.all([
         teamIds.length > 0
           ? supabase.from('team_members').select('team_id, user_id').in('team_id', teamIds)
           : Promise.resolve({ data: [] as { team_id: string; user_id: string }[], error: null }),
@@ -127,6 +130,12 @@ export function TeamsPanel() {
         teamIds.length > 0
           ? supabase.from('team_outcome_tags').select('team_id, tag_id').in('team_id', teamIds)
           : Promise.resolve({ data: [] as { team_id: string; tag_id: string }[], error: null }),
+        teamIds.length > 0
+          ? supabase
+              .from('team_allowed_templates')
+              .select('team_id, template_id')
+              .in('team_id', teamIds)
+          : Promise.resolve({ data: [] as { team_id: string; template_id: string }[], error: null }),
       ]);
 
       if (!teamMembersRes.error) {
@@ -153,6 +162,14 @@ export function TeamsPanel() {
           counts.set(row.team_id, (counts.get(row.team_id) ?? 0) + 1);
         }
         setTabulacaoCountByTeam(counts);
+      }
+
+      if (!templatesRes.error) {
+        const counts = new Map<string, number>();
+        for (const row of templatesRes.data ?? []) {
+          counts.set(row.team_id, (counts.get(row.team_id) ?? 0) + 1);
+        }
+        setTemplateCountByTeam(counts);
       }
     } catch (err) {
       console.error('[TeamsPanel] fetch error:', err);
@@ -254,6 +271,7 @@ export function TeamsPanel() {
                 const memberCount = (membershipByTeam.get(team.id) ?? []).length;
                 const channelCount = channelCountByTeam.get(team.id) ?? 0;
                 const tabulacaoCount = tabulacaoCountByTeam.get(team.id) ?? 0;
+                const templateCount = templateCountByTeam.get(team.id) ?? 0;
                 return (
                   <li
                     key={team.id}
@@ -292,6 +310,10 @@ export function TeamsPanel() {
                         <span className="inline-flex items-center gap-1">
                           <TagIcon className="size-3.5" />
                           {tabulacaoCount} {tabulacaoCount === 1 ? 'tabulação' : 'tabulações'}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <FileText className="size-3.5" />
+                          {templateCount} {templateCount === 1 ? 'template' : 'templates'}
                         </span>
                       </div>
                     </div>
