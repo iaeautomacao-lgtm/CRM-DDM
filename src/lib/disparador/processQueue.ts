@@ -455,11 +455,28 @@ export async function processQueueItem(
     phone = item.mensagem_final;
   }
 
-  const { data: blacklisted } = await supabaseAdmin()
+  const { data: blacklisted, error: blacklistCheckError } = await supabaseAdmin()
     .from("blacklist")
     .select("id")
     .eq("telefone", phone)
     .maybeSingle();
+
+  if (blacklistCheckError) {
+    // Falha fechada: antes, um erro transitório aqui deixava `blacklisted`
+    // undefined e o código seguia como "não bloqueado", enviando a
+    // mensagem mesmo sem conseguir confirmar que o número não está na
+    // blacklist. permanent=false — é um erro técnico da checagem, não
+    // uma rejeição de negócio; deixa retry_transient_queue_errors tentar
+    // de novo no próximo tick em vez de desistir permanentemente.
+    await markQueueError(
+      item.id,
+      `Falha ao checar blacklist: ${blacklistCheckError.message}`,
+      false,
+      item.campaign_id,
+      tentativasAtuais + 1
+    );
+    return { outcome: "error", error: blacklistCheckError.message };
+  }
 
   if (blacklisted) {
     await supabaseAdmin()

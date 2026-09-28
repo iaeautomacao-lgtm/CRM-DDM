@@ -33,7 +33,35 @@ export async function startCampaign(
   accountId: string
 ): Promise<StartCampaignResult> {
   try {
-    // 1. Fetch Campaign configuration
+    // 1. Claim atômico: evita o duplo-start quando duas chamadas
+    // concorrentes (dois ticks do cron sobrepostos — ver cron/route.ts,
+    // que chama startCampaign() pra toda campanha "agendado" vencida a
+    // cada tick — ou um clique manual em "Iniciar" concorrendo com esse
+    // auto-start) tentam iniciar a mesma campanha ao mesmo tempo. Sem
+    // isso, ambas passariam por um SELECT+check em memória vendo o mesmo
+    // status "rascunho"/"agendado", e ambas rodariam o delete+insert
+    // completo da fila abaixo — duplicando o envio pra cada contato. Um
+    // UPDATE ... WHERE é atômico no Postgres por si só (sem precisar de
+    // advisory lock): só uma chamada concorrente de fato muda o status
+    // aqui, as outras recebem 0 linhas de volta. Só cobre rascunho/
+    // agendado — "pausada" usa seu próprio branch de retomada logo
+    // abaixo, que não recria a fila.
+    const { data: claimedRows, error: claimError } = await supabaseAdmin()
+      .from("campaigns")
+      .update({ status: "em_execucao" })
+      .eq("id", campaignId)
+      .in("status", ["rascunho", "agendado"])
+      .select("id");
+
+    if (claimError) {
+      return { ok: false, status: 500, error: claimError.message };
+    }
+    const claimedFreshStart = !!claimedRows && claimedRows.length > 0;
+
+    // 2. Fetch campaign configuration — necessário de todo jeito: quando
+    // claimedFreshStart, pra ler mensagens/session_ids/etc; quando não,
+    // pra decidir entre "retomar pausada" e um 404/409 com a mensagem
+    // certa (o claim acima sozinho não diferencia esses casos).
     const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("*")
@@ -44,14 +72,11 @@ export async function startCampaign(
       return { ok: false, status: 404, error: "Campanha não encontrada" };
     }
 
-    // Only "rascunho" (never started), "pausada" (resuming) and
-    // "agendado" (scheduled start time reached, cron-triggered) are
-    // valid starting points — see STATUS_LABELS in campanhas/page.tsx.
-    // Enforced here, not just disabled in the UI, so a direct call to
-    // this route can't re-run a campaign that's already sending or
-    // restart one that's already closed.
-    const STARTABLE_STATUSES = ["rascunho", "pausada", "agendado"];
-    if (!STARTABLE_STATUSES.includes(campaign.status)) {
+    // Not claimed above (não era rascunho/agendado) e não é retomada de
+    // pausada — genuinamente não iniciável agora. Enforced aqui, não só
+    // desabilitado na UI, pra uma chamada direta não conseguir reiniciar
+    // uma campanha já em execução nem reabrir uma já encerrada.
+    if (!claimedFreshStart && campaign.status !== "pausada") {
       return {
         ok: false,
         status: 409,
@@ -82,10 +107,14 @@ export async function startCampaign(
         return { ok: false, status: 500, error: reactivateError.message };
       }
 
-      await supabaseAdmin()
+      const { error: resumeStatusError } = await supabaseAdmin()
         .from("campaigns")
         .update({ status: "em_execucao" })
         .eq("id", campaignId);
+
+      if (resumeStatusError) {
+        return { ok: false, status: 500, error: "Falha ao ativar campanha" };
+      }
 
       return { ok: true, enqueued: reactivated?.length ?? 0 };
     }
@@ -271,9 +300,30 @@ export async function startCampaign(
       };
     }
 
-    // Fetch Blacklist to skip
-    const { data: blacklist } = await supabaseAdmin().from("blacklist").select("telefone");
-    const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
+    // Fetch Blacklist to skip — paginado via .range(), mesmo padrão de
+    // allContacts/contact_import_variables acima: sem filtro nenhum (a
+    // blacklist não tem account_id, ver import/route.ts) e sem
+    // paginação, uma blacklist com mais de 1000 números batia no cap de
+    // resposta do PostgREST e truncava silenciosamente — números fora do
+    // corte paravam de ser excluídos, sem erro nenhum.
+    const blacklist: Array<{ telefone: string }> = [];
+    {
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page, error: pageError } = await supabaseAdmin()
+          .from("blacklist")
+          .select("telefone")
+          .range(from, from + pageSize - 1);
+        if (pageError) {
+          throw new Error(`Erro ao carregar blacklist: ${pageError.message}`);
+        }
+        blacklist.push(...(page ?? []));
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
+    }
+    const blacklistSet = new Set(blacklist.map((b) => b.telefone));
 
     // Links UTM personalizados por contato (telefone normalizado -> link),
     // gerados em campanhas/page.tsx via handleGerarUTM e persistidos em
@@ -544,11 +594,20 @@ export async function startCampaign(
       }
     }
 
-    // 5. Update campaign status to 'em_execucao' (In execution)
-    await supabaseAdmin()
+    // 5. Update campaign status to 'em_execucao' (In execution) — status já
+    // foi setado atomicamente no claim do passo 1 (evita duplo-start);
+    // esta escrita é redundante nesse campo (idempotente) mas ainda cuida
+    // de `agendamento`. Erro agora é checado — antes falhava
+    // silenciosamente e podia deixar a fila cheia de itens "agendado" sem
+    // `agendamento` correto (status em si já está protegido pelo claim).
+    const { error: activateError } = await supabaseAdmin()
       .from("campaigns")
       .update({ status: "em_execucao", agendamento: now })
       .eq("id", campaignId);
+
+    if (activateError) {
+      return { ok: false, status: 500, error: "Falha ao ativar campanha" };
+    }
 
     // Update Metrics
     await supabaseAdmin()
