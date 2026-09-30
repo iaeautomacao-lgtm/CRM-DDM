@@ -1268,6 +1268,24 @@ export default function CampanhasPage() {
         // "rascunho" status lock are re-checked there (see
         // /api/disparador/campaigns/[id] PATCH) instead of trusting a
         // direct client-side update.
+        // WAHA texto livre com {{N}} no conteúdo mas sem template_variable_map
+        // (mensagem digitada à mão, não veio do catálogo de templates Meta nem
+        // já foi processada) — sintetiza o mapa a partir do columnMap do Step 2
+        // pra startCampaign.ts conseguir resolver os placeholders no enqueue.
+        const mensagensComMap = mensagens.map((msg: any) => {
+          if (msg.template_name || Array.isArray(msg.template_variable_map)) return msg;
+          if (!msg.conteudo?.includes("{{")) return msg;
+          if (!columnMap.var1 && !columnMap.var2 && !columnMap.var3) return msg;
+
+          const map: any[] = [
+            columnMap.var1 ? { type: "csv_var", index: 0 } : { type: "static", value: "" },
+            columnMap.var2 ? { type: "csv_var", index: 1 } : { type: "static", value: "" },
+            columnMap.var3 ? { type: "csv_var", index: 2 } : { type: "static", value: "" },
+          ];
+
+          return { ...msg, template_variable_map: map };
+        });
+
         const res = await apiFetch(`/api/disparador/campaigns/${editingId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1276,7 +1294,7 @@ export default function CampanhasPage() {
             descricao,
             session_ids: selectedSessions,
             tags_filtro: selectedTags,
-            mensagens,
+            mensagens: mensagensComMap,
             intervalo_min: intervaloMin,
             intervalo_max: intervaloMax,
             janela_inicio: janelaInicio,
@@ -1315,12 +1333,28 @@ export default function CampanhasPage() {
         // 040 (RLS do Disparador) poder ser aplicada depois.
         if (!accountId) throw new Error("Conta não resolvida — recarregue a página e tente de novo.");
 
+        // Mesma síntese de template_variable_map para WAHA texto livre do
+        // ramo de edição (PATCH) acima — ver comentário lá.
+        const mensagensComMap = mensagens.map((msg: any) => {
+          if (msg.template_name || Array.isArray(msg.template_variable_map)) return msg;
+          if (!msg.conteudo?.includes("{{")) return msg;
+          if (!columnMap.var1 && !columnMap.var2 && !columnMap.var3) return msg;
+
+          const map: any[] = [
+            columnMap.var1 ? { type: "csv_var", index: 0 } : { type: "static", value: "" },
+            columnMap.var2 ? { type: "csv_var", index: 1 } : { type: "static", value: "" },
+            columnMap.var3 ? { type: "csv_var", index: 2 } : { type: "static", value: "" },
+          ];
+
+          return { ...msg, template_variable_map: map };
+        });
+
         const campaignData = {
           nome,
           descricao,
           session_ids: selectedSessions,
           tags_filtro: selectedTags,
-          mensagens,
+          mensagens: mensagensComMap,
           intervalo_min: intervaloMin,
           intervalo_max: intervaloMax,
           janela_inicio: janelaInicio,
