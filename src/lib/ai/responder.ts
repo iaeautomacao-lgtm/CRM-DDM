@@ -504,6 +504,56 @@ export async function handleAiAutoResponse(
     }
   }
 
+  // 3b. Normalize non-text history entries before any provider call.
+  //
+  // Placed AFTER the Whisper transcription block above (not immediately
+  // after `history` is built) on purpose — transcription mutates
+  // `lastMsg.content_text` in place but reads `lastMsg.media_url` to
+  // fetch the audio first. Running this normalization any earlier would
+  // null out `media_url` before Whisper ever sees it, silently breaking
+  // transcription for the very message this feature exists for.
+  //
+  // Every provider function (generateOpenAiResponse/generateGeminiResponse/
+  // generateClaudeResponse/generateHermesResponse) builds its own message
+  // array from this same `history`, and only two of them (OpenAI, Gemini)
+  // special-case `content_type === "image"` — everything else (audio,
+  // video, document, sticker, and images on Claude/Hermes) falls through
+  // to a plain `content_text || ""` turn. A WhatsApp media_url is
+  // short-lived/authenticated, so passing it straight through for a type
+  // no provider fetches specially (or handing OpenAI's Vision branch an
+  // already-expired URL) is what produces `invalid_image_url` and a
+  // silent run_error. Fix: give every non-text entry a readable
+  // placeholder when it has no real transcribed/captioned text, and drop
+  // media_url except where a provider still needs it (OpenAI/Gemini's
+  // Vision branch for an un-captioned image).
+  const CONTENT_TYPE_PLACEHOLDERS: Record<string, string> = {
+    audio: "[Cliente enviou um áudio]",
+    video: "[Cliente enviou um vídeo]",
+    image: "[Cliente enviou uma imagem]",
+    document: "[Cliente enviou um documento]",
+    sticker: "[Cliente enviou uma figurinha]",
+  };
+  for (const msg of history) {
+    if (msg.content_type && msg.content_type !== "text") {
+      const hadText = !!msg.content_text?.trim();
+      if (!hadText) {
+        msg.content_text =
+          CONTENT_TYPE_PLACEHOLDERS[msg.content_type] ?? "[Cliente enviou conteúdo não suportado]";
+      }
+      // Remove media_url to avoid the provider trying to download an
+      // expired/authenticated WhatsApp URL. Images are the one
+      // exception — but only when there's no caption/transcription
+      // already: that's the case OpenAI/Gemini's Vision branch exists
+      // for (see generateOpenAiResponse/generateGeminiResponse, both
+      // gated on `content_type === "image" && media_url`). An image
+      // that already had real text doesn't need the binary re-sent —
+      // the text alone is enough, so media_url is dropped there too.
+      if (msg.content_type !== "image" || hadText) {
+        msg.media_url = null;
+      }
+    }
+  }
+
   // 4. Load Knowledge Base (File Search RAG) Context
   const { data: kbFiles } = await db
     .from("knowledge_base_files")
