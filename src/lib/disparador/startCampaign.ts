@@ -333,6 +333,35 @@ export async function startCampaign(
       contacts = allContacts.filter((c) => matchingContactIds.has(c.id));
     }
 
+    // Se a campanha tem um import associado e nenhuma tag foi usada como
+    // filtro, restringe os contatos aos que pertencem a esse import —
+    // evita disparar para toda a conta quando o usuário não selecionou tags.
+    if (campaign.import_draft_id && tagsFiltro.length === 0) {
+      const importedContactIds = new Set<string>();
+      const pageSize = 1000;
+      let from = 0;
+      while (true) {
+        const { data: page, error: pageError } = await supabaseAdmin()
+          .from("contact_import_variables")
+          .select("contact_id")
+          .eq("draft_id", campaign.import_draft_id)
+          .range(from, from + pageSize - 1);
+
+        if (pageError) {
+          throw new Error(`Erro ao carregar contatos do import: ${pageError.message}`);
+        }
+        for (const row of page ?? []) {
+          if (row.contact_id) importedContactIds.add(row.contact_id);
+        }
+        if (!page || page.length < pageSize) break;
+        from += pageSize;
+      }
+
+      if (importedContactIds.size > 0) {
+        contacts = contacts.filter((c) => importedContactIds.has(c.id));
+      }
+    }
+
     if (contacts.length === 0) {
       return {
         ok: false,
