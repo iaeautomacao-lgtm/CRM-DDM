@@ -6,7 +6,6 @@ import { getDisparadorScope } from "@/lib/disparador/scope";
 const EDITABLE_FIELDS = [
   "nome",
   "descricao",
-  "objetivo",
   "session_ids",
   "tags_filtro",
   "mensagens",
@@ -17,6 +16,8 @@ const EDITABLE_FIELDS = [
   "agendamento",
   "batch_size",
   "batch_pause_seconds",
+  // Migration 114 — modo de disparo "Segmentado".
+  "batch_percent",
   // Coluna jsonb legada ("dias da semana permitidos") nunca lida por este
   // código — reaproveitada para guardar o modo de alternância de
   // templates (template_mode: "sequencia" | "rotacao" | "aleatorio") sem

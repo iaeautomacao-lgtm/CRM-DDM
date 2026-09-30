@@ -499,7 +499,30 @@ export async function startCampaign(
     // <= now, então batch_size nunca tinha efeito prático nenhum —
     // confirmado ao vivo numa campanha com batch_size=10 processando 1-2
     // itens por tick.
-    const batchSize = Math.max(1, campaign.batch_size ?? 1);
+    // Modo "Segmentado" (campaigns.batch_percent, migration 114) — resolve
+    // o percentual contra o total real de contatos AGORA (no início de
+    // fato, não em quando a campanha foi criada/editada — a lista pode ter
+    // crescido/encolhido desde lá) e grava o batch_size absoluto resultante
+    // de volta em campaigns, para que cron/route.ts continue lendo só essa
+    // coluna sem precisar saber que "Segmentado" existe. Detectado por
+    // batch_percent IS NOT NULL, não por uma coluna dispatch_mode — não
+    // existe nenhuma no schema (DispatchMode é puramente um conceito de UI
+    // em campanhas/page.tsx, inferido a partir dos campos técnicos — ver
+    // comentário na própria migration 114).
+    let batchSize = Math.max(1, campaign.batch_size ?? 1);
+    if (campaign.batch_percent != null && campaign.batch_percent > 0) {
+      batchSize = Math.max(1, Math.ceil(contacts.length * (campaign.batch_percent / 100)));
+      const { error: batchSizeUpdateError } = await supabaseAdmin()
+        .from("campaigns")
+        .update({ batch_size: batchSize })
+        .eq("id", campaignId);
+      if (batchSizeUpdateError) {
+        console.error(
+          "[startCampaign] Falha ao gravar batch_size resolvido do modo Segmentado:",
+          batchSizeUpdateError.message
+        );
+      }
+    }
     const batchPauseMs = (campaign.batch_pause_seconds ?? 0) * 1000;
 
     // Se a campanha tem agendamento futuro, usa como base do scheduled_at

@@ -132,7 +132,6 @@ export async function POST(request: Request) {
     if (!file) {
       return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 });
     }
-    const defaultTag = formData.get("defaultTag") as string | null;
     // campaign_id só vem preenchido quando o import acontece numa edição
     // de campanha já existente; draft_id cobre a criação de campanha nova
     // (import roda no Step 2 do wizard, antes do insert em wacrm.campaigns
@@ -464,14 +463,7 @@ export async function POST(request: Request) {
       if (cpfNormalized) seenCpfInFile.add(cpfNormalized);
 
       const rawTags = getField(row, "tags", "tag", "etiquetas", "categorias") || "";
-      const csvTagNames = rawTags ? rawTags.split(",").map((t) => t.trim()).filter(Boolean) : [];
-      // Inclui a tag padrão da campanha (se fornecida) em todo contato —
-      // não só nos que já têm tags no CSV, senão formatos externos sem
-      // coluna de tags (ex: CONTATO;VAR1;VAR2;VAR3 da Meta) nunca
-      // receberiam a marcação da campanha.
-      const tagsArray = defaultTag?.trim()
-        ? [...csvTagNames, defaultTag.trim()]
-        : csvTagNames;
+      const tagsArray = rawTags ? rawTags.split(",").map((t) => t.trim()).filter(Boolean) : [];
 
       pending.push({
         phone: normalized,
@@ -497,9 +489,8 @@ export async function POST(request: Request) {
     // 4. Resolve tag names -> ids up front, scoped to this account
     const allTagNames = pending.flatMap((p) => p.tagsArray);
     let tagIdByKey = new Map<string, string>();
-    let resolvedNameByKey = new Map<string, string>();
     if (allTagNames.length > 0) {
-      ({ tagIdByKey, resolvedNameByKey } = await resolveImportTagIds(supabaseAdmin(), {
+      ({ tagIdByKey } = await resolveImportTagIds(supabaseAdmin(), {
         accountId,
         userId: user.id,
         tagNames: allTagNames,
@@ -672,18 +663,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Nome real da tag usada no import — pode diferir de defaultTag quando
-    // já existia uma tag com o mesmo nome em outra capitalização
-    // (resolveImportTagIds casa por nome case-insensitive, mas
-    // tags_filtro em start/route.ts casa contra tags.name de forma
-    // case-sensitive). O caller deve usar este valor para preencher
-    // tags_filtro, não o nome que ele mesmo enviou.
-    const defaultTagTrimmed = defaultTag?.trim() || null;
-    const tagName = defaultTagTrimmed
-      ? resolvedNameByKey.get(defaultTagTrimmed.toLowerCase()) ?? defaultTagTrimmed
-      : null;
-
-    return NextResponse.json({ success: true, results, tagName });
+    return NextResponse.json({ success: true, results });
   } catch (err: any) {
     console.error("[Contacts Import] Failed:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

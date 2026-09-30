@@ -21,13 +21,15 @@ import {
   Calendar,
   X,
   FileText,
-  ArrowLeft,
   Pencil,
   Upload,
   Loader2,
   BarChart2,
   Search,
-  CheckCircle2
+  CheckCircle2,
+  Download,
+  ListChecks,
+  Activity
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,7 +70,6 @@ interface Campaign {
   id: string;
   nome: string;
   descricao?: string;
-  objetivo?: string;
   status: string;
   session_ids: string[];
   tags_filtro: string[];
@@ -88,12 +89,21 @@ interface Campaign {
   // Reaproveitada para template_mode — ver parseTemplateMode. Tipo bruto
   // porque linhas antigas ainda têm o array-default [1,2,3,4,5,6].
   dias_permitidos?: unknown;
+  // Migration 114 — modo de disparo "Segmentado". Não nulo só quando esse
+  // modo foi escolhido; resolvido para um batch_size absoluto em
+  // startCampaign.ts no momento real do início (ver comentário lá).
+  batch_percent?: number | null;
 }
 
 interface TagItem {
   id: string;
   name: string;
   color?: string;
+}
+
+interface Team {
+  id: string;
+  name: string;
 }
 
 interface WahaSession {
@@ -103,6 +113,9 @@ interface WahaSession {
   provider?: string;
   display_phone_number?: string;
   waba_id?: string;
+  // whatsapp_config.team_id (migration 103) — usado só pelo filtro de
+  // equipe do Step 1 (teamFilter), nunca enviado de volta ao servidor.
+  team_id?: string | null;
 }
 
 interface CampaignMessage {
@@ -146,16 +159,17 @@ const STATUS_LABELS: Record<string, string> = {
   encerrada: "Encerrada",
 };
 
-type DispatchMode = "imediato" | "balanceado" | "cauteloso" | "personalizado";
+type DispatchMode = "imediato" | "balanceado" | "cauteloso" | "personalizado" | "segmentado";
 
 interface DispatchModeOption {
   key: DispatchMode;
   emoji: string;
   label: string;
   description: string;
-  // Ausente só em "personalizado" — os campos técnicos ficam sob controle
-  // manual do usuário nesse caso, em vez de serem sobrescritos ao trocar
-  // de modo.
+  // Ausente em "personalizado" e "segmentado" — os campos técnicos ficam
+  // sob controle manual do usuário (personalizado) ou são derivados de
+  // batchPercent/batchPauseMinutes (segmentado) em vez de serem
+  // sobrescritos ao trocar de modo.
   preset?: { batchSize: number; batchPauseSeconds: number; intervaloMin: number; intervaloMax: number };
 }
 
@@ -189,18 +203,31 @@ const DISPATCH_MODES: DispatchModeOption[] = [
     label: "Personalizado",
     description: "Configuração manual dos campos técnicos",
   },
+  {
+    key: "segmentado",
+    emoji: "📊",
+    label: "Segmentado",
+    description: "Envia um percentual da lista a cada rodada",
+  },
 ];
 
 // Reconstrói o modo a partir dos valores técnicos salvos (edição de
 // campanha existente ou draft antigo sem dispatchMode gravado) — cai em
 // "personalizado" quando a combinação não bate exatamente com nenhum
 // preset (campanha criada antes desta mudança, ou ajustada manualmente).
+// batchPercent tem prioridade sobre a busca por preset: uma campanha só
+// tem esse campo preenchido quando "Segmentado" foi escolhido (migration
+// 114), então ele por si só já identifica o modo sem precisar bater
+// contra batchSize/batchPauseSeconds (que nem são o preset estático de
+// nenhum outro modo nesse caso).
 function inferDispatchMode(
   batchSize: number,
   batchPauseSeconds: number,
   intervaloMin: number,
-  intervaloMax: number
+  intervaloMax: number,
+  batchPercent?: number | null
 ): DispatchMode {
+  if (batchPercent != null) return "segmentado";
   const found = DISPATCH_MODES.find(
     (m) =>
       m.preset &&
@@ -258,7 +285,6 @@ function formatColumnLabel(value: string | null | undefined): string {
 interface CampaignDraft {
   nome: string;
   descricao: string;
-  objetivo: string;
   selectedSessions: string[];
   selectedTags: string[];
   intervaloMin: number;
@@ -267,6 +293,8 @@ interface CampaignDraft {
   janelaFim: string;
   batchSize: number;
   batchPauseSeconds: number;
+  batchPercent: number;
+  batchPauseMinutes: number;
   dispatchMode: DispatchMode;
   templateMode: TemplateMode;
   mensagens: CampaignMessage[];
@@ -514,7 +542,6 @@ function isDraftEmpty(draft: CampaignDraft): boolean {
   return (
     !draft.nome.trim() &&
     !draft.descricao.trim() &&
-    !draft.objetivo.trim() &&
     draft.selectedSessions.length === 0 &&
     draft.selectedTags.length === 0 &&
     draft.mensagens.length <= 1 &&
@@ -528,6 +555,10 @@ export default function CampanhasPage() {
   const [loading, setLoading] = useState(true);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [sessions, setSessions] = useState<WahaSession[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
+  // "" = Todas as equipes — filtra `sessions` no Step 1 (ver
+  // filteredSessions), nunca enviado ao servidor.
+  const [teamFilter, setTeamFilter] = useState("");
   // Resolved once in loadData() — used to scope the localStorage draft key.
   const [accountId, setAccountId] = useState<string | null>(null);
   const draftKey = draftStorageKey(accountId);
@@ -548,7 +579,6 @@ export default function CampanhasPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nome, setNome] = useState("");
   const [descricao, setDescricao] = useState("");
-  const [objetivo, setObjetivo] = useState("");
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [tagSearch, setTagSearch] = useState("");
@@ -561,6 +591,13 @@ export default function CampanhasPage() {
   const [janelaFim, setJanelaFim] = useState("18:00");
   const [batchSize, setBatchSize] = useState(1);
   const [batchPauseSeconds, setBatchPauseSeconds] = useState(0);
+  // Modo "Segmentado" — % da lista por rodada + intervalo entre rodadas
+  // em minutos. Convertidos para batchSize/batchPauseSeconds só para a
+  // prévia/estimativa (ver handleDispatchModeChange e o useEffect
+  // abaixo); o cálculo que de fato vale para o envio é feito em
+  // startCampaign.ts no momento real do início, contra batch_percent.
+  const [batchPercent, setBatchPercent] = useState(10);
+  const [batchPauseMinutes, setBatchPauseMinutes] = useState(30);
   const [dispatchMode, setDispatchMode] = useState<DispatchMode>("balanceado");
   const [templateMode, setTemplateMode] = useState<TemplateMode>("sequencia");
   const [agendarPara, setAgendarPara] = useState<string>("");
@@ -702,7 +739,6 @@ export default function CampanhasPage() {
     const draft: CampaignDraft = {
       nome,
       descricao,
-      objetivo,
       selectedSessions,
       selectedTags,
       intervaloMin,
@@ -711,6 +747,8 @@ export default function CampanhasPage() {
       janelaFim,
       batchSize,
       batchPauseSeconds,
+      batchPercent,
+      batchPauseMinutes,
       dispatchMode,
       templateMode,
       mensagens,
@@ -728,7 +766,6 @@ export default function CampanhasPage() {
     draftKey,
     nome,
     descricao,
-    objetivo,
     selectedSessions,
     selectedTags,
     intervaloMin,
@@ -737,6 +774,8 @@ export default function CampanhasPage() {
     janelaFim,
     batchSize,
     batchPauseSeconds,
+    batchPercent,
+    batchPauseMinutes,
     dispatchMode,
     templateMode,
     mensagens,
@@ -766,7 +805,7 @@ export default function CampanhasPage() {
         const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, objetivo, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, limite_por_hora, dias_permitidos")
+          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos")
           .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -782,15 +821,17 @@ export default function CampanhasPage() {
     return () => clearInterval(interval);
   }, [campaigns]);
 
-  // Recarrega só a lista de tags — reutilizada por loadData() no mount e
-  // por handleSubmit() após um import de CSV bem-sucedido, para que a tag
-  // recém-criada com o nome da campanha apareça no seletor de filtros da
-  // próxima vez que o modal for aberto (na sessão atual, o próprio
-  // handleSubmit já garante o filtro certo via tagsFinais, sem depender
-  // desta lista estar atualizada).
+  // Tabulações (tags com kind='outcome') — só essas fazem sentido como
+  // filtro de "contato já teve este desfecho de atendimento"; tags de
+  // contato genéricas (kind='contact') não entram aqui, mesmo padrão de
+  // filtro usado em tabulacoes-manager.tsx.
   const loadTags = async () => {
     const supabase = createClient();
-    const { data: tagList } = await supabase.from("tags").select("id, name, color").order("name");
+    const { data: tagList } = await supabase
+      .from("tags")
+      .select("id, name, color")
+      .eq("kind", "outcome")
+      .order("name");
     setTags(tagList ?? []);
   };
 
@@ -810,13 +851,44 @@ export default function CampanhasPage() {
         .order("created_at", { ascending: false });
       setCampaigns(campaignList ?? []);
 
+      // Métricas resumidas por campanha — buscadas junto (1 query pra
+      // todas, não N+1) para que os cards já mostrem
+      // enviados/entregues/lidos/respostas sem precisar abrir "Ver
+      // métricas" primeiro. metricsMap também alimenta a estimativa de
+      // tempo dos cards (estimarDisparo), que antes só aparecia depois
+      // do modal ser aberto pelo menos uma vez nesta sessão.
+      const campaignIds = (campaignList ?? []).map((c) => c.id);
+      if (campaignIds.length > 0) {
+        const { data: metricsList } = await supabase
+          .from("campaign_metrics")
+          .select("*")
+          .in("campaign_id", campaignIds);
+        if (metricsList) {
+          setMetricsMap((prev) => {
+            const next = { ...prev };
+            for (const m of metricsList) next[m.campaign_id] = m;
+            return next;
+          });
+        }
+      }
+
       // Load Tags
       await loadTags();
+
+      // Equipes da conta — só para o filtro "Equipe" do Step 1 (ver
+      // filteredSessions); mesmo padrão de fetch usado em /canais e
+      // /equipes.
+      const { data: teamList } = await supabase
+        .from("teams")
+        .select("id, name")
+        .eq("account_id", scopedAccountId)
+        .order("name", { ascending: true });
+      setTeams((teamList ?? []) as Team[]);
 
       // Load enabled WhatsApp channels (WAHA + Meta)
       const { data: configList } = await supabase
         .from("whatsapp_config")
-        .select("id, waha_session, provider, display_phone_number, waba_id")
+        .select("id, waha_session, provider, display_phone_number, waba_id, team_id")
         .eq("habilitado", true);
 
       const wahaSessions = (configList ?? []).map((c) => ({
@@ -827,6 +899,7 @@ export default function CampanhasPage() {
         provider: c.provider,
         display_phone_number: c.display_phone_number,
         waba_id: c.waba_id,
+        team_id: c.team_id,
       }));
       setSessions(wahaSessions);
     } catch (err) {
@@ -912,7 +985,6 @@ export default function CampanhasPage() {
     setEditingId(campaign.id);
     setNome(campaign.nome);
     setDescricao(campaign.descricao || "");
-    setObjetivo(campaign.objetivo || "");
     setSelectedSessions(campaign.session_ids || []);
     setSelectedTags(campaign.tags_filtro || []);
     setIntervaloMin(campaign.intervalo_min);
@@ -921,12 +993,17 @@ export default function CampanhasPage() {
     setJanelaFim(campaign.janela_fim);
     setBatchSize(campaign.batch_size ?? 1);
     setBatchPauseSeconds(campaign.batch_pause_seconds ?? 0);
+    if (campaign.batch_percent != null) {
+      setBatchPercent(campaign.batch_percent);
+      setBatchPauseMinutes(Math.max(1, Math.round((campaign.batch_pause_seconds ?? 0) / 60)));
+    }
     setDispatchMode(
       inferDispatchMode(
         campaign.batch_size ?? 1,
         campaign.batch_pause_seconds ?? 0,
         campaign.intervalo_min,
-        campaign.intervalo_max
+        campaign.intervalo_max,
+        campaign.batch_percent
       )
     );
     setTemplateMode(parseTemplateMode(campaign.dias_permitidos));
@@ -967,7 +1044,6 @@ export default function CampanhasPage() {
     if (!pendingDraft) return;
     setNome(pendingDraft.nome);
     setDescricao(pendingDraft.descricao);
-    setObjetivo(pendingDraft.objetivo);
     setSelectedSessions(pendingDraft.selectedSessions);
     setSelectedTags(pendingDraft.selectedTags);
     setIntervaloMin(pendingDraft.intervaloMin);
@@ -976,6 +1052,9 @@ export default function CampanhasPage() {
     setJanelaFim(pendingDraft.janelaFim);
     setBatchSize(pendingDraft.batchSize ?? 1);
     setBatchPauseSeconds(pendingDraft.batchPauseSeconds ?? 0);
+    // Drafts salvos antes desta mudança não têm batchPercent/batchPauseMinutes.
+    setBatchPercent(pendingDraft.batchPercent ?? 10);
+    setBatchPauseMinutes(pendingDraft.batchPauseMinutes ?? 30);
     // Drafts salvos antes desta mudança não têm dispatchMode gravado —
     // reconstrói a partir dos valores técnicos nesse caso.
     setDispatchMode(
@@ -1131,23 +1210,12 @@ export default function CampanhasPage() {
       ? new Date(agendarPara).toISOString()
       : null;
 
-    // Se importou CSV, garante que o filtro da campanha inclui a tag do
-    // import (mesmo nome usado como defaultTag abaixo) — sem isso,
-    // tags_filtro fica vazio e start/route.ts dispara para TODOS os
-    // contatos da conta, não só os importados nesta sessão.
-    const tagDoCsv = nome.trim();
-    let tagsFinais = importFile && !selectedTags.includes(tagDoCsv)
-      ? [...selectedTags, tagDoCsv]
-      : selectedTags;
-
     setIsSubmitting(true);
     try {
       // Se há arquivo para importar, envia para o servidor primeiro
       if (importFile) {
         const formData = new FormData();
         formData.append("file", importFile);
-        // Tag com o nome da campanha para identificar os contatos
-        formData.append("defaultTag", tagDoCsv);
         // campaign_id (edição) ou draft_id (criação, campanha ainda não
         // existe) — persistem VAR1/VAR2/VAR3 em
         // wacrm.contact_import_variables (migration 079). Mesmo padrão
@@ -1190,26 +1258,9 @@ export default function CampanhasPage() {
           toast.warning(partes.join(" · ") + " — nenhum contato novo foi adicionado");
         }
 
-        // Nome real da tag usada no import — pode diferir de tagDoCsv
-        // quando já existia uma tag com o mesmo nome em outra
-        // capitalização (a rota casa por nome case-insensitive, mas o
-        // filtro de tags_filtro em start/route.ts é case-sensitive contra
-        // tags.name). Sem isso, tagsFinais poderia guardar um nome que
-        // não bate com a tag de fato vinculada aos contatos, e a
-        // campanha dispararia para zero contatos.
-        if (importResult.tagName && importResult.tagName !== tagDoCsv) {
-          tagsFinais = tagsFinais.map((t) => (t === tagDoCsv ? importResult.tagName : t));
-        }
-
         trackAction("csv_imported", {
           total_rows: importados + duplicados + invalidos + erros.length,
-          tag: importResult.tagName || tagDoCsv,
         });
-
-        // Repopula o seletor de tags com a tag recém-criada (útil ao
-        // reabrir/editar esta campanha depois — a sessão atual já usa
-        // tagsFinais acima, não depende deste reload).
-        await loadTags();
       }
 
       if (editingId) {
@@ -1223,9 +1274,8 @@ export default function CampanhasPage() {
           body: JSON.stringify({
             nome,
             descricao,
-            objetivo,
             session_ids: selectedSessions,
-            tags_filtro: tagsFinais,
+            tags_filtro: selectedTags,
             mensagens,
             intervalo_min: intervaloMin,
             intervalo_max: intervaloMax,
@@ -1233,6 +1283,8 @@ export default function CampanhasPage() {
             janela_fim: janelaFim,
             batch_size: batchSize,
             batch_pause_seconds: batchPauseSeconds,
+            // Migration 114 — modo "Segmentado"; null em qualquer outro modo.
+            batch_percent: dispatchMode === "segmentado" ? batchPercent : null,
             // Reaproveita a coluna dias_permitidos — ver parseTemplateMode.
             dias_permitidos: templateMode,
             agendamento: agendamentoISO,
@@ -1266,9 +1318,8 @@ export default function CampanhasPage() {
         const campaignData = {
           nome,
           descricao,
-          objetivo,
           session_ids: selectedSessions,
-          tags_filtro: tagsFinais,
+          tags_filtro: selectedTags,
           mensagens,
           intervalo_min: intervaloMin,
           intervalo_max: intervaloMax,
@@ -1276,6 +1327,8 @@ export default function CampanhasPage() {
           janela_fim: janelaFim,
           batch_size: batchSize,
           batch_pause_seconds: batchPauseSeconds,
+          // Migration 114 — modo "Segmentado"; null em qualquer outro modo.
+          batch_percent: dispatchMode === "segmentado" ? batchPercent : null,
           // Reaproveita a coluna dias_permitidos — ver parseTemplateMode.
           dias_permitidos: templateMode,
           agendamento: agendamentoISO,
@@ -1346,10 +1399,10 @@ export default function CampanhasPage() {
   const resetForm = () => {
     setNome("");
     setDescricao("");
-    setObjetivo("");
     setSelectedSessions([]);
     setSelectedTags([]);
     setTagSearch("");
+    setTeamFilter("");
     setMensagens([{ tipo: "texto", conteudo: "" }]);
     // "Balanceado" é o modo default do formulário — ver DISPATCH_MODES.
     setDispatchMode("balanceado");
@@ -1358,6 +1411,8 @@ export default function CampanhasPage() {
     setIntervaloMax(balanceadoPreset.intervaloMax);
     setBatchSize(balanceadoPreset.batchSize);
     setBatchPauseSeconds(balanceadoPreset.batchPauseSeconds);
+    setBatchPercent(10);
+    setBatchPauseMinutes(30);
     setTemplateMode("sequencia");
     setAgendarPara("");
     setWizardStep(1);
@@ -1620,6 +1675,47 @@ export default function CampanhasPage() {
     return metaSessions.length === 1 ? metaSessions[0].waba_id : undefined;
   }, [sessions, selectedSessions]);
 
+  // Canais filtrados pela equipe selecionada no Step 1 (teamFilter="" =
+  // Todas as equipes, mostra tudo). Puramente client-side sobre a lista
+  // já carregada em loadData() — nenhuma query nova por troca de filtro.
+  const filteredSessions = useMemo(
+    () => (teamFilter ? sessions.filter((s) => s.team_id === teamFilter) : sessions),
+    [sessions, teamFilter]
+  );
+
+  // Melhor estimativa de total de contatos disponível agora, para a
+  // prévia do modo "Segmentado" — import desta sessão (Step 2) tem
+  // prioridade; editando uma campanha que já tem métricas reais, usa
+  // total_contatos dela; sem nenhum dos dois, null (a prévia cai no
+  // exemplo ilustrativo — ver segmentadoExampleBase abaixo).
+  const totalContatosConhecidos =
+    importAllRows?.length ??
+    (editingId ? metricsMap[editingId]?.total_contatos : undefined) ??
+    null;
+
+  // Resolve batchPercent/batchPauseMinutes (Segmentado) para
+  // batchSize/batchPauseSeconds — os campos que de fato vão no payload
+  // de criação/edição. batchSize só é atualizado quando o total real é
+  // conhecido (senão ficaria salvando uma contagem baseada no exemplo
+  // ilustrativo); a resolução definitiva acontece em startCampaign.ts no
+  // momento real do início, contra o total de contatos nesse momento.
+  useEffect(() => {
+    if (dispatchMode !== "segmentado") return;
+    setBatchPauseSeconds(Math.max(0, batchPauseMinutes) * 60);
+    if (totalContatosConhecidos && totalContatosConhecidos > 0) {
+      setBatchSize(Math.max(1, Math.ceil(totalContatosConhecidos * (batchPercent / 100))));
+    }
+  }, [dispatchMode, batchPercent, batchPauseMinutes, totalContatosConhecidos]);
+
+  // Texto de exemplo dinâmico do modo "Segmentado" — usa o total real
+  // quando conhecido (totalContatosConhecidos), senão um exemplo
+  // ilustrativo de 2.000 contatos, deixando claro qual dos dois é.
+  const segmentadoExampleBase =
+    totalContatosConhecidos && totalContatosConhecidos > 0 ? totalContatosConhecidos : 2000;
+  const segmentadoPorRodada = Math.max(1, Math.ceil(segmentadoExampleBase * (batchPercent / 100)));
+  const segmentadoRodadas = Math.max(1, Math.ceil(segmentadoExampleBase / segmentadoPorRodada));
+  const segmentadoTempoLabel = formatResponseTime(segmentadoRodadas * batchPauseMinutes * 60);
+
   // Busca métricas de campanha + UTM. `silent` evita o toast de erro nos
   // refreshes automáticos (handleMetricsClick já mostra o toast na busca
   // inicial) para não empilhar notificações a cada 15s de falha.
@@ -1857,13 +1953,6 @@ export default function CampanhasPage() {
       <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
         <div>
           <div className="flex items-center gap-2">
-            <Link
-              href="/disparador"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
-              title="Voltar para a Central"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Megaphone className="h-5 w-5" />
             </div>
@@ -1875,9 +1964,16 @@ export default function CampanhasPage() {
             Gerencie disparos agendados em lote e acompanhe o processamento no servidor.
           </p>
         </div>
-        <Button onClick={openCreateModal} className="gap-1.5 self-start">
-          <Plus className="h-4 w-4" /> Nova Campanha
-        </Button>
+        <div className="flex gap-2.5 self-start">
+          <Link href="/disparador/monitor">
+            <Button variant="outline" className="gap-1.5 text-xs h-9">
+              <Activity className="h-4 w-4 text-primary" /> Monitor em tempo real
+            </Button>
+          </Link>
+          <Button onClick={openCreateModal} className="gap-1.5 h-9 text-xs">
+            <Plus className="h-4 w-4" /> Nova Campanha
+          </Button>
+        </div>
       </div>
 
       {/* Campaigns list */}
@@ -1897,10 +1993,7 @@ export default function CampanhasPage() {
             {campaigns.map((c) => (
               <div key={c.id} className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm relative overflow-hidden">
                 <header className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-foreground truncate max-w-[180px]">{c.nome}</h3>
-                    <p className="text-xs text-muted-foreground">{c.objetivo || "Suporte/Envio Geral"}</p>
-                  </div>
+                  <h3 className="font-bold text-foreground truncate max-w-[180px]">{c.nome}</h3>
                   <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[c.status] || STATUS_COLORS.rascunho}`}>
                     {STATUS_LABELS[c.status] || c.status}
                   </span>
@@ -1914,10 +2007,10 @@ export default function CampanhasPage() {
                     <Clock className="h-3.5 w-3.5" /> Delay: {c.intervalo_min}s - {c.intervalo_max}s
                   </div>
                   <div className="flex items-center gap-1.5 truncate">
-                    <Tag className="h-3.5 w-3.5" /> Filtro: {c.tags_filtro.length > 0 ? `${c.tags_filtro.length} tags` : "Todos"}
+                    <Tag className="h-3.5 w-3.5" /> Tabulação: {c.tags_filtro.length > 0 ? c.tags_filtro.length : "Todos"}
                   </div>
                   <div className="flex items-center gap-1.5 truncate">
-                    <Smartphone className="h-3.5 w-3.5" /> Sessões: {c.session_ids.length} ativas
+                    <Smartphone className="h-3.5 w-3.5" /> Canais: {c.session_ids.length} ativos
                   </div>
                   <div className="flex items-center gap-1.5 truncate">
                     <Calendar className="h-3.5 w-3.5" /> Janela: {c.janela_inicio} - {c.janela_fim}
@@ -1929,10 +2022,37 @@ export default function CampanhasPage() {
                   )}
                 </div>
 
-                {/* Tempo estimado — só quando métricas dessa campanha já
-                    foram carregadas nesta sessão (usuário abriu o modal
-                    de métricas pelo menos uma vez); sem isso, "—" em vez
-                    de disparar uma query por card (evita N+1). */}
+                {/* Métricas resumidas — vêm de metricsMap, pré-carregado pra
+                    TODAS as campanhas em loadData() (1 query, não N+1); só
+                    aparece quando a campanha já tem uma linha em
+                    campaign_metrics (isto é, o envio já começou pelo menos
+                    uma vez). "Ver métricas" abre o modal com o detalhe
+                    completo (taxas, UTM, etc). */}
+                {metricsMap[c.id] && (
+                  <div className="grid grid-cols-4 gap-2 pt-2 text-center text-[11px] border-t border-border/40">
+                    <div>
+                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_enviados}</p>
+                      <p className="text-muted-foreground">Enviados</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_entregues}</p>
+                      <p className="text-muted-foreground">Entregues</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_lidos}</p>
+                      <p className="text-muted-foreground">Lidos</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_respostas}</p>
+                      <p className="text-muted-foreground">Respostas</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tempo estimado — pré-carregado junto com as métricas
+                    resumidas acima (mesmo metricsMap); "—" só quando a
+                    campanha ainda não tem métrica nenhuma (envio nunca
+                    começou). */}
                 <div className="text-[11px] text-muted-foreground">
                   ⏱{" "}
                   {metricsMap[c.id]?.total_contatos ? (
@@ -1976,6 +2096,16 @@ export default function CampanhasPage() {
                     ) : null}
                   </div>
                   <div className="flex gap-1">
+                    <Link href={`/disparador/campanhas/${c.id}`}>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        title="Ver por contato"
+                      >
+                        <ListChecks className="h-4 w-4" />
+                      </Button>
+                    </Link>
                     <Button
                       size="icon"
                       variant="ghost"
@@ -2060,27 +2190,15 @@ export default function CampanhasPage() {
 
             {wizardStep === 1 && (
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Nome da Campanha</label>
-                  <input
-                    type="text"
-                    value={nome}
-                    onChange={(e) => setNome(e.target.value)}
-                    placeholder="Ex: Reativação Clientes Inativos"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Objetivo</label>
-                  <input
-                    type="text"
-                    value={objetivo}
-                    onChange={(e) => setObjetivo(e.target.value)}
-                    placeholder="Ex: Comercial / Suporte"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                  />
-                </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Nome da Campanha</label>
+                <input
+                  type="text"
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                  placeholder="Ex: Reativação Clientes Inativos"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                />
               </div>
 
               <div className="space-y-1">
@@ -2093,14 +2211,40 @@ export default function CampanhasPage() {
                 />
               </div>
 
-              {/* Sessions Selector */}
+              {/* Equipe — filtra a lista de canais abaixo (client-side,
+                  sobre `sessions` já carregado); não é enviado ao servidor,
+                  só decide quais checkboxes aparecem. */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Sessões de WhatsApp Utilizadas</label>
+                <label className="text-xs font-medium text-muted-foreground">Equipe</label>
+                <Select value={teamFilter || "__all__"} onValueChange={(v) => setTeamFilter(v === "__all__" ? "" : v || "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue>
+                      {(v: string) => (v === "__all__" ? "Todas as equipes" : (teams.find((t) => t.id === v)?.name ?? v))}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">Todas as equipes</SelectItem>
+                    {teams.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>
+                        {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Channels Selector */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">Canais de WhatsApp</label>
                 <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-border p-2 rounded-md">
-                  {sessions.length === 0 ? (
-                    <span className="text-xs text-muted-foreground">Nenhuma sessão WAHA conectada encontrada.</span>
+                  {filteredSessions.length === 0 ? (
+                    <span className="text-xs text-muted-foreground">
+                      {sessions.length === 0
+                        ? "Nenhum canal de WhatsApp conectado encontrado."
+                        : "Nenhum canal para a equipe selecionada."}
+                    </span>
                   ) : (
-                    sessions.map((s) => (
+                    filteredSessions.map((s) => (
                       <label key={s.id} className="flex items-center gap-1.5 bg-muted/50 border border-border rounded px-2.5 py-1 text-xs cursor-pointer hover:bg-muted text-foreground">
                         <input
                           type="checkbox"
@@ -2117,15 +2261,19 @@ export default function CampanhasPage() {
                 </div>
               </div>
 
-              {/* Filter tags */}
+              {/* Filtrar por tabulação */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Filtro de Contatos por Tags (Opcional - Vazio envia para todos)</label>
+                <label className="text-xs font-medium text-muted-foreground">Filtrar por tabulação</label>
+                <p className="text-[10px] text-muted-foreground">
+                  Filtra contatos do CSV que possuem esta tabulação no atendimento. Deixe vazio para
+                  enviar para todos.
+                </p>
                 <div className="relative mb-2">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2
                     h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                   <input
                     type="text"
-                    placeholder="Buscar tag..."
+                    placeholder="Buscar tabulação..."
                     value={tagSearch}
                     onChange={(e) => setTagSearch(e.target.value)}
                     className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border
@@ -2134,23 +2282,27 @@ export default function CampanhasPage() {
                   />
                 </div>
                 <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-border p-2 rounded-md">
-                  {tags
-                    .filter((t) =>
-                      t.name.toLowerCase().includes(tagSearch.toLowerCase())
-                    )
-                    .map((t) => (
-                      <label key={t.id} className="flex items-center gap-1.5 bg-muted/50 border border-border rounded px-2.5 py-1 text-xs cursor-pointer hover:bg-muted text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={selectedTags.includes(t.name)}
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedTags([...selectedTags, t.name]);
-                            else setSelectedTags(selectedTags.filter((name) => name !== t.name));
-                          }}
-                        />
-                        {t.name}
-                      </label>
-                    ))}
+                  {tags.length === 0 ? (
+                    <span className="text-xs text-muted-foreground">Nenhuma tabulação cadastrada.</span>
+                  ) : (
+                    tags
+                      .filter((t) =>
+                        t.name.toLowerCase().includes(tagSearch.toLowerCase())
+                      )
+                      .map((t) => (
+                        <label key={t.id} className="flex items-center gap-1.5 bg-muted/50 border border-border rounded px-2.5 py-1 text-xs cursor-pointer hover:bg-muted text-foreground">
+                          <input
+                            type="checkbox"
+                            checked={selectedTags.includes(t.name)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedTags([...selectedTags, t.name]);
+                              else setSelectedTags(selectedTags.filter((name) => name !== t.name));
+                            }}
+                          />
+                          {t.name}
+                        </label>
+                      ))
+                  )}
                 </div>
               </div>
 
@@ -2273,6 +2425,52 @@ export default function CampanhasPage() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* Campos técnicos — só em modo "Segmentado". batchSize/
+                  batchPauseSeconds (o que de fato vai no payload) são
+                  derivados de batchPercent/batchPauseMinutes pelo useEffect
+                  logo acima de channelMap/selectedMetaWabaId — a resolução
+                  definitiva contra o total real de contatos acontece em
+                  startCampaign.ts no momento do início. */}
+              {dispatchMode === "segmentado" && (
+                <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Percentual por rodada</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={batchPercent}
+                        onChange={(e) =>
+                          setBatchPercent(Math.min(50, Math.max(1, Number(e.target.value) || 1)))
+                        }
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                      <p className="text-[10px] text-muted-foreground">De 1% a 50% da lista por rodada.</p>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Intervalo entre rodadas (min)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        value={batchPauseMinutes}
+                        onChange={(e) =>
+                          setBatchPauseMinutes(Math.max(1, Number(e.target.value) || 1))
+                        }
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Para {segmentadoExampleBase.toLocaleString("pt-BR")} contatos
+                    {!totalContatosConhecidos && " (exemplo)"}: {segmentadoPorRodada.toLocaleString("pt-BR")} por
+                    rodada a cada {batchPauseMinutes} min (~{segmentadoRodadas} rodadas, ~{segmentadoTempoLabel} para
+                    concluir).
+                  </p>
                 </div>
               )}
 
@@ -2756,6 +2954,14 @@ export default function CampanhasPage() {
                   />
                 </label>
 
+                {/* Baixar modelo — mesmo arquivo estático usado em
+                    /disparador/contatos (não gerado client-side). */}
+                <a href="/modelo_importacao_disparador.csv" download>
+                  <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
+                    <Download className="h-3.5 w-3.5" /> Baixar modelo de exemplo
+                  </Button>
+                </a>
+
                 {/* Formato esperado */}
                 <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1">
                   <p className="font-medium text-foreground">Formatos aceitos:</p>
@@ -3166,17 +3372,16 @@ export default function CampanhasPage() {
                   </div>
                 )}
 
-                {/* Safety net educativo: com a Correção 1 (tagsFinais em
-                    handleSubmit) isto raramente aparece quando há import,
-                    já que a tag da campanha é adicionada automaticamente
-                    ao salvar — mas ainda vale o aviso para campanhas sem
-                    import nenhuma que também deixaram o filtro vazio. */}
+                {/* Sem criação automática de tag pelo nome da campanha (ver
+                    handleSubmit) — filtro vazio hoje sempre significa "toda
+                    a conta", inclusive logo após um import, então este
+                    aviso é o único sinal disso antes de salvar. */}
                 {selectedTags.length === 0 && (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
-                    ⚠ Nenhum filtro de tag selecionado — a campanha será enviada
-                    para todos os contatos da conta. Se quiser enviar só para
-                    os contatos importados, o filtro será aplicado
-                    automaticamente ao salvar.
+                    ⚠ Nenhuma tabulação selecionada — a campanha será enviada
+                    para todos os contatos da conta. Para enviar só para um
+                    grupo específico, selecione uma tabulação em &quot;Filtrar por
+                    tabulação&quot; no Step 1.
                   </div>
                 )}
               </div>
