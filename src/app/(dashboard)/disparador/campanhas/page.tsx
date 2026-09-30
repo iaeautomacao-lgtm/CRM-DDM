@@ -2007,7 +2007,12 @@ export default function CampanhasPage() {
                     <Clock className="h-3.5 w-3.5" /> Delay: {c.intervalo_min}s - {c.intervalo_max}s
                   </div>
                   <div className="flex items-center gap-1.5 truncate">
-                    <Tag className="h-3.5 w-3.5" /> Tabulação: {c.tags_filtro.length > 0 ? c.tags_filtro.length : "Todos"}
+                    <Tag className="h-3.5 w-3.5" /> Tabulação:{" "}
+                    {c.tags_filtro.length === 0
+                      ? "Todos"
+                      : c.tags_filtro.length === 1
+                        ? c.tags_filtro[0]
+                        : `${c.tags_filtro[0]} +${c.tags_filtro.length - 1}`}
                   </div>
                   <div className="flex items-center gap-1.5 truncate">
                     <Smartphone className="h-3.5 w-3.5" /> Canais: {c.session_ids.length} ativos
