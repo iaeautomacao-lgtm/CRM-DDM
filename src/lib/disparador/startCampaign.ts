@@ -604,6 +604,7 @@ export async function startCampaign(
         // applyTemplateVars, not here, so they reflect the contact's
         // current data and today's date rather than a snapshot from enqueue.
         const rawText = msg.conteudo || msg.prompt || "";
+        let resolvedText = rawText;
 
         // Meta template fields — resolved per-contact from template_variable_map
         // (populated in campanhas/page.tsx only when the message came from the
@@ -636,6 +637,28 @@ export async function startCampaign(
           });
         }
 
+        // WAHA free-text: apply {{N}} substitution at enqueue time because there
+        // is no Meta API to resolve placeholders — the text must arrive at
+        // processQueueItem already substituted.
+        if (!msg.template_name && Array.isArray(msg.template_variable_map)) {
+          resolvedText = msg.template_variable_map.reduce(
+            (text: string, entry: any, idx: number) => {
+              let value = "";
+              if (entry?.type === "contact_field") {
+                value = String((contact as any)[entry.field] ?? "");
+              } else if (entry?.type === "utm_link") {
+                value = utmLinkByPhone.get((contact as any).phone_normalized) ?? "";
+              } else if (entry?.type === "csv_var") {
+                value = csvVarMap.get(`${contact.id}:${entry.index}`) ?? "";
+              } else {
+                value = String(entry?.value ?? "");
+              }
+              return text.replace(new RegExp(`\\{\\{${idx + 1}\\}\\}`, "g"), value);
+            },
+            resolvedText
+          );
+        }
+
         // Validação de janela 24h para canais Meta sem template
         if (isMetaChannel && !templateName) {
           const lastInbound = windowMap.get(contact.id);
@@ -652,7 +675,7 @@ export async function startCampaign(
               account_id: accountId,
               contact_id: contact.id,
               session_id: sessionId,
-              mensagem_final: rawText,
+              mensagem_final: resolvedText,
               status: "erro",
               erro: "Janela de 24h encerrada — use um template aprovado para este contato",
               tipo: msg.tipo || "texto",
@@ -672,7 +695,7 @@ export async function startCampaign(
           account_id: accountId,
           contact_id: contact.id,
           session_id: sessionId,
-          mensagem_final: rawText,
+          mensagem_final: resolvedText,
           status: "agendado",
           tipo: msg.tipo || "texto",
           media_url: msg.url || null,
