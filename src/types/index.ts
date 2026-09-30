@@ -68,6 +68,9 @@ export interface AccountMember {
   /** Team this member belongs to (migration 049). Null = unassigned.
    *  One team per agent — not a join table. */
   team_id: string | null;
+  /** Cap on concurrent open/pending conversations for handoff routing
+   *  (migration 116). Null = no limit. */
+  max_simultaneous_chats: number | null;
 }
 
 /**

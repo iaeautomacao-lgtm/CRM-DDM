@@ -139,6 +139,7 @@ function MemberRoleSection({
   onSearchChange,
   pendingMemberId,
   onToggle,
+  onCapacityChange,
   readOnly,
 }: {
   title: string;
@@ -151,6 +152,8 @@ function MemberRoleSection({
   onSearchChange: (v: string) => void;
   pendingMemberId: string | null;
   onToggle: (userId: string, checked: boolean) => void;
+  /** Commits on blur — rawValue is the input's raw text ("" = sem limite). */
+  onCapacityChange: (userId: string, rawValue: string) => void;
   /** Supervisor (admin) view — same data, add/remove controls hidden. */
   readOnly: boolean;
 }) {
@@ -198,6 +201,27 @@ function MemberRoleSection({
                     {displayName}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">{roleMeta.label}</span>
+                  <div className="flex shrink-0 items-center gap-1" title="Atend. simultâneos">
+                    <Input
+                      key={`cap-${member.user_id}-${member.max_simultaneous_chats ?? "none"}`}
+                      type="number"
+                      min={1}
+                      defaultValue={member.max_simultaneous_chats ?? undefined}
+                      onBlur={(e) => onCapacityChange(member.user_id, e.target.value)}
+                      placeholder="Sem limite"
+                      disabled={readOnly}
+                      aria-label="Atend. simultâneos"
+                      className="h-7 w-20 px-2 text-center text-xs"
+                    />
+                    {member.max_simultaneous_chats == null && (
+                      <span
+                        className="text-xs text-muted-foreground"
+                        title="Sem limite de atendimentos simultâneos"
+                      >
+                        ∞
+                      </span>
+                    )}
+                  </div>
                   {readOnly ? null : isPending ? (
                     <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
                   ) : (
@@ -607,6 +631,38 @@ export default function EquipeDetailPage({
     }
   }
 
+  async function handleCapacityChange(userId: string, rawValue: string) {
+    const trimmed = rawValue.trim();
+    const newValue = trimmed === "" ? null : Number(trimmed);
+    if (newValue !== null && (!Number.isInteger(newValue) || newValue < 1)) {
+      toast.error("Atend. simultâneos deve ser um número inteiro maior ou igual a 1 (ou vazio para sem limite)");
+      return;
+    }
+    const previous =
+      allAccountMembers.find((m) => m.user_id === userId)?.max_simultaneous_chats ?? null;
+    if (previous === newValue) return;
+    setAllAccountMembers((prev) =>
+      prev.map((m) => (m.user_id === userId ? { ...m, max_simultaneous_chats: newValue } : m)),
+    );
+    try {
+      const res = await apiFetch(`/api/account/members/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_simultaneous_chats: newValue }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.error || "Falha ao atualizar capacidade de atendimento");
+      }
+    } catch (err) {
+      setAllAccountMembers((prev) =>
+        prev.map((m) => (m.user_id === userId ? { ...m, max_simultaneous_chats: previous } : m)),
+      );
+      console.error("[EquipeDetail] capacity change error:", err);
+      toast.error(err instanceof Error ? err.message : "Falha ao atualizar capacidade de atendimento");
+    }
+  }
+
   async function handleSaveName() {
     const trimmed = editName.trim();
     if (!team) return;
@@ -967,6 +1023,7 @@ export default function EquipeDetailPage({
                 onSearchChange={setSupervisorSearch}
                 pendingMemberId={pendingMemberId}
                 onToggle={handleToggleMember}
+                onCapacityChange={handleCapacityChange}
                 readOnly={isReadOnly}
               />
 
@@ -980,6 +1037,7 @@ export default function EquipeDetailPage({
                 onSearchChange={setOperatorSearch}
                 pendingMemberId={pendingMemberId}
                 onToggle={handleToggleMember}
+                onCapacityChange={handleCapacityChange}
                 readOnly={isReadOnly}
               />
             </>

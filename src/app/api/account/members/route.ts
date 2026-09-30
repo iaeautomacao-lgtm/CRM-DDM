@@ -26,6 +26,7 @@ interface ProfileRow {
   account_role: string;
   created_at: string;
   team_id: string | null;
+  max_simultaneous_chats: number | null;
 }
 
 export async function GET() {
@@ -36,7 +37,9 @@ export async function GET() {
     // the caller's, so this query is naturally account-scoped.
     const { data, error } = await ctx.supabase
       .from("profiles")
-      .select("user_id, full_name, email, avatar_url, account_role, created_at, team_id")
+      .select(
+        "user_id, full_name, email, avatar_url, account_role, created_at, team_id, max_simultaneous_chats",
+      )
       .eq("account_id", ctx.accountId)
       .order("created_at", { ascending: true });
 
@@ -64,6 +67,7 @@ export async function GET() {
           role: row.account_role,
           joined_at: row.created_at,
           team_id: row.team_id,
+          max_simultaneous_chats: row.max_simultaneous_chats,
         },
       ];
     });

@@ -948,15 +948,37 @@ export async function selectAgentForTeam(
   // filtragem é feita com uma query separada em vez de um join embutido.
   const { data: agentProfiles } = await db
     .from("profiles")
-    .select("user_id")
+    .select("user_id, max_simultaneous_chats")
     .in("user_id", orderedMemberIds)
     .eq("account_role", "agent");
 
-  const agentIds = new Set(
-    (agentProfiles as { user_id: string }[] | null ?? []).map((p) => p.user_id),
+  const agentProfileRows =
+    (agentProfiles as { user_id: string; max_simultaneous_chats: number | null }[] | null) ?? [];
+  const agentIds = new Set(agentProfileRows.map((p) => p.user_id));
+  const maxChatsMap = new Map<string, number | null>(
+    agentProfileRows.map((p) => [p.user_id, p.max_simultaneous_chats]),
   );
   const memberIds = orderedMemberIds.filter((id) => agentIds.has(id));
   if (memberIds.length === 0) return null;
+
+  // account_id scopes the overflow lookup to the caller's own account —
+  // teamId is trusted (comes from this same account's flow config), but
+  // this keeps the recursion from ever following a cross-account team.
+  async function fallbackToOverflow(): Promise<string | null> {
+    const { data: teamRow } = await db
+      .from("teams")
+      .select("overflow_team_id")
+      .eq("id", teamId)
+      .eq("account_id", accountId)
+      .maybeSingle();
+    const overflowTeamId = (
+      teamRow as { overflow_team_id: string | null } | null
+    )?.overflow_team_id;
+    if (overflowTeamId) {
+      return selectAgentForTeam(db, overflowTeamId, accountId);
+    }
+    return null;
+  }
 
   const cutoff = new Date(Date.now() - 75_000).toISOString();
 
@@ -984,22 +1006,7 @@ export async function selectAgentForTeam(
   }
 
   if (eligibleIds.length === 0) {
-    // account_id scopes the overflow lookup to the caller's own account —
-    // teamId is trusted (comes from this same account's flow config), but
-    // this keeps the recursion from ever following a cross-account team.
-    const { data: teamRow } = await db
-      .from("teams")
-      .select("overflow_team_id")
-      .eq("id", teamId)
-      .eq("account_id", accountId)
-      .maybeSingle();
-    const overflowTeamId = (
-      teamRow as { overflow_team_id: string | null } | null
-    )?.overflow_team_id;
-    if (overflowTeamId) {
-      return selectAgentForTeam(db, overflowTeamId, accountId);
-    }
-    return null;
+    return fallbackToOverflow();
   }
 
   const { data: openConvs } = await db
@@ -1016,10 +1023,26 @@ export async function selectAgentForTeam(
     }
   }
 
-  const minCount = Math.min(...counts.values());
+  // Agentes no teto de max_simultaneous_chats saem da disputa — mas ainda
+  // contam para o load balancing dos demais (counts acima já os inclui).
+  const eligibleWithCapacity = eligibleIds.filter((id) => {
+    const max = maxChatsMap.get(id);
+    if (max === null || max === undefined) return true;
+    return (counts.get(id) ?? 0) < max;
+  });
+
+  if (eligibleWithCapacity.length === 0) {
+    return fallbackToOverflow();
+  }
+
+  const minCount = Math.min(...eligibleWithCapacity.map((id) => counts.get(id)!));
   // memberIds is oldest-first (query above), so the first eligible id at
   // the min count is the tie-break winner.
-  return memberIds.find((id) => counts.get(id) === minCount) ?? null;
+  return (
+    memberIds.find(
+      (id) => eligibleWithCapacity.includes(id) && counts.get(id) === minCount,
+    ) ?? null
+  );
 }
 
 export async function selectAnyAgentForAccount(
@@ -1029,7 +1052,7 @@ export async function selectAnyAgentForAccount(
   // Busca todos os Operadores da conta (account_role = 'agent')
   const { data: agents } = await db
     .from("profiles")
-    .select("user_id")
+    .select("user_id, max_simultaneous_chats")
     .eq("account_id", accountId)
     .eq("account_role", "agent")
     .order("created_at", { ascending: true });
@@ -1037,6 +1060,12 @@ export async function selectAnyAgentForAccount(
   if (!agents || agents.length === 0) return null;
 
   const agentIds = agents.map((a) => a.user_id);
+  const maxChatsMap = new Map<string, number | null>(
+    (agents as { user_id: string; max_simultaneous_chats: number | null }[]).map((a) => [
+      a.user_id,
+      a.max_simultaneous_chats,
+    ]),
+  );
   const cutoff = new Date(Date.now() - 75_000).toISOString();
 
   // Tenta online primeiro
@@ -1079,9 +1108,22 @@ export async function selectAnyAgentForAccount(
     }
   }
 
-  const minCount = Math.min(...counts.values());
+  // Agentes no teto de max_simultaneous_chats saem da disputa.
+  const eligibleWithCapacity = eligibleIds.filter((id) => {
+    const max = maxChatsMap.get(id);
+    if (max === null || max === undefined) return true;
+    return (counts.get(id) ?? 0) < max;
+  });
+
+  if (eligibleWithCapacity.length === 0) return null;
+
+  const minCount = Math.min(...eligibleWithCapacity.map((id) => counts.get(id)!));
   // Tie-break: mais antigo na conta (agentIds já está ordenado por created_at)
-  return agentIds.find((id) => counts.get(id) === minCount) ?? null;
+  return (
+    agentIds.find(
+      (id) => eligibleWithCapacity.includes(id) && counts.get(id) === minCount,
+    ) ?? null
+  );
 }
 
 /**

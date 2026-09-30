@@ -1,12 +1,16 @@
 // ============================================================
 // /api/account/members/[userId]
 //
-//   PATCH  — change a member's role.   Admin+.
-//   DELETE — remove a member.          Admin+.
+//   PATCH  — change a member's role and/or handoff capacity. Admin+.
+//   DELETE — remove a member.                                 Admin+.
 //
-// Both delegate to SECURITY DEFINER RPCs from migration 018:
-//   - set_member_role(p_user_id, p_new_role)
-//   - remove_account_member(p_user_id)
+// PATCH accepts `role`, `max_simultaneous_chats`, or both in the same
+// body; each field present is applied independently via its own RPC.
+//
+// These delegate to SECURITY DEFINER RPCs:
+//   - set_member_role(p_user_id, p_new_role)                  (migration 018)
+//   - set_member_max_simultaneous_chats(p_user_id, p_max)      (migration 116)
+//   - remove_account_member(p_user_id)                         (migration 018)
 //
 // The RPCs do the *real* authorisation work — caller must be
 // admin+, target must be in caller's account, target can't be the
@@ -58,35 +62,68 @@ export async function PATCH(
     const { userId } = await params;
 
     const body = (await request.json().catch(() => null)) as
-      | { role?: unknown }
+      | { role?: unknown; max_simultaneous_chats?: unknown }
       | null;
-    const role = body?.role;
+    const hasRole = body != null && "role" in body;
+    const hasMaxChats = body != null && "max_simultaneous_chats" in body;
 
-    if (!isAccountRole(role)) {
+    if (!hasRole && !hasMaxChats) {
       return NextResponse.json(
-        { error: "'role' must be one of owner, admin, agent, viewer" },
+        { error: "Provide 'role' and/or 'max_simultaneous_chats' to update" },
         { status: 400 },
       );
     }
 
-    // The RPC blocks promotion to / demotion from owner, but
-    // surface the friendlier 400 before crossing the wire too.
-    if (role === "owner") {
-      return NextResponse.json(
-        {
-          error:
-            "Use POST /api/account/transfer-ownership to promote a member to owner",
-        },
-        { status: 400 },
-      );
+    if (hasRole) {
+      const role = body!.role;
+
+      if (!isAccountRole(role)) {
+        return NextResponse.json(
+          { error: "'role' must be one of owner, admin, agent, viewer" },
+          { status: 400 },
+        );
+      }
+
+      // The RPC blocks promotion to / demotion from owner, but
+      // surface the friendlier 400 before crossing the wire too.
+      if (role === "owner") {
+        return NextResponse.json(
+          {
+            error:
+              "Use POST /api/account/transfer-ownership to promote a member to owner",
+          },
+          { status: 400 },
+        );
+      }
+
+      const { error } = await ctx.supabase.rpc("set_member_role", {
+        p_user_id: userId,
+        p_new_role: role,
+      });
+
+      if (error) return rpcErrorToResponse(error);
     }
 
-    const { error } = await ctx.supabase.rpc("set_member_role", {
-      p_user_id: userId,
-      p_new_role: role,
-    });
+    if (hasMaxChats) {
+      const maxChats = body!.max_simultaneous_chats;
 
-    if (error) return rpcErrorToResponse(error);
+      if (
+        maxChats !== null &&
+        (typeof maxChats !== "number" || !Number.isInteger(maxChats) || maxChats < 1)
+      ) {
+        return NextResponse.json(
+          { error: "'max_simultaneous_chats' must be an integer >= 1, or null" },
+          { status: 400 },
+        );
+      }
+
+      const { error } = await ctx.supabase.rpc(
+        "set_member_max_simultaneous_chats",
+        { p_user_id: userId, p_max: maxChats },
+      );
+
+      if (error) return rpcErrorToResponse(error);
+    }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
