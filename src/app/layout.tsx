@@ -83,7 +83,8 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="pt-BR"
+      translate="no"
       data-theme={DEFAULT_THEME}
       data-mode={DEFAULT_MODE}
       className={`${inter.variable} h-full antialiased`}
@@ -97,6 +98,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <meta name="google" content="notranslate" />
         <Script
           id="theme-boot"
           strategy="beforeInteractive"
