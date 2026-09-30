@@ -543,12 +543,24 @@ export async function handleAiAutoResponse(
       // Remove media_url to avoid the provider trying to download an
       // expired/authenticated WhatsApp URL. Images are the one
       // exception — but only when there's no caption/transcription
-      // already: that's the case OpenAI/Gemini's Vision branch exists
-      // for (see generateOpenAiResponse/generateGeminiResponse, both
-      // gated on `content_type === "image" && media_url`). An image
-      // that already had real text doesn't need the binary re-sent —
-      // the text alone is enough, so media_url is dropped there too.
-      if (msg.content_type !== "image" || hadText) {
+      // already (that's the case OpenAI/Gemini's Vision branch exists
+      // for — see generateOpenAiResponse/generateGeminiResponse, both
+      // gated on `content_type === "image" && media_url`) AND the URL
+      // is actually resolvable to something externally fetchable.
+      // Supabase storage paths ("/storage/..." or "storage/...") are
+      // fine — both provider functions already turn those into a real
+      // public URL via .storage.from("chat-media").getPublicUrl()
+      // before fetching. A raw internal proxy path like
+      // "/api/whatsapp/media/<id>" is not — it only resolves inside
+      // our own server, so Vision (running on OpenAI's infra) can
+      // never reach it. That's what invalid_image_url comes from, so
+      // even an un-captioned image with one of those has to fall back
+      // to the text placeholder instead.
+      const isPublicUrl =
+        !!msg.media_url?.startsWith("https://") ||
+        !!msg.media_url?.startsWith("/storage/") ||
+        !!msg.media_url?.startsWith("storage/");
+      if (msg.content_type !== "image" || hadText || !isPublicUrl) {
         msg.media_url = null;
       }
     }
