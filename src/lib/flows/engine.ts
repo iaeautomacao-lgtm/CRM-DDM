@@ -1617,33 +1617,72 @@ async function runAiAgentCore(
     // Last customer message is the AI's input — same "what does the
     // customer want answered" the standalone auto-responder uses.
     let incomingText: string;
-    let incomingMsg: { content_text: string | null; received_at: string } | null = null;
+    let incomingMsg: {
+      content_text: string | null;
+      content_type: string | null;
+      received_at: string;
+    } | null = null;
 
     if (incomingTextOverride !== undefined && incomingTextOverride !== "") {
       // Mensagem já disponível no caller — evita race condition de leitura do banco
       incomingText = incomingTextOverride;
       // Ainda precisamos do received_at para filtrar a query do bot depois
+      // (e de content_type — ver placeholder de mídia sem texto abaixo).
       const { data: msgRow } = await db
         .from("messages")
-        .select("content_text, received_at")
+        .select("content_text, content_type, received_at")
         .eq("conversation_id", run.conversation_id!)
         .eq("sender_type", "customer")
         .order("received_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      incomingMsg = msgRow as { content_text: string | null; received_at: string } | null;
+      incomingMsg = msgRow as {
+        content_text: string | null;
+        content_type: string | null;
+        received_at: string;
+      } | null;
     } else {
       // Trigger inicial: busca normalmente do banco
       const { data: lastCustomerMsg } = await db
         .from("messages")
-        .select("content_text, received_at")
+        .select("content_text, content_type, received_at")
         .eq("conversation_id", run.conversation_id!)
         .eq("sender_type", "customer")
         .order("received_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      incomingMsg = lastCustomerMsg as { content_text: string | null; received_at: string } | null;
+      incomingMsg = lastCustomerMsg as {
+        content_text: string | null;
+        content_type: string | null;
+        received_at: string;
+      } | null;
       incomingText = incomingMsg?.content_text ?? "";
+    }
+
+    // Mensagem de mídia sem texto (sticker, áudio ainda não transcrito
+    // neste ponto, vídeo, documento) vira um placeholder descritivo em
+    // vez de string vazia — sem isso, o turno que chega em
+    // handleAiAutoResponse (e depois no histórico enviado ao provedor,
+    // ver responder.ts) fica em branco, sem nenhum indício de que o
+    // cliente mandou algo. Mesma classe de problema já corrigida no
+    // loop de normalização de history em responder.ts, mas aqui é
+    // sobre o texto que ALIMENTA aquele fluxo, não sobre o histórico
+    // em si.
+    if (
+      !incomingText?.trim() &&
+      incomingMsg?.content_type &&
+      incomingMsg.content_type !== "text"
+    ) {
+      const INCOMING_CONTENT_TYPE_PLACEHOLDERS: Record<string, string> = {
+        image: "[Cliente enviou uma imagem]",
+        audio: "[Cliente enviou um áudio]",
+        video: "[Cliente enviou um vídeo]",
+        sticker: "[Cliente enviou uma figurinha]",
+        document: "[Cliente enviou um documento]",
+      };
+      incomingText =
+        INCOMING_CONTENT_TYPE_PLACEHOLDERS[incomingMsg.content_type] ??
+        "[Conteúdo não suportado]";
     }
 
     // skipDebounce: true — debounceAiAgentReply (handleReplyForActiveRun)
@@ -3028,6 +3067,39 @@ async function debounceAiAgentReply(db: AdminClient, runId: string): Promise<boo
   return (row as { debounce_until: string } | null)?.debounce_until === myDeadline;
 }
 
+/**
+ * Re-reads current_node_key/status fresh from flow_runs and reports
+ * whether the run has moved on from the node-key snapshot the caller
+ * is holding — either a different node now, or no longer 'active' at
+ * all. Used by handleReplyForActiveRun to catch a stale `run` object
+ * driving processing for the wrong node: the small window between
+ * loadActiveRunForContact loading `run` and this function actually
+ * starting is one source, but the bigger one is
+ * debounceAiAgentReply's 4s wait — `cfg`/`currentNode` are captured
+ * BEFORE that wait, and nothing re-validates them after it, so a
+ * concurrent advance (e.g. BEN handing off to Aleh) mid-wait would
+ * otherwise have this call proceed with the wrong node's config even
+ * though the DB has already moved on.
+ *
+ * A failed re-read (`error`, or the row gone) is NOT treated as an
+ * advance — fails open, so a transient DB hiccup doesn't wrongly
+ * abort an otherwise-valid turn.
+ */
+async function hasRunLeftNodeSnapshot(
+  db: AdminClient,
+  runId: string,
+  snapshotNodeKey: string | null,
+): Promise<boolean> {
+  const { data, error } = await db
+    .from("flow_runs")
+    .select("current_node_key, status")
+    .eq("id", runId)
+    .maybeSingle();
+  if (error || !data) return false;
+  const row = data as { current_node_key: string | null; status: string };
+  return row.current_node_key !== snapshotNodeKey || row.status !== "active";
+}
+
 async function handleReplyForActiveRun(
   db: AdminClient,
   run: FlowRunRow,
@@ -3062,6 +3134,20 @@ async function handleReplyForActiveRun(
       flow_run_id: run.id,
       outcome: "no_match",
     };
+  }
+
+  // Closes the (smaller) window between loadActiveRunForContact loading
+  // `run` and this function actually running — dispatchInboundToFlows
+  // does an isDuplicateInbound check and a loadAllNodes query in
+  // between, either of which gives a concurrent advance time to land.
+  // See hasRunLeftNodeSnapshot's own comment for the bigger window
+  // (debounceAiAgentReply's wait) this same helper guards below.
+  if (await hasRunLeftNodeSnapshot(db, run.id, run.current_node_key)) {
+    console.log(
+      "[flows] Run advanced before processing could start, bailing out",
+      { run_id: run.id, snapshot_node_key: run.current_node_key },
+    );
+    return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
   }
 
   const currentNode = nodes.get(run.current_node_key) ?? null;
@@ -3126,6 +3212,19 @@ async function handleReplyForActiveRun(
     // without touching turns/vars/events; the newer call handles it.
     const shouldProceed = await debounceAiAgentReply(db, run.id);
     if (!shouldProceed) {
+      return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
+    }
+
+    // The 4s wait inside debounceAiAgentReply is the main window this
+    // guards — `cfg` above was read from the `currentNode` snapshot
+    // taken before that wait started, and nothing else re-validates it
+    // afterwards. Re-check now, right before actually calling the AI
+    // with that (possibly stale) config.
+    if (await hasRunLeftNodeSnapshot(db, run.id, run.current_node_key)) {
+      console.log("[flows] Node advanced during debounce, bailing out", {
+        run_id: run.id,
+        snapshot_node_key: run.current_node_key,
+      });
       return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
     }
 
