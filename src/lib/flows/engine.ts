@@ -213,19 +213,27 @@ async function loadActiveRunForContact(
   contactId: string,
 ): Promise<FlowRunRow | null> {
   // The partial unique index `idx_one_active_run_per_contact` was
-  // rebuilt in migration 017 over `(account_id, contact_id)` — so
-  // "two active runs for one contact in one account" is impossible
-  // by design. But a future migration glitch or manual SQL could
-  // create one, and .maybeSingle() throws on >1 row — which would
-  // kill dispatch for that contact's webhook entirely. .limit(1) is
-  // forgiving: pick the newest, let the cron sweep clean up the
-  // stale one.
+  // rebuilt in migration 017 over `(account_id, contact_id)`, and
+  // widened by migration 115 to cover `paused_by_agent` alongside
+  // `active` — so "two active-or-paused runs for one contact in one
+  // account" is impossible by design. But a future migration glitch or
+  // manual SQL could create one, and .maybeSingle() throws on >1 row —
+  // which would kill dispatch for that contact's webhook entirely.
+  // .limit(1) is forgiving: pick the newest, let the cron sweep clean
+  // up the stale one.
+  //
+  // Includes `paused_by_agent` (not just `active`) so callers can tell
+  // "no run at all" apart from "there IS a run, a human just paused it"
+  // — dispatchInboundToFlows uses that distinction to suppress starting
+  // a brand-new run out from under the paused one instead of silently
+  // letting a second, independent run get inserted alongside it (see
+  // that function's own handling right after this call).
   const { data, error } = await db
     .from("flow_runs")
     .select("*")
     .eq("account_id", accountId)
     .eq("contact_id", contactId)
-    .eq("status", "active")
+    .in("status", ["active", "paused_by_agent"])
     .order("started_at", { ascending: false })
     .limit(1);
   if (error) {
@@ -236,14 +244,10 @@ async function loadActiveRunForContact(
   const run = rows[0] ?? null;
   if (!run) return null;
 
-  // A human agent taking over the conversation should silence the flow —
-  // nothing else clears `current_node_key`/`status='active'` on the run
-  // row when that happens (e.g. handleAiAutoResponse's tag-triggered
-  // handoff in responder.ts, or a manual assign from the inbox), so
-  // without this check the engine would keep feeding the customer's
-  // replies to the AI even after a human has been assigned.
-  // Run sem conversation_id é órfão — encerra e ignora
-  // para não bloquear novos atendimentos para este contato.
+  // Run sem conversation_id é órfão — encerra e ignora para não
+  // bloquear novos atendimentos para este contato. Aplica-se a
+  // active e paused_by_agent igualmente — sem conversation_id não há
+  // nada pra retomar de qualquer forma.
   if (!run.conversation_id) {
     console.warn(
       '[flows] run órfão encontrado (sem conversation_id), encerrando:',
@@ -256,7 +260,21 @@ async function loadActiveRunForContact(
     return null
   }
 
-  if (run.conversation_id) {
+  // A human agent taking over the conversation should silence the flow —
+  // nothing else clears `current_node_key`/`status='active'` on the run
+  // row when that happens (e.g. handleAiAutoResponse's tag-triggered
+  // handoff in responder.ts, or a manual assign from the inbox), so
+  // without this check the engine would keep feeding the customer's
+  // replies to the AI even after a human has been assigned.
+  //
+  // Only applies to `active` runs — a `paused_by_agent` run almost
+  // always has `assigned_agent_id` set too (send/route.ts sets both in
+  // the same request), so applying this check unconditionally would
+  // swallow the paused run back to `null` here and defeat the whole
+  // point of including `paused_by_agent` in the query above. The
+  // caller needs to actually see the paused run, not have it silently
+  // filtered out a second time.
+  if (run.status === "active") {
     const { data: conv } = await db
       .from("conversations")
       .select("assigned_agent_id")
@@ -1393,7 +1411,10 @@ export async function endActiveRunForConversation(
     .from("flow_runs")
     .select("id, flow_id, account_id")
     .eq("conversation_id", conversationId)
-    .eq("status", "active")
+    // paused_by_agent (migration 115) alongside active — closing a
+    // conversation should resolve a run a human paused by replying,
+    // not just one still technically "active".
+    .in("status", ["active", "paused_by_agent"])
     .limit(1)
     .maybeSingle();
   if (error) {
@@ -1435,7 +1456,7 @@ export async function endActiveRunForConversation(
     .select("id, flow_id, account_id")
     .eq("account_id", conv.account_id)
     .eq("contact_id", conv.contact_id)
-    .eq("status", "active")
+    .in("status", ["active", "paused_by_agent"])
     .limit(1)
     .maybeSingle();
   if (fallbackError) {
@@ -2834,6 +2855,18 @@ export async function dispatchInboundToFlows(
       input.accountId,
       input.contactId,
     );
+
+    // A human already paused this run by replying (send/route.ts) —
+    // don't advance it (it's not ours to drive anymore) and don't fall
+    // through to the trigger-matching below either, which would insert
+    // a second, independent run for the same contact now that the
+    // partial unique index (migration 115) allows an active row to
+    // coexist with a paused_by_agent one. The paused run itself is
+    // resolved later by endActiveRunForConversation (closing the
+    // conversation) or by the agent taking it back over.
+    if (activeRun && activeRun.status === "paused_by_agent") {
+      return { consumed: false, outcome: "no_match" };
+    }
 
     // Idempotency — only matters if there's already a run for this
     // contact. For new runs, the partial unique index catches duplicate
