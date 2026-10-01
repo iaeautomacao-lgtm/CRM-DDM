@@ -154,11 +154,10 @@ async function createTestCampaign(channelId: string): Promise<string> {
       mensagens: [{ tipo: "texto", conteudo: `${STRESS_PREFIX} — mensagem de carga` }],
       intervalo_min: 0,
       intervalo_max: 1,
-      // batch_size alto agrupa itens no mesmo scheduled_at (ver
-      // startCampaign.ts) para o cron poder puxar um lote grande por
-      // tick em vez do pacing sequencial de intervalo_min/max — é isso
-      // que revela o throughput real do cron.
-      batch_size: 100,
+      // Lote de 50 para o stress do scheduler global: o cron pode buscar
+      // até 50 desta campanha por rodada, mas DISPATCH_CONCURRENCY continua
+      // sendo o teto GLOBAL de envios simultâneos no servidor.
+      batch_size: 50,
       batch_pause_seconds: 0,
       // Valores EXATOS que cron/route.ts trata como "sem janela" — ver
       // `hasWindow` em src/app/api/disparador/cron/route.ts.
