@@ -1,0 +1,11 @@
+node_modules/
+.next/
+*.log
+dist/
+coverage/
+.git/
+supabase/.branches/
+supabase/.temp/
+public/
+*.dump
+*.sql.bak
