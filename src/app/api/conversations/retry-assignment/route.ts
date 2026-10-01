@@ -26,7 +26,11 @@ export async function POST(request: Request) {
     .eq("status", "pending")
     .is("assigned_agent_id", null)
     // Removido — conversas sem team_id também precisam de retry
-    .lte("updated_at", cutoff);
+    .lte("updated_at", cutoff)
+    // Backpressure: uma única execução não deve tentar drenar um backlog
+    // ilimitado dentro do mesmo processo Passenger.
+    .order("updated_at", { ascending: true })
+    .limit(100);
 
   if (error) {
     console.error("[RetryAssignment] Query error:", error.message);
