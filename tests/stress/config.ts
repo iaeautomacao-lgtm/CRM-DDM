@@ -66,14 +66,23 @@ export const STRESS_PREFIX = "STRESS_TEST";
 export const PRODUCTION_URL =
   process.env.STRESS_PRODUCTION_URL || "https://omnicrm.grupoddm.ia.br";
 
-// Base usada pelos testes que batem em HTTP (import, queue). O teste de
-// webhook (Passo 4) é sempre local por restrição do enunciado — ver
-// LOCAL_URL abaixo — independente do valor aqui.
-export const TARGET_URL = process.env.STRESS_TARGET_URL || PRODUCTION_URL;
-
 // O webhook NUNCA deve ser testado contra produção (evita qualquer risco
 // de side-effect real). test-webhook.ts sempre usa esta URL.
 export const LOCAL_URL = process.env.STRESS_LOCAL_URL || "http://localhost:3000";
+
+// Fail-safe: stress HTTP aponta para local por default. Para atingir a URL
+// de produção é obrigatório fornecer STRESS_TARGET_URL explicitamente E
+// confirmar com STRESS_ALLOW_PRODUCTION=true.
+export const TARGET_URL = process.env.STRESS_TARGET_URL || LOCAL_URL;
+
+if (
+  TARGET_URL.replace(/\/$/, "") === PRODUCTION_URL.replace(/\/$/, "") &&
+  process.env.STRESS_ALLOW_PRODUCTION !== "true"
+) {
+  throw new Error(
+    "[stress-config] Execução contra produção bloqueada. Defina STRESS_ALLOW_PRODUCTION=true explicitamente se esta execução for realmente intencional."
+  );
+}
 
 export const SUPABASE_URL = () => required("STRESS_SUPABASE_URL");
 export const SUPABASE_SERVICE_KEY = () => required("STRESS_SERVICE_KEY");
