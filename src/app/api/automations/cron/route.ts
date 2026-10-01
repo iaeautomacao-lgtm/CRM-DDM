@@ -14,7 +14,7 @@ import type { AutomationContext } from '@/lib/automations/engine'
  * only; expensive SELECT ... FOR UPDATE is avoided in favor of a
  * two-step UPDATE-by-id.
  */
-export async function GET(request: Request) {
+async function handler(request: Request) {
   const expected = process.env.AUTOMATION_CRON_SECRET
   if (!expected) {
     return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
@@ -66,3 +66,9 @@ export async function GET(request: Request) {
 
   return NextResponse.json({ processed })
 }
+
+
+// O crontab do cPanel usa POST; mantemos GET por compatibilidade com
+// pingers/health checks existentes. Ambos executam o mesmo handler.
+export const GET = handler
+export const POST = handler
