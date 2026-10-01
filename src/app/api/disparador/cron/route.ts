@@ -40,6 +40,23 @@ async function runWithConcurrency<T>(
   );
 }
 
+function interleaveGroups<T>(groups: T[][]): T[] {
+  const result: T[] = [];
+  const maxLength = groups.reduce((max, group) => Math.max(max, group.length), 0);
+
+  for (let index = 0; index < maxLength; index++) {
+    for (const group of groups) {
+      if (index < group.length) result.push(group[index]);
+    }
+  }
+
+  return result;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Consumidor principal (e único) da fila do Disparador. Phusion Passenger
 // não mantém setInterval em memória entre requisições, então o antigo
 // worker.ts (ver src/lib/disparador/worker.ts, agora desativado) nunca era
@@ -59,7 +76,28 @@ export async function POST(request: Request) {
     }
 
     const fetchSize = readPositiveIntEnv("DISPATCH_FETCH_SIZE", 100, 500);
+    // Limite GLOBAL deste processo/tick. N campanhas ativas compartilham
+    // este mesmo pool — nunca vira N * concurrency.
     const concurrency = readPositiveIntEnv("DISPATCH_CONCURRENCY", 10, 50);
+    // Mantém a request abaixo do minuto do crontab e deixa folga pro
+    // Passenger liberar recursos antes do próximo tick.
+    const tickBudgetMs = readPositiveIntEnv(
+      "DISPATCH_TICK_BUDGET_MS",
+      40_000,
+      50_000
+    );
+    // Quantos candidatos podem ser materializados por rodada somando TODAS
+    // as campanhas. O pool global continua sendo o limitador de execução.
+    const roundMaxItems = readPositiveIntEnv(
+      "DISPATCH_ROUND_MAX_ITEMS",
+      150,
+      500
+    );
+    const idlePollMs = readPositiveIntEnv(
+      "DISPATCH_IDLE_POLL_MS",
+      500,
+      2_000
+    );
     const lockTtlSeconds = readPositiveIntEnv(
       "DISPATCH_CRON_LOCK_TTL_SECONDS",
       600,
@@ -173,32 +211,44 @@ export async function POST(request: Request) {
       console.error("[Cron] Falha ao rodar retry_transient_queue_errors:", err.message || err);
     }
 
-    // 2. Processar itens da fila para campanhas em execução — mesma lógica
-    // que existia em worker.ts (setInterval, agora desativado), só que
-    // stateless: um tick por invocação do cron, sem loop em memória.
+    // 2. Drenar a fila dentro de um orçamento de tempo. Diferente da
+    // implementação anterior, não fazemos apenas UMA rodada por campanha e
+    // depois esperamos o próximo minuto. Enquanto houver budget, buscamos
+    // novos itens elegíveis e reutilizamos o mesmo pool GLOBAL.
     const { data: campanhasAtivas } = await supabaseAdmin()
       .from("campaigns")
       .select("id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora")
       .eq("status", "em_execucao");
 
-    const results: Array<{ campaign_id: string; processed: number }> = [];
+    type CampaignState = {
+      campaign: Campaign;
+      batchSize: number;
+      remainingHourlyCapacity: number;
+      enabled: boolean;
+    };
 
+    type WorkItem = {
+      item: QueueItem;
+      state: CampaignState;
+    };
+
+    type CampaignStats = {
+      campaign_id: string;
+      processed: number;
+      sent: number;
+      error: number;
+      deferred: number;
+      blocked: number;
+    };
+
+    const states: CampaignState[] = [];
+    const resultsByCampaign = new Map<string, CampaignStats>();
+
+    // Preparação feita uma vez por tick: stale recovery, janela e quota
+    // horária. A quota restante é decrementada em memória a cada envio
+    // bem-sucedido nas rodadas seguintes, evitando um COUNT por rodada.
     for (const campaign of (campanhasAtivas ?? []) as Campaign[]) {
       try {
-        // Itens presos em 'enviando' — se o processo cair entre
-        // claimItemAtomically (marca 'enviando') e a escrita final de
-        // sucesso/erro, o item ficava travado ali pra sempre: o claim só
-        // reivindica status='agendado' (nunca mais pega esse item de
-        // volta), retry_transient_queue_errors (migration 089) só cobre
-        // status='erro', e o check de "campanha completa" abaixo só
-        // conta 'agendado' e 'erro' elegível — um item 'enviando' órfão é
-        // invisível pra ele, então a campanha fecha como "encerrada" com
-        // esse item permanentemente pendurado, fora de qualquer métrica.
-        // 5 minutos é seguro: claim + envio + escrita final não passam de
-        // 1-2 minutos em condições normais. Depende de updated_at
-        // refletir o momento do claim, não do enfileiramento — ver
-        // claimItemAtomically em processQueue.ts, que agora carimba essa
-        // coluna explicitamente por não haver trigger mantendo ela.
         const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
         const { error: staleResetError } = await supabaseAdmin()
           .from("disp_message_queue")
@@ -220,13 +270,13 @@ export async function POST(request: Request) {
           campaign.janela_inicio !== "00:00" &&
           campaign.janela_fim !== "23:59";
 
-        if (hasWindow && !checkWithinWindow(campaign.janela_inicio!, campaign.janela_fim!)) {
+        if (
+          hasWindow &&
+          !checkWithinWindow(campaign.janela_inicio!, campaign.janela_fim!)
+        ) {
           continue;
         }
 
-        // limite_por_hora usa janela movel de 60 minutos. Alem de
-        // bloquear quando o limite ja foi atingido, reduzimos o fetch para
-        // a capacidade RESTANTE — evita 95/100 liberar um lote de 20.
         const limiteHora = Math.max(0, campaign.limite_por_hora ?? 0);
         let remainingHourlyCapacity = Number.POSITIVE_INFINITY;
 
@@ -240,8 +290,6 @@ export async function POST(request: Request) {
             .gte("sent_at", umaHoraAtras);
 
           if (hourlyLimitError) {
-            // Fail closed: se nao conseguimos medir o rate limit, nao
-            // liberamos um lote potencialmente acima do configurado.
             console.error(
               `[Cron] Falha ao calcular limite_por_hora da campanha ${campaign.id}:`,
               hourlyLimitError.message
@@ -258,139 +306,260 @@ export async function POST(request: Request) {
           }
         }
 
-        // batch_size continua sendo uma regra funcional da campanha.
-        // fetchSize limita quantos candidatos um tick materializa e
-        // concurrency limita quantos processQueueItem rodam ao mesmo tempo.
-        const batchSize = Math.max(1, campaign.batch_size ?? 1);
+        states.push({
+          campaign,
+          batchSize: Math.max(1, campaign.batch_size ?? 1),
+          remainingHourlyCapacity,
+          enabled: true,
+        });
+        resultsByCampaign.set(campaign.id, {
+          campaign_id: campaign.id,
+          processed: 0,
+          sent: 0,
+          error: 0,
+          deferred: 0,
+          blocked: 0,
+        });
+      } catch (campaignErr: any) {
+        console.error(
+          `[Cron] Falha ao preparar campanha ${campaign.id}:`,
+          campaignErr?.message || campaignErr
+        );
+      }
+    }
+
+    const drainDeadline = startedAt + tickBudgetMs;
+    let round = 0;
+    let roundOffset = 0;
+    let idleRounds = 0;
+    let totalProcessed = 0;
+
+    while (Date.now() < drainDeadline - 1_000) {
+      const activeStates = states.filter(
+        (state) =>
+          state.enabled &&
+          (state.remainingHourlyCapacity > 0 ||
+            !Number.isFinite(state.remainingHourlyCapacity))
+      );
+      if (activeStates.length === 0) break;
+
+      // Divide o budget de candidatos de forma justa entre as campanhas
+      // desta rodada. Ex.: roundMax=150 e 3 campanhas => até 50 de cada.
+      // Com 30 campanhas => até 5 de cada. batch_size e fetchSize continuam
+      // sendo tetos adicionais.
+      const fairShare = Math.max(
+        1,
+        Math.floor(roundMaxItems / Math.max(1, activeStates.length))
+      );
+      let remainingRoundBudget = roundMaxItems;
+      let visited = 0;
+      const groups: WorkItem[][] = [];
+
+      const orderedStates = [
+        ...activeStates.slice(roundOffset % activeStates.length),
+        ...activeStates.slice(0, roundOffset % activeStates.length),
+      ];
+
+      for (const state of orderedStates) {
+        if (remainingRoundBudget <= 0) break;
+        if (Date.now() >= drainDeadline - 1_000) break;
+
+        visited += 1;
+
+        const hourlyCap = Number.isFinite(state.remainingHourlyCapacity)
+          ? state.remainingHourlyCapacity
+          : Number.MAX_SAFE_INTEGER;
+
         const fetchLimit = Math.max(
           1,
-          Math.min(batchSize, fetchSize, remainingHourlyCapacity)
+          Math.min(
+            state.batchSize,
+            fetchSize,
+            fairShare,
+            hourlyCap,
+            remainingRoundBudget
+          )
         );
 
-        const now = new Date().toISOString();
         const { data: items, error: queryError } = await supabaseAdmin()
           .from("disp_message_queue")
           .select("*, contacts(name, phone, company)")
-          .eq("campaign_id", campaign.id)
+          .eq("campaign_id", state.campaign.id)
           .eq("status", "agendado")
-          .lte("scheduled_at", now)
+          .lte("scheduled_at", new Date().toISOString())
           .order("scheduled_at", { ascending: true })
           .limit(fetchLimit);
 
         if (queryError) {
-          console.error(`[Cron] Query error for campaign ${campaign.id}:`, queryError.message);
+          console.error(
+            `[Cron] Query error for campaign ${state.campaign.id}:`,
+            queryError.message
+          );
           continue;
         }
 
-        if (!items?.length) {
-          const { count } = await supabaseAdmin()
-            .from("disp_message_queue")
-            .select("*", { count: "exact", head: true })
-            .eq("campaign_id", campaign.id)
-            .eq("status", "agendado");
+        if (!items?.length) continue;
 
-          // Itens 'erro' com erro_permanente=false e tentativas<5 ainda
-          // são candidatos a retry_transient_queue_errors (migration 089,
-          // chamada no passo 1.5 acima) — são a MESMA condição de
-          // elegibilidade daquela RPC. Sem essa contagem aqui, uma
-          // campanha com só esses itens "sobrando" (0 agendado) encerrava
-          // como concluída, e a RPC nunca mais reagenda itens de campanha
-          // que não está 'em_execucao' — os itens ficavam presos em
-          // 'erro' pra sempre, mesmo não sendo erro permanente e ainda
-          // tendo tentativas disponíveis. Tolerante à coluna
-          // erro_permanente não existir (migration 075 não aplicada,
-          // mesmo padrão de markQueueError em processQueue.ts): erro na
-          // query não deve travar o cron, só faz essa contagem cair pra 0
-          // (comportamento anterior a este fix).
-          let pendingRetryableErrors = 0;
-          const { count: retryableCount, error: retryableError } = await supabaseAdmin()
+        const group = (items as QueueItem[]).map((item) => ({
+          item,
+          state,
+        }));
+        groups.push(group);
+        remainingRoundBudget -= group.length;
+      }
+
+      if (activeStates.length > 0) {
+        roundOffset =
+          (roundOffset + Math.max(1, visited)) % activeStates.length;
+      }
+
+      const work = interleaveGroups(groups);
+
+      if (work.length === 0) {
+        // Balanceado agenda os próximos itens 1-3s à frente. Em vez de
+        // encerrar imediatamente e desperdiçar o resto do minuto, fazemos
+        // polls curtos. O teto de 8 rounds ociosos evita manter uma request
+        // viva até o deadline quando não há mais nada próximo de ficar due.
+        idleRounds += 1;
+        if (idleRounds >= 8) break;
+
+        const waitMs = Math.min(
+          idlePollMs,
+          Math.max(0, drainDeadline - Date.now() - 1_000)
+        );
+        if (waitMs <= 0) break;
+        await sleep(waitMs);
+        continue;
+      }
+
+      idleRounds = 0;
+      round += 1;
+
+      console.log(
+        `[Cron] Round ${round}: ${work.length} candidato(s), ${activeStates.length} campanha(s), concurrency global=${concurrency}`
+      );
+
+      // ÚNICO pool de concorrência do tick. Mesmo que existam dezenas de
+      // campanhas, nunca há mais que DISPATCH_CONCURRENCY
+      // processQueueItem simultâneos neste processo.
+      await runWithConcurrency(work, concurrency, async ({ item, state }) => {
+        const stats = resultsByCampaign.get(state.campaign.id)!;
+
+        try {
+          const result = await processQueueItem(item, state.campaign);
+          stats.processed += 1;
+          totalProcessed += 1;
+
+          if (result.outcome === "sent") {
+            stats.sent += 1;
+            if (Number.isFinite(state.remainingHourlyCapacity)) {
+              state.remainingHourlyCapacity = Math.max(
+                0,
+                state.remainingHourlyCapacity - 1
+              );
+            }
+          } else if (result.outcome === "error") {
+            stats.error += 1;
+            console.error(`[Cron] Item ${item.id} error:`, result.error);
+          } else if (result.outcome === "blocked") {
+            stats.blocked += 1;
+          } else {
+            stats.deferred += 1;
+          }
+        } catch (itemErr: any) {
+          stats.processed += 1;
+          stats.error += 1;
+          totalProcessed += 1;
+          console.error(`[Cron] Exception on item ${item.id}:`, itemErr.message);
+          await markQueueError(
+            item.id,
+            itemErr.message || String(itemErr),
+            false,
+            item.campaign_id,
+            (item.tentativas || 0) + 1
+          );
+        }
+      });
+    }
+
+    // Completion sweep uma vez no final, não a cada rodada. Inclui
+    // 'enviando' para não encerrar uma campanha que ainda tenha trabalho
+    // em andamento por alguma execução anterior.
+    for (const state of states) {
+      try {
+        const { count: pendingCount, error: pendingError } = await supabaseAdmin()
+          .from("disp_message_queue")
+          .select("id", { count: "exact", head: true })
+          .eq("campaign_id", state.campaign.id)
+          .in("status", ["agendado", "enviando"]);
+
+        if (pendingError) {
+          console.error(
+            `[Cron] Falha ao contar pendências da campanha ${state.campaign.id}:`,
+            pendingError.message
+          );
+          continue;
+        }
+
+        let pendingRetryableErrors = 0;
+        const { count: retryableCount, error: retryableError } =
+          await supabaseAdmin()
             .from("disp_message_queue")
-            .select("*", { count: "exact", head: true })
-            .eq("campaign_id", campaign.id)
+            .select("id", { count: "exact", head: true })
+            .eq("campaign_id", state.campaign.id)
             .eq("status", "erro")
             .eq("erro_permanente", false)
             .lt("tentativas", 5);
-          if (retryableError) {
-            console.error(
-              `[Cron] Falha ao contar itens de erro retry-elegíveis da campanha ${campaign.id} (coluna erro_permanente pode não existir):`,
-              retryableError.message
-            );
-          } else {
-            pendingRetryableErrors = retryableCount ?? 0;
-          }
 
-          if (count === 0 && pendingRetryableErrors === 0) {
-            console.log(`[Cron] Campaign ${campaign.id} completed.`);
-            await supabaseAdmin()
-              .from("campaigns")
-              .update({ status: "encerrada" })
-              .eq("id", campaign.id);
-            // Recalcula campaign_metrics do zero a partir de
-            // disp_message_queue (migration 112) antes do callback —
-            // corrige qualquer drift acumulado por increment_campaign_metric
-            // ter perdido algum evento ao longo da campanha. Aguardado
-            // (não fire-and-forget) pra garantir que sendCampaignCallback
-            // logo abaixo já leia métricas frescas.
-            const { error: recalcError } = await supabaseAdmin().rpc(
-              "recalculate_campaign_metrics",
-              { p_campaign_id: campaign.id }
-            );
-            if (recalcError) {
-              console.error(
-                `[Cron] Falha ao recalcular métricas da campanha ${campaign.id}:`,
-                recalcError.message
-              );
-            }
-            void sendCampaignCallback(campaign.id);
-          }
-          continue;
+        if (retryableError) {
+          console.error(
+            `[Cron] Falha ao contar erros retry-elegíveis da campanha ${state.campaign.id}:`,
+            retryableError.message
+          );
+        } else {
+          pendingRetryableErrors = retryableCount ?? 0;
         }
 
-        console.log(
-          `[Cron] Processing ${items.length} item(s) for campaign ${campaign.id} (batch_size=${batchSize}, fetch_limit=${fetchLimit}, concurrency=${concurrency})`
-        );
+        if ((pendingCount ?? 0) === 0 && pendingRetryableErrors === 0) {
+          console.log(`[Cron] Campaign ${state.campaign.id} completed.`);
+          await supabaseAdmin()
+            .from("campaigns")
+            .update({ status: "encerrada" })
+            .eq("id", state.campaign.id);
 
-        // Backpressure real: o tamanho do batch/fetch nao cria o mesmo
-        // numero de Promises simultaneas. No maximo "concurrency" itens
-        // ficam em processamento ao mesmo tempo neste tick.
-        await runWithConcurrency(
-          items as QueueItem[],
-          concurrency,
-          async (item) => {
-            try {
-              const result = await processQueueItem(item, campaign);
-              if (result.outcome === "error") {
-                console.error(`[Cron] Item ${item.id} error:`, result.error);
-              }
-            } catch (itemErr: any) {
-              console.error(`[Cron] Exception on item ${item.id}:`, itemErr.message);
-              await markQueueError(
-                item.id,
-                itemErr.message || String(itemErr),
-                false,
-                item.campaign_id,
-                (item.tentativas || 0) + 1
-              );
-            }
+          const { error: recalcError } = await supabaseAdmin().rpc(
+            "recalculate_campaign_metrics",
+            { p_campaign_id: state.campaign.id }
+          );
+          if (recalcError) {
+            console.error(
+              `[Cron] Falha ao recalcular métricas da campanha ${state.campaign.id}:`,
+              recalcError.message
+            );
           }
-        );
-
-        results.push({ campaign_id: campaign.id, processed: items.length });
-
-        // Nota: batch_pause_seconds NÃO é aplicado aqui como pausa síncrona
-        // (diferente de worker.ts) — segurar a resposta HTTP do cron por
-        // até batch_pause_seconds segundos não vale a pena; o crontab já
-        // roda a cada minuto, o que naturalmente espaça os lotes.
+          void sendCampaignCallback(state.campaign.id);
+        }
       } catch (campaignErr: any) {
-        console.error(`[Cron] Error on campaign ${campaign.id}:`, campaignErr.message);
+        console.error(
+          `[Cron] Completion sweep falhou para ${state.campaign.id}:`,
+          campaignErr?.message || campaignErr
+        );
       }
     }
+
+    const results = Array.from(resultsByCampaign.values()).filter(
+      (result) => result.processed > 0
+    );
 
     return NextResponse.json({
       status: results.length > 0 ? "processed" : "idle",
       cron_run_id: cronRunId,
       fetch_size: fetchSize,
       concurrency,
+      tick_budget_ms: tickBudgetMs,
+      round_max_items: roundMaxItems,
+      rounds: round,
+      total_processed: totalProcessed,
       results,
     });
     } finally {
@@ -413,6 +582,8 @@ export async function POST(request: Request) {
         duration_ms: Date.now() - startedAt,
         fetch_size: fetchSize,
         concurrency,
+        tick_budget_ms: tickBudgetMs,
+        round_max_items: roundMaxItems,
         rss_before: memoryBefore.rss,
         rss_after: memoryAfter.rss,
         heap_used_before: memoryBefore.heapUsed,
