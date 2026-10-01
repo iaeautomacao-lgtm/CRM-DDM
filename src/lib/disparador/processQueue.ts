@@ -535,7 +535,18 @@ export async function processQueueItem(
 
   if (tipo === "ia" && disparadorOpenAiKey) {
     try {
-      const openai = new OpenAI({ apiKey: disparadorOpenAiKey });
+      const configuredAiTimeout = Number.parseInt(
+        process.env.DISPATCH_OPENAI_TIMEOUT_MS ?? "",
+        10
+      );
+      const aiTimeoutMs =
+        Number.isFinite(configuredAiTimeout) && configuredAiTimeout > 0
+          ? Math.min(configuredAiTimeout, 120_000)
+          : 30_000;
+      const openai = new OpenAI({
+        apiKey: disparadorOpenAiKey,
+        timeout: aiTimeoutMs,
+      });
       const completion = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
