@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   processQueueItem,
@@ -10,6 +11,34 @@ import {
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { writeLog } from "@/lib/logger";
+
+
+function readPositiveIntEnv(name: string, fallback: number, max: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, max);
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  if (items.length === 0) return;
+
+  let cursor = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = cursor++;
+        if (index >= items.length) return;
+        await worker(items[index]);
+      }
+    })
+  );
+}
 
 // Consumidor principal (e único) da fila do Disparador. Phusion Passenger
 // não mantém setInterval em memória entre requisições, então o antigo
@@ -28,6 +57,53 @@ export async function POST(request: Request) {
     if (supplied !== expected) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    const fetchSize = readPositiveIntEnv("DISPATCH_FETCH_SIZE", 100, 500);
+    const concurrency = readPositiveIntEnv("DISPATCH_CONCURRENCY", 10, 50);
+    const lockTtlSeconds = readPositiveIntEnv(
+      "DISPATCH_CRON_LOCK_TTL_SECONDS",
+      600,
+      3600
+    );
+    const cronRunId = randomUUID();
+    const memoryBefore = process.memoryUsage();
+    const startedAt = Date.now();
+    let lockAcquired = false;
+
+    // Lock distribuido no Postgres (migration 113). Se a migration ainda
+    // nao estiver aplicada, o cron continua operando com o claim atomico
+    // individual existente, mas registra claramente que esta sem o lock.
+    try {
+      const { data: acquired, error: lockError } = await supabaseAdmin().rpc(
+        "try_acquire_cron_lock",
+        {
+          p_name: "disparador_cron",
+          p_owner_id: cronRunId,
+          p_ttl_seconds: lockTtlSeconds,
+        }
+      );
+
+      if (lockError) {
+        console.error(
+          "[Cron] Lock distribuido indisponivel (migration 113 aplicada?):",
+          lockError.message
+        );
+      } else if (!acquired) {
+        return NextResponse.json({
+          status: "already_running",
+          cron_run_id: cronRunId,
+        });
+      } else {
+        lockAcquired = true;
+      }
+    } catch (lockErr: any) {
+      console.error(
+        "[Cron] Falha ao adquirir lock distribuido:",
+        lockErr?.message || lockErr
+      );
+    }
+
+    try {
 
     // 1. Auto-start de campanhas agendadas cujo horário chegou — direto via
     // startCampaign()/supabaseAdmin(), sem round-trip HTTP pro endpoint
@@ -148,28 +224,48 @@ export async function POST(request: Request) {
           continue;
         }
 
-        // limite_por_hora — bloqueia novos claims quando a campanha já
-        // enviou (enviado/entregue/lido) esse tanto na última hora.
-        const limiteHora = campaign.limite_por_hora ?? 0;
+        // limite_por_hora usa janela movel de 60 minutos. Alem de
+        // bloquear quando o limite ja foi atingido, reduzimos o fetch para
+        // a capacidade RESTANTE — evita 95/100 liberar um lote de 20.
+        const limiteHora = Math.max(0, campaign.limite_por_hora ?? 0);
+        let remainingHourlyCapacity = Number.POSITIVE_INFINITY;
+
         if (limiteHora > 0) {
           const umaHoraAtras = new Date(Date.now() - 3600 * 1000).toISOString();
-          const { count } = await supabaseAdmin()
+          const { count, error: hourlyLimitError } = await supabaseAdmin()
             .from("disp_message_queue")
-            .select("*", { count: "exact", head: true })
+            .select("id", { count: "exact", head: true })
             .eq("campaign_id", campaign.id)
             .in("status", ["enviado", "entregue", "lido"])
             .gte("sent_at", umaHoraAtras);
 
-          if ((count ?? 0) >= limiteHora) {
-            console.log(`[Cron] Campanha ${campaign.id} atingiu limite_por_hora (${limiteHora}) — pulando este tick.`);
+          if (hourlyLimitError) {
+            // Fail closed: se nao conseguimos medir o rate limit, nao
+            // liberamos um lote potencialmente acima do configurado.
+            console.error(
+              `[Cron] Falha ao calcular limite_por_hora da campanha ${campaign.id}:`,
+              hourlyLimitError.message
+            );
+            continue;
+          }
+
+          remainingHourlyCapacity = Math.max(0, limiteHora - (count ?? 0));
+          if (remainingHourlyCapacity === 0) {
+            console.log(
+              `[Cron] Campanha ${campaign.id} atingiu limite_por_hora (${limiteHora}) — pulando este tick.`
+            );
             continue;
           }
         }
 
-        // batch_size itens são buscados aqui (candidatos, ainda não
-        // reivindicados) — a reivindicação atômica de cada um continua
-        // dentro de processQueueItem (claimItemAtomically).
+        // batch_size continua sendo uma regra funcional da campanha.
+        // fetchSize limita quantos candidatos um tick materializa e
+        // concurrency limita quantos processQueueItem rodam ao mesmo tempo.
         const batchSize = Math.max(1, campaign.batch_size ?? 1);
+        const fetchLimit = Math.max(
+          1,
+          Math.min(batchSize, fetchSize, remainingHourlyCapacity)
+        );
 
         const now = new Date().toISOString();
         const { data: items, error: queryError } = await supabaseAdmin()
@@ -179,7 +275,7 @@ export async function POST(request: Request) {
           .eq("status", "agendado")
           .lte("scheduled_at", now)
           .order("scheduled_at", { ascending: true })
-          .limit(batchSize);
+          .limit(fetchLimit);
 
         if (queryError) {
           console.error(`[Cron] Query error for campaign ${campaign.id}:`, queryError.message);
@@ -250,14 +346,17 @@ export async function POST(request: Request) {
           continue;
         }
 
-        console.log(`[Cron] Processing ${items.length} item(s) for campaign ${campaign.id} (batch_size=${batchSize})`);
+        console.log(
+          `[Cron] Processing ${items.length} item(s) for campaign ${campaign.id} (batch_size=${batchSize}, fetch_limit=${fetchLimit}, concurrency=${concurrency})`
+        );
 
-        // Processa o lote em paralelo — cada item ainda passa pelo claim
-        // atômico individual dentro de processQueueItem, então não há
-        // risco de double-send mesmo com N chamadas simultâneas, nem com
-        // o crontab externo sobrepondo invocações.
-        await Promise.all(
-          (items as QueueItem[]).map(async (item) => {
+        // Backpressure real: o tamanho do batch/fetch nao cria o mesmo
+        // numero de Promises simultaneas. No maximo "concurrency" itens
+        // ficam em processamento ao mesmo tempo neste tick.
+        await runWithConcurrency(
+          items as QueueItem[],
+          concurrency,
+          async (item) => {
             try {
               const result = await processQueueItem(item, campaign);
               if (result.outcome === "error") {
@@ -265,10 +364,6 @@ export async function POST(request: Request) {
               }
             } catch (itemErr: any) {
               console.error(`[Cron] Exception on item ${item.id}:`, itemErr.message);
-              // permanent=false — erro de infra (ex: claimItemAtomically,
-              // "Canal não encontrado"), não uma rejeição de negócio;
-              // markQueueError também seta erro_permanente e incrementa
-              // total_erros, o que o UPDATE manual anterior não fazia.
               await markQueueError(
                 item.id,
                 itemErr.message || String(itemErr),
@@ -277,7 +372,7 @@ export async function POST(request: Request) {
                 (item.tentativas || 0) + 1
               );
             }
-          })
+          }
         );
 
         results.push({ campaign_id: campaign.id, processed: items.length });
@@ -293,8 +388,37 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       status: results.length > 0 ? "processed" : "idle",
+      cron_run_id: cronRunId,
+      fetch_size: fetchSize,
+      concurrency,
       results,
     });
+    } finally {
+      if (lockAcquired) {
+        const { error: releaseError } = await supabaseAdmin().rpc(
+          "release_cron_lock",
+          {
+            p_name: "disparador_cron",
+            p_owner_id: cronRunId,
+          }
+        );
+        if (releaseError) {
+          console.error("[Cron] Falha ao liberar lock distribuido:", releaseError.message);
+        }
+      }
+
+      const memoryAfter = process.memoryUsage();
+      console.log("[Cron] Tick finalizado", {
+        cron_run_id: cronRunId,
+        duration_ms: Date.now() - startedAt,
+        fetch_size: fetchSize,
+        concurrency,
+        rss_before: memoryBefore.rss,
+        rss_after: memoryAfter.rss,
+        heap_used_before: memoryBefore.heapUsed,
+        heap_used_after: memoryAfter.heapUsed,
+      });
+    }
   } catch (err: any) {
     console.error("[Cron] Error:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
