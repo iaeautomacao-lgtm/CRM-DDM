@@ -108,9 +108,23 @@ async function wahaFetch(
     headers.set('Authorization', `Bearer ${config.waha_api_key}`);
   }
 
+  const configuredTimeout = Number.parseInt(
+    process.env.WAHA_TIMEOUT_MS ?? "",
+    10
+  );
+  const timeoutMs =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? Math.min(configuredTimeout, 120_000)
+      : 15_000;
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
+
   return fetch(url, {
     ...options,
     headers,
+    signal,
   });
 }
 
