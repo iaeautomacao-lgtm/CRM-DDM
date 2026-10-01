@@ -46,7 +46,7 @@ BEGIN
   WHERE wacrm.cron_locks.expires_at <= now()
   RETURNING owner_id INTO v_owner;
 
-  RETURN v_owner = p_owner_id;
+  RETURN COALESCE(v_owner = p_owner_id, false);
 END;
 $$;
 
