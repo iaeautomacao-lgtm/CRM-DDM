@@ -22,7 +22,8 @@ function readPositiveIntEnv(name: string, fallback: number, max: number): number
 async function runWithConcurrency<T>(
   items: T[],
   concurrency: number,
-  worker: (item: T) => Promise<void>
+  worker: (item: T) => Promise<void>,
+  shouldStartNext: () => boolean = () => true
 ): Promise<void> {
   if (items.length === 0) return;
 
@@ -31,7 +32,7 @@ async function runWithConcurrency<T>(
 
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
-      while (true) {
+      while (shouldStartNext()) {
         const index = cursor++;
         if (index >= items.length) return;
         await worker(items[index]);
@@ -442,44 +443,52 @@ export async function POST(request: Request) {
       // ÚNICO pool de concorrência do tick. Mesmo que existam dezenas de
       // campanhas, nunca há mais que DISPATCH_CONCURRENCY
       // processQueueItem simultâneos neste processo.
-      await runWithConcurrency(work, concurrency, async ({ item, state }) => {
-        const stats = resultsByCampaign.get(state.campaign.id)!;
+      await runWithConcurrency(
+        work,
+        concurrency,
+        async ({ item, state }) => {
+          const stats = resultsByCampaign.get(state.campaign.id)!;
 
-        try {
-          const result = await processQueueItem(item, state.campaign);
-          stats.processed += 1;
-          totalProcessed += 1;
+          try {
+            const result = await processQueueItem(item, state.campaign);
+            stats.processed += 1;
+            totalProcessed += 1;
 
-          if (result.outcome === "sent") {
-            stats.sent += 1;
-            if (Number.isFinite(state.remainingHourlyCapacity)) {
-              state.remainingHourlyCapacity = Math.max(
-                0,
-                state.remainingHourlyCapacity - 1
-              );
+            if (result.outcome === "sent") {
+              stats.sent += 1;
+              if (Number.isFinite(state.remainingHourlyCapacity)) {
+                state.remainingHourlyCapacity = Math.max(
+                  0,
+                  state.remainingHourlyCapacity - 1
+                );
+              }
+            } else if (result.outcome === "error") {
+              stats.error += 1;
+              console.error(`[Cron] Item ${item.id} error:`, result.error);
+            } else if (result.outcome === "blocked") {
+              stats.blocked += 1;
+            } else {
+              stats.deferred += 1;
             }
-          } else if (result.outcome === "error") {
+          } catch (itemErr: any) {
+            stats.processed += 1;
             stats.error += 1;
-            console.error(`[Cron] Item ${item.id} error:`, result.error);
-          } else if (result.outcome === "blocked") {
-            stats.blocked += 1;
-          } else {
-            stats.deferred += 1;
+            totalProcessed += 1;
+            console.error(`[Cron] Exception on item ${item.id}:`, itemErr.message);
+            await markQueueError(
+              item.id,
+              itemErr.message || String(itemErr),
+              false,
+              item.campaign_id,
+              (item.tentativas || 0) + 1
+            );
           }
-        } catch (itemErr: any) {
-          stats.processed += 1;
-          stats.error += 1;
-          totalProcessed += 1;
-          console.error(`[Cron] Exception on item ${item.id}:`, itemErr.message);
-          await markQueueError(
-            item.id,
-            itemErr.message || String(itemErr),
-            false,
-            item.campaign_id,
-            (item.tentativas || 0) + 1
-          );
-        }
-      });
+        },
+        // Não inicia trabalho novo nos últimos 5s do budget. Um request
+        // externo que já começou pode terminar depois disso (timeouts
+        // próprios protegem WAHA/Meta/OpenAI), mas não criamos novas ondas.
+        () => Date.now() < drainDeadline - 5_000
+      );
     }
 
     // Completion sweep uma vez no final, não a cada rodada. Inclui
