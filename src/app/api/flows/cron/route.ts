@@ -59,13 +59,13 @@ export async function GET(request: Request) {
       'id, flow_id, user_id, contact_id, last_advanced_at, flows ( fallback_policy )',
     )
     .eq('status', 'active')
+    .order('last_advanced_at', { ascending: true })
+    .limit(200)
 
   if (error) {
     console.error('[flows-cron] active-run scan failed:', error.message)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  if (!runs?.length) return NextResponse.json({ swept: 0 })
-
   type Row = {
     id: string
     flow_id: string
