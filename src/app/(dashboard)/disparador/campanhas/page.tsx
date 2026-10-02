@@ -31,7 +31,8 @@ import {
   ListChecks,
   Activity,
   AlertTriangle,
-  Info
+  Info,
+  RefreshCw
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +58,7 @@ import Link from "next/link";
 import { uploadAccountMedia } from "@/lib/storage/upload-media";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { trackAction } from "@/hooks/use-telemetry";
+import { useAuth } from "@/hooks/use-auth";
 import { normalizePhone } from "@/lib/whatsapp/phone-utils";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
@@ -581,8 +583,10 @@ function isDraftEmpty(draft: CampaignDraft): boolean {
 }
 
 export default function CampanhasPage() {
+  const { canManageMembers } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [recalculatingMetrics, setRecalculatingMetrics] = useState(false);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [sessions, setSessions] = useState<WahaSession[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -977,6 +981,38 @@ export default function CampanhasPage() {
       }
     } catch (err: any) {
       toast.error(err.message);
+    }
+  };
+
+  // Recalcula campaign_metrics a partir de disp_message_queue para todas
+  // as campanhas elegíveis da conta — corrige drift acumulado por
+  // caminhos de escrita que esqueceram de chamar increment_campaign_metric
+  // (ver migration 112). Owner/admin only — gated na renderização do botão.
+  const handleRecalculateMetrics = async () => {
+    setRecalculatingMetrics(true);
+    try {
+      const res = await apiFetch("/api/disparador/campaigns/recalculate-metrics");
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Erro ao recalcular métricas");
+      }
+      const { total, success, failed } = data as {
+        total: number;
+        success: number;
+        failed: number;
+        errors: string[];
+      };
+      if (failed > 0) {
+        toast.warning(
+          `Recalculado ${success}/${total} — ${failed} falha${failed === 1 ? "" : "s"}.`
+        );
+      } else {
+        toast.success(`Métricas recalculadas: ${success}/${total} campanhas.`);
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao recalcular métricas");
+    } finally {
+      setRecalculatingMetrics(false);
     }
   };
 
@@ -2029,6 +2065,17 @@ export default function CampanhasPage() {
           </p>
         </div>
         <div className="flex gap-2.5 self-start">
+          {canManageMembers && (
+            <Button
+              variant="outline"
+              className="gap-1.5 text-xs h-9"
+              onClick={handleRecalculateMetrics}
+              disabled={recalculatingMetrics}
+            >
+              <RefreshCw className={cn("h-4 w-4", recalculatingMetrics && "animate-spin")} />
+              Recalcular métricas
+            </Button>
+          )}
           <Link href="/disparador/monitor">
             <Button variant="outline" className="gap-1.5 text-xs h-9">
               <Activity className="h-4 w-4 text-primary" /> Monitor em tempo real
