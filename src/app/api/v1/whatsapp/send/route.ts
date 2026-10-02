@@ -1,3 +1,5 @@
+import { runIdempotentSend } from '@/lib/disparador/send-ledger';
+import { resolveProviderMedia } from '@/lib/storage/provider-media';
 // ============================================================
 // POST /api/v1/whatsapp/send — Public API route to send WhatsApp messages.
 //
@@ -97,9 +99,11 @@ export async function POST(request: Request) {
     logCtx.keyId = ctx.keyId;
 
     // 2. Parse request body
+    return await runIdempotentSend(ctx.accountId, request, async () => {
     const body = await request.json();
-    const { to, phone, text, message, name, media_url, media_base64, media_type, media_caption } = body;
+    const { to, phone, text, message, name, media_url: originalMediaUrl, media_base64, media_type, media_caption } = body;
 
+    const media_url = originalMediaUrl ? await resolveProviderMedia(originalMediaUrl, ctx.accountId) : originalMediaUrl;
     const targetPhone = phone || to;
     const targetText = message || text;
     // true por default — omitido/true = comportamento atual (grava
@@ -411,7 +415,7 @@ export async function POST(request: Request) {
           content_text: mediaKind ? (mediaCaption ?? null) : targetText,
           // Only hasMediaUrl gives us a fetchable URL to store — a
           // media_base64 send has no hosted copy (see file header comment).
-          media_url: hasMediaUrl ? media_url : null,
+          media_url: hasMediaUrl ? originalMediaUrl : null,
           message_id: waMessageId,
           status: 'sent',
           waha_session: config.provider === 'waha' ? config.waha_session : null,
@@ -464,6 +468,7 @@ export async function POST(request: Request) {
       200,
       logCtx
     );
+    });
   } catch (err) {
     return toApiErrorResponse(err, logCtx);
   }

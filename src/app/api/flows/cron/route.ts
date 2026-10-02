@@ -28,7 +28,7 @@ import type { FlowRunRow, SmartDelayNodeConfig } from '@/lib/flows/types'
  * default; once per hour would also be acceptable for low-volume
  * tenants.
  */
-export async function GET(request: Request) {
+export async function POST(request: Request) {
   const expected = process.env.AUTOMATION_CRON_SECRET
   if (!expected) {
     return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
@@ -53,14 +53,7 @@ export async function GET(request: Request) {
   // Pull all currently-active runs along with their parent flow's
   // fallback_policy. Joined in one query — the small set of active
   // runs per tenant keeps this cheap.
-  const { data: runs, error } = await admin
-    .from('flow_runs')
-    .select(
-      'id, flow_id, user_id, contact_id, last_advanced_at, flows ( fallback_policy )',
-    )
-    .eq('status', 'active')
-    .order('last_advanced_at', { ascending: true })
-    .limit(200)
+  const { data: runs, error } = await admin.rpc('sweepable_flow_runs', { p_limit: 200 })
 
   if (error) {
     console.error('[flows-cron] active-run scan failed:', error.message)
@@ -76,7 +69,7 @@ export async function GET(request: Request) {
   }
 
   let swept = 0
-  for (const r of runs as Row[]) {
+  for (const r of (runs ?? []) as Row[]) {
     const flowsField = Array.isArray(r.flows) ? r.flows[0] : r.flows
     const policy = resolveFallbackPolicy(flowsField?.fallback_policy ?? null)
     const lastAdvanced = new Date(r.last_advanced_at)
@@ -165,4 +158,11 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({ swept, woken })
+}
+export async function GET(request: Request) {
+  const expected = process.env.AUTOMATION_CRON_SECRET;
+  if (!expected || request.headers.get('x-cron-secret') !== expected)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: expected ? 401 : 503 });
+  const { error } = await supabaseAdmin().from('flow_runs').select('id').limit(1);
+  return NextResponse.json({ status: error ? 'unavailable' : 'healthy' }, { status: error ? 503 : 200 });
 }

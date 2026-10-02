@@ -1,3 +1,4 @@
+import { chatMediaReference } from '@/lib/storage/chat-media';
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
@@ -961,10 +962,7 @@ async function downloadAndStoreMetaMedia(
       return null
     }
 
-    const { data } = supabaseAdmin()
-      .storage.from('chat-media')
-      .getPublicUrl(storagePath)
-    return data.publicUrl
+    return chatMediaReference(storagePath)
   } catch (err: any) {
     console.error(
       `[webhook] Failed to download/store Meta media ${mediaId}:`,

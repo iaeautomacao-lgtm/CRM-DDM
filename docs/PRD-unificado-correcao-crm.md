@@ -3,8 +3,8 @@
 | Campo      | Valor                                                                                                                            |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Data       | 01/10/2026                                                                                                                       |
-| Versão     | 1.0 — Consolidação dos três PRDs                                                                                                 |
-| Status     | Primeira entrega implementada na branch fix/crm-reliability-security; validação e implantação pendentes conforme registro abaixo |
+| Versão     | 1.1 — Revisão e correções de 02/10/2026                                                                                                 |
+| Status     | Entrega ampliada na branch fix/crm-reliability-security; revisão, homologação e implantação pendentes |
 | Escopo     | Segurança, infraestrutura, backend, frontend, login, usabilidade, filas, crons, WhatsApp/Meta, WAHA, IA e VoIP                   |
 | Origem     | Revisão estática do código e configurações; relato de duplicação WhatsApp/Meta e sobrecarga                                      |
 | Inventário | 34 registros de achados/requisitos e 1 decisão de produto; há sobreposições explicitadas abaixo                                  |
@@ -16,11 +16,11 @@ Este documento substitui os três PRDs anteriores como referência de execução
 
 Proteger dados e operações por conta, tornar os envios e campanhas confiáveis, controlar a carga das integrações, recuperar acesso sem ciclos e preservar o trabalho do usuário. A implementação cobre os serviços que forem confirmados como ativos: CRM Next.js/Supabase, disparador integrado, disparador NestJS e seu frontend, e VoIP em Go.
 
-A análise foi estática. Não foram executados build, lint, testes, migrações, mensagens reais ou alterações de produção. Faltam runtimes e dependências no ambiente analisado; não houve acesso às permissões efetivas do banco, servidores, agendadores e métricas. Comportamentos visuais e cenários de concorrência precisam ser reproduzidos em homologação. A duplicação foi relatada pelo usuário, mas a causa do incidente ainda depende de correlação com logs e IDs Meta. Os achados não constituem comprovação de exploração nem garantia de envio exatamente uma vez.
+A auditoria inicial foi estática. A entrega de 02/10/2026 executou testes, lint, typecheck e builds locais, conforme [registro atualizado](./PR-02-entrega-e-homologacao.md). Não foram aplicadas migrações em produção nem enviados WhatsApps reais; não houve acesso às permissões efetivas do banco, servidores, agendadores e métricas. Comportamentos visuais e cenários de concorrência precisam ser reproduzidos em homologação. A duplicação foi relatada pelo usuário, mas a causa do incidente ainda depende de correlação com logs e IDs Meta. Os achados não constituem comprovação de exploração nem garantia de envio exatamente uma vez.
 
 Antes de escrever código Next.js, instalar as dependências e ler os guias relevantes em `node_modules/next/dist/docs/`, conforme `AGENTS.md`. Validar as versões e contratos efetivamente implantados dos provedores e de cada serviço.
 
-Não fazem parte deste trabalho um redesenho completo, funcionalidades comerciais novas, troca do CRM ou provedor de autenticação, certificação de segurança ou declaração integral de conformidade de acessibilidade. A política de cadastro depende de DEC-01. Se um serviço estiver descontinuado, encerrar seus itens exige evidência da retirada de endpoints, credenciais e implantação.
+Não fazem parte deste trabalho um redesenho completo, funcionalidades comerciais novas, troca do CRM ou provedor de autenticação, certificação de segurança ou declaração integral de conformidade de acessibilidade. DEC-01 foi decidida pelo usuário: cadastro aberto para contas independentes. Se um serviço estiver descontinuado, encerrar seus itens exige evidência da retirada de endpoints, credenciais e implantação.
 
 ### Navegação
 
@@ -37,7 +37,7 @@ Não fazem parte deste trabalho um redesenho completo, funcionalidades comerciai
 
 ## 2. Backlog único e prioridades
 
-**P0:** conter riscos críticos de acesso ou reenvio de operações aceitas. **P1:** corrigir confiabilidade, proteção de dados, acesso e perda de trabalho na sequência. **P2:** melhorar operação, implantação, navegação e acessibilidade. DEC-01 permanece como decisão pendente.
+**P0:** conter riscos críticos de acesso ou reenvio de operações aceitas. **P1:** corrigir confiabilidade, proteção de dados, acesso e perda de trabalho na sequência. **P2:** melhorar operação, implantação, navegação e acessibilidade. DEC-01 foi decidida: manter cadastro aberto.
 
 CRM-07 passa a P0 para acompanhar a competição de consumidores detalhada em CRON-04; CRM-11 passa a P1 para acompanhar os controles de carga de CRON-09/10. A prioridade não comprova que o serviço esteja ativo em produção: confirmar essa condição na etapa 0.
 
@@ -45,41 +45,41 @@ Os responsáveis são funções sugeridas, ainda sem pessoas designadas. Os esta
 
 | ID                  | Tema                                                              | Prioridade       | Responsável sugerido                    | Status               | Tarefa/PR e evidência                             |
 | ------------------- | ----------------------------------------------------------------- | ---------------- | --------------------------------------- | -------------------- | ------------------------------------------------- |
-| [CRM-01](#crm-01)   | Webhook WAHA do CRM sem autenticação                              | P0               | Backend + Integrações                   | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-02](#crm-02)   | API VoIP sem autenticação e isolamento                            | P0               | Backend + VoIP + Infra                  | Não iniciado         | A registrar                                       |
-| [CRM-03](#crm-03)   | RPCs privilegiadas sem autorização suficiente                     | P0               | Banco de dados + Backend                | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-04](#crm-04)   | Credencial padrão e acesso global aos logs                        | P1               | Backend + Segurança                     | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-05](#crm-05)   | Anexos de conversas públicos                                      | P1               | Backend + Frontend + Banco              | Não iniciado         | A registrar                                       |
-| [CRM-06](#crm-06)   | Permissões insuficientes no NestJS                                | P1               | Backend                                 | Não iniciado         | A registrar                                       |
-| [CRM-07](#crm-07)   | Duplicação e travamento no worker NestJS                          | P0               | Backend + Banco                         | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-08](#crm-08)   | Download de áudio VoIP sem restrições                             | P1               | VoIP + Infra                            | Não iniciado         | A registrar                                       |
-| [CRM-09](#crm-09)   | Endpoints NestJS abertos sem segredo                              | P1               | Backend + Infra                         | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-10](#crm-10)   | Eventos de confirmação WAHA incompatíveis                         | P2               | Integrações + Backend                   | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-11](#crm-11)   | Limite por hora e pausa entre lotes incorretos                    | P1               | Backend + Banco                         | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-12](#crm-12)   | Compose exposto e build incompleto                                | P2               | Infra                                   | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRM-13](#crm-13)   | Credencial administrativa em localStorage                         | P2               | Frontend + Backend                      | Não iniciado         | A registrar                                       |
-| [CRM-14](#crm-14)   | CI cobre apenas o CRM principal                                   | P2               | Infra + Responsáveis pelos serviços     | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [UX-01](#ux-01)     | Ciclos de login e tratamento de 401                               | P1               | Frontend + Backend                      | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [UX-02](#ux-02)     | Falha de perfil apresentada como falta de permissão               | P1               | Frontend + Backend                      | Não iniciado         | A registrar                                       |
-| [UX-03](#ux-03)     | Recuperação de senha e erros de callback                          | P1               | Frontend + Autenticação                 | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [UX-04](#ux-04)     | Menu incompatível com perfil e acesso à própria senha             | P2               | Frontend + Produto                      | Não iniciado         | A registrar                                       |
-| [UX-05](#ux-05)     | Retorno ao destino original após login                            | P2               | Frontend + Autenticação                 | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [UX-06](#ux-06)     | Preservação de alterações no editor de fluxos                     | P1               | Frontend + Backend                      | Não iniciado         | A registrar                                       |
-| [UX-07](#ux-07)     | Navegação móvel do disparador                                     | P2               | Frontend                                | Não iniciado         | A registrar                                       |
-| [UX-08](#ux-08)     | Acessibilidade e textos de interface                              | P2               | Frontend + Produto                      | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [DEC-01](#dec-01)   | Cadastro aberto ou somente por convite                            | Decisão pendente | Responsável pelo produto + Autenticação | Decisão pendente     | A registrar                                       |
-| [CRON-01](#cron-01) | Health check aciona crons reais                                   | P1               | Backend + Infra                         | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-02](#cron-02) | Itens em envio são recolocados na fila por idade                  | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-03](#cron-03) | Meta aceita envio, mas erro local é devolvido como falha          | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-04](#cron-04) | Worker NestJS não reivindica atomicamente                         | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-05](#cron-05) | Campanha fica executável antes de terminar o enfileiramento       | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-06](#cron-06) | Finalização e callback não possuem vencedor único                 | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-07](#cron-07) | Falhas Meta assíncronas e eventos atrasados podem reabrir retries | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-08](#cron-08) | Registro de sucesso possui fallback com erros não conferidos      | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-09](#cron-09) | Lotes usam paralelismo e quota somente por campanha               | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-10](#cron-10) | Pausa inicial não limita lotes atrasados na execução real         | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
-| [CRON-11](#cron-11) | Debounce da IA global não identifica o dono da resposta           | P1               | Backend + IA + Banco                    | Não iniciado         | A registrar                                       |
-| [CRON-12](#cron-12) | Chamadas externas e retomadas carecem de controle comum de carga  | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega 01](./PR-01-correcao-crons-seguranca.md) |
+| [CRM-01](#crm-01)   | Webhook WAHA do CRM sem autenticação                              | P0               | Backend + Integrações                   | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-02](#crm-02)   | API VoIP sem autenticação e isolamento                            | P0               | Backend + VoIP + Infra                  | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [CRM-03](#crm-03)   | RPCs privilegiadas sem autorização suficiente                     | P0               | Banco de dados + Backend                | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-04](#crm-04)   | Credencial padrão e acesso global aos logs                        | P1               | Backend + Segurança                     | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-05](#crm-05)   | Anexos de conversas públicos                                      | P1               | Backend + Frontend + Banco              | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [CRM-06](#crm-06)   | Permissões insuficientes no NestJS                                | P1               | Backend                                 | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [CRM-07](#crm-07)   | Duplicação e travamento no worker NestJS                          | P0               | Backend + Banco                         | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-08](#crm-08)   | Download de áudio VoIP sem restrições                             | P1               | VoIP + Infra                            | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [CRM-09](#crm-09)   | Endpoints NestJS abertos sem segredo                              | P1               | Backend + Infra                         | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-10](#crm-10)   | Eventos de confirmação WAHA incompatíveis                         | P2               | Integrações + Backend                   | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-11](#crm-11)   | Limite por hora e pausa entre lotes incorretos                    | P1               | Backend + Banco                         | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-12](#crm-12)   | Compose exposto e build incompleto                                | P2               | Infra                                   | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRM-13](#crm-13)   | Credencial administrativa em localStorage                         | P2               | Frontend + Backend                      | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [CRM-14](#crm-14)   | CI cobre apenas o CRM principal                                   | P2               | Infra + Responsáveis pelos serviços     | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [UX-01](#ux-01)     | Ciclos de login e tratamento de 401                               | P1               | Frontend + Backend                      | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [UX-02](#ux-02)     | Falha de perfil apresentada como falta de permissão               | P1               | Frontend + Backend                      | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [UX-03](#ux-03)     | Recuperação de senha e erros de callback                          | P1               | Frontend + Autenticação                 | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [UX-04](#ux-04)     | Menu incompatível com perfil e acesso à própria senha             | P2               | Frontend + Produto                      | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [UX-05](#ux-05)     | Retorno ao destino original após login                            | P2               | Frontend + Autenticação                 | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [UX-06](#ux-06)     | Preservação de alterações no editor de fluxos                     | P1               | Frontend + Backend                      | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [UX-07](#ux-07)     | Navegação móvel do disparador                                     | P2               | Frontend                                | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [UX-08](#ux-08)     | Acessibilidade e textos de interface                              | P2               | Frontend + Produto                      | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [DEC-01](#dec-01)   | Cadastro aberto ou somente por convite                            | Decidido: aberto | Responsável pelo produto + Autenticação | Decidido: aberto     | [Decisão e implementação](./PR-02-entrega-e-homologacao.md)                                       |
+| [CRON-01](#cron-01) | Health check aciona crons reais                                   | P1               | Backend + Infra                         | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-02](#cron-02) | Itens em envio são recolocados na fila por idade                  | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-03](#cron-03) | Meta aceita envio, mas erro local é devolvido como falha          | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-04](#cron-04) | Worker NestJS não reivindica atomicamente                         | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-05](#cron-05) | Campanha fica executável antes de terminar o enfileiramento       | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-06](#cron-06) | Finalização e callback não possuem vencedor único                 | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-07](#cron-07) | Falhas Meta assíncronas e eventos atrasados podem reabrir retries | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-08](#cron-08) | Registro de sucesso possui fallback com erros não conferidos      | P0               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-09](#cron-09) | Lotes usam paralelismo e quota somente por campanha               | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-10](#cron-10) | Pausa inicial não limita lotes atrasados na execução real         | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
+| [CRON-11](#cron-11) | Debounce da IA global não identifica o dono da resposta           | P1               | Backend + IA + Banco                    | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md)|
+| [CRON-12](#cron-12) | Chamadas externas e retomadas carecem de controle comum de carga  | P1               | Backend + Banco + Integrações           | Em validação parcial | [Entrega ampliada](./PR-02-entrega-e-homologacao.md) |
 
 ### Sobreposições: implementar uma vez e validar todos os critérios
 
@@ -1196,3 +1196,8 @@ Usar os IDs nas tarefas e PRs. Atualizar o backlog único com estados como Não 
 | Data       | IDs                            | Responsável             | Tarefa/PR                    | Validação e ambiente                    | Implantação/recuperação                               | Pendências                                              |
 | ---------- | ------------------------------ | ----------------------- | ---------------------------- | --------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------- |
 | 01/10/2026 | IDs em validação parcial acima | A designar para revisão | fix/crm-reliability-security | Testes locais registrados na Entrega 01 | Migrações 118/119 e configuração WAHA antes do deploy | Critérios restantes e diagnóstico de produção pendentes |
+
+
+### Registro de 02/10/2026
+
+Cadastro aberto confirmado pelo usuário. O estado “Em validação parcial” não encerra os critérios de cada requisito: consultar a matriz de implementação e pendências da [entrega ampliada](./PR-02-entrega-e-homologacao.md). O PR aguarda revisão; não houve merge nem implantação.

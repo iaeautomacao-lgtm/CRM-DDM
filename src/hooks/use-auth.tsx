@@ -52,6 +52,7 @@ interface AccountSummary {
 }
 
 interface AuthContextValue {
+  authError: string | null;
   user: User | null;
   profile: Profile | null;
   /**
@@ -134,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // settles later. Callers that gate on `profile.*` need to know which
   // window they're in — see the type doc above.
   const [profileLoading, setProfileLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
   const instanceIdRef = useRef(`auth-provider-${Math.random().toString(16).slice(2)}`);
   const fetchProfileCallsRef = useRef(0);
   const profileUserIdRef = useRef<string | null>(null);
@@ -144,6 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = useCallback(async (userId: string) => {
     const supabase = createClient();
     fetchProfileCallsRef.current += 1;
+    const requestId = fetchProfileCallsRef.current;
+    setAuthError(null);
     logAuthFx("AUTH-PROVIDER", {
       event: "fetchProfile:start",
       instanceId: instanceIdRef.current,
@@ -162,6 +166,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (error) {
+        if (requestId === fetchProfileCallsRef.current)
+          setAuthError("Não foi possível carregar seu perfil. Tente novamente.");
         console.error("[AuthProvider] fetchProfile error:", {
           message: error.message,
           details: error.details,
@@ -171,6 +177,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      if (requestId !== fetchProfileCallsRef.current) return;
       if (data) {
         // Load the account with a plain lookup by id instead of an
         // embedded FK join. The embed (`account:accounts!inner(...)`)
@@ -216,6 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ? data.account_role
           : null;
 
+        if (requestId !== fetchProfileCallsRef.current) return;
         profileUserIdRef.current = userId;
         setProfile({
           id: data.id,
@@ -232,9 +240,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           account_role: accountRole,
         });
         setAccount(accountRow);
+      } else {
+        setProfile(null);
+        setAccount(null);
+        setAuthError("Seu perfil não está vinculado a uma conta. Contate o administrador.");
       }
     } catch (err) {
       console.error("[AuthProvider] fetchProfile threw:", err);
+      if (requestId === fetchProfileCallsRef.current)
+        setAuthError("Não foi possível carregar seu perfil. Tente novamente.");
     } finally {
       logAuthFx("AUTH-PROVIDER", {
         event: "fetchProfile:end",
@@ -242,7 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         call: fetchProfileCallsRef.current,
         cookies: summarizeSupabaseCookies(),
       });
-      setProfileLoading(false);
+      if (requestId === fetchProfileCallsRef.current) setProfileLoading(false);
     }
   }, []);
 
@@ -259,6 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const safetyTimer = setTimeout(() => {
       if (mounted) {
         console.warn("[AuthProvider] getSession() timed out after 3s");
+        setAuthError("A conexão está demorando para responder. Tente novamente.");
         setLoading(false);
         setProfileLoading(false);
       }
@@ -271,17 +286,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           error,
         } = await supabase.auth.getSession();
 
-        if (error) console.error("[AuthProvider] getSession error:", error.message);
+        if (error) throw error;
 
         const currentUser = session?.user ?? null;
         logAuthFx("AUTH-PROVIDER", {
           event: "init:getSession",
           instanceId: instanceIdRef.current,
-          error: error?.message ?? null,
+          error: null,
           ...summarizeSession(session),
           cookies: summarizeSupabaseCookies(),
         });
         if (!mounted) return;
+        setAuthError(null);
         setUser(currentUser);
 
         if (currentUser) {
@@ -298,6 +314,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch (err) {
         console.error("[AuthProvider] init threw:", err);
+        if (mounted) setAuthError("Não foi possível verificar sua sessão. Tente novamente.");
       } finally {
         if (mounted) setLoading(false);
         clearTimeout(safetyTimer);
@@ -348,6 +365,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             });
         }
       } else {
+        fetchProfileCallsRef.current += 1;
+        setAuthError(null);
         profileUserIdRef.current = null;
         setProfile(null);
         setAccount(null);
@@ -415,6 +434,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         profile,
+        authError,
         loading,
         profileLoading,
         signOut,
@@ -445,6 +465,7 @@ export function useAuth(): AuthContextValue {
     return {
       user: null,
       profile: null,
+      authError: null,
       loading: false,
       profileLoading: false,
       signOut: async () => {

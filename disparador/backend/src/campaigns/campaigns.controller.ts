@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, UseGuards, Request, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { CampaignsService } from './campaigns.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -17,6 +17,8 @@ export class CampaignsController {
 
   @Post()
   create(@Body() body: any, @Request() req: any) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || ['created_by','approved_by','approved_at','account_id','status','id'].some(key => key in body))
+      throw new BadRequestException('Campos internos não podem ser informados');
     return this.campaignsService.create(body, req.user.sub);
   }
 
@@ -27,6 +29,9 @@ export class CampaignsController {
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() body: any) {
+    const editable = new Set(['nome','tipo_campanha','descricao','session_id','session_ids','modo_envio','intervalo_min','intervalo_max','limite_por_hora','janela_inicio','janela_fim','dias_permitidos','mensagens','agendamento','batch_size','batch_pause_seconds','config']);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !editable.has(key)))
+      throw new BadRequestException('Campo de campanha não permitido');
     return this.campaignsService.update(id, body);
   }
 

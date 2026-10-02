@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { chatMediaReference } from './chat-media';
 
 /**
  * Shared media-upload helper for Supabase Storage buckets that use the
@@ -87,7 +88,7 @@ export async function uploadAccountMedia(
     error: userErr,
   } = await supabase.auth.getUser();
   if (userErr || !user) {
-    throw new Error("Not signed in.");
+    throw new Error("Entre na sua conta para enviar um anexo.");
   }
 
   // Resolve account_id so the path is account-scoped (matches the
@@ -99,7 +100,7 @@ export async function uploadAccountMedia(
     .eq("user_id", user.id)
     .maybeSingle();
   if (profileErr || !profile?.account_id) {
-    throw new Error("Could not resolve your account.");
+    throw new Error("Não foi possível carregar sua conta.");
   }
 
   const path = buildMediaPath(profile.account_id as string, file.name);
@@ -110,6 +111,7 @@ export async function uploadAccountMedia(
   });
   if (upErr) throw new Error(upErr.message);
 
+  if (bucket === 'chat-media') return { publicUrl: chatMediaReference(path), path };
   const {
     data: { publicUrl },
   } = supabase.storage.from(bucket).getPublicUrl(path);

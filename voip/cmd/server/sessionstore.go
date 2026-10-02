@@ -24,6 +24,12 @@ func newSessionStore(ctx context.Context, db *sql.DB) (*sessionStore, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err = db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS session_accounts (
+      session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+      account_id TEXT NOT NULL
+    )`); err != nil {
+		return nil, err
+	}
 	return &sessionStore{db: db}, nil
 }
 

@@ -1,3 +1,4 @@
+import { chatMediaReference } from '@/lib/storage/chat-media';
 import { NextResponse } from 'next/server'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -450,8 +451,7 @@ export async function POST(request: Request) {
                 })
 
               if (!uploadError) {
-                const { data } = db.storage.from('chat-media').getPublicUrl(storagePath)
-                mediaUrl = data.publicUrl
+                mediaUrl = chatMediaReference(storagePath)
               } else {
                 console.error('[waha/webhook] Supabase Storage upload failed:', uploadError.message)
                 mediaUrl = `/api/whatsapp/media/waha?file=${fileKey}`

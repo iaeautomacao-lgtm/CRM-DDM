@@ -1,3 +1,6 @@
+
+> Registro histórico da primeira entrega. O escopo e as instruções atuais estão em [PR-02-entrega-e-homologacao.md](./PR-02-entrega-e-homologacao.md); inclusive os logs agora usam sessão individual, e não Basic Auth.
+
 # Entrega 01 — Segurança operacional e contenção de envios duplicados
 
 Esta entrega inicia a implementação do [PRD unificado](./PRD-unificado-correcao-crm.md), com foco nos caminhos de envio duplicado, carga operacional e acesso aos endpoints relacionados. O PRD completo continua aberto: nenhum ID foi marcado como concluído sem homologação e configuração efetiva verificadas. Os itens com mudanças estão registrados como Em validação parcial.

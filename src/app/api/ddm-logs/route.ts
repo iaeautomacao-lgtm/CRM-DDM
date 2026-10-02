@@ -1,51 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-
-// Explicit support credentials required. Account-scoped session authorization
-// remains a separate backlog item; never provide default credentials.
-function isAuthorized(request: Request): boolean {
-  const header = request.headers.get("authorization");
-  if (!header || !header.startsWith("Basic ")) return false;
-
-  let decoded: string;
-  try {
-    decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
-  } catch {
-    return false;
-  }
-  const sepIdx = decoded.indexOf(":");
-  if (sepIdx === -1) return false;
-
-  const user = decoded.slice(0, sepIdx);
-  const password = decoded.slice(sepIdx + 1);
-  const expectedUser = process.env.DDM_LOGS_USER;
-  const expectedPassword = process.env.DDM_LOGS_PASSWORD;
-  if (!expectedUser || !expectedPassword) return false;
-
-  // timingSafeEqual exige buffers do mesmo tamanho — comparar o
-  // tamanho primeiro não vaza mais informação do que a própria API já
-  // vaza (tamanho de senha não é segredo), só evita o throw.
-  const userBuf = Buffer.from(user);
-  const expectedUserBuf = Buffer.from(expectedUser);
-  const passwordBuf = Buffer.from(password);
-  const expectedPasswordBuf = Buffer.from(expectedPassword);
-
-  const userMatches =
-    userBuf.length === expectedUserBuf.length && timingSafeEqual(userBuf, expectedUserBuf);
-  const passwordMatches =
-    passwordBuf.length === expectedPasswordBuf.length &&
-    timingSafeEqual(passwordBuf, expectedPasswordBuf);
-
-  return userMatches && passwordMatches;
-}
-
-function unauthorizedResponse(): NextResponse {
-  return NextResponse.json(
-    { error: "Unauthorized" },
-    { status: 401, headers: { "WWW-Authenticate": 'Basic realm="DDM Logs"' } }
-  );
-}
+import { requireRole, toErrorResponse } from "@/lib/auth/account";
 
 let _adminClient: SupabaseClient | null = null;
 function supabaseAdmin(): SupabaseClient {
@@ -99,11 +54,8 @@ const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
 
 export async function GET(request: Request) {
-  if (!isAuthorized(request)) {
-    return unauthorizedResponse();
-  }
-
   try {
+    const { accountId } = await requireRole("admin");
     const { searchParams } = new URL(request.url);
 
     const tabParam = searchParams.get("tab");
@@ -134,21 +86,21 @@ export async function GET(request: Request) {
     const db = supabaseAdmin();
 
     if (tab === "users") {
-      return await getUsersTab(db, from);
+      return await getUsersTab(db, accountId, from);
     }
     if (tab === "sessions") {
-      return await getSessionsTab(db, { from, to, cursor, limit, userId });
+      return await getSessionsTab(db, accountId, { from, to, cursor, limit, userId });
     }
     if (tab === "actions") {
-      return await getActionsTab(db, { from, cursor, limit, userId, action });
+      return await getActionsTab(db, accountId, { from, cursor, limit, userId, action });
     }
     if (tab === "tests") {
-      return await getTestsTab(db);
+      return await getTestsTab(db, accountId);
     }
     if (tab === "feedback") {
-      return await getFeedbackTab(db, { from, cursor, limit });
+      return await getFeedbackTab(db, accountId, { from, cursor, limit });
     }
-    return await getEventsTab(db, {
+    return await getEventsTab(db, accountId, {
       source,
       level,
       from,
@@ -158,7 +110,7 @@ export async function GET(request: Request) {
       userId,
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Erro ao buscar logs" }, { status: 500 });
+    return toErrorResponse(err);
   }
 }
 
@@ -172,6 +124,7 @@ export async function GET(request: Request) {
 // ------------------------------------------------------------
 async function getEventsTab(
   db: SupabaseClient,
+  accountId: string,
   params: {
     source: string | null;
     level: string | null;
@@ -187,7 +140,7 @@ async function getEventsTab(
   // 1. wacrm.system_logs — fonte nativa, todos os campos.
   let systemLogsQuery = db
     .from("system_logs")
-    .select("*")
+    .select("*").eq("account_id", accountId)
     .gte("created_at", from)
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -206,7 +159,7 @@ async function getEventsTab(
   let queueQuery = includeQueue
     ? db
         .from("disp_message_queue")
-        .select("*")
+        .select("*").eq("account_id", accountId)
         .eq("status", "erro")
         .gte("created_at", from)
         .order("created_at", { ascending: false })
@@ -222,7 +175,7 @@ async function getEventsTab(
   let flowEventsQuery = includeFlowEvents
     ? db
         .from("flow_run_events")
-        .select("*")
+        .select("*").eq("account_id", accountId)
         .in("event_type", ["error", "node_error", "run_error"])
         .gte("created_at", from)
         .order("created_at", { ascending: false })
@@ -309,8 +262,9 @@ async function getEventsTab(
 // expressável no query builder). Sem paginação por cursor — a RPC já
 // limita a 50 linhas, ordenadas por error_count desc.
 // ------------------------------------------------------------
-async function getUsersTab(db: SupabaseClient, from: string): Promise<NextResponse> {
-  const { data, error } = await db.rpc("get_user_log_ranking", {
+async function getUsersTab(db: SupabaseClient, accountId: string, from: string): Promise<NextResponse> {
+  const { data, error } = await db.rpc("get_user_log_ranking_for_account", {
+    p_account_id: accountId,
     p_from: from,
   });
   if (error) throw error;
@@ -331,6 +285,7 @@ async function getUsersTab(db: SupabaseClient, from: string): Promise<NextRespon
 // ------------------------------------------------------------
 async function getSessionsTab(
   db: SupabaseClient,
+  accountId: string,
   params: {
     from: string;
     to: string | null;
@@ -343,7 +298,7 @@ async function getSessionsTab(
 
   let query = db
     .from("user_sessions")
-    .select("*")
+    .select("*").eq("account_id", accountId)
     .gte("started_at", from)
     .order("started_at", { ascending: false })
     .limit(limit + 1);
@@ -380,6 +335,7 @@ async function getSessionsTab(
 // ------------------------------------------------------------
 async function getActionsTab(
   db: SupabaseClient,
+  accountId: string,
   params: {
     from: string;
     cursor: string | null;
@@ -390,7 +346,8 @@ async function getActionsTab(
 ): Promise<NextResponse> {
   const { from, cursor, limit, userId, action } = params;
 
-  const { data, error } = await db.rpc("get_action_logs", {
+  const { data, error } = await db.rpc("get_action_logs_for_account", {
+    p_account_id: accountId,
     p_from: from,
     p_cursor: cursor,
     p_limit: limit + 1,
@@ -419,10 +376,10 @@ async function getActionsTab(
 // tem os 7 testes individuais) — sem paginação por cursor, só as 50
 // mais recentes, igual à aba Por Usuário.
 // ------------------------------------------------------------
-async function getTestsTab(db: SupabaseClient): Promise<NextResponse> {
+async function getTestsTab(db: SupabaseClient, accountId: string): Promise<NextResponse> {
   const { data, error } = await db
     .from("system_logs")
-    .select("*")
+    .select("*").eq("account_id", accountId)
     .eq("event", "automated_health_check")
     .order("created_at", { ascending: false })
     .limit(50);
@@ -443,11 +400,13 @@ async function getTestsTab(db: SupabaseClient): Promise<NextResponse> {
 // ------------------------------------------------------------
 async function getFeedbackTab(
   db: SupabaseClient,
+  accountId: string,
   params: { from: string; cursor: string | null; limit: number }
 ): Promise<NextResponse> {
   const { from, cursor, limit } = params;
 
-  const { data, error } = await db.rpc("get_feedback_logs", {
+  const { data, error } = await db.rpc("get_feedback_logs_for_account", {
+    p_account_id: accountId,
     p_from: from,
     p_cursor: cursor,
     p_limit: limit + 1,

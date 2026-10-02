@@ -126,7 +126,7 @@ func (m *SessionManager) Create(name string) (string, error) {
 		if s, ok := m.Get(id); ok {
 			return s.id, nil
 		}
-		// If it exists in store but not loaded in manager, we proceed to register it
+		return "", err
 	}
 	device := m.container.NewDevice()
 	client := whatsmeow.NewClient(device, m.waLogger)

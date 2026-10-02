@@ -1,26 +1,10 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { LogLevel, LogSource } from "@/lib/logger";
 
-// A API (/api/ddm-logs) agora exige HTTP Basic Auth (ver route.ts) — a
-// página guarda o header "Authorization" já pronto no localStorage pra
-// sobreviver a reload sem pedir login de novo. Nunca guarda usuário/
-// senha em texto puro separadamente, só o header base64 já composto.
+// Logs use the signed-in CRM session; remove reusable legacy credentials.
 const AUTH_STORAGE_KEY = "ddm-logs-auth";
-
-function getStoredAuthHeader(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(AUTH_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function encodeBasicAuth(user: string, password: string): string {
-  return `Basic ${btoa(`${user}:${password}`)}`;
-}
 
 interface LogRow {
   id: string;
@@ -382,15 +366,10 @@ export default function DdmLogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  // Auth — ver route.ts. authHeader vem do localStorage já pronto;
-  // needsLogin começa true quando não há nada guardado, e volta a true
-  // sempre que a API responde 401 (credencial nunca setada, errada, ou
-  // trocada no servidor depois do login).
-  const [authHeader, setAuthHeader] = useState<string | null>(() => getStoredAuthHeader());
-  const [needsLogin, setNeedsLogin] = useState<boolean>(() => !getStoredAuthHeader());
-  const [loginUser, setLoginUser] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
+  const authHeader = "session";
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  useEffect(() => { window.localStorage.removeItem(AUTH_STORAGE_KEY); }, []);
 
   const displayItems = useMemo(() => groupConsecutiveLogs(logs), [logs]);
 
@@ -474,26 +453,12 @@ export default function DdmLogsPage() {
   // único lugar: limpa a credencial guardada e volta pro formulário de
   // login. Retorna null nesse caso (chamador já não tem mais o que
   // fazer com a resposta).
-  const authorizedFetch = useCallback(
-    async (url: string): Promise<Response | null> => {
-      const res = await fetch(url, {
-        headers: authHeader ? { Authorization: authHeader } : {},
-      });
-      if (res.status === 401) {
-        try {
-          window.localStorage.removeItem(AUTH_STORAGE_KEY);
-        } catch {
-          // localStorage indisponível — segue, só não persiste.
-        }
-        setAuthHeader(null);
-        setLoginError("Usuário ou senha inválidos");
-        setNeedsLogin(true);
-        return null;
-      }
-      return res;
-    },
-    [authHeader]
-  );
+  const authorizedFetch = useCallback(async (url: string): Promise<Response | null> => {
+    const res = await fetch(url, { credentials: "same-origin" });
+    if (res.status === 401) { window.location.assign("/login?next=%2Fddm-logs"); return null; }
+    if (res.status === 403) { setNeedsLogin(true); setLoginError("Acesso permitido somente a administradores da sua conta."); return null; }
+    return res;
+  }, []);
 
   // ---- Eventos: load (comportamento pré-existente) ----
   const loadFirstPage = useCallback(async () => {
@@ -809,28 +774,6 @@ export default function DdmLogsPage() {
     loadFeedbackFirstPage,
   ]);
 
-  // Otimista: só grava a credencial e deixa authHeader mudar disparar o
-  // fetch (efeitos acima). Se estiver errada, authorizedFetch pega o
-  // 401 e volta pro formulário sozinho com loginError preenchido.
-  const handleLoginSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    if (!loginUser.trim() || !loginPassword) {
-      setLoginError("Informe usuário e senha");
-      return;
-    }
-    const header = encodeBasicAuth(loginUser.trim(), loginPassword);
-    try {
-      window.localStorage.setItem(AUTH_STORAGE_KEY, header);
-    } catch {
-      // localStorage indisponível — login ainda funciona pra esta aba,
-      // só não sobrevive a reload.
-    }
-    setLoginPassword("");
-    setLoginError(null);
-    setAuthHeader(header);
-    setNeedsLogin(false);
-  };
-
   const handleUserRowClick = (row: UserRankingRow) => {
     setUserIdFilter(row.user_id);
     setTab("events");
@@ -977,56 +920,7 @@ export default function DdmLogsPage() {
     );
   };
 
-  if (needsLogin) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#141414] px-4">
-        <form
-          onSubmit={handleLoginSubmit}
-          className="w-full max-w-sm space-y-4 rounded-lg border border-white/10 bg-[#1F1F1F] p-6"
-        >
-          <div>
-            <h1 className="text-lg font-semibold text-white">DDM Logs</h1>
-            <p className="mt-1 text-xs text-zinc-500">Acesso restrito.</p>
-          </div>
-
-          {loginError && (
-            <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-              {loginError}
-            </div>
-          )}
-
-          <div className="space-y-3">
-            <label className="block text-xs text-zinc-400">
-              Usuário
-              <input
-                type="text"
-                value={loginUser}
-                onChange={(e) => setLoginUser(e.target.value)}
-                autoFocus
-                className="mt-1 w-full rounded-md border border-white/10 bg-[#262626] px-3 py-2 text-sm text-zinc-100 focus:border-[#FF5706]/60 focus:outline-none"
-              />
-            </label>
-            <label className="block text-xs text-zinc-400">
-              Senha
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="mt-1 w-full rounded-md border border-white/10 bg-[#262626] px-3 py-2 text-sm text-zinc-100 focus:border-[#FF5706]/60 focus:outline-none"
-              />
-            </label>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full rounded-md bg-[#FF5706] px-3 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          >
-            Entrar
-          </button>
-        </form>
-      </div>
-    );
-  }
+  if (needsLogin) return <main className="p-8" role="alert"><p>{loginError}</p><a href="/dashboard">Voltar ao CRM</a></main>;
 
   const activeCount =
     tab === "events"

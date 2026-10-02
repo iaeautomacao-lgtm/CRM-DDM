@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('@/lib/disparador/send-ledger', () => ({
+  runIdempotentSend: (_account: string, _request: Request, work: () => Promise<Response>) => work(),
+}));
 
 // ---------------------------------------------------------------------------
 // Tests for the `contact_id` send path (issue #296): sending an approved

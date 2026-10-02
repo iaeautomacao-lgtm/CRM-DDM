@@ -63,8 +63,8 @@ export function EditorHeader() {
   // way — SPA route changes don't fire beforeunload, so this is the
   // only chance to persist edits made in the last <2s before the
   // debounce autosave would have caught them.
-  const navigateAway = (href: string) => {
-    if (dirty) void save({ silent: true });
+  const navigateAway = async (href: string) => {
+    if (dirty && !await save({ silent: true })) return;
     router.push(href);
   };
 

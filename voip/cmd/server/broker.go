@@ -55,6 +55,7 @@ type Broker struct {
 	history []CallRecord
 
 	SnapshotFn func() []any
+	ScopeFn    func(account, session string) bool
 }
 
 func NewBroker() *Broker {
@@ -225,14 +226,17 @@ func (b *Broker) serveSSE(w http.ResponseWriter, r *http.Request, clientID strin
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	sub := b.subscribe(clientID)
 	defer b.unsubscribe(sub)
 
 	if b.SnapshotFn != nil {
 		for _, ev := range b.SnapshotFn() {
-			writeSSE(w, flusher, ev)
+			data, _ := json.Marshal(ev)
+			if filtered := b.scopedEvent(data, r.Header.Get("X-Voip-Account"), r.Header.Get("X-Voip-Role")); filtered != nil {
+				w.Write(append(append([]byte("data: "), filtered...), '\n', '\n'))
+				flusher.Flush()
+			}
 		}
 	}
 	b.broadcastCallList()
@@ -245,6 +249,10 @@ func (b *Broker) serveSSE(w http.ResponseWriter, r *http.Request, clientID strin
 		case <-r.Context().Done():
 			return
 		case data := <-sub.ch:
+			data = b.scopedEvent(data, r.Header.Get("X-Voip-Account"), r.Header.Get("X-Voip-Role"))
+			if data == nil {
+				continue
+			}
 			if _, err := w.Write(append(append([]byte("data: "), data...), '\n', '\n')); err != nil {
 				return
 			}

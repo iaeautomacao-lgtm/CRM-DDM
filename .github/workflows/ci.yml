@@ -85,3 +85,18 @@ jobs:
           cache-dependency-path: disparador/frontend/package-lock.json
       - run: npm ci
       - run: npm run build
+
+  voip:
+    name: VoIP tests and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: voip
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: voip/go.mod
+          cache-dependency-path: voip/go.sum
+      - run: go test ./...
+      - run: go build ./cmd/server

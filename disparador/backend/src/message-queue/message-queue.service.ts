@@ -27,7 +27,10 @@ export class MessageQueueService {
       .eq('id', campaignId)
       .single();
 
-    if (!campaign) return;
+    if (!campaign) throw new BadRequestException('Campanha não encontrada');
+    const { count: oldCount, error: oldError } = await this.supabase.db.from('disp_message_queue')
+      .select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId).is('message_index', null);
+    if (oldError || oldCount) throw new BadRequestException('Fila anterior à migração: reconciliar antes de preparar novamente');
 
     const mensagens: any[] = Array.isArray(campaign.mensagens) ? campaign.mensagens : [];
     if (mensagens.length === 0) {
@@ -98,7 +101,8 @@ export class MessageQueueService {
 
         const { data: queueItem, error: insertError } = await this.supabase.db
           .from('disp_message_queue')
-          .insert({
+          .upsert({
+            message_index: j,
             campaign_id: campaignId,
             contact_id: contact.id,
             session_id: sessionId,
@@ -107,12 +111,12 @@ export class MessageQueueService {
             tipo: msg.tipo || 'texto',
             media_url: msg.url || null,
             scheduled_at: scheduledAt,
-          })
+          }, { onConflict: 'campaign_id,contact_id,message_index', ignoreDuplicates: true })
           .select()
           .single();
 
         if (insertError) {
-          this.logger.error(`Erro DB (contato ${contact.id}, msg ${j}, tipo ${msg.tipo}): ${insertError.message}`);
+          throw new BadRequestException(`Falha na preparação: ${insertError.message}`);
         } else if (queueItem) {
           enqueued++;
         }

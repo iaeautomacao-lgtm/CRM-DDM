@@ -331,3 +331,8 @@ Planned endpoints, shipping one per release (tracked in
 - `GET /api/v1/conversations` (`conversations:read`)
 - Outbound event webhooks (so automations can react to inbound
   messages)
+
+
+### Idempotência de envio (alteração de contrato)
+
+POST /api/v1/whatsapp/send exige o cabeçalho Idempotency-Key, com 8 a 128 caracteres de letras, números, ponto, hífen, dois-pontos ou sublinhado. Gere uma chave por intenção e preserve-a ao repetir a mesma requisição. A chave é isolada por conta e vinculada ao caminho e corpo exatos. Repetir após conclusão retorna o resultado persistido; reutilizar com outro conteúdo retorna 409. Operação em andamento/resultado desconhecido retorna 409 com provider_outcome_unknown: true e exige reconciliação, sem novo POST com uma chave diferente. Ausência de cabeçalho retorna 400; falha da coordenação retorna 503. Aceitação remota com falha local pode retornar 202 e reconciliation_required: true: não reenviar.

@@ -16,6 +16,7 @@ import {
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
 import OpenAI from "openai";
@@ -508,6 +509,7 @@ export async function processQueueItem(
   }
 
   const provider = config.provider as "waha" | "meta";
+  if (item.media_url) item = { ...item, media_url: await resolveProviderMedia(item.media_url, config.account_id) };
   const tipo = item.tipo || "texto";
   // Contato externo com texto livre WAHA: mensagem_final guarda o
   // telefone (única forma de resolvê-lo sem contact_id), o texto real
@@ -672,6 +674,8 @@ export async function processQueueItem(
     };
   }
 
+  const { error: replayError } = await supabaseAdmin().rpc('replay_dispatch_receipts', { p_message_id: externalMessageId });
+  if (replayError) console.error('[Disparador] Confirmações antecipadas aguardam reconciliação:', replayError.message);
   return { outcome: "sent", messageId: externalMessageId };
 }
 
@@ -855,18 +859,19 @@ async function sendViaMeta(
 // campanha termina de processar. Best-effort: qualquer falha (URL
 // bloqueada, timeout, erro de rede) é só logada — nunca deve derrubar
 // o worker que a chama via `void`.
-export async function sendCampaignCallback(campaignId: string): Promise<void> {
+export async function sendCampaignCallback(campaignId: string): Promise<boolean> {
   try {
     const db = supabaseAdmin();
 
     // Buscar campanha com callback_url
     const { data: campaign } = await db
       .from("campaigns")
-      .select("id, nome, status, callback_url")
+      .select("id, nome, status, callback_url, updated_at")
       .eq("id", campaignId)
       .maybeSingle();
 
-    if (!campaign?.callback_url) return;
+    if (!campaign) return false;
+    if (!campaign.callback_url) return true;
 
     // Revalida a URL no momento do envio (não só na criação da
     // campanha) — fecha a janela entre criar a campanha e o callback
@@ -875,7 +880,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       await assertWahaUrlIsSafe(campaign.callback_url);
     } catch (err) {
       console.error(`[Callback] Campanha ${campaignId} — callback_url bloqueada:`, err);
-      return;
+      return false;
     }
 
     // Buscar métricas da campanha
@@ -905,7 +910,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
             `[Callback] Campanha ${campaignId} — falha ao paginar disp_message_queue:`,
             pageError.message
           );
-          break;
+          return false;
         }
         queueSummary.push(...(page ?? []));
         if (!page || page.length < pageSize) break;
@@ -935,7 +940,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       event: "campaign.completed",
       campaign_id: campaign.id,
       campaign_name: campaign.nome,
-      completed_at: new Date().toISOString(),
+      completed_at: campaign.updated_at,
       summary: {
         total_enfileirados: queueSummary.length,
         enviados,
@@ -962,7 +967,9 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
     console.log(
       `[Callback] Campanha ${campaignId} — callback enviado para ${campaign.callback_url}`
     );
+    return true;
   } catch (err: any) {
     console.error(`[Callback] Campanha ${campaignId} — falha ao enviar callback:`, err.message);
+    return false;
   }
 }

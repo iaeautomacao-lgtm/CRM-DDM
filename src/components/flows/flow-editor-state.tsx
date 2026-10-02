@@ -105,7 +105,7 @@ export interface FlowEditorContextValue {
   removeNode: (key: string) => void;
 
   // Actions
-  save: (opts?: { silent?: boolean }) => Promise<void>;
+  save: (opts?: { silent?: boolean }) => Promise<boolean>;
   setStatus: (status: BuilderState["status"]) => Promise<void>;
   deleteFlow: () => Promise<void>;
 
@@ -322,9 +322,15 @@ export function FlowEditorProvider({
   // API succeeds) use setStateRaw so they don't falsely re-flag the
   // form as dirty.
   const [dirty, setDirty] = useState(false);
+  const latestStateRef = useRef(state);
+  latestStateRef.current = state;
+  const revisionRef = useRef(0);
   const setState = useCallback<typeof setStateRaw>((updaterOrValue) => {
+    const next = typeof updaterOrValue === "function" ? updaterOrValue(latestStateRef.current) : updaterOrValue;
+    latestStateRef.current = next;
+    revisionRef.current += 1;
     setDirty(true);
-    setStateRaw(updaterOrValue);
+    setStateRaw(next);
   }, []);
 
   // Cross-view "look here" signal (see FlowEditorContextValue docs).
@@ -363,20 +369,9 @@ export function FlowEditorProvider({
   // before navigating.
   useEffect(() => {
     if (!dirty) return;
-    const handler = () => {
-      void apiFetch(`/api/flows/${initialFlow.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: state.name,
-          description: state.description || null,
-          trigger_type: state.trigger_type,
-          trigger_config: state.trigger_config,
-          entry_node_id: state.entry_node_id,
-          nodes: state.nodes,
-        }),
-        keepalive: true,
-      });
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
@@ -405,40 +400,71 @@ export function FlowEditorProvider({
   // `silent` skips the success toast — used by the debounce autosave so
   // it doesn't pop a toast on every 2s tick while the user keeps typing.
   const isSavingRef = useRef(false);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const save = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      if (isSavingRef.current) return;
+    async (opts?: { silent?: boolean }): Promise<boolean> => {
+      if (savePromiseRef.current) {
+        if (!await savePromiseRef.current) return false;
+        return save(opts);
+      }
+      const snapshot = latestStateRef.current;
+      const revision = revisionRef.current;
       isSavingRef.current = true;
       setSaving(true);
+      const operation = (async () => {
       try {
         const res = await apiFetch(`/api/flows/${initialFlow.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: state.name,
-            description: state.description || null,
-            trigger_type: state.trigger_type,
-            trigger_config: state.trigger_config,
-            entry_node_id: state.entry_node_id,
-            nodes: state.nodes,
+            name: snapshot.name,
+            description: snapshot.description || null,
+            trigger_type: snapshot.trigger_type,
+            trigger_config: snapshot.trigger_config,
+            entry_node_id: snapshot.entry_node_id,
+            nodes: snapshot.nodes,
           }),
         });
         if (!res.ok) {
           const json = await res.json().catch(() => ({}));
           throw new Error(json.error ?? `Falha ao salvar: ${res.status}`);
         }
-        setDirty(false);
+        if (revision === revisionRef.current) setDirty(false);
         if (!opts?.silent) toast.success("Salvo.");
+        return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Falha ao salvar";
         toast.error(msg);
+        return false;
       } finally {
         setSaving(false);
         isSavingRef.current = false;
+        savePromiseRef.current = null;
       }
+      })();
+      savePromiseRef.current = operation;
+      const success = await operation;
+      if (success && revision !== revisionRef.current) return save(opts);
+      return success;
     },
     [initialFlow.id, state],
   );
+
+  // Protect internal links, including the dashboard sidebar, before unmount.
+  useEffect(() => {
+    if (!dirty) return;
+    const protect = (event: MouseEvent) => {
+      const anchor = (event.target as Element)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!anchor || anchor.target === "_blank" || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+      const url = new URL(anchor.href);
+      if (url.origin !== window.location.origin || url.href === window.location.href) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void save({ silent: true }).then(ok => { if (ok) router.push(url.pathname + url.search + url.hash); });
+    };
+    document.addEventListener("click", protect, true);
+    return () => document.removeEventListener("click", protect, true);
+  }, [dirty, save, router]);
 
   // ---- Debounced autosave ----
   // `save`'s identity changes on every edit (it closes over `state`),
@@ -466,7 +492,7 @@ export function FlowEditorProvider({
         // latest state — the user shouldn't have to remember "save
         // then activate".
         if (next === "active") {
-          await save();
+          if (!await save()) return;
         }
         const res = await apiFetch(`/api/flows/${initialFlow.id}/activate`, {
           method: "POST",

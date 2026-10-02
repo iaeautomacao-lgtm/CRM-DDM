@@ -1,3 +1,5 @@
+import { runIdempotentSend } from '@/lib/disparador/send-ledger';
+import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import {
@@ -63,6 +65,7 @@ export async function POST(request: Request) {
       )
     }
 
+    return await runIdempotentSend(accountId, request, async () => {
     const body = await request.json()
     const {
       // `conversation_id` targets an existing thread (inbox). `contact_id`
@@ -72,7 +75,7 @@ export async function POST(request: Request) {
       contact_id,
       message_type,
       content_text,
-      media_url,
+      media_url: originalMediaUrl,
       filename,
       template_name,
       template_language,
@@ -81,6 +84,8 @@ export async function POST(request: Request) {
       reply_to_message_id,
       waha_session,
     } = body
+
+    const media_url = originalMediaUrl ? await resolveProviderMedia(originalMediaUrl, accountId) : originalMediaUrl;
 
     if ((!conversationIdInput && !contact_id) || !message_type) {
       return NextResponse.json(
@@ -521,7 +526,7 @@ export async function POST(request: Request) {
         sender_type: 'agent',
         content_type: message_type,
         content_text: content_text || null,
-        media_url: media_url || null,
+        media_url: originalMediaUrl || null,
         template_name: template_name || null,
         message_id: waMessageId,
         status: 'sent',
@@ -602,6 +607,7 @@ export async function POST(request: Request) {
       message_id: messageRecord.id,
       whatsapp_message_id: waMessageId,
     })
+    });
   } catch (error) {
     console.error('Error in WhatsApp send POST:', error)
     return NextResponse.json(

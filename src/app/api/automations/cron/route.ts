@@ -70,5 +70,11 @@ async function handler(request: Request) {
 
 // O crontab do cPanel usa POST; mantemos GET por compatibilidade com
 // pingers/health checks existentes. Ambos executam o mesmo handler.
-export const GET = handler
 export const POST = handler
+export async function GET(request: Request) {
+  const expected = process.env.AUTOMATION_CRON_SECRET;
+  if (!expected || request.headers.get('x-cron-secret') !== expected)
+    return NextResponse.json({ error: 'Unauthorized' }, { status: expected ? 401 : 503 });
+  const { error } = await supabaseAdmin().from('automation_pending_executions').select('id').limit(1);
+  return NextResponse.json({ status: error ? 'unavailable' : 'healthy' }, { status: error ? 503 : 200 });
+}

@@ -83,7 +83,7 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* E-mail */}
             <div>
-              <label
+              <label htmlFor="email"
                 className="block text-xs font-medium mb-1.5"
                 style={{ color: '#94A3B8', fontFamily: 'Inter, sans-serif' }}
               >
@@ -96,7 +96,7 @@ export default function LoginPage() {
                   style={{ color: '#64748B' }}
                 />
                 <input
-                  type="email"
+                  id="email" type="email" autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu@email.com"
@@ -131,7 +131,7 @@ export default function LoginPage() {
 
             {/* Senha */}
             <div>
-              <label
+              <label htmlFor="password"
                 className="block text-xs font-medium mb-1.5"
                 style={{ color: '#94A3B8', fontFamily: 'Inter, sans-serif' }}
               >
@@ -144,7 +144,7 @@ export default function LoginPage() {
                   style={{ color: '#64748B' }}
                 />
                 <input
-                  type="password"
+                  id="password" type="password" autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -179,7 +179,7 @@ export default function LoginPage() {
 
             {/* Erro */}
             {error && (
-              <div
+              <div role="alert"
                 className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-lg"
                 style={{
                   color: '#FCA5A5',

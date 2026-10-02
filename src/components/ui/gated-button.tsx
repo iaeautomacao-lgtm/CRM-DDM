@@ -76,7 +76,7 @@ export function GatedButton({
 }: GatedButtonProps) {
   const effectivelyDisabled = disabled || !canAct;
   const tooltip = !canAct && gateReason
-    ? `Read-only — your role can't ${gateReason}`
+    ? "Seu perfil possui acesso somente de leitura."
     : title;
 
   return (
@@ -88,6 +88,8 @@ export function GatedButton({
       // mouseover on disabled buttons.
       className={cn("inline-flex", !canAct && "cursor-not-allowed")}
       title={tooltip}
+      tabIndex={!canAct ? 0 : undefined}
+      aria-label={!canAct ? tooltip : undefined}
     >
       <Button
         disabled={effectivelyDisabled}

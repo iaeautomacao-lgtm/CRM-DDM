@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from 'node:crypto';
+import { drainCallbackOutbox } from '@/lib/disparador/callback-outbox';
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
 import {
   processQueueItem,
   checkWithinWindow,
-  sendCampaignCallback,
   type QueueItem,
   type Campaign,
 } from "@/lib/disparador/processQueue";
@@ -34,8 +35,31 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const rejection = authorize(request);
   if (rejection) return rejection;
+  const owner = randomUUID();
+  let locked = false;
+  let lostLease = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const deadline = Date.now() + 40_000;
   try {
     const db = supabaseAdmin();
+    const { data: acquired, error: lockError } = await db.rpc('try_acquire_cron_lock', {
+      p_name: 'disparador_cron', p_owner_id: owner, p_ttl_seconds: 600,
+    });
+    if (lockError) throw lockError;
+    if (!acquired) return NextResponse.json({ status: 'already_running' });
+    locked = true;
+    heartbeat = setInterval(() => {
+      void (async () => {
+        try {
+          const { data, error } = await db.rpc('renew_cron_lock', { p_name: 'disparador_cron', p_owner: owner });
+          if (error || !data) lostLease = true;
+        } catch { lostLease = true; }
+      })();
+    }, 20_000);
+    // Give durable receipts and callbacks a chance before a busy queue consumes the tick.
+    const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 100 });
+    if (receiptsError) throw receiptsError;
+    await drainCallbackOutbox(1);
     // Deployment preflight before any campaign preparation or external effects.
     const { error: readinessError } = await db.from("campaigns").select("next_batch_at").limit(1);
     if (readinessError)
@@ -44,9 +68,10 @@ export async function POST(request: Request) {
       .from("campaigns")
       .select("id, account_id")
       .eq("status", "agendado")
-      .lte("agendamento", new Date().toISOString());
+      .lte("agendamento", new Date().toISOString()).limit(20);
     if (scheduledError) throw scheduledError;
     for (const campaign of scheduled ?? []) {
+      if (lostLease || Date.now() > deadline - 5_000) break;
       if (!campaign.account_id) continue;
       const result = await startCampaign(campaign.id, campaign.account_id);
       if (!result.ok)
@@ -59,7 +84,7 @@ export async function POST(request: Request) {
       .select(
         "id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora"
       )
-      .eq("status", "em_execucao");
+      .eq("status", "em_execucao").order('next_batch_at', { ascending: true, nullsFirst: true });
     if (activeError) throw activeError;
     const results: Array<{
       campaign_id: string;
@@ -67,6 +92,7 @@ export async function POST(request: Request) {
       pending_confirmation: number;
     }> = [];
     for (const campaign of (active ?? []) as Campaign[]) {
+      if (lostLease || Date.now() > deadline - 5_000) break;
       if (
         campaign.janela_inicio &&
         campaign.janela_fim &&
@@ -103,7 +129,6 @@ export async function POST(request: Request) {
           });
           if (recalcError)
             console.error("[Cron] Falha ao recalcular métricas:", recalcError.message);
-          await sendCampaignCallback(campaign.id);
         }
         continue;
       }
@@ -113,6 +138,7 @@ export async function POST(request: Request) {
         pending_confirmation: 0,
       };
       await processWithConcurrency(items as QueueItem[], 4, async (item) => {
+        if (lostLease || Date.now() > deadline - 5_000) return;
         try {
           const outcome = await processQueueItem(item, campaign);
           if (outcome.outcome === "sent") result.sent++;
@@ -124,6 +150,7 @@ export async function POST(request: Request) {
       });
       results.push(result);
     }
+    if (!lostLease && Date.now() < deadline - 10_000) await drainCallbackOutbox();
     return NextResponse.json({
       status: results.length ? "processed" : "idle",
       results,
@@ -131,5 +158,13 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("[Cron] Falha operacional:", error);
     return NextResponse.json({ error: "Dispatch processing unavailable" }, { status: 503 });
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    if (locked) {
+      try {
+        const { error } = await supabaseAdmin().rpc('release_cron_lock', { p_name: 'disparador_cron', p_owner_id: owner });
+        if (error) console.error('[Cron] Falha ao liberar lock:', error.message);
+      } catch (error) { console.error('[Cron] Falha ao liberar lock:', error); }
+    }
   }
 }

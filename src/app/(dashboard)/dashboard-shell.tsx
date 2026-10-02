@@ -15,7 +15,7 @@ import { canAccessRoute, getDefaultRoute, isRouteGated } from "@/lib/role-utils"
 // client components can't export Next's metadata object.
 
 function DashboardShellInner({ children }: { children: React.ReactNode }) {
-  const { user, loading, profileLoading, accountRole } = useAuth();
+  const { user, loading, profileLoading, accountRole, authError, refreshProfile, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
@@ -25,13 +25,13 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
   useEffect(() => {
-    if (!loading && !user) {
-      router.replace("/login");
+    if (!loading && !user && !authError) {
+      router.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, authError]);
 
   useEffect(() => {
-    if (loading || profileLoading || !user) return;
+    if (loading || profileLoading || !user || authError) return;
 
     if (!accountRole) {
       if (pathname !== "/unauthorized") router.replace("/unauthorized");
@@ -42,7 +42,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
       const fallback = getDefaultRoute(accountRole);
       if (pathname !== fallback) router.replace(fallback);
     }
-  }, [accountRole, loading, pathname, profileLoading, router, user]);
+  }, [accountRole, loading, pathname, profileLoading, router, user, authError]);
 
   // Page views — dispara a cada troca de rota dentro do dashboard.
   // duration_ms enviado aqui é o tempo gasto na página ANTERIOR (por
@@ -94,12 +94,19 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  if (authError) return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6" role="alert">
+      <p>{authError}</p>
+      <button onClick={() => user ? void refreshProfile() : window.location.reload()} className="rounded border px-4 py-2">Tentar novamente</button>
+      <button onClick={() => void signOut()} className="rounded border px-4 py-2">Sair da conta</button>
+    </div>
+  );
   if (loading || (user && profileLoading)) {
     return (
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground" role="status">Carregando...</p>
         </div>
       </div>
     );

@@ -106,7 +106,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             </p>
           </div>
           <DropdownMenuSeparator className="bg-border" />
-          {accountRole !== "agent" && (
+          {(accountRole === "owner" || accountRole === "admin") && (
             <DropdownMenuItem
               render={
                 <Link
@@ -119,7 +119,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               Meu Perfil
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem
+          {(accountRole === "owner" || accountRole === "admin") && <DropdownMenuItem
             render={
               <Link
                 href="/settings?tab=whatsapp"
@@ -129,6 +129,9 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           >
             <SettingsIcon className="size-4" />
             Configurações
+          </DropdownMenuItem>}
+          <DropdownMenuItem render={<Link href="/seguranca" />}>
+            <User className="size-4" /> Minha senha e sessões
           </DropdownMenuItem>
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem

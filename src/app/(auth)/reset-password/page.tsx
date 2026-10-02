@@ -98,7 +98,7 @@ export default function ResetPasswordPage() {
         <CardContent>
           <form onSubmit={handleUpdatePassword} className="flex flex-col gap-4">
             {error && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
                 {error}
               </div>
             )}
@@ -109,7 +109,7 @@ export default function ResetPasswordPage() {
               </Label>
               <Input
                 id="password"
-                type="password"
+                type="password" autoComplete="new-password"
                 placeholder="******"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -127,7 +127,7 @@ export default function ResetPasswordPage() {
               </Label>
               <Input
                 id="confirmPassword"
-                type="password"
+                type="password" autoComplete="new-password"
                 placeholder="******"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

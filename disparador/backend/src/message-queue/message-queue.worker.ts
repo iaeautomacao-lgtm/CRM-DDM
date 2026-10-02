@@ -86,13 +86,9 @@ export class MessageQueueWorker implements OnModuleInit {
 
     // ✅ FIX: updates também na tabela real
     const { data: claimed, error: claimError } = await this.supabase.db
-      .from('disp_message_queue')
-      .update({ status: 'enviando', updated_at: now })
-      .eq('id', item.id)
-      .eq('status', 'agendado')
-      .select('id');
+      .rpc('claim_legacy_dispatch_item', { p_item_id: item.id });
     if (claimError) throw claimError;
-    if (!claimed?.length) return;
+    if (!claimed) return;
 
     let externalAttempted = false;
     let acceptedMessageId: string | undefined;

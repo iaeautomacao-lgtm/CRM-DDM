@@ -1,3 +1,5 @@
+import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
 import type { AiAgentTool } from "@/lib/flows/types";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
@@ -9,6 +11,11 @@ import {
   isValidE164,
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
+
+function boundedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const timeout = AbortSignal.timeout(15_000);
+  return globalThis.fetch(input, { ...init, signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
+}
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -31,7 +38,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
   try {
     // Passo 1: Localizar devedor por CPF no localiza_dev.php com timeout de 10s
     const localizaUrl = `https://www.ddmacordos.com/calc/localiza_dev.php?tk=${token}&cpf=${cpf}`;
-    const resLocaliza = await fetch(localizaUrl, { signal: AbortSignal.timeout(10000) });
+    const resLocaliza = await boundedFetch(localizaUrl, { signal: AbortSignal.timeout(10000) });
     if (!resLocaliza.ok) {
       console.warn(`[AI Agent] DDM localiza_dev failed with status: ${resLocaliza.status}`);
       return null;
@@ -56,7 +63,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
 
     // Passo 2: Buscar detalhes de cálculo com timeout de 10s
     const calcUrl = `https://ddmacordos.com/calc/?tk=${token}&idDev=${iddev}&cli=${sistema}&Desconto=40`;
-    const resCalc = await fetch(calcUrl, { signal: AbortSignal.timeout(10000) });
+    const resCalc = await boundedFetch(calcUrl, { signal: AbortSignal.timeout(10000) });
     if (!resCalc.ok) {
       console.warn(`[AI Agent] DDM calc failed with status: ${resCalc.status}`);
       return { nome, instituicao };
@@ -277,6 +284,16 @@ export async function handleAiAutoResponse(
   }
 
   // 2. Load recent conversation history (last 10 messages)
+  // One persistent winner per inbound intent, across workers and webhook retries.
+  const { data: inbound, error: inboundError } = await db.from('messages')
+    .select('id').eq('conversation_id', conversationId).eq('account_id', accountId)
+    .eq('sender_type', 'customer').order('received_at', { ascending: false }).limit(1).maybeSingle();
+  if (inboundError || !inbound) return;
+  const { data: ownsReply, error: replyClaimError } = await db.rpc('claim_ai_reply', {
+    p_account: accountId, p_conversation: conversationId, p_message: inbound.id, p_node: nodeKey ?? '',
+  });
+  if (replyClaimError || !ownsReply) return;
+  // An interrupted intent stays reserved for review; never blindly rerun its effects.
   let messagesQuery = db
     .from("messages")
     .select("id, content_text, content_type, media_url, created_at, sender_type")
@@ -433,7 +450,8 @@ export async function handleAiAutoResponse(
           fetchUrl = publicUrlData.publicUrl;
         }
 
-        const audioRes = await fetch(fetchUrl);
+        fetchUrl = await resolveProviderMedia(lastMsg.media_url, accountId);
+        const audioRes = await boundedFetch(fetchUrl);
         if (audioRes.ok) {
           const arrayBuffer = await audioRes.arrayBuffer();
           const formData = new FormData();
@@ -442,7 +460,7 @@ export async function handleAiAutoResponse(
           formData.append("model", "whisper-1");
           formData.append("language", "pt");
 
-          const whisperRes = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+          const whisperRes = await boundedFetch("https://api.openai.com/v1/audio/transcriptions", {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${whisperKey}`,
@@ -556,6 +574,10 @@ export async function handleAiAutoResponse(
       // never reach it. That's what invalid_image_url comes from, so
       // even an un-captioned image with one of those has to fall back
       // to the text placeholder instead.
+      if (msg.content_type === "image" && msg.media_url) {
+        try { msg.media_url = await resolveProviderMedia(msg.media_url, accountId); }
+        catch { msg.media_url = null; }
+      }
       const isPublicUrl =
         !!msg.media_url?.startsWith("https://") ||
         !!msg.media_url?.startsWith("/storage/") ||
@@ -1075,7 +1097,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       if (!calculoId) {
         // 1. Busca os débitos/cálculos no localiza_dev.php para pegar o CalculoID ativo
         const localizaUrl = `https://ddmacordos.com/calc/localiza_dev.php?tk=${activeKey}&cpf=${foundCpf.replace(/\D/g, "")}`;
-        const resLocaliza = await fetch(localizaUrl);
+        const resLocaliza = await boundedFetch(localizaUrl);
       if (resLocaliza.ok) {
         const localizaData = await resLocaliza.json();
         const iddev = localizaData?.[0]?.iddev;
@@ -1083,7 +1105,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         if (iddev) {
           const cli = (localizaData?.[0]?.sistema || "").trim().toLowerCase() === "cruzeirodosul" ? "cruzeiro" : "ddm";
           const calcUrl = `https://ddmacordos.com/calc/?tk=${activeKey}&idDev=${iddev}&cli=${cli}`;
-          const resCalc = await fetch(calcUrl);
+          const resCalc = await boundedFetch(calcUrl);
           
           if (resCalc.ok) {
             const rawCalc = await resCalc.json();
@@ -1107,7 +1129,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       console.log(`[AI Agent] Formalizing agreement for CPF ${foundCpf} with ${installments} requested installments (sending OpcaoAcordo=${opcaoAcordo} to integration).`);
       
       const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=${opcaoAcordo}&TipoAcordo=1&Doc=${foundCpf}${calculoId ? `&idcalc=${calculoId}` : ""}`;
-      const resFormalize = await fetch(formalizeUrl);
+      const resFormalize = await boundedFetch(formalizeUrl);
       if (resFormalize.ok) {
         const resText = await resFormalize.text();
         console.log(`[AI Agent] DDM formalize success. Response payload: ${resText}`);
@@ -1188,7 +1210,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       }
       console.log("[AI Agent] Generating voice reply with ElevenLabs...");
       const ttsUrl = `https://api.elevenlabs.io/v1/text-to-speech/${elevenlabsVoiceId}`;
-      const ttsRes = await fetch(ttsUrl, {
+      const ttsRes = await boundedFetch(ttsUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1218,8 +1240,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
           });
 
         if (!uploadError) {
-          const { data: publicUrlData } = db.storage.from("chat-media").getPublicUrl(storagePath);
-          voiceMediaUrl = publicUrlData.publicUrl;
+          voiceMediaUrl = chatMediaReference(storagePath);
           console.log("[AI Agent] Voice reply generated and uploaded:", voiceMediaUrl);
         } else {
           console.error("[AI Agent] Failed to upload ElevenLabs audio to Storage:", uploadError.message);
@@ -1278,11 +1299,12 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   // Simulação de digitação: aguarda 2 segundos adicionais antes de enviar a mensagem de fato
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
+  const voiceProviderUrl = voiceMediaUrl ? await resolveProviderMedia(voiceMediaUrl, accountId) : null;
   for (const variant of variants) {
     try {
       if (isWaha) {
         if (voiceMediaUrl) {
-          const result = await sendWahaMediaMessage(wahaConfig!, variant, voiceMediaUrl, "audio", "voice.mp3");
+          const result = await sendWahaMediaMessage(wahaConfig!, variant, voiceProviderUrl!, "audio", "voice.mp3");
           sentMessageId = result.messageId;
         } else {
           const result = await sendWahaTextMessage(wahaConfig!, variant, generatedText);
@@ -1305,7 +1327,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
             accessToken,
             to: variant,
             kind: "audio",
-            link: voiceMediaUrl,
+            link: voiceProviderUrl!,
           });
           sentMessageId = result.messageId;
         } else {
@@ -1415,7 +1437,7 @@ async function generateGeminiResponse(
           fetchUrl = publicUrlData.publicUrl;
         }
 
-        const imgRes = await fetch(fetchUrl);
+        const imgRes = await boundedFetch(fetchUrl);
         if (imgRes.ok) {
           const buffer = await imgRes.arrayBuffer();
           const base64 = Buffer.from(buffer).toString("base64");
@@ -1452,7 +1474,7 @@ async function generateGeminiResponse(
       }
     : undefined;
 
-  const response = await fetch(url, {
+  const response = await boundedFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1548,7 +1570,7 @@ async function generateOpenAiResponse(
       body.tool_choice = "auto";
     }
 
-    const response = await fetch(url, {
+    const response = await boundedFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify(body),
@@ -1625,7 +1647,7 @@ async function generateOpenAiResponse(
             resolvedHeaders[k] = interpolate(v);
           }
 
-          const httpRes = await fetch(resolvedUrl, {
+          const httpRes = await boundedFetch(resolvedUrl, {
             method: toolDef.http.method,
             headers: { "Content-Type": "application/json", ...resolvedHeaders },
             ...(resolvedBody ? { body: resolvedBody } : {}),
@@ -1678,7 +1700,7 @@ async function generateClaudeResponse(
     });
   }
 
-  const response = await fetch(url, {
+  const response = await boundedFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1722,7 +1744,7 @@ async function generateHermesResponse(
     });
   }
 
-  const response = await fetch(url, {
+  const response = await boundedFetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
