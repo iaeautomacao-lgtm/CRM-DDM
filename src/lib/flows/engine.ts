@@ -33,7 +33,7 @@ import { resolveProviderMedia } from '@/lib/storage/provider-media';
  *     INSERT raises 23505 and the runner catches & exits.
  */
 
-import { handleAiAutoResponse } from "@/lib/ai/responder";
+import { handleAiAutoResponse, AI_EMPTY_REPLY_FALLBACK_TEXT } from "@/lib/ai/responder";
 import { supabaseAdmin } from "./admin-client";
 import { writeLog } from "@/lib/logger";
 import {
@@ -1927,6 +1927,15 @@ async function runAiAgentCore(
         ? { error_reason: "ai_config_disabled_or_missing" }
         : {}),
       ...(lastReply === "" ? { warning: "ai_returned_empty_reply" } : {}),
+      // handleAiAutoResponse já tentou o modelo 2x (tentativa + retry
+      // automático, ver responder.ts passo 5) e, mesmo assim, só
+      // conseguiu enviar o texto fixo de fallback — registra o motivo
+      // real no node_completed em vez de deixar como se fosse uma
+      // resposta normal do modelo. Mutuamente exclusivo com o warning
+      // acima: aqui last_reply não é "", é o texto do fallback.
+      ...(lastReply === AI_EMPTY_REPLY_FALLBACK_TEXT
+        ? { reason: "ai_returned_empty_reply_fallback_sent" }
+        : {}),
     };
 
     return {

@@ -59,3 +59,18 @@ export function extrairCodigoMetaErro(erro: string | null | undefined): number |
   const match = erro.match(/code (\d+)/);
   return match ? parseInt(match[1], 10) : null;
 }
+
+// Classificação curta de "tipo de erro" para a coluna correspondente no
+// drilldown de métricas do Disparador (campanhas/page.tsx). Mais grosseira
+// que normalizarErroMeta — não tenta cobrir todo código Meta, só os casos
+// pedidos + um fallback "Outro" pra qualquer coisa não reconhecida.
+export function classificarTipoErro(erro: string | null | undefined): string {
+  if (!erro) return "Outro";
+
+  const codigo = extrairCodigoMetaErro(erro);
+  if (codigo === 131008) return "Variável vazia";
+  if (codigo === 131026) return "Janela 24h";
+  if (/timeout/i.test(erro)) return "Timeout";
+  if (erro.includes("Canal não encontrado")) return "Canal offline";
+  return "Outro";
+}

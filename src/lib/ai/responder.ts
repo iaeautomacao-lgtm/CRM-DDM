@@ -30,6 +30,15 @@ const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
   }
 });
 
+// Enviada quando o modelo retorna "" tanto na primeira tentativa quanto
+// no retry automático (ver handleAiAutoResponse, passo 5) — mantém a
+// conversa andando em vez de deixar o cliente sem resposta. Exportada
+// para runAiAgentCore (flows/engine.ts) comparar contra last_reply e
+// registrar "ai_returned_empty_reply_fallback_sent" no node_completed,
+// em vez de mudar o contrato de retorno de handleAiAutoResponse.
+export const AI_EMPTY_REPLY_FALLBACK_TEXT =
+  "Olá! 😊 Tudo bem? Sou o Ben, do Grupo DDM. Para verificarmos sua situação, preciso do seu CPF (apenas os números). Pode me passar?";
+
 interface DdmCpfResponse {
   instituicao?: string;
   valor_divida?: number | string;
@@ -989,39 +998,47 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   }
 
   // 5. Generate response using chosen LLM API
+  //
+  // Isolado num closure pra poder chamar duas vezes (tentativa + retry
+  // automático abaixo) sem duplicar o if/else de provider.
+  const callProvider = (): Promise<string> => {
+    if (aiConfig.api_provider === "openai") {
+      return generateOpenAiResponse(
+        activeKey,
+        systemPromptWithKb,
+        history,
+        tools,
+        onToolCall,
+        onToolResult,
+        nodeKey,
+      );
+    } else if (aiConfig.api_provider === "claude") {
+      return generateClaudeResponse(activeKey, systemPromptWithKb, history);
+    } else if (aiConfig.api_provider === "hermes") {
+      return generateHermesResponse(activeKey, systemPromptWithKb, history);
+    }
+    return generateGeminiResponse(activeKey, systemPromptWithKb, history);
+  };
+
   let generatedText = "";
   if (forceTransferHumanMsg) {
     generatedText = forceTransferHumanMsg;
   } else {
     try {
-      if (aiConfig.api_provider === "openai") {
-        generatedText = await generateOpenAiResponse(
-          activeKey,
-          systemPromptWithKb,
-          history,
-          tools,
-          onToolCall,
-          onToolResult,
-          nodeKey,
-        );
-      } else if (aiConfig.api_provider === "claude") {
-        generatedText = await generateClaudeResponse(
-          activeKey,
-          systemPromptWithKb,
-          history
-        );
-      } else if (aiConfig.api_provider === "hermes") {
-        generatedText = await generateHermesResponse(
-          activeKey,
-          systemPromptWithKb,
-          history
-        );
-      } else {
-        generatedText = await generateGeminiResponse(
-          activeKey,
-          systemPromptWithKb,
-          history
-        );
+      generatedText = (await callProvider()).trim();
+
+      // Retry automático: o modelo ocasionalmente retorna "" sem lançar
+      // exceção (hiccup do provider, resposta filtrada) — isso não cai
+      // no catch abaixo, que só trata falhas de verdade. Uma segunda
+      // tentativa com o mesmo histórico/system prompt resolve a maioria
+      // dos casos sem precisar envolver o cliente no fallback abaixo.
+      // claim_ai_reply (migration 122) já reivindicou esta invocação
+      // antes de chegarmos aqui, então o retry precisa acontecer dentro
+      // desta mesma chamada — chamar handleAiAutoResponse de novo a
+      // partir do engine.ts seria descartado silenciosamente pelo claim.
+      if (!generatedText) {
+        console.warn("[AI Agent] Resposta vazia do modelo, tentando novamente (retry automático)...");
+        generatedText = (await callProvider()).trim();
       }
     } catch (err) {
       // Rethrown (not just logged + returned) so the Flow Builder's
@@ -1037,6 +1054,23 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   }
 
   generatedText = generatedText.trim();
+
+  // Mesmo depois do retry acima, o modelo não produziu nenhum texto —
+  // em vez de deixar o cliente sem resposta (comportamento anterior:
+  // retornava aqui sem enviar nada), envia uma mensagem fixa pedindo o
+  // CPF, pelo MESMO caminho de envio/persistência de uma resposta
+  // normal logo abaixo (WAHA/Meta + insert em messages como
+  // sender_type: "bot") — não duplica lógica de envio aqui.
+  //
+  // runAiAgentCore (flows/engine.ts) detecta este caso comparando
+  // last_reply com AI_EMPTY_REPLY_FALLBACK_TEXT (exportada abaixo) para
+  // registrar o motivo certo no evento node_completed, em vez de mudar
+  // o contrato de retorno desta função — usado também pelos dois
+  // webhooks (Meta/WAHA), que ignoram o valor de retorno.
+  if (!generatedText && !forceTransferHumanMsg) {
+    generatedText = AI_EMPTY_REPLY_FALLBACK_TEXT;
+  }
+
   if (!generatedText) return;
 
   // Captured BEFORE the known-tag strip below removes it from the text

@@ -32,10 +32,20 @@ import {
   Activity,
   AlertTriangle,
   Info,
-  RefreshCw
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Select,
   SelectContent,
@@ -330,6 +340,26 @@ interface CampaignMetrics {
   total_erros: number;
   tempo_medio_resposta: number;
   updated_at: string;
+}
+
+// Chaves de métrica clicável no modal de métricas — mapeiam 1:1 para
+// os status aceitos por /api/disparador/campaigns/[id]/queue-details
+// (ver STATUS_FILTERS naquela rota). "Respostas" fica de fora: não tem
+// status correspondente em disp_message_queue (total_respostas vem de
+// correlação em reply-tracker.ts, sem gravar qual item foi "a
+// resposta"), então não há como abrir um drilldown que bata com o
+// número do card.
+type QueueDetailStatusKey = "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado";
+
+interface QueueDetailRow {
+  id: string;
+  contact_name: string | null;
+  phone: string | null;
+  status: string;
+  mensagem_final: string | null;
+  erro: string | null;
+  tipo_erro: string | null;
+  data_hora: string | null;
 }
 
 interface EstimativaDisparo {
@@ -753,6 +783,25 @@ export default function CampanhasPage() {
   // Só tem dado pra campanhas cujo modal de métricas já foi aberto
   // nesta sessão.
   const [metricsMap, setMetricsMap] = useState<Record<string, CampaignMetrics>>({});
+  // Contagem de status='agendado' na fila — não vem de campaign_metrics
+  // (não existe coluna pra isso), buscada à parte via queue-details.
+  const [agendadosCount, setAgendadosCount] = useState<number | null>(null);
+
+  // Drilldown por contato de uma métrica do modal acima (segundo modal,
+  // empilhado). `label` é só pro título ("Enviados — 668 mensagens").
+  const [queueDetailModal, setQueueDetailModal] = useState<{
+    status: QueueDetailStatusKey;
+    label: string;
+  } | null>(null);
+  const [queueDetailRows, setQueueDetailRows] = useState<QueueDetailRow[]>([]);
+  const [queueDetailTotal, setQueueDetailTotal] = useState(0);
+  const [queueDetailPage, setQueueDetailPage] = useState(1);
+  const [queueDetailSearchInput, setQueueDetailSearchInput] = useState("");
+  const [queueDetailSearch, setQueueDetailSearch] = useState("");
+  const [queueDetailLoading, setQueueDetailLoading] = useState(false);
+  const [queueDetailExporting, setQueueDetailExporting] = useState(false);
+  const QUEUE_DETAIL_PAGE_SIZE = 20;
+
   const [utmMetrics, setUtmMetrics] = useState<{
     total_cliques: number;
     total_cliques_unicos: number;
@@ -1839,6 +1888,21 @@ export default function CampanhasPage() {
       if (!silent) toast.error("Erro ao carregar métricas");
     }
 
+    // "A enviar" não vem de campaign_metrics (sem coluna pra isso) —
+    // lê o total retornado por queue-details?status=agendado, ignorando
+    // as linhas (só a contagem interessa aqui).
+    try {
+      const res = await apiFetch(
+        `/api/disparador/campaigns/${campaignId}/queue-details?status=agendado&page=1`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAgendadosCount(data.total ?? 0);
+      }
+    } catch {
+      // silencioso — mesmo padrão do UTM abaixo, não é crítico pro modal
+    }
+
     setUtmMetricsLoading(true);
     try {
       const utmRes = await fetch(
@@ -1858,6 +1922,7 @@ export default function CampanhasPage() {
   const handleMetricsClick = async (campaign: typeof campaigns[0]) => {
     setMetricsModal({ campaignId: campaign.id, nome: campaign.nome });
     setMetricsData(null);
+    setAgendadosCount(null);
     setMetricsLoading(true);
     await fetchMetrics(campaign.id, campaign.nome);
     setMetricsLoading(false);
@@ -1867,6 +1932,86 @@ export default function CampanhasPage() {
     metricsRefreshRef.current = setInterval(() => {
       fetchMetrics(campaign.id, campaign.nome, true);
     }, 15000);
+  };
+
+  // Abre o drilldown por contato de uma métrica clicada (segundo modal,
+  // empilhado sobre o de métricas). A busca de fato acontece no efeito
+  // logo abaixo, disparado pela mudança de queueDetailModal/page/search.
+  const openQueueDetail = (status: QueueDetailStatusKey, label: string) => {
+    setQueueDetailModal({ status, label });
+    setQueueDetailRows([]);
+    setQueueDetailTotal(0);
+    setQueueDetailPage(1);
+    setQueueDetailSearchInput("");
+    setQueueDetailSearch("");
+  };
+
+  // Debounce da busca do drilldown — evita uma chamada por tecla digitada.
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      setQueueDetailSearch(queueDetailSearchInput);
+      setQueueDetailPage(1);
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [queueDetailSearchInput]);
+
+  useEffect(() => {
+    if (!queueDetailModal || !metricsModal) return;
+    let cancelled = false;
+    setQueueDetailLoading(true);
+    (async () => {
+      try {
+        const qs = new URLSearchParams({
+          status: queueDetailModal.status,
+          page: String(queueDetailPage),
+        });
+        if (queueDetailSearch) qs.set("search", queueDetailSearch);
+        const res = await apiFetch(
+          `/api/disparador/campaigns/${metricsModal.campaignId}/queue-details?${qs.toString()}`
+        );
+        if (!res.ok) throw new Error("Erro ao carregar detalhamento");
+        const data = await res.json();
+        if (cancelled) return;
+        setQueueDetailRows(data.rows ?? []);
+        setQueueDetailTotal(data.total ?? 0);
+      } catch (err: any) {
+        if (!cancelled) toast.error(err.message || "Erro ao carregar detalhamento");
+      } finally {
+        if (!cancelled) setQueueDetailLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [queueDetailModal, queueDetailPage, queueDetailSearch, metricsModal]);
+
+  const handleExportQueueDetailXlsx = async () => {
+    if (!queueDetailModal || !metricsModal) return;
+    setQueueDetailExporting(true);
+    try {
+      const qs = new URLSearchParams({
+        status: queueDetailModal.status,
+        export: "xlsx",
+      });
+      if (queueDetailSearch) qs.set("search", queueDetailSearch);
+      const res = await apiFetch(
+        `/api/disparador/campaigns/${metricsModal.campaignId}/queue-details?${qs.toString()}`
+      );
+      if (!res.ok) throw new Error("Erro ao exportar XLSX");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `campanha_${queueDetailModal.status}_${metricsModal.campaignId}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      toast.error(err.message || "Erro ao exportar XLSX");
+    } finally {
+      setQueueDetailExporting(false);
+    }
   };
 
   // Gera links de rastreamento (UTM) via proxy server-side (/api/disparador/utm)
@@ -3746,6 +3891,7 @@ export default function CampanhasPage() {
                   setMetricsModal(null);
                   setMetricsData(null);
                   setUtmMetrics(null);
+                  setQueueDetailModal(null);
                 }}
               >
                 <X className="h-5 w-5" />
@@ -3768,30 +3914,50 @@ export default function CampanhasPage() {
 
               {!metricsLoading && metricsData && (
                 <div className="space-y-4">
-                  {/* Grid de KPIs */}
+                  {/* Grid de KPIs — métricas com `status` abrem o drilldown por
+                      contato (ver queueDetailModal); as demais (Total de
+                      Contatos, Respostas, Tempo Médio) ficam só informativas. */}
                   <div className="grid grid-cols-2 gap-3">
                     {[
-                      { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground" },
-                      { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500" },
-                      { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500" },
-                      { label: "Lidos", value: metricsData.total_lidos, color: "text-purple-500" },
-                      { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500" },
-                      { label: "Blacklist", value: metricsData.total_blacklist, color: "text-yellow-500" },
-                      { label: "Erros", value: metricsData.total_erros, color: "text-red-500" },
+                      { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground", status: null },
+                      { label: "A enviar", value: agendadosCount ?? 0, color: "text-cyan-500", status: "agendado" as const },
+                      { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500", status: "enviado" as const },
+                      { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500", status: "entregue" as const },
+                      { label: "Lidos", value: metricsData.total_lidos, color: "text-purple-500", status: "lido" as const },
+                      { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500", status: null },
+                      { label: "Blacklist", value: metricsData.total_blacklist, color: "text-yellow-500", status: "bloqueado" as const },
+                      { label: "Erros", value: metricsData.total_erros, color: "text-red-500", status: "erro" as const },
                       {
                         label: "Tempo Médio Resposta",
                         value: formatResponseTime(metricsData.tempo_medio_resposta),
                         color: "text-foreground",
+                        status: null,
                       },
-                    ].map(({ label, value, color }) => (
-                      <div
-                        key={label}
-                        className="rounded-lg border border-border bg-muted/20 p-3 text-center"
-                      >
-                        <p className={`text-xl font-bold ${color}`}>{value}</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
-                      </div>
-                    ))}
+                    ].map(({ label, value, color, status }) => {
+                      const content = (
+                        <>
+                          <p className={`text-xl font-bold ${color}`}>{value}</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+                        </>
+                      );
+                      return status ? (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => openQueueDetail(status, label)}
+                          className="rounded-lg border border-border bg-muted/20 p-3 text-center transition-colors hover:border-primary/50 hover:bg-muted/40 cursor-pointer"
+                        >
+                          {content}
+                        </button>
+                      ) : (
+                        <div
+                          key={label}
+                          className="rounded-lg border border-border bg-muted/20 p-3 text-center"
+                        >
+                          {content}
+                        </div>
+                      );
+                    })}
                   </div>
 
                   {/* Taxas */}
@@ -3930,6 +4096,136 @@ export default function CampanhasPage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Drilldown por contato de uma métrica clicada — empilhado sobre o
+          modal de métricas (z-index maior), ver openQueueDetail. */}
+      {queueDetailModal && metricsModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-card border border-border w-full max-w-4xl rounded-xl shadow-2xl flex flex-col max-h-[85vh]">
+            <header className="px-6 py-4 border-b border-border flex justify-between items-center gap-4">
+              <div className="min-w-0">
+                <h3 className="font-bold text-foreground truncate">
+                  {queueDetailModal.label} — {queueDetailTotal.toLocaleString("pt-BR")}{" "}
+                  mensagem{queueDetailTotal === 1 ? "" : "s"}
+                </h3>
+                <p className="text-xs text-muted-foreground truncate max-w-[400px]">
+                  {metricsModal.nome}
+                </p>
+              </div>
+              <Button size="icon" variant="ghost" onClick={() => setQueueDetailModal(null)}>
+                <X className="h-5 w-5" />
+              </Button>
+            </header>
+
+            <div className="px-6 py-3 border-b border-border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={queueDetailSearchInput}
+                  onChange={(e) => setQueueDetailSearchInput(e.target.value)}
+                  placeholder="Buscar por nome ou telefone..."
+                  className="pl-8 h-9 text-xs"
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs h-9"
+                onClick={handleExportQueueDetailXlsx}
+                disabled={queueDetailExporting || queueDetailTotal === 0}
+              >
+                {queueDetailExporting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5" />
+                )}
+                Baixar XLSX
+              </Button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {queueDetailLoading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Carregando...</span>
+                </div>
+              ) : queueDetailRows.length === 0 ? (
+                <div className="text-center py-12 text-sm text-muted-foreground">
+                  Nenhum registro encontrado.
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Contato</TableHead>
+                      <TableHead>Telefone</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Mensagem Final</TableHead>
+                      {queueDetailModal.status === "erro" && <TableHead>Tipo de Erro</TableHead>}
+                      <TableHead>Data/Hora</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {queueDetailRows.map((row) => (
+                      <TableRow key={row.id}>
+                        <TableCell>{row.contact_name || "-"}</TableCell>
+                        <TableCell>{row.phone || "-"}</TableCell>
+                        <TableCell className="capitalize">{row.status}</TableCell>
+                        <TableCell className="max-w-xs truncate" title={row.mensagem_final || ""}>
+                          {(row.mensagem_final || "").slice(0, 60)}
+                          {(row.mensagem_final?.length ?? 0) > 60 ? "…" : ""}
+                        </TableCell>
+                        {queueDetailModal.status === "erro" && (
+                          <TableCell>{row.tipo_erro || "Outro"}</TableCell>
+                        )}
+                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                          {row.data_hora
+                            ? new Date(row.data_hora).toLocaleString("pt-BR", {
+                                timeZone: "America/Sao_Paulo",
+                              })
+                            : "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+
+            {queueDetailTotal > QUEUE_DETAIL_PAGE_SIZE && (
+              <footer className="px-6 py-3 border-t border-border flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  Página {queueDetailPage} de{" "}
+                  {Math.max(1, Math.ceil(queueDetailTotal / QUEUE_DETAIL_PAGE_SIZE))}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 text-xs"
+                    disabled={queueDetailPage <= 1 || queueDetailLoading}
+                    onClick={() => setQueueDetailPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" /> Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 text-xs"
+                    disabled={
+                      queueDetailPage >= Math.ceil(queueDetailTotal / QUEUE_DETAIL_PAGE_SIZE) ||
+                      queueDetailLoading
+                    }
+                    onClick={() => setQueueDetailPage((p) => p + 1)}
+                  >
+                    Próxima <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </footer>
+            )}
           </div>
         </div>
       )}
