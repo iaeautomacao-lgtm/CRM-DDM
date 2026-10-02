@@ -24,13 +24,13 @@ export const ROLE_META: Record<
 > = {
   owner: {
     icon: Crown,
-    label: 'Administrador',
+    label: 'Proprietário',
     variant: 'owner',
     className: 'border-amber-500/40 bg-amber-500/10 text-amber-300',
   },
   admin: {
     icon: Shield,
-    label: 'Supervisor',
+    label: 'Administrador',
     variant: 'admin',
     className: 'border-primary/40 bg-primary/10 text-primary',
   },

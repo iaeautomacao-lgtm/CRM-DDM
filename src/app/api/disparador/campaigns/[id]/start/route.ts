@@ -72,7 +72,7 @@ export async function POST(
       // profile to scope the contacts query below.
       const { data: profile } = await supabase
         .from("profiles")
-        .select("account_id")
+        .select("account_id, account_role")
         .eq("user_id", user.id)
         .maybeSingle();
 
@@ -85,12 +85,29 @@ export async function POST(
       accountId = profile.account_id;
 
       // wacrm.campaigns has no account_id column (only created_by), so
-      // ownership is checked per-user rather than per-account for now.
+      // "mesma conta" é resolvido via o profile do criador. Donos/admins
+      // podem iniciar qualquer campanha da própria conta; agents/viewers
+      // só a que eles mesmos criaram.
       if (campaign.created_by !== user.id) {
-        return NextResponse.json(
-          { error: "Você não tem permissão para executar esta campanha." },
-          { status: 403 }
-        );
+        const isPrivilegedRole =
+          profile.account_role === "owner" || profile.account_role === "admin";
+
+        let sameAccountAsCreator = false;
+        if (isPrivilegedRole && campaign.created_by) {
+          const { data: creatorProfile } = await supabase
+            .from("profiles")
+            .select("account_id")
+            .eq("user_id", campaign.created_by)
+            .maybeSingle();
+          sameAccountAsCreator = creatorProfile?.account_id === profile.account_id;
+        }
+
+        if (!isPrivilegedRole || !sameAccountAsCreator) {
+          return NextResponse.json(
+            { error: "Você não tem permissão para executar esta campanha." },
+            { status: 403 }
+          );
+        }
       }
     }
 
