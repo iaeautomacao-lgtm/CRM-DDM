@@ -1,4 +1,6 @@
+import { chatMediaReference } from '@/lib/storage/chat-media';
 import { NextResponse } from 'next/server'
+import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
@@ -8,6 +10,21 @@ import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
 import { writeLog, maskPhone } from '@/lib/logger'
 
 export async function POST(request: Request) {
+  // Autenticação do webhook: o WAHA envia `x-webhook-secret` (configurado
+  // via customHeaders em startWahaSession). Sem o segredo, qualquer um
+  // poderia injetar mensagens/status falsos em qualquer sessão.
+  // Fail-closed: sem WAHA_WEBHOOK_SECRET no .env a rota fica indisponível.
+  if (!process.env.WAHA_WEBHOOK_SECRET) {
+    return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 })
+  }
+  if (
+    !matchesOperationalSecret(
+      process.env.WAHA_WEBHOOK_SECRET,
+      request.headers.get('x-webhook-secret')
+    )
+  ) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
   try {
     const body = await request.json()
     const { event, session, payload } = body
@@ -38,20 +55,48 @@ export async function POST(request: Request) {
     // ============================================================
     // 1. Message status updates
     // ============================================================
-    if (event === 'message.status') {
-      const { id: messageId, status: wahaStatus } = payload
+    if (event === 'message.status' || event === 'message.ack') {
+      // Versões do WAHA diferem no formato do ack: `ackName` ('SERVER',
+      // 'DEVICE', 'READ', 'PLAYED'), `status` com prefixo ACK_ (legado) ou
+      // `ack` numérico (1=servidor, 2=aparelho, 3=lido, 4=reproduzido).
+      // Todos são normalizados para sent/delivered/read.
+      const messageId = payload.id
+      const wahaStatus = payload.ackName ?? payload.status ?? payload.ack
       let status: 'sent' | 'delivered' | 'read' | null = null
 
-      if (wahaStatus === 'ACK_SERVER') status = 'sent'
-      else if (wahaStatus === 'ACK_DEVICE') status = 'delivered'
-      else if (wahaStatus === 'ACK_READ') status = 'read'
+      if (wahaStatus === 'SERVER' || wahaStatus === 'ACK_SERVER' || wahaStatus === 1)
+        status = 'sent'
+      else if (wahaStatus === 'DEVICE' || wahaStatus === 'ACK_DEVICE' || wahaStatus === 2)
+        status = 'delivered'
+      else if (
+        wahaStatus === 'READ' ||
+        wahaStatus === 'PLAYED' ||
+        wahaStatus === 'ACK_READ' ||
+        wahaStatus === 'ACK_PLAYED' ||
+        wahaStatus === 3 ||
+        wahaStatus === 4
+      )
+        status = 'read'
 
       if (status) {
-        // Update message status in database
+        // Atualização monotônica: só avança o status (pending → sent →
+        // delivered → read). Acks podem chegar fora de ordem ou repetidos;
+        // o filtro `.in(status anterior)` impede, por exemplo, um 'sent'
+        // atrasado de rebaixar uma mensagem já 'read'. Escopo por conta
+        // para uma sessão não alterar mensagens de outra conta.
         const { error: updateError } = await db
           .from('messages')
           .update({ status })
           .eq('message_id', messageId)
+          .eq('account_id', accountId)
+          .in(
+            'status',
+            status === 'sent'
+              ? ['pending', 'sending']
+              : status === 'delivered'
+                ? ['pending', 'sending', 'sent']
+                : ['pending', 'sending', 'sent', 'delivered']
+          )
 
         if (updateError) {
           console.error('[waha/webhook] Failed to update message status:', updateError)
@@ -69,7 +114,10 @@ export async function POST(request: Request) {
       const emoji = reaction?.text
 
       if (!originalMessageId) {
-        return NextResponse.json({ success: true, message: 'Ignored reaction without message key' })
+        return NextResponse.json({
+          success: true,
+          message: 'Ignored reaction without message key',
+        })
       }
 
       const { data: dbMsg } = await db
@@ -79,12 +127,18 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (!dbMsg) {
-        console.warn('[waha/webhook] Could not find message in database for reaction:', originalMessageId)
-        return NextResponse.json({ success: true, message: 'Message not found for reaction' })
+        console.warn(
+          '[waha/webhook] Could not find message in database for reaction:',
+          originalMessageId
+        )
+        return NextResponse.json({
+          success: true,
+          message: 'Message not found for reaction',
+        })
       }
 
       const actorType = fromMe ? 'agent' : 'customer'
-      
+
       // Delete any existing reaction from this actor on this message
       await db
         .from('message_reactions')
@@ -94,44 +148,66 @@ export async function POST(request: Request) {
 
       // Insert the new reaction if an emoji is provided
       if (emoji) {
-        const { error: insertError } = await db
-          .from('message_reactions')
-          .insert({
-            message_id: dbMsg.id,
-            conversation_id: dbMsg.conversation_id,
-            actor_type: actorType,
-            emoji: emoji,
-          })
+        const { error: insertError } = await db.from('message_reactions').insert({
+          message_id: dbMsg.id,
+          conversation_id: dbMsg.conversation_id,
+          actor_type: actorType,
+          emoji: emoji,
+        })
 
         if (insertError) {
           console.error('[waha/webhook] Failed to insert reaction:', insertError)
         }
       }
 
-      return NextResponse.json({ success: true, message: 'Reaction synchronized' })
+      return NextResponse.json({
+        success: true,
+        message: 'Reaction synchronized',
+      })
     }
 
     // ============================================================
     // 2. Incoming and outgoing message synchronization
     // ============================================================
     if (event === 'message.any') {
-      const { id: messageId, timestamp, from, to, body: textBody, fromMe, hasMedia, type, chatId } = payload
-      
+      const {
+        id: messageId,
+        timestamp,
+        from,
+        to,
+        body: textBody,
+        fromMe,
+        hasMedia,
+        type,
+        chatId,
+      } = payload
+
       let participantJid = fromMe ? to : from
 
       // Extract real phone JID if WAHA is sending a LID (WhatsApp internal ID)
       const senderAlt = payload._data?.Info?.SenderAlt
       const recipientAlt = payload._data?.Info?.RecipientAlt
 
-      if (!fromMe && senderAlt && (senderAlt.endsWith('@s.whatsapp.net') || senderAlt.endsWith('@c.us'))) {
+      if (
+        !fromMe &&
+        senderAlt &&
+        (senderAlt.endsWith('@s.whatsapp.net') || senderAlt.endsWith('@c.us'))
+      ) {
         participantJid = senderAlt
-      } else if (fromMe && recipientAlt && (recipientAlt.endsWith('@s.whatsapp.net') || recipientAlt.endsWith('@c.us'))) {
+      } else if (
+        fromMe &&
+        recipientAlt &&
+        (recipientAlt.endsWith('@s.whatsapp.net') || recipientAlt.endsWith('@c.us'))
+      ) {
         participantJid = recipientAlt
       }
 
       if (!participantJid) {
         console.warn('[waha/webhook] Ignored message due to missing participant JID')
-        return NextResponse.json({ success: true, message: 'Ignored message without participant JID' })
+        return NextResponse.json({
+          success: true,
+          message: 'Ignored message without participant JID',
+        })
       }
 
       // Determine the contact phone number
@@ -144,15 +220,18 @@ export async function POST(request: Request) {
 
       // Ignore status broadcast updates (WhatsApp Stories), group messages, and channels/newsletters
       if (
-        from === 'status@broadcast' || 
+        from === 'status@broadcast' ||
         to === 'status@broadcast' ||
         (from && (from.endsWith('@g.us') || from.endsWith('@newsletter'))) ||
         (to && (to.endsWith('@g.us') || to.endsWith('@newsletter'))) ||
         (chatId && (chatId.endsWith('@g.us') || chatId.endsWith('@newsletter')))
       ) {
-        return NextResponse.json({ success: true, message: 'Ignored group, status broadcast or newsletter' })
+        return NextResponse.json({
+          success: true,
+          message: 'Ignored group, status broadcast or newsletter',
+        })
       }
-      
+
       // Check if message already exists in DB to prevent duplicates
       const { data: existingMsg } = await db
         .from('messages')
@@ -161,7 +240,10 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (existingMsg) {
-        return NextResponse.json({ success: true, message: 'Message already synchronized' })
+        return NextResponse.json({
+          success: true,
+          message: 'Message already synchronized',
+        })
       }
 
       // 1. Find or create contact
@@ -170,14 +252,14 @@ export async function POST(request: Request) {
       let contactName = rawPhone
 
       if (!fromMe) {
-        contactName = 
-          payload.sender?.name || 
-          payload._data?.Info?.PushName || 
-          payload.pushName || 
+        contactName =
+          payload.sender?.name ||
+          payload._data?.Info?.PushName ||
+          payload.pushName ||
           payload.pushname ||
-          payload._data?.notifyName || 
-          payload._data?.pushname || 
-          payload.sender?.pushName || 
+          payload._data?.notifyName ||
+          payload._data?.pushname ||
+          payload.sender?.pushName ||
           rawPhone
       }
 
@@ -205,10 +287,7 @@ export async function POST(request: Request) {
         const isFallbackName = contact.name === rawPhone || contact.name === phone
         if (contactName !== rawPhone && isFallbackName) {
           try {
-            await db
-              .from('contacts')
-              .update({ name: contactName })
-              .eq('id', contactId)
+            await db.from('contacts').update({ name: contactName }).eq('id', contactId)
           } catch (e) {
             console.error('[waha/webhook] Failed to update contact name:', e)
           }
@@ -218,17 +297,17 @@ export async function POST(request: Request) {
         if (!avatarUrl) {
           try {
             const { getWahaProfilePicture } = await import('@/lib/whatsapp/waha-api')
-            avatarUrl = await getWahaProfilePicture({
-              waha_url: config.waha_url,
-              waha_session: config.waha_session,
-              waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
-            }, phone)
+            avatarUrl = await getWahaProfilePicture(
+              {
+                waha_url: config.waha_url,
+                waha_session: config.waha_session,
+                waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
+              },
+              phone
+            )
 
             if (avatarUrl) {
-              await db
-                .from('contacts')
-                .update({ avatar_url: avatarUrl })
-                .eq('id', contactId)
+              await db.from('contacts').update({ avatar_url: avatarUrl }).eq('id', contactId)
             }
           } catch (e) {
             console.error('[waha/webhook] Failed to update avatar for existing contact:', e)
@@ -238,11 +317,14 @@ export async function POST(request: Request) {
         // Fetch avatar url from WAHA
         try {
           const { getWahaProfilePicture } = await import('@/lib/whatsapp/waha-api')
-          avatarUrl = await getWahaProfilePicture({
-            waha_url: config.waha_url,
-            waha_session: config.waha_session,
-            waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
-          }, phone)
+          avatarUrl = await getWahaProfilePicture(
+            {
+              waha_url: config.waha_url,
+              waha_session: config.waha_session,
+              waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
+            },
+            phone
+          )
         } catch (e) {
           console.error('[waha/webhook] Failed to fetch avatar for new contact:', e)
         }
@@ -268,7 +350,10 @@ export async function POST(request: Request) {
             source: 'webhook_waha',
             event: 'contact_creation_failed',
             message: 'Falha ao criar contato a partir de mensagem inbound WAHA',
-            payload: { phone: maskPhone(phone), erro: contactCreateError.message },
+            payload: {
+              phone: maskPhone(phone),
+              erro: contactCreateError.message,
+            },
           })
           return NextResponse.json({ error: 'Failed to synchronize contact' }, { status: 500 })
         }
@@ -359,12 +444,16 @@ export async function POST(request: Request) {
             const fileRes = await fetch(fileUrl, { headers })
             if (fileRes.ok) {
               const buffer = await fileRes.arrayBuffer()
-              const contentType = fileRes.headers.get('Content-Type') || mediaInfo.mimetype || mediaInfo.mime_type || 'application/octet-stream'
-              
+              const contentType =
+                fileRes.headers.get('Content-Type') ||
+                mediaInfo.mimetype ||
+                mediaInfo.mime_type ||
+                'application/octet-stream'
+
               // Build file name and upload to account-scoped path in chat-media bucket
               const filename = fileKey.split('/').pop() || 'file'
               const storagePath = `account-${accountId}/${Date.now()}-${filename}`
-              
+
               const { error: uploadError } = await db.storage
                 .from('chat-media')
                 .upload(storagePath, new Uint8Array(buffer), {
@@ -374,14 +463,16 @@ export async function POST(request: Request) {
                 })
 
               if (!uploadError) {
-                const { data } = db.storage.from('chat-media').getPublicUrl(storagePath)
-                mediaUrl = data.publicUrl
+                mediaUrl = chatMediaReference(storagePath)
               } else {
                 console.error('[waha/webhook] Supabase Storage upload failed:', uploadError.message)
                 mediaUrl = `/api/whatsapp/media/waha?file=${fileKey}`
               }
             } else {
-              console.error('[waha/webhook] Failed to download media from WAHA, status:', fileRes.status)
+              console.error(
+                '[waha/webhook] Failed to download media from WAHA, status:',
+                fileRes.status
+              )
               mediaUrl = `/api/whatsapp/media/waha?file=${fileKey}`
             }
           } catch (err) {
@@ -394,21 +485,37 @@ export async function POST(request: Request) {
       // Map WAHA message types to CRM content_type.
       // Use mimetype-based classification if media details are available,
       // fallback to type-based mapping.
-      const hasPollStructure = payload._data?.Message?.pollCreationMessage || 
-                               payload._data?.Message?.pollCreationMessageV2 || 
-                               payload._data?.Message?.pollCreationMessageV3 || 
-                               payload.poll
+      const hasPollStructure =
+        payload._data?.Message?.pollCreationMessage ||
+        payload._data?.Message?.pollCreationMessageV2 ||
+        payload._data?.Message?.pollCreationMessageV3 ||
+        payload.poll
 
-      const hasVcardStructure = payload._data?.Message?.contactMessage || 
-                                payload._data?.Message?.contactsArrayMessage || 
-                                payload.vcard || 
-                                (payload.vCards && payload.vCards.length > 0) ||
-                                payload._data?.Info?.MediaType === 'vcard'
+      const hasVcardStructure =
+        payload._data?.Message?.contactMessage ||
+        payload._data?.Message?.contactsArrayMessage ||
+        payload.vcard ||
+        (payload.vCards && payload.vCards.length > 0) ||
+        payload._data?.Info?.MediaType === 'vcard'
 
       const rawType = type || payload._data?.Info?.Type || ''
-      let contentType: 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'poll' | 'vcard' | 'revoked' = 'text'
+      let contentType:
+        | 'text'
+        | 'image'
+        | 'video'
+        | 'audio'
+        | 'document'
+        | 'sticker'
+        | 'poll'
+        | 'vcard'
+        | 'revoked' = 'text'
 
-      if (hasPollStructure || rawType === 'poll' || rawType === 'poll_creation' || rawType === 'pollCreation') {
+      if (
+        hasPollStructure ||
+        rawType === 'poll' ||
+        rawType === 'poll_creation' ||
+        rawType === 'pollCreation'
+      ) {
         contentType = 'poll'
       } else if (hasVcardStructure || rawType === 'vcard' || rawType === 'contact') {
         contentType = 'vcard'
@@ -418,8 +525,7 @@ export async function POST(request: Request) {
         const mime = mediaInfo.mimetype || mediaInfo.mime_type || ''
         if (mime.startsWith('image/')) {
           contentType = rawType === 'sticker' ? 'sticker' : 'image'
-        }
-        else if (mime.startsWith('video/')) contentType = 'video'
+        } else if (mime.startsWith('video/')) contentType = 'video'
         else if (mime.startsWith('audio/')) contentType = 'audio'
         else if (rawType === 'sticker') contentType = 'sticker'
         else contentType = 'document'
@@ -433,10 +539,11 @@ export async function POST(request: Request) {
 
       let contentText = textBody || ''
       if (contentType === 'poll' && !contentText) {
-        const pollMsg = payload._data?.Message?.pollCreationMessage || 
-                        payload._data?.Message?.pollCreationMessageV2 || 
-                        payload._data?.Message?.pollCreationMessageV3 ||
-                        payload.poll
+        const pollMsg =
+          payload._data?.Message?.pollCreationMessage ||
+          payload._data?.Message?.pollCreationMessageV2 ||
+          payload._data?.Message?.pollCreationMessageV3 ||
+          payload.poll
         if (pollMsg?.name) {
           contentText = pollMsg.name
         }
@@ -460,23 +567,30 @@ export async function POST(request: Request) {
       const messageDate = new Date(timestamp * 1000).toISOString()
 
       // 3. Insert the message record
-      const { error: msgInsertError } = await db
-        .from('messages')
-        .insert({
-          conversation_id: conversationId,
-          message_id: messageId,
-          sender_type: fromMe ? 'agent' : 'customer',
-          content_type: contentType,
-          content_text: contentText,
-          media_url: mediaUrl,
-          status: direction === 'inbound' ? 'read' : 'sent',
-          created_at: messageDate,
-          waha_session: session,
-        })
+      const { error: msgInsertError } = await db.from('messages').insert({
+        conversation_id: conversationId,
+        message_id: messageId,
+        sender_type: fromMe ? 'agent' : 'customer',
+        content_type: contentType,
+        content_text: contentText,
+        media_url: mediaUrl,
+        status: direction === 'inbound' ? 'read' : 'sent',
+        created_at: messageDate,
+        waha_session: session,
+      })
 
       if (msgInsertError) {
-        console.error('[waha/webhook] Failed to insert message database error:', JSON.stringify(msgInsertError))
-        return NextResponse.json({ error: 'Failed to insert message', details: msgInsertError.message }, { status: 500 })
+        console.error(
+          '[waha/webhook] Failed to insert message database error:',
+          JSON.stringify(msgInsertError)
+        )
+        return NextResponse.json(
+          {
+            error: 'Failed to insert message',
+            details: msgInsertError.message,
+          },
+          { status: 500 }
+        )
       }
 
       // Correlacionar resposta com campanha do Disparador (se houver) —
@@ -491,7 +605,7 @@ export async function POST(request: Request) {
 
       // 4. Update the conversation values
       const updates: Record<string, any> = {
-        last_message_text: contentType === 'text' ? (textBody || '') : `[${contentType}]`,
+        last_message_text: contentType === 'text' ? textBody || '' : `[${contentType}]`,
         last_message_at: messageDate,
         updated_at: new Date().toISOString(),
       }
@@ -574,7 +688,13 @@ export async function POST(request: Request) {
         // to a human and is not pending after a handoff. The flow dispatcher
         // deliberately treats status='pending' as human-owned even when no
         // agent was selected; the global responder must honor the same guard.
-        if (direction === 'inbound' && !conversation?.assigned_agent_id && conversation?.status !== 'pending' && contactId && conversationId) {
+        if (
+          direction === 'inbound' &&
+          !conversation?.assigned_agent_id &&
+          conversation?.status !== 'pending' &&
+          contactId &&
+          conversationId
+        ) {
           // Extra guard on top of !flowConsumed: skip the global AI agent
           // whenever a flow run is still active for this conversation
           // (e.g. parked in an ai_agent/collect_input loop waiting on the
@@ -606,23 +726,22 @@ export async function POST(request: Request) {
               undefined, // onToolCall
               undefined, // onToolResult
               undefined, // nodeKey
-              config.id,
-            )
-              .catch((err) => {
-                console.error('[AI Agent] handleAiAutoResponse failed:', err)
-                void writeLog({
-                  account_id: accountId,
-                  level: 'error',
-                  source: 'ai_agent',
-                  event: 'ai_agent_error',
-                  message: 'handleAiAutoResponse falhou no webhook WAHA',
-                  payload: {
-                    contact_id: contactId,
-                    conversation_id: conversationId,
-                    erro: err instanceof Error ? err.message : String(err),
-                  },
-                })
+              config.id
+            ).catch((err) => {
+              console.error('[AI Agent] handleAiAutoResponse failed:', err)
+              void writeLog({
+                account_id: accountId,
+                level: 'error',
+                source: 'ai_agent',
+                event: 'ai_agent_error',
+                message: 'handleAiAutoResponse falhou no webhook WAHA',
+                payload: {
+                  contact_id: contactId,
+                  conversation_id: conversationId,
+                  erro: err instanceof Error ? err.message : String(err),
+                },
               })
+            })
           }
         }
 
@@ -640,7 +759,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: true })
     }
 
-    return NextResponse.json({ success: true, message: `Ignored event: ${event}` })
+    return NextResponse.json({
+      success: true,
+      message: `Ignored event: ${event}`,
+    })
   } catch (err: any) {
     console.error('[waha/webhook] handler crashed:', err)
     return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 })

@@ -2,10 +2,10 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { DDM_LOGO_WHITE } from '@/lib/brand';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   LayoutDashboard, Users, Megaphone, Smartphone,
-  MessageSquare, ShieldOff, LogOut,
+  MessageSquare, ShieldOff, LogOut, Menu, X,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -21,6 +21,8 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const [isIframe, setIsIframe] = useState(false);
+  const drawer = useRef<HTMLDialogElement>(null);
+  useEffect(() => { drawer.current?.close(); }, [pathname]);
 
   useEffect(() => {
     setIsIframe(window.self !== window.top);
@@ -34,9 +36,9 @@ export function Sidebar() {
     window.location.href = '/auth/login';
   };
 
-  return (
+  const sidebar = (
     <aside
-      className="w-64 flex-shrink-0 flex flex-col h-screen sticky top-0"
+      className="w-64 max-w-full flex-shrink-0 flex flex-col h-screen max-h-[90dvh] md:max-h-none sticky top-0"
       style={{ background: 'var(--sidebar-bg)', borderRight: '1px solid var(--sidebar-border)' }}
     >
       {/* ── Logo DDM ── */}
@@ -134,4 +136,12 @@ export function Sidebar() {
       </div>
     </aside>
   );
+  return <>
+    <div className="hidden md:block">{sidebar}</div>
+    <button type="button" aria-label="Abrir menu" aria-haspopup="dialog" onClick={() => drawer.current?.showModal()} className="fixed left-2 top-2 z-40 rounded bg-slate-900 p-3 text-white md:hidden"><Menu size={20} /></button>
+    <dialog ref={drawer} aria-label="Menu de navegação" className="m-0 h-dvh max-h-dvh max-w-[90vw] overflow-auto bg-slate-900 p-0 text-white backdrop:bg-black/50">
+      <button type="button" aria-label="Fechar menu" onClick={() => drawer.current?.close()} className="absolute right-2 top-2 z-10 p-3"><X size={20} /></button>
+      {sidebar}
+    </dialog>
+  </>;
 }

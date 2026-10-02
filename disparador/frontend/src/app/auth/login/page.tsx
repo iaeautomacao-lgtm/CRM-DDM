@@ -7,10 +7,10 @@ import { DDM_LOGO_WHITE } from '@/lib/brand';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail]       = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,8 +19,16 @@ export default function LoginPage() {
     try {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('access_token', data.access_token);
-      document.cookie = `access_token=${data.access_token};path=/;max-age=86400`;
-      router.push('/dashboard');
+      document.cookie = `access_token=${encodeURIComponent(data.access_token)};path=/;max-age=86400;SameSite=Lax${window.location.protocol === 'https:' ? ';Secure' : ''}`;
+      const next = new URLSearchParams(window.location.search).get('next');
+      const destination =
+        next?.startsWith('/') &&
+        !next.startsWith('//') &&
+        !next.includes('\\') &&
+        !next.startsWith('/auth')
+          ? next
+          : '/dashboard';
+      router.replace(destination);
     } catch {
       setError('E-mail ou senha inválidos.');
     } finally {
@@ -37,15 +45,17 @@ export default function LoginPage() {
       <div
         className="absolute pointer-events-none"
         style={{
-          top: '30%', left: '50%', transform: 'translate(-50%, -50%)',
-          width: 560, height: 560,
+          top: '30%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: 560,
+          height: 560,
           background: 'radial-gradient(circle, rgba(255,87,6,0.08) 0%, transparent 70%)',
           borderRadius: '50%',
         }}
       />
 
       <div className="w-full max-w-sm relative z-10">
-
         {/* ── Marca DDM ── */}
         <div className="text-center mb-8">
           <img src={DDM_LOGO_WHITE} alt="Grupo DDM" className="h-12 w-auto mx-auto mb-4" />
@@ -73,16 +83,20 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* E-mail */}
             <div>
-              <label
+              <label htmlFor="email"
                 className="block text-xs font-medium mb-1.5"
                 style={{ color: '#94A3B8', fontFamily: 'Inter, sans-serif' }}
               >
                 E-mail
               </label>
               <div className="relative">
-                <Mail size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#64748B' }} />
+                <Mail
+                  size={15}
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2"
+                  style={{ color: '#64748B' }}
+                />
                 <input
-                  type="email"
+                  id="email" type="email" autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu@email.com"
@@ -92,7 +106,10 @@ export default function LoginPage() {
                     background: 'rgba(255,255,255,0.05)',
                     border: '1px solid rgba(255,255,255,0.1)',
                     borderRadius: 8,
-                    paddingLeft: 40, paddingRight: 16, paddingTop: 10, paddingBottom: 10,
+                    paddingLeft: 40,
+                    paddingRight: 16,
+                    paddingTop: 10,
+                    paddingBottom: 10,
                     fontSize: 14,
                     color: '#F1F5F9',
                     outline: 'none',
@@ -114,16 +131,20 @@ export default function LoginPage() {
 
             {/* Senha */}
             <div>
-              <label
+              <label htmlFor="password"
                 className="block text-xs font-medium mb-1.5"
                 style={{ color: '#94A3B8', fontFamily: 'Inter, sans-serif' }}
               >
                 Senha
               </label>
               <div className="relative">
-                <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#64748B' }} />
+                <Lock
+                  size={15}
+                  className="absolute left-3.5 top-1/2 -translate-y-1/2"
+                  style={{ color: '#64748B' }}
+                />
                 <input
-                  type="password"
+                  id="password" type="password" autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -133,7 +154,10 @@ export default function LoginPage() {
                     background: 'rgba(255,255,255,0.05)',
                     border: '1px solid rgba(255,255,255,0.1)',
                     borderRadius: 8,
-                    paddingLeft: 40, paddingRight: 16, paddingTop: 10, paddingBottom: 10,
+                    paddingLeft: 40,
+                    paddingRight: 16,
+                    paddingTop: 10,
+                    paddingBottom: 10,
                     fontSize: 14,
                     color: '#F1F5F9',
                     outline: 'none',
@@ -155,7 +179,7 @@ export default function LoginPage() {
 
             {/* Erro */}
             {error && (
-              <div
+              <div role="alert"
                 className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-lg"
                 style={{
                   color: '#FCA5A5',
@@ -185,12 +209,21 @@ export default function LoginPage() {
                 border: 'none',
               }}
             >
-              {loading ? 'Entrando...' : (<>Entrar <ArrowRight size={15} /></>)}
+              {loading ? (
+                'Entrando...'
+              ) : (
+                <>
+                  Entrar <ArrowRight size={15} />
+                </>
+              )}
             </button>
           </form>
         </div>
 
-        <p className="text-center text-xs mt-6" style={{ color: '#334155', fontFamily: 'Inter, sans-serif' }}>
+        <p
+          className="text-center text-xs mt-6"
+          style={{ color: '#334155', fontFamily: 'Inter, sans-serif' }}
+        >
           Grupo DDM · Plataforma Interna
         </p>
       </div>

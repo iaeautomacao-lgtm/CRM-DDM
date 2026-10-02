@@ -1,3 +1,4 @@
+import { resolveProviderMedia } from '@/lib/storage/provider-media';
 /**
  * Flow runner.
  *
@@ -627,6 +628,7 @@ async function sendMediaViaProvider(
     filename?: string;
   },
 ): Promise<{ whatsapp_message_id: string }> {
+  args = { ...args, link: await resolveProviderMedia(args.link, run.account_id) };
   const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
   if (provider === "waha") {
     return engineWahaSendMedia({

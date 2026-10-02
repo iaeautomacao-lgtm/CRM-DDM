@@ -1,4 +1,11 @@
-import { Controller, Post, Body, Headers, UnauthorizedException } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Headers,
+  UnauthorizedException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 import { WebhooksService } from './webhooks.service';
@@ -8,16 +15,18 @@ import { WebhooksService } from './webhooks.service';
 export class WebhooksController {
   constructor(
     private readonly webhooksService: WebhooksService,
-    private readonly config: ConfigService,
+    private readonly config: ConfigService
   ) {}
 
   @Post('waha')
   async wahaWebhook(
     @Body() body: any,
-    @Headers('x-webhook-secret') secret: string,
+    @Headers('x-webhook-secret') secret: string
   ) {
     const expectedSecret = this.config.get('WEBHOOK_SECRET');
-    if (expectedSecret && secret !== expectedSecret) {
+    if (!expectedSecret)
+      throw new ServiceUnavailableException('Webhook não configurado');
+    if (secret !== expectedSecret) {
       throw new UnauthorizedException('Webhook secret inválido');
     }
 

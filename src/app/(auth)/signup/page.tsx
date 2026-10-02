@@ -69,7 +69,7 @@ function SignupPageInner() {
       ? `${window.location.origin}/join/${encodeURIComponent(inviteToken)}`
       : undefined;
 
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -86,6 +86,10 @@ function SignupPageInner() {
       return;
     }
 
+    if (data.session) {
+      window.location.assign(inviteToken ? `/join/${encodeURIComponent(inviteToken)}` : "/dashboard");
+      return;
+    }
     setSuccess(true);
     setLoading(false);
   };
@@ -145,13 +149,13 @@ function SignupPageInner() {
           <CardDescription className="text-muted-foreground">
             {inviteToken
               ? "Verifique seu e-mail, depois aceite o convite para se juntar à equipe."
-              : "Comece a usar o CRM DDM"}
+              : "Crie uma conta independente. O acesso a outra organização exige convite."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSignup} className="flex flex-col gap-4">
             {error && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
                 {error}
               </div>
             )}
@@ -177,7 +181,7 @@ function SignupPageInner() {
               </Label>
               <Input
                 id="email"
-                type="email"
+                type="email" autoComplete="email"
                 placeholder="seu@exemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -192,7 +196,7 @@ function SignupPageInner() {
               </Label>
               <Input
                 id="password"
-                type="password"
+                type="password" autoComplete="new-password"
                 placeholder="Pelo menos 6 caracteres"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -207,7 +211,7 @@ function SignupPageInner() {
               </Label>
               <Input
                 id="confirmPassword"
-                type="password"
+                type="password" autoComplete="new-password"
                 placeholder="Repita sua senha"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}

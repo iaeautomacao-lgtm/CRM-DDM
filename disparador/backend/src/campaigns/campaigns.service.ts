@@ -59,6 +59,10 @@ export class CampaignsService {
   }
 
   async update(id: string, body: any) {
+    const existing = await this.findOne(id);
+    if (!existing) throw new BadRequestException('Campanha não encontrada');
+    if (!('status' in body) && !['rascunho','pausada'].includes(existing.status))
+      throw new ForbiddenException('Pause a campanha antes de editar');
     const { data, error } = await this.supabase.db
       .from('campaigns')
       .update(body)
@@ -105,33 +109,25 @@ export class CampaignsService {
       }
     }
 
-    await this.update(id, {
-      status: 'em_execucao',
-      approved_at: campaign.approved_at ?? new Date().toISOString(),
-    });
-
-    // Enfileira contatos
-    await this.queueService.enqueueCampaignContacts(id);
+    const { data: claimed, error: claimError } = await this.supabase.db.from('campaigns')
+      .update({ status: 'preparando' }).eq('id', id).eq('status', campaign.status).select('id');
+    if (claimError || !claimed?.length) throw new ForbiddenException('Campanha já está sendo preparada');
+    try {
+      if (campaign.status !== 'pausada') await this.queueService.enqueueCampaignContacts(id);
+      const { error: activateError } = await this.supabase.db.from('campaigns')
+        .update({ status: 'em_execucao' }).eq('id', id).eq('status', 'preparando');
+      if (activateError) throw activateError;
+    } catch (error) {
+      await this.supabase.db.from('campaigns').update({ status: campaign.status }).eq('id', id).eq('status', 'preparando');
+      throw error;
+    }
 
     return { started: true };
   }
 
   async requeue(id: string) {
-    const campaign = await this.findOne(id);
-    if (!campaign) throw new BadRequestException('Campanha não encontrada');
+    throw new ForbiddenException('Reenfileiramento em massa desativado; reconciliar tentativas e criar uma nova campanha revisada');
 
-    // Remove itens pendentes/agendados/erro para evitar duplicatas
-    await this.supabase.db
-      .from('disp_message_queue')
-      .delete()
-      .eq('campaign_id', id)
-      .in('status', ['pendente', 'agendado', 'erro']);
-
-    // Garante status em execução
-    await this.update(id, { status: 'em_execucao' });
-
-    await this.queueService.enqueueCampaignContacts(id);
-    return { requeued: true };
   }
 
   async pause(id: string) {

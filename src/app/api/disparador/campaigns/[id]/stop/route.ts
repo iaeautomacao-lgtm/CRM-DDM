@@ -18,16 +18,30 @@ export async function POST(
 
     const { id: campaignId } = await params;
 
-    // wacrm.campaigns has no account_id column (only created_by), so
-    // ownership is checked per-user rather than per-account for now.
+    // Isolamento por conta: a campanha só é encontrada se pertencer à conta
+    // do usuário (antes só o created_by era conferido, sem escopo de conta).
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("account_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (profileError || !profile?.account_id)
+      return NextResponse.json(
+        { error: "Conta indisponível" },
+        { status: 403 }
+      );
     const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("id, created_by")
       .eq("id", campaignId)
+      .eq("account_id", profile.account_id)
       .single();
 
     if (campaignError || !campaign) {
-      return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Campanha não encontrada" },
+        { status: 404 }
+      );
     }
 
     if (campaign.created_by !== user.id) {
@@ -40,37 +54,30 @@ export async function POST(
     const url = new URL(request.url);
     const action = url.searchParams.get("action") || "stop"; // 'stop' or 'pause'
 
-    if (action === "pause") {
-      // 1. Update status to 'pausada' (Paused)
-      await supabaseAdmin()
-        .from("campaigns")
-        .update({ status: "pausada" })
-        .eq("id", campaignId);
-
-      // 2. Pause scheduled items in the queue (set status to 'pausado')
-      await supabaseAdmin()
-        .from("disp_message_queue")
-        .update({ status: "pausado" })
-        .eq("campaign_id", campaignId)
-        .in("status", ["agendado", "pendente"]);
-
-      return NextResponse.json({ success: true, status: "pausada" });
-    } else {
-      // 1. Update status to 'encerrada' (Closed)
-      await supabaseAdmin()
-        .from("campaigns")
-        .update({ status: "encerrada" })
-        .eq("id", campaignId);
-
-      // 2. Cancel scheduled items in the queue (set status to 'cancelado')
-      await supabaseAdmin()
-        .from("disp_message_queue")
-        .update({ status: "cancelado" })
-        .eq("campaign_id", campaignId)
-        .in("status", ["agendado", "pendente", "pausado"]);
-
-      return NextResponse.json({ success: true, status: "encerrada" });
-    }
+    if (action !== "pause" && action !== "stop")
+      return NextResponse.json({ error: "Ação inválida" }, { status: 400 });
+    // RPC transacional (migration 118): trava a campanha, muda o status e
+    // pausa/cancela só itens agendado/pendente/pausado. Itens 'enviando'
+    // não são tocados — podem já ter sido aceitos pelo provedor. Pausa só
+    // é aceita em campanha 'em_execucao' (não em 'preparando').
+    const { data: changed, error } = await supabaseAdmin().rpc(
+      "stop_dispatch_campaign",
+      {
+        p_campaign_id: campaignId,
+        p_account_id: profile.account_id,
+        p_action: action,
+      }
+    );
+    if (error) throw error;
+    if (!changed)
+      return NextResponse.json(
+        { error: "Estado da campanha não permite a ação" },
+        { status: 409 }
+      );
+    return NextResponse.json({
+      success: true,
+      status: action === "pause" ? "pausada" : "encerrada",
+    });
   } catch (err: any) {
     console.error("[Campaign Stop/Pause] Failed:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

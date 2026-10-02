@@ -1,12 +1,13 @@
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { safeReturnPath } from '@/lib/auth/return-path'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
   // se "next" for informado, redireciona para lá, senão vai para a home do dashboard
-  const next = searchParams.get('next') ?? '/dashboard'
+  const next = safeReturnPath(searchParams.get('next'))
 
   if (code) {
     const cookieStore = await cookies()

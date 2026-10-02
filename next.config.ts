@@ -61,6 +61,8 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  // Each service owns its dependencies; parent lockfiles must not change resolution.
+  turbopack: { root: __dirname },
   /**
    * Cache-Control policy.
    *
@@ -124,17 +126,7 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
-    const voipUrl = process.env.VOIP_URL || "http://localhost:8080";
-    return [
-      {
-        source: "/api/calls/events",
-        destination: `${voipUrl}/api/events`,
-      },
-      {
-        source: "/api/calls/:path*",
-        destination: `${voipUrl}/api/:path*`,
-      },
-    ];
+    return [];
   },
 };
 

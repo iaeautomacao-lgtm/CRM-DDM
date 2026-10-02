@@ -47,6 +47,7 @@ func newServer(ctx context.Context, dbPath, staticDir string, maxCalls int, log 
 	}
 
 	broker := NewBroker()
+	broker.ScopeFn = func(account, session string) bool { return store.accountFor(ctx, session) == account }
 	mgr := newSessionManager(ctx, container, broker, store, waLogger, log, maxCalls)
 	broker.SnapshotFn = mgr.snapshotEvents
 

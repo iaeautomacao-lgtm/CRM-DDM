@@ -16,6 +16,7 @@ import {
 import { decrypt } from "@/lib/whatsapp/encryption";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
 import OpenAI from "openai";
@@ -66,60 +67,52 @@ export interface Campaign {
   limite_por_hora?: number;
 }
 
+// Resultado de processQueueItem:
+// - sent: provedor aceitou e a confirmação local foi gravada.
+// - deferred: item reagendado (fora da janela, telefone alternativo...).
+// - blocked: contato na blacklist; não haverá envio.
+// - pending_confirmation: o item fica em 'enviando' para reconciliação
+//   manual — o provedor PODE ter recebido a mensagem (timeout/5xx) ou
+//   aceitou mas a gravação local falhou. Nunca é reenfileirado sozinho.
+// - error: rejeição comprovada do provedor ou falha antes do envio.
 export type ProcessResult =
   | { outcome: "sent"; messageId: string }
   | { outcome: "deferred"; reason: string }
   | { outcome: "blocked"; reason: string }
+  | { outcome: "pending_confirmation"; messageId?: string; reason: string }
   | { outcome: "error"; error: string };
 
 // Após esse número de tentativas, o item é marcado como erro permanente
 // em vez de reentrar no funil de reenvio (ver markQueueError).
 const MAX_TENTATIVAS = 5;
 
-// Reivindica atomicamente um item já identificado (agendado -> enviando)
-// via UPDATE condicionado a status='agendado'. Isso é o que de fato evita
-// o double-send: mesmo que worker.ts e cron/route.ts selecionem o mesmo
-// item (cada um faz seu próprio SELECT), só um deles consegue vencer esse
-// UPDATE — o outro recebe 0 linhas afetadas e desiste. Não depende de
-// nenhuma migration: um UPDATE com WHERE é atômico no Postgres por si só.
+// Reivindica atomicamente um item (agendado -> enviando) via RPC
+// wacrm.claim_dispatch_item (migration 118). Dentro de uma transação, a RPC:
+// - trava a campanha (FOR UPDATE) e exige status 'em_execucao';
+// - trava o canal (advisory lock por session_id) para serializar claims de
+//   campanhas diferentes que usam o mesmo número;
+// - confere limite_por_hora da campanha, max_in_flight e hourly_limit do
+//   canal (dispatch_channel_limits), contando também itens 'enviando';
+// - recusa item já com waha_message_id (já aceito pelo provedor).
+// Só um chamador vence; os demais recebem false e pulam o item.
 //
-// updated_at é setado explicitamente aqui — a coluna não tem trigger
-// nenhum mantendo ela em disp_message_queue (confirmado: um UPDATE que
-// não a menciona deixa o valor antigo, geralmente o de quando a linha foi
-// inserida, não o do claim). A varredura de itens presos em 'enviando'
-// (cron/route.ts) depende de updated_at refletir o momento do claim, não
-// o do enfileiramento — sem este carimbo aqui, ela resetaria pra
-// 'agendado' itens só recém-reivindicados cujo scheduled_at original é
-// antigo, reintroduzindo risco de double-send.
+// Sem a migration 118 a RPC não existe e o erro é propagado de propósito:
+// o fallback antigo (UPDATE simples) não respeitava quota nem concorrência
+// por canal e podia gerar envio duplicado.
 async function claimItemAtomically(itemId: string): Promise<boolean> {
-  const { data, error } = await supabaseAdmin()
-    .from("disp_message_queue")
-    .update({ status: "enviando", updated_at: new Date().toISOString() })
-    .eq("id", itemId)
-    .eq("status", "agendado")
-    .select("id");
+  const { data, error } = await supabaseAdmin().rpc("claim_dispatch_item", {
+    p_item_id: itemId,
+  });
   if (error) throw error;
-  return !!data && data.length > 0;
+  return data === true;
 }
 
-// Busca e reivindica o próximo item agendado de uma campanha. Usa a RPC
-// wacrm.claim_queue_item (migration 075 — SELECT ... FOR UPDATE SKIP LOCKED)
-// quando disponível; sem a migration aplicada, cai para um SELECT do
-// candidato seguido do mesmo claim atômico usado acima. O fallback pode
-// retornar null sob concorrência alta (perdeu a corrida) — quem chama deve
-// apenas tentar de novo no próximo ciclo, o que já é o comportamento normal
-// de worker.ts/cron ao não encontrar item.
+// Busca o próximo item agendado de uma campanha e o reivindica com o mesmo
+// claim protegido usado pelo cron. Pode retornar null sob concorrência
+// (outro consumidor venceu) ou quando a quota/concorrência do canal está
+// cheia — quem chama apenas tenta de novo no próximo ciclo.
 export async function claimQueueItem(campaignId: string): Promise<QueueItem | null> {
   const supabase = supabaseAdmin();
-
-  try {
-    const { data, error } = await supabase.rpc("claim_queue_item", {
-      p_campaign_id: campaignId,
-    });
-    if (!error) return (data as QueueItem) ?? null;
-  } catch {
-    // RPC ainda não existe (migration 075 não aplicada) — fallback abaixo.
-  }
 
   const now = new Date().toISOString();
   const { data: candidates } = await supabase
@@ -185,7 +178,11 @@ function isPermanentSendError(err: unknown): boolean {
 // se deve tentar o próximo telefone de wacrm.contact_phones em vez de só
 // marcar o item como erro permanente.
 export function isInvalidPhoneError(err: unknown): boolean {
-  return err instanceof MetaApiError && err.metaCode !== null && META_INVALID_PHONE_CODES.has(err.metaCode);
+  return (
+    err instanceof MetaApiError &&
+    err.metaCode !== null &&
+    META_INVALID_PHONE_CODES.has(err.metaCode)
+  );
 }
 
 // Grava erro + tentativas no item. Tenta incluir erro_permanente; se a
@@ -218,10 +215,7 @@ export async function markQueueError(
     .eq("id", itemId);
 
   if (error) {
-    await supabaseAdmin()
-      .from("disp_message_queue")
-      .update(baseUpdate)
-      .eq("id", itemId);
+    await supabaseAdmin().from("disp_message_queue").update(baseUpdate).eq("id", itemId);
   }
 
   if (permanent) {
@@ -230,7 +224,10 @@ export async function markQueueError(
       p_field: "total_erros",
     });
     if (metricError) {
-      console.error("[Disparador] markQueueError: falha ao incrementar total_erros:", metricError.message);
+      console.error(
+        "[Disparador] markQueueError: falha ao incrementar total_erros:",
+        metricError.message
+      );
     }
   }
 }
@@ -260,7 +257,10 @@ async function markPhoneInvalid(item: QueueItem): Promise<void> {
     if (attemptOrder > 1) {
       ({ error } = await supabaseAdmin()
         .from("contact_phones")
-        .update({ status: "invalido", last_attempt_at: new Date().toISOString() })
+        .update({
+          status: "invalido",
+          last_attempt_at: new Date().toISOString(),
+        })
         .eq("contact_id", item.contact_id)
         .eq("ordem", attemptOrder));
     } else {
@@ -273,7 +273,10 @@ async function markPhoneInvalid(item: QueueItem): Promise<void> {
 
       ({ error } = await supabaseAdmin()
         .from("contact_phones")
-        .update({ status: "invalido", last_attempt_at: new Date().toISOString() })
+        .update({
+          status: "invalido",
+          last_attempt_at: new Date().toISOString(),
+        })
         .eq("contact_id", item.contact_id)
         .eq("phone_normalized", contact.phone_normalized));
     }
@@ -398,10 +401,7 @@ export async function processQueueItem(
 ): Promise<ProcessResult> {
   const { janela_inicio, janela_fim } = campaign;
   const hasWindow =
-    janela_inicio &&
-    janela_fim &&
-    janela_inicio !== "00:00" &&
-    janela_fim !== "23:59";
+    janela_inicio && janela_fim && janela_inicio !== "00:00" && janela_fim !== "23:59";
 
   if (hasWindow && !checkWithinWindow(janela_inicio!, janela_fim!)) {
     // Constrói "amanhã às janela_inicio" no fuso America/Sao_Paulo.
@@ -429,7 +429,8 @@ export async function processQueueItem(
     await supabaseAdmin()
       .from("disp_message_queue")
       .update({ status: "agendado", scheduled_at: tomorrowUtc.toISOString() })
-      .eq("id", item.id);
+      .eq("id", item.id)
+      .eq("status", "agendado");
 
     return { outcome: "deferred", reason: "outside_window" };
   }
@@ -443,7 +444,13 @@ export async function processQueueItem(
 
   const tentativasAtuais = item.tentativas ?? 0;
   if (tentativasAtuais >= MAX_TENTATIVAS) {
-    await markQueueError(item.id, "Máximo de tentativas atingido", true, item.campaign_id, tentativasAtuais);
+    await markQueueError(
+      item.id,
+      "Máximo de tentativas atingido",
+      true,
+      item.campaign_id,
+      tentativasAtuais
+    );
     return { outcome: "error", error: "Máximo de tentativas atingido" };
   }
 
@@ -505,7 +512,10 @@ export async function processQueueItem(
       p_field: "total_blacklist",
     });
     if (metricError) {
-      console.error("[Disparador] processQueueItem: falha ao incrementar total_blacklist:", metricError.message);
+      console.error(
+        "[Disparador] processQueueItem: falha ao incrementar total_blacklist:",
+        metricError.message
+      );
     }
     return { outcome: "blocked", reason: "blacklisted" };
   }
@@ -521,17 +531,20 @@ export async function processQueueItem(
   }
 
   const provider = config.provider as "waha" | "meta";
+  // Bucket chat-media é privado: troca a referência interna por URL
+  // assinada curta que Meta/WAHA conseguem baixar. Valida que o anexo
+  // pertence à conta do canal.
+  if (item.media_url) item = { ...item, media_url: await resolveProviderMedia(item.media_url, config.account_id) };
   const tipo = item.tipo || "texto";
   // Contato externo com texto livre WAHA: mensagem_final guarda o
   // telefone (única forma de resolvê-lo sem contact_id), o texto real
   // fica em template_variables[0].
   let messageText =
     item.template_name === EXTERNAL_WAHA_TEXT_MARKER
-      ? item.template_variables?.[0] ?? ""
+      ? (item.template_variables?.[0] ?? "")
       : item.mensagem_final;
 
-  const disparadorOpenAiKey =
-    process.env.DISPARADOR_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  const disparadorOpenAiKey = process.env.DISPARADOR_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 
   if (tipo === "ia" && disparadorOpenAiKey) {
     try {
@@ -581,8 +594,30 @@ export async function processQueueItem(
         ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
         : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
   } catch (sendErr: any) {
+    // Timeout, erro de rede, erro WAHA (não-MetaApiError) ou 5xx da Meta NÃO
+    // provam que o POST foi rejeitado — o provedor pode ter entregue a
+    // mensagem. Mantém o item em 'enviando' (reservado) e só anota o motivo:
+    // um segundo POST automático poderia duplicar o envio para o cliente.
+    // Apenas MetaApiError 4xx (rejeição explícita) segue para o retry abaixo.
+    if (!(sendErr instanceof MetaApiError) || sendErr.httpStatus >= 500) {
+      const { error } = await supabaseAdmin()
+        .from("disp_message_queue")
+        .update({
+          erro: "Resultado externo desconhecido; requer reconciliação antes de reenviar",
+        })
+        .eq("id", item.id)
+        .eq("status", "enviando");
+      if (error)
+        console.error("[Disparador] Falha ao registrar resultado desconhecido:", error.message);
+      return {
+        outcome: "pending_confirmation",
+        reason: "provider_outcome_unknown",
+      };
+    }
     if (sendErr instanceof MetaApiError) {
-      console.error(`[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`);
+      console.error(
+        `[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`
+      );
       // 131026 (janela de 24h encerrada) rejeitado direto pela Meta no
       // POST /messages — mesma blacklist automática do caminho
       // assíncrono (webhook de status "failed"), fire-and-forget.
@@ -645,44 +680,37 @@ export async function processQueueItem(
   });
 
   if (markSentError) {
-    // Migration 091 ainda não aplicada (RPC não existe) ou erro
-    // transitório — cai pro caminho antigo (3 escritas separadas,
-    // mesmo bug de não-atomicidade que a RPC resolve) em vez de deixar
-    // o item preso em 'enviando' pra sempre: claimItemAtomically já
-    // marcou status='enviando' antes deste ponto, então SEM nenhuma
-    // escrita de sucesso o item nunca mais seria reivindicado (o claim
-    // só seleciona status='agendado').
-    console.error(
-      "[Disparador] mark_queue_item_sent falhou (migration 091 não aplicada?) — usando fallback não-atômico:",
-      markSentError.message
-    );
-    await supabaseAdmin()
+    // O provedor JÁ aceitou o envio, mas a confirmação local falhou. Não
+    // marcamos erro (isso levaria a reenvio): gravamos o message ID externo
+    // no item, que continua 'enviando', para reconciliação posterior via
+    // mark_queue_item_sent (idempotente) — sem novo POST ao provedor.
+    console.error("[Disparador] Envio aceito; confirmação local pendente:", markSentError.message);
+    const { error: receiptError } = await supabaseAdmin()
       .from("disp_message_queue")
       .update({
-        status: "enviado",
-        sent_at: new Date().toISOString(),
         waha_message_id: externalMessageId,
-        tentativas: (item.tentativas || 0) + 1,
+        erro: "Envio aceito pelo provedor; confirmação local pendente. Não reenviar.",
       })
-      .eq("id", item.id);
-
-    await supabaseAdmin().from("message_logs").insert({
-      queue_id: item.id,
-      campaign_id: item.campaign_id,
-      contact_id: item.contact_id,
-      session_id: item.session_id,
-      direcao: "saida",
-      mensagem: cleanText,
-      status: "enviado",
-      waha_message_id: externalMessageId,
-    });
-
-    await supabaseAdmin().rpc("increment_campaign_metric", {
-      p_campaign_id: item.campaign_id,
-      p_field: "total_enviados",
-    });
+      .eq("id", item.id)
+      .eq("status", "enviando");
+    if (receiptError)
+      console.error(
+        "[Disparador] Falha ao persistir recibo de envio aceito:",
+        receiptError.message
+      );
+    return {
+      outcome: "pending_confirmation",
+      messageId: externalMessageId,
+      reason: "local_confirmation_failed",
+    };
   }
 
+  // O webhook de status (delivered/read/failed) pode chegar antes desta
+  // confirmação local; nesse caso ele ficou guardado em
+  // dispatch_status_receipts (migration 125). Reaplica agora que o item
+  // está 'enviado'. Falha aqui não é crítica: o cron reconcilia depois.
+  const { error: replayError } = await supabaseAdmin().rpc('replay_dispatch_receipts', { p_message_id: externalMessageId });
+  if (replayError) console.error('[Disparador] Confirmações antecipadas aguardam reconciliação:', replayError.message);
   return { outcome: "sent", messageId: externalMessageId };
 }
 
@@ -711,11 +739,25 @@ async function sendViaWaha(
   }
 
   if (tipo === "imagem") {
-    const res = await sendWahaMediaMessage(wahaConfig, phone, item.media_url!, "image", "imagem.png", text);
+    const res = await sendWahaMediaMessage(
+      wahaConfig,
+      phone,
+      item.media_url!,
+      "image",
+      "imagem.png",
+      text
+    );
     return res.messageId;
   }
   if (tipo === "video") {
-    const res = await sendWahaMediaMessage(wahaConfig, phone, item.media_url!, "video", "video.mp4", text);
+    const res = await sendWahaMediaMessage(
+      wahaConfig,
+      phone,
+      item.media_url!,
+      "video",
+      "video.mp4",
+      text
+    );
     return res.messageId;
   }
   if (tipo === "audio") {
@@ -723,7 +765,14 @@ async function sendViaWaha(
     return res.messageId;
   }
   if (tipo === "arquivo") {
-    const res = await sendWahaMediaMessage(wahaConfig, phone, item.media_url!, "document", "documento", text);
+    const res = await sendWahaMediaMessage(
+      wahaConfig,
+      phone,
+      item.media_url!,
+      "document",
+      "documento",
+      text
+    );
     return res.messageId;
   }
   if (tipo === "ligacao") {
@@ -736,8 +785,14 @@ async function sendViaWaha(
       await new Promise((r) => setTimeout(r, 2000));
       try {
         const callInfo = await getWacallsCallStatus(wahaConfig, callId);
-        if (callInfo.status === "connected") { isConnected = true; break; }
-        if (callInfo.ended || callInfo.status === "ended") { ended = true; break; }
+        if (callInfo.status === "connected") {
+          isConnected = true;
+          break;
+        }
+        if (callInfo.ended || callInfo.status === "ended") {
+          ended = true;
+          break;
+        }
       } catch (err) {
         console.warn(`[processQueue] Falha ao checar status da ligação ${callId}:`, err);
       }
@@ -784,11 +839,11 @@ async function sendViaMeta(
       : [];
 
     // Sanitiza variáveis — converte Markdown [texto](url) para url pura
-    const sanitizedVariables = variables.map(v => {
+    const sanitizedVariables = variables.map((v) => {
       const mdLink = v.match(/\[.*?\]\((https?:\/\/[^)]+)\)/);
       if (mdLink) return mdLink[1];
       // Remove formatação Markdown residual
-      return v.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+      return v.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
     });
 
     const result = await sendTemplateMessage({
@@ -836,21 +891,29 @@ async function sendViaMeta(
 }
 
 // Dispara um webhook de callback para o sistema externo quando uma
-// campanha termina de processar. Best-effort: qualquer falha (URL
-// bloqueada, timeout, erro de rede) é só logada — nunca deve derrubar
-// o worker que a chama via `void`.
-export async function sendCampaignCallback(campaignId: string): Promise<void> {
+// campanha termina de processar. Nunca lança: qualquer falha (URL
+// bloqueada, timeout, erro de rede, HTTP não-2xx) é logada e vira `false`.
+//
+// Retorno usado pela outbox (callback-outbox.ts):
+// - true  → entregue (2xx) ou campanha sem callback_url (nada a fazer);
+// - false → tentar de novo depois, com backoff.
+// O header `Idempotency-Key: campaign.completed:<id>` é estável entre
+// tentativas, para o receptor deduplicar caso um retry repita a entrega.
+// `completed_at` usa updated_at da campanha (momento do encerramento), e
+// não "agora", para o payload ser idêntico em todas as tentativas.
+export async function sendCampaignCallback(campaignId: string): Promise<boolean> {
   try {
     const db = supabaseAdmin();
 
     // Buscar campanha com callback_url
     const { data: campaign } = await db
       .from("campaigns")
-      .select("id, nome, status, callback_url")
+      .select("id, nome, status, callback_url, updated_at")
       .eq("id", campaignId)
       .maybeSingle();
 
-    if (!campaign?.callback_url) return;
+    if (!campaign) return false;
+    if (!campaign.callback_url) return true;
 
     // Revalida a URL no momento do envio (não só na criação da
     // campanha) — fecha a janela entre criar a campanha e o callback
@@ -859,7 +922,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       await assertWahaUrlIsSafe(campaign.callback_url);
     } catch (err) {
       console.error(`[Callback] Campanha ${campaignId} — callback_url bloqueada:`, err);
-      return;
+      return false;
     }
 
     // Buscar métricas da campanha
@@ -885,8 +948,11 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
           .eq("campaign_id", campaignId)
           .range(from, from + pageSize - 1);
         if (pageError) {
-          console.error(`[Callback] Campanha ${campaignId} — falha ao paginar disp_message_queue:`, pageError.message);
-          break;
+          console.error(
+            `[Callback] Campanha ${campaignId} — falha ao paginar disp_message_queue:`,
+            pageError.message
+          );
+          return false;
         }
         queueSummary.push(...(page ?? []));
         if (!page || page.length < pageSize) break;
@@ -894,10 +960,12 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       }
     }
 
-    const enviados = queueSummary.filter(i => i.status === "enviado" || i.status === "entregue" || i.status === "lido").length;
-    const erros = queueSummary.filter(i => i.status === "erro").length;
-    const bloqueados = queueSummary.filter(i => i.status === "bloqueado").length;
-    const cancelados = queueSummary.filter(i => i.status === "cancelado").length;
+    const enviados = queueSummary.filter(
+      (i) => i.status === "enviado" || i.status === "entregue" || i.status === "lido"
+    ).length;
+    const erros = queueSummary.filter((i) => i.status === "erro").length;
+    const bloqueados = queueSummary.filter((i) => i.status === "bloqueado").length;
+    const cancelados = queueSummary.filter((i) => i.status === "cancelado").length;
 
     // Nota: só roda quando a campanha tem callback_url configurado (early
     // return na linha acima) — campanhas sem callback externo não geram
@@ -914,7 +982,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       event: "campaign.completed",
       campaign_id: campaign.id,
       campaign_name: campaign.nome,
-      completed_at: new Date().toISOString(),
+      completed_at: campaign.updated_at,
       summary: {
         total_enfileirados: queueSummary.length,
         enviados,
@@ -926,15 +994,24 @@ export async function sendCampaignCallback(campaignId: string): Promise<void> {
       },
     };
 
-    await fetch(campaign.callback_url, {
+    const response = await fetch(campaign.callback_url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": `campaign.completed:${campaignId}`,
+      },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(10000),
     });
 
-    console.log(`[Callback] Campanha ${campaignId} — callback enviado para ${campaign.callback_url}`);
+    if (!response.ok) throw new Error(`Callback rejeitado: HTTP ${response.status}`);
+
+    console.log(
+      `[Callback] Campanha ${campaignId} — callback enviado para ${campaign.callback_url}`
+    );
+    return true;
   } catch (err: any) {
     console.error(`[Callback] Campanha ${campaignId} — falha ao enviar callback:`, err.message);
+    return false;
   }
 }

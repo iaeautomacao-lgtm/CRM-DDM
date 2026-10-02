@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { privateChatMediaUrl } from '@/lib/storage/chat-media';
 import type { Message, MessageReaction } from "@/types";
 import {
   Clock,
@@ -51,7 +52,7 @@ function MediaUnavailable({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
       <ImageOff className="h-4 w-4 shrink-0 text-muted-foreground" />
-      <span>{label} unavailable</span>
+      <span>{label} indisponível</span>
     </div>
   );
 }
@@ -119,7 +120,8 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
-function MessageContent({ message }: { message: Message }) {
+function MessageContent({ message: originalMessage }: { message: Message }) {
+  const message = { ...originalMessage, media_url: originalMessage.media_url ? privateChatMediaUrl(originalMessage.media_url) : null };
   switch (message.content_type) {
     case "text":
       return (

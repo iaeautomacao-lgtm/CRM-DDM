@@ -615,6 +615,7 @@ export function MessageComposer({
             canAct={!readOnly}
             gateReason="send messages"
             disabled={!text.trim() || sessionExpired || sending}
+            aria-label="Enviar mensagem"
             onClick={handleSend}
             className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
           >
@@ -712,6 +713,7 @@ function MediaDraftPreview({
           canAct={!readOnly}
           gateReason="send messages"
           disabled={busy}
+          aria-label="Enviar anexo"
           onClick={onSend}
           className={cn(
             "h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40",

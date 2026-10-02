@@ -53,6 +53,11 @@ export async function apiFetch(
   options?: RequestInit,
 ): Promise<Response> {
   const requestOptions = withCredentials(options);
+  if (url === '/api/whatsapp/send' && requestOptions.method === 'POST') {
+    const headers = new Headers(requestOptions.headers);
+    if (!headers.has('Idempotency-Key')) headers.set('Idempotency-Key', crypto.randomUUID());
+    requestOptions.headers = headers;
+  }
   const res = await fetch(url, requestOptions);
   if (res.status !== 401) return res;
 

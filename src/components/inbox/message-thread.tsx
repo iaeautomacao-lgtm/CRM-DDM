@@ -597,6 +597,11 @@ export function MessageThread({
         const payload = await res.json().catch(() => ({}));
 
         if (!res.ok) {
+          if (res.status >= 500 || payload?.provider_outcome_unknown) {
+            toast.warning("Resultado do envio não confirmado. Verifique antes de reenviar.");
+            onUpdateMessage(tempId, { status: "sending" });
+            return;
+          }
           const reason = payload?.error || `HTTP ${res.status}`;
           console.error("Failed to send message:", reason);
           toast.error(`Falha ao enviar: ${reason}`);
@@ -608,11 +613,13 @@ export function MessageThread({
         // with the real DB row. If realtime hasn't arrived yet, at least
         // flip status to 'sent' so the UI stops showing "sending".
         if (!opts.silent) onUpdateMessage(tempId, { status: "sent" });
+        if (payload?.reconciliation_required) {
+          toast.warning("Mensagem aceita pelo provedor; registro local pendente. Não reenvie a mensagem.");
+        }
       } catch (err) {
         console.error("Failed to send message:", err);
-        const reason = err instanceof Error ? err.message : "erro de rede";
-        toast.error(`Falha ao enviar: ${reason}`);
-        if (!opts.silent) onUpdateMessage(tempId, { status: "failed" });
+        toast.warning("Resultado do envio não confirmado. Verifique a conversa antes de reenviar.");
+        onUpdateMessage(tempId, { status: "sending" });
       }
     },
     [onNewMessage, onUpdateMessage],
@@ -662,6 +669,11 @@ export function MessageThread({
         const data = await res.json().catch(() => ({}));
 
         if (!res.ok) {
+          if (res.status >= 500 || data?.provider_outcome_unknown) {
+            toast.warning("Resultado do envio não confirmado. Verifique antes de reenviar.");
+            onUpdateMessage(tempId, { status: "sending" });
+            return;
+          }
           const reason = data?.error || `HTTP ${res.status}`;
           console.error("Failed to send media:", reason);
           toast.error(`Falha ao enviar: ${reason}`);
@@ -673,12 +685,14 @@ export function MessageThread({
         }
 
         if (!opts.silent) onUpdateMessage(tempId, { status: "sent" });
+        if (data?.reconciliation_required) {
+          toast.warning("Mídia aceita pelo provedor; registro local pendente. Não reenvie a mensagem.");
+        }
       } catch (err) {
         console.error("Failed to send media:", err);
-        const reason = err instanceof Error ? err.message : "erro de rede";
-        toast.error(`Falha ao enviar: ${reason}`);
-        if (!opts.silent) onUpdateMessage(tempId, { status: "failed" });
-        void deleteAccountMedia(CHAT_MEDIA_BUCKET, payload.path).catch(() => {});
+        toast.warning("Resultado do envio não confirmado. Verifique a conversa antes de reenviar.");
+        onUpdateMessage(tempId, { status: "sending" });
+        // Preserve the attachment: the provider may already be downloading it.
       }
     },
     [onNewMessage, onUpdateMessage],
@@ -797,6 +811,11 @@ export function MessageThread({
         const payload = await res.json().catch(() => ({}));
 
         if (!res.ok) {
+          if (res.status >= 500 || payload?.provider_outcome_unknown) {
+            toast.warning("Resultado do envio não confirmado. Verifique antes de reenviar.");
+            onUpdateMessage(tempId, { status: "sending" });
+            return;
+          }
           const reason = payload?.error || `HTTP ${res.status}`;
           console.error("Failed to send template:", reason);
           toast.error(`Falha ao enviar template: ${reason}`);
@@ -807,9 +826,8 @@ export function MessageThread({
         onUpdateMessage(tempId, { status: "sent" });
       } catch (err) {
         console.error("Failed to send template:", err);
-        const reason = err instanceof Error ? err.message : "erro de rede";
-        toast.error(`Falha ao enviar template: ${reason}`);
-        onUpdateMessage(tempId, { status: "failed" });
+        toast.warning("Resultado do envio não confirmado. Verifique a conversa antes de reenviar.");
+        onUpdateMessage(tempId, { status: "sending" });
       }
     },
     [conversation, onNewMessage, onUpdateMessage],

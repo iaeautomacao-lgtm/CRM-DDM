@@ -25,6 +25,7 @@ export async function POST(request: Request) {
     .select("id, team_id, account_id")
     .eq("status", "pending")
     .is("assigned_agent_id", null)
+    .or(`assignment_retry_at.is.null,assignment_retry_at.lte.${new Date().toISOString()}`)
     // Removido — conversas sem team_id também precisam de retry
     .lte("updated_at", cutoff)
     // Backpressure: uma única execução não deve tentar drenar um backlog
@@ -51,7 +52,13 @@ export async function POST(request: Request) {
         ? await selectAgentForTeam(db, conv.team_id, conv.account_id)
         : await selectAnyAgentForAccount(db, conv.account_id);
 
-      if (!agentId) continue; // ainda ninguém disponível
+      if (!agentId) {
+        const { error: retryError } = await db.from('conversations')
+          .update({ assignment_retry_at: new Date(Date.now() + 5 * 60_000).toISOString() })
+          .eq('id', conv.id).is('assigned_agent_id', null);
+        if (retryError) throw retryError;
+        continue;
+      }
 
       await db
         .from("conversations")

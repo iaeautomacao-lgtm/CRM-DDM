@@ -66,6 +66,7 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/settings": ["owner", "admin"],
   "/equipes": ["owner", "admin"],
   "/perfil": ["owner", "admin"],
+  "/seguranca": ["owner", "admin", "agent", "viewer"],
   "/templates": ["owner", "admin"],
   "/tabulacoes": ["owner", "admin"],
   "/usuarios": ["owner", "admin"],

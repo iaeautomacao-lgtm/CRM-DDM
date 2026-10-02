@@ -64,8 +64,8 @@ interface SendTextEngineArgs {
  * media sends) settle.
  */
 export async function engineSendText(
-  args: SendTextEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
+  args: SendTextEngineArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   const db = supabaseAdmin()
 
   const { data: contact, error: contactErr } = await db
@@ -143,7 +143,8 @@ export async function engineSendText(
     status: 'sent',
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    console.error('[Meta send] Provider accepted; local persistence failed:', msgErr.message)
+    return { whatsapp_message_id: waMessageId, reconciliation_required: true }
   }
 
   await db
@@ -183,8 +184,8 @@ interface SendMediaEngineArgs {
  * the media kind so the inbox renders the right preview.
  */
 export async function engineSendMedia(
-  args: SendMediaEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
+  args: SendMediaEngineArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   const db = supabaseAdmin()
 
   const { data: contact, error: contactErr } = await db
@@ -265,7 +266,8 @@ export async function engineSendMedia(
     status: 'sent',
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    console.error('[Meta send] Provider accepted; local persistence failed:', msgErr.message)
+    return { whatsapp_message_id: waMessageId, reconciliation_required: true }
   }
 
   await db
@@ -319,8 +321,8 @@ interface SendInteractiveListEngineArgs {
  * the `flow_runs.last_prompt_message_id` field for later reference.
  */
 export async function engineSendInteractiveButtons(
-  args: SendInteractiveButtonsEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
+  args: SendInteractiveButtonsEngineArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   return sendInteractiveViaMeta({ ...args, kind: 'buttons' })
 }
 
@@ -329,8 +331,8 @@ export async function engineSendInteractiveButtons(
  * Used when the flow needs more than 3 options (Meta's button cap).
  */
 export async function engineSendInteractiveList(
-  args: SendInteractiveListEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
+  args: SendInteractiveListEngineArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   return sendInteractiveViaMeta({ ...args, kind: 'list' })
 }
 
@@ -365,8 +367,8 @@ interface SendTemplateEngineArgs {
  * `src/lib/automations/meta-send.ts`'s `engineSendTemplate` uses.
  */
 export async function engineMetaSendTemplate(
-  args: SendTemplateEngineArgs,
-): Promise<{ whatsapp_message_id: string }> {
+  args: SendTemplateEngineArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   const db = supabaseAdmin()
 
   const { data: contact, error: contactErr } = await db
@@ -440,7 +442,8 @@ export async function engineMetaSendTemplate(
     status: 'sent',
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    console.error('[Meta send] Provider accepted; local persistence failed:', msgErr.message)
+    return { whatsapp_message_id: waMessageId, reconciliation_required: true }
   }
 
   await db
@@ -460,8 +463,8 @@ type SendInput =
   | (SendInteractiveListEngineArgs & { kind: 'list' })
 
 async function sendInteractiveViaMeta(
-  input: SendInput,
-): Promise<{ whatsapp_message_id: string }> {
+  input: SendInput
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   const db = supabaseAdmin()
 
   // Scope the contact + whatsapp_config lookups by account_id —
@@ -565,7 +568,8 @@ async function sendInteractiveViaMeta(
     status: 'sent',
   })
   if (msgErr) {
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    console.error('[Meta send] Provider accepted; local persistence failed:', msgErr.message)
+    return { whatsapp_message_id: waMessageId, reconciliation_required: true }
   }
 
   await db

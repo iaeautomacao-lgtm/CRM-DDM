@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "HTTP listen address")
+	addr := flag.String("addr", "127.0.0.1:8080", "HTTP listen address")
 	dbPath := flag.String("db", "wacalls.db", "SQLite session database path")
 	staticDir := flag.String("static", "client/dist", "static client directory (optional)")
 	debug := flag.Bool("debug", false, "verbose logging")
@@ -42,7 +42,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	httpSrv := &http.Server{Addr: *addr, Handler: srv.routes()}
+	httpSrv := &http.Server{Addr: *addr, Handler: srv.routes(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		log.Info("HTTP server listening", "addr", *addr)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

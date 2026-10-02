@@ -1,9 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -38,20 +38,7 @@ func (s *server) routes() http.Handler {
 			mux.Handle("/", http.FileServer(http.Dir(s.staticDir)))
 		}
 	}
-	return withCORS(mux)
-}
-
-func withCORS(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Client-Id")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		h.ServeHTTP(w, r)
-	})
+	return s.withServiceAuth(mux)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -81,7 +68,16 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleSessionList(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"sessions": s.sessions.infos()})
+	infos := []SessionInfo{}
+	for _, info := range s.sessions.infos() {
+		if s.sessions.store.accountFor(r.Context(), info.ID) == r.Header.Get("X-Voip-Account") {
+			if r.Header.Get("X-Voip-Role") == "agent" {
+				info.QR = ""
+			}
+			infos = append(infos, info)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": infos})
 }
 
 func (s *server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
@@ -91,13 +87,27 @@ func (s *server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&body)
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
-		name = "Session"
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		return
+	}
+	if _, exists := s.sessions.Get(name); exists {
+		if s.sessions.store.accountFor(r.Context(), name) != r.Header.Get("X-Voip-Account") {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": name})
+		return
 	}
 	id, err := s.sessions.Create(name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	if err := s.sessions.store.bindAccount(r.Context(), id, r.Header.Get("X-Voip-Account")); err != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "session ownership must be verified"})
+		return
+	}
+	s.broker.emitSessionList(s.sessions.infos())
 	writeJSON(w, http.StatusOK, map[string]string{"id": id})
 }
 
@@ -306,17 +316,33 @@ func (s *server) doPlayAudio(sess *Session, w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Downloader & Streamer run in background to return status immediately
+	select {
+	case audioSlots <- struct{}{}:
+	default:
+		http.Error(w, "audio capacity reached", http.StatusTooManyRequests)
+		return
+	}
 	go func() {
-		s.log.Info("downloading audio to play on call", "url", body.URL, "call_id", id)
-		resp, err := http.Get(body.URL)
-		if err != nil {
-			s.log.Error("failed to download audio", "err", err, "call_id", id)
-			return
-		}
-		defer resp.Body.Close()
-
-		audioBytes, err := io.ReadAll(resp.Body)
+		defer func() { <-audioSlots }()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		// Cancel the download as soon as the associated call disappears.
+		go func() {
+			ticker := time.NewTicker(200 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if _, active := sess.reg.get(id); !active {
+						cancel()
+						return
+					}
+				}
+			}
+		}()
+		audioBytes, err := downloadAudio(ctx, body.URL)
 		if err != nil {
 			s.log.Error("failed to read audio bytes", "err", err, "call_id", id)
 			return
@@ -399,5 +425,3 @@ func (s *server) doGetCall(sess *Session, w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": rec.Status, "ended": false})
 }
-
-

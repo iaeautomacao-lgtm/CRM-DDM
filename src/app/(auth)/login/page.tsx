@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { safeReturnPath } from "@/lib/auth/return-path";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +17,11 @@ import {
 } from "@/components/ui/card";
 import { UsersRound } from "lucide-react";
 import { DdmLogo } from "@/components/ui/ddm-logo";
-import { logAuthFx, summarizeSession, summarizeSupabaseCookies } from "@/lib/auth/auth-forensics";
+import {
+  logAuthFx,
+  summarizeSession,
+  summarizeSupabaseCookies,
+} from "@/lib/auth/auth-forensics";
 
 // `useSearchParams` opts the component out of static prerendering
 // unless it sits under a Suspense boundary. We split the form into
@@ -40,7 +45,11 @@ function LoginPageInner() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(
+    searchParams.get("error") === "auth-callback-failed"
+      ? "Não foi possível validar o link. Solicite um novo link de acesso ou recuperação."
+      : null
+  );
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
@@ -76,22 +85,25 @@ function LoginPageInner() {
     if (inviteToken) {
       router.push(`/join/${encodeURIComponent(inviteToken)}`);
     } else {
-      router.push("/dashboard");
+      router.replace(safeReturnPath(searchParams.get("next")));
     }
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-border bg-card">
+    <div className="bg-background flex min-h-screen items-center justify-center px-4">
+      <Card className="border-border bg-card w-full max-w-md">
         <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+          <div className="bg-primary/10 mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
             {inviteToken ? (
-              <UsersRound className="h-6 w-6 text-primary" />
+              <UsersRound className="text-primary h-6 w-6" />
             ) : (
-              <DdmLogo className="h-7 w-7 text-primary" outlineColor="oklch(from var(--primary) l c h / 0.1)" />
+              <DdmLogo
+                className="text-primary h-7 w-7"
+                outlineColor="oklch(from var(--primary) l c h / 0.1)"
+              />
             )}
           </div>
-          <CardTitle className="text-xl text-foreground">
+          <CardTitle className="text-foreground text-xl">
             {inviteToken ? "Entrar para aceitar" : "Bem-vindo de volta"}
           </CardTitle>
           <CardDescription className="text-muted-foreground">
@@ -103,7 +115,10 @@ function LoginPageInner() {
         <CardContent>
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
             {error && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <div
+                role="alert"
+                className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+              >
                 {error}
               </div>
             )}
@@ -114,7 +129,7 @@ function LoginPageInner() {
               </Label>
               <Input
                 id="email"
-                type="email"
+                type="email" autoComplete="email"
                 placeholder="seu@exemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -130,14 +145,14 @@ function LoginPageInner() {
                 </Label>
                 <Link
                   href="/forgot-password"
-                  className="text-sm text-primary hover:text-primary/80"
+                  className="text-primary hover:text-primary/80 text-sm"
                 >
                   Esqueceu sua senha?
                 </Link>
               </div>
               <Input
                 id="password"
-                type="password"
+                type="password" autoComplete="current-password"
                 placeholder="Digite sua senha"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -149,13 +164,13 @@ function LoginPageInner() {
             <Button
               type="submit"
               disabled={loading}
-              className="mt-2 h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 mt-2 h-10 w-full disabled:opacity-50"
             >
               {loading ? "Entrando..." : "Entrar"}
             </Button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-muted-foreground">
+          <p className="text-muted-foreground mt-6 text-center text-sm">
             Não tem uma conta?{" "}
             <Link
               href={
