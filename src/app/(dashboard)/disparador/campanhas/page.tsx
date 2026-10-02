@@ -29,7 +29,9 @@ import {
   CheckCircle2,
   Download,
   ListChecks,
-  Activity
+  Activity,
+  AlertTriangle,
+  Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -536,6 +538,34 @@ const ALT_PHONE_COLUMN_KEYS = [
 
 function countAltPhones(raw: Record<string, string>): number {
   return ALT_PHONE_COLUMN_KEYS.filter((keys) => keys.some((k) => raw[k]?.trim())).length;
+}
+
+// Nomes de tier da Meta traduzidos para PT-BR, exibidos no modal de
+// confirmação de início de campanha.
+const TIER_LABELS: Record<string, string> = {
+  TIER_50: "Nível inicial",
+  TIER_1K: "Nível 1",
+  TIER_10K: "Nível 2",
+  TIER_100K: "Nível 3",
+  UNLIMITED: "Ilimitado",
+};
+
+function tierLabel(tier: string | null | undefined): string {
+  if (!tier) return "Nível 1 (padrão)";
+  return TIER_LABELS[tier] ?? tier;
+}
+
+// Qualidade do número (Meta) traduzida — usada só para exibição, nunca
+// para bloquear o início da campanha (ver AlertDialog de confirmação).
+const QUALITY_LABELS: Record<string, string> = {
+  GREEN: "VERDE",
+  YELLOW: "AMARELA",
+  RED: "VERMELHA",
+};
+
+function qualityLabel(rating: string | null | undefined): string {
+  if (!rating) return "";
+  return QUALITY_LABELS[rating] ?? rating;
 }
 
 function isDraftEmpty(draft: CampaignDraft): boolean {
@@ -3568,14 +3598,14 @@ export default function CampanhasPage() {
                                   : "text-red-600 font-medium"
                               }
                             >
-                              {ch.quality_rating}
+                              {qualityLabel(ch.quality_rating)}
                             </span>
                           )}
                         </div>
                         <div className="text-muted-foreground">
-                          Tier:{" "}
+                          Nível:{" "}
                           <span className="font-medium text-foreground">
-                            {ch.tier ?? "TIER_1K (padrão)"}
+                            {tierLabel(ch.tier)}
                           </span>{" "}
                           — até{" "}
                           <span className="font-medium text-foreground">
@@ -3585,6 +3615,28 @@ export default function CampanhasPage() {
                           </span>{" "}
                           disparos/dia
                         </div>
+
+                        {ch.quality_rating === "RED" && (
+                          <div className="flex items-start gap-2 rounded-md border border-red-500 bg-red-500/10 p-2 text-red-700 dark:text-red-400">
+                            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                            <span className="font-medium">
+                              Qualidade VERMELHA — este número está em risco de
+                              restrição pela Meta. Avalie o conteúdo das
+                              mensagens antes de prosseguir.
+                            </span>
+                          </div>
+                        )}
+
+                        {ch.quality_rating === "YELLOW" && (
+                          <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                            <span>
+                              Qualidade AMARELA — número em observação pela
+                              Meta, acompanhe o desempenho dos disparos.
+                            </span>
+                          </div>
+                        )}
+
                         {ch.error && (
                           <div className="text-xs text-yellow-600">
                             ⚠ {ch.error} — limite padrão aplicado
@@ -3602,7 +3654,7 @@ export default function CampanhasPage() {
 
                 {!infoLoading && campaignInfo && !campaignInfo.hasMeta && (
                   <p className="text-sm text-muted-foreground">
-                    Canal WAHA — sem limites de tier da Meta.
+                    Canal WAHA — sem limite de nível da Meta.
                   </p>
                 )}
 
