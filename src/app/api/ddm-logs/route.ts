@@ -2,13 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-// Antes protegida só pela obscuridade da URL — agora exige HTTP Basic
-// Auth via DDM_LOGS_USER/DDM_LOGS_PASSWORD (fallback "ddm"/"ddm2026"
-// se as env vars não estiverem setadas, ver .env.local.example). A
-// página passou a carregar user_id/page/action (migration 092) e
-// page_views/user_sessions (093/094), com dado atribuível a um
-// usuário real — a obscuridade de URL deixou de ser proteção
-// suficiente pra esse volume de PII.
+// Explicit support credentials required. Account-scoped session authorization
+// remains a separate backlog item; never provide default credentials.
 function isAuthorized(request: Request): boolean {
   const header = request.headers.get("authorization");
   if (!header || !header.startsWith("Basic ")) return false;
@@ -24,8 +19,9 @@ function isAuthorized(request: Request): boolean {
 
   const user = decoded.slice(0, sepIdx);
   const password = decoded.slice(sepIdx + 1);
-  const expectedUser = process.env.DDM_LOGS_USER || "ddm";
-  const expectedPassword = process.env.DDM_LOGS_PASSWORD || "ddm2026";
+  const expectedUser = process.env.DDM_LOGS_USER;
+  const expectedPassword = process.env.DDM_LOGS_PASSWORD;
+  if (!expectedUser || !expectedPassword) return false;
 
   // timingSafeEqual exige buffers do mesmo tamanho — comparar o
   // tamanho primeiro não vaza mais informação do que a própria API já
@@ -97,14 +93,7 @@ const VALID_SOURCES = new Set([
 ]);
 
 type Tab = "events" | "users" | "sessions" | "actions" | "tests" | "feedback";
-const VALID_TABS = new Set<Tab>([
-  "events",
-  "users",
-  "sessions",
-  "actions",
-  "tests",
-  "feedback",
-]);
+const VALID_TABS = new Set<Tab>(["events", "users", "sessions", "actions", "tests", "feedback"]);
 
 const DEFAULT_LIMIT = 200;
 const MAX_LIMIT = 500;
@@ -159,7 +148,15 @@ export async function GET(request: Request) {
     if (tab === "feedback") {
       return await getFeedbackTab(db, { from, cursor, limit });
     }
-    return await getEventsTab(db, { source, level, from, to, cursor, limit, userId });
+    return await getEventsTab(db, {
+      source,
+      level,
+      from,
+      to,
+      cursor,
+      limit,
+      userId,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "Erro ao buscar logs" }, { status: 500 });
   }
@@ -297,7 +294,7 @@ async function getEventsTab(
 
   const hasMore = combined.length > limit;
   const page = combined.slice(0, limit);
-  const nextCursor = hasMore ? page[page.length - 1]?.created_at ?? null : null;
+  const nextCursor = hasMore ? (page[page.length - 1]?.created_at ?? null) : null;
 
   return NextResponse.json({
     logs: page,
@@ -313,7 +310,9 @@ async function getEventsTab(
 // limita a 50 linhas, ordenadas por error_count desc.
 // ------------------------------------------------------------
 async function getUsersTab(db: SupabaseClient, from: string): Promise<NextResponse> {
-  const { data, error } = await db.rpc("get_user_log_ranking", { p_from: from });
+  const { data, error } = await db.rpc("get_user_log_ranking", {
+    p_from: from,
+  });
   if (error) throw error;
 
   return NextResponse.json({
@@ -358,7 +357,7 @@ async function getSessionsTab(
   const rows = data ?? [];
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor = hasMore ? page[page.length - 1]?.started_at ?? null : null;
+  const nextCursor = hasMore ? (page[page.length - 1]?.started_at ?? null) : null;
 
   return NextResponse.json({
     sessions: page,
@@ -403,7 +402,7 @@ async function getActionsTab(
   const rows = (data ?? []) as any[];
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor = hasMore ? page[page.length - 1]?.created_at ?? null : null;
+  const nextCursor = hasMore ? (page[page.length - 1]?.created_at ?? null) : null;
 
   return NextResponse.json({
     logs: page,
@@ -458,7 +457,7 @@ async function getFeedbackTab(
   const rows = (data ?? []) as any[];
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor = hasMore ? page[page.length - 1]?.created_at ?? null : null;
+  const nextCursor = hasMore ? (page[page.length - 1]?.created_at ?? null) : null;
 
   return NextResponse.json({
     logs: page,

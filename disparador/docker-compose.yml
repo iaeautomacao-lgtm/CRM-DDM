@@ -4,7 +4,7 @@ services:
   backend:
     build: ./backend
     ports:
-      - '3001:3001'
+      - '127.0.0.1:3001:3001'
     environment:
       - NODE_ENV=development
     env_file:
@@ -18,7 +18,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - '3000:3000'
+      - '127.0.0.1:3000:3000'
     environment:
       - NODE_ENV=development
     env_file:
@@ -30,14 +30,14 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
 
   bull-board:
     image: deadly0/bull-board
     ports:
-      - '3002:3000'
+      - '127.0.0.1:3002:3000'
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379

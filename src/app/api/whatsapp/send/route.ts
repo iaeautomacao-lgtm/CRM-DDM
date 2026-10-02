@@ -36,10 +36,7 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Per-user rate limit. Bucket key is scoped to this route so
@@ -62,7 +59,7 @@ export async function POST(request: Request) {
     if (!accountId) {
       return NextResponse.json(
         { error: 'Your profile is not linked to an account.' },
-        { status: 403 },
+        { status: 403 }
       )
     }
 
@@ -98,7 +95,9 @@ export async function POST(request: Request) {
     // Media kinds (image/video/document/audio) are sent to Meta via a
     // public URL the composer already uploaded to the chat-media bucket.
     const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const
-    const isMediaKind = (MEDIA_KINDS as readonly string[]).includes(message_type)
+    const isMediaKind = (MEDIA_KINDS as readonly string[]).includes(
+      message_type
+    )
 
     // Reject anything outside the known set up front rather than letting
     // an unknown type fall through to the text path with empty content.
@@ -149,7 +148,10 @@ export async function POST(request: Request) {
     // existing thread; with `contact_id` we find-or-create one for the
     // contact so a business-initiated template send (Contact detail view)
     // reuses this whole path — phone variants, send-builder, persistence.
-    let conversation: { id: string; contact?: { id: string; phone?: string } | null } | null = null
+    let conversation: {
+      id: string
+      contact?: { id: string; phone?: string } | null
+    } | null = null
 
     if (conversationIdInput) {
       const { data, error: convError } = await supabase
@@ -248,15 +250,22 @@ export async function POST(request: Request) {
     if (conversation && (conversation as any).config_id) {
       configQuery = configQuery.eq('id', (conversation as any).config_id)
     } else if (conversation && (conversation as any).waha_session) {
-      configQuery = configQuery.eq('waha_session', (conversation as any).waha_session)
+      configQuery = configQuery.eq(
+        'waha_session',
+        (conversation as any).waha_session
+      )
     }
 
     const { data: configList, error: configError } = await configQuery
 
-    const isListEmpty = !configList || (Array.isArray(configList) && configList.length === 0)
+    const isListEmpty =
+      !configList || (Array.isArray(configList) && configList.length === 0)
     if (configError || isListEmpty) {
       return NextResponse.json(
-        { error: 'WhatsApp not configured. Please set up your WhatsApp integration first.' },
+        {
+          error:
+            'WhatsApp not configured. Please set up your WhatsApp integration first.',
+        },
         { status: 400 }
       )
     }
@@ -352,7 +361,7 @@ export async function POST(request: Request) {
             error:
               'Template row is malformed locally — run "Sync from Meta" in Settings to repair it.',
           },
-          { status: 500 },
+          { status: 500 }
         )
       }
       templateRow = data ?? null
@@ -369,14 +378,23 @@ export async function POST(request: Request) {
           let text = `Template: ${template_name}`
           if (templateRow) {
             let bodyText = templateRow.body_text
-            const params = template_message_params?.body?.parameters || template_params || []
+            const params =
+              template_message_params?.body?.parameters || template_params || []
             params.forEach((param: any, idx: number) => {
-              const val = typeof param === 'string' ? param : (param.text || '')
-              bodyText = bodyText.replace(new RegExp(`\\{\\{${idx + 1}\\}\\}`, 'g'), val)
+              const val = typeof param === 'string' ? param : param.text || ''
+              bodyText = bodyText.replace(
+                new RegExp(`\\{\\{${idx + 1}\\}\\}`, 'g'),
+                val
+              )
             })
             text = bodyText
           }
-          const result = await sendWahaTextMessage(wahaConfig, phone, text, contextMessageId)
+          const result = await sendWahaTextMessage(
+            wahaConfig,
+            phone,
+            text,
+            contextMessageId
+          )
           return result.messageId
         }
         if (isMediaKind) {
@@ -457,16 +475,23 @@ export async function POST(request: Request) {
             throw err
           }
           lastError = err
-          console.warn(`[whatsapp/send] variant "${variant}" rejected by Meta, trying next…`)
+          console.warn(
+            `[whatsapp/send] variant "${variant}" rejected by Meta, trying next…`
+          )
         }
       }
 
       if (lastError) throw lastError
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown API error'
-      console.error(`${config.provider === 'waha' ? 'WAHA' : 'Meta'} API send failed:`, message)
+      console.error(
+        `${config.provider === 'waha' ? 'WAHA' : 'Meta'} API send failed:`,
+        message
+      )
       return NextResponse.json(
-        { error: `${config.provider === 'waha' ? 'WAHA' : 'Meta'} API error: ${message}` },
+        {
+          error: `${config.provider === 'waha' ? 'WAHA' : 'Meta'} API error: ${message}`,
+        },
         { status: 502 }
       )
     }
@@ -509,8 +534,15 @@ export async function POST(request: Request) {
     if (msgError) {
       console.error('Error inserting sent message:', msgError)
       return NextResponse.json(
-        { error: `Message sent to Meta but failed to save to DB: ${msgError.message}` },
-        { status: 500 }
+        {
+          success: true,
+          saved: false,
+          reconciliation_required: true,
+          whatsapp_message_id: waMessageId,
+          warning:
+            'Envio aceito pelo provedor; registro local pendente. Não reenviar.',
+        },
+        { status: 202 }
       )
     }
 
@@ -561,7 +593,7 @@ export async function POST(request: Request) {
     } catch (err) {
       console.error(
         '[flows] pause-on-agent-send threw:',
-        err instanceof Error ? err.message : err,
+        err instanceof Error ? err.message : err
       )
     }
 
@@ -593,7 +625,7 @@ async function findOrCreateConversation(
   accountId: string,
   userId: string,
   contactId: string,
-  wahaSession?: string,
+  wahaSession?: string
 ) {
   let query = supabase
     .from('conversations')
@@ -627,7 +659,10 @@ async function findOrCreateConversation(
     .single()
 
   if (error) {
-    console.error('Error creating conversation for contact send:', error.message)
+    console.error(
+      'Error creating conversation for contact send:',
+      error.message
+    )
     return null
   }
 

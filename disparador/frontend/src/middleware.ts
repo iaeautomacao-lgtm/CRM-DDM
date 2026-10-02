@@ -8,11 +8,9 @@ export function middleware(request: NextRequest) {
   const isPublic = pathname.startsWith('/auth');
 
   if (!isPublic && !token) {
-    return NextResponse.redirect(new URL('/auth/login', request.url));
-  }
-
-  if (isPublic && token) {
-    return NextResponse.redirect(new URL('/dashboard', request.url));
+    const login = new URL('/auth/login', request.url);
+    login.searchParams.set('next', pathname + request.nextUrl.search);
+    return NextResponse.redirect(login);
   }
 
   return NextResponse.next();

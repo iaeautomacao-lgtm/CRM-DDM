@@ -61,6 +61,8 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  // Each service owns its dependencies; parent lockfiles must not change resolution.
+  turbopack: { root: __dirname },
   /**
    * Cache-Control policy.
    *

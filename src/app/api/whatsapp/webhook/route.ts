@@ -9,7 +9,6 @@ import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
 import { writeLog, maskPhone } from '@/lib/logger'
-import { autoBlacklistOn131026 } from '@/lib/disparador/auto-blacklist'
 import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
@@ -47,10 +46,20 @@ interface WhatsAppMessage {
   text?: { body: string }
   image?: { id: string; mime_type: string; caption?: string }
   video?: { id: string; mime_type: string; caption?: string }
-  document?: { id: string; mime_type: string; filename?: string; caption?: string }
+  document?: {
+    id: string
+    mime_type: string
+    filename?: string
+    caption?: string
+  }
   audio?: { id: string; mime_type: string }
   sticker?: { id: string; mime_type: string }
-  location?: { latitude: number; longitude: number; name?: string; address?: string }
+  location?: {
+    latitude: number
+    longitude: number
+    name?: string
+    address?: string
+  }
   reaction?: { message_id: string; emoji: string }
   /**
    * Set when the customer taps a button or list row on an interactive
@@ -149,7 +158,7 @@ export async function GET(request: Request) {
             if (error) {
               console.warn(
                 '[webhook] verify_token GCM upgrade failed:',
-                (error as { message?: string })?.message ?? error,
+                (error as { message?: string })?.message ?? error
               )
             }
           })
@@ -194,7 +203,8 @@ export async function POST(request: Request) {
   // We only need the first entry/change's phone_number_id: Meta batches
   // webhook deliveries per subscribed App, so every entry in one POST
   // body is already signed with the same App Secret.
-  const phoneNumberId = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
+  const phoneNumberId =
+    body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
 
   let channelAppSecret: string | null = null
   if (phoneNumberId) {
@@ -209,7 +219,11 @@ export async function POST(request: Request) {
       try {
         channelAppSecret = decrypt(config.app_secret)
       } catch (err) {
-        console.error('[webhook] failed to decrypt app_secret for phone_number_id:', phoneNumberId, err)
+        console.error(
+          '[webhook] failed to decrypt app_secret for phone_number_id:',
+          phoneNumberId,
+          err
+        )
       }
     }
   }
@@ -219,10 +233,13 @@ export async function POST(request: Request) {
   const secret = channelAppSecret ?? process.env.META_APP_SECRET ?? null
 
   if (!secret) {
-    console.error('[webhook] no App Secret configured for phone_number_id:', phoneNumberId)
+    console.error(
+      '[webhook] no App Secret configured for phone_number_id:',
+      phoneNumberId
+    )
     return NextResponse.json(
       { error: 'App Secret não configurado para este canal' },
-      { status: 401 },
+      { status: 401 }
     )
   }
 
@@ -283,7 +300,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       if (isTemplateWebhookField(change.field)) {
         await handleTemplateWebhookChange(
           { field: change.field, value: change.value as unknown },
-          supabaseAdmin(),
+          supabaseAdmin()
         )
         continue
       }
@@ -332,7 +349,10 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
           phoneNumberId,
           '— inbound message dropped. Resolve duplicates so each number maps to a single account.',
           'Account owners:',
-          configRows.map((r: { account_id: string; user_id: string }) => `${r.account_id} (admin ${r.user_id})`)
+          configRows.map(
+            (r: { account_id: string; user_id: string }) =>
+              `${r.account_id} (admin ${r.user_id})`
+          )
         )
         continue
       }
@@ -369,94 +389,37 @@ async function handleStatusUpdate(status: {
   timestamp: string
   recipient_id: string
 }) {
-  // 1) Mirror onto messages (legacy behavior) — Meta's status values
-  //    already match the CHECK constraint on messages.status.
+  const allowedPrevious: Record<string, string[]> = {
+    sent: ['pending', 'sending'],
+    delivered: ['pending', 'sending', 'sent'],
+    read: ['pending', 'sending', 'sent', 'delivered'],
+    failed: ['pending', 'sending', 'sent'],
+  }
+  if (!allowedPrevious[status.status]) return
   const { error: msgErr } = await supabaseAdmin()
     .from('messages')
     .update({ status: status.status })
     .eq('message_id', status.id)
+    .in('status', allowedPrevious[status.status])
+  if (msgErr) throw msgErr
 
-  if (msgErr) {
-    console.error('Error updating message status:', msgErr)
-  }
-
-  // ── Disparador queue tracking ─────────────────────────────────────
-  // Mirror delivery status back into disp_message_queue so the
-  // campaign monitor can show delivered/read/failed per message.
-  const { data: queueItem } = await supabaseAdmin()
-    .from('disp_message_queue')
-    .select('id, status, campaign_id')
-    .eq('waha_message_id', status.id)
-    .maybeSingle()
-
-  if (queueItem) {
-    const QUEUE_STATUS_LADDER = ['agendado', 'enviando', 'enviado', 'entregue', 'lido']
-    const currentIdx = QUEUE_STATUS_LADDER.indexOf(queueItem.status)
-
-    const incomingQueueStatus =
-      status.status === 'delivered' ? 'entregue' :
-      status.status === 'read' ? 'lido' :
-      status.status === 'failed' ? 'erro' :
-      null
-
-    if (incomingQueueStatus) {
-      // Guard: só avança (ou aceita erro a partir de enviado/entregue)
-      const isValidTransition =
-        incomingQueueStatus === 'erro'
-          ? currentIdx >= QUEUE_STATUS_LADDER.indexOf('enviado')
-          : QUEUE_STATUS_LADDER.indexOf(incomingQueueStatus) > currentIdx
-
-      if (isValidTransition) {
-        const queueUpdate: Record<string, unknown> = {
-          status: incomingQueueStatus,
-        }
-
-        // Captura motivo de falha da Meta (campo errors[])
-        let failedMetaCode: number | null = null
-        if (incomingQueueStatus === 'erro') {
-          const metaErrors = (status as any).errors as
-            Array<{ code: number; title: string }> | undefined
-          if (metaErrors && metaErrors.length > 0) {
-            failedMetaCode = metaErrors[0].code
-            queueUpdate.erro = `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
-          } else {
-            queueUpdate.erro = 'Falha na entrega (Meta)'
-          }
-        }
-
-        await supabaseAdmin()
-          .from('disp_message_queue')
-          .update(queueUpdate)
-          .eq('id', queueItem.id)
-
-        // 131026 (janela de 24h encerrada) reportado pelo status de
-        // entrega assíncrono — bloqueia o número automaticamente pra não
-        // repetir a mesma falha em campanhas futuras. Fire-and-forget:
-        // nunca deve atrasar/derrubar o processamento do webhook.
-        if (incomingQueueStatus === 'erro' && failedMetaCode === 131026) {
-          void autoBlacklistOn131026(status.recipient_id, queueItem.campaign_id ?? null)
-        }
-
-        // Incrementar métricas da campanha
-        if (incomingQueueStatus === 'entregue') {
-          await supabaseAdmin().rpc('increment_campaign_metric', {
-            p_campaign_id: queueItem.campaign_id,
-            p_field: 'total_entregues',
-          })
-        } else if (incomingQueueStatus === 'lido') {
-          await supabaseAdmin().rpc('increment_campaign_metric', {
-            p_campaign_id: queueItem.campaign_id,
-            p_field: 'total_lidos',
-          })
-        } else if (incomingQueueStatus === 'erro') {
-          await supabaseAdmin().rpc('increment_campaign_metric', {
-            p_campaign_id: queueItem.campaign_id,
-            p_field: 'total_erros',
-          })
-        }
-      }
+  const errors = (
+    status as typeof status & {
+      errors?: Array<{ code: number; title: string }>
     }
-  }
+  ).errors
+  const failureReason = errors?.[0]
+    ? `Meta: ${errors[0].title} (code ${errors[0].code})`
+    : null
+  const { error: transitionError } = await supabaseAdmin().rpc(
+    'apply_dispatch_status',
+    {
+      p_message_id: status.id,
+      p_status: status.status,
+      p_error: failureReason,
+    }
+  )
+  if (transitionError) throw transitionError
 
   // ── Channel-test tracking ─────────────────────────────────────────
   // Mirror status into whatsapp_test_sends for one-off "Testar canal"
@@ -467,10 +430,12 @@ async function handleStatusUpdate(status: {
   const testSendUpdate: Record<string, unknown> = { status: status.status }
   if (status.status === 'failed') {
     const metaErrors = (status as any).errors as
-      Array<{ code: number; title: string }> | undefined
-    testSendUpdate.erro = metaErrors && metaErrors.length > 0
-      ? `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
-      : 'Falha na entrega (Meta)'
+      | Array<{ code: number; title: string }>
+      | undefined
+    testSendUpdate.erro =
+      metaErrors && metaErrors.length > 0
+        ? `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
+        : 'Falha na entrega (Meta)'
   }
   const { error: testSendErr } = await supabaseAdmin()
     .from('whatsapp_test_sends')
@@ -579,7 +544,7 @@ async function processMessage(
   // this, a flow bound to a specific Meta number via /canais is
   // silently ignored and every inbound falls through to the
   // account-wide keyword/first-inbound scan instead.
-  configId: string,
+  configId: string
 ) {
   const senderPhone = normalizePhone(message.from)
   const contactName = contact.profile.name
@@ -599,7 +564,7 @@ async function processMessage(
     accountId,
     configOwnerUserId,
     contactRecord.id,
-    configId,
+    configId
   )
   if (!conversation) return
 
@@ -646,14 +611,20 @@ async function processMessage(
   // Map incoming WhatsApp types that aren't in that list to the closest
   // allowed value so the INSERT doesn't fail with a constraint error.
   const ALLOWED_CONTENT_TYPES = new Set([
-    'text', 'image', 'document', 'audio', 'video',
-    'location', 'template', 'interactive',
+    'text',
+    'image',
+    'document',
+    'audio',
+    'video',
+    'location',
+    'template',
+    'interactive',
   ])
   const contentType = ALLOWED_CONTENT_TYPES.has(message.type)
     ? message.type
     : message.type === 'sticker'
-      ? 'image'   // stickers are images
-      : 'text'    // reaction, unknown → text fallback
+      ? 'image' // stickers are images
+      : 'text' // reaction, unknown → text fallback
 
   // Determine whether this is the contact's very first inbound message
   // BEFORE we insert, so the count is accurate. Covers the case where
@@ -666,21 +637,23 @@ async function processMessage(
     .eq('sender_type', 'customer')
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
 
-  const { error: msgError } = await supabaseAdmin().from('messages').insert({
-    conversation_id: conversation.id,
-    sender_type: 'customer',
-    content_type: contentType,
-    content_text: contentText,
-    media_url: mediaUrl,
-    message_id: message.id,
-    status: 'delivered',
-    created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
-    reply_to_message_id: replyToInternalId,
-    // Only populated for content_type='interactive'. Migration 010 added
-    // the column; null for every other content_type so existing inserts
-    // behave identically.
-    interactive_reply_id: interactiveReplyId,
-  })
+  const { error: msgError } = await supabaseAdmin()
+    .from('messages')
+    .insert({
+      conversation_id: conversation.id,
+      sender_type: 'customer',
+      content_type: contentType,
+      content_text: contentText,
+      media_url: mediaUrl,
+      message_id: message.id,
+      status: 'delivered',
+      created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+      reply_to_message_id: replyToInternalId,
+      // Only populated for content_type='interactive'. Migration 010 added
+      // the column; null for every other content_type so existing inserts
+      // behave identically.
+      interactive_reply_id: interactiveReplyId,
+    })
 
   if (msgError) {
     // 23505 = unique_violation na migration 088 (idx_messages_message_id_unique)
@@ -689,7 +662,10 @@ async function processMessage(
     // novo" — sem isso, redelivery duplicava a mensagem no inbox e incrementava
     // unread_count duas vezes.
     if (msgError.code === '23505') {
-      console.log('[webhook] Mensagem duplicada ignorada (já processada):', message.id)
+      console.log(
+        '[webhook] Mensagem duplicada ignorada (já processada):',
+        message.id
+      )
       return
     }
     console.error('Error inserting message:', msgError)
@@ -725,9 +701,12 @@ async function processMessage(
   // início da função e escrevia o calculado, então duas mensagens do
   // mesmo contato chegando em rajada podiam ler o mesmo valor base e uma
   // escrita perder o incremento da outra (lost update).
-  const { error: unreadError } = await supabaseAdmin().rpc('increment_unread_count', {
-    conversation_id: conversation.id,
-  })
+  const { error: unreadError } = await supabaseAdmin().rpc(
+    'increment_unread_count',
+    {
+      conversation_id: conversation.id,
+    }
+  )
   if (unreadError) {
     console.error('Error incrementing unread_count:', unreadError)
   }
@@ -762,19 +741,18 @@ async function processMessage(
     contactId: contactRecord.id,
     conversationId: conversation.id,
     configId,
-    message:
-      interactiveReplyId
-        ? {
-            kind: 'interactive_reply',
-            reply_id: interactiveReplyId,
-            reply_title: contentText ?? '',
-            meta_message_id: message.id,
-          }
-        : {
-            kind: 'text',
-            text: contentText ?? message.text?.body ?? '',
-            meta_message_id: message.id,
-          },
+    message: interactiveReplyId
+      ? {
+          kind: 'interactive_reply',
+          reply_id: interactiveReplyId,
+          reply_title: contentText ?? '',
+          meta_message_id: message.id,
+        }
+      : {
+          kind: 'text',
+          text: contentText ?? message.text?.body ?? '',
+          meta_message_id: message.id,
+        },
     isFirstInboundMessage,
   })
   const flowConsumed = flowResult.consumed
@@ -812,28 +790,32 @@ async function processMessage(
         undefined, // onToolCall
         undefined, // onToolResult
         undefined, // nodeKey
-        configId,
-      )
-        .catch((err) => {
-          console.error('[AI Agent] handleAiAutoResponse failed:', err)
-          void writeLog({
-            account_id: accountId,
-            level: 'error',
-            source: 'ai_agent',
-            event: 'ai_agent_error',
-            message: 'handleAiAutoResponse falhou no webhook Meta',
-            payload: {
-              contact_id: contactRecord.id,
-              conversation_id: conversation.id,
-              erro: err instanceof Error ? err.message : String(err),
-            },
-          })
+        configId
+      ).catch((err) => {
+        console.error('[AI Agent] handleAiAutoResponse failed:', err)
+        void writeLog({
+          account_id: accountId,
+          level: 'error',
+          source: 'ai_agent',
+          event: 'ai_agent_error',
+          message: 'handleAiAutoResponse falhou no webhook Meta',
+          payload: {
+            contact_id: contactRecord.id,
+            conversation_id: conversation.id,
+            erro: err instanceof Error ? err.message : String(err),
+          },
         })
+      })
     }
 
     // Trigger Sentiment and Auto-Tagging Analysis
-    const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
-    void analyzeConversationSentimentAndTags(accountId, contactRecord.id, conversation.id)
+    const { analyzeConversationSentimentAndTags } =
+      await import('@/lib/ai/sentiment')
+    void analyzeConversationSentimentAndTags(
+      accountId,
+      contactRecord.id,
+      conversation.id
+    )
 
     // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
     const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
@@ -863,7 +845,8 @@ async function processMessage(
   // manually-imported contacts sending for the first time. We dispatch both
   // so users can pick whichever semantic they want; an automation that
   // listens to only one trigger runs only when that trigger matches.
-  if (contactOutcome.wasCreated) automationTriggers.unshift('new_contact_created')
+  if (contactOutcome.wasCreated)
+    automationTriggers.unshift('new_contact_created')
   if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
   for (const triggerType of automationTriggers) {
     runAutomationsForTrigger({
@@ -951,16 +934,23 @@ async function downloadAndStoreMetaMedia(
       return null
     }
 
-    const finalContentType = contentType || mediaInfo.mimeType || 'application/octet-stream'
+    const finalContentType =
+      contentType || mediaInfo.mimeType || 'application/octet-stream'
     const ext = extensionForMimeType(finalContentType, fallbackExt)
     const storagePath = `meta/${mediaId}.${ext}`
 
     const { error: uploadError } = await supabaseAdmin()
       .storage.from('chat-media')
-      .upload(storagePath, buffer, { contentType: finalContentType, upsert: true })
+      .upload(storagePath, buffer, {
+        contentType: finalContentType,
+        upsert: true,
+      })
 
     if (uploadError) {
-      console.error(`[webhook] Failed to upload Meta media ${mediaId} to Storage:`, uploadError.message)
+      console.error(
+        `[webhook] Failed to upload Meta media ${mediaId} to Storage:`,
+        uploadError.message
+      )
       void writeLog({
         level: 'warn',
         source: 'webhook_meta',
@@ -971,16 +961,24 @@ async function downloadAndStoreMetaMedia(
       return null
     }
 
-    const { data } = supabaseAdmin().storage.from('chat-media').getPublicUrl(storagePath)
+    const { data } = supabaseAdmin()
+      .storage.from('chat-media')
+      .getPublicUrl(storagePath)
     return data.publicUrl
   } catch (err: any) {
-    console.error(`[webhook] Failed to download/store Meta media ${mediaId}:`, err)
+    console.error(
+      `[webhook] Failed to download/store Meta media ${mediaId}:`,
+      err
+    )
     void writeLog({
       level: 'warn',
       source: 'webhook_meta',
       event: 'media_upload_failed',
       message: `Falha ao baixar/armazenar mídia ${mediaId} da Meta`,
-      payload: { media_id: mediaId, erro: err instanceof Error ? err.message : String(err) },
+      payload: {
+        media_id: mediaId,
+        erro: err instanceof Error ? err.message : String(err),
+      },
     })
     return null
   }
@@ -1006,9 +1004,7 @@ async function parseMessageContent(
   // the args swapped, so every verification hit an invalid Meta URL and
   // fell through to the catch block, leaving mediaUrl as null. That's
   // why images showed up as empty bubbles in the inbox.
-  const verifyAndBuildUrl = async (
-    mediaId: string
-  ): Promise<string | null> => {
+  const verifyAndBuildUrl = async (mediaId: string): Promise<string | null> => {
     try {
       await getMediaUrl({ mediaId, accessToken })
       return `/api/whatsapp/media/${mediaId}`
@@ -1114,7 +1110,11 @@ async function parseMessageContent(
     case 'location':
       if (message.location) {
         const loc = message.location
-        const locationText = [loc.name, loc.address, `${loc.latitude},${loc.longitude}`]
+        const locationText = [
+          loc.name,
+          loc.address,
+          `${loc.latitude},${loc.longitude}`,
+        ]
           .filter(Boolean)
           .join(' - ')
         return { ...empty, contentText: locationText }
@@ -1176,7 +1176,7 @@ async function findOrCreateContact(
   const existingContact = await findExistingContact(
     supabaseAdmin(),
     accountId,
-    phone,
+    phone
   )
 
   if (existingContact) {
@@ -1233,7 +1233,7 @@ async function findOrCreateConversation(
   accountId: string,
   configOwnerUserId: string,
   contactId: string,
-  configId: string,
+  configId: string
 ) {
   // Look for existing conversation in this account. `.single()` used to
   // throw PGRST116 (and silently fall through to creating a duplicate
@@ -1249,7 +1249,7 @@ async function findOrCreateConversation(
     .limit(1)
 
   if (!findError && existing && existing.length > 0) {
-    const conv = existing[0] as { status: string } & typeof existing[0]
+    const conv = existing[0] as { status: string } & (typeof existing)[0]
     // Conversa fechada → cria uma nova em vez de reutilizar.
     // Isso garante que um novo contato reinicie o fluxo do BEN
     // mesmo que já tenha sido atendido antes.

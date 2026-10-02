@@ -22,7 +22,7 @@ export default function ResetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  
+
   const router = useRouter();
   const supabase = createClient();
 
@@ -57,23 +57,23 @@ export default function ResetPasswordPage() {
 
     // Redireciona para o login após 3 segundos
     setTimeout(() => {
-      router.push("/login");
+      router.replace("/dashboard");
     }, 3000);
   };
 
   if (success) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md border-border bg-card">
+      <div className="bg-background flex min-h-screen items-center justify-center px-4">
+        <Card className="border-border bg-card w-full max-w-md">
           <CardHeader className="items-center text-center">
-            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-              <CheckCircle className="h-6 w-6 text-primary" />
+            <div className="bg-primary/10 mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
+              <CheckCircle className="text-primary h-6 w-6" />
             </div>
-            <CardTitle className="text-xl text-foreground">
+            <CardTitle className="text-foreground text-xl">
               Senha redefinida com sucesso!
             </CardTitle>
             <CardDescription className="text-muted-foreground">
-              Sua senha foi atualizada. Redirecionando para a página de login...
+              Sua senha foi atualizada. Redirecionando para o painel...
             </CardDescription>
           </CardHeader>
         </Card>
@@ -82,13 +82,15 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-border bg-card">
+    <div className="bg-background flex min-h-screen items-center justify-center px-4">
+      <Card className="border-border bg-card w-full max-w-md">
         <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <KeyRound className="h-6 w-6 text-primary" />
+          <div className="bg-primary/10 mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
+            <KeyRound className="text-primary h-6 w-6" />
           </div>
-          <CardTitle className="text-xl text-foreground">Definir Nova Senha</CardTitle>
+          <CardTitle className="text-foreground text-xl">
+            Definir Nova Senha
+          </CardTitle>
           <CardDescription className="text-muted-foreground">
             Escolha uma nova senha forte para sua conta
           </CardDescription>
@@ -117,7 +119,10 @@ export default function ResetPasswordPage() {
             </div>
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="confirmPassword" className="text-muted-foreground">
+              <Label
+                htmlFor="confirmPassword"
+                className="text-muted-foreground"
+              >
                 Confirmar Nova Senha
               </Label>
               <Input
@@ -134,7 +139,7 @@ export default function ResetPasswordPage() {
             <Button
               type="submit"
               disabled={loading}
-              className="mt-2 h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 mt-2 h-10 w-full disabled:opacity-50"
             >
               {loading ? "Salvando..." : "Redefinir Senha"}
             </Button>
@@ -142,7 +147,7 @@ export default function ResetPasswordPage() {
 
           <Link
             href="/login"
-            className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground mt-6 flex items-center justify-center gap-2 text-sm"
           >
             <ArrowLeft className="h-4 w-4" />
             Cancelar e Voltar

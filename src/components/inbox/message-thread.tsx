@@ -608,6 +608,9 @@ export function MessageThread({
         // with the real DB row. If realtime hasn't arrived yet, at least
         // flip status to 'sent' so the UI stops showing "sending".
         if (!opts.silent) onUpdateMessage(tempId, { status: "sent" });
+        if (payload?.reconciliation_required) {
+          toast.warning("Mensagem aceita pelo provedor; registro local pendente. Não reenvie a mensagem.");
+        }
       } catch (err) {
         console.error("Failed to send message:", err);
         const reason = err instanceof Error ? err.message : "erro de rede";
@@ -673,6 +676,9 @@ export function MessageThread({
         }
 
         if (!opts.silent) onUpdateMessage(tempId, { status: "sent" });
+        if (data?.reconciliation_required) {
+          toast.warning("Mídia aceita pelo provedor; registro local pendente. Não reenvie a mensagem.");
+        }
       } catch (err) {
         console.error("Failed to send media:", err);
         const reason = err instanceof Error ? err.message : "erro de rede";

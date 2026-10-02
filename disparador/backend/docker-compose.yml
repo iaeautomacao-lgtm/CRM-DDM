@@ -16,12 +16,14 @@ services:
       - OPENAI_MODEL=${OPENAI_MODEL}
       - FRONTEND_URL=${FRONTEND_URL}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET}
+      - CRON_SECRET=${CRON_SECRET}
+      - QUEUE_WORKER_MODE=${QUEUE_WORKER_MODE:-cron}
     labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.whatsapp-backend.rule=Host(`backend.meuchatia.com.br`)"
-      - "traefik.http.routers.whatsapp-backend.entrypoints=websecure"
-      - "traefik.http.routers.whatsapp-backend.tls.certresolver=letsencrypt"
-      - "traefik.http.services.whatsapp-backend.loadbalancer.server.port=3001"
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.whatsapp-backend.rule=Host(`backend.meuchatia.com.br`)'
+      - 'traefik.http.routers.whatsapp-backend.entrypoints=websecure'
+      - 'traefik.http.routers.whatsapp-backend.tls.certresolver=letsencrypt'
+      - 'traefik.http.services.whatsapp-backend.loadbalancer.server.port=3001'
     networks:
       - network_public
     restart: unless-stopped

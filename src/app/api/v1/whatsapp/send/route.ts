@@ -158,7 +158,7 @@ export async function POST(request: Request) {
     // is set — see attemptSend below).
     const mediaCaption: string | undefined =
       hasMedia && (mediaKind === 'image' || mediaKind === 'video')
-        ? (media_caption || targetText || undefined)
+        ? media_caption || targetText || undefined
         : undefined;
     // Validado aqui (pós-derivação), não só sobre o media_caption bruto,
     // pra cobrir também o caso em que targetText foi promovido a caption
@@ -197,7 +197,7 @@ export async function POST(request: Request) {
     // depende de contactRow — só existe pra alimentar conversation/messages.
     let contactRow: any = null;
     if (salvarBd) {
-      contactRow = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone) as any;
+      contactRow = (await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone)) as any;
 
       if (contactRow) {
         // Se o contato existe, atualiza o nome dele se tiver sido enviado um novo diferente
@@ -316,7 +316,11 @@ export async function POST(request: Request) {
           const result = await sendWahaMediaMessageBase64(
             wahaConfig,
             phoneStr,
-            { data: media_base64, mimetype: media_type, filename: `file_${Date.now()}.${ext}` },
+            {
+              data: media_base64,
+              mimetype: media_type,
+              filename: `file_${Date.now()}.${ext}`,
+            },
             mediaCaption
           );
           return result.messageId;
@@ -404,7 +408,7 @@ export async function POST(request: Request) {
           conversation_id: conversation.id,
           sender_type: 'bot',
           content_type: mediaKind ?? 'text',
-          content_text: mediaKind ? mediaCaption ?? null : targetText,
+          content_text: mediaKind ? (mediaCaption ?? null) : targetText,
           // Only hasMediaUrl gives us a fetchable URL to store — a
           // media_base64 send has no hosted copy (see file header comment).
           media_url: hasMediaUrl ? media_url : null,
@@ -416,7 +420,18 @@ export async function POST(request: Request) {
         .single();
 
       if (msgInsertErr || !data) {
-        throw new ApiError('internal', `Message sent but failed to save in database: ${msgInsertErr?.message}`, 500);
+        console.error('[API send] Provider accepted; local persistence failed:', msgInsertErr?.message);
+        return ok(
+          {
+            success: true,
+            saved: false,
+            reconciliation_required: true,
+            whatsapp_message_id: waMessageId,
+            warning: 'Provider accepted the message. Do not resend.',
+          },
+          202,
+          logCtx
+        );
       }
       messageRecord = data;
 
@@ -424,7 +439,7 @@ export async function POST(request: Request) {
       await ctx.supabase
         .from('conversations')
         .update({
-          last_message_text: mediaKind ? mediaCaption ?? `[${mediaKind}]` : targetText,
+          last_message_text: mediaKind ? (mediaCaption ?? `[${mediaKind}]`) : targetText,
           last_message_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -449,7 +464,6 @@ export async function POST(request: Request) {
       200,
       logCtx
     );
-
   } catch (err) {
     return toApiErrorResponse(err, logCtx);
   }
@@ -518,8 +532,7 @@ async function findOrCreateConversation(
 
     const now = Date.now();
     const active = candidates.find(
-      (c: { id: string }) =>
-        lastByConversation.has(c.id) && now - lastByConversation.get(c.id)! < 24 * 60 * 60 * 1000
+      (c: { id: string }) => lastByConversation.has(c.id) && now - lastByConversation.get(c.id)! < 24 * 60 * 60 * 1000
     );
     if (active) existing = active;
   }

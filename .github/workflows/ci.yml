@@ -51,3 +51,37 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  auxiliary-backend:
+    name: Disparador backend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: disparador/backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: disparador/backend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  auxiliary-frontend:
+    name: Disparador frontend build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: disparador/frontend
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: disparador/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build

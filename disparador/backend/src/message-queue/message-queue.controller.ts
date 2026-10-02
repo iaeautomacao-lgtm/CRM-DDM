@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Param, Headers, UnauthorizedException, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Headers,
+  UnauthorizedException,
+  ServiceUnavailableException,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { MessageQueueService } from './message-queue.service';
 import { MessageQueueWorker } from './message-queue.worker';
@@ -11,7 +20,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 export class MessageQueueController {
   constructor(
     private readonly service: MessageQueueService,
-    private readonly worker: MessageQueueWorker,
+    private readonly worker: MessageQueueWorker
   ) {}
 
   @Get('campaign/:campaignId')
@@ -34,7 +43,8 @@ export class MessageQueueCronController {
   @Post('process-tick')
   async processTick(@Headers('x-cron-secret') secret: string) {
     const expected = process.env.CRON_SECRET;
-    if (expected && secret !== expected) {
+    if (!expected) throw new ServiceUnavailableException('Cron não configurado');
+    if (secret !== expected) {
       throw new UnauthorizedException('Invalid cron secret');
     }
     return this.worker.runOnce();

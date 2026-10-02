@@ -32,24 +32,14 @@ export async function startCampaign(
   campaignId: string,
   accountId: string
 ): Promise<StartCampaignResult> {
+  let preparing = false;
   try {
-    // 1. Claim atômico: evita o duplo-start quando duas chamadas
-    // concorrentes (dois ticks do cron sobrepostos — ver cron/route.ts,
-    // que chama startCampaign() pra toda campanha "agendado" vencida a
-    // cada tick — ou um clique manual em "Iniciar" concorrendo com esse
-    // auto-start) tentam iniciar a mesma campanha ao mesmo tempo. Sem
-    // isso, ambas passariam por um SELECT+check em memória vendo o mesmo
-    // status "rascunho"/"agendado", e ambas rodariam o delete+insert
-    // completo da fila abaixo — duplicando o envio pra cada contato. Um
-    // UPDATE ... WHERE é atômico no Postgres por si só (sem precisar de
-    // advisory lock): só uma chamada concorrente de fato muda o status
-    // aqui, as outras recebem 0 linhas de volta. Só cobre rascunho/
-    // agendado — "pausada" usa seu próprio branch de retomada logo
-    // abaixo, que não recria a fila.
+    // Prepare privately; consumers only see the campaign after all rows exist.
     const { data: claimedRows, error: claimError } = await supabaseAdmin()
       .from("campaigns")
-      .update({ status: "em_execucao" })
+      .update({ status: "preparando" })
       .eq("id", campaignId)
+      .eq("account_id", accountId)
       .in("status", ["rascunho", "agendado"])
       .select("id");
 
@@ -57,6 +47,7 @@ export async function startCampaign(
       return { ok: false, status: 500, error: claimError.message };
     }
     const claimedFreshStart = !!claimedRows && claimedRows.length > 0;
+    preparing = claimedFreshStart;
 
     // 2. Fetch campaign configuration — necessário de todo jeito: quando
     // claimedFreshStart, pra ler mensagens/session_ids/etc; quando não,
@@ -66,6 +57,7 @@ export async function startCampaign(
       .from("campaigns")
       .select("*")
       .eq("id", campaignId)
+      .eq("account_id", accountId)
       .single();
 
     if (campaignError || !campaign) {
@@ -96,38 +88,37 @@ export async function startCampaign(
     // de onde parou. Reativa os itens pausados in-place e retorna sem
     // tocar em mensagens/contatos/fila nova.
     if (campaign.status === "pausada") {
-      const { data: reactivated, error: reactivateError } = await supabaseAdmin()
-        .from("disp_message_queue")
-        .update({ status: "agendado", scheduled_at: new Date().toISOString() })
-        .eq("campaign_id", campaignId)
-        .eq("status", "pausado")
-        .select("id");
-
-      if (reactivateError) {
-        return { ok: false, status: 500, error: reactivateError.message };
-      }
-
-      const { error: resumeStatusError } = await supabaseAdmin()
-        .from("campaigns")
-        .update({ status: "em_execucao" })
-        .eq("id", campaignId);
-
-      if (resumeStatusError) {
-        return { ok: false, status: 500, error: "Falha ao ativar campanha" };
-      }
-
-      return { ok: true, enqueued: reactivated?.length ?? 0 };
+      const { data: count, error } = await supabaseAdmin().rpc("resume_dispatch_campaign", {
+        p_campaign_id: campaignId,
+        p_account_id: accountId,
+      });
+      if (error) return { ok: false, status: 500, error: "Falha ao retomar campanha" };
+      if (count === null)
+        return {
+          ok: false,
+          status: 409,
+          error: "Estado da campanha mudou; atualize antes de retomar",
+        };
+      return { ok: true, enqueued: count };
     }
 
     const mensagens = Array.isArray(campaign.mensagens) ? campaign.mensagens : [];
     if (mensagens.length === 0) {
-      return { ok: false, status: 400, error: "Campanha sem mensagens configuradas." };
+      return {
+        ok: false,
+        status: 400,
+        error: "Campanha sem mensagens configuradas.",
+      };
     }
     const templateMode = parseTemplateMode(campaign.dias_permitidos);
 
     const sessionIds = Array.isArray(campaign.session_ids) ? campaign.session_ids : [];
     if (sessionIds.length === 0) {
-      return { ok: false, status: 400, error: "Campanha sem sessões de WhatsApp selecionadas." };
+      return {
+        ok: false,
+        status: 400,
+        error: "Campanha sem sessões de WhatsApp selecionadas.",
+      };
     }
 
     // Relink de segurança: VAR1/VAR2/VAR3 do CSV (Step 2 do wizard) podem
@@ -148,7 +139,10 @@ export async function startCampaign(
         .eq("draft_id", campaign.import_draft_id)
         .is("campaign_id", null);
       if (csvVarRelinkErr) {
-        console.error("[startCampaign] Falha ao relinkar contact_import_variables:", csvVarRelinkErr);
+        console.error(
+          "[startCampaign] Falha ao relinkar contact_import_variables:",
+          csvVarRelinkErr
+        );
       }
     }
 
@@ -158,9 +152,7 @@ export async function startCampaign(
       .select("id, provider, phone_number_id")
       .in("id", sessionIds);
 
-    const channelMap = new Map(
-      (channelConfigs ?? []).map((c) => [c.id, c])
-    );
+    const channelMap = new Map((channelConfigs ?? []).map((c) => [c.id, c]));
 
     // IDs dos canais Meta nesta campanha
     const metaSessionIds = (channelConfigs ?? [])
@@ -212,7 +204,10 @@ export async function startCampaign(
           .range(from, from + pageSize - 1);
 
         if (pageError) {
-          console.error("[startCampaign] Falha ao paginar histórico de mensagens (janela 24h):", pageError.message);
+          console.error(
+            "[startCampaign] Falha ao paginar histórico de mensagens (janela 24h):",
+            pageError.message
+          );
           break;
         }
 
@@ -273,7 +268,11 @@ export async function startCampaign(
     }
 
     if (allContacts.length === 0) {
-      return { ok: false, status: 400, error: "Nenhum contato ativo encontrado no CRM." };
+      return {
+        ok: false,
+        status: 400,
+        error: "Nenhum contato ativo encontrado no CRM.",
+      };
     }
 
     // Filter contacts by tag — filtra pelo lado pequeno (nomes em
@@ -484,7 +483,11 @@ export async function startCampaign(
       // ~333 contatos ficavam com entradas no csvVarMap, e os outros
       // ~667 recebiam template_variables vazio (confirmado ao vivo,
       // campaign_id d5aba714-a8d1-4579-8ab1-15a62e9cfcc7, 3000 linhas).
-      const csvVars: Array<{ contact_id: string; var_index: number; value: string }> = [];
+      const csvVars: Array<{
+        contact_id: string;
+        var_index: number;
+        value: string;
+      }> = [];
       const pageSize = 1000;
       let from = 0;
       let csvVarsError: { message: string } | null = null;
@@ -504,7 +507,10 @@ export async function startCampaign(
         from += pageSize;
       }
       if (csvVarsError) {
-        console.error("[startCampaign] Falha ao carregar contact_import_variables:", csvVarsError.message);
+        console.error(
+          "[startCampaign] Falha ao carregar contact_import_variables:",
+          csvVarsError.message
+        );
       } else {
         for (const row of csvVars) {
           csvVarMap.set(`${row.contact_id}:${row.var_index}`, row.value);
@@ -601,7 +607,8 @@ export async function startCampaign(
       } else {
         // Comportamento original: pacing sequencial por contato via
         // intervalo_min/max, com pausas anti-spam fixas.
-        if (i > 0 && i % 100 === 0) contactDelay += 60 * 60 * 1000; // 1 hour pause every 100 contacts
+        if (i > 0 && i % 100 === 0)
+          contactDelay += 60 * 60 * 1000; // 1 hour pause every 100 contacts
         else if (i > 0 && i % 20 === 0) contactDelay += 10 * 60 * 1000; // 10 mins pause every 20 contacts
         contactBaseDelay = contactDelay;
       }
@@ -692,8 +699,7 @@ export async function startCampaign(
         if (isMetaChannel && !templateName) {
           const lastInbound = windowMap.get(contact.id);
           const windowOpen =
-            lastInbound != null &&
-            Date.now() - lastInbound.getTime() < 24 * 60 * 60 * 1000;
+            lastInbound != null && Date.now() - lastInbound.getTime() < 24 * 60 * 60 * 1000;
 
           if (!windowOpen) {
             // Contato fora da janela e sem template — enfileira como
@@ -743,7 +749,10 @@ export async function startCampaign(
       // mensagens ESTE contato recebeu — em rotacao/aleatorio é sempre 1,
       // então não soma intraDelay extra que nunca é usado.
       if (batchSize <= 1) {
-        contactDelay += (messagesToSend.length - 1) * intraDelay + minDelay + Math.random() * (maxDelay - minDelay);
+        contactDelay +=
+          (messagesToSend.length - 1) * intraDelay +
+          minDelay +
+          Math.random() * (maxDelay - minDelay);
       }
     }
 
@@ -759,33 +768,47 @@ export async function startCampaign(
       }
     }
 
-    // 5. Update campaign status to 'em_execucao' (In execution) — status já
-    // foi setado atomicamente no claim do passo 1 (evita duplo-start);
-    // esta escrita é redundante nesse campo (idempotente) mas ainda cuida
-    // de `agendamento`. Erro agora é checado — antes falhava
-    // silenciosamente e podia deixar a fila cheia de itens "agendado" sem
-    // `agendamento` correto (status em si já está protegido pelo claim).
-    const { error: activateError } = await supabaseAdmin()
-      .from("campaigns")
-      .update({ status: "em_execucao", agendamento: now })
-      .eq("id", campaignId);
-
-    if (activateError) {
-      return { ok: false, status: 500, error: "Falha ao ativar campanha" };
-    }
-
     // Update Metrics
-    await supabaseAdmin()
-      .from("campaign_metrics")
-      .upsert({
+    const { error: metricsError } = await supabaseAdmin().from("campaign_metrics").upsert(
+      {
         campaign_id: campaignId,
         account_id: accountId,
         total_contatos: contacts.length,
-      }, { onConflict: "campaign_id" });
+      },
+      { onConflict: "campaign_id" }
+    );
+
+    if (metricsError) throw metricsError;
+
+    // Publish only if preparation still owns this campaign.
+    const { data: activated, error: activateError } = await supabaseAdmin()
+      .from("campaigns")
+      .update({ status: "em_execucao", agendamento: now, next_batch_at: null })
+      .eq("id", campaignId)
+      .eq("account_id", accountId)
+      .eq("status", "preparando")
+      .select("id");
+
+    if (activateError || !activated?.length) {
+      return { ok: false, status: 500, error: "Falha ao ativar campanha" };
+    }
+    preparing = false;
 
     return { ok: true, enqueued };
   } catch (err: any) {
     console.error("[startCampaign] Failed to schedule queue:", err);
     return { ok: false, status: 500, error: err.message };
+  } finally {
+    if (preparing) {
+      // Partial rows cannot be consumed; a new start clears them before publication.
+      const { error } = await supabaseAdmin()
+        .from("campaigns")
+        .update({ status: "rascunho" })
+        .eq("id", campaignId)
+        .eq("account_id", accountId)
+        .eq("status", "preparando");
+      if (error)
+        console.error("[startCampaign] Recuperação de preparação pendente:", error.message);
+    }
   }
 }

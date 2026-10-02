@@ -26,12 +26,16 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    if (err.response?.status === 401 && typeof window !== 'undefined') {
+    if (err.response?.status === 401 && typeof window !== 'undefined' && !err.config?.url?.startsWith('/auth/')) {
       localStorage.removeItem('access_token');
-      window.location.href = '/auth/login';
+      document.cookie = 'access_token=;path=/;max-age=0;SameSite=Lax';
+      if (!window.location.pathname.startsWith('/auth/')) {
+        const next = window.location.pathname + window.location.search;
+        window.location.replace(`/auth/login?next=${encodeURIComponent(next)}`);
+      }
     }
     return Promise.reject(err);
-  },
+  }
 );
 
 export default api;
@@ -49,11 +53,13 @@ export const contactsApi = {
   delete: (id: string) => api.delete(`/contacts/${id}`),
   bulkDelete: (ids: string[]) => api.delete('/contacts/bulk', { data: { ids } }),
   importCsv: (file: File) => {
-    const fd = new FormData(); fd.append('file', file);
+    const fd = new FormData();
+    fd.append('file', file);
     return api.post('/contacts/import/csv', fd);
   },
   importXlsx: (file: File) => {
-    const fd = new FormData(); fd.append('file', file);
+    const fd = new FormData();
+    fd.append('file', file);
     return api.post('/contacts/import/xlsx', fd);
   },
 };
@@ -61,7 +67,8 @@ export const contactsApi = {
 // ── Uploads ───────────────────────────────────────────────
 export const uploadsApi = {
   upload: (file: File) => {
-    const fd = new FormData(); fd.append('file', file);
+    const fd = new FormData();
+    fd.append('file', file);
     return api.post<{ url: string }>('/uploads', fd);
   },
 };

@@ -74,9 +74,9 @@ function hasSessionCookie(request: NextRequest): boolean {
     const session = JSON.parse(json)
     return Boolean(
       session &&
-        typeof session === 'object' &&
-        typeof session.access_token === 'string' &&
-        session.access_token.length > 0
+      typeof session === 'object' &&
+      typeof session.access_token === 'string' &&
+      session.access_token.length > 0
     )
   } catch {
     return false
@@ -110,17 +110,16 @@ export function middleware(request: NextRequest) {
   // they can accept the invitation in one click. Without this,
   // a forwarded invite link to someone who's already signed in
   // would silently drop them on /dashboard.
-  if (isAuthenticated && (
-    pathname === '/login' ||
-    pathname === '/signup' ||
-    pathname === '/forgot-password'
-  )) {
+  if (
+    isAuthenticated &&
+    !request.nextUrl.searchParams.has('error') &&
+    (pathname === '/login' ||
+      pathname === '/signup' ||
+      pathname === '/forgot-password')
+  ) {
     const url = request.nextUrl.clone()
     const inviteToken = request.nextUrl.searchParams.get('invite')
-    if (
-      inviteToken &&
-      (pathname === '/login' || pathname === '/signup')
-    ) {
+    if (inviteToken && (pathname === '/login' || pathname === '/signup')) {
       url.pathname = `/join/${encodeURIComponent(inviteToken)}`
       url.search = ''
     } else {
@@ -148,9 +147,17 @@ export function middleware(request: NextRequest) {
     '/automacoes',
     '/settings',
   ]
-  if (!isAuthenticated && protectedPaths.some(path => pathname.startsWith(path))) {
+  if (
+    !isAuthenticated &&
+    protectedPaths.some((path) => pathname.startsWith(path))
+  ) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
+    url.search = ''
+    url.searchParams.set(
+      'next',
+      request.nextUrl.pathname + request.nextUrl.search
+    )
 
     // Add debugging parameters to help trace authentication issues on the server/cPanel
     url.searchParams.set('auth_failed', 'true')
@@ -169,8 +176,11 @@ export function middleware(request: NextRequest) {
   // validate for real themselves via getCurrentAccount() — these two
   // prefixes are gated here too because a couple of routes under them
   // (voip-url, external-urls) have no auth check of their own.
-  if (!isAuthenticated && pathname.startsWith('/api/whatsapp/') &&
-      !pathname.includes('/webhook')) {
+  if (
+    !isAuthenticated &&
+    pathname.startsWith('/api/whatsapp/') &&
+    !pathname.includes('/webhook')
+  ) {
     return finalizeAuthFx(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     )
@@ -178,8 +188,11 @@ export function middleware(request: NextRequest) {
 
   // Disparador routes need auth too, except /cron which is triggered by an
   // external scheduler authenticating via CRON_SECRET, not a user session.
-  if (!isAuthenticated && pathname.startsWith('/api/disparador/') &&
-      !pathname.includes('/cron')) {
+  if (
+    !isAuthenticated &&
+    pathname.startsWith('/api/disparador/') &&
+    !pathname.includes('/cron')
+  ) {
     return finalizeAuthFx(
       NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     )

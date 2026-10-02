@@ -31,7 +31,10 @@ function supabaseAdmin(): SupabaseClient {
 }
 
 function getBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_APP_URL || "https://omnicrm.grupoddm.ia.br";
+  const configured = process.env.NEXT_PUBLIC_APP_URL;
+  if (!configured)
+    throw new Error("NEXT_PUBLIC_APP_URL deve ser configurada explicitamente para este ambiente");
+  return new URL(configured).origin;
 }
 
 type TestStatus = "pass" | "fail" | "warn";
@@ -98,11 +101,17 @@ async function testSmokeWebhook(signal: AbortSignal): Promise<TestOutcome> {
         "META_APP_SECRET não configurado (fallback global) — canais com app_secret próprio podem estar OK mesmo assim",
     };
   }
-  const body = JSON.stringify({ object: "whatsapp_business_account", entry: [] });
+  const body = JSON.stringify({
+    object: "whatsapp_business_account",
+    entry: [],
+  });
   const signature = signMetaPayload(body, secret);
   const res = await fetch(`${getBaseUrl()}/api/whatsapp/webhook`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "x-hub-signature-256": signature },
+    headers: {
+      "Content-Type": "application/json",
+      "x-hub-signature-256": signature,
+    },
     body,
     signal,
   });
@@ -112,47 +121,38 @@ async function testSmokeWebhook(signal: AbortSignal): Promise<TestOutcome> {
   return { status: "pass", message: "Webhook respondeu 200" };
 }
 
-// ---- 2. smoke_cron_disparador ----
-// Chama a rota de produção de verdade — não é um mock. processQueueItem
-// já é seguro sob invocações concorrentes (claim atômico via UPDATE
-// condicional, ver processQueue.ts), então rodar isso a mais (fora do
-// crontab de ~60s que já existe) não introduz risco de double-send.
+// Read-only diagnostics. Never call the operational POST or the flows cron.
 async function testSmokeCronDisparador(signal: AbortSignal): Promise<TestOutcome> {
   const secret = process.env.CRON_SECRET;
-  if (!secret) {
-    return { status: "fail", message: "CRON_SECRET não configurado no servidor" };
-  }
+  if (!secret) return { status: "fail", message: "CRON_SECRET não configurado" };
   const res = await fetch(`${getBaseUrl()}/api/disparador/cron`, {
-    method: "POST",
-    headers: { "x-cron-secret": secret },
-    signal,
-  });
-  if (res.status !== 200) {
-    return { status: "fail", message: `status ${res.status} (esperado 200)` };
-  }
-  return { status: "pass", message: "Cron do disparador respondeu 200" };
-}
-
-// ---- 3. smoke_cron_flows ----
-// Idem — chama /api/flows/cron de verdade. Efeito colateral desejável:
-// esse sweep (timeout de flow_runs travados) hoje só roda quando algo
-// bate essa rota; incluir aqui + o crontab diário do README passa a dar
-// a ele uma execução garantida por dia, mesmo que nenhum outro agendador
-// externo esteja configurado.
-async function testSmokeCronFlows(signal: AbortSignal): Promise<TestOutcome> {
-  const secret = process.env.AUTOMATION_CRON_SECRET;
-  if (!secret) {
-    return { status: "fail", message: "AUTOMATION_CRON_SECRET não configurado no servidor" };
-  }
-  const res = await fetch(`${getBaseUrl()}/api/flows/cron`, {
     method: "GET",
     headers: { "x-cron-secret": secret },
     signal,
   });
-  if (res.status !== 200) {
-    return { status: "fail", message: `status ${res.status} (esperado 200)` };
-  }
-  return { status: "pass", message: "Cron de flows respondeu 200" };
+  return {
+    status: res.ok ? "pass" : "fail",
+    message: `Diagnóstico do disparador: HTTP ${res.status}`,
+  };
+}
+
+async function testSmokeCronFlows(signal: AbortSignal): Promise<TestOutcome> {
+  if (!process.env.AUTOMATION_CRON_SECRET)
+    return {
+      status: "fail",
+      message: "AUTOMATION_CRON_SECRET não configurado",
+    };
+  const { error } = await supabaseAdmin()
+    .from("flow_runs")
+    .select("id")
+    .limit(1)
+    .abortSignal(signal);
+  return {
+    status: error ? "fail" : "pass",
+    message: error
+      ? "Consulta de flows indisponível"
+      : "Configuração e consulta de flows disponíveis; cron não executado",
+  };
 }
 
 // ---- 4. smoke_db ----
@@ -202,7 +202,11 @@ async function testFlowRunsHealth(signal: AbortSignal): Promise<TestOutcome> {
     .abortSignal(signal);
   if (error) return { status: "fail", message: error.message };
   const n = count ?? 0;
-  if (n > 0) return { status: "warn", message: `${n} flow_runs travados além do timeout` };
+  if (n > 0)
+    return {
+      status: "warn",
+      message: `${n} flow_runs travados além do timeout`,
+    };
   return { status: "pass", message: "Nenhum flow_run travado" };
 }
 
@@ -218,32 +222,20 @@ async function testPendingConversations(signal: AbortSignal): Promise<TestOutcom
   if (error) return { status: "fail", message: error.message };
   const n = count ?? 0;
   if (n > 5) return { status: "warn", message: `${n} conversas pendentes sem agente` };
-  return { status: "pass", message: `${n} conversa(s) pendente(s) (dentro do normal)` };
+  return {
+    status: "pass",
+    message: `${n} conversa(s) pendente(s) (dentro do normal)`,
+  };
 }
 
-// ---- 8. ddm_api_health ----
-// Health check de um sistema externo do mesmo grupo (ddmacordos.com),
-// não do próprio CRM — verifica se a API de débitos está respondendo
-// antes de qualquer integração do disparador/CRM depender dela.
-async function testDdmApiHealth(signal: AbortSignal): Promise<TestOutcome> {
-  const token = process.env.DDM_ACORDOS_API_TOKEN;
-  if (!token) {
-    return { status: "fail", message: "DDM_ACORDOS_API_TOKEN não configurado no servidor" };
-  }
-  const idDev = "1599911302107525132";
-  const url = `https://ddmacordos.com/calc/?tk=${token}&idDev=${idDev}&cli=ddm`;
-  const res = await fetch(url, { signal });
-  if (res.status !== 200) {
-    return { status: "fail", message: `status ${res.status} (esperado 200)` };
-  }
-  const body = await res.json().catch(() => null);
-  if (body && typeof body === "object" && !Array.isArray(body) && (body as any).error === "invalid_client") {
-    return { status: "fail", message: "API DDM retornou invalid_client" };
-  }
-  if (Array.isArray(body)) {
-    return { status: "pass", message: "API DDM respondendo corretamente" };
-  }
-  return { status: "warn", message: "API DDM respondeu 200 com formato inesperado" };
+// An actual calculation is business work, not a readiness check. No external
+// business endpoint is invoked until a read-only readiness contract is defined.
+async function testDdmApiHealth(_signal: AbortSignal): Promise<TestOutcome> {
+  return {
+    status: "warn",
+    message:
+      "Diagnóstico DDM suspenso: definir endpoint de saúde sem cálculo ou efeitos operacionais",
+  };
 }
 
 // ---- 9/10/11. api_v1_* ----
@@ -294,12 +286,18 @@ async function testApiV1WhatsappSend(signal: AbortSignal): Promise<TestOutcome> 
 async function testApiV1CampaignStatus(signal: AbortSignal): Promise<TestOutcome> {
   const apiKey = process.env.STRESS_API_KEY;
   if (!apiKey) {
-    return { status: "fail", message: "STRESS_API_KEY não configurado no servidor" };
+    return {
+      status: "fail",
+      message: "STRESS_API_KEY não configurado no servidor",
+    };
   }
 
   const apiKeyRow = await findActiveKeyByHash(hashApiKey(apiKey));
   if (!apiKeyRow) {
-    return { status: "fail", message: "STRESS_API_KEY inválido, revogado ou expirado" };
+    return {
+      status: "fail",
+      message: "STRESS_API_KEY inválido, revogado ou expirado",
+    };
   }
 
   const { data: campaign, error } = await supabaseAdmin()
@@ -330,7 +328,10 @@ async function testApiV1CampaignStatus(signal: AbortSignal): Promise<TestOutcome
   if (!body?.data?.campaign_id) {
     return { status: "fail", message: "200 mas data.campaign_id ausente" };
   }
-  return { status: "pass", message: `Campanha ${campaign.id} consultada com sucesso` };
+  return {
+    status: "pass",
+    message: `Campanha ${campaign.id} consultada com sucesso`,
+  };
 }
 
 export async function POST(request: Request) {
@@ -350,10 +351,7 @@ export async function POST(request: Request) {
 
   const overallStart = Date.now();
 
-  // Sequencial de propósito (não Promise.all) — os testes de cron
-  // batem endpoints que fazem trabalho real; rodar em paralelo
-  // multiplicaria a carga simultânea à toa sem nenhum ganho pro
-  // objetivo do health check.
+  // Sequential diagnostics keep database and HTTP probe load bounded.
   const results: TestResult[] = [];
   results.push(await runTest("smoke_webhook", 2000, testSmokeWebhook));
   results.push(await runTest("smoke_cron_disparador", 3000, testSmokeCronDisparador));

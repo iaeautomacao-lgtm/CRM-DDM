@@ -15,14 +15,16 @@ export class MessageQueueWorker implements OnModuleInit {
     private config: ConfigService,
     private waha: WahaService,
     private risk: RiskService,
-    private supabase: SupabaseService,
+    private supabase: SupabaseService
   ) {
     this.openai = new OpenAI({ apiKey: config.get('OPENAI_API_KEY') });
   }
 
   onModuleInit() {
-    if (process.env.VERCEL) {
-      this.logger.log('Worker em modo Vercel — aguardando cron /message-queue/process-tick');
+    const mode = this.config.get<string>('QUEUE_WORKER_MODE') || 'cron';
+    if (!['cron', 'polling', 'disabled'].includes(mode)) throw new Error('QUEUE_WORKER_MODE inválido');
+    if (mode !== 'polling') {
+      this.logger.log(`Worker em modo ${mode} — polling automático desativado`);
       return;
     }
     this.logger.log('Worker de envio iniciado — polling a cada 5s');
@@ -46,6 +48,7 @@ export class MessageQueueWorker implements OnModuleInit {
   }
 
   async runOnce() {
+    if (this.config.get<string>('QUEUE_WORKER_MODE') === 'disabled') return { skipped: true };
     if (this.processing) return { skipped: true };
     this.processing = true;
     try {
@@ -82,11 +85,17 @@ export class MessageQueueWorker implements OnModuleInit {
     this.logger.log(`Processando: ${item.id} | tipo: ${item.tipo} | scheduled: ${item.scheduled_at}`);
 
     // ✅ FIX: updates também na tabela real
-    await this.supabase.db
+    const { data: claimed, error: claimError } = await this.supabase.db
       .from('disp_message_queue')
-      .update({ status: 'enviando' })
-      .eq('id', item.id);
+      .update({ status: 'enviando', updated_at: now })
+      .eq('id', item.id)
+      .eq('status', 'agendado')
+      .select('id');
+    if (claimError) throw claimError;
+    if (!claimed?.length) return;
 
+    let externalAttempted = false;
+    let acceptedMessageId: string | undefined;
     try {
       // Verifica se campanha ainda está em execução
       const { data: campaign } = await this.supabase.db
@@ -103,19 +112,29 @@ export class MessageQueueWorker implements OnModuleInit {
         return;
       }
 
-      const janela = campaign.janela_inicio && campaign.janela_fim
-        && campaign.janela_inicio !== '00:00:00' && campaign.janela_fim !== '23:59:00'
-        && campaign.janela_inicio !== '00:00' && campaign.janela_fim !== '23:59';
+      const janela =
+        campaign.janela_inicio &&
+        campaign.janela_fim &&
+        campaign.janela_inicio !== '00:00:00' &&
+        campaign.janela_fim !== '23:59:00' &&
+        campaign.janela_inicio !== '00:00' &&
+        campaign.janela_fim !== '23:59';
 
       if (janela && !this.isWithinSendWindow(campaign.janela_inicio, campaign.janela_fim)) {
-        this.logger.warn(`Fora da janela de envio (${campaign.janela_inicio}-${campaign.janela_fim}). Item ${item.id} adiado.`);
+        this.logger.warn(
+          `Fora da janela de envio (${campaign.janela_inicio}-${campaign.janela_fim}). Item ${item.id} adiado.`
+        );
         const amanha = new Date();
         amanha.setDate(amanha.getDate() + 1);
         const [h, m] = campaign.janela_inicio.split(':');
         amanha.setHours(parseInt(h), parseInt(m), 0, 0);
         await this.supabase.db
           .from('disp_message_queue') // ✅ FIX
-          .update({ scheduled_at: amanha.toISOString() })
+          .update({
+            status: 'agendado',
+            scheduled_at: amanha.toISOString(),
+            updated_at: now,
+          })
           .eq('id', item.id);
         return;
       }
@@ -147,22 +166,35 @@ export class MessageQueueWorker implements OnModuleInit {
         const completion = await this.openai.chat.completions.create({
           model: 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: 'Você é um assistente de vendas para WhatsApp. Gere uma mensagem natural, sem parecer spam. Responda APENAS com a mensagem, sem explicações.' },
-            { role: 'user', content: `Contato: nome=${contact?.nome || ''}. Prompt: ${prompt}` },
+            {
+              role: 'system',
+              content:
+                'Você é um assistente de vendas para WhatsApp. Gere uma mensagem natural, sem parecer spam. Responda APENAS com a mensagem, sem explicações.',
+            },
+            {
+              role: 'user',
+              content: `Contato: nome=${contact?.nome || ''}. Prompt: ${prompt}`,
+            },
           ],
           max_tokens: 500,
         });
         const textoGerado = completion.choices[0]?.message?.content || prompt;
+        externalAttempted = true;
         result = await this.waha.sendText(sessionName, telefone, textoGerado);
       } else if (tipo === 'imagem') {
+        externalAttempted = true;
         result = await this.waha.sendImage(sessionName, telefone, item.media_url, item.mensagem_final || undefined);
       } else if (tipo === 'video') {
+        externalAttempted = true;
         result = await this.waha.sendVideo(sessionName, telefone, item.media_url, item.mensagem_final || undefined);
       } else if (tipo === 'audio') {
+        externalAttempted = true;
         result = await this.waha.sendAudio(sessionName, telefone, item.media_url);
       } else if (tipo === 'arquivo') {
+        externalAttempted = true;
         result = await this.waha.sendFile(sessionName, telefone, item.media_url, item.mensagem_final || undefined);
       } else if (tipo === 'ligacao') {
+        externalAttempted = true;
         // 1. Inicia a chamada via WaCalls
         const callRes = await this.waha.startCall(sessionName, telefone);
         const callId = callRes.call?.callId;
@@ -193,22 +225,30 @@ export class MessageQueueWorker implements OnModuleInit {
         }
 
         if (!isConnected) {
-          throw new Error(ended ? 'Chamada rejeitada ou encerrada pelo destinatário' : 'Chamada não atendida (tempo esgotado)');
+          throw new Error(
+            ended ? 'Chamada rejeitada ou encerrada pelo destinatário' : 'Chamada não atendida (tempo esgotado)'
+          );
         }
 
         // 3. Toca o áudio associado na ligação
         await this.waha.playAudio(sessionName, callId, item.media_url);
         result = { id: `call_${callId}` };
       } else {
+        externalAttempted = true;
         result = await this.waha.sendText(sessionName, telefone, item.mensagem_final);
       }
 
-      await this.supabase.db.from('disp_message_queue').update({ // ✅ FIX
-        status: 'enviado',
-        sent_at: new Date().toISOString(),
-        waha_message_id: result.id,
-        tentativas: (item.tentativas || 0) + 1,
-      }).eq('id', item.id);
+      acceptedMessageId = result.id;
+      const { error: confirmationError } = await this.supabase.db
+        .from('disp_message_queue')
+        .update({
+          status: 'enviado',
+          sent_at: new Date().toISOString(),
+          waha_message_id: result.id,
+          tentativas: (item.tentativas || 0) + 1,
+        })
+        .eq('id', item.id);
+      if (confirmationError) throw confirmationError;
 
       await this.supabase.db.from('message_logs').insert({
         queue_id: item.id,
@@ -225,22 +265,38 @@ export class MessageQueueWorker implements OnModuleInit {
       await this.updateMetrics(item.campaign_id, 'enviado');
 
       this.logger.log(`Enviado para ${telefone} (tipo: ${tipo})`);
-
     } catch (err: any) {
       this.logger.error(`Erro no envio (item ${item.id}): ${err.message}`);
 
+      if (externalAttempted) {
+        // No automatic replay after a transport failure or local persistence
+        // failure. The provider may already have accepted the operation.
+        const { error } = await this.supabase.db
+          .from('disp_message_queue')
+          .update({
+            erro: 'Resultado externo pendente de reconciliação; não reenviar automaticamente',
+            ...(acceptedMessageId ? { waha_message_id: acceptedMessageId } : {}),
+          })
+          .eq('id', item.id)
+          .eq('status', 'enviando');
+        if (error) this.logger.error(`Falha ao registrar reconciliação: ${error.message}`);
+        return;
+      }
+
       const tentativas = (item.tentativas || 0) + 1;
       const novoStatus = tentativas >= 3 ? 'erro' : 'agendado';
-      const newScheduled = tentativas < 3
-        ? new Date(Date.now() + tentativas * 60 * 1000).toISOString()
-        : undefined;
+      const newScheduled = tentativas < 3 ? new Date(Date.now() + tentativas * 60 * 1000).toISOString() : undefined;
 
-      await this.supabase.db.from('disp_message_queue').update({ // ✅ FIX
-        status: novoStatus,
-        erro: err.message,
-        tentativas,
-        ...(newScheduled ? { scheduled_at: newScheduled } : {}),
-      }).eq('id', item.id);
+      await this.supabase.db
+        .from('disp_message_queue')
+        .update({
+          // ✅ FIX
+          status: novoStatus,
+          erro: err.message,
+          tentativas,
+          ...(newScheduled ? { scheduled_at: newScheduled } : {}),
+        })
+        .eq('id', item.id);
 
       await this.updateMetrics(item.campaign_id, 'erro');
     }
@@ -256,6 +312,9 @@ export class MessageQueueWorker implements OnModuleInit {
 
   private async updateMetrics(campaignId: string, tipo: 'enviado' | 'erro') {
     const field = tipo === 'enviado' ? 'total_enviados' : 'total_erros';
-    await this.supabase.db.rpc('increment_campaign_metric', { p_campaign_id: campaignId, p_field: field });
+    await this.supabase.db.rpc('increment_campaign_metric', {
+      p_campaign_id: campaignId,
+      p_field: field,
+    });
   }
 }

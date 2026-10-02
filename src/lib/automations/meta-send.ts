@@ -43,13 +43,15 @@ interface SendTemplateArgs {
   params?: string[]
 }
 
-export async function engineSendText(args: SendTextArgs): Promise<{ whatsapp_message_id: string }> {
+export async function engineSendText(
+  args: SendTextArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   return sendViaMeta({ ...args, kind: 'text' })
 }
 
 export async function engineSendTemplate(
-  args: SendTemplateArgs,
-): Promise<{ whatsapp_message_id: string }> {
+  args: SendTemplateArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   return sendViaMeta({ ...args, kind: 'template' })
 }
 
@@ -57,7 +59,9 @@ type SendInput =
   | (SendTextArgs & { kind: 'text' })
   | (SendTemplateArgs & { kind: 'template' })
 
-async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: string }> {
+async function sendViaMeta(
+  input: SendInput
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
   const db = supabaseAdmin()
 
   // Scope the contact + config lookups by account_id, not user_id.
@@ -137,7 +141,10 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   if (lastError) throw lastError
 
   if (workingPhone !== sanitized) {
-    await db.from('contacts').update({ phone: workingPhone }).eq('id', contact.id)
+    await db
+      .from('contacts')
+      .update({ phone: workingPhone })
+      .eq('id', contact.id)
   }
 
   // Persist the sent message so it appears in the inbox with a real
@@ -159,14 +166,20 @@ async function sendViaMeta(input: SendInput): Promise<{ whatsapp_message_id: str
   if (msgErr) {
     // Meta already has the message; record the DB error but don't pretend
     // the send failed. The engine wraps this in a log line.
-    throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
+    console.error(
+      '[Meta send] Provider accepted; local persistence failed:',
+      msgErr.message
+    )
+    return { whatsapp_message_id: waMessageId, reconciliation_required: true }
   }
 
   await db
     .from('conversations')
     .update({
       last_message_text:
-        input.kind === 'template' ? `[template:${input.templateName}]` : input.text,
+        input.kind === 'template'
+          ? `[template:${input.templateName}]`
+          : input.text,
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

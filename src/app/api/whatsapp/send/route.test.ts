@@ -14,6 +14,7 @@ const messageInserts: Array<Record<string, unknown>> = []
 // Toggles for the per-test scenario.
 let existingConversation: Record<string, unknown> | null = null
 let contactRow: Record<string, unknown> | null = null
+let messageInsertError: { message: string } | null = null
 
 const CONTACT = {
   id: 'contact-1',
@@ -66,7 +67,10 @@ function makeSupabaseMock() {
             error: null,
           }
         case 'messages':
-          return { data: { id: 'msg-1' }, error: null }
+          return {
+            data: messageInsertError ? null : { id: 'msg-1' },
+            error: messageInsertError,
+          }
         default:
           return { data: null, error: null }
       }
@@ -77,7 +81,16 @@ function makeSupabaseMock() {
 
     const b: Record<string, unknown> = {}
     const chain = () => b
-    for (const m of ['select', 'eq', 'in', 'order', 'limit', 'update', 'delete', 'is']) {
+    for (const m of [
+      'select',
+      'eq',
+      'in',
+      'order',
+      'limit',
+      'update',
+      'delete',
+      'is',
+    ]) {
       b[m] = vi.fn(chain)
     }
     b.insert = vi.fn((payload: Record<string, unknown>) => {
@@ -154,7 +167,7 @@ function postContactTemplate(overrides: Record<string, unknown> = {}) {
         template_params: ['Acme', '#1234'],
         ...overrides,
       }),
-    }),
+    })
   )
 }
 
@@ -164,12 +177,26 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
     messageInserts.length = 0
     existingConversation = null
     contactRow = CONTACT
+    messageInsertError = null
     supabaseMock = makeSupabaseMock()
     sendTemplateMessage.mockClear()
   })
 
   afterEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('reports provider acceptance instead of a retryable send failure when the database fails', async () => {
+    messageInsertError = { message: 'database unavailable' }
+    const response = await postContactTemplate()
+    expect(response.status).toBe(202)
+    expect(await response.json()).toMatchObject({
+      success: true,
+      saved: false,
+      reconciliation_required: true,
+      whatsapp_message_id: 'wamid-1',
+    })
+    expect(sendTemplateMessage).toHaveBeenCalledTimes(1)
   })
 
   it('creates a conversation for a contact with none, then sends the template', async () => {
@@ -219,7 +246,9 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
     expect(res.status).toBe(200)
 
     expect(conversationInserts).toHaveLength(0)
-    expect(messageInserts[0]).toMatchObject({ conversation_id: 'conv-existing' })
+    expect(messageInserts[0]).toMatchObject({
+      conversation_id: 'conv-existing',
+    })
   })
 
   it('404s when the contact is not in the caller account', async () => {
@@ -239,7 +268,7 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message_type: 'template', template_name: 'x' }),
-      }),
+      })
     )
     expect(res.status).toBe(400)
   })
