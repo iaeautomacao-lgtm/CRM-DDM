@@ -1,3 +1,8 @@
+-- 124 — Ledger de idempotência dos envios manuais/API (Idempotency-Key).
+-- Uma linha por (conta, chave). reserve_send_operation retorna true só
+-- para o primeiro chamador; a resposta final é gravada pelo app
+-- (src/lib/disparador/send-ledger.ts). Reservas sem conclusão NÃO expiram:
+-- exigem reconciliação manual, pois o provedor pode ter aceitado o envio.
 BEGIN;
 CREATE TABLE IF NOT EXISTS wacrm.send_operations (
  account_id uuid NOT NULL,operation_key text NOT NULL,request_hash text NOT NULL,

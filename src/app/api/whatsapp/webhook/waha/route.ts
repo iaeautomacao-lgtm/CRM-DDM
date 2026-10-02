@@ -10,6 +10,10 @@ import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
 import { writeLog, maskPhone } from '@/lib/logger'
 
 export async function POST(request: Request) {
+  // Autenticação do webhook: o WAHA envia `x-webhook-secret` (configurado
+  // via customHeaders em startWahaSession). Sem o segredo, qualquer um
+  // poderia injetar mensagens/status falsos em qualquer sessão.
+  // Fail-closed: sem WAHA_WEBHOOK_SECRET no .env a rota fica indisponível.
   if (!process.env.WAHA_WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 })
   }
@@ -52,6 +56,10 @@ export async function POST(request: Request) {
     // 1. Message status updates
     // ============================================================
     if (event === 'message.status' || event === 'message.ack') {
+      // Versões do WAHA diferem no formato do ack: `ackName` ('SERVER',
+      // 'DEVICE', 'READ', 'PLAYED'), `status` com prefixo ACK_ (legado) ou
+      // `ack` numérico (1=servidor, 2=aparelho, 3=lido, 4=reproduzido).
+      // Todos são normalizados para sent/delivered/read.
       const messageId = payload.id
       const wahaStatus = payload.ackName ?? payload.status ?? payload.ack
       let status: 'sent' | 'delivered' | 'read' | null = null
@@ -71,7 +79,11 @@ export async function POST(request: Request) {
         status = 'read'
 
       if (status) {
-        // Update message status in database
+        // Atualização monotônica: só avança o status (pending → sent →
+        // delivered → read). Acks podem chegar fora de ordem ou repetidos;
+        // o filtro `.in(status anterior)` impede, por exemplo, um 'sent'
+        // atrasado de rebaixar uma mensagem já 'read'. Escopo por conta
+        // para uma sessão não alterar mensagens de outra conta.
         const { error: updateError } = await db
           .from('messages')
           .update({ status })

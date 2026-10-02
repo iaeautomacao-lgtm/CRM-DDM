@@ -12,6 +12,22 @@ import { processWithConcurrency } from "@/lib/disparador/concurrency";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 
+// ============================================================
+// /api/disparador/cron — motor stateless do disparador.
+//
+// GET  → só diagnóstico (health check). Não tem efeitos colaterais.
+// POST → executa um tick: prepara campanhas agendadas, consome a fila e
+//        entrega callbacks. Os agendadores externos devem usar POST.
+//
+// Ambos exigem o header `x-cron-secret` == CRON_SECRET. Sem a variável
+// configurada a rota responde 503 (fail-closed), nunca libera o acesso.
+//
+// Toda a coordenação de concorrência fica no banco (migrations 118–125):
+// lock do cron com lease, reserva de cadência por campanha, claim por item
+// com quota/concorrência por canal. Assim, ticks sobrepostos ou várias
+// instâncias do Passenger não geram envio duplicado.
+// ============================================================
+
 function authorize(request: Request): NextResponse | null {
   if (!process.env.CRON_SECRET)
     return NextResponse.json({ error: "cron not configured" }, { status: 503 });
@@ -21,7 +37,9 @@ function authorize(request: Request): NextResponse | null {
   return null;
 }
 
-// Diagnostics must not start campaigns, drain queues, retry or emit callbacks.
+// Diagnóstico apenas: não inicia campanhas, não consome fila, não faz
+// retry nem emite callbacks. Antes o GET executava o tick inteiro, e cada
+// health check (monitor, stress test) virava um disparo real.
 export async function GET(request: Request) {
   const rejection = authorize(request);
   if (rejection) return rejection;
@@ -35,19 +53,30 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const rejection = authorize(request);
   if (rejection) return rejection;
+  // Identifica esta execução como dona do lock (renovação/liberação só
+  // funcionam para o mesmo owner).
   const owner = randomUUID();
   let locked = false;
+  // Vira true se a renovação do lock falhar: outro tick pode ter assumido,
+  // então paramos de iniciar trabalho novo o quanto antes.
   let lostLease = false;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
+  // Orçamento de tempo do tick. Nenhum trabalho novo começa nos últimos 5s,
+  // para a requisição terminar antes do timeout do agendador/proxy.
   const deadline = Date.now() + 40_000;
   try {
     const db = supabaseAdmin();
+    // Só um tick por vez em todo o cluster. TTL de 600s cobre crash do
+    // processo: o lock expira sozinho e o próximo tick consegue entrar.
     const { data: acquired, error: lockError } = await db.rpc('try_acquire_cron_lock', {
       p_name: 'disparador_cron', p_owner_id: owner, p_ttl_seconds: 600,
     });
     if (lockError) throw lockError;
     if (!acquired) return NextResponse.json({ status: 'already_running' });
     locked = true;
+    // Heartbeat do lease. Este setInterval vive só durante a requisição
+    // (é limpo no finally) — não é worker em memória, então é compatível
+    // com o Passenger.
     heartbeat = setInterval(() => {
       void (async () => {
         try {
@@ -56,11 +85,15 @@ export async function POST(request: Request) {
         } catch { lostLease = true; }
       })();
     }, 20_000);
-    // Give durable receipts and callbacks a chance before a busy queue consumes the tick.
+    // Reaplica recibos de status (delivered/read/failed) que chegaram antes
+    // da confirmação local do envio e entrega um callback pendente. Vem
+    // primeiro para não ficar sempre sem tempo quando a fila está cheia.
     const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 100 });
     if (receiptsError) throw receiptsError;
     await drainCallbackOutbox(1);
-    // Deployment preflight before any campaign preparation or external effects.
+    // Preflight de deploy: se a coluna next_batch_at (migration 118) não
+    // existir, o código novo subiu sem as migrations. Para aqui, antes de
+    // qualquer preparação de campanha ou envio externo.
     const { error: readinessError } = await db.from("campaigns").select("next_batch_at").limit(1);
     if (readinessError)
       return NextResponse.json({ error: "Dispatch safety migration required" }, { status: 503 });
@@ -70,6 +103,8 @@ export async function POST(request: Request) {
       .eq("status", "agendado")
       .lte("agendamento", new Date().toISOString()).limit(20);
     if (scheduledError) throw scheduledError;
+    // 1) Campanhas agendadas cujo horário chegou: monta a fila
+    //    (startCampaign deixa a campanha em 'preparando' até terminar).
     for (const campaign of scheduled ?? []) {
       if (lostLease || Date.now() > deadline - 5_000) break;
       if (!campaign.account_id) continue;
@@ -77,8 +112,12 @@ export async function POST(request: Request) {
       if (!result.ok)
         console.error("[Cron] Falha ao preparar campanha:", campaign.id, result.error);
     }
+    // 2) Devolve para 'agendado' apenas erros transitórios já classificados
+    //    (nunca itens 'enviando' — esses podem ter sido aceitos pelo provedor).
     const { error: retryError } = await db.rpc("retry_transient_queue_errors");
     if (retryError) throw retryError;
+    // 3) Campanhas em execução, mais "atrasadas" primeiro (fairness entre
+    //    campanhas quando o tick não dá conta de todas).
     const { data: active, error: activeError } = await db
       .from("campaigns")
       .select(
@@ -99,6 +138,10 @@ export async function POST(request: Request) {
         !checkWithinWindow(campaign.janela_inicio, campaign.janela_fim)
       )
         continue;
+      // Reserva o próximo lote da campanha no banco: grava next_batch_at =
+      // agora + batch_pause_seconds. Se outro tick já reservou dentro da
+      // pausa, retorna false e a campanha é pulada — ticks extras não
+      // furam o intervalo anti-spam.
       const { data: reserved, error: reservationError } = await db.rpc("reserve_campaign_tick", {
         p_campaign_id: campaign.id,
       });
@@ -117,7 +160,10 @@ export async function POST(request: Request) {
         .limit(batchSize);
       if (queryError) throw queryError;
       if (!items?.length) {
-        // Counts in-flight/unknown results and takes the same lock as claims.
+        // Fila vazia: tenta encerrar a campanha. A RPC usa o mesmo lock de
+        // campanha dos claims e só encerra se não houver item agendado,
+        // enviando (incl. resultado desconhecido), pausado ou com retry
+        // pendente. Ao encerrar, já enfileira o callback na outbox.
         const { data: completed, error: completionError } = await db.rpc(
           "complete_dispatch_campaign",
           { p_campaign_id: campaign.id }
@@ -137,6 +183,9 @@ export async function POST(request: Request) {
         sent: 0,
         pending_confirmation: 0,
       };
+      // Até 4 envios simultâneos por processo. O SELECT acima não reserva
+      // nada: cada item ainda passa pelo claim atômico dentro de
+      // processQueueItem (claim_dispatch_item), que pode recusá-lo.
       await processWithConcurrency(items as QueueItem[], 4, async (item) => {
         if (lostLease || Date.now() > deadline - 5_000) return;
         try {
@@ -144,12 +193,15 @@ export async function POST(request: Request) {
           if (outcome.outcome === "sent") result.sent++;
           if (outcome.outcome === "pending_confirmation") result.pending_confirmation++;
         } catch (error) {
-          // An exception after a provider call must not reopen the reservation.
+          // Exceção depois da chamada ao provedor NÃO devolve o item à fila:
+          // ele fica 'enviando' para reconciliação, evitando reenvio cego.
           console.error("[Cron] Item requer investigação:", item.id, error);
         }
       });
       results.push(result);
     }
+    // Sobrou tempo? Entrega mais callbacks (inclusive de campanhas
+    // encerradas neste tick).
     if (!lostLease && Date.now() < deadline - 10_000) await drainCallbackOutbox();
     return NextResponse.json({
       status: results.length ? "processed" : "idle",
@@ -160,6 +212,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Dispatch processing unavailable" }, { status: 503 });
   } finally {
     if (heartbeat) clearInterval(heartbeat);
+    // Libera o lock explicitamente para o próximo tick não esperar o TTL.
+    // Falha aqui só é logada: o TTL garante a liberação de qualquer forma.
     if (locked) {
       try {
         const { error } = await supabaseAdmin().rpc('release_cron_lock', { p_name: 'disparador_cron', p_owner_id: owner });

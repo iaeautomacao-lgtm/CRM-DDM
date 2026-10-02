@@ -32,9 +32,16 @@ export async function startCampaign(
   campaignId: string,
   accountId: string
 ): Promise<StartCampaignResult> {
+  // true enquanto esta chamada é dona da preparação (status 'preparando').
+  // Se sair por erro com ela ainda true, o finally devolve a campanha a
+  // 'rascunho' para não ficar presa.
   let preparing = false;
   try {
-    // Prepare privately; consumers only see the campaign after all rows exist.
+    // 1. Claim condicional rascunho/agendado -> 'preparando'. Enquanto a
+    // fila é montada a campanha NÃO está 'em_execucao', então o cron e o
+    // claim_dispatch_item ignoram os itens já inseridos — nenhum consumidor
+    // começa a enviar um lote incompleto. Também impede dois starts
+    // simultâneos: só um UPDATE encontra o status de origem.
     const { data: claimedRows, error: claimError } = await supabaseAdmin()
       .from("campaigns")
       .update({ status: "preparando" })
@@ -88,6 +95,10 @@ export async function startCampaign(
     // de onde parou. Reativa os itens pausados in-place e retorna sem
     // tocar em mensagens/contatos/fila nova.
     if (campaign.status === "pausada") {
+      // RPC (migration 118) faz tudo numa transação com lock da campanha:
+      // confirma 'pausada', volta itens 'pausado' -> 'agendado' e põe a
+      // campanha em 'em_execucao'. Retorna NULL se o status mudou nesse
+      // meio-tempo (ex.: outro usuário encerrou), evitando reabrir a fila.
       const { data: count, error } = await supabaseAdmin().rpc("resume_dispatch_campaign", {
         p_campaign_id: campaignId,
         p_account_id: accountId,
@@ -780,7 +791,10 @@ export async function startCampaign(
 
     if (metricsError) throw metricsError;
 
-    // Publish only if preparation still owns this campaign.
+    // Publicação: só agora a campanha vira 'em_execucao' e os itens ficam
+    // visíveis para os consumidores. O filtro status='preparando' garante
+    // que não ativamos uma campanha que foi encerrada/alterada durante a
+    // preparação. next_batch_at=null libera o primeiro lote imediatamente.
     const { data: activated, error: activateError } = await supabaseAdmin()
       .from("campaigns")
       .update({ status: "em_execucao", agendamento: now, next_batch_at: null })
@@ -800,7 +814,11 @@ export async function startCampaign(
     return { ok: false, status: 500, error: err.message };
   } finally {
     if (preparing) {
-      // Partial rows cannot be consumed; a new start clears them before publication.
+      // Falhou no meio da preparação: volta para 'rascunho'. Os itens
+      // parciais já inseridos não são consumidos (campanha não está em
+      // execução) e o próximo start limpa a fila antes de publicar.
+      // Crash do processo não passa por aqui: campanha presa em
+      // 'preparando' exige revisão manual.
       const { error } = await supabaseAdmin()
         .from("campaigns")
         .update({ status: "rascunho" })

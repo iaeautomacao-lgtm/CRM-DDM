@@ -1,5 +1,6 @@
 import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
+import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
 import { advanceFromNodeKey, loadAllNodes } from '@/lib/flows/engine'
@@ -159,10 +160,17 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ swept, woken })
 }
+
+// GET = só diagnóstico (health check): confere o segredo e se a tabela
+// flow_runs responde. NÃO executa o sweep — a execução é só via POST,
+// para monitores e pingers não dispararem automações.
 export async function GET(request: Request) {
   const expected = process.env.AUTOMATION_CRON_SECRET;
-  if (!expected || request.headers.get('x-cron-secret') !== expected)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: expected ? 401 : 503 });
+  if (!expected)
+    return NextResponse.json({ error: 'cron not configured' }, { status: 503 });
+  // Comparação em tempo constante, como no POST acima.
+  if (!matchesOperationalSecret(expected, request.headers.get('x-cron-secret')))
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { error } = await supabaseAdmin().from('flow_runs').select('id').limit(1);
   return NextResponse.json({ status: error ? 'unavailable' : 'healthy' }, { status: error ? 503 : 200 });
 }

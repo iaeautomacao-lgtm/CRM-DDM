@@ -1,3 +1,9 @@
+-- 125 — Recibos de status que chegam antes da confirmação local.
+-- O webhook pode receber delivered/read antes de mark_queue_item_sent
+-- gravar o item como 'enviado'. apply_dispatch_status guarda o recibo em
+-- dispatch_status_receipts e só o remove depois de aplicado;
+-- replay_dispatch_receipts (chamado após confirmar o envio) e
+-- reconcile_dispatch_receipts (chamado a cada tick do cron) reaplicam.
 BEGIN;
 CREATE TABLE IF NOT EXISTS wacrm.dispatch_status_receipts(message_id text NOT NULL,status text NOT NULL,error_text text,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(message_id,status));
 ALTER TABLE wacrm.dispatch_status_receipts ENABLE ROW LEVEL SECURITY;

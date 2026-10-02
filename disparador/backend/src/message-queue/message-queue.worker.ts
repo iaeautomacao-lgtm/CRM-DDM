@@ -20,6 +20,11 @@ export class MessageQueueWorker implements OnModuleInit {
     this.openai = new OpenAI({ apiKey: config.get('OPENAI_API_KEY') });
   }
 
+  // QUEUE_WORKER_MODE define quem consome a fila (explícito, padrão 'cron'):
+  // - cron: só processa quando /message-queue/process-tick é chamado;
+  // - polling: loop interno a cada 5s (apenas em processo de longa duração);
+  // - disabled: não consome (ex.: quando o CRM principal é o consumidor).
+  // Valor inválido derruba o boot de propósito, para não rodar no modo errado.
   onModuleInit() {
     const mode = this.config.get<string>('QUEUE_WORKER_MODE') || 'cron';
     if (!['cron', 'polling', 'disabled'].includes(mode)) throw new Error('QUEUE_WORKER_MODE inválido');
@@ -84,12 +89,18 @@ export class MessageQueueWorker implements OnModuleInit {
 
     this.logger.log(`Processando: ${item.id} | tipo: ${item.tipo} | scheduled: ${item.scheduled_at}`);
 
-    // ✅ FIX: updates também na tabela real
+    // Claim atômico agendado -> enviando (disparador/database/004). A RPC
+    // trava campanha e sessão, confere campanha em execução, até 4 envios
+    // simultâneos por sessão e a quota horária. Se outro consumidor venceu
+    // ou o limite está cheio, retorna false e o item fica para depois.
     const { data: claimed, error: claimError } = await this.supabase.db
       .rpc('claim_legacy_dispatch_item', { p_item_id: item.id });
     if (claimError) throw claimError;
     if (!claimed) return;
 
+    // externalAttempted: já chamamos o WAHA para este item? A partir daí um
+    // erro NÃO pode reagendar o envio (o provedor pode ter aceitado).
+    // acceptedMessageId: ID retornado pelo WAHA, guardado para reconciliação.
     let externalAttempted = false;
     let acceptedMessageId: string | undefined;
     try {

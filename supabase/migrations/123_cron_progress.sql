@@ -1,3 +1,9 @@
+-- 123 — Progresso dos crons.
+-- renew_cron_lock: renova o lease do lock enquanto o tick ainda trabalha
+--   (só o dono atual e só se ainda não expirou).
+-- assignment_retry_at: backoff da redistribuição de conversas pendentes.
+-- sweepable_flow_runs: seleciona no banco apenas flow_runs que já passaram
+--   do timeout do próprio flow (padrão 24h), em vez de filtrar no app.
 BEGIN;
 CREATE OR REPLACE FUNCTION wacrm.renew_cron_lock(p_name text,p_owner text)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { resumePendingExecution } from '@/lib/automations/engine'
 import type { AutomationContext } from '@/lib/automations/engine'
@@ -19,8 +20,8 @@ async function handler(request: Request) {
   if (!expected) {
     return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
   }
-  const supplied = request.headers.get('x-cron-secret')
-  if (supplied !== expected) {
+  // Comparação em tempo constante (mesmo helper das demais rotas operacionais).
+  if (!matchesOperationalSecret(expected, request.headers.get('x-cron-secret'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -68,13 +69,16 @@ async function handler(request: Request) {
 }
 
 
-// O crontab do cPanel usa POST; mantemos GET por compatibilidade com
-// pingers/health checks existentes. Ambos executam o mesmo handler.
+// Execução só via POST (crontab do cPanel). GET virou apenas diagnóstico
+// para os pingers/health checks existentes: confere o segredo e se a
+// tabela responde, sem executar automações pendentes.
 export const POST = handler
 export async function GET(request: Request) {
   const expected = process.env.AUTOMATION_CRON_SECRET;
-  if (!expected || request.headers.get('x-cron-secret') !== expected)
-    return NextResponse.json({ error: 'Unauthorized' }, { status: expected ? 401 : 503 });
+  if (!expected)
+    return NextResponse.json({ error: 'cron not configured' }, { status: 503 });
+  if (!matchesOperationalSecret(expected, request.headers.get('x-cron-secret')))
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { error } = await supabaseAdmin().from('automation_pending_executions').select('id').limit(1);
   return NextResponse.json({ status: error ? 'unavailable' : 'healthy' }, { status: error ? 503 : 200 });
 }

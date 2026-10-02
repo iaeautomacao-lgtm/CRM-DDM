@@ -390,6 +390,9 @@ async function handleStatusUpdate(status: {
   timestamp: string
   recipient_id: string
 }) {
+  // Transições permitidas por status recebido da Meta. Os webhooks de
+  // status podem chegar fora de ordem ou duplicados; só avançamos a partir
+  // dos estados listados, então um 'sent' atrasado nunca rebaixa 'read'.
   const allowedPrevious: Record<string, string[]> = {
     sent: ['pending', 'sending'],
     delivered: ['pending', 'sending', 'sent'],
@@ -412,6 +415,12 @@ async function handleStatusUpdate(status: {
   const failureReason = errors?.[0]
     ? `Meta: ${errors[0].title} (code ${errors[0].code})`
     : null
+  // Espelha o status na fila do disparador (migrations 119/125), numa
+  // transação com lock do item. Se o recibo chegar antes da confirmação
+  // local do envio (item ainda 'enviando'), ele fica guardado em
+  // dispatch_status_receipts e é reaplicado depois — sem perder métricas.
+  // Um 'failed' assíncrono marca erro permanente para revisão; nunca
+  // reabre o item para novo envio automático.
   const { error: transitionError } = await supabaseAdmin().rpc(
     'apply_dispatch_status',
     {

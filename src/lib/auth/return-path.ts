@@ -1,4 +1,17 @@
-/** Return navigation is convenience only; destination authorization still applies. */
+/**
+ * Valida o parâmetro `?next=` usado para voltar à página original após o
+ * login. Evita open redirect: só aceita caminhos relativos do próprio CRM.
+ *
+ * Rejeita (e usa `fallback`):
+ * - qualquer coisa que não comece com `/`, ou que comece com `//`
+ *   (protocol-relative → outro domínio);
+ * - barras invertidas e caracteres de controle, inclusive depois de
+ *   decodificar (`%2F%2F`, `%5C`), que alguns navegadores normalizam para `/`;
+ * - rotas de API e de autenticação, para não criar loops de login.
+ *
+ * O retorno é só conveniência de navegação: a página de destino continua
+ * aplicando a própria autorização.
+ */
 export function safeReturnPath(
   raw: string | null | undefined,
   fallback = '/dashboard'
@@ -12,6 +25,8 @@ export function safeReturnPath(
   try {
     const decoded = decodeURIComponent(raw);
     if (decoded.startsWith('//') || decoded.includes('\\')) return fallback;
+    // Resolve contra uma origem fictícia: se o resultado sair dela, o valor
+    // tentava apontar para outro host.
     const url = new URL(raw, 'https://crm.invalid');
     if (url.origin !== 'https://crm.invalid') return fallback;
     if (
@@ -20,6 +35,7 @@ export function safeReturnPath(
       return fallback;
     return url.pathname + url.search + url.hash;
   } catch {
+    // decodeURIComponent lança com sequências % inválidas.
     return fallback;
   }
 }

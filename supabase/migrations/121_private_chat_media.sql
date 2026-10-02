@@ -1,3 +1,8 @@
+-- 121 — Torna o bucket chat-media privado.
+-- Leitura só para usuários autenticados cuja conta é dona da pasta
+-- account-<uuid>/. O navegador acessa via /api/chat-media/... (URL assinada
+-- de 60s) e os provedores recebem URL assinada de 10 min no envio.
+-- Aplicar junto com o deploy da aplicação: o código anterior usa URLs públicas.
 BEGIN;
 UPDATE storage.buckets SET public = false WHERE id = 'chat-media';
 DROP POLICY IF EXISTS "Chat media is publicly readable" ON storage.objects;

@@ -12,6 +12,10 @@ import {
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
 
+// fetch com teto de 15s para todas as chamadas externas da IA (OpenAI,
+// Gemini, Claude, API DDM, TTS, download de mídia). Sem isso uma API lenta
+// segurava a requisição indefinidamente. Se o chamador já passar um
+// signal próprio (ex.: timeout de 10s), vale o que disparar primeiro.
 function boundedFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   const timeout = AbortSignal.timeout(15_000);
   return globalThis.fetch(input, { ...init, signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout });
@@ -284,7 +288,11 @@ export async function handleAiAutoResponse(
   }
 
   // 2. Load recent conversation history (last 10 messages)
-  // One persistent winner per inbound intent, across workers and webhook retries.
+  // Uma única resposta da IA por mensagem recebida. Retries do webhook,
+  // debounce concorrente ou múltiplos workers podem chamar esta função
+  // para a mesma mensagem; claim_ai_reply (migration 122) insere a
+  // intenção (conta, conversa, mensagem, nó) com ON CONFLICT DO NOTHING e
+  // só o primeiro chamador recebe true — os demais saem sem responder.
   const { data: inbound, error: inboundError } = await db.from('messages')
     .select('id').eq('conversation_id', conversationId).eq('account_id', accountId)
     .eq('sender_type', 'customer').order('received_at', { ascending: false }).limit(1).maybeSingle();
@@ -293,7 +301,9 @@ export async function handleAiAutoResponse(
     p_account: accountId, p_conversation: conversationId, p_message: inbound.id, p_node: nodeKey ?? '',
   });
   if (replyClaimError || !ownsReply) return;
-  // An interrupted intent stays reserved for review; never blindly rerun its effects.
+  // Se o processo cair depois daqui, a intenção continua registrada e a IA
+  // não responde de novo a essa mensagem: preferimos revisão manual a
+  // repetir efeitos (mensagem duplicada, acordo formalizado duas vezes).
   let messagesQuery = db
     .from("messages")
     .select("id, content_text, content_type, media_url, created_at, sender_type")

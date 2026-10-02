@@ -18,6 +18,8 @@ export async function POST(
 
     const { id: campaignId } = await params;
 
+    // Isolamento por conta: a campanha só é encontrada se pertencer à conta
+    // do usuário (antes só o created_by era conferido, sem escopo de conta).
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("account_id")
@@ -54,6 +56,10 @@ export async function POST(
 
     if (action !== "pause" && action !== "stop")
       return NextResponse.json({ error: "Ação inválida" }, { status: 400 });
+    // RPC transacional (migration 118): trava a campanha, muda o status e
+    // pausa/cancela só itens agendado/pendente/pausado. Itens 'enviando'
+    // não são tocados — podem já ter sido aceitos pelo provedor. Pausa só
+    // é aceita em campanha 'em_execucao' (não em 'preparando').
     const { data: changed, error } = await supabaseAdmin().rpc(
       "stop_dispatch_campaign",
       {

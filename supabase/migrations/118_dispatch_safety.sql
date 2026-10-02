@@ -1,3 +1,14 @@
+-- 118 — Coordenação de envios do disparador no banco.
+--
+-- Move para RPCs transacionais as decisões que antes eram feitas no código
+-- (sujeitas a corrida entre cron, worker e várias instâncias):
+--   reserve_campaign_tick      → cadência: um lote por campanha a cada batch_pause_seconds
+--   claim_dispatch_item        → claim agendado→enviando com quota e concorrência por canal
+--   complete_dispatch_campaign → encerra só quando não há trabalho pendente/em voo
+--   resume_/stop_dispatch_campaign → pausa/retomada/encerramento atômicos por conta
+--   mark_queue_item_sent       → confirmação idempotente (repetir não duplica log/métrica)
+-- Todas são SECURITY DEFINER com search_path vazio e executáveis só pelo service_role.
+--
 -- Apply before deploying the application. No automatic recovery of unknown sends.
 BEGIN;
 
@@ -19,6 +30,8 @@ ALTER TABLE wacrm.dispatch_channel_limits ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON wacrm.dispatch_channel_limits FROM PUBLIC, anon, authenticated;
 GRANT ALL ON wacrm.dispatch_channel_limits TO service_role;
 
+-- Cadência por campanha: reserva o próximo lote gravando next_batch_at.
+-- Retorna false se a campanha não está em execução ou a pausa ainda não passou.
 CREATE OR REPLACE FUNCTION wacrm.reserve_campaign_tick(p_campaign_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE v_id uuid;
@@ -32,6 +45,11 @@ BEGIN
 END;
 $$;
 
+-- Claim de um item da fila (agendado → enviando). Retorna true só para o
+-- vencedor e apenas se: campanha em execução, item vencido e sem message ID,
+-- dentro do limite_por_hora da campanha e dos limites do canal
+-- (max_in_flight / hourly_limit). Itens 'enviando' contam no limite, inclusive
+-- os de resultado desconhecido aguardando reconciliação.
 CREATE OR REPLACE FUNCTION wacrm.claim_dispatch_item(p_item_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
@@ -76,6 +94,8 @@ BEGIN
 END;
 $$;
 
+-- Encerra a campanha quando não resta nada agendado, enviando, pausado ou
+-- com retry pendente. Usa o mesmo lock de campanha do claim.
 CREATE OR REPLACE FUNCTION wacrm.complete_dispatch_campaign(p_campaign_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE v_status text;
@@ -93,6 +113,8 @@ BEGIN
 END;
 $$;
 
+-- Retoma campanha pausada: itens 'pausado' voltam a 'agendado'. Retorna o
+-- número de itens reativados, ou NULL se a campanha não estava pausada.
 CREATE OR REPLACE FUNCTION wacrm.resume_dispatch_campaign(p_campaign_id uuid, p_account_id uuid)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE v_status text; v_count integer;
@@ -108,6 +130,8 @@ BEGIN
 END;
 $$;
 
+-- Pausa ('pause') ou encerra ('stop') a campanha e os itens ainda não
+-- enviados, numa única transação. Itens 'enviando' não são alterados.
 CREATE OR REPLACE FUNCTION wacrm.stop_dispatch_campaign(p_campaign_id uuid, p_account_id uuid, p_action text)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 DECLARE v_status text;

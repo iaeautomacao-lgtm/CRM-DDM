@@ -98,376 +98,382 @@ export async function POST(request: Request) {
     logCtx.accountId = ctx.accountId;
     logCtx.keyId = ctx.keyId;
 
-    // 2. Parse request body
+    // 2. Parse request body — dentro do controle de idempotência. Integradores
+    // precisam enviar `Idempotency-Key` (sem ela: 400). Ver docs/public-api.md
+    // e src/lib/disparador/send-ledger.ts.
     return await runIdempotentSend(ctx.accountId, request, async () => {
-    const body = await request.json();
-    const { to, phone, text, message, name, media_url: originalMediaUrl, media_base64, media_type, media_caption } = body;
+      const body = await request.json();
+      const { to, phone, text, message, name, media_url: originalMediaUrl, media_base64, media_type, media_caption } = body;
 
-    const media_url = originalMediaUrl ? await resolveProviderMedia(originalMediaUrl, ctx.accountId) : originalMediaUrl;
-    const targetPhone = phone || to;
-    const targetText = message || text;
-    // true por default — omitido/true = comportamento atual (grava
-    // contacts/conversations/messages); false = pula essas 3 tabelas.
-    const salvarBd = body.salvar_bd !== false;
+      // media_url (assinada, curta) vai para o provedor; originalMediaUrl
+      // (referência estável) é a que fica gravada em messages.
+      const media_url = originalMediaUrl ? await resolveProviderMedia(originalMediaUrl, ctx.accountId) : originalMediaUrl;
+      const targetPhone = phone || to;
+      const targetText = message || text;
+      // true por default — omitido/true = comportamento atual (grava
+      // contacts/conversations/messages); false = pula essas 3 tabelas.
+      const salvarBd = body.salvar_bd !== false;
 
-    const hasMediaUrl = typeof media_url === 'string' && media_url.length > 0;
-    const hasMediaBase64 = typeof media_base64 === 'string' && media_base64.length > 0;
-    const hasMedia = hasMediaUrl || hasMediaBase64;
+      const hasMediaUrl = typeof media_url === 'string' && media_url.length > 0;
+      const hasMediaBase64 = typeof media_base64 === 'string' && media_base64.length > 0;
+      const hasMedia = hasMediaUrl || hasMediaBase64;
 
-    if (!targetPhone) {
-      throw badRequest("'phone' (or 'to') is required");
-    }
-    if (!targetText && !hasMedia) {
-      throw badRequest("'text' (or 'message') is required when no media is provided");
-    }
-    if (hasMediaUrl && hasMediaBase64) {
-      throw badRequest('Envie media_url OU media_base64, não os dois');
-    }
-    if (hasMediaBase64 && !media_type) {
-      throw badRequest('media_type obrigatório com media_base64');
-    }
-    if (media_type && !ALLOWED_MEDIA_TYPES.includes(media_type)) {
-      throw badRequest(`media_type inválido. Aceitos: ${ALLOWED_MEDIA_TYPES.join(', ')}`);
-    }
-    if (hasMediaUrl && !media_url.startsWith('https://')) {
-      throw badRequest("'media_url' deve ser uma URL pública iniciando com https://");
-    }
-
-    let mediaBuffer: Buffer | null = null;
-    if (hasMediaBase64) {
-      mediaBuffer = Buffer.from(media_base64, 'base64');
-      if (mediaBuffer.length === 0) {
-        throw badRequest("'media_base64' inválido ou vazio");
+      if (!targetPhone) {
+        throw badRequest("'phone' (or 'to') is required");
       }
-      if (mediaBuffer.length > MAX_MEDIA_BASE64_BYTES) {
-        throw badRequest(
-          `Mídia excede o tamanho máximo de 16MB (recebido: ${(mediaBuffer.length / (1024 * 1024)).toFixed(1)}MB)`
-        );
+      if (!targetText && !hasMedia) {
+        throw badRequest("'text' (or 'message') is required when no media is provided");
       }
-    }
+      if (hasMediaUrl && hasMediaBase64) {
+        throw badRequest('Envie media_url OU media_base64, não os dois');
+      }
+      if (hasMediaBase64 && !media_type) {
+        throw badRequest('media_type obrigatório com media_base64');
+      }
+      if (media_type && !ALLOWED_MEDIA_TYPES.includes(media_type)) {
+        throw badRequest(`media_type inválido. Aceitos: ${ALLOWED_MEDIA_TYPES.join(', ')}`);
+      }
+      if (hasMediaUrl && !media_url.startsWith('https://')) {
+        throw badRequest("'media_url' deve ser uma URL pública iniciando com https://");
+      }
 
-    // media_type is only mandatory for base64 (validated above); for
-    // media_url it's optional and falls back to guessing from the
-    // extension, same as the Flows engine's WAHA media_url sends.
-    const mediaKind: MediaKind | null = hasMedia
-      ? (media_type as MediaKind | undefined) && MEDIA_TYPE_TO_KIND[media_type]
-        ? MEDIA_TYPE_TO_KIND[media_type]
-        : guessMediaKindFromUrl(media_url ?? '')
-      : null;
-    // Caption only applies to image/video per the field's documented
-    // scope — silently dropped for audio/document rather than rejected.
-    // Falls back to targetText when media_caption isn't sent, so a
-    // caller that just sends media_url + text doesn't have its text
-    // silently discarded (text is otherwise unused whenever mediaKind
-    // is set — see attemptSend below).
-    const mediaCaption: string | undefined =
-      hasMedia && (mediaKind === 'image' || mediaKind === 'video')
-        ? media_caption || targetText || undefined
-        : undefined;
-    // Validado aqui (pós-derivação), não só sobre o media_caption bruto,
-    // pra cobrir também o caso em que targetText foi promovido a caption
-    // acima.
-    if (mediaCaption && mediaCaption.length > MAX_CAPTION_LENGTH) {
-      throw badRequest(`Caption excede ${MAX_CAPTION_LENGTH} caracteres.`);
-    }
-
-    // 3. Sanitize and validate phone number
-    const sanitizedPhone = sanitizePhoneForMeta(targetPhone);
-    if (!isValidE164(sanitizedPhone)) {
-      throw badRequest('Invalid phone number format. Must be in E.164 format (ex: +5527999991212)');
-    }
-
-    // 4. Fetch WhatsApp config for this account — only enabled channels,
-    // oldest first. Without the habilitado filter, an account with more
-    // than one whatsapp_config row (enabled or not) made maybeSingle()
-    // return PGRST116 ("multiple rows returned") instead of picking
-    // one, surfacing as a misleading "not configured" error even when
-    // a working channel existed.
-    const { data: config, error: configError } = await ctx.supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', ctx.accountId)
-      .eq('habilitado', true)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (configError || !config) {
-      throw badRequest('WhatsApp is not configured for this account.');
-    }
-
-    // 5. Find or create Contact — pulado quando salvar_bd: false (ver
-    // header do arquivo). Nada no envio em si (attemptSend abaixo)
-    // depende de contactRow — só existe pra alimentar conversation/messages.
-    let contactRow: any = null;
-    if (salvarBd) {
-      contactRow = (await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone)) as any;
-
-      if (contactRow) {
-        // Se o contato existe, atualiza o nome dele se tiver sido enviado um novo diferente
-        if (name && name !== contactRow.name) {
-          await ctx.supabase
-            .from('contacts')
-            .update({ name, updated_at: new Date().toISOString() })
-            .eq('id', contactRow.id);
+      let mediaBuffer: Buffer | null = null;
+      if (hasMediaBase64) {
+        mediaBuffer = Buffer.from(media_base64, 'base64');
+        if (mediaBuffer.length === 0) {
+          throw badRequest("'media_base64' inválido ou vazio");
         }
-      } else {
-        const { data: newContact, error: createContactErr } = await ctx.supabase
-          .from('contacts')
-          .insert({
-            account_id: ctx.accountId,
-            user_id: config.user_id, // Atribui ao criador da configuração do WhatsApp
-            phone: sanitizedPhone,
-            name: name || 'API Lead',
-          })
-          .select()
-          .single();
+        if (mediaBuffer.length > MAX_MEDIA_BASE64_BYTES) {
+          throw badRequest(
+            `Mídia excede o tamanho máximo de 16MB (recebido: ${(mediaBuffer.length / (1024 * 1024)).toFixed(1)}MB)`
+          );
+        }
+      }
 
-        if (createContactErr) {
-          // Se ocorreu um erro de chave duplicada (corrida/concorrência), tente buscar o contato existente novamente
-          if (isUniqueViolation(createContactErr)) {
-            const raced = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone);
-            if (raced) {
-              contactRow = raced;
-            }
-          }
+      // media_type is only mandatory for base64 (validated above); for
+      // media_url it's optional and falls back to guessing from the
+      // extension, same as the Flows engine's WAHA media_url sends.
+      const mediaKind: MediaKind | null = hasMedia
+        ? (media_type as MediaKind | undefined) && MEDIA_TYPE_TO_KIND[media_type]
+          ? MEDIA_TYPE_TO_KIND[media_type]
+          : guessMediaKindFromUrl(media_url ?? '')
+        : null;
+      // Caption only applies to image/video per the field's documented
+      // scope — silently dropped for audio/document rather than rejected.
+      // Falls back to targetText when media_caption isn't sent, so a
+      // caller that just sends media_url + text doesn't have its text
+      // silently discarded (text is otherwise unused whenever mediaKind
+      // is set — see attemptSend below).
+      const mediaCaption: string | undefined =
+        hasMedia && (mediaKind === 'image' || mediaKind === 'video')
+          ? media_caption || targetText || undefined
+          : undefined;
+      // Validado aqui (pós-derivação), não só sobre o media_caption bruto,
+      // pra cobrir também o caso em que targetText foi promovido a caption
+      // acima.
+      if (mediaCaption && mediaCaption.length > MAX_CAPTION_LENGTH) {
+        throw badRequest(`Caption excede ${MAX_CAPTION_LENGTH} caracteres.`);
+      }
 
-          if (!contactRow) {
-            throw new ApiError('internal', `Failed to create contact: ${createContactErr?.message}`, 500);
+      // 3. Sanitize and validate phone number
+      const sanitizedPhone = sanitizePhoneForMeta(targetPhone);
+      if (!isValidE164(sanitizedPhone)) {
+        throw badRequest('Invalid phone number format. Must be in E.164 format (ex: +5527999991212)');
+      }
+
+      // 4. Fetch WhatsApp config for this account — only enabled channels,
+      // oldest first. Without the habilitado filter, an account with more
+      // than one whatsapp_config row (enabled or not) made maybeSingle()
+      // return PGRST116 ("multiple rows returned") instead of picking
+      // one, surfacing as a misleading "not configured" error even when
+      // a working channel existed.
+      const { data: config, error: configError } = await ctx.supabase
+        .from('whatsapp_config')
+        .select('*')
+        .eq('account_id', ctx.accountId)
+        .eq('habilitado', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (configError || !config) {
+        throw badRequest('WhatsApp is not configured for this account.');
+      }
+
+      // 5. Find or create Contact — pulado quando salvar_bd: false (ver
+      // header do arquivo). Nada no envio em si (attemptSend abaixo)
+      // depende de contactRow — só existe pra alimentar conversation/messages.
+      let contactRow: any = null;
+      if (salvarBd) {
+        contactRow = (await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone)) as any;
+
+        if (contactRow) {
+          // Se o contato existe, atualiza o nome dele se tiver sido enviado um novo diferente
+          if (name && name !== contactRow.name) {
+            await ctx.supabase
+              .from('contacts')
+              .update({ name, updated_at: new Date().toISOString() })
+              .eq('id', contactRow.id);
           }
         } else {
-          contactRow = newContact;
+          const { data: newContact, error: createContactErr } = await ctx.supabase
+            .from('contacts')
+            .insert({
+              account_id: ctx.accountId,
+              user_id: config.user_id, // Atribui ao criador da configuração do WhatsApp
+              phone: sanitizedPhone,
+              name: name || 'API Lead',
+            })
+            .select()
+            .single();
+
+          if (createContactErr) {
+            // Se ocorreu um erro de chave duplicada (corrida/concorrência), tente buscar o contato existente novamente
+            if (isUniqueViolation(createContactErr)) {
+              const raced = await findExistingContact(ctx.supabase, ctx.accountId, sanitizedPhone);
+              if (raced) {
+                contactRow = raced;
+              }
+            }
+
+            if (!contactRow) {
+              throw new ApiError('internal', `Failed to create contact: ${createContactErr?.message}`, 500);
+            }
+          } else {
+            contactRow = newContact;
+          }
         }
       }
-    }
 
-    // 6. Find or create Conversation — pulado quando salvar_bd: false.
-    let conversation: any = null;
-    if (salvarBd) {
-      conversation = await findOrCreateConversation(
-        ctx.supabase,
-        ctx.accountId,
-        config.user_id, // Passa o user_id da config
-        contactRow.id,
-        config.provider === 'waha' ? config.waha_session : undefined,
-        config.provider === 'meta' ? config.id : undefined
-      );
+      // 6. Find or create Conversation — pulado quando salvar_bd: false.
+      let conversation: any = null;
+      if (salvarBd) {
+        conversation = await findOrCreateConversation(
+          ctx.supabase,
+          ctx.accountId,
+          config.user_id, // Passa o user_id da config
+          contactRow.id,
+          config.provider === 'waha' ? config.waha_session : undefined,
+          config.provider === 'meta' ? config.id : undefined
+        );
 
-      if (!conversation) {
-        throw new ApiError('internal', 'Failed to open a conversation for this contact.', 500);
+        if (!conversation) {
+          throw new ApiError('internal', 'Failed to open a conversation for this contact.', 500);
+        }
       }
-    }
 
-    // 7. Send the message via active provider (WAHA or Meta API)
-    let waMessageId = '';
-    let accessToken = '';
-    if (config.provider === 'meta') {
-      accessToken = decrypt(config.access_token);
-    }
+      // 7. Send the message via active provider (WAHA or Meta API)
+      let waMessageId = '';
+      let accessToken = '';
+      if (config.provider === 'meta') {
+        accessToken = decrypt(config.access_token);
+      }
 
-    // Meta media_base64 uploads once, up front — not inside attemptSend,
-    // which the phone-variant retry loop below can call more than once
-    // (Meta "recipient not in allowed list" retries). Re-uploading the
-    // same bytes per retry would waste calls and media ids for no
-    // benefit; the id itself is retry-safe to reuse across variants.
-    let uploadedMediaId: string | null = null;
-    if (hasMediaBase64 && mediaBuffer && config.provider === 'meta' && mediaKind) {
-      const ext = MEDIA_TYPE_EXTENSION[media_type] ?? 'bin';
-      const uploadResult = await uploadMedia({
-        phoneNumberId: config.phone_number_id,
-        accessToken,
-        buffer: mediaBuffer,
-        mimeType: media_type,
-        filename: `file_${Date.now()}.${ext}`,
-      });
-      uploadedMediaId = uploadResult.mediaId;
-    }
+      // Meta media_base64 uploads once, up front — not inside attemptSend,
+      // which the phone-variant retry loop below can call more than once
+      // (Meta "recipient not in allowed list" retries). Re-uploading the
+      // same bytes per retry would waste calls and media ids for no
+      // benefit; the id itself is retry-safe to reuse across variants.
+      let uploadedMediaId: string | null = null;
+      if (hasMediaBase64 && mediaBuffer && config.provider === 'meta' && mediaKind) {
+        const ext = MEDIA_TYPE_EXTENSION[media_type] ?? 'bin';
+        const uploadResult = await uploadMedia({
+          phoneNumberId: config.phone_number_id,
+          accessToken,
+          buffer: mediaBuffer,
+          mimeType: media_type,
+          filename: `file_${Date.now()}.${ext}`,
+        });
+        uploadedMediaId = uploadResult.mediaId;
+      }
 
-    const attemptSend = async (phoneStr: string): Promise<string> => {
-      if (mediaKind) {
+      const attemptSend = async (phoneStr: string): Promise<string> => {
+        if (mediaKind) {
+          if (config.provider === 'waha') {
+            const wahaConfig = {
+              waha_url: config.waha_url,
+              waha_session: config.waha_session,
+              waha_api_key: config.waha_api_key,
+            };
+            if (hasMediaUrl) {
+              if (mediaKind === 'audio') {
+                const result = await sendWahaVoiceMessage(wahaConfig, phoneStr, media_url);
+                return result.messageId;
+              }
+              const filename = media_url.split('?')[0].split('/').pop() || `file_${Date.now()}`;
+              const result = await sendWahaMediaMessage(
+                wahaConfig,
+                phoneStr,
+                media_url,
+                mediaKind,
+                filename,
+                mediaCaption
+              );
+              return result.messageId;
+            }
+            // media_base64 — WAHA takes the base64 payload inline, no
+            // upload step (unlike Meta).
+            if (mediaKind === 'audio') {
+              const result = await sendWahaVoiceMessageBase64(wahaConfig, phoneStr, {
+                data: media_base64,
+                mimetype: media_type,
+              });
+              return result.messageId;
+            }
+            const ext = MEDIA_TYPE_EXTENSION[media_type] ?? 'bin';
+            const result = await sendWahaMediaMessageBase64(
+              wahaConfig,
+              phoneStr,
+              {
+                data: media_base64,
+                mimetype: media_type,
+                filename: `file_${Date.now()}.${ext}`,
+              },
+              mediaCaption
+            );
+            return result.messageId;
+          }
+
+          // Meta
+          if (hasMediaUrl) {
+            const filename =
+              mediaKind === 'document' ? media_url.split('?')[0].split('/').pop() || 'document' : undefined;
+            const result = await sendMediaMessage({
+              phoneNumberId: config.phone_number_id,
+              accessToken,
+              to: phoneStr,
+              kind: mediaKind,
+              link: media_url,
+              caption: mediaCaption,
+              filename,
+            });
+            return result.messageId;
+          }
+          // media_base64 — already uploaded above, send by id.
+          const result = await sendMediaMessage({
+            phoneNumberId: config.phone_number_id,
+            accessToken,
+            to: phoneStr,
+            kind: mediaKind,
+            id: uploadedMediaId!,
+            caption: mediaCaption,
+          });
+          return result.messageId;
+        }
+
         if (config.provider === 'waha') {
           const wahaConfig = {
             waha_url: config.waha_url,
             waha_session: config.waha_session,
             waha_api_key: config.waha_api_key,
           };
-          if (hasMediaUrl) {
-            if (mediaKind === 'audio') {
-              const result = await sendWahaVoiceMessage(wahaConfig, phoneStr, media_url);
-              return result.messageId;
-            }
-            const filename = media_url.split('?')[0].split('/').pop() || `file_${Date.now()}`;
-            const result = await sendWahaMediaMessage(
-              wahaConfig,
-              phoneStr,
-              media_url,
-              mediaKind,
-              filename,
-              mediaCaption
-            );
-            return result.messageId;
-          }
-          // media_base64 — WAHA takes the base64 payload inline, no
-          // upload step (unlike Meta).
-          if (mediaKind === 'audio') {
-            const result = await sendWahaVoiceMessageBase64(wahaConfig, phoneStr, {
-              data: media_base64,
-              mimetype: media_type,
-            });
-            return result.messageId;
-          }
-          const ext = MEDIA_TYPE_EXTENSION[media_type] ?? 'bin';
-          const result = await sendWahaMediaMessageBase64(
-            wahaConfig,
-            phoneStr,
-            {
-              data: media_base64,
-              mimetype: media_type,
-              filename: `file_${Date.now()}.${ext}`,
-            },
-            mediaCaption
-          );
+          const result = await sendWahaTextMessage(wahaConfig, phoneStr, targetText);
           return result.messageId;
-        }
-
-        // Meta
-        if (hasMediaUrl) {
-          const filename =
-            mediaKind === 'document' ? media_url.split('?')[0].split('/').pop() || 'document' : undefined;
-          const result = await sendMediaMessage({
+        } else {
+          const result = await sendTextMessage({
             phoneNumberId: config.phone_number_id,
             accessToken,
             to: phoneStr,
-            kind: mediaKind,
-            link: media_url,
-            caption: mediaCaption,
-            filename,
+            text: targetText,
           });
           return result.messageId;
         }
-        // media_base64 — already uploaded above, send by id.
-        const result = await sendMediaMessage({
-          phoneNumberId: config.phone_number_id,
-          accessToken,
-          to: phoneStr,
-          kind: mediaKind,
-          id: uploadedMediaId!,
-          caption: mediaCaption,
-        });
-        return result.messageId;
-      }
+      };
 
-      if (config.provider === 'waha') {
-        const wahaConfig = {
-          waha_url: config.waha_url,
-          waha_session: config.waha_session,
-          waha_api_key: config.waha_api_key,
-        };
-        const result = await sendWahaTextMessage(wahaConfig, phoneStr, targetText);
-        return result.messageId;
-      } else {
-        const result = await sendTextMessage({
-          phoneNumberId: config.phone_number_id,
-          accessToken,
-          to: phoneStr,
-          text: targetText,
-        });
-        return result.messageId;
-      }
-    };
+      // Retry sending with phone variants if Meta sandbox/trunk 0 issues occur
+      try {
+        const variants = phoneVariants(sanitizedPhone);
+        let lastError: unknown = null;
 
-    // Retry sending with phone variants if Meta sandbox/trunk 0 issues occur
-    try {
-      const variants = phoneVariants(sanitizedPhone);
-      let lastError: unknown = null;
-
-      for (const variant of variants) {
-        try {
-          waMessageId = await attemptSend(variant);
-          lastError = null;
-          break;
-        } catch (err) {
-          if (config.provider === 'waha') {
-            throw err; // Re-throw WAHA errors directly
+        for (const variant of variants) {
+          try {
+            waMessageId = await attemptSend(variant);
+            lastError = null;
+            break;
+          } catch (err) {
+            if (config.provider === 'waha') {
+              throw err; // Re-throw WAHA errors directly
+            }
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!isRecipientNotAllowedError(msg)) {
+              throw err;
+            }
+            lastError = err;
           }
-          const msg = err instanceof Error ? err.message : String(err);
-          if (!isRecipientNotAllowedError(msg)) {
-            throw err;
-          }
-          lastError = err;
         }
+        if (lastError) throw lastError;
+      } catch (sendErr: any) {
+        const msg = sendErr instanceof Error ? sendErr.message : 'Unknown send error';
+        throw new ApiError('internal', `WhatsApp sending failed: ${msg}`, 502);
       }
-      if (lastError) throw lastError;
-    } catch (sendErr: any) {
-      const msg = sendErr instanceof Error ? sendErr.message : 'Unknown send error';
-      throw new ApiError('internal', `WhatsApp sending failed: ${msg}`, 502);
-    }
 
-    // 8. Record the sent message in the database — pulado quando salvar_bd: false.
-    let messageRecord: any = null;
-    if (salvarBd) {
-      const { data, error: msgInsertErr } = await ctx.supabase
-        .from('messages')
-        .insert({
-          conversation_id: conversation.id,
-          sender_type: 'bot',
-          content_type: mediaKind ?? 'text',
-          content_text: mediaKind ? (mediaCaption ?? null) : targetText,
-          // Only hasMediaUrl gives us a fetchable URL to store — a
-          // media_base64 send has no hosted copy (see file header comment).
-          media_url: hasMediaUrl ? originalMediaUrl : null,
-          message_id: waMessageId,
-          status: 'sent',
-          waha_session: config.provider === 'waha' ? config.waha_session : null,
-        })
-        .select()
-        .single();
+      // 8. Record the sent message in the database — pulado quando salvar_bd: false.
+      let messageRecord: any = null;
+      if (salvarBd) {
+        const { data, error: msgInsertErr } = await ctx.supabase
+          .from('messages')
+          .insert({
+            conversation_id: conversation.id,
+            sender_type: 'bot',
+            content_type: mediaKind ?? 'text',
+            content_text: mediaKind ? (mediaCaption ?? null) : targetText,
+            // Only hasMediaUrl gives us a fetchable URL to store — a
+            // media_base64 send has no hosted copy (see file header comment).
+            media_url: hasMediaUrl ? originalMediaUrl : null,
+            message_id: waMessageId,
+            status: 'sent',
+            waha_session: config.provider === 'waha' ? config.waha_session : null,
+          })
+          .select()
+          .single();
 
-      if (msgInsertErr || !data) {
-        console.error('[API send] Provider accepted; local persistence failed:', msgInsertErr?.message);
-        return ok(
-          {
-            success: true,
-            saved: false,
-            reconciliation_required: true,
-            whatsapp_message_id: waMessageId,
-            warning: 'Provider accepted the message. Do not resend.',
-          },
-          202,
-          logCtx
-        );
+        if (msgInsertErr || !data) {
+          // Provedor aceitou, gravação local falhou: 202 + reconciliation_required
+          // para o integrador não reenviar (antes era 500 e induzia retry).
+          console.error('[API send] Provider accepted; local persistence failed:', msgInsertErr?.message);
+          return ok(
+            {
+              success: true,
+              saved: false,
+              reconciliation_required: true,
+              whatsapp_message_id: waMessageId,
+              warning: 'Provider accepted the message. Do not resend.',
+            },
+            202,
+            logCtx
+          );
+        }
+        messageRecord = data;
+
+        // 9. Update last message state in conversation
+        await ctx.supabase
+          .from('conversations')
+          .update({
+            last_message_text: mediaKind ? (mediaCaption ?? `[${mediaKind}]`) : targetText,
+            last_message_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', conversation.id);
       }
-      messageRecord = data;
 
-      // 9. Update last message state in conversation
-      await ctx.supabase
-        .from('conversations')
-        .update({
-          last_message_text: mediaKind ? (mediaCaption ?? `[${mediaKind}]`) : targetText,
-          last_message_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', conversation.id);
-    }
-
-    return ok(
-      salvarBd
-        ? {
-            success: true,
-            saved: true,
-            message_id: messageRecord.id,
-            whatsapp_message_id: waMessageId,
-            ...(uploadedMediaId ? { media_id: uploadedMediaId } : {}),
-          }
-        : {
-            success: true,
-            saved: false,
-            whatsapp_message_id: waMessageId,
-            media_id: uploadedMediaId ?? null,
-          },
-      200,
-      logCtx
-    );
+      return ok(
+        salvarBd
+          ? {
+              success: true,
+              saved: true,
+              message_id: messageRecord.id,
+              whatsapp_message_id: waMessageId,
+              ...(uploadedMediaId ? { media_id: uploadedMediaId } : {}),
+            }
+          : {
+              success: true,
+              saved: false,
+              whatsapp_message_id: waMessageId,
+              media_id: uploadedMediaId ?? null,
+            },
+        200,
+        logCtx
+      );
     });
   } catch (err) {
     return toApiErrorResponse(err, logCtx);

@@ -67,6 +67,14 @@ export interface Campaign {
   limite_por_hora?: number;
 }
 
+// Resultado de processQueueItem:
+// - sent: provedor aceitou e a confirmação local foi gravada.
+// - deferred: item reagendado (fora da janela, telefone alternativo...).
+// - blocked: contato na blacklist; não haverá envio.
+// - pending_confirmation: o item fica em 'enviando' para reconciliação
+//   manual — o provedor PODE ter recebido a mensagem (timeout/5xx) ou
+//   aceitou mas a gravação local falhou. Nunca é reenfileirado sozinho.
+// - error: rejeição comprovada do provedor ou falha antes do envio.
 export type ProcessResult =
   | { outcome: "sent"; messageId: string }
   | { outcome: "deferred"; reason: string }
@@ -78,8 +86,19 @@ export type ProcessResult =
 // em vez de reentrar no funil de reenvio (ver markQueueError).
 const MAX_TENTATIVAS = 5;
 
-// The database enforces campaign state, quota and shared channel concurrency.
-// Migration 118 is required; no unsafe fallback when the RPC is unavailable.
+// Reivindica atomicamente um item (agendado -> enviando) via RPC
+// wacrm.claim_dispatch_item (migration 118). Dentro de uma transação, a RPC:
+// - trava a campanha (FOR UPDATE) e exige status 'em_execucao';
+// - trava o canal (advisory lock por session_id) para serializar claims de
+//   campanhas diferentes que usam o mesmo número;
+// - confere limite_por_hora da campanha, max_in_flight e hourly_limit do
+//   canal (dispatch_channel_limits), contando também itens 'enviando';
+// - recusa item já com waha_message_id (já aceito pelo provedor).
+// Só um chamador vence; os demais recebem false e pulam o item.
+//
+// Sem a migration 118 a RPC não existe e o erro é propagado de propósito:
+// o fallback antigo (UPDATE simples) não respeitava quota nem concorrência
+// por canal e podia gerar envio duplicado.
 async function claimItemAtomically(itemId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin().rpc("claim_dispatch_item", {
     p_item_id: itemId,
@@ -88,7 +107,10 @@ async function claimItemAtomically(itemId: string): Promise<boolean> {
   return data === true;
 }
 
-// Select a candidate, then use the same guarded claim as the cron.
+// Busca o próximo item agendado de uma campanha e o reivindica com o mesmo
+// claim protegido usado pelo cron. Pode retornar null sob concorrência
+// (outro consumidor venceu) ou quando a quota/concorrência do canal está
+// cheia — quem chama apenas tenta de novo no próximo ciclo.
 export async function claimQueueItem(campaignId: string): Promise<QueueItem | null> {
   const supabase = supabaseAdmin();
 
@@ -509,6 +531,9 @@ export async function processQueueItem(
   }
 
   const provider = config.provider as "waha" | "meta";
+  // Bucket chat-media é privado: troca a referência interna por URL
+  // assinada curta que Meta/WAHA conseguem baixar. Valida que o anexo
+  // pertence à conta do canal.
   if (item.media_url) item = { ...item, media_url: await resolveProviderMedia(item.media_url, config.account_id) };
   const tipo = item.tipo || "texto";
   // Contato externo com texto livre WAHA: mensagem_final guarda o
@@ -569,8 +594,11 @@ export async function processQueueItem(
         ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
         : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
   } catch (sendErr: any) {
-    // A transport error or provider 5xx does not prove the POST was rejected.
-    // Keep the reservation: a second POST could repeat an accepted operation.
+    // Timeout, erro de rede, erro WAHA (não-MetaApiError) ou 5xx da Meta NÃO
+    // provam que o POST foi rejeitado — o provedor pode ter entregue a
+    // mensagem. Mantém o item em 'enviando' (reservado) e só anota o motivo:
+    // um segundo POST automático poderia duplicar o envio para o cliente.
+    // Apenas MetaApiError 4xx (rejeição explícita) segue para o retry abaixo.
     if (!(sendErr instanceof MetaApiError) || sendErr.httpStatus >= 500) {
       const { error } = await supabaseAdmin()
         .from("disp_message_queue")
@@ -652,7 +680,10 @@ export async function processQueueItem(
   });
 
   if (markSentError) {
-    // Preserve the accepted receipt without reporting a rejected send.
+    // O provedor JÁ aceitou o envio, mas a confirmação local falhou. Não
+    // marcamos erro (isso levaria a reenvio): gravamos o message ID externo
+    // no item, que continua 'enviando', para reconciliação posterior via
+    // mark_queue_item_sent (idempotente) — sem novo POST ao provedor.
     console.error("[Disparador] Envio aceito; confirmação local pendente:", markSentError.message);
     const { error: receiptError } = await supabaseAdmin()
       .from("disp_message_queue")
@@ -674,6 +705,10 @@ export async function processQueueItem(
     };
   }
 
+  // O webhook de status (delivered/read/failed) pode chegar antes desta
+  // confirmação local; nesse caso ele ficou guardado em
+  // dispatch_status_receipts (migration 125). Reaplica agora que o item
+  // está 'enviado'. Falha aqui não é crítica: o cron reconcilia depois.
   const { error: replayError } = await supabaseAdmin().rpc('replay_dispatch_receipts', { p_message_id: externalMessageId });
   if (replayError) console.error('[Disparador] Confirmações antecipadas aguardam reconciliação:', replayError.message);
   return { outcome: "sent", messageId: externalMessageId };
@@ -856,9 +891,16 @@ async function sendViaMeta(
 }
 
 // Dispara um webhook de callback para o sistema externo quando uma
-// campanha termina de processar. Best-effort: qualquer falha (URL
-// bloqueada, timeout, erro de rede) é só logada — nunca deve derrubar
-// o worker que a chama via `void`.
+// campanha termina de processar. Nunca lança: qualquer falha (URL
+// bloqueada, timeout, erro de rede, HTTP não-2xx) é logada e vira `false`.
+//
+// Retorno usado pela outbox (callback-outbox.ts):
+// - true  → entregue (2xx) ou campanha sem callback_url (nada a fazer);
+// - false → tentar de novo depois, com backoff.
+// O header `Idempotency-Key: campaign.completed:<id>` é estável entre
+// tentativas, para o receptor deduplicar caso um retry repita a entrega.
+// `completed_at` usa updated_at da campanha (momento do encerramento), e
+// não "agora", para o payload ser idêntico em todas as tentativas.
 export async function sendCampaignCallback(campaignId: string): Promise<boolean> {
   try {
     const db = supabaseAdmin();

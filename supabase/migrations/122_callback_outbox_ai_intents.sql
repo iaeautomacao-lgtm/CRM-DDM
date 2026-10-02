@@ -1,3 +1,11 @@
+-- 122 — Outbox de callbacks de campanha + intenções de resposta da IA.
+--
+-- campaign_callback_outbox: complete_dispatch_campaign passa a inserir o
+--   callback na MESMA transação que encerra a campanha (não se perde em
+--   crash). claim_campaign_callback entrega com lease de 120s via
+--   FOR UPDATE SKIP LOCKED; o app aplica backoff (callback-outbox.ts).
+-- ai_reply_intents / claim_ai_reply: garante uma única resposta da IA por
+--   (conta, conversa, mensagem recebida, nó do flow).
 BEGIN;
 CREATE TABLE IF NOT EXISTS wacrm.campaign_callback_outbox (
   campaign_id uuid PRIMARY KEY REFERENCES wacrm.campaigns(id) ON DELETE CASCADE,

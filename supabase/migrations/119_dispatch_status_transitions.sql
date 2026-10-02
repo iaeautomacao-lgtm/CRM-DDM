@@ -1,3 +1,7 @@
+-- 119 — Aplica na fila do disparador os status assíncronos da Meta
+-- (delivered/read/failed) de forma monotônica: estados nunca regridem e as
+-- métricas da campanha são incrementadas uma única vez por transição.
+-- (Substituída pela versão com recibos antecipados na migration 125.)
 BEGIN;
 
 CREATE OR REPLACE FUNCTION wacrm.apply_dispatch_status(p_message_id text, p_status text, p_error text DEFAULT NULL)
