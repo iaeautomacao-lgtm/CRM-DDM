@@ -224,11 +224,11 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
     case "set_tag":
       return { mode: "add", tag_id: "", next_node_key: "" };
     case "handoff":
-      return { note: "" };
+      return { reason_code: "INDEFINIDO", note: "" };
     case "handoff_agent":
-      return { note: "" };
+      return { reason_code: "INDEFINIDO", note: "" };
     case "handoff_team":
-      return { note: "" };
+      return { reason_code: "INDEFINIDO", note: "" };
     case "end":
       return {};
     case "http_fetch":

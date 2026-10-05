@@ -791,10 +791,23 @@ function validateNode(
 
     case "handoff":
     case "handoff_agent":
-    case "handoff_team":
+    case "handoff_team": {
+      const cfg = node.config as { reason_code?: string };
+      if (!cfg.reason_code?.trim()) {
+        issues.push({
+          severity: "warning",
+          scope: "node",
+          node_key: node.node_key,
+          field: "reason_code",
+          message:
+            "Defina um motivo estruturado para o handoff. Sem isso, o encaminhamento cai como INDEFINIDO nos relatórios.",
+        });
+      }
+      break;
+    }
+
     case "end":
-      // Terminal nodes have no outgoing edges; nothing to validate
-      // beyond their existence.
+      // Terminal node with no outgoing edges.
       break;
 
     case "http_fetch": {

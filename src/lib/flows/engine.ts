@@ -444,6 +444,177 @@ async function logRunEvent(
   }
 }
 
+type AiDecisionInput = {
+  account_id: string;
+  conversation_id?: string | null;
+  flow_run_id?: string | null;
+  flow_id?: string | null;
+  node_key?: string | null;
+  decision_type: string;
+  intent?: string | null;
+  decision?: Record<string, unknown>;
+  reason?: string | null;
+  confidence?: number | null;
+  needs_human?: boolean;
+  handoff_reason?: string | null;
+  handoff_subreason?: string | null;
+  ai_exit_code?: string | null;
+  tool_name?: string | null;
+  tool_status?: string | null;
+  ai_node?: string | null;
+  tool_error?: string | null;
+  model?: string | null;
+  prompt_version?: string | null;
+};
+
+async function logAiDecision(
+  db: AdminClient,
+  input: AiDecisionInput,
+): Promise<void> {
+  const { error } = await db.from("ai_decisions").insert({
+    account_id: input.account_id,
+    conversation_id: input.conversation_id ?? null,
+    flow_run_id: input.flow_run_id ?? null,
+    flow_id: input.flow_id ?? null,
+    node_key: input.node_key ?? null,
+    decision_type: input.decision_type,
+    intent: input.intent ?? null,
+    decision: input.decision ?? {},
+    reason: input.reason ?? null,
+    confidence: input.confidence ?? null,
+    needs_human: input.needs_human ?? false,
+    handoff_reason: input.handoff_reason ?? null,
+    handoff_subreason: input.handoff_subreason ?? null,
+    ai_exit_code: input.ai_exit_code ?? null,
+    tool_name: input.tool_name ?? null,
+    tool_status: input.tool_status ?? null,
+    ai_node: input.ai_node ?? null,
+    tool_error: input.tool_error ?? null,
+    model: input.model ?? null,
+    prompt_version: input.prompt_version ?? null,
+  });
+
+  if (error) {
+    console.error("[flows] logAiDecision error:", error.message);
+    void writeLog({
+      account_id: input.account_id,
+      level: "error",
+      source: "flows",
+      event: "ai_decision_log_failed",
+      message: "Falha ao gravar decisão estruturada da IA",
+      payload: {
+        flow_run_id: input.flow_run_id ?? null,
+        decision_type: input.decision_type,
+        node_key: input.node_key ?? null,
+        erro: error.message,
+      },
+    });
+  }
+}
+
+function parseToolFailure(result: string): string | null {
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "error" in parsed &&
+      typeof (parsed as { error?: unknown }).error === "string"
+    ) {
+      return (parsed as { error: string }).error;
+    }
+  } catch {
+    // API responses are not guaranteed to be JSON.
+  }
+  return null;
+}
+
+async function loadLatestAiHandoffContext(
+  db: AdminClient,
+  runId: string,
+): Promise<{
+  aiNode: string | null;
+  toolError: string | null;
+  toolName: string | null;
+}> {
+  const { data } = await db
+    .from("flow_run_events")
+    .select("node_key,node_type,event_type,payload,created_at")
+    .eq("flow_run_id", runId)
+    .in("event_type", ["tool_result", "node_completed"])
+    .order("created_at", { ascending: false })
+    .limit(30);
+
+  let aiNode: string | null = null;
+  let toolError: string | null = null;
+  let toolName: string | null = null;
+
+  for (const row of data ?? []) {
+    const event = row as {
+      node_key: string | null;
+      node_type: string | null;
+      event_type: string;
+      payload: Record<string, unknown> | null;
+    };
+    if (!aiNode && event.node_type === "ai_agent" && event.node_key) {
+      aiNode = event.node_key;
+    }
+
+    if (event.event_type === "tool_result" && event.payload) {
+      const result =
+        typeof event.payload.result === "string" ? event.payload.result : null;
+      const failure = result ? parseToolFailure(result) : null;
+      if (failure) {
+        toolError = failure;
+        toolName =
+          typeof event.payload.tool_name === "string"
+            ? event.payload.tool_name
+            : null;
+        break;
+      }
+    }
+  }
+
+  return { aiNode, toolError, toolName };
+}
+
+async function recordHandoffDecision(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  reasonCode: string,
+  reasonSubcode: string | null,
+  assignedTo: string | null,
+  teamId: string | null,
+): Promise<void> {
+  const ctx = await loadLatestAiHandoffContext(db, run.id);
+
+  await logAiDecision(db, {
+    account_id: run.account_id,
+    conversation_id: run.conversation_id ?? null,
+    flow_run_id: run.id,
+    flow_id: run.flow_id,
+    node_key: node.node_key,
+    decision_type: "handoff",
+    decision: {
+      assigned_to: assignedTo,
+      team_id: teamId,
+      ai_node: ctx.aiNode,
+      tool_error: ctx.toolError,
+    },
+    reason: ctx.toolError,
+    needs_human: true,
+    handoff_reason: reasonCode,
+    handoff_subreason: reasonSubcode,
+    ai_exit_code:
+      typeof run.vars?.ai_exit_code === "string" ? run.vars.ai_exit_code : null,
+    tool_name: ctx.toolName,
+    tool_status: ctx.toolError ? "error" : null,
+    ai_node: ctx.aiNode,
+    tool_error: ctx.toolError,
+  });
+}
+
 /**
  * Builds the rich `node_error` payload shared by every failure path —
  * the loop's own `nodeError` closure AND `endRun`'s `errorContext`
@@ -894,7 +1065,13 @@ async function executeHandoff(
 ): Promise<void> {
   const startedAt = Date.now();
   const input = { ...run.vars };
-  const cfg = node.config as { assign_to?: string; team_id?: string; note?: string };
+  const cfg = node.config as {
+    assign_to?: string;
+    team_id?: string;
+    note?: string;
+    reason_code?: string;
+    reason_subcode?: string;
+  };
   try {
     const convUpdate: Record<string, unknown> = {
       status: "pending",
@@ -916,11 +1093,29 @@ async function executeHandoff(
       error_message: detail,
       err,
       input,
-      output: { assigned_to: cfg.assign_to ?? null, team_id: cfg.team_id ?? null },
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     });
     return;
   }
+  await recordHandoffDecision(
+    db,
+    run,
+    node,
+    cfg.reason_code ?? "INDEFINIDO",
+    cfg.reason_subcode ?? null,
+    cfg.assign_to ?? null,
+    cfg.team_id ?? null,
+  );
   await logEvent(db, run.id, "handoff", node.node_key, {
+    reason_code: cfg.reason_code ?? "INDEFINIDO",
+    reason_subcode: cfg.reason_subcode ?? null,
+    ai_exit_code: run.vars?.ai_exit_code ?? null,
+    conversation_id: run.conversation_id ?? null,
     note: cfg.note ?? null,
     assigned_to: cfg.assign_to ?? null,
     team_id: cfg.team_id ?? null,
@@ -936,7 +1131,12 @@ async function executeHandoff(
     duration_ms: Date.now() - startedAt,
     payload: {
       input,
-      output: { assigned_to: cfg.assign_to ?? null, team_id: cfg.team_id ?? null },
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     },
   });
   await endRun(db, run, "handed_off", "handoff_node");
@@ -954,7 +1154,12 @@ async function executeHandoffAgent(
 ): Promise<void> {
   const startedAt = Date.now();
   const input = { ...run.vars };
-  const cfg = node.config as { assign_to?: string; note?: string };
+  const cfg = node.config as {
+    assign_to?: string;
+    note?: string;
+    reason_code?: string;
+    reason_subcode?: string;
+  };
   try {
     const convUpdate: Record<string, unknown> = {
       status: "pending",
@@ -975,11 +1180,28 @@ async function executeHandoffAgent(
       error_message: detail,
       err,
       input,
-      output: { assigned_to: cfg.assign_to ?? null },
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     });
     return;
   }
+  await recordHandoffDecision(
+    db,
+    run,
+    node,
+    cfg.reason_code ?? "INDEFINIDO",
+    cfg.reason_subcode ?? null,
+    cfg.assign_to ?? null,
+    null,
+  );
   await logEvent(db, run.id, "handoff", node.node_key, {
+    reason_code: cfg.reason_code ?? "INDEFINIDO",
+    reason_subcode: cfg.reason_subcode ?? null,
+    ai_exit_code: run.vars?.ai_exit_code ?? null,
+    conversation_id: run.conversation_id ?? null,
     note: cfg.note ?? null,
     assigned_to: cfg.assign_to ?? null,
     team_id: null,
@@ -993,7 +1215,14 @@ async function executeHandoffAgent(
     event_type: "node_completed",
     status: "success",
     duration_ms: Date.now() - startedAt,
-    payload: { input, output: { assigned_to: cfg.assign_to ?? null } },
+    payload: {
+      input,
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
+    },
   });
   await endRun(db, run, "handed_off", "handoff_node");
 }
@@ -1226,7 +1455,12 @@ async function executeHandoffTeam(
 ): Promise<void> {
   const startedAt = Date.now();
   const input = { ...run.vars };
-  const cfg = node.config as { team_id?: string; note?: string };
+  const cfg = node.config as {
+    team_id?: string;
+    note?: string;
+    reason_code?: string;
+    reason_subcode?: string;
+  };
   let selectedAgent: string | null = null;
   try {
     const convUpdate: Record<string, unknown> = {
@@ -1259,11 +1493,28 @@ async function executeHandoffTeam(
       error_message: detail,
       err,
       input,
-      output: { assigned_to: cfg.team_id ?? null },
+      output: {
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     });
     return;
   }
+  await recordHandoffDecision(
+    db,
+    run,
+    node,
+    cfg.reason_code ?? "INDEFINIDO",
+    cfg.reason_subcode ?? null,
+    selectedAgent ?? null,
+    cfg.team_id ?? null,
+  );
   await logEvent(db, run.id, "handoff", node.node_key, {
+    reason_code: cfg.reason_code ?? "INDEFINIDO",
+    reason_subcode: cfg.reason_subcode ?? null,
+    ai_exit_code: run.vars?.ai_exit_code ?? null,
+    conversation_id: run.conversation_id ?? null,
     note: cfg.note ?? null,
     assigned_to: selectedAgent ?? null,
     team_id: cfg.team_id ?? null,
@@ -1277,7 +1528,15 @@ async function executeHandoffTeam(
     event_type: "node_completed",
     status: "success",
     duration_ms: Date.now() - startedAt,
-    payload: { input, output: { assigned_to: cfg.team_id ?? null } },
+    payload: {
+      input,
+      output: {
+        assigned_to: selectedAgent ?? null,
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
+    },
   });
   await endRun(db, run, "handed_off", "handoff_node");
 }
@@ -1937,7 +2196,7 @@ async function runAiAgentCore(
           },
         });
       },
-      async (toolName, result, durationMs) => {
+      async (toolName, result, durationMs, meta) => {
         collectedToolResults.push({ toolName, result });
         // Truncate result to 8000 chars for readability in logs — 500 era
         // curto demais pra respostas grandes (ex: consultar_debitos da API
@@ -1949,6 +2208,7 @@ async function runAiAgentCore(
         // em src/lib/ai/responder.ts), e collectedToolResults acima também
         // guarda o `result` cru, não `truncated`.
         const truncated = result.length > 8000 ? result.slice(0, 8000) + "…" : result;
+        const toolFailure = parseToolFailure(result);
         await logRunEvent(db, {
           run_id: run.id,
           flow_id: run.flow_id,
@@ -1956,12 +2216,43 @@ async function runAiAgentCore(
           node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
           node_type: "ai_agent",
           event_type: "tool_result",
-          status: "success",
+          status: toolFailure ? "error" : "success",
           duration_ms: durationMs,
+          error_message: toolFailure,
           payload: {
             tool_name: toolName,
             result: truncated,
+            attempts: meta?.attempts ?? 1,
+            recovered: meta?.recovered ?? false,
+            failure_code: meta?.failureCode ?? null,
+            http_status: meta?.httpStatus ?? null,
           },
+        });
+        await logAiDecision(db, {
+          account_id: run.account_id,
+          conversation_id: run.conversation_id ?? null,
+          flow_run_id: run.id,
+          flow_id: run.flow_id,
+          node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+          decision_type: "tool_result",
+          decision: {
+            duration_ms: durationMs,
+            attempts: meta?.attempts ?? 1,
+            recovered: meta?.recovered ?? false,
+            failure_code: meta?.failureCode ?? null,
+            http_status: meta?.httpStatus ?? null,
+          },
+          reason: toolFailure,
+          needs_human: false,
+          tool_name: toolName,
+          tool_status: toolFailure
+            ? "error"
+            : meta?.recovered
+              ? "recovered"
+              : "success",
+          ai_node: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+          tool_error: toolFailure,
+          model: modelUsed,
         });
       },
       currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
@@ -2025,6 +2316,25 @@ async function runAiAgentCore(
         exitCodeFound = "#NEGOCIACAO";
         await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
       }
+    }
+
+    if (exitCodeFound) {
+      await logAiDecision(db, {
+        account_id: run.account_id,
+        conversation_id: run.conversation_id ?? null,
+        flow_run_id: run.id,
+        flow_id: run.flow_id,
+        node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+        decision_type: "ai_exit",
+        decision: {
+          exit_code: exitCodeFound,
+        },
+        reason: "ai_exit_code",
+        needs_human: false,
+        ai_exit_code: exitCodeFound,
+        ai_node: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+        model: modelUsed,
+      });
     }
 
     const baseOutput = {
