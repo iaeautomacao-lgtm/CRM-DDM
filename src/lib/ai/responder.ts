@@ -3,6 +3,14 @@ import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
 import type { AiAgentTool } from "@/lib/flows/types";
+import {
+  classifyFetchFailure,
+  classifyHttpFailure,
+  prepareToolArgs,
+  retryDelayMs,
+  serializeToolFailure,
+  shouldRetryTool,
+} from "@/lib/ai/tool-recovery";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
 import { sendWahaTextMessage, sendWahaMediaMessage } from "@/lib/whatsapp/waha-api";
@@ -1731,44 +1739,125 @@ async function generateOpenAiResponse(
 
       if (toolDef) {
         const toolStartedAt = Date.now();
+        const prepared = prepareToolArgs(
+          toolName,
+          toolArgs,
+          toolDef.parameters.required ?? [],
+        );
+        const normalizedArgs = prepared.args;
+
         if (onToolCall) {
-          await onToolCall(toolName, toolArgs).catch(() => {});
+          await onToolCall(toolName, normalizedArgs).catch(() => {});
         }
-        try {
-          // Substitute {{param}} placeholders in URL and body
+
+        if (prepared.failure) {
+          toolResult = serializeToolFailure(prepared.failure, 0);
+          if (onToolResult) {
+            await onToolResult(
+              toolName,
+              toolResult,
+              Date.now() - toolStartedAt,
+            ).catch(() => {});
+          }
+        } else {
           const interpolate = (str: string) =>
             str.replace(/\{\{(\w+)\}\}/g, (_, key) =>
-              toolArgs[key] !== undefined ? String(toolArgs[key]) : ""
+              normalizedArgs[key] !== undefined
+                ? String(normalizedArgs[key])
+                : ""
             );
 
           const resolvedUrl = interpolate(toolDef.http.url);
-          const resolvedBody = toolDef.http.body ? interpolate(toolDef.http.body) : undefined;
+          const resolvedBody = toolDef.http.body
+            ? interpolate(toolDef.http.body)
+            : undefined;
           const resolvedHeaders: Record<string, string> = {};
           for (const [k, v] of Object.entries(toolDef.http.headers || {})) {
             resolvedHeaders[k] = interpolate(v);
           }
 
-          const httpRes = await boundedFetch(resolvedUrl, {
-            method: toolDef.http.method,
-            headers: { "Content-Type": "application/json", ...resolvedHeaders },
-            ...(resolvedBody ? { body: resolvedBody } : {}),
-            signal: AbortSignal.timeout(30000),
-          });
-          const httpText = await httpRes.text();
-          const toolDurationMs = Date.now() - toolStartedAt;
-          if (onToolResult) {
-            await onToolResult(toolName, httpText, toolDurationMs).catch(() => {});
+          const maxAttempts = 3;
+          let attempt = 0;
+
+          while (attempt < maxAttempts) {
+            attempt += 1;
+
+            try {
+              const httpRes = await boundedFetch(resolvedUrl, {
+                method: toolDef.http.method,
+                headers: {
+                  "Content-Type": "application/json",
+                  ...resolvedHeaders,
+                },
+                ...(resolvedBody ? { body: resolvedBody } : {}),
+                signal: AbortSignal.timeout(30000),
+              });
+
+              const httpText = await httpRes.text();
+              const failure = classifyHttpFailure(httpRes.status);
+
+              if (!failure) {
+                toolResult = httpText;
+                break;
+              }
+
+              toolResult = serializeToolFailure(failure, attempt);
+
+              if (
+                shouldRetryTool(
+                  toolName,
+                  toolDef.http.method,
+                  failure,
+                  attempt,
+                  maxAttempts,
+                )
+              ) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, retryDelayMs(attempt)),
+                );
+                continue;
+              }
+
+              break;
+            } catch (err) {
+              const failure = classifyFetchFailure(err);
+              toolResult = serializeToolFailure(failure, attempt);
+
+              if (
+                shouldRetryTool(
+                  toolName,
+                  toolDef.http.method,
+                  failure,
+                  attempt,
+                  maxAttempts,
+                )
+              ) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, retryDelayMs(attempt)),
+                );
+                continue;
+              }
+
+              break;
+            }
           }
-          toolResult = httpText;
-        } catch (err) {
-          toolResult = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
-          const toolDurationMs = Date.now() - toolStartedAt;
+
           if (onToolResult) {
-            await onToolResult(toolName, toolResult, toolDurationMs).catch(() => {});
+            await onToolResult(
+              toolName,
+              toolResult,
+              Date.now() - toolStartedAt,
+            ).catch(() => {});
           }
         }
       } else {
-        toolResult = JSON.stringify({ error: `Tool "${toolName}" not found in node config` });
+        toolResult = JSON.stringify({
+          ok: false,
+          error: "TOOL_SCHEMA_ERROR",
+          message: `Tool "${toolName}" não encontrada na configuração do nó.`,
+          retryable: false,
+          attempts: 0,
+        });
       }
 
       collectedToolResults.push({ toolName, result: toolResult });
