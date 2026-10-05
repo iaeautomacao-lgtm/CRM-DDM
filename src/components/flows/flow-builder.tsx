@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { confirmNodeRemoval } from './confirm-removal';
 import {
   CircleAlert,
   Plus,
@@ -105,6 +106,7 @@ export function FlowBuilder() {
 
   const removeNode = useCallback(
     (key: string) => {
+      if (!confirmNodeRemoval(state.nodes, [key])) return;
       removeNodeCtx(key);
       setExpanded((prev) => {
         const next = new Set(prev);
@@ -112,7 +114,7 @@ export function FlowBuilder() {
         return next;
       });
     },
-    [removeNodeCtx]
+    [removeNodeCtx, state.nodes]
   );
 
   const toggleExpanded = useCallback((key: string) => {
@@ -266,7 +268,7 @@ const TRIGGER_TYPE_LABELS: Record<BuilderState['trigger_type'], string> = {
   keyword: 'Uma mensagem contém uma palavra-chave',
   first_inbound_message: 'Primeira mensagem recebida do cliente',
   manual: 'Somente manual (sem disparo automático)',
-  called_by_flow: 'Chamado por outro fluxo (go_to_flow)',
+  called_by_flow: 'Chamado por outro fluxo',
 };
 
 function TriggerPanel({
@@ -278,6 +280,8 @@ function TriggerPanel({
   setState: React.Dispatch<React.SetStateAction<BuilderState>>;
   triggerIssues: ValidationIssue[];
 }) {
+  // Recarrega o rascunho das palavras-chave depois de desfazer/refazer.
+  const { historyEpoch } = useFlowEditor();
   return (
     <section className="border-border bg-card rounded-lg border p-4">
       <h2 className="text-foreground mb-3 text-sm font-semibold">Disparo</h2>
@@ -316,7 +320,7 @@ function TriggerPanel({
                 Somente manual (sem disparo automático)
               </SelectItem>
               <SelectItem value="called_by_flow">
-                Chamado por outro fluxo (go_to_flow)
+                Chamado por outro fluxo
               </SelectItem>
             </SelectContent>
           </Select>
@@ -327,6 +331,7 @@ function TriggerPanel({
               Palavras-chave (separadas por vírgula)
             </label>
             <KeywordsInput
+              key={historyEpoch}
               keywords={
                 Array.isArray(state.trigger_config.keywords)
                   ? (state.trigger_config.keywords as string[])
@@ -531,11 +536,13 @@ function NodeConfigWithAdvanced({
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const { renameNodeKey, historyEpoch } = useFlowEditor();
   const hasReplyIds =
     node.node_type === 'send_buttons' || node.node_type === 'send_list';
   return (
     <div className="flex flex-col gap-3">
       <NodeConfigForm
+        key={historyEpoch}
         node={node}
         allNodes={allNodes}
         showAdvanced={showAdvanced}
@@ -560,12 +567,10 @@ function NodeConfigWithAdvanced({
               <label className="text-muted-foreground mb-1 block text-xs">
                 Chave do nó (identificador interno — mantenha estável para análises)
               </label>
-              <Input
+              <NodeKeyInput
+                key={`${node.node_key}:${historyEpoch}`}
                 value={node.node_key}
-                onChange={(e) =>
-                  onUpdate({ node_key: slugify(e.target.value, node.node_key) })
-                }
-                className="bg-muted font-mono text-xs"
+                onCommit={(next) => renameNodeKey(node.node_key, next)}
               />
             </div>
             {hasReplyIds && (
@@ -642,5 +647,42 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// ============================================================
+// Chave do nó — edita num rascunho e só aplica ao sair do campo/Enter:
+// renomear reaponta as setas que chegam (renameNodeKey). Antes cada tecla
+// trocava a chave, remontava o card e deixava as setas apontando para a
+// chave antiga.
+// ============================================================
+
+function NodeKeyInput({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (next: string) => boolean;
+}) {
+  const [draft, setDraft] = useState(value);
+  const commit = () => {
+    if (draft.trim() === value) return;
+    if (!onCommit(draft)) setDraft(value);
+  };
+  return (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          setDraft(value);
+        }
+      }}
+      className="bg-muted font-mono text-xs"
+    />
   );
 }

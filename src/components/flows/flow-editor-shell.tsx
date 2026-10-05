@@ -298,7 +298,7 @@ function DebugBanner({ debug }: { debug: FlowDebugState }) {
         {debug.loading
           ? "Modo debug — carregando execução…"
           : startedAt
-            ? `Modo debug — Execução de ${contactLabel} iniciada em ${format(new Date(startedAt), "PP p")}`
+            ? `Modo debug — Execução de ${contactLabel} iniciada em ${format(new Date(startedAt), "dd/MM/yyyy HH:mm")}`
             : "Modo debug — execução não encontrada"}
       </span>
       <button

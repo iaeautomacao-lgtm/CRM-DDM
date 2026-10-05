@@ -94,6 +94,7 @@ export function NodeConfigForm({
             label="Texto enviado ao cliente"
             value={(cfg as { text?: string }).text ?? ""}
             onChange={(v) => onUpdateConfig({ text: v })}
+            rows={4}
           />
           <NextNodeRow
             value={(cfg as { next_node_key?: string }).next_node_key ?? ""}
@@ -148,7 +149,7 @@ export function NodeConfigForm({
           />
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">
-              Chave da variável (armazenada em flow_runs.vars; alfanumérica + underscore)
+              Nome da variável (letras, números e _ — use depois como {"{{vars.nome}}"})
             </label>
             <Input
               value={(cfg as { var_key?: string }).var_key ?? ""}
@@ -471,7 +472,7 @@ function SendButtonsForm({
       buttons: [
         ...buttons,
         {
-          reply_id: `btn_${buttons.length + 1}`,
+          reply_id: nextFreeReplyId("btn", buttons.map((b) => b.reply_id)),
           title: "Opção",
           next_node_key: "",
         },
@@ -518,7 +519,7 @@ function SendButtonsForm({
                       reply_id: slugify(e.target.value, `btn_${i + 1}`),
                     })
                   }
-                  placeholder="reply_id"
+                  placeholder="id da resposta"
                   className="bg-muted font-mono text-xs"
                 />
               )}
@@ -616,7 +617,7 @@ function SendListForm({
           title: "",
           rows: [
             {
-              reply_id: `row_${totalRows + 1}`,
+              reply_id: nextFreeReplyId("row", sections.flatMap((s) => s.rows.map((r) => r.reply_id))),
               title: `Opção ${totalRows + 1}`,
               next_node_key: "",
             },
@@ -653,7 +654,7 @@ function SendListForm({
               rows: [
                 ...s.rows,
                 {
-                  reply_id: `row_${totalRows + 1}`,
+                  reply_id: nextFreeReplyId("row", sections.flatMap((s) => s.rows.map((r) => r.reply_id))),
                   title: `Opção ${totalRows + 1}`,
                   next_node_key: "",
                 },
@@ -741,7 +742,7 @@ function SendListForm({
                         ),
                       })
                     }
-                    placeholder="reply_id"
+                    placeholder="id da resposta"
                     className="bg-muted font-mono text-xs"
                   />
                 )}
@@ -902,7 +903,7 @@ function ConditionForm({
               onChange={(e) =>
                 onUpdateConfig({ subject_key: e.target.value })
               }
-              placeholder={subject === "var" ? "ex.: email" : "UUID da tag"}
+              placeholder={subject === "var" ? "ex.: email" : "ID da etiqueta"}
               className="bg-muted font-mono text-xs"
             />
           )}
@@ -1253,7 +1254,7 @@ function SwitchConditionRow({
         <Input
           value={cond.subject_key ?? ""}
           onChange={(e) => onChange({ subject_key: e.target.value })}
-          placeholder={subject === "var" ? "ex.: email" : "UUID da tag"}
+          placeholder={subject === "var" ? "ex.: email" : "ID da etiqueta"}
           className="bg-muted font-mono text-xs"
         />
       )}
@@ -1364,7 +1365,7 @@ function SetTagForm({
             <Input
               value={cfg.tag_id ?? ""}
               onChange={(e) => onUpdateConfig({ tag_id: e.target.value })}
-              placeholder="UUID da tag"
+              placeholder="ID da etiqueta"
               className="bg-muted font-mono text-xs"
             />
           )}
@@ -2127,7 +2128,7 @@ function SetVariableForm({
     <>
       <div>
         <label className="mb-2 block text-xs text-muted-foreground">
-          Variáveis a gravar em flow_runs.vars (o valor aceita {"{{vars.X}}"})
+          Variáveis a gravar no fluxo (o valor aceita {"{{vars.X}}"})
         </label>
         <div className="flex flex-col gap-2">
           {assignments.map((a, i) => (
@@ -2500,7 +2501,7 @@ function ReceiveAttachmentForm({
       />
       <div>
         <label className="mb-1 block text-xs text-muted-foreground">
-          Nome da variável (guarda a URL do arquivo em flow_runs.vars)
+          Nome da variável (guarda o link do arquivo)
         </label>
         <Input
           value={cfg.var_name ?? ""}
@@ -2605,12 +2606,12 @@ function AiAgentForm({
           {mode === "loop" &&
             "Chama o agente de IA a cada nova mensagem do cliente, sem sair deste nó, até o limite de turnos."}
           {mode === "takeover" &&
-            "Chama o agente de IA uma última vez e encerra o fluxo, transferindo a conversa (handed_off)."}
+            "Chama o agente de IA uma última vez e encerra o fluxo, transferindo a conversa."}
         </p>
       </div>
 
       <TextRow
-        label="System prompt override (opcional)"
+        label="Instruções da IA para este nó (opcional, substituem as gerais)"
         value={cfg.system_prompt_override ?? ""}
         onChange={(v) => onUpdateConfig({ system_prompt_override: v })}
         rows={4}
@@ -2667,7 +2668,7 @@ function AiAgentForm({
                   {herdarSwitch}
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  Configure um &quot;System prompt override&quot; acima para habilitar esta opção.
+                  Preencha as &quot;Instruções da IA para este nó&quot; acima para habilitar esta opção.
                 </TooltipContent>
               </Tooltip>
             ) : (
@@ -2702,7 +2703,7 @@ function AiAgentForm({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium text-foreground">
-            Tools (chamadas HTTP)
+            Ferramentas (chamadas HTTP)
           </label>
           <button
             type="button"
@@ -2717,7 +2718,7 @@ function AiAgentForm({
             }}
             className="text-xs text-primary hover:underline"
           >
-            + Adicionar tool
+            + Adicionar ferramenta
           </button>
         </div>
 
@@ -2733,7 +2734,7 @@ function AiAgentForm({
             {/* Tool header */}
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-foreground">
-                Tool {toolIdx + 1}{tool.name ? `: ${tool.name}` : ""}
+                Ferramenta {toolIdx + 1}{tool.name ? `: ${tool.name}` : ""}
               </span>
               <button
                 type="button"
@@ -2899,9 +2900,9 @@ function AiAgentForm({
                         onUpdateConfig({ tools: updated });
                       }}
                     >
-                      <option value="string">string</option>
-                      <option value="number">number</option>
-                      <option value="boolean">boolean</option>
+                      <option value="string">texto</option>
+                      <option value="number">número</option>
+                      <option value="boolean">sim/não</option>
                     </select>
                     <button
                       type="button"
@@ -2965,4 +2966,12 @@ function AiAgentForm({
       </div>
     </>
   );
+}
+
+/** Próximo id livre ("btn_3"): contar o tamanho repetia id depois de remover um botão. */
+function nextFreeReplyId(prefix: string, existing: Array<string | undefined>): string {
+  const taken = new Set(existing.filter(Boolean));
+  let i = existing.length + 1;
+  while (taken.has(`${prefix}_${i}`)) i += 1;
+  return `${prefix}_${i}`;
 }

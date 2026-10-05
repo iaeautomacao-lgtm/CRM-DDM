@@ -537,5 +537,6 @@ function describeTrigger(flow: FlowRow): string {
   if (flow.trigger_type === "first_inbound_message") {
     return "Disparado pela primeira mensagem recebida do contato";
   }
+  if ((flow.trigger_type as string) === "called_by_flow") return "Chamado por outro fluxo";
   return "Disparo manual";
 }

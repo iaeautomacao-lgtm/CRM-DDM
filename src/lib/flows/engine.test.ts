@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  withInterpolatedTexts,
   matchReplyId,
   matchesKeywordTrigger,
   isAutoAdvancing,
@@ -334,5 +335,23 @@ describe("evaluateConditionPredicate", () => {
         configValue: "anything",
       }),
     ).toBe(false);
+  });
+});
+
+describe("withInterpolatedTexts (send_buttons / send_list)", () => {
+  it("troca {{vars.x}} no texto, cabeçalho e rodapé enviados ao cliente", () => {
+    const cfg = withInterpolatedTexts(
+      { text: "Olá {{vars.nome}}, sua dívida é {{vars.valor}}", header_text: "Oi {{vars.nome}}", footer_text: "DDM", buttons: [] },
+      { nome: "Maria", valor: "R$ 100" },
+    );
+    expect(cfg.text).toBe("Olá Maria, sua dívida é R$ 100");
+    expect(cfg.header_text).toBe("Oi Maria");
+    expect(cfg.footer_text).toBe("DDM");
+    expect(cfg.buttons).toEqual([]);
+  });
+  it("variável ausente vira vazio e campos opcionais ausentes continuam ausentes", () => {
+    const cfg = withInterpolatedTexts({ text: "Oi {{vars.x}}" }, {});
+    expect(cfg.text).toBe("Oi ");
+    expect("footer_text" in cfg).toBe(false);
   });
 });
