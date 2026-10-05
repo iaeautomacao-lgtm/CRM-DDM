@@ -98,6 +98,10 @@ export interface SendMediaNodeConfig {
 }
 
 export interface HandoffNodeConfig {
+  /** Structured reason used for analytics and handoff audit. */
+  reason_code?: string;
+  /** Optional more specific structured reason. */
+  reason_subcode?: string;
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
   /**
@@ -116,6 +120,10 @@ export interface HandoffNodeConfig {
 
 /** 'handoff_agent' — transfers to a specific operator (or any available one). */
 export interface HandoffAgentNodeConfig {
+  /** Structured reason used for analytics and handoff audit. */
+  reason_code?: string;
+  /** Optional more specific structured reason. */
+  reason_subcode?: string;
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
   /** Optional agent user_id to assign. Leave unset for "any available operator". */
@@ -124,6 +132,10 @@ export interface HandoffAgentNodeConfig {
 
 /** 'handoff_team' — transfers to a specific team (or any team). */
 export interface HandoffTeamNodeConfig {
+  /** Structured reason used for analytics and handoff audit. */
+  reason_code?: string;
+  /** Optional more specific structured reason. */
+  reason_subcode?: string;
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
   /** Optional team id to route to. Leave unset for "any team". */
