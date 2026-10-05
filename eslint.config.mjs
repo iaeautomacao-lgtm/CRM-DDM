@@ -16,10 +16,6 @@ const eslintConfig = defineConfig([
     "public/opus/**",
     // Separate NestJS app with its own package.json/tsconfig — not part of this Next.js lint scope.
     "disparador/**",
-    // One-off legacy debug scripts (CommonJS, not part of the app).
-    "check_audios.js",
-    "check_recent_messages.js",
-    "get_all_recent_messages.js",
     // Passenger entry point (CommonJS — committed by server setup).
     "app.js",
   ]),

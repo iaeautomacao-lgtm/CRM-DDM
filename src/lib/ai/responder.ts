@@ -44,6 +44,23 @@ const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
 export const AI_EMPTY_REPLY_FALLBACK_TEXT =
   "Olá! 😊 Tudo bem? Sou o Ben, do Grupo DDM. Para verificarmos sua situação, preciso do seu CPF (apenas os números). Pode me passar?";
 
+/**
+ * Token da API DDM Acordos (localiza_dev, calc, CalculaDebitos). Só vem do
+ * ambiente do servidor — nunca com valor padrão no código (o antigo vazou
+ * no repositório). DDM_ACORDOS_API_TOKEN é o nome documentado; DDM_TOKEN e
+ * DDM_API_KEY seguem aceitos para não quebrar servidores já configurados.
+ */
+function ddmApiToken(): string | null {
+  const token = [process.env.DDM_ACORDOS_API_TOKEN, process.env.DDM_TOKEN, process.env.DDM_API_KEY].find(
+    (v) => v && v.trim(),
+  );
+  if (!token) {
+    console.error("[AI Agent] DDM_ACORDOS_API_TOKEN não configurado — consulta/formalização na DDM desativada");
+    return null;
+  }
+  return token.trim();
+}
+
 interface DdmCpfResponse {
   instituicao?: string;
   valor_divida?: number | string;
@@ -51,7 +68,8 @@ interface DdmCpfResponse {
 }
 
 async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
-  const token = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
+  const token = ddmApiToken();
+  if (!token) return null;
 
   try {
     // Passo 1: Localizar devedor por CPF no localiza_dev.php com timeout de 10s
@@ -1140,7 +1158,9 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   if (hasAgreedAcordo && foundCpf && !hasOverride) {
     console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${foundCpf}...`);
     try {
-      const activeKey = process.env.DDM_TOKEN || process.env.DDM_API_KEY || "af875d1e5ffab9247c16c56ba2c6b349";
+      const activeKey = ddmApiToken();
+      // Sem token não formaliza: o erro já foi registrado em ddmApiToken().
+      if (!activeKey) throw new Error("DDM_ACORDOS_API_TOKEN ausente");
       let calculoId = ddmData?.calculoId || "";
       
       if (!calculoId) {
