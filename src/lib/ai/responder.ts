@@ -6,6 +6,7 @@ import type { AiAgentTool } from "@/lib/flows/types";
 import {
   classifyFetchFailure,
   classifyHttpFailure,
+  classifyToolBodyFailure,
   prepareToolArgs,
   retryDelayMs,
   serializeToolFailure,
@@ -1794,7 +1795,9 @@ async function generateOpenAiResponse(
               });
 
               const httpText = await httpRes.text();
-              const failure = classifyHttpFailure(httpRes.status);
+              const failure =
+                classifyHttpFailure(httpRes.status) ??
+                classifyToolBodyFailure(httpText);
 
               if (!failure) {
                 toolResult = httpText;
