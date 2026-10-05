@@ -444,6 +444,133 @@ async function logRunEvent(
   }
 }
 
+type AiDecisionInput = {
+  account_id: string;
+  conversation_id?: string | null;
+  flow_run_id?: string | null;
+  flow_id?: string | null;
+  node_key?: string | null;
+  decision_type: string;
+  intent?: string | null;
+  decision?: Record<string, unknown>;
+  reason?: string | null;
+  confidence?: number | null;
+  needs_human?: boolean;
+  handoff_reason?: string | null;
+  handoff_subreason?: string | null;
+  ai_exit_code?: string | null;
+  tool_name?: string | null;
+  tool_status?: string | null;
+  model?: string | null;
+  prompt_version?: string | null;
+};
+
+async function logAiDecision(
+  db: AdminClient,
+  input: AiDecisionInput,
+): Promise<void> {
+  const { error } = await db.from("ai_decisions").insert({
+    account_id: input.account_id,
+    conversation_id: input.conversation_id ?? null,
+    flow_run_id: input.flow_run_id ?? null,
+    flow_id: input.flow_id ?? null,
+    node_key: input.node_key ?? null,
+    decision_type: input.decision_type,
+    intent: input.intent ?? null,
+    decision: input.decision ?? {},
+    reason: input.reason ?? null,
+    confidence: input.confidence ?? null,
+    needs_human: input.needs_human ?? false,
+    handoff_reason: input.handoff_reason ?? null,
+    handoff_subreason: input.handoff_subreason ?? null,
+    ai_exit_code: input.ai_exit_code ?? null,
+    tool_name: input.tool_name ?? null,
+    tool_status: input.tool_status ?? null,
+    model: input.model ?? null,
+    prompt_version: input.prompt_version ?? null,
+  });
+
+  if (error) {
+    console.error("[flows] logAiDecision error:", error.message);
+    void writeLog({
+      account_id: input.account_id,
+      level: "error",
+      source: "flows",
+      event: "ai_decision_log_failed",
+      message: "Falha ao gravar decisão estruturada da IA",
+      payload: {
+        flow_run_id: input.flow_run_id ?? null,
+        decision_type: input.decision_type,
+        node_key: input.node_key ?? null,
+        erro: error.message,
+      },
+    });
+  }
+}
+
+function parseToolFailure(result: string): string | null {
+  try {
+    const parsed = JSON.parse(result) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "error" in parsed &&
+      typeof (parsed as { error?: unknown }).error === "string"
+    ) {
+      return (parsed as { error: string }).error;
+    }
+  } catch {
+    // API responses are not guaranteed to be JSON.
+  }
+  return null;
+}
+
+async function loadLatestAiHandoffContext(
+  db: AdminClient,
+  runId: string,
+): Promise<{
+  aiNode: string | null;
+  toolError: string | null;
+  toolName: string | null;
+}> {
+  const { data } = await db
+    .from("flow_run_events")
+    .select("node_key,event_type,payload,created_at")
+    .eq("flow_run_id", runId)
+    .in("event_type", ["tool_result", "node_completed"])
+    .order("created_at", { ascending: false })
+    .limit(30);
+
+  let aiNode: string | null = null;
+  let toolError: string | null = null;
+  let toolName: string | null = null;
+
+  for (const row of data ?? []) {
+    const event = row as {
+      node_key: string | null;
+      event_type: string;
+      payload: Record<string, unknown> | null;
+    };
+    if (!aiNode && event.node_key) aiNode = event.node_key;
+
+    if (event.event_type === "tool_result" && event.payload) {
+      const result =
+        typeof event.payload.result === "string" ? event.payload.result : null;
+      const failure = result ? parseToolFailure(result) : null;
+      if (failure) {
+        toolError = failure;
+        toolName =
+          typeof event.payload.tool_name === "string"
+            ? event.payload.tool_name
+            : null;
+        break;
+      }
+    }
+  }
+
+  return { aiNode, toolError, toolName };
+}
+
 /**
  * Builds the rich `node_error` payload shared by every failure path —
  * the loop's own `nodeError` closure AND `endRun`'s `errorContext`
