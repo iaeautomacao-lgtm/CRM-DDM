@@ -1984,6 +1984,10 @@ async function runAiAgentCore(
       exitCodeFound: string | null;
       modelUsed: string | null;
       aiConfigUsable: boolean;
+      messageSent: boolean;
+      messageId: string | null;
+      responseOutcome: "sent" | "skipped";
+      responseReason: string | null;
       baseOutput: Record<string, unknown>;
     }
   | {
@@ -1994,6 +1998,10 @@ async function runAiAgentCore(
       exitCodeFound: string | null;
       modelUsed: string | null;
       aiConfigUsable: boolean;
+      messageSent: false;
+      messageId: null;
+      responseOutcome: "failed";
+      responseReason: string;
     }
 > {
   // Garante que exit codes de nós anteriores não vazem para este nó
@@ -3281,22 +3289,6 @@ export async function advanceFromNodeKey(
           mode: cfg.mode,
           message_id: core.messageId,
           last_reply: lastReply.slice(-300),
-        });
-      } else {
-        await logRunEvent(db, {
-          run_id: run.id,
-          flow_id: run.flow_id,
-          account_id: run.account_id,
-          node_key: node.node_key,
-          node_type: "ai_agent",
-          event_type: "node_entered",
-          status: "warning",
-          duration_ms: 0,
-          payload: {
-            response_outcome: core.responseOutcome,
-            response_reason: core.responseReason,
-            message_sent: false,
-          },
         });
       }
 
