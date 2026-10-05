@@ -15,6 +15,11 @@ import {
 } from "@/lib/ai/tool-recovery";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
+import {
+  extractAiExitTag,
+  shouldLegacyAssignHuman,
+  stripAiExitTag,
+} from "@/lib/ai/exit-tags";
 import { sendWahaTextMessage, sendWahaMediaMessage } from "@/lib/whatsapp/waha-api";
 import { getConversationChannel, isSocialChannel, sendWebchatMessage } from "@/lib/webchat/send";
 import { sendSocialMessage } from "@/lib/channels/social";
@@ -1116,8 +1121,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   // node needs back as `ai_exit_code`. Re-reading the saved message and
   // regex-matching it (the old approach) never found anything, because
   // by the time it's saved the tag is already gone.
-  const exitTagMatch = generatedText.match(/#[A-Z0-9_]+/);
-  const detectedTag: string | null = exitTagMatch ? exitTagMatch[0] : null;
+  const detectedTag = extractAiExitTag(generatedText);
 
   let payBoletoUrl = "";
   let shouldTransferToHuman = false;
@@ -1140,29 +1144,19 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     hasAgreedAcordo = true;
   }
 
-  if (
-    generatedText.includes("#EQUIPEHUMANA") || 
-    generatedText.includes("#RECUSA") || 
-    generatedText.includes("#NEGOCIACAO") ||
-    generatedText.includes("#ANIMA") ||
-    generatedText.includes("#AGENDAMENTO(finalização)") ||
-    generatedText.includes("#AGENDAMENTO") ||
-    generatedText.includes("#NAOLOCALIZADO") ||
-    hasAgreedAcordo
-  ) {
-    shouldTransferToHuman = true;
-    generatedText = generatedText
-      .replace(/#EQUIPEHUMANA/g, "")
-      .replace(/#RECUSA/g, "")
-      .replace(/#NEGOCIACAO/g, "")
-      .replace(/#ANIMA/g, "")
-      .replace(/#AGENDAMENTO\(finalização\)/g, "")
-      .replace(/#AGENDAMENTO/g, "")
-      .replace(/#ACORDOFORMALIZADO\(finalização\)/g, "")
-      .replace(/#ACORDOFORMALIZADO/g, "")
-      .replace(/#NAOLOCALIZADO/g, "")
-      .trim();
-  }
+  shouldTransferToHuman = shouldLegacyAssignHuman({
+    tag: detectedTag,
+    flowControlled: Boolean(systemPromptOverride || nodeKey),
+    hasAgreedAcordo,
+  });
+
+  // Exit codes are control-plane markers, not customer-facing text.
+  // Strip exactly the detected tag so newer structured codes such as
+  // #RECUSA_CONFIRMADA or #CLIENTE_PEDIU_HUMANO never leak into chat.
+  generatedText = stripAiExitTag(generatedText, detectedTag)
+    .replace(/#ACORDOFORMALIZADO\(finalização\)/g, "")
+    .replace(/#AGENDAMENTO\(finalização\)/g, "")
+    .trim();
 
   if (!generatedText) return detectedTag;
 
