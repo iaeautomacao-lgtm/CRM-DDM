@@ -1,4 +1,28 @@
+import { execSync } from "node:child_process";
 import type { NextConfig } from "next";
+
+/**
+ * Identificador do build para a proteção contra "version skew" do Next.
+ *
+ * Sem ele, uma aba aberta antes do deploy (ou um HTML/RSC velho no cache
+ * da Hostinger) continua navegando com referências de componentes do build
+ * anterior; no build novo elas resolvem para `undefined` e a tela quebra
+ * com "Minified React error #130". Com o id, o servidor responde com o id
+ * novo e o cliente recarrega a página inteira em vez de misturar versões.
+ *
+ * Ordem: NEXT_DEPLOYMENT_ID (se o deploy definir) → SHA do commit (o deploy
+ * faz git pull + build no servidor) → nada (comportamento antigo).
+ */
+function resolveDeploymentId(): string | undefined {
+  if (process.env.NEXT_DEPLOYMENT_ID) return process.env.NEXT_DEPLOYMENT_ID;
+  try {
+    return execSync("git rev-parse --short=12 HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Baseline security headers applied to every response.
@@ -63,6 +87,7 @@ const SECURITY_HEADERS = [
 const nextConfig: NextConfig = {
   // Each service owns its dependencies; parent lockfiles must not change resolution.
   turbopack: { root: __dirname },
+  deploymentId: resolveDeploymentId(),
   /**
    * Cache-Control policy.
    *
@@ -115,6 +140,20 @@ const nextConfig: NextConfig = {
               "public, max-age=0, s-maxage=300, stale-while-revalidate=86400",
           },
         ],
+      },
+      {
+        // Navegação interna (payload RSC e prefetch) nunca no cache
+        // compartilhado: é por usuário e por build — um payload de outro
+        // build quebra a tela (React #130). Vem depois da regra acima para
+        // sobrescrever o Cache-Control nessas requisições.
+        source: "/:path((?!_next/static|_next/image|api).*)",
+        has: [{ type: "header", key: "rsc" }],
+        headers: [{ key: "Cache-Control", value: "private, no-store" }],
+      },
+      {
+        source: "/:path((?!_next/static|_next/image|api).*)",
+        has: [{ type: "query", key: "_rsc" }],
+        headers: [{ key: "Cache-Control", value: "private, no-store" }],
       },
       {
         // Security headers on every response, including /_next/static
