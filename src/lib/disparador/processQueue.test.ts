@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   updates: [] as Array<Record<string, unknown>>,
   rpc: vi.fn(),
   send: vi.fn(),
+  autoBlacklist: vi.fn(),
 }));
 vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
@@ -50,12 +51,13 @@ vi.mock('@/lib/logger', () => ({
   maskPhone: () => 'masked',
 }));
 vi.mock('@/lib/disparador/auto-blacklist', () => ({
-  autoBlacklistOn131026: vi.fn(),
+  autoBlacklistOn131026: mocks.autoBlacklist,
 }));
 vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/whatsapp/meta-api')>()),
   sendTextMessage: mocks.send,
 }));
+import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { processQueueItem, type QueueItem } from './processQueue';
 
 const item: QueueItem = {
@@ -73,6 +75,7 @@ describe('queue provider outcomes', () => {
     mocks.confirmationError = null;
     mocks.updates.length = 0;
     mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
+    mocks.autoBlacklist.mockReset().mockResolvedValue(undefined);
     mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
       data: name === 'claim_dispatch_item' ? mocks.claimed : null,
       error: name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
@@ -91,6 +94,38 @@ describe('queue provider outcomes', () => {
     ).toEqual({ outcome: 'sent', messageId: 'wamid.test' });
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
+  it('blocks Meta 131026 permanently instead of scheduling a retry', async () => {
+    mocks.send.mockRejectedValue(
+      new MetaApiError('Meta: Message undeliverable (code 131026)', 131026, 400)
+    );
+
+    expect(
+      await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
+    ).toEqual({ outcome: 'blocked', reason: 'meta_131026' });
+
+    expect(mocks.autoBlacklist).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.updates.some(
+        (update) =>
+          update.status === 'bloqueado' &&
+          update.erro_permanente === true &&
+          update.tentativas === 1
+      )
+    ).toBe(true);
+    expect(
+      mocks.updates.some(
+        (update) => update.status === 'agendado' || update.erro_permanente === false
+      )
+    ).toBe(false);
+    expect(
+      mocks.rpc.mock.calls.some(
+        ([name, args]) =>
+          name === 'increment_campaign_metric' &&
+          args?.p_field === 'total_blacklist'
+      )
+    ).toBe(true);
+  });
+
   it('does not reopen the reservation when local confirmation fails', async () => {
     mocks.confirmationError = { message: 'database unavailable' };
     expect(
