@@ -838,7 +838,9 @@ async function sendButtonsAndSuspend(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
-  const cfg = node.config as unknown as SendButtonsNodeConfig;
+  // Variáveis ({{vars.x}}) no texto/cabeçalho/rodapé: antes iam literais
+  // ao cliente (só o log mostrava o texto interpolado).
+  const cfg = withInterpolatedTexts(node.config as unknown as SendButtonsNodeConfig, run.vars);
   const { whatsapp_message_id } = await sendButtonsViaProvider(db, run, cfg);
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_buttons",
@@ -865,7 +867,7 @@ async function sendListAndSuspend(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
-  const cfg = node.config as unknown as SendListNodeConfig;
+  const cfg = withInterpolatedTexts(node.config as unknown as SendListNodeConfig, run.vars);
   const { whatsapp_message_id } = await sendListViaProvider(db, run, cfg);
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_list",
@@ -1396,6 +1398,19 @@ async function evaluateSwitchBranch(
  * ("Thanks {{vars.name}}, what's your email?"). Missing vars render as
  * empty string — the same behavior as the automations engine.
  */
+/** Cópia do config com text/header_text/footer_text interpolados. */
+export function withInterpolatedTexts<T extends { text: string; header_text?: string; footer_text?: string }>(
+  cfg: T,
+  vars: Record<string, unknown>,
+): T {
+  return {
+    ...cfg,
+    text: interpolateVars(cfg.text, vars),
+    ...(cfg.header_text ? { header_text: interpolateVars(cfg.header_text, vars) } : {}),
+    ...(cfg.footer_text ? { footer_text: interpolateVars(cfg.footer_text, vars) } : {}),
+  };
+}
+
 function interpolateVars(template: string, vars: Record<string, unknown>): string {
   if (!template) return "";
   return template.replace(/\{\{vars\.([a-zA-Z0-9_]+)\}\}/g, (_, key) => {
