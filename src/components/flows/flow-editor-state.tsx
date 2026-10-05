@@ -144,17 +144,17 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
     case "send_buttons":
       return {
         text: "",
-        buttons: [{ reply_id: "yes", title: "Sim", next_node_key: "" }],
+        buttons: [{ reply_id: "yes", title: "Yes", next_node_key: "" }],
       };
     case "send_list":
       return {
         text: "",
-        button_label: "Ver opções",
+        button_label: "View options",
         sections: [
           {
             title: "",
             rows: [
-              { reply_id: "row_1", title: "Opção 1", next_node_key: "" },
+              { reply_id: "row_1", title: "Option 1", next_node_key: "" },
             ],
           },
         ],
@@ -200,11 +200,11 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
     case "set_tag":
       return { mode: "add", tag_id: "", next_node_key: "" };
     case "handoff":
-      return { note: "" };
+      return { reason_code: "INDEFINIDO", note: "" };
     case "handoff_agent":
-      return { note: "" };
+      return { reason_code: "INDEFINIDO", note: "" };
     case "handoff_team":
-      return { note: "" };
+      return { reason_code: "INDEFINIDO", note: "" };
     case "end":
       return {};
     case "http_fetch":
@@ -519,9 +519,6 @@ export function FlowEditorProvider({
         toast.error("Corrija os problemas abaixo antes de ativar.");
         return;
       }
-      // Status anterior capturado antes da troca: pausar um fluxo ativo
-      // (active → draft) merece um aviso próprio, não "rascunho".
-      const prevStatus = latestStateRef.current.status;
       setActivating(true);
       try {
         // Always save first so the activation validator sees the
@@ -545,9 +542,7 @@ export function FlowEditorProvider({
             ? "Fluxo ativado."
             : next === "archived"
               ? "Arquivado."
-              : prevStatus === "active"
-                ? "Fluxo pausado — não dispara mais."
-                : "Salvo como rascunho.",
+              : "Salvo como rascunho.",
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Falha ao atualizar status";
