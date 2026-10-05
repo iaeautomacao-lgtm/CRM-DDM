@@ -100,6 +100,8 @@ export interface SendMediaNodeConfig {
 export interface HandoffNodeConfig {
   /** Structured reason used for analytics and handoff audit. */
   reason_code?: string;
+  /** Optional more specific structured reason. */
+  reason_subcode?: string;
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
   /**
