@@ -494,14 +494,25 @@ export async function handleAiAutoResponse(
     }
 
     if (targetAgentId) {
-      // Atribui o chat ao atendente e atualiza
-      await db
+      // Atribui o chat ao atendente e só declara handoff depois que a
+      // persistência for confirmada. Sem isso o Flow Engine pode encerrar
+      // o run como handed_off enquanto a conversa continua sem responsável.
+      const { error: assignmentError } = await db
         .from("conversations")
         .update({
           assigned_agent_id: targetAgentId,
           updated_at: new Date().toISOString()
         })
         .eq("id", conversationId);
+
+      if (assignmentError) {
+        return {
+          outcome: "failed",
+          reason: `handoff_anti_scam_assignment_failed:${assignmentError.message}`,
+          detectedTag: null,
+          modelUsed: responseModel,
+        };
+      }
         
       // Opcional: envia um alerta ou tag de humano no comando no banco
       return {
@@ -542,15 +553,32 @@ export async function handleAiAutoResponse(
         targetUserId = configData?.user_id;
       }
 
-      if (targetUserId) {
-        await db
-          .from("conversations")
-          .update({
-            assigned_agent_id: targetUserId,
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", conversationId);
+      if (!targetUserId) {
+        return {
+          outcome: "failed",
+          reason: "handoff_anti_loop_target_missing",
+          detectedTag: null,
+          modelUsed: responseModel,
+        };
       }
+
+      const { error: assignmentError } = await db
+        .from("conversations")
+        .update({
+          assigned_agent_id: targetUserId,
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", conversationId);
+
+      if (assignmentError) {
+        return {
+          outcome: "failed",
+          reason: `handoff_anti_loop_assignment_failed:${assignmentError.message}`,
+          detectedTag: null,
+          modelUsed: responseModel,
+        };
+      }
+
       return {
         outcome: "skipped",
         reason: "handoff_anti_loop",
