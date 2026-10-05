@@ -189,6 +189,48 @@ async function testQueueHealth(signal: AbortSignal): Promise<TestOutcome> {
   return { status: "pass", message: "Nenhum item preso em enviando" };
 }
 
+// ---- 6. campaign_queue_stalled ----
+// Detecta o efeito operacional de um cron parado: campanha ainda em execução
+// com item "agendado" cujo scheduled_at venceu há mais de 10 minutos.
+// É mais confiável que inferir saúde pela ausência de logs, porque ticks
+// saudáveis e ociosos não precisam gravar system_logs a cada minuto.
+async function testCampaignQueueStalled(signal: AbortSignal): Promise<TestOutcome> {
+  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: activeCampaigns, error: campaignError } = await supabaseAdmin()
+    .from("campaigns")
+    .select("id")
+    .eq("status", "em_execucao")
+    .limit(500)
+    .abortSignal(signal);
+
+  if (campaignError) return { status: "fail", message: campaignError.message };
+  const ids = (activeCampaigns ?? []).map((row: { id: string }) => row.id);
+  if (ids.length === 0) {
+    return { status: "pass", message: "Nenhuma campanha em execução" };
+  }
+
+  const { count, error } = await supabaseAdmin()
+    .from("disp_message_queue")
+    .select("id", { count: "exact", head: true })
+    .in("campaign_id", ids)
+    .eq("status", "agendado")
+    .lt("scheduled_at", cutoff)
+    .abortSignal(signal);
+
+  if (error) return { status: "fail", message: error.message };
+  const n = count ?? 0;
+  if (n > 0) {
+    return {
+      status: "warn",
+      message: `${n} item(ns) vencidos há mais de 10min em campanha(s) em execução`,
+    };
+  }
+  return {
+    status: "pass",
+    message: "Nenhum item vencido em campanhas em execução",
+  };
+}
+
 // ---- 6. flow_runs_health ----
 // last_advanced_at É mantida de verdade (confirmado ao vivo) — diferente
 // do caveat acima, este check é confiável.
@@ -358,6 +400,7 @@ export async function POST(request: Request) {
   results.push(await runTest("smoke_cron_flows", 3000, testSmokeCronFlows));
   results.push(await runTest("smoke_db", 5000, testSmokeDb));
   results.push(await runTest("queue_health", 5000, testQueueHealth));
+  results.push(await runTest("campaign_queue_stalled", 5000, testCampaignQueueStalled));
   results.push(await runTest("flow_runs_health", 5000, testFlowRunsHealth));
   results.push(await runTest("pending_conversations", 5000, testPendingConversations));
   results.push(await runTest("ddm_api_health", 5000, testDdmApiHealth));
@@ -377,7 +420,7 @@ export async function POST(request: Request) {
   const failCount = results.filter((r) => r.status === "fail").length;
 
   const level = overall === "pass" ? "info" : overall === "warn" ? "warn" : "error";
-  const message = `Health check: ${passCount}/12 pass, ${warnCount} warn, ${failCount} fail`;
+  const message = `Health check: ${passCount}/13 pass, ${warnCount} warn, ${failCount} fail`;
 
   await writeLog({
     level,

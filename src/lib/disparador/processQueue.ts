@@ -148,7 +148,10 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131047, 131021]);
 // 132001: Template name/language does not exist — parâmetros do
 // template incompatíveis com o que está aprovado na Meta; retry não
 // corrige.
-const META_PERMANENT_CODES = new Set([131031, 131051, 368, 190, 131008, 131009, 132000, 132001]);
+// 131026: Meta aceitou a requisição mas declarou o destino inacessível. O
+// próprio CRM coloca esse número na blacklist automática, portanto não faz
+// sentido tratá-lo como transitório nem reenfileirá-lo depois.
+const META_PERMANENT_CODES = new Set([131026, 131031, 131051, 368, 190, 131008, 131009, 132000, 132001]);
 
 // Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
 // permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
@@ -614,11 +617,68 @@ export async function processQueueItem(
       console.error(
         `[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`
       );
-      // 131026 (janela de 24h encerrada) rejeitado direto pela Meta no
-      // POST /messages — mesma blacklist automática do caminho
-      // assíncrono (webhook de status "failed"), fire-and-forget.
+
+      // 131026 é terminal para este telefone: a mesma ocorrência já alimenta
+      // a blacklist automática, então reenfileirar o item criaria um estado
+      // contraditório ("bloqueado" e "a enviar" ao mesmo tempo). Espera a
+      // blacklist best-effort e encerra a linha como bloqueada, sem passar
+      // pelo retry_transient_queue_errors.
       if (sendErr.metaCode === 131026) {
-        void autoBlacklistOn131026(phone, item.campaign_id ?? null);
+        const novasTentativas = tentativasAtuais + 1;
+        const message = sendErr?.message || String(sendErr);
+        await autoBlacklistOn131026(phone, item.campaign_id ?? null);
+
+        const { error: blockError } = await supabaseAdmin()
+          .from("disp_message_queue")
+          .update({
+            status: "bloqueado",
+            erro: message,
+            erro_permanente: true,
+            tentativas: novasTentativas,
+          })
+          .eq("id", item.id);
+
+        if (blockError) {
+          // Se a atualização final falhar, ainda marca como erro permanente:
+          // nunca devolve 131026 para o funil automático de retry.
+          await markQueueError(
+            item.id,
+            message,
+            true,
+            item.campaign_id,
+            novasTentativas
+          );
+          return { outcome: "error", error: message };
+        }
+
+        const { error: metricError } = await supabaseAdmin().rpc(
+          "increment_campaign_metric",
+          {
+            p_campaign_id: item.campaign_id,
+            p_field: "total_blacklist",
+          }
+        );
+        if (metricError) {
+          console.error(
+            "[Disparador] Falha ao incrementar total_blacklist após 131026:",
+            metricError.message
+          );
+        }
+
+        void writeLog({
+          level: "warn",
+          source: "disparador",
+          event: "message_blocked_meta_131026",
+          message: "Destino bloqueado após erro Meta 131026; item não será reenfileirado",
+          payload: {
+            campaign_id: item.campaign_id,
+            contact_id: item.contact_id,
+            phone: maskPhone(normalizedPhone),
+            metaCode: 131026,
+          },
+        });
+
+        return { outcome: "blocked", reason: "meta_131026" };
       }
     }
 
