@@ -1,4 +1,5 @@
 import { chatMediaReference } from '@/lib/storage/chat-media';
+import { registerAuditActor } from '@/lib/audit/context'
 import { NextResponse } from 'next/server'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -6,10 +7,14 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
-import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
+import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
+import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
+import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { writeLog, maskPhone } from '@/lib/logger'
 
 export async function POST(request: Request) {
+  // Auditoria: escritas desta requisição saem como "webhook" (webhook_waha).
+  await registerAuditActor({ actorType: 'webhook', source: 'webhook_waha' })
   // Autenticação do webhook: o WAHA envia `x-webhook-secret` (configurado
   // via customHeaders em startWahaSession). Sem o segredo, qualquer um
   // poderia injetar mensagens/status falsos em qualquer sessão.
@@ -248,6 +253,7 @@ export async function POST(request: Request) {
 
       // 1. Find or create contact
       let contactId: string | null = null
+      let contactWasCreated = false
       let avatarUrl: string | null = null
       let contactName = rawPhone
 
@@ -358,6 +364,7 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: 'Failed to synchronize contact' }, { status: 500 })
         }
         contactId = newContact.id
+        contactWasCreated = true
       }
 
       // 2. Find or create conversation
@@ -597,10 +604,19 @@ export async function POST(request: Request) {
       // ver reply-tracker.ts. Só para inbound de verdade: este evento
       // também dispara para o eco das nossas próprias mensagens enviadas
       // (direction === 'outbound'), que não é uma resposta do contato.
-      if (direction === 'inbound' && contactId && accountId) {
+      if (direction === 'inbound' && contactId && accountId && conversationId) {
         // `phone` vem como "+<dígitos>" (linha ~140) — normaliza pro
         // mesmo formato de phone_normalized antes de passar adiante.
-        trackCampaignReply(contactId, accountId, normalizePhone(phone)).catch(() => {})
+        // `replyTo.id` = mensagem citada pelo cliente (atribuição exata
+        // quando é a da campanha); ausente nas versões do WAHA sem citação.
+        recordCampaignReply({
+          contactId,
+          accountId,
+          conversationId,
+          inboundMessageId: messageId,
+          replyToProviderId: payload.replyTo?.id ?? null,
+          replyPhoneNormalized: normalizePhone(phone),
+        }).catch(() => {})
       }
 
       // 4. Update the conversation values
@@ -662,7 +678,19 @@ export async function POST(request: Request) {
           .eq('sender_type', 'customer')
         const isFirstInboundMessage = (custCount ?? 0) <= 1
 
-        const flowResult = await dispatchInboundToFlows({
+        // Resposta a campanha com "enviar para o Webchat": convite no lugar
+        // do fluxo receptivo (mesma regra do webhook Meta).
+        const movedToWebchat = await maybeStartCampaignWebchat({
+          accountId,
+          userId: config.user_id,
+          contactId,
+          conversationId,
+          configId: config.id,
+          replyToProviderId: payload.replyTo?.id ?? null,
+        })
+        const flowResult = movedToWebchat
+          ? { consumed: true }
+          : await dispatchInboundToFlows({
           accountId,
           userId: config.user_id,
           contactId,
@@ -677,6 +705,37 @@ export async function POST(request: Request) {
           isFirstInboundMessage,
         })
         flowConsumed = flowResult.consumed
+
+        // Automações — mesmos gatilhos e mesma precedência do webhook Meta
+        // (conteúdo só quando nenhum fluxo consumiu), filtradas pela linha.
+        const automationTriggers: (
+          | 'new_contact_created'
+          | 'first_inbound_message'
+          | 'new_message_received'
+          | 'keyword_match'
+        )[] = []
+        if (!flowConsumed) automationTriggers.push('new_message_received', 'keyword_match')
+        if (contactWasCreated) automationTriggers.unshift('new_contact_created')
+        if (isFirstInboundMessage) automationTriggers.unshift('first_inbound_message')
+        for (const triggerType of automationTriggers) {
+          runAutomationsForTrigger({
+            accountId,
+            triggerType,
+            contactId,
+            lineId: config.id,
+            context: { message_text: contentText ?? '', conversation_id: conversationId },
+          }).catch((err) => {
+            console.error('[automations] dispatch failed (waha):', err)
+            void writeLog({
+              account_id: accountId,
+              level: 'error',
+              source: 'automations',
+              event: 'automation_dispatch_error',
+              message: `Falha ao disparar automações para o trigger "${triggerType}" (WAHA)`,
+              payload: { contact_id: contactId, trigger_type: triggerType, erro: err instanceof Error ? err.message : String(err) },
+            })
+          })
+        }
       }
 
       // Suppress AI auto-response / sentiment / auto-tagging when the

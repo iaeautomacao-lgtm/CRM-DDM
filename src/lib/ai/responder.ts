@@ -1,10 +1,13 @@
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
 import type { AiAgentTool } from "@/lib/flows/types";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
 import { sendWahaTextMessage, sendWahaMediaMessage } from "@/lib/whatsapp/waha-api";
+import { getConversationChannel, isSocialChannel, sendWebchatMessage } from "@/lib/webchat/send";
+import { sendSocialMessage } from "@/lib/channels/social";
 import {
   sanitizePhoneForMeta,
   phoneVariants,
@@ -27,7 +30,9 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
   db: {
     schema: 'wacrm'
-  }
+  },
+        // Auditoria (migration 131): escritas da IA saem como ator "ai".
+        global: { fetch: auditFetch, headers: { 'x-audit-actor-type': 'ai', 'x-audit-source': 'ia' } },
 });
 
 // Enviada quando o modelo retorna "" tanto na primeira tentativa quanto
@@ -1295,6 +1300,38 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     } catch (err) {
       console.error("[AI Agent] ElevenLabs error:", err);
     }
+  }
+
+  // 6b. Canais que não são WhatsApp. Webchat: a resposta (texto ou áudio) e
+  // o boleto são gravados na conversa e a página do cliente os busca.
+  // Instagram/Messenger: saem pela Graph API (src/lib/channels/social.ts).
+  // A simulação de digitação e o retry por variante de telefone abaixo não
+  // se aplicam a esses canais.
+  const conversationChannel = await getConversationChannel(conversationId);
+  if (conversationChannel === "webchat" || isSocialChannel(conversationChannel)) {
+    const send = conversationChannel === "webchat" ? sendWebchatMessage : sendSocialMessage;
+    try {
+      await send({
+        conversationId,
+        senderType: "bot",
+        contentType: voiceMediaUrl ? "audio" : "text",
+        text: generatedText,
+        mediaUrl: voiceMediaUrl || null,
+      });
+      if (payBoletoUrl && payBoletoUrl.toLowerCase().includes(".pdf")) {
+        await send({
+          conversationId,
+          senderType: "bot",
+          contentType: "document",
+          text: "Boleto-Acordo.pdf",
+          mediaUrl: payBoletoUrl,
+        });
+      }
+    } catch (err) {
+      console.error(`[AI Agent] ${conversationChannel} send error:`, err);
+      return;
+    }
+    return detectedTag;
   }
 
   // 7. Load WhatsApp configuration

@@ -14,6 +14,9 @@ import {
 } from '@/lib/whatsapp/waha-api'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { sendWebchatMessage } from '@/lib/webchat/send'
+import { hasActiveWebchatSession } from '@/lib/webchat/sessions'
+import { SocialWindowClosedError, sendSocialMessage } from '@/lib/channels/social'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -236,6 +239,96 @@ export async function POST(request: Request) {
       }
 
       const conversation_id = conversation.id
+
+      // Conversa de Webchat (migration 127): não passa por Meta/WAHA — a
+      // mensagem é gravada na conversa e a página do cliente a busca. Fica
+      // antes da checagem de telefone/config porque não depende de nenhum.
+      if ((conversation as { channel_type?: string }).channel_type === 'webchat') {
+        if (message_type === 'template') {
+          return NextResponse.json(
+            { error: 'Templates são do WhatsApp; no Webchat envie uma mensagem normal.' },
+            { status: 400 }
+          )
+        }
+        // Link vencido/substituído: o cliente não vê mais esta conversa.
+        if (!(await hasActiveWebchatSession(conversation_id))) {
+          return NextResponse.json(
+            {
+              error:
+                'O link do Webchat deste cliente expirou. Continue pela conversa do WhatsApp.',
+            },
+            { status: 409 }
+          )
+        }
+        const sent = await sendWebchatMessage({
+          conversationId: conversation_id,
+          senderType: 'agent',
+          senderId: user.id,
+          contentType: message_type as 'text' | 'image' | 'video' | 'audio' | 'document',
+          text: content_text || (isMediaKind ? filename : null) || null,
+          mediaUrl: isMediaKind ? originalMediaUrl : null,
+          replyToMessageId: reply_to_message_id || null,
+        })
+        // Mesmo comportamento do WhatsApp: quem responde assume a conversa
+        // e o fluxo ativo do contato pausa.
+        if (!(conversation as { assigned_agent_id?: string | null }).assigned_agent_id) {
+          await supabase
+            .from('conversations')
+            .update({ assigned_agent_id: user.id })
+            .eq('id', conversation_id)
+        }
+        if (conversation.contact?.id) {
+          await pauseActiveFlowRuns(accountId, conversation.contact.id)
+        }
+        return NextResponse.json({
+          success: true,
+          message_id: sent.id,
+          whatsapp_message_id: sent.whatsapp_message_id,
+        })
+      }
+
+      // Instagram/Messenger (migration 128): Graph API pelo canal da
+      // conversa, com a regra de janela 24h / HUMAN_AGENT até 7 dias.
+      const socialChannel = (conversation as { channel_type?: string }).channel_type
+      if (socialChannel === 'instagram' || socialChannel === 'messenger') {
+        if (message_type === 'template') {
+          return NextResponse.json(
+            { error: 'Templates são do WhatsApp; neste canal envie uma mensagem normal.' },
+            { status: 400 }
+          )
+        }
+        try {
+          const sent = await sendSocialMessage({
+            conversationId: conversation_id,
+            senderType: 'agent',
+            senderId: user.id,
+            contentType: message_type as 'text' | 'image' | 'video' | 'audio' | 'document',
+            text: content_text || null,
+            mediaUrl: isMediaKind ? originalMediaUrl : null,
+          })
+          if (!(conversation as { assigned_agent_id?: string | null }).assigned_agent_id) {
+            await supabase
+              .from('conversations')
+              .update({ assigned_agent_id: user.id })
+              .eq('id', conversation_id)
+          }
+          if (conversation.contact?.id) {
+            await pauseActiveFlowRuns(accountId, conversation.contact.id)
+          }
+          return NextResponse.json({
+            success: true,
+            message_id: sent.id,
+            whatsapp_message_id: sent.whatsapp_message_id,
+          })
+        } catch (err) {
+          if (err instanceof SocialWindowClosedError) {
+            return NextResponse.json({ error: err.message }, { status: 409 })
+          }
+          const message = err instanceof Error ? err.message : 'Falha no envio'
+          console.error(`[${socialChannel} send] falhou:`, message)
+          return NextResponse.json({ error: `${socialChannel}: ${message}` }, { status: 502 })
+        }
+      }
 
       const contact = conversation.contact
       if (!contact?.phone) {
@@ -582,36 +675,7 @@ export async function POST(request: Request) {
         .update(convUpdate)
         .eq('id', conversation_id)
 
-      // Pause any active Flow run for this contact — the agent stepping
-      // in is the strongest "yield, human is here" signal. See PR #2
-      // plan for why we pause (not end): preserves diagnostic state +
-      // lets the agent or the 24h timeout sweep cleanly resolve the
-      // run later. For accounts with no active runs the UPDATE matches
-      // zero rows — cheap and harmless.
-      try {
-        const { error: pauseErr } = await supabaseAdmin()
-          .from('flow_runs')
-          .update({
-            status: 'paused_by_agent',
-            ended_at: new Date().toISOString(),
-            end_reason: 'agent_replied',
-          })
-          .eq('account_id', accountId)
-          .eq('contact_id', contact.id)
-          .eq('status', 'active')
-        if (pauseErr) {
-          // Best-effort — log + continue. The agent's message already
-          // landed at Meta; don't fail the response over a bookkeeping
-          // miss. Worst case: a stale active run gets caught by the
-          // stale-run cron sweep within 24h.
-          console.error('[flows] pause-on-agent-send failed:', pauseErr.message)
-        }
-      } catch (err) {
-        console.error(
-          '[flows] pause-on-agent-send threw:',
-          err instanceof Error ? err.message : err
-        )
-      }
+      await pauseActiveFlowRuns(accountId, contact.id)
 
       return NextResponse.json({
         success: true,
@@ -624,6 +688,40 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { error: 'Failed to send message' },
       { status: 500 }
+    )
+  }
+}
+
+/**
+ * Pause any active Flow run for this contact — the agent stepping in is
+ * the strongest "yield, human is here" signal. See PR #2 plan for why we
+ * pause (not end): preserves diagnostic state + lets the agent or the 24h
+ * timeout sweep cleanly resolve the run later. For accounts with no
+ * active runs the UPDATE matches zero rows — cheap and harmless.
+ * Shared by the WhatsApp and Webchat send paths.
+ */
+async function pauseActiveFlowRuns(accountId: string, contactId: string) {
+  try {
+    const { error: pauseErr } = await supabaseAdmin()
+      .from('flow_runs')
+      .update({
+        status: 'paused_by_agent',
+        ended_at: new Date().toISOString(),
+        end_reason: 'agent_replied',
+      })
+      .eq('account_id', accountId)
+      .eq('contact_id', contactId)
+      .eq('status', 'active')
+    if (pauseErr) {
+      // Best-effort — log + continue. The agent's message already landed;
+      // don't fail the response over a bookkeeping miss. Worst case: a
+      // stale active run gets caught by the stale-run cron sweep within 24h.
+      console.error('[flows] pause-on-agent-send failed:', pauseErr.message)
+    }
+  } catch (err) {
+    console.error(
+      '[flows] pause-on-agent-send threw:',
+      err instanceof Error ? err.message : err
     )
   }
 }
@@ -649,6 +747,9 @@ async function findOrCreateConversation(
     .select('*, contact:contacts(*)')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
+    // Webchat tem conversa própria (migration 127); envio de template por
+    // contato é sempre WhatsApp.
+    .eq('channel_type', 'whatsapp')
 
   if (wahaSession) {
     query = query.eq('waha_session', wahaSession)

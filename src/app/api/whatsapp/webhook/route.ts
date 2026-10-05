@@ -1,4 +1,5 @@
 import { chatMediaReference } from '@/lib/storage/chat-media';
+import { auditFetch, registerAuditActor } from '@/lib/audit/context'
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
@@ -8,7 +9,8 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
-import { trackCampaignReply } from '@/lib/disparador/reply-tracker'
+import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
+import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
 import {
   handleTemplateWebhookChange,
@@ -33,6 +35,8 @@ function supabaseAdmin() {
         db: {
           schema: 'wacrm',
         },
+        // Autor/IP para as triggers de auditoria (migration 131).
+        global: { fetch: auditFetch },
       }
     ) as any
   }
@@ -186,6 +190,8 @@ export async function GET(request: Request) {
 
 // POST - Receive messages
 export async function POST(request: Request) {
+  // Auditoria: escritas desta requisição saem como "webhook" (webhook_meta_whatsapp).
+  await registerAuditActor({ actorType: 'webhook', source: 'webhook_meta_whatsapp' })
   // Read raw body first so we can HMAC-verify the exact bytes Meta
   // signed. request.json() would re-encode and break the signature.
   const rawBody = await request.text()
@@ -721,10 +727,18 @@ async function processMessage(
     console.error('Error incrementing unread_count:', unreadError)
   }
 
-  // Correlacionar resposta com campanha do Disparador (se houver) — ver
-  // reply-tracker.ts. Fire-and-forget: nunca deve atrasar/derrubar o
-  // processamento do webhook.
-  trackCampaignReply(contactRecord.id, accountId, senderPhone).catch(() => {})
+  // Correlacionar resposta com campanha do Disparador (se houver) e mostrar
+  // o disparo na conversa — ver reply-tracker.ts. `context.id` é a mensagem
+  // que o cliente citou; quando é a da campanha, a atribuição é exata.
+  // Fire-and-forget: nunca deve atrasar/derrubar o processamento do webhook.
+  recordCampaignReply({
+    contactId: contactRecord.id,
+    accountId,
+    conversationId: conversation.id,
+    inboundMessageId: message.id,
+    replyToProviderId: message.context?.id ?? null,
+    replyPhoneNormalized: senderPhone,
+  }).catch(() => {})
 
   // ============================================================
   // Flow runner dispatch.
@@ -744,8 +758,22 @@ async function processMessage(
   // runner has its own try/catch and never throws. Accounts with
   // no active flows take the runner's early-exit "no_match" path
   // basically for free (one indexed SELECT for the active run).
+  //
+  // Antes dos fluxos: resposta a uma campanha com a opção "enviar para o
+  // Webchat" ligada recebe o convite e conta como tratada (sem fluxo
+  // receptivo, sem IA global) — ver src/lib/webchat/campaign.ts.
   // ============================================================
-  const flowResult = await dispatchInboundToFlows({
+  const movedToWebchat = await maybeStartCampaignWebchat({
+    accountId,
+    userId: configOwnerUserId,
+    contactId: contactRecord.id,
+    conversationId: conversation.id,
+    configId: configId ?? null,
+    replyToProviderId: message.context?.id ?? null,
+  })
+  const flowResult = movedToWebchat
+    ? { consumed: true }
+    : await dispatchInboundToFlows({
     accountId,
     userId: configOwnerUserId,
     contactId: contactRecord.id,
@@ -863,6 +891,8 @@ async function processMessage(
       accountId,
       triggerType,
       contactId: contactRecord.id,
+      // Automação por linha (automations.line_ids, migration 128).
+      lineId: configId ?? null,
       context: {
         message_text: inboundText,
         conversation_id: conversation.id,
@@ -1252,6 +1282,9 @@ async function findOrCreateConversation(
     .select('*')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
+    // Só conversas de WhatsApp: o mesmo contato pode ter uma conversa de
+    // Webchat aberta (migration 127), que nunca recebe mensagens daqui.
+    .eq('channel_type', 'whatsapp')
     .order('created_at', { ascending: false })
     .limit(1)
 

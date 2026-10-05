@@ -318,6 +318,27 @@ export interface GoToFlowNodeConfig {
 }
 
 /**
+ * "Enviar para Webchat": manda no WhatsApp um convite para continuar a
+ * conversa no Webchat (botão de URL na Meta, link no texto no WAHA) e
+ * encerra o run do WhatsApp. Quando o cliente abre o link, um novo run
+ * do MESMO fluxo começa em `next_node_key`, na conversa de canal webchat,
+ * com as variáveis do run atual. Ver src/lib/webchat/.
+ *
+ * Num run que já está no Webchat o nó só segue para `next_node_key`.
+ */
+export interface SendWebchatNodeConfig {
+  /** Texto da mensagem do convite no WhatsApp. Aceita {{variaveis}}. */
+  message_text: string;
+  /** Rótulo do botão na Meta (máx. 20 caracteres, limite da Meta). */
+  button_text: string;
+  /** Primeiro nó executado dentro do Webchat. */
+  next_node_key: string;
+}
+
+/** Limite da Meta para o texto do botão de URL (display_text). */
+export const WEBCHAT_BUTTON_TEXT_MAX = 20;
+
+/**
  * Sends a Meta HSM template. WAHA has no template concept — when the
  * run's provider is WAHA, `fallback_text` is sent as plain text instead
  * (if set; otherwise the node is a no-op send and just advances).
@@ -435,7 +456,8 @@ export type FlowNodeConfig =
   | { node_type: "send_template"; config: SendTemplateNodeConfig }
   | { node_type: "add_note"; config: AddNoteNodeConfig }
   | { node_type: "receive_attachment"; config: ReceiveAttachmentNodeConfig }
-  | { node_type: "ai_agent"; config: AiAgentNodeConfig };
+  | { node_type: "ai_agent"; config: AiAgentNodeConfig }
+  | { node_type: "send_webchat"; config: SendWebchatNodeConfig };
 
 export type FlowNodeType = FlowNodeConfig["node_type"];
 
@@ -632,6 +654,12 @@ export interface DispatchInboundInput {
    * same number the contact messaged (meta-send.ts) — see engine.ts.
    */
   configId?: string;
+  /**
+   * wacrm.channels.id (Instagram/Messenger, migration 128) — mesma
+   * função de configId para essas linhas: fluxo receptivo vinculado à
+   * linha (channels.flow_id) em findEntryFlow.
+   */
+  channelId?: string;
 }
 
 export interface DispatchInboundResult {
@@ -653,7 +681,14 @@ export interface DispatchInboundResult {
     | "duplicate_inbound_ignored"
     | "no_match"
     /** Ended via go_to_flow — a new run was started on another flow. */
-    | "transferred";
+    | "transferred"
+    /**
+     * O contato tem um run ativo em OUTRO canal (ex.: está no Webchat e
+     * escreveu no WhatsApp). Volta com consumed=true para o webhook não
+     * disparar IA global/automações em paralelo; a mensagem fica para o
+     * atendente no inbox.
+     */
+    | "other_channel_run";
 }
 
 // ============================================================

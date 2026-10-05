@@ -111,6 +111,12 @@ interface WahaSendTextEngineArgs {
   conversationId: string
   contactId: string
   text: string
+  /**
+   * Texto gravado em `messages`/prévia no lugar de `text`, quando o que vai
+   * ao cliente não pode ficar no banco (ex.: convite do Webchat, cujo link
+   * é a credencial do cliente). Ausente = grava `text`.
+   */
+  storedText?: string
 }
 
 /**
@@ -128,13 +134,14 @@ export async function engineWahaSendText(
 
   const result: WahaSendResult = await sendWahaTextMessage(wahaConfig, phone, args.text)
 
+  const stored = args.storedText ?? args.text
   await persistOutgoing(db, {
     conversationId: args.conversationId,
     contentType: 'text',
-    contentText: args.text,
+    contentText: stored,
     messageId: result.messageId,
     wahaSession: wahaConfig.waha_session,
-    previewText: args.text,
+    previewText: stored,
   })
 
   return { whatsapp_message_id: result.messageId }

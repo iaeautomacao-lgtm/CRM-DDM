@@ -24,6 +24,7 @@
  */
 
 import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
+import { WEBCHAT_BUTTON_TEXT_MAX } from "@/lib/flows/types";
 
 export interface ValidationIssue {
   severity: "error" | "warning";
@@ -902,6 +903,67 @@ function validateNode(
       break;
     }
 
+    case "send_webchat": {
+      const cfg = node.config as {
+        message_text?: string;
+        button_text?: string;
+        next_node_key?: string;
+      };
+      if (!cfg.message_text?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "message_text",
+          message: '"Enviar para Webchat" precisa do texto do convite.',
+        });
+      } else if (cfg.message_text.length > INTERACTIVE_LIMITS.bodyMaxLength) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "message_text",
+          message: `O convite excede ${INTERACTIVE_LIMITS.bodyMaxLength} caracteres (limite do WhatsApp).`,
+        });
+      }
+      // Limite da Meta para o rótulo de botão de URL (cta_url display_text).
+      if (!cfg.button_text?.trim()) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "button_text",
+          message: '"Enviar para Webchat" precisa do texto do botão.',
+        });
+      } else if (cfg.button_text.length > WEBCHAT_BUTTON_TEXT_MAX) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "button_text",
+          message: `O texto do botão aceita até ${WEBCHAT_BUTTON_TEXT_MAX} caracteres (limite do WhatsApp).`,
+        });
+      }
+      if (!cfg.next_node_key) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: '"Enviar para Webchat" precisa do nó que continua dentro do Webchat.',
+        });
+      } else if (!knownKeys.has(cfg.next_node_key)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `"Enviar para Webchat" aponta para um nó inexistente "${cfg.next_node_key}".`,
+        });
+      }
+      break;
+    }
+
     case "go_to_flow": {
       const cfg = node.config as { flow_id?: string; pass_vars?: boolean };
       if (!cfg.flow_id?.trim()) {
@@ -1080,7 +1142,8 @@ function outgoingEdges(node: NodeInput): string[] {
     case "anchor":
     case "send_template":
     case "add_note":
-    case "receive_attachment": {
+    case "receive_attachment":
+    case "send_webchat": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
     }

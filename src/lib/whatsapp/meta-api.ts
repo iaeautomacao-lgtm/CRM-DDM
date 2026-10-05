@@ -910,6 +910,68 @@ export async function sendInteractiveButtons(
   return { messageId: data.messages[0].id }
 }
 
+/** Limite da Meta para o rótulo do botão de URL (cta_url display_text). */
+export const CTA_URL_DISPLAY_TEXT_MAX = 20
+
+export interface SendInteractiveCtaUrlArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  bodyText: string
+  /** Rótulo do botão (≤ 20 caracteres). */
+  displayText: string
+  /** URL https aberta ao tocar no botão. */
+  url: string
+}
+
+/**
+ * Mensagem interativa com um botão que abre uma URL (`cta_url`). Usada
+ * pelo convite do Webchat. Como toda interativa, só pode ser enviada
+ * dentro da janela de 24h — o convite sai logo depois de uma mensagem do
+ * cliente, então a janela está aberta.
+ */
+export async function sendInteractiveCtaUrl(
+  args: SendInteractiveCtaUrlArgs
+): Promise<MetaSendResult> {
+  const { phoneNumberId, accessToken, to, bodyText, displayText, url } = args
+  validateInteractiveBody(bodyText)
+  if (!displayText || displayText.length > CTA_URL_DISPLAY_TEXT_MAX) {
+    throw new Error(
+      `CTA URL button text must have 1-${CTA_URL_DISPLAY_TEXT_MAX} chars (got ${displayText.length}).`
+    )
+  }
+  if (!/^https:\/\//.test(url)) throw new Error('CTA URL must be https.')
+
+  const body = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'cta_url',
+      body: { text: bodyText },
+      action: {
+        name: 'cta_url',
+        parameters: { display_text: displayText, url },
+      },
+    },
+  }
+
+  const response = await metaFetch(`${META_API_BASE}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
+}
+
 export interface InteractiveListRow {
   /** Stable id sent back in the webhook when tapped (≤ 200 chars). */
   id: string

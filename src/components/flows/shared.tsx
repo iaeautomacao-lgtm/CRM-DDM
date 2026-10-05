@@ -75,7 +75,8 @@ export type NodeType =
   | 'send_template'
   | 'add_note'
   | 'receive_attachment'
-  | 'ai_agent';
+  | 'ai_agent'
+  | 'send_webchat';
 
 export interface BuilderNode {
   node_key: string;
@@ -284,6 +285,13 @@ export const NODE_META: Record<
     blurb: 'Aciona o agente de IA para responder ao cliente',
     category: 'messaging',
   },
+  send_webchat: {
+    label: 'Enviar para Webchat',
+    icon: Globe,
+    color: 'text-cyan-500',
+    blurb: 'Convida o cliente a continuar a conversa no Webchat',
+    category: 'routing',
+  },
 };
 
 /**
@@ -338,6 +346,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   add_note: { l: 0.68, c: 0.16, h: 38 }, // orange — a flag for humans
   receive_attachment: { l: 0.65, c: 0.17, h: 335 }, // magenta-pink — inbound media
   ai_agent: { l: 0.65, c: 0.2, h: 32 }, // DDM brand orange (#FF5706) — the AI speaks
+  send_webchat: { l: 0.66, c: 0.12, h: 200 }, // cyan — leaves WhatsApp for the webchat
 };
 
 export interface NodeColors {
@@ -647,6 +656,12 @@ export function summarizeNode(node: BuilderNode): string | null {
         return `${label} ${maxTurns} turnos`;
       }
       return label;
+    }
+    case 'send_webchat': {
+      const text = typeof cfg.message_text === 'string' ? cfg.message_text : '';
+      const button = typeof cfg.button_text === 'string' ? cfg.button_text : '';
+      if (text.length > 0) return button ? `${truncate(text, 45)} · [${button}]` : truncate(text);
+      return button ? `[${button}]` : null;
     }
   }
 }
