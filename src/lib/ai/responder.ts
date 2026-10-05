@@ -3,8 +3,23 @@ import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
 import type { AiAgentTool } from "@/lib/flows/types";
+import {
+  classifyFetchFailure,
+  classifyHttpFailure,
+  classifyToolBodyFailure,
+  prepareToolArgs,
+  retryDelayMs,
+  serializeToolFailure,
+  shouldRetryTool,
+  type ToolExecutionMeta,
+} from "@/lib/ai/tool-recovery";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
+import {
+  extractAiExitTag,
+  shouldLegacyAssignHuman,
+  stripAiExitTag,
+} from "@/lib/ai/exit-tags";
 import { sendWahaTextMessage, sendWahaMediaMessage } from "@/lib/whatsapp/waha-api";
 import { getConversationChannel, isSocialChannel, sendWebchatMessage } from "@/lib/webchat/send";
 import { sendSocialMessage } from "@/lib/channels/social";
@@ -251,7 +266,12 @@ export async function handleAiAutoResponse(
   historyBefore?: string,
   tools?: AiAgentTool[],
   onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
-  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>,
+  onToolResult?: (
+    toolName: string,
+    result: string,
+    durationMs: number,
+    meta?: ToolExecutionMeta,
+  ) => Promise<void>,
   // Node key of the calling ai_agent flow node — only "agente_de_ia"
   // (BEN) gets the #NEGOCIACAO auto-exit in generateOpenAiResponse.
   // "agente_de_ia_2" (Aleh) needs consultar_debitos' data to present
@@ -1101,8 +1121,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   // node needs back as `ai_exit_code`. Re-reading the saved message and
   // regex-matching it (the old approach) never found anything, because
   // by the time it's saved the tag is already gone.
-  const exitTagMatch = generatedText.match(/#[A-Z0-9_]+/);
-  const detectedTag: string | null = exitTagMatch ? exitTagMatch[0] : null;
+  const detectedTag = extractAiExitTag(generatedText);
 
   let payBoletoUrl = "";
   let shouldTransferToHuman = false;
@@ -1125,29 +1144,19 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     hasAgreedAcordo = true;
   }
 
-  if (
-    generatedText.includes("#EQUIPEHUMANA") || 
-    generatedText.includes("#RECUSA") || 
-    generatedText.includes("#NEGOCIACAO") ||
-    generatedText.includes("#ANIMA") ||
-    generatedText.includes("#AGENDAMENTO(finalização)") ||
-    generatedText.includes("#AGENDAMENTO") ||
-    generatedText.includes("#NAOLOCALIZADO") ||
-    hasAgreedAcordo
-  ) {
-    shouldTransferToHuman = true;
-    generatedText = generatedText
-      .replace(/#EQUIPEHUMANA/g, "")
-      .replace(/#RECUSA/g, "")
-      .replace(/#NEGOCIACAO/g, "")
-      .replace(/#ANIMA/g, "")
-      .replace(/#AGENDAMENTO\(finalização\)/g, "")
-      .replace(/#AGENDAMENTO/g, "")
-      .replace(/#ACORDOFORMALIZADO\(finalização\)/g, "")
-      .replace(/#ACORDOFORMALIZADO/g, "")
-      .replace(/#NAOLOCALIZADO/g, "")
-      .trim();
-  }
+  shouldTransferToHuman = shouldLegacyAssignHuman({
+    tag: detectedTag,
+    flowControlled: Boolean(systemPromptOverride || nodeKey),
+    hasAgreedAcordo,
+  });
+
+  // Exit codes are control-plane markers, not customer-facing text.
+  // Strip exactly the detected tag so newer structured codes such as
+  // #RECUSA_CONFIRMADA or #CLIENTE_PEDIU_HUMANO never leak into chat.
+  generatedText = stripAiExitTag(generatedText, detectedTag)
+    .replace(/#ACORDOFORMALIZADO\(finalização\)/g, "")
+    .replace(/#AGENDAMENTO\(finalização\)/g, "")
+    .trim();
 
   if (!generatedText) return detectedTag;
 
@@ -1603,7 +1612,12 @@ async function generateOpenAiResponse(
   history: any[],
   tools?: AiAgentTool[],
   onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
-  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>,
+  onToolResult?: (
+    toolName: string,
+    result: string,
+    durationMs: number,
+    meta?: ToolExecutionMeta,
+  ) => Promise<void>,
   nodeKey?: string,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
@@ -1731,44 +1745,145 @@ async function generateOpenAiResponse(
 
       if (toolDef) {
         const toolStartedAt = Date.now();
+        const prepared = prepareToolArgs(
+          toolName,
+          toolArgs,
+          toolDef.parameters.required ?? [],
+        );
+        const normalizedArgs = prepared.args;
+
         if (onToolCall) {
-          await onToolCall(toolName, toolArgs).catch(() => {});
+          await onToolCall(toolName, normalizedArgs).catch(() => {});
         }
-        try {
-          // Substitute {{param}} placeholders in URL and body
+
+        if (prepared.failure) {
+          toolResult = serializeToolFailure(prepared.failure, 0);
+          if (onToolResult) {
+            await onToolResult(
+              toolName,
+              toolResult,
+              Date.now() - toolStartedAt,
+              {
+                attempts: 0,
+                recovered: false,
+                failureCode: prepared.failure.code,
+                httpStatus: prepared.failure.httpStatus,
+              },
+            ).catch(() => {});
+          }
+        } else {
           const interpolate = (str: string) =>
             str.replace(/\{\{(\w+)\}\}/g, (_, key) =>
-              toolArgs[key] !== undefined ? String(toolArgs[key]) : ""
+              normalizedArgs[key] !== undefined
+                ? String(normalizedArgs[key])
+                : ""
             );
 
           const resolvedUrl = interpolate(toolDef.http.url);
-          const resolvedBody = toolDef.http.body ? interpolate(toolDef.http.body) : undefined;
+          const resolvedBody = toolDef.http.body
+            ? interpolate(toolDef.http.body)
+            : undefined;
           const resolvedHeaders: Record<string, string> = {};
           for (const [k, v] of Object.entries(toolDef.http.headers || {})) {
             resolvedHeaders[k] = interpolate(v);
           }
 
-          const httpRes = await boundedFetch(resolvedUrl, {
-            method: toolDef.http.method,
-            headers: { "Content-Type": "application/json", ...resolvedHeaders },
-            ...(resolvedBody ? { body: resolvedBody } : {}),
-            signal: AbortSignal.timeout(30000),
-          });
-          const httpText = await httpRes.text();
-          const toolDurationMs = Date.now() - toolStartedAt;
-          if (onToolResult) {
-            await onToolResult(toolName, httpText, toolDurationMs).catch(() => {});
+          const maxAttempts = 3;
+          let attempt = 0;
+          let finalFailure:
+            | ReturnType<typeof classifyFetchFailure>
+            | null = null;
+
+          while (attempt < maxAttempts) {
+            attempt += 1;
+
+            try {
+              const httpRes = await boundedFetch(resolvedUrl, {
+                method: toolDef.http.method,
+                headers: {
+                  "Content-Type": "application/json",
+                  ...resolvedHeaders,
+                },
+                ...(resolvedBody ? { body: resolvedBody } : {}),
+                signal: AbortSignal.timeout(30000),
+              });
+
+              const httpText = await httpRes.text();
+              const failure =
+                classifyHttpFailure(httpRes.status) ??
+                classifyToolBodyFailure(httpText);
+
+              if (!failure) {
+                toolResult = httpText;
+                finalFailure = null;
+                break;
+              }
+
+              finalFailure = failure;
+              toolResult = serializeToolFailure(failure, attempt);
+
+              if (
+                shouldRetryTool(
+                  toolName,
+                  toolDef.http.method,
+                  failure,
+                  attempt,
+                  maxAttempts,
+                )
+              ) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, retryDelayMs(attempt)),
+                );
+                continue;
+              }
+
+              break;
+            } catch (err) {
+              const failure = classifyFetchFailure(err);
+              finalFailure = failure;
+              toolResult = serializeToolFailure(failure, attempt);
+
+              if (
+                shouldRetryTool(
+                  toolName,
+                  toolDef.http.method,
+                  failure,
+                  attempt,
+                  maxAttempts,
+                )
+              ) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, retryDelayMs(attempt)),
+                );
+                continue;
+              }
+
+              break;
+            }
           }
-          toolResult = httpText;
-        } catch (err) {
-          toolResult = JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
-          const toolDurationMs = Date.now() - toolStartedAt;
+
           if (onToolResult) {
-            await onToolResult(toolName, toolResult, toolDurationMs).catch(() => {});
+            await onToolResult(
+              toolName,
+              toolResult,
+              Date.now() - toolStartedAt,
+              {
+                attempts: attempt,
+                recovered: !finalFailure && attempt > 1,
+                failureCode: finalFailure?.code,
+                httpStatus: finalFailure?.httpStatus,
+              },
+            ).catch(() => {});
           }
         }
       } else {
-        toolResult = JSON.stringify({ error: `Tool "${toolName}" not found in node config` });
+        toolResult = JSON.stringify({
+          ok: false,
+          error: "TOOL_SCHEMA_ERROR",
+          message: `Tool "${toolName}" não encontrada na configuração do nó.`,
+          retryable: false,
+          attempts: 0,
+        });
       }
 
       collectedToolResults.push({ toolName, result: toolResult });
