@@ -10,6 +10,11 @@ import { apiFetch } from "@/lib/api-fetch";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { SlaStats } from "@/lib/monitoramento/sla";
+import {
+  ConversationDrilldown,
+  type DrilldownMetric,
+  type DrilldownQuery,
+} from "@/components/monitoramento/conversation-drilldown";
 
 interface SlaResponse {
   days: number;
@@ -66,6 +71,17 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
   }, [load]);
 
   const target = data?.target_minutes ?? 15;
+  // Clique num número → conversas por trás dele (com link para o caso).
+  const [drill, setDrill] = useState<DrilldownQuery | null>(null);
+  const open = (metric: DrilldownMetric, title: string, dim?: "team" | "channel", key?: string) =>
+    setDrill({
+      title,
+      metric,
+      from: new Date(Date.now() - days * 86_400_000).toISOString(),
+      to: new Date().toISOString(),
+      dim,
+      key,
+    });
 
   return (
     <div className="space-y-4">
@@ -93,39 +109,82 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
       {data && (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi label="Na fila agora" value={String(data.total.queued)} hint={`maior espera ${fmtMinutes(data.total.longestWaitMin)}`} />
+            <Kpi
+              label="Na fila agora"
+              value={String(data.total.queued)}
+              hint={`maior espera ${fmtMinutes(data.total.longestWaitMin)}`}
+              onClick={() => open("queued", "Na fila agora")}
+            />
             <Kpi label="1ª resposta (média)" value={fmtMinutes(data.total.firstResponseAvgMin)} hint={`p90 ${fmtMinutes(data.total.firstResponseP90Min)}`} />
             <Kpi
               label={`Dentro de ${target} min`}
               value={data.total.withinTargetPct === null ? "—" : `${data.total.withinTargetPct}%`}
               hint={`${data.total.responded} respondidas`}
             />
-            <Kpi label="Conversas no período" value={String(data.total.created)} hint={`${data.days} dia(s)`} />
+            <Kpi
+              label="Conversas no período"
+              value={String(data.total.created)}
+              hint={`${data.days} dia(s)`}
+              onClick={() => open("received", `Conversas · últimos ${data.days} dia(s)`)}
+            />
           </div>
 
-          <SlaTable title="Por canal" rows={data.byChannel} labelFor={(k) => CHANNEL_LABEL[k] ?? k} target={target} />
+          <SlaTable
+            title="Por canal"
+            rows={data.byChannel}
+            labelFor={(k) => CHANNEL_LABEL[k] ?? k}
+            target={target}
+            onOpen={(metric, key, label) =>
+              open(metric, `${metric === "queued" ? "Na fila" : "Conversas"} · ${label}`, "channel", key)
+            }
+          />
           <SlaTable
             title="Por equipe"
             rows={data.byTeam}
             labelFor={(k) => (k === "none" ? "Sem equipe" : teamNames[k] ?? "Equipe removida")}
             target={target}
+            onOpen={(metric, key, label) =>
+              open(metric, `${metric === "queued" ? "Na fila" : "Conversas"} · ${label}`, "team", key)
+            }
           />
           {data.truncated && (
             <p className="text-xs text-muted-foreground">Período muito grande: parte das conversas ficou de fora.</p>
           )}
         </>
       )}
+      <ConversationDrilldown query={drill} onClose={() => setDrill(null)} />
     </div>
   );
 }
 
-function Kpi({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-3">
+function Kpi({ label, value, hint, onClick }: { label: string; value: string; hint: string; onClick?: () => void }) {
+  const body = (
+    <>
       <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="mt-1 text-xl font-semibold text-foreground">{value}</p>
       <p className="text-[11px] text-muted-foreground">{hint}</p>
-    </div>
+    </>
+  );
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Ver as conversas"
+      className="rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="rounded-xl border border-border bg-card p-3">{body}</div>
+  );
+}
+
+function CellButton({ value, onClick }: { value: number; onClick: () => void }) {
+  if (value === 0) return <span className="text-muted-foreground">0</span>;
+  return (
+    <button type="button" onClick={onClick} className="font-medium text-primary underline-offset-2 hover:underline">
+      {value.toLocaleString("pt-BR")}
+    </button>
   );
 }
 
@@ -134,11 +193,13 @@ function SlaTable({
   rows,
   labelFor,
   target,
+  onOpen,
 }: {
   title: string;
   rows: SlaStats[];
   labelFor: (key: string) => string;
   target: number;
+  onOpen: (metric: DrilldownMetric, key: string, label: string) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -166,7 +227,9 @@ function SlaTable({
             rows.map((r) => (
               <tr key={r.key} className="border-t border-border">
                 <td className="px-3 py-2 font-medium text-foreground">{labelFor(r.key)}</td>
-                <td className="px-3 py-2">{r.created}</td>
+                <td className="px-3 py-2">
+                  <CellButton value={r.created} onClick={() => onOpen("received", r.key, labelFor(r.key))} />
+                </td>
                 <td className="px-3 py-2">{fmtMinutes(r.firstResponseAvgMin)}</td>
                 <td className="px-3 py-2">{fmtMinutes(r.firstResponseP90Min)}</td>
                 <td
@@ -177,7 +240,9 @@ function SlaTable({
                 >
                   {r.withinTargetPct === null ? "—" : `${r.withinTargetPct}%`}
                 </td>
-                <td className={cn("px-3 py-2", r.queued > 0 ? "font-semibold text-foreground" : undefined)}>{r.queued}</td>
+                <td className={cn("px-3 py-2", r.queued > 0 ? "font-semibold text-foreground" : undefined)}>
+                  <CellButton value={r.queued} onClick={() => onOpen("queued", r.key, labelFor(r.key))} />
+                </td>
                 <td className="px-3 py-2">{fmtMinutes(r.longestWaitMin)}</td>
               </tr>
             ))

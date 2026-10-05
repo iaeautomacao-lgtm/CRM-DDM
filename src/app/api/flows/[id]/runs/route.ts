@@ -94,11 +94,26 @@ export async function GET(
   if (dateFrom) runsQuery = runsQuery.gte('started_at', dateFrom)
   if (dateTo) runsQuery = runsQuery.lte('started_at', dateTo)
 
-  const { data: runs, error: runsErr } = await runsQuery
+  const { data: listed, error: runsErr } = await runsQuery
     .order('started_at', { ascending: false })
     .limit(50)
   if (runsErr) {
     return NextResponse.json({ error: runsErr.message }, { status: 500 })
+  }
+  let runs = listed ?? []
+
+  // Link direto para uma execução (inbox → "Fluxo"): traz essa execução
+  // mesmo fora das 50 mais recentes ou dos filtros, sempre deste fluxo.
+  if (runId && !runs.some((r: { id: string }) => r.id === runId)) {
+    const { data: focused } = await supabase
+      .from('flow_runs')
+      .select(
+        'id, status, current_node_key, started_at, last_advanced_at, ended_at, end_reason, vars, reprompt_count, hops_count, contact:contacts(id, name, phone)',
+      )
+      .eq('flow_id', id)
+      .eq('id', runId)
+      .limit(1)
+    if (focused?.[0]) runs = [focused[0], ...runs]
   }
 
   let events: Array<{
@@ -134,7 +149,7 @@ export async function GET(
 
   return NextResponse.json({
     flow,
-    runs: runs ?? [],
+    runs,
     events,
   })
 }

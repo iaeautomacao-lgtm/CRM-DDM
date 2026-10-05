@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { ConversationOriginBanner } from "./conversation-origin";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -1571,6 +1572,9 @@ export function MessageThread({
         agentOptions={profiles.map((p) => ({ id: p.user_id, label: p.full_name }))}
         teamOptions={teams.map((t) => ({ id: t.id, label: t.name }))}
       />
+
+      {/* De onde veio a conversa: ativo/receptivo, campanha, linha (PRD-02). */}
+      <ConversationOriginBanner key={conversation.id} conversationId={conversation.id} />
 
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">

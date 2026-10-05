@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { ConversationOriginCard } from "@/components/inbox/conversation-origin";
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
@@ -398,6 +399,13 @@ export function ContactSidebar({
               }}
             />
           </div>
+
+          {/* Quem iniciou a conversa e o que foi enviado (PRD-02). */}
+          {conversation && (
+            <div className="mt-4">
+              <ConversationOriginCard key={conversation.id} conversationId={conversation.id} />
+            </div>
+          )}
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />

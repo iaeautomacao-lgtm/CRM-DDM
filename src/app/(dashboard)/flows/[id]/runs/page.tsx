@@ -2,8 +2,8 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 
-import { createElement, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { createElement, useEffect, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Loader2,
@@ -27,7 +27,16 @@ import {
   Circle,
   GitBranch,
   Trash2,
+  Wrench,
+  Bot,
 } from "lucide-react";
+import { NODE_META, type NodeType } from "@/components/flows/shared";
+import {
+  describeEvent,
+  EVENT_LABEL,
+  isRoutineEvent,
+  summarizeRun,
+} from "@/lib/flows/run-log";
 import { toast } from "sonner";
 import { format, formatDistanceToNow } from "date-fns";
 
@@ -219,6 +228,9 @@ export default function FlowRunsPage() {
   const canDelete = useCan("send-messages");
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  // ?run_id= (atalho "Fluxo" do inbox): abre já expandida e rolada até ela.
+  const focusRunId = useSearchParams().get("run_id");
+  const focusHandled = useRef(false);
 
   const [flow, setFlow] = useState<{ id: string; name: string } | null>(null);
   const [runs, setRuns] = useState<RunRow[]>([]);
@@ -285,6 +297,8 @@ export default function FlowRunsPage() {
         const qs = new URLSearchParams();
         if (statusFilter !== STATUS_FILTER_ALL) qs.set("status", statusFilter);
         if (contactFilter) qs.set("contact", contactFilter);
+        // A execução em foco vem na lista mesmo fora das 50/filtros, com eventos.
+        if (focusRunId && !focusHandled.current) qs.set("run_id", focusRunId);
         if (dateFrom) {
           qs.set("date_from", new Date(`${dateFrom}T00:00:00`).toISOString());
         }
@@ -303,11 +317,20 @@ export default function FlowRunsPage() {
         const json = (await res.json()) as {
           flow: { id: string; name: string };
           runs: RunRow[];
+          events?: EventRow[];
         };
         if (!cancelled) {
           setFlow(json.flow);
           setRuns(json.runs ?? []);
           setSelected(new Set());
+          if (focusRunId && !focusHandled.current && (json.runs ?? []).some((r) => r.id === focusRunId)) {
+            focusHandled.current = true;
+            setEventsByRun((prev) => ({ ...prev, [focusRunId]: json.events ?? [] }));
+            setExpanded(focusRunId);
+            window.setTimeout(() => {
+              document.getElementById(`run-${focusRunId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 100);
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -321,7 +344,7 @@ export default function FlowRunsPage() {
     return () => {
       cancelled = true;
     };
-  }, [params.id, statusFilter, contactFilter, dateFrom, dateTo, reloadKey]);
+  }, [params.id, statusFilter, contactFilter, dateFrom, dateTo, reloadKey, focusRunId]);
 
   // Independent of the runs fetch above — a failure here just means
   // "Nós não executados" stays empty everywhere, not a page-breaking
@@ -609,6 +632,7 @@ export default function FlowRunsPage() {
             <RunCard
               key={run.id}
               run={run}
+              focused={run.id === focusRunId}
               selected={selected.has(run.id)}
               onToggleSelect={() => toggleSelect(run.id)}
               events={eventsByRun[run.id] ?? null}
@@ -699,6 +723,7 @@ export default function FlowRunsPage() {
 
 function RunCard({
   run,
+  focused,
   selected,
   onToggleSelect,
   events,
@@ -711,6 +736,8 @@ function RunCard({
   onViewInDiagram,
 }: {
   run: RunRow;
+  /** Execução aberta pelo atalho do inbox (?run_id=). */
+  focused?: boolean;
   selected: boolean;
   onToggleSelect: () => void;
   events: EventRow[] | null;
@@ -736,8 +763,15 @@ function RunCard({
   // before that (see the file header comment on why events aren't
   // bulk-fetched for the whole list).
   const stats = events ? computeRunEventStats(events, flowNodes) : null;
+  const summary = events ? summarizeRun(run, events) : null;
+  // "Só o importante": esconde entrada/conclusão de nó sem conteúdo.
+  const [onlyImportant, setOnlyImportant] = useState(true);
+  const visibleEvents = events ? (onlyImportant ? events.filter((e) => !isRoutineEvent(e)) : events) : null;
   return (
-    <div className="rounded-lg border border-border bg-card">
+    <div
+      id={`run-${run.id}`}
+      className={cn("scroll-mt-4 rounded-lg border bg-card", focused ? "border-primary ring-1 ring-primary/40" : "border-border")}
+    >
       <div className="flex w-full items-center gap-2 px-4 py-3">
         <Checkbox
           checked={selected}
@@ -822,6 +856,22 @@ function RunCard({
       </div>
       {expanded && (
         <div className="border-t border-border px-4 py-3">
+          {summary && (
+            <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+              <p className="text-sm font-medium text-foreground">{summary.headline}</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {summary.messagesSent} mensage{summary.messagesSent === 1 ? "m enviada" : "ns enviadas"} ·{" "}
+                {summary.replies} resposta{summary.replies === 1 ? "" : "s"} do cliente
+                {summary.toolCalls > 0 && (
+                  <>
+                    {" "}· {summary.toolCalls} ferramenta{summary.toolCalls === 1 ? "" : "s"} da IA
+                    {summary.toolErrors > 0 && ` (${summary.toolErrors} com erro)`}
+                  </>
+                )}
+                {summary.errors > 0 && <> · {summary.errors} erro{summary.errors === 1 ? "" : "s"}</>}
+              </p>
+            </div>
+          )}
           {Object.keys(run.vars).length > 0 && (
             <details className="mb-3">
               <summary className="cursor-pointer text-xs text-muted-foreground">
@@ -838,13 +888,19 @@ function RunCard({
             </div>
           ) : (
             <>
+              {events && events.length > 0 && (
+                <label className="mb-1.5 flex w-fit cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
+                  <Checkbox checked={onlyImportant} onCheckedChange={(v) => setOnlyImportant(!!v)} />
+                  Só o importante ({events.length - (visibleEvents?.length ?? 0)} passos internos ocultos)
+                </label>
+              )}
               <div className="flex flex-col gap-1">
                 {!events || events.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
                     Nenhum evento registrado para esta execução.
                   </p>
                 ) : (
-                  events.map((ev, ix) => (
+                  (visibleEvents ?? []).map((ev, ix) => (
                     <EventLine
                       key={ix}
                       ev={ev}
@@ -918,6 +974,10 @@ const EVENT_ICON: Record<string, typeof Clock> = {
   completed: CheckCircle,
   run_completed: CheckCircle2,
   run_error: XCircle,
+  tool_called: Wrench,
+  tool_result: Wrench,
+  ai_agent_takeover: Bot,
+  ai_agent_failed: XCircle,
 };
 
 const EVENT_COLOR: Record<string, string> = {
@@ -935,6 +995,10 @@ const EVENT_COLOR: Record<string, string> = {
   completed: "text-emerald-400",
   run_completed: "text-emerald-400",
   run_error: "text-red-400",
+  tool_called: "text-violet-500",
+  tool_result: "text-violet-500",
+  ai_agent_takeover: "text-violet-500",
+  ai_agent_failed: "text-red-400",
 };
 
 function getEventIcon(ev: EventRow): typeof Clock {
@@ -944,6 +1008,7 @@ function getEventIcon(ev: EventRow): typeof Clock {
 
 function getEventColor(ev: EventRow): string {
   if (ev.event_type === "node_completed" && ev.status === "error") return "text-red-400";
+  if (ev.event_type === "tool_result" && ev.status === "error") return "text-red-400";
   return EVENT_COLOR[ev.event_type] ?? "text-muted-foreground";
 }
 
@@ -958,8 +1023,14 @@ function EventLine({
 }) {
   const cls = getEventColor(ev);
   const iconComponent = getEventIcon(ev);
-  const isError = ev.event_type === "node_error" || ev.event_type === "run_error";
+  const isError =
+    ev.event_type === "node_error" ||
+    ev.event_type === "run_error" ||
+    ev.event_type === "ai_agent_failed" ||
+    (ev.event_type === "tool_result" && ev.status === "error");
   const isNodeError = ev.event_type === "node_error";
+  const nodeTypeLabel = ev.node_type ? NODE_META[ev.node_type as NodeType]?.label ?? ev.node_type : null;
+  const sentence = describeEvent(ev);
   return (
     <button
       type="button"
@@ -982,12 +1053,12 @@ function EventLine({
         <span className="w-28 shrink-0 text-[10px] text-muted-foreground">
           {format(new Date(ev.created_at), "HH:mm:ss")}
         </span>
-        <span className={cn("w-32 shrink-0 font-mono text-[10px]", cls)}>
-          {ev.event_type}
+        <span className={cn("w-36 shrink-0 text-[11px] font-medium", cls)} title={ev.event_type}>
+          {EVENT_LABEL[ev.event_type] ?? ev.event_type}
         </span>
         {ev.node_key && (
-          <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
-            {ev.node_type ? `${ev.node_key} (${ev.node_type})` : ev.node_key}
+          <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground" title={ev.node_type ?? undefined}>
+            {nodeTypeLabel ? `${nodeTypeLabel} · ${ev.node_key}` : ev.node_key}
           </code>
         )}
         {typeof ev.duration_ms === "number" && (
@@ -996,48 +1067,17 @@ function EventLine({
             {ev.duration_ms}ms
           </span>
         )}
-        {!isError && Object.keys(ev.payload).length > 0 && (
-          <span className="min-w-0 truncate text-[10px] text-muted-foreground">
-            {summarizePayload(ev.payload)}
+        {!isError && sentence && sentence !== EVENT_LABEL[ev.event_type] && (
+          <span className="min-w-0 truncate text-[11px] text-foreground/80" title={sentence}>
+            {sentence}
           </span>
         )}
       </div>
-      {isError && ev.error_message && (
-        <p className="ml-9 text-[10px] text-red-400">{ev.error_message}</p>
-      )}
+      {isError && <p className="ml-9 text-[11px] text-red-500 dark:text-red-400">{sentence}</p>}
     </button>
   );
 }
 
-function summarizePayload(payload: Record<string, unknown>): string {
-  // Type-specific renderings first — richer than the generic key dump
-  // below. Detected by payload shape (not `node_type`, which the
-  // `logEvent` helper these all go through never sets on the row —
-  // only `logRunEvent`'s node_completed/node_error siblings do).
-  if ("fell_through" in payload) {
-    if (payload.fell_through === true) return "Senão (fallback)";
-    if (typeof payload.branch_chosen === "string") {
-      return `Ramo: ${payload.branch_chosen}`;
-    }
-  }
-  if (Array.isArray(payload.variables_set)) {
-    const vars = payload.variables_set as Array<{ key: string; value: string }>;
-    return vars.map((v) => `Setou: ${v.key} = ${v.value}`).join(" · ");
-  }
-  if (typeof payload.last_reply === "string" && payload.last_reply) {
-    return payload.last_reply.slice(0, 100);
-  }
-
-  // Show the keys that matter most to a human debugger; full JSON is
-  // available via the "Captured vars" details panel for the run.
-  const keys = ["reply_id", "captured_key", "reason", "advancing_to"];
-  for (const k of keys) {
-    if (k in payload && payload[k] !== null && payload[k] !== undefined) {
-      return `${k}=${String(payload[k]).slice(0, 80)}`;
-    }
-  }
-  return "";
-}
 
 // ============================================================
 // Event detail sheet — n8n-style "click a step, see its full
