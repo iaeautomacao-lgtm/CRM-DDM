@@ -37,6 +37,8 @@ export interface ChannelConfig {
   flow_id: string | null;
   receptivo: boolean;
   habilitado: boolean;
+  /** Cliente da linha (migration 128); passthrough do GET. */
+  client_id?: string | null;
   /** Resolved client-side, not returned by the API — see comment above. */
   flow_name?: string;
   /** team_id (migration 103) — raw passthrough column, same treatment

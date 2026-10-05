@@ -68,6 +68,8 @@ import { NewChannelDialog } from "@/components/canais/NewChannelDialog";
 import { EditChannelDialog } from "@/components/canais/EditChannelDialog";
 import { ConnectWahaDialog } from "@/components/canais/ConnectWahaDialog";
 import { TestChannelDialog } from "@/components/canais/TestChannelDialog";
+import { ClientsDialog, type ClientOption } from "@/components/canais/ClientsDialog";
+import { SocialChannelsSection } from "@/components/canais/SocialChannelsSection";
 
 function channelName(c: ChannelConfig): string {
   if (c.provider === "waha") return c.waha_session || "Sessão WAHA";
@@ -133,6 +135,48 @@ export default function CanaisPage() {
   const [deleteTargets, setDeleteTargets] = useState<ChannelConfig[] | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [stopBusyId, setStopBusyId] = useState<string | null>(null);
+  const [clients, setClients] = useState<ClientOption[]>([]);
+  const [clientsOpen, setClientsOpen] = useState(false);
+
+  // Clientes (migration 128): leitura direta, a RLS libera para membros.
+  const fetchClients = useCallback(async () => {
+    if (!accountId) return;
+    const { data, error } = await createClient()
+      .from("clients")
+      .select("id, name, color")
+      .eq("account_id", accountId)
+      .order("name", { ascending: true });
+    if (error) console.error("[canais] failed to load clients:", error);
+    else setClients((data ?? []) as ClientOption[]);
+  }, [accountId]);
+  useEffect(() => {
+    void fetchClients();
+  }, [fetchClients]);
+
+  // Retorno do OAuth da Meta (/api/channels/<tipo>/callback).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("channel_connected");
+    const error = params.get("channel_error");
+    if (connected) {
+      toast.success(`${connected === "instagram" ? "Instagram" : "Messenger"} conectado (${params.get("count") ?? 1}).`);
+    }
+    if (error) toast.error(error);
+    if (connected || error) window.history.replaceState(null, "", "/canais");
+  }, []);
+
+  async function handleClientChange(c: ChannelConfig, clientId: string | null) {
+    const res = await apiFetch("/api/whatsapp/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, client_id: clientId }),
+    });
+    if (!res.ok) {
+      toast.error("Falha ao definir o cliente da linha");
+      return;
+    }
+    setConfigs((prev) => prev.map((row) => (row.id === c.id ? { ...row, client_id: clientId } : row)));
+  }
 
   const fetchConfigs = useCallback(async (): Promise<ChannelConfig[]> => {
     setLoading(true);
@@ -298,13 +342,18 @@ export default function CanaisPage() {
         <div>
           <h1 className="text-xl font-semibold text-foreground">Canais</h1>
           <p className="text-sm text-muted-foreground">
-            Gerenciamento de canais WhatsApp conectados.
+            WhatsApp, Instagram e Messenger conectados, com o cliente de cada linha.
           </p>
         </div>
-        <Button onClick={() => setNewOpen(true)} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
-          <Plus className="size-4" />
-          Novo canal
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setClientsOpen(true)}>
+            Clientes
+          </Button>
+          <Button onClick={() => setNewOpen(true)} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
+            <Plus className="size-4" />
+            Novo canal
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -380,6 +429,7 @@ export default function CanaisPage() {
                 <TableHead>Sessão/Número</TableHead>
                 <TableHead>Fluxo</TableHead>
                 <TableHead>Equipe</TableHead>
+                <TableHead>Cliente</TableHead>
                 <TableHead>Receptivo</TableHead>
                 <TableHead>Habilitado</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
@@ -466,6 +516,21 @@ export default function CanaisPage() {
                   <TableCell>{c.flow_id ? flowNameById.get(c.flow_id) ?? "—" : "—"}</TableCell>
                   <TableCell>{c.team_id ? teamNameById.get(c.team_id) ?? "—" : "—"}</TableCell>
                   <TableCell>
+                    <select
+                      value={c.client_id ?? ""}
+                      onChange={(e) => handleClientChange(c, e.target.value || null)}
+                      aria-label={`Cliente — ${channelName(c)}`}
+                      className="h-8 max-w-[160px] rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                    >
+                      <option value="">—</option>
+                      {clients.map((cl) => (
+                        <option key={cl.id} value={cl.id}>
+                          {cl.name}
+                        </option>
+                      ))}
+                    </select>
+                  </TableCell>
+                  <TableCell>
                     <Switch
                       checked={c.receptivo}
                       onCheckedChange={() => handleToggleField(c, "receptivo")}
@@ -530,6 +595,16 @@ export default function CanaisPage() {
           </Table>
         )}
       </div>
+
+      <SocialChannelsSection flows={flows} teams={teams} clients={clients} />
+
+      <ClientsDialog
+        accountId={accountId}
+        clients={clients}
+        open={clientsOpen}
+        onOpenChange={setClientsOpen}
+        onChanged={fetchClients}
+      />
 
       <NewChannelDialog
         open={newOpen}
