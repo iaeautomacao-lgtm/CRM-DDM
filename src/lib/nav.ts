@@ -38,23 +38,35 @@ export interface NavItem {
    * Puramente informativo — não afeta rota nem acesso.
    */
   beta?: boolean;
+  /**
+   * Seção do menu. O menu mostra o título da seção antes do primeiro
+   * item visível dela; itens sem seção ficam no topo.
+   */
+  group?: NavGroup;
 }
 
+export type NavGroup = "Atendimento" | "Automação" | "Disparos" | "Configuração";
+
+// Agrupado por tarefa (antes eram 14 itens soltos). Ordem = ordem no menu.
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/monitoramento", label: "Monitoramento", icon: Activity },
-  { href: "/canais", label: "Canais", icon: Wifi },
-  { href: "/inbox", label: "Conversas", icon: MessageSquare },
-  { href: "/contacts", label: "Contatos", icon: Users },
-  { href: "/flows", label: "Fluxos", icon: Workflow, beta: true },
-  { href: "/disparador", label: "Disparador", icon: Megaphone },
-  { href: "/disparador/blacklist", label: "Blacklist", icon: ShieldAlert },
-  { href: "/equipes", label: "Equipes", icon: Users },
-  { href: "/templates", label: "Templates", icon: FileText },
-  { href: "/tabulacoes", label: "Tabulações", icon: Tags },
-  { href: "/respostas-rapidas", label: "Respostas rápidas", icon: Zap },
-  { href: "/usuarios", label: "Usuários", icon: UsersRound },
-  { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot },
+
+  { href: "/inbox", label: "Conversas", icon: MessageSquare, group: "Atendimento" },
+  { href: "/contacts", label: "Contatos", icon: Users, group: "Atendimento" },
+  { href: "/respostas-rapidas", label: "Respostas rápidas", icon: Zap, group: "Atendimento" },
+  { href: "/tabulacoes", label: "Tabulações", icon: Tags, group: "Atendimento" },
+
+  { href: "/flows", label: "Fluxos", icon: Workflow, beta: true, group: "Automação" },
+  { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot, group: "Automação" },
+
+  { href: "/disparador", label: "Disparador", icon: Megaphone, group: "Disparos" },
+  { href: "/templates", label: "Templates", icon: FileText, group: "Disparos" },
+  { href: "/disparador/blacklist", label: "Blacklist", icon: ShieldAlert, group: "Disparos" },
+
+  { href: "/canais", label: "Canais", icon: Wifi, group: "Configuração" },
+  { href: "/equipes", label: "Equipes", icon: Users, group: "Configuração" },
+  { href: "/usuarios", label: "Usuários", icon: UsersRound, group: "Configuração" },
 ];
 
 // Sub-itens do grupo recolhível "Relatórios".
