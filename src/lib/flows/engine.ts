@@ -2363,7 +2363,9 @@ async function runAiAgentCore(
       ...(!aiConfigUsable
         ? { error_reason: "ai_config_disabled_or_missing" }
         : {}),
-      ...(lastReply === "" ? { warning: "ai_returned_empty_reply" } : {}),
+      ...(aiResponse.outcome === "skipped"
+        ? { warning: "ai_response_skipped" }
+        : {}),
       // handleAiAutoResponse já tentou o modelo 2x (tentativa + retry
       // automático, ver responder.ts passo 5) e, mesmo assim, só
       // conseguiu enviar o texto fixo de fallback — registra o motivo
