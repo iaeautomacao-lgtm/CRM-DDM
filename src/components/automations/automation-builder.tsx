@@ -76,6 +76,8 @@ export interface BuilderInitial {
   trigger_config: Record<string, unknown>
   is_active: boolean
   steps: BuilderStep[]
+  /** Linhas em que roda (migration 128); vazio = todas. */
+  line_ids?: string[]
 }
 
 // ------------------------------------------------------------
@@ -515,6 +517,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         trigger_type: state.trigger_type,
         trigger_config: state.trigger_config,
         is_active: state.is_active,
+        line_ids: state.line_ids ?? [],
         steps: toApiSteps(state.steps),
       }
 
@@ -604,6 +607,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
               onTypeChange={(t) => patchTop("trigger_type", t)}
               onConfigChange={(c) => patchTop("trigger_config", c)}
             />
+            <LinesCard value={state.line_ids ?? []} onChange={(ids) => patchTop("line_ids", ids)} />
             <StepList
               steps={state.steps}
               parentPath={[]}
@@ -616,6 +620,76 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
             />
           </ResourcesProvider>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------
+// Linhas — automação por número/conta (Flows, IA e automações são
+// configurados por canal e linha). Nenhuma marcada = todas.
+// ------------------------------------------------------------
+
+interface LineOption {
+  id: string
+  channel_type: string
+  name: string
+}
+
+const LINE_CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: "WhatsApp",
+  instagram: "Instagram",
+  messenger: "Messenger",
+  sms: "SMS",
+}
+
+function LinesCard({ value, onChange }: { value: string[]; onChange: (ids: string[]) => void }) {
+  const [lines, setLines] = useState<LineOption[]>([])
+  useEffect(() => {
+    let cancelled = false
+    apiFetch("/api/lines")
+      .then((r) => (r.ok ? r.json() : { lines: [] }))
+      .then((json) => {
+        if (!cancelled) setLines((json.lines ?? []).filter((l: LineOption) => l.channel_type !== "webchat"))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (lines.length === 0) return null
+  const toggle = (id: string) =>
+    onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
+
+  return (
+    <div className="mt-3 w-full max-w-md rounded-xl border border-border bg-card p-3 text-xs">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="font-semibold text-foreground">Linhas</span>
+        <span className="text-muted-foreground">
+          {value.length === 0 ? "Todas as linhas" : `${value.length} selecionada(s)`}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {lines.map((l) => {
+          const active = value.includes(l.id)
+          return (
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => toggle(l.id)}
+              className={cn(
+                "rounded-full border px-2.5 py-1 transition-colors",
+                active
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {l.name}
+              <span className="ml-1 opacity-60">{LINE_CHANNEL_LABEL[l.channel_type] ?? l.channel_type}</span>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

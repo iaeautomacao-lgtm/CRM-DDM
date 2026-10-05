@@ -19,6 +19,9 @@ import { supabaseAdmin } from './admin-client'
 import { engineSendText, engineSendTemplate } from './meta-send'
 import { DEFAULT_CURRENCY } from '@/lib/currency'
 import { endActiveRunForConversation } from '@/lib/flows/engine'
+import { getConversationChannel, isSocialChannel, sendWebchatMessage } from '@/lib/webchat/send'
+import { sendSocialMessage } from '@/lib/channels/social'
+import { engineWahaSendText } from '@/lib/flows/waha-send'
 
 // ------------------------------------------------------------
 // Public API
@@ -47,6 +50,12 @@ export interface DispatchInput {
   triggerType: AutomationTriggerType
   contactId?: string | null
   context?: AutomationContext
+  /**
+   * Linha onde o evento aconteceu (whatsapp_config.id ou channels.id).
+   * Automação com line_ids preenchido (migration 128) só roda nessas
+   * linhas; sem line_ids roda em todas.
+   */
+  lineId?: string | null
 }
 
 /**
@@ -98,8 +107,23 @@ export async function runAutomationsForTrigger(input: DispatchInput): Promise<vo
     }
     if (!automations || automations.length === 0) return
 
+    // Gatilhos fora do webhook (tag_added, conversation_assigned, …) não
+    // trazem a linha: vem da conversa do contexto.
+    let lineId = input.lineId ?? null
+    const ctxConversationId = (input.context as { conversation_id?: string } | undefined)?.conversation_id
+    if (!lineId && ctxConversationId) {
+      const { data: conv } = await db
+        .from('conversations')
+        .select('config_id, channel_id')
+        .eq('id', ctxConversationId)
+        .eq('account_id', input.accountId)
+        .limit(1)
+      lineId = conv?.[0]?.config_id ?? conv?.[0]?.channel_id ?? null
+    }
+
     for (const automation of automations as Automation[]) {
       if (!triggerMatches(automation, input.context)) continue
+      if (!automationAppliesToLine(automation, lineId)) continue
       try {
         await executeAutomation(automation, input)
       } catch (err) {
@@ -340,6 +364,27 @@ async function executeStepsFrom(args: ExecuteArgs): Promise<void> {
   }
 }
 
+/** config_id da conversa quando a linha é WAHA; null para Meta/sem linha. */
+async function wahaConfigIdForConversation(conversationId: string): Promise<string | null> {
+  const db = supabaseAdmin()
+  const { data: conv } = await db
+    .from('conversations')
+    .select('account_id, config_id, waha_session, channel_type')
+    .eq('id', conversationId)
+    .limit(1)
+  const row = conv?.[0] as
+    | { account_id: string; config_id: string | null; waha_session: string | null; channel_type: string | null }
+    | undefined
+  if (!row || (row.channel_type ?? 'whatsapp') !== 'whatsapp') return null
+  // Conversas antigas do WAHA só têm waha_session (sem config_id).
+  let cfgQuery = db.from('whatsapp_config').select('id, provider').eq('account_id', row.account_id)
+  if (row.config_id) cfgQuery = cfgQuery.eq('id', row.config_id)
+  else if (row.waha_session) cfgQuery = cfgQuery.eq('waha_session', row.waha_session)
+  else return null
+  const { data: cfg } = await cfgQuery.limit(1)
+  return cfg?.[0]?.provider === 'waha' ? (cfg[0].id as string) : null
+}
+
 async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string> {
   const db = supabaseAdmin()
 
@@ -350,6 +395,31 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const text = interpolate(cfg.text, args)
       if (!text.trim()) throw new Error('send_message has empty text')
       const conversationId = await resolveConversationId(args)
+      // Conversa de Webchat/Instagram/Messenger: envia pelo canal dela
+      // (o caminho Meta abaixo exige telefone e é só WhatsApp).
+      const channel = await getConversationChannel(conversationId)
+      if (channel === 'webchat' || isSocialChannel(channel)) {
+        const send = channel === 'webchat' ? sendWebchatMessage : sendSocialMessage
+        const { whatsapp_message_id } = await send({
+          conversationId,
+          senderType: 'bot',
+          contentType: 'text',
+          text,
+        })
+        return `sent via ${channel} (${whatsapp_message_id})`
+      }
+      // Linha WAHA: texto livre pelo WAHA (nunca pelo caminho Meta).
+      const wahaConfigId = await wahaConfigIdForConversation(conversationId)
+      if (wahaConfigId) {
+        const { whatsapp_message_id } = await engineWahaSendText({
+          accountId: args.automation.account_id,
+          configId: wahaConfigId,
+          conversationId,
+          contactId: args.contactId,
+          text,
+        })
+        return `sent via WAHA (${whatsapp_message_id})`
+      }
       const { whatsapp_message_id } = await engineSendText({
         accountId: args.automation.account_id,
         userId: args.automation.user_id,
@@ -365,6 +435,10 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       if (!args.contactId) throw new Error('send_template needs a contact')
       if (!cfg.template_name) throw new Error('send_template needs template_name')
       const conversationId = await resolveConversationId(args)
+      // Template aprovado só existe na Meta: linha WAHA não tem.
+      if (await wahaConfigIdForConversation(conversationId)) {
+        throw new Error('send_template não se aplica a linha WAHA (use send_message)')
+      }
       // Meta templates use positional {{1}}, {{2}}, … placeholders, so
       // we MUST emit params in strict numeric order. Lexicographic sort
       // of "1", "2", …, "10" yields "1", "10", "2", … which silently
@@ -620,6 +694,9 @@ async function resolveConversationId(args: ExecuteArgs): Promise<string> {
     .select('id')
     .eq('account_id', args.automation.account_id)
     .eq('contact_id', args.contactId)
+    // Automações enviam pela Meta: ignora a conversa de Webchat do contato
+    // (migration 127), senão o maybeSingle quebraria com duas linhas.
+    .eq('channel_type', 'whatsapp')
     .maybeSingle()
   if (error) throw new Error(`conversation lookup failed: ${error.message}`)
   if (!data?.id) throw new Error('no conversation for contact')
@@ -770,4 +847,18 @@ async function markPending(id: string, status: 'done' | 'failed') {
     .from('automation_pending_executions')
     .update({ status })
     .eq('id', id)
+}
+
+/**
+ * Filtro por linha (automations.line_ids, migration 128): vazio = todas
+ * as linhas; preenchido = só as escolhidas. Evento sem linha conhecida
+ * (gatilho manual/API) só dispara automações sem filtro.
+ */
+export function automationAppliesToLine(
+  automation: { line_ids?: string[] | null },
+  lineId: string | null | undefined
+): boolean {
+  const lines = automation.line_ids ?? []
+  if (lines.length === 0) return true
+  return !!lineId && lines.includes(lineId)
 }

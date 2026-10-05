@@ -95,7 +95,7 @@ vi.mock("./meta-send", () => ({
   engineSendTemplate: vi.fn(async () => ({ whatsapp_message_id: "m1" })),
 }));
 
-import { runAutomationsForTrigger } from "./engine";
+import { automationAppliesToLine, runAutomationsForTrigger } from "./engine";
 
 const ACCOUNT = "acct-1";
 
@@ -256,3 +256,16 @@ function customStep(field: string, value: string) {
     step_config: { field, value },
   };
 }
+
+describe("automationAppliesToLine", () => {
+  it("sem line_ids roda em todas as linhas", () => {
+    expect(automationAppliesToLine({ line_ids: [] }, "l1")).toBe(true);
+    expect(automationAppliesToLine({ line_ids: null }, null)).toBe(true);
+    expect(automationAppliesToLine({}, undefined)).toBe(true);
+  });
+  it("com line_ids só roda nas linhas marcadas", () => {
+    expect(automationAppliesToLine({ line_ids: ["l1"] }, "l1")).toBe(true);
+    expect(automationAppliesToLine({ line_ids: ["l1"] }, "l2")).toBe(false);
+    expect(automationAppliesToLine({ line_ids: ["l1"] }, null)).toBe(false);
+  });
+});
