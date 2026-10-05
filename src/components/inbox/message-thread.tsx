@@ -1741,6 +1741,7 @@ export function MessageThread({
         sessionExpired={sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
+        contactName={contact?.name ?? null}
         onOpenTemplates={conversation.channel_type === "webchat" ? undefined : handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { after } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import type { ParsedInbound } from '@/lib/flows/types'
 import { chatMediaReference } from '@/lib/storage/chat-media'
 import { MEDIA_MAX_BYTES_BY_KIND } from '@/lib/storage/upload-media'
@@ -211,7 +212,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   // próxima busca.
   after(async () => {
     try {
-      await dispatchInboundToFlows({
+      const flowResult = await dispatchInboundToFlows({
         accountId: session.account_id,
         userId: conversation.user_id,
         contactId: session.contact_id,
@@ -220,6 +221,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
         message: inbound,
         isFirstInboundMessage: false,
       })
+      // Sentimento (antes o Webchat nunca analisava).
+      maybeScheduleSentiment(
+        { accountId: session.account_id, contactId: session.contact_id, conversationId },
+        { text, flowConsumed: flowResult.consumed, isInteractiveReply: Boolean(replyId) },
+      )
     } catch (err) {
       console.error('[webchat/messages] falha ao entregar ao fluxo:', err)
     }

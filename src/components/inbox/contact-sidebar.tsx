@@ -3,7 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { ConversationOriginCard } from "@/components/inbox/conversation-origin";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -109,16 +109,25 @@ export function ContactSidebar({
     }
   };
 
+  // Conversa aberta agora — a análise leva alguns segundos e o atendente
+  // pode trocar de conversa no meio: o resultado só vale para a conversa
+  // que pediu (a outra recebe o seu pelo realtime).
+  const currentConversationIdRef = useRef<string | null>(null);
+  currentConversationIdRef.current = conversation?.id ?? null;
+
   const handleAnalyzeSentiment = useCallback(async () => {
     if (!conversation) return;
+    const requestedId = conversation.id;
     setAnalyzing(true);
     try {
-      const res = await apiFetch(`/api/conversations/${conversation.id}/sentiment`, {
+      const res = await apiFetch(`/api/conversations/${requestedId}/sentiment`, {
         method: "POST",
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        onUpdateConversation?.({ sentiment: data.sentiment });
+        if (currentConversationIdRef.current === requestedId) {
+          onUpdateConversation?.({ sentiment: data.sentiment });
+        }
       } else {
         console.error("Failed to analyze sentiment:", data.error || "Unknown error");
       }
@@ -128,6 +137,26 @@ export function ContactSidebar({
       setAnalyzing(false);
     }
   }, [conversation, onUpdateConversation]);
+
+  // Conversa ainda sem análise (antiga, ou de antes da análise rodar em
+  // todos os canais): analisa sozinha ao abrir, uma vez por conversa
+  // nesta tela — sem precisar clicar em atualizar.
+  const autoAnalyzedRef = useRef<Set<string>>(new Set());
+  const analyzeRef = useRef(handleAnalyzeSentiment);
+  analyzeRef.current = handleAnalyzeSentiment;
+  const conversationIdForAuto = conversation?.id;
+  const sentimentForAuto = conversation?.sentiment;
+  // Só quando o cliente já escreveu (last_customer_message_at, trigger da
+  // 128) — conversa só de campanha/bot não tem o que analisar.
+  const hasCustomerMessageForAuto = Boolean(conversation?.last_customer_message_at);
+  const canAutoAnalyze = !!accountRole && accountRole !== "viewer";
+  useEffect(() => {
+    if (!canAutoAnalyze || !conversationIdForAuto || !hasCustomerMessageForAuto) return;
+    if (sentimentForAuto && sentimentForAuto !== "unknown") return;
+    if (autoAnalyzedRef.current.has(conversationIdForAuto)) return;
+    autoAnalyzedRef.current.add(conversationIdForAuto);
+    void analyzeRef.current();
+  }, [canAutoAnalyze, conversationIdForAuto, sentimentForAuto, hasCustomerMessageForAuto]);
 
   const fetchContactData = useCallback(async (isCancelled: () => boolean) => {
     if (!contact) return;
@@ -478,11 +507,19 @@ export function ContactSidebar({
                     bg: "bg-muted",
                     border: "border-border",
                     label: "Não Analisado",
-                    desc: "Clique no botão de recarregar acima para analisar a conversa e receber recomendações de atendimento."
+                    desc: "Ainda sem mensagens suficientes do cliente para analisar. A análise roda sozinha quando ele escreve; o botão acima refaz na hora."
                   }
                 };
-                const currentSentiment = conversation.sentiment || "unknown";
-                const config = SENTIMENT_CONFIG[currentSentiment] || SENTIMENT_CONFIG.unknown;
+                const currentSentiment = conversation.sentiment ?? "unknown";
+                const config = SENTIMENT_CONFIG[currentSentiment] ?? SENTIMENT_CONFIG.unknown;
+                if (analyzing && currentSentiment === "unknown") {
+                  return (
+                    <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                      <RefreshCw className="h-3 w-3 animate-spin" />
+                      Analisando a conversa…
+                    </p>
+                  );
+                }
                 return (
                   <div className="mt-3">
                     <div className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium", config.bg, config.border, config.color)}>
