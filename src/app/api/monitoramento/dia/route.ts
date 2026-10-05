@@ -21,7 +21,7 @@ const COLUMNS =
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('supervisor')
     const param = new URL(request.url).searchParams.get('date')
     const today = todayInBrazil()
     const date = isValidDay(param) ? param : today

@@ -61,7 +61,7 @@ const ROLE_ALIASES: Record<string, AccountRole> = {
   owner: 'owner',
   administrador: 'owner',
   admin: 'admin',
-  supervisor: 'admin',
+  supervisor: 'supervisor',
   agent: 'agent',
   operador: 'agent',
   viewer: 'viewer',

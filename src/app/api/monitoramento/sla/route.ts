@@ -14,7 +14,7 @@ const COLUMNS =
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('supervisor')
     const daysParam = Number(new URL(request.url).searchParams.get('days') ?? 7)
     const days = Number.isFinite(daysParam) ? Math.min(Math.max(Math.trunc(daysParam), 1), 90) : 7
     const nowMs = Date.now()

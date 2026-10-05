@@ -2,11 +2,13 @@
 // Account role helpers — pure, unit-testable, no I/O.
 //
 // Mirrors the `account_role_enum` Postgres type from migration
-// 017_account_sharing.sql. The hierarchy is intentionally a flat
-// ordinal (owner=4 … viewer=1) — it matches the same CASE
-// expression the `is_account_member(account_id, min_role)` SQL
-// helper uses, so server-side TypeScript guards and database-side
-// RLS speak the same language.
+// 017_account_sharing.sql (+ 'supervisor', migrations 134/135). The
+// hierarchy is intentionally a flat ordinal (owner=5 … viewer=1) — it
+// matches the same CASE expression the
+// `is_account_member(account_id, min_role)` SQL helper uses (135), so
+// server-side TypeScript guards and database-side RLS speak the same
+// language. Supervisor: tudo do agente + Monitoramento/Relatórios das
+// suas equipes; nada que exija admin.
 //
 // Predicates (`canManageMembers`, `canEditSettings`, …) are the
 // single source of truth for "what can this role do?" — both
@@ -15,12 +17,13 @@
 // changes a one-file diff.
 // ============================================================
 
-export type AccountRole = "owner" | "admin" | "agent" | "viewer";
+export type AccountRole = "owner" | "admin" | "supervisor" | "agent" | "viewer";
 
 /** Ordered list of every valid role, lowest privilege first. */
 export const ACCOUNT_ROLES: readonly AccountRole[] = [
   "viewer",
   "agent",
+  "supervisor",
   "admin",
   "owner",
 ] as const;
@@ -32,8 +35,10 @@ export const ACCOUNT_ROLES: readonly AccountRole[] = [
 export function roleRank(role: AccountRole): number {
   switch (role) {
     case "owner":
-      return 4;
+      return 5;
     case "admin":
+      return 4;
+    case "supervisor":
       return 3;
     case "agent":
       return 2;
@@ -116,4 +121,12 @@ export function canDeleteAccount(role: AccountRole): boolean {
 /** Owner only: hand the account to another member. */
 export function canTransferOwnership(role: AccountRole): boolean {
   return role === "owner";
+}
+
+/**
+ * DDM Intelligence e painéis de supervisão (Monitoramento, Relatórios):
+ * supervisor ou acima. O supervisor vê só as suas equipes (RLS, 135).
+ */
+export function canSuperviseTeams(role: AccountRole): boolean {
+  return hasMinRole(role, "supervisor");
 }
