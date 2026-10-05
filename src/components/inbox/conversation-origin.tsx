@@ -25,7 +25,12 @@ function fetchOrigin(conversationId: string): Promise<OriginResponse | null> {
   if (!p) {
     p = apiFetch(`/api/conversations/${conversationId}/origin`)
       .then((r) => (r.ok ? (r.json() as Promise<OriginResponse>) : null))
-      .catch(() => null);
+      .catch(() => null)
+      .then((data) => {
+        // Falha ou conversa ainda sem mensagens: busca de novo na próxima vez.
+        if (!data || data.origin.direction === "desconhecido") cache.delete(conversationId);
+        return data;
+      });
     cache.set(conversationId, p);
     // A origem quase não muda; expira em 2 min para pegar atribuição tardia.
     setTimeout(() => cache.delete(conversationId), 120_000);

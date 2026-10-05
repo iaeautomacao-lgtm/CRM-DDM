@@ -22,14 +22,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const { supabase, accountId } = await getCurrentAccount()
     const { id } = await params
 
-    const { data: convRows, error } = await supabase
-      .from('conversations')
-      .select('id, account_id, channel_type, config_id, channel_id, client_id, waha_session, origin_campaign_id, origin_queue_item_id')
-      .eq('id', id)
-      .eq('account_id', accountId)
-      .limit(1)
+    const BASE = 'id, account_id, channel_type, config_id, channel_id, client_id, waha_session'
+    const loadConversation = (columns: string) =>
+      supabase.from('conversations').select(columns).eq('id', id).eq('account_id', accountId).limit(1)
+    let { data: convRows, error } = await loadConversation(`${BASE}, origin_campaign_id, origin_queue_item_id`)
+    // 42703 = coluna inexistente (migration 126 ainda não aplicada).
+    if (error?.code === '42703') ({ data: convRows, error } = await loadConversation(BASE))
     if (error) throw error
-    const conv = convRows?.[0]
+    const conv = convRows?.[0] as
+      | (Record<string, string | null> & { origin_campaign_id?: string | null; origin_queue_item_id?: string | null })
+      | undefined
     if (!conv) return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
 
     const db = supabaseAdmin()

@@ -30,6 +30,18 @@ describe("buildConversationOrigin", () => {
     });
   });
 
+  it("cliente escreveu antes do disparo continua receptivo", () => {
+    const o = buildConversationOrigin({
+      ...none,
+      originCampaignId: "c1",
+      campaign: { id: "c1", name: "Outubro" },
+      firstMessage: msg({ created_at: "2026-10-01T10:00:00Z" }),
+      sent: { template_name: "t", text: "oferta", sent_at: "2026-10-03T10:00:00Z" },
+    });
+    expect(o).toMatchObject({ direction: "receptivo", later_campaign: { id: "c1", name: "Outubro" } });
+    expect(o.headline).toContain("depois respondeu à campanha Outubro");
+  });
+
   it("cliente escreveu primeiro = receptivo", () => {
     const o = buildConversationOrigin({ ...none, firstMessage: msg({ content_text: "Boa tarde" }) });
     expect(o).toMatchObject({ direction: "receptivo", initiator: "customer", opening_text: "Boa tarde" });

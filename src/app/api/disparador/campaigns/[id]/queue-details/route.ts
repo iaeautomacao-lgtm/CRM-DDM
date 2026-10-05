@@ -228,6 +228,12 @@ export async function GET(
     if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
 
     const { data, error, count } = await query;
+    if (error?.code === "42703" && replied) {
+      return NextResponse.json(
+        { error: "O detalhamento de respostas precisa da migration 126 aplicada." },
+        { status: 400 },
+      );
+    }
     if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
 
     const rows = await attachConversations(

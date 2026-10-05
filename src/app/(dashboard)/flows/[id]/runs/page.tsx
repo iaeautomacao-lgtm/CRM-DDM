@@ -1024,6 +1024,7 @@ function EventLine({
   const cls = getEventColor(ev);
   const iconComponent = getEventIcon(ev);
   const isError =
+    ev.event_type === "error" ||
     ev.event_type === "node_error" ||
     ev.event_type === "run_error" ||
     ev.event_type === "ai_agent_failed" ||

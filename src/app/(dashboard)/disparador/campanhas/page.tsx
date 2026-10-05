@@ -4291,6 +4291,15 @@ export default function CampanhasPage() {
               </Button>
             </div>
 
+            {queueDetailModal.status === "respondido" &&
+              !queueDetailLoading &&
+              metricsData &&
+              queueDetailTotal < metricsData.total_respostas && (
+                <p className="mx-6 mt-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                  O card conta {metricsData.total_respostas} respostas; {metricsData.total_respostas - queueDetailTotal}{" "}
+                  foram registradas antes do rastreio por envio e não aparecem nesta lista.
+                </p>
+              )}
             <div className="flex-1 overflow-y-auto">
               {queueDetailLoading ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">

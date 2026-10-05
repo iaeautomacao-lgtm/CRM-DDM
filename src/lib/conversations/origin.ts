@@ -43,6 +43,8 @@ export interface ConversationOrigin {
   opening_text: string | null;
   opened_at: string | null;
   by: string | null;
+  /** Receptivo que depois respondeu a uma campanha (atribuição recente). */
+  later_campaign?: { id: string; name: string } | null;
 }
 
 function preview(m: OriginFirstMessage | null): string | null {
@@ -56,7 +58,17 @@ export function buildConversationOrigin(input: OriginInput): ConversationOrigin 
   const { firstMessage: first, campaign } = input;
   const campaignId = input.originCampaignId ?? first?.campaign_id ?? null;
 
-  if (campaignId) {
+  // O cliente escreveu ANTES do disparo e só depois respondeu à campanha
+  // (atribuição "recente" grava origin_campaign_id na conversa existente):
+  // a conversa continua receptiva.
+  const customerFirstBeforeSend =
+    !!campaignId &&
+    first?.sender_type === "customer" &&
+    !first.campaign_id &&
+    !!input.sent?.sent_at &&
+    Date.parse(first.created_at) < Date.parse(input.sent.sent_at);
+
+  if (campaignId && !customerFirstBeforeSend) {
     const template = input.sent?.template_name ?? first?.template_name ?? null;
     const name = campaign?.name ?? "campanha";
     return {
@@ -91,7 +103,17 @@ export function buildConversationOrigin(input: OriginInput): ConversationOrigin 
     opened_at: first.created_at,
   };
   if (first.sender_type === "customer") {
-    return { ...base, direction: "receptivo", initiator: "customer", headline: "Receptivo · o cliente escreveu primeiro", by: "Cliente" };
+    const later = customerFirstBeforeSend ? campaign ?? (campaignId ? { id: campaignId, name: "campanha" } : null) : null;
+    return {
+      ...base,
+      direction: "receptivo",
+      initiator: "customer",
+      headline: later
+        ? `Receptivo · o cliente escreveu primeiro (depois respondeu à campanha ${later.name})`
+        : "Receptivo · o cliente escreveu primeiro",
+      by: "Cliente",
+      later_campaign: later,
+    };
   }
   if (first.sender_type === "agent") {
     const who = input.agentName ?? "atendente";

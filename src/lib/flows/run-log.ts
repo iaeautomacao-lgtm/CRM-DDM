@@ -88,7 +88,7 @@ export function describeEvent(ev: RunEvent): string {
       return text ? `Enviou: "${text}"` : media ? `Enviou ${media}` : "Enviou mensagem";
     }
     case "reply_received": {
-      const text = str(p.text ?? p.last_reply ?? p.content_text, 100);
+      const text = str(p.reply_text ?? p.text ?? p.last_reply ?? p.content_text, 100);
       if (p.reply_id) return `Cliente escolheu a opção "${String(p.reply_id)}"${text ? `: "${text}"` : ""}`;
       return text ? `Cliente respondeu: "${text}"` : "Cliente respondeu";
     }
@@ -120,7 +120,11 @@ export function describeEvent(ev: RunEvent): string {
     case "node_error":
     case "run_error":
     case "error":
-      return ev.error_message || str(p.detail ?? p.exit_reason ?? p.error, 160) || "Erro sem detalhe";
+      return (
+        ev.error_message ||
+        [str(p.reason, 60), str(p.detail ?? p.exit_reason ?? p.error, 140)].filter(Boolean).join(": ") ||
+        "Erro sem detalhe"
+      );
     case "node_completed": {
       if (p.fell_through === true) return "Nenhuma condição bateu: seguiu pelo Senão";
       if (typeof p.branch_chosen === "string") return `Seguiu pelo ramo "${p.branch_chosen}"`;
@@ -130,8 +134,11 @@ export function describeEvent(ev: RunEvent): string {
           .join(" · ");
       }
       if (typeof p.advancing_to === "string") return `Seguiu para ${p.advancing_to}`;
+      if (typeof p.last_reply === "string" && p.last_reply) return `Resposta da IA: "${str(p.last_reply, 100)}"`;
       return `Concluído${ms(ev.duration_ms)}`;
     }
+    case "node_entered":
+      return typeof p.captured_key === "string" ? `Aguardando resposta para ${p.captured_key}` : "Entrou no nó";
     default:
       return EVENT_LABEL[ev.event_type] ?? ev.event_type;
   }
@@ -139,10 +146,17 @@ export function describeEvent(ev: RunEvent): string {
 
 /** Eventos sem informação para quem lê (escondidos em "Só o importante"). */
 export function isRoutineEvent(ev: RunEvent): boolean {
-  if (ev.event_type === "node_entered") return true;
+  const p = ev.payload ?? {};
+  if (ev.event_type === "node_entered") return typeof p.captured_key !== "string";
   if (ev.event_type === "node_completed") {
-    const p = ev.payload ?? {};
-    return ev.status !== "error" && !("fell_through" in p) && !("branch_chosen" in p) && !Array.isArray(p.variables_set);
+    return (
+      ev.status !== "error" &&
+      !("fell_through" in p) &&
+      !("branch_chosen" in p) &&
+      !Array.isArray(p.variables_set) &&
+      typeof p.advancing_to !== "string" &&
+      !(typeof p.last_reply === "string" && p.last_reply)
+    );
   }
   return false;
 }

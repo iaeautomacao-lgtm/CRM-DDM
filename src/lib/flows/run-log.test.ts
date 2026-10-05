@@ -28,6 +28,13 @@ describe("describeEvent", () => {
       'Cliente escolheu a opção "sim"',
     );
   });
+  it("usa reply_text do engine e o motivo de erros genéricos", () => {
+    expect(describeEvent(ev({ event_type: "reply_received", payload: { reply_text: "2" } }))).toBe('Cliente respondeu: "2"');
+    expect(describeEvent(ev({ event_type: "error", payload: { reason: "send_text_failed", detail: "429" } }))).toBe(
+      "send_text_failed: 429",
+    );
+  });
+
   it("transferência com motivo e erro com mensagem", () => {
     expect(describeEvent(ev({ event_type: "handoff", payload: { note: "pediu atendente" } }))).toBe(
       "Transferido para humano — pediu atendente",
