@@ -58,7 +58,7 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Copy,
+import { Plus, Copy, Search, Zap,
   Trash2 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -85,6 +85,8 @@ import {
   summarizeNode,
   type BuilderNode,
   type NodeType,
+  nodeLabel,
+  nodeSearchText,
 } from './shared';
 import {
   DropdownMenu,
@@ -96,6 +98,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useFlowEditor } from './flow-editor-state';
+import { TriggerPanel } from './flow-builder';
+import { Input } from '@/components/ui/input';
+import { normalizeForSearch } from '@/lib/utils';
 import { NodeConfigForm } from './forms/node-config-form';
 import { NodeDebugEventsSheet } from './node-debug-sheet';
 import type { FlowDebugState, NodeDebugStatus } from '@/hooks/use-flow-debug';
@@ -284,9 +289,15 @@ function FlowNodeCard({ data, selected }: NodeProps) {
           </span>
         )}
       </div>
-      <div className="text-muted-foreground mt-2 truncate font-mono text-[11px]">
-        {node.node_key}
-      </div>
+      {nodeLabel(node) ? (
+        <div className="mt-2 truncate text-[13px] font-semibold text-foreground" title={node.node_key}>
+          {nodeLabel(node)}
+        </div>
+      ) : (
+        <div className="text-muted-foreground mt-2 truncate font-mono text-[11px]">
+          {node.node_key}
+        </div>
+      )}
       {summary && (
         <div className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-relaxed">
           {summary}
@@ -369,7 +380,9 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     duplicateNode,
     flashKey,
     issues,
+    requestFlash,
   } = useFlowEditor();
+  const [triggerOpen, setTriggerOpen] = useState(false);
   const reactFlow = useReactFlow();
   const builderNodes = state.nodes;
   const entryNodeId = state.entry_node_id;
@@ -664,7 +677,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
         <p className="max-w-xs text-center text-xs">
           Adicione o primeiro nó: uma mensagem de boas-vindas ou um menu de botões.
         </p>
-        {!isDebugMode && <CanvasAddNodeButton />}
+        {!isDebugMode && <CanvasAddNodeButton onAdded={setSelectedNodeKey} />}
       </div>
     );
   }
@@ -734,12 +747,45 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
             className="!border-border !bg-card !rounded-xl !border !shadow-[0_6px_20px_-8px_rgba(0,0,0,0.5)]"
           />
           {!isDebugMode && (
-            <Panel position="top-left" className="!top-4 !left-4">
-              <CanvasAddNodeButton />
+            <Panel position="top-left" className="!top-4 !left-4 flex flex-wrap items-center gap-2">
+              <CanvasAddNodeButton onAdded={setSelectedNodeKey} />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setTriggerOpen(true)}
+                className={cn(
+                  'bg-card h-9',
+                  issues.some((i) => i.scope === 'trigger' && i.severity === 'error') &&
+                    'border-red-500/60 text-red-500'
+                )}
+                title="Quando este fluxo começa"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Disparo
+              </Button>
+              <CanvasNodeSearch nodes={builderNodes} onFound={requestFlash} />
             </Panel>
           )}
         </ReactFlow>
       </div>
+
+      <Sheet open={triggerOpen} onOpenChange={setTriggerOpen}>
+        <SheetContent side="right" className="border-border bg-popover flex w-full flex-col gap-0 border-l p-0 sm:max-w-lg">
+          <SheetHeader className="border-border border-b px-5 py-4">
+            <SheetTitle className="text-sm">Disparo do fluxo</SheetTitle>
+            <SheetDescription className="text-xs">
+              Quando este fluxo começa para um cliente.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="overflow-y-auto p-4">
+            <TriggerPanel
+              state={state}
+              setState={setState}
+              triggerIssues={issues.filter((i) => i.scope === 'trigger')}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {isDebugMode ? (
         <NodeDebugEventsSheet
@@ -904,12 +950,14 @@ const ADD_NODE_TYPES: NodeType[] = [
   'end',
 ];
 
-function CanvasAddNodeButton() {
+function CanvasAddNodeButton({ onAdded }: { onAdded?: (key: string) => void }) {
   const reactFlow = useReactFlow();
   const { addNode, updateNodePosition } = useFlowEditor();
 
   const handleAdd = (type: NodeType) => {
     const key = addNode(type);
+    // Abre o formulário do nó novo (antes nascia solto, sem nada aberto).
+    onAdded?.(key);
     // Place the new node at the visible canvas center. The Panel's
     // own DOM lives inside ReactFlow so we can climb up to find the
     // .react-flow root and read its bounding rect. If we can't find
@@ -980,5 +1028,47 @@ function CanvasAddNodeButton() {
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// Busca de nó no diagrama: nome, chave ou texto. Enter vai para o próximo
+// resultado (centraliza e abre o nó via requestFlash).
+function CanvasNodeSearch({
+  nodes,
+  onFound,
+}: {
+  nodes: BuilderNode[];
+  onFound: (key: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [cursor, setCursor] = useState(0);
+  const q = normalizeForSearch(query.trim());
+  const matches = q ? nodes.filter((n) => normalizeForSearch(nodeSearchText(n)).includes(q)) : [];
+  return (
+    <div className="relative">
+      <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2" />
+      <Input
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setCursor(0);
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' || matches.length === 0) return;
+          e.preventDefault();
+          const next = matches[cursor % matches.length];
+          onFound(next.node_key);
+          setCursor((c) => c + 1);
+        }}
+        placeholder="Buscar nó…"
+        aria-label="Buscar nó no diagrama"
+        className="bg-card h-9 w-48 pl-8 text-xs"
+      />
+      {q && (
+        <span className="text-muted-foreground absolute top-1/2 right-2 -translate-y-1/2 text-[10px]">
+          {matches.length === 0 ? '0' : `${(cursor % matches.length) + 1}/${matches.length}`}
+        </span>
+      )}
+    </div>
   );
 }

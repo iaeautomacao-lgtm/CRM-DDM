@@ -68,7 +68,7 @@ interface NodeConfigFormProps {
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }
 
-export function NodeConfigForm({
+function NodeConfigFields({
   node,
   allNodes,
   showAdvanced,
@@ -3070,4 +3070,22 @@ function nextFreeReplyId(prefix: string, existing: Array<string | undefined>): s
   let i = existing.length + 1;
   while (taken.has(`${prefix}_${i}`)) i += 1;
   return `${prefix}_${i}`;
+}
+
+/**
+ * Formulário do nó: "Nome do nó" (opcional, só exibição — aparece no
+ * diagrama e nas listas de "Próximo nó") + campos do tipo.
+ */
+export function NodeConfigForm(props: NodeConfigFormProps) {
+  const label = (props.node.config as { label?: string }).label ?? "";
+  return (
+    <>
+      <TextRow
+        label="Nome do nó (opcional — ex.: Pergunta CPF)"
+        value={label}
+        onChange={(v) => props.onUpdateConfig({ label: v.slice(0, 60) })}
+      />
+      <NodeConfigFields {...props} />
+    </>
+  );
 }
