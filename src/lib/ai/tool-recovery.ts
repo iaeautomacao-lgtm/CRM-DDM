@@ -147,9 +147,12 @@ export function classifyToolBodyFailure(body: string): ToolFailure | null {
     return null;
   }
 
-  const rawError = String(
-    (parsed as { error?: unknown }).error ?? "",
-  ).trim();
+  const errorValue = (parsed as { error?: unknown }).error;
+  if (errorValue === null || errorValue === undefined || errorValue === false) {
+    return null;
+  }
+
+  const rawError = String(errorValue).trim();
   if (!rawError) return null;
 
   if (rawError === "invalid_client") {
