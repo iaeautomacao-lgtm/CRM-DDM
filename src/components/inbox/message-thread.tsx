@@ -60,7 +60,10 @@ import { PendingSendBubble, type PendingSendData } from "./pending-send-bubble";
 import { CONVERSATION_STATUS_LABELS } from "./status-labels";
 import { createPendingSendQueue } from "@/lib/inbox/pending-send-queue";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
-import { transferConversation } from "@/lib/conversations/actions";
+import {
+  closeConversationWithOutcomeTag,
+  transferConversation,
+} from "@/lib/conversations/actions";
 import { TemplatePicker } from "./template-picker";
 import { OutcomeTagPicker } from "./outcome-tag-picker";
 import { buildReplyPreview } from "./reply-quote";
@@ -779,30 +782,36 @@ export function MessageThread({
     async (status: ConversationStatus, outcomeTag?: Tag) => {
       if (!conversation) return;
 
-      const updates: { status: ConversationStatus; outcome_tag_id?: string } = {
-        status,
-      };
-      if (outcomeTag) updates.outcome_tag_id = outcomeTag.id;
-
       const supabase = createClient();
-      await supabase.from("conversations").update(updates).eq("id", conversation.id);
 
-      // Closing/tabulating is the strongest "stop the automated flow"
-      // signal there is — best-effort, mustn't block the status change
-      // that already committed above.
       if (status === "closed") {
-        try {
-          await apiFetch("/api/flows/end-run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              conversation_id: conversation.id,
-              reason: "conversation_closed",
-            }),
-          });
-        } catch (err) {
-          console.error("[handleStatusChange] end-run failed:", err);
+        if (!outcomeTag) {
+          toast.error("Selecione uma tag de encerramento.");
+          return;
         }
+
+        const { error } = await closeConversationWithOutcomeTag(
+          supabase,
+          conversation.id,
+          outcomeTag,
+        );
+        if (error) {
+          toast.error(`Erro ao finalizar atendimento: ${error}`);
+          return;
+        }
+
+        onStatusChange(conversation.id, status, outcomeTag);
+        return;
+      }
+
+      const { error } = await supabase
+        .from("conversations")
+        .update({ status })
+        .eq("id", conversation.id);
+
+      if (error) {
+        toast.error(`Erro ao alterar status: ${error.message}`);
+        return;
       }
 
       onStatusChange(conversation.id, status, outcomeTag);
