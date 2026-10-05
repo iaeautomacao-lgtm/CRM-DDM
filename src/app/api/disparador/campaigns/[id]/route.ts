@@ -13,6 +13,7 @@ const EDITABLE_FIELDS = [
   "intervalo_max",
   "janela_inicio",
   "janela_fim",
+  "dias_envio",
   "agendamento",
   "batch_size",
   "batch_pause_seconds",

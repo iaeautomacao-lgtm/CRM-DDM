@@ -48,7 +48,9 @@ export async function startCampaign(
     // simultâneos: só um UPDATE encontra o status de origem.
     const { data: claimedRows, error: claimError } = await supabaseAdmin()
       .from("campaigns")
-      .update({ status: "preparando" })
+      // updated_at marca o início da preparação: o cron devolve a
+      // 'rascunho' o que ficar preso aqui por um crash.
+      .update({ status: "preparando", updated_at: new Date().toISOString() })
       .eq("id", campaignId)
       .eq("account_id", accountId)
       .in("status", ["rascunho", "agendado"])
@@ -725,7 +727,9 @@ export async function startCampaign(
       {
         campaign_id: campaignId,
         account_id: accountId,
-        total_contatos: contacts.length,
+        // Contatos que de fato entraram na fila (sem blacklist e sem quem já
+        // recebeu numa tentativa anterior) — antes era o público bruto.
+        total_contatos: new Set(queueRows.map((r) => r.contact_id)).size,
       },
       { onConflict: "campaign_id" }
     );

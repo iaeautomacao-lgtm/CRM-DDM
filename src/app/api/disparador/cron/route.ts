@@ -5,10 +5,10 @@ import { drainCallbackOutbox } from '@/lib/disparador/callback-outbox';
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
 import {
   processQueueItem,
-  checkWithinWindow,
   type QueueItem,
   type Campaign,
 } from "@/lib/disparador/processQueue";
+import { canSendNow } from "@/lib/disparador/send-window";
 import { processWithConcurrency } from "@/lib/disparador/concurrency";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -100,6 +100,19 @@ export async function POST(request: Request) {
     const { error: readinessError } = await db.from("campaigns").select("next_batch_at").limit(1);
     if (readinessError)
       return NextResponse.json({ error: "Dispatch safety migration required" }, { status: 503 });
+    // 0) Campanha presa em 'preparando' (o processo caiu no meio do
+    //    startCampaign — o finally não roda num crash): depois de 30 min
+    //    volta para 'rascunho' para poder ser iniciada de novo. Os itens
+    //    parciais não são consumidos (campanha fora de execução) e o
+    //    próximo start limpa a fila antes de publicar.
+    const stuckBefore = new Date(Date.now() - 30 * 60_000).toISOString();
+    const { error: stuckError } = await db
+      .from("campaigns")
+      .update({ status: "rascunho", updated_at: new Date().toISOString() })
+      .eq("status", "preparando")
+      .lt("updated_at", stuckBefore);
+    if (stuckError) console.error("[Cron] Falha ao liberar campanhas presas em preparação:", stuckError.message);
+
     const { data: scheduled, error: scheduledError } = await db
       .from("campaigns")
       .select("id, account_id")
@@ -124,7 +137,7 @@ export async function POST(request: Request) {
     const { data: active, error: activeError } = await db
       .from("campaigns")
       .select(
-        "id, account_id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora"
+        "id, account_id, status, janela_inicio, janela_fim, dias_envio, batch_size, batch_pause_seconds, limite_por_hora"
       )
       .eq("status", "em_execucao").order('next_batch_at', { ascending: true, nullsFirst: true });
     if (activeError) throw activeError;
@@ -136,9 +149,7 @@ export async function POST(request: Request) {
     for (const campaign of (active ?? []) as Campaign[]) {
       if (lostLease || Date.now() > deadline - 5_000) break;
       if (
-        campaign.janela_inicio &&
-        campaign.janela_fim &&
-        !checkWithinWindow(campaign.janela_inicio, campaign.janela_fim)
+        !canSendNow({ inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio })
       )
         continue;
       // Reserva o próximo lote da campanha no banco: grava next_batch_at =

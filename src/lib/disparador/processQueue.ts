@@ -25,6 +25,7 @@ import OpenAI from "openai";
 // reexportado aqui para os imports existentes continuarem funcionando.
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/queue-markers";
 import { phoneVariants } from "@/lib/disparador/phone-key";
+import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/send-window";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -62,6 +63,8 @@ export interface Campaign {
   batch_size?: number;
   batch_pause_seconds?: number;
   limite_por_hora?: number;
+  /** Dias da semana permitidos (0=dom…6=sáb, Brasília); vazio = todos (144). */
+  dias_envio?: number[] | null;
   /** Quando presente, o canal (whatsapp_config) precisa ser desta conta. */
   account_id?: string;
 }
@@ -430,58 +433,22 @@ async function tryNextPhone(item: QueueItem): Promise<boolean> {
   return false;
 }
 
+// Mantida pelo nome para os chamadores existentes; a regra está em
+// send-window.ts (fuso de Brasília, janela que cruza a meia-noite).
 export function checkWithinWindow(inicio: string, fim: string): boolean {
-  const now = new Date();
-  try {
-    const brTimeStr = now.toLocaleTimeString("pt-BR", {
-      timeZone: "America/Sao_Paulo",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-    const [brHour, brMinute] = brTimeStr.split(":").map(Number);
-    const nowMinutes = brHour * 60 + brMinute;
-    const [hInicio, mInicio] = inicio.split(":").map(Number);
-    const [hFim, mFim] = fim.split(":").map(Number);
-    return nowMinutes >= hInicio * 60 + mInicio && nowMinutes <= hFim * 60 + mFim;
-  } catch {
-    const [hInicio, mInicio] = inicio.split(":").map(Number);
-    const [hFim, mFim] = fim.split(":").map(Number);
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    return nowMinutes >= hInicio * 60 + mInicio && nowMinutes <= hFim * 60 + mFim;
-  }
+  return isWithinSendWindow(inicio, fim);
 }
 
 export async function processQueueItem(
   item: QueueItem,
   campaign: Campaign
 ): Promise<ProcessResult> {
-  const { janela_inicio, janela_fim } = campaign;
-  const hasWindow =
-    janela_inicio && janela_fim && janela_inicio !== "00:00" && janela_fim !== "23:59";
+  const janela = { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio };
 
-  if (hasWindow && !checkWithinWindow(janela_inicio!, janela_fim!)) {
-    // Constrói "amanhã às janela_inicio" no fuso America/Sao_Paulo.
-    // setHours() usa o timezone local do processo Node (UTC em produção,
-    // se TZ não estiver configurada), não Brasília — daí o bug original
-    // (warp gravava 3h adiantado em relação ao horário configurado).
-    // Resolve a data de "hoje" em Brasília via Intl e converte direto
-    // para UTC, sem round-trip por string — Brasil não tem horário de
-    // verão desde 2019, então America/Sao_Paulo é sempre UTC-3 fixo, sem
-    // ambiguidade de offset a resolver.
-    const [h, m] = janela_inicio!.split(":");
-    const hora = parseInt(h, 10);
-    const minuto = parseInt(m, 10);
-
-    const hojeBr = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "America/Sao_Paulo",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
-    const [ano, mes, dia] = hojeBr.split("-").map(Number);
-
-    const tomorrowUtc = new Date(Date.UTC(ano, mes - 1, dia + 1, hora + 3, minuto, 0, 0));
+  if (!canSendNow(janela)) {
+    // Fora da janela ou em dia não permitido: adia para a PRÓXIMA abertura
+    // válida (hoje, se ainda não abriu; senão o próximo dia permitido).
+    const tomorrowUtc = nextSendSlot(janela);
 
     await supabaseAdmin()
       .from("disp_message_queue")
