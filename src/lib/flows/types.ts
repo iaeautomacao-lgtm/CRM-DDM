@@ -122,6 +122,8 @@ export interface HandoffNodeConfig {
 export interface HandoffAgentNodeConfig {
   /** Structured reason used for analytics and handoff audit. */
   reason_code?: string;
+  /** Optional more specific structured reason. */
+  reason_subcode?: string;
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
   /** Optional agent user_id to assign. Leave unset for "any available operator". */
@@ -132,6 +134,8 @@ export interface HandoffAgentNodeConfig {
 export interface HandoffTeamNodeConfig {
   /** Structured reason used for analytics and handoff audit. */
   reason_code?: string;
+  /** Optional more specific structured reason. */
+  reason_subcode?: string;
   /** Optional internal note written to flow_run_events.payload.note. */
   note?: string;
   /** Optional team id to route to. Leave unset for "any team". */
