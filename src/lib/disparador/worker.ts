@@ -39,13 +39,8 @@ export function ensureQueueWorkerRunning() {
 
       for (const campaign of activeCampaigns as Campaign[]) {
         try {
-          const hasWindow =
-            campaign.janela_inicio &&
-            campaign.janela_fim &&
-            campaign.janela_inicio !== "00:00" &&
-            campaign.janela_fim !== "23:59";
-
-          if (hasWindow && !checkWithinWindow(campaign.janela_inicio!, campaign.janela_fim!)) {
+          // Mesma regra do cron/envio (send-window.ts).
+          if (!checkWithinWindow(campaign.janela_inicio ?? "", campaign.janela_fim ?? "")) {
             continue;
           }
 

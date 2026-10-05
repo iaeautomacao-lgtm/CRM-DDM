@@ -100,6 +100,19 @@ export async function POST(request: Request) {
     const { error: readinessError } = await db.from("campaigns").select("next_batch_at").limit(1);
     if (readinessError)
       return NextResponse.json({ error: "Dispatch safety migration required" }, { status: 503 });
+    // 0) Campanha presa em 'preparando' (o processo caiu no meio do
+    //    startCampaign — o finally não roda num crash): depois de 30 min
+    //    volta para 'rascunho' para poder ser iniciada de novo. Os itens
+    //    parciais não são consumidos (campanha fora de execução) e o
+    //    próximo start limpa a fila antes de publicar.
+    const stuckBefore = new Date(Date.now() - 30 * 60_000).toISOString();
+    const { error: stuckError } = await db
+      .from("campaigns")
+      .update({ status: "rascunho", updated_at: new Date().toISOString() })
+      .eq("status", "preparando")
+      .lt("updated_at", stuckBefore);
+    if (stuckError) console.error("[Cron] Falha ao liberar campanhas presas em preparação:", stuckError.message);
+
     const { data: scheduled, error: scheduledError } = await db
       .from("campaigns")
       .select("id, account_id")
@@ -135,12 +148,7 @@ export async function POST(request: Request) {
     }> = [];
     for (const campaign of (active ?? []) as Campaign[]) {
       if (lostLease || Date.now() > deadline - 5_000) break;
-      if (
-        campaign.janela_inicio &&
-        campaign.janela_fim &&
-        !checkWithinWindow(campaign.janela_inicio, campaign.janela_fim)
-      )
-        continue;
+      if (!checkWithinWindow(campaign.janela_inicio ?? "", campaign.janela_fim ?? "")) continue;
       // Reserva o próximo lote da campanha no banco: grava next_batch_at =
       // agora + batch_pause_seconds. Se outro tick já reservou dentro da
       // pausa, retorna false e a campanha é pulada — ticks extras não
