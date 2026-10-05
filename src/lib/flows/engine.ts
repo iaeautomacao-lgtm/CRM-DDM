@@ -2184,6 +2184,7 @@ async function runAiAgentCore(
         // em src/lib/ai/responder.ts), e collectedToolResults acima também
         // guarda o `result` cru, não `truncated`.
         const truncated = result.length > 8000 ? result.slice(0, 8000) + "…" : result;
+        const toolFailure = parseToolFailure(result);
         await logRunEvent(db, {
           run_id: run.id,
           flow_id: run.flow_id,
@@ -2191,12 +2192,29 @@ async function runAiAgentCore(
           node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
           node_type: "ai_agent",
           event_type: "tool_result",
-          status: "success",
+          status: toolFailure ? "error" : "success",
           duration_ms: durationMs,
+          error_message: toolFailure,
           payload: {
             tool_name: toolName,
             result: truncated,
           },
+        });
+        await logAiDecision(db, {
+          account_id: run.account_id,
+          conversation_id: run.conversation_id ?? null,
+          flow_run_id: run.id,
+          flow_id: run.flow_id,
+          node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+          decision_type: "tool_result",
+          decision: {
+            duration_ms: durationMs,
+          },
+          reason: toolFailure,
+          needs_human: false,
+          tool_name: toolName,
+          tool_status: toolFailure ? "error" : "success",
+          model: modelUsed,
         });
       },
       currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
@@ -2260,6 +2278,24 @@ async function runAiAgentCore(
         exitCodeFound = "#NEGOCIACAO";
         await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
       }
+    }
+
+    if (exitCodeFound) {
+      await logAiDecision(db, {
+        account_id: run.account_id,
+        conversation_id: run.conversation_id ?? null,
+        flow_run_id: run.id,
+        flow_id: run.flow_id,
+        node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+        decision_type: "ai_exit",
+        decision: {
+          exit_code: exitCodeFound,
+        },
+        reason: "ai_exit_code",
+        needs_human: false,
+        ai_exit_code: exitCodeFound,
+        model: modelUsed,
+      });
     }
 
     const baseOutput = {
