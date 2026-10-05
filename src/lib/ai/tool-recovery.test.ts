@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyFetchFailure,
   classifyHttpFailure,
+  classifyToolBodyFailure,
   isValidCpf,
   normalizeCpf,
   prepareToolArgs,
@@ -68,6 +69,35 @@ describe("tool recovery — HTTP classification", () => {
     const err = new Error("The operation was aborted");
     err.name = "AbortError";
     expect(classifyFetchFailure(err).code).toBe("TOOL_TIMEOUT");
+  });
+
+  it("classifies provider error payloads returned with HTTP 200", () => {
+    expect(
+      classifyToolBodyFailure('{"error":"invalid_client"}'),
+    ).toEqual(
+      expect.objectContaining({
+        code: "TOOL_INVALID_CLIENT",
+        retryable: true,
+      }),
+    );
+
+    expect(
+      classifyToolBodyFailure('{"error":"invalid_simulation"}'),
+    ).toEqual(
+      expect.objectContaining({
+        code: "TOOL_PROVIDER_ERROR",
+        retryable: false,
+      }),
+    );
+
+    expect(
+      classifyToolBodyFailure('{"error":"The operation was aborted due to timeout"}'),
+    ).toEqual(
+      expect.objectContaining({
+        code: "TOOL_TIMEOUT",
+        retryable: true,
+      }),
+    );
   });
 
   it("retries only known read-only DDM tools", () => {
