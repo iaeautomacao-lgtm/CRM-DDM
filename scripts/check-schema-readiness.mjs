@@ -48,7 +48,8 @@ const probes = [
   },
   { table: "ai_reply_intents", columns: "account_id,conversation_id,inbound_message_id,node_key" },
   { table: "disp_import_contacts", columns: "id" },
-  { table: "webchat_settings", columns: "id" },
+  // Chave da tabela é account_id (133_webchat_settings) — não há coluna id.
+  { table: "webchat_settings", columns: "account_id" },
   { table: "intelligence_tool_calls", columns: "id" },
   { table: "quick_replies", columns: "id" },
 ];
