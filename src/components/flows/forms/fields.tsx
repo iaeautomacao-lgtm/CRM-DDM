@@ -28,7 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { NODE_META, type BuilderNode } from "../shared";
+import { NODE_META, type BuilderNode, nodeLabel, summarizeNode } from "../shared";
 
 export function TextRow({
   label,
@@ -136,12 +136,21 @@ export function NodeKeySelect({
   );
 }
 
+// Nome legível primeiro (ou o resumo do conteúdo), chave em segundo plano —
+// "enviar_mensagem_3" sozinho não diz para onde a seta vai.
 function NodeKeyLabel({ node }: { node: BuilderNode }) {
   const Icon = NODE_META[node.node_type].icon;
+  const label = nodeLabel(node);
+  const summary = label ? null : summarizeNode(node);
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <Icon className={cn("h-3 w-3", NODE_META[node.node_type].color)} />
-      {node.node_key}
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <Icon className={cn("h-3 w-3 shrink-0", NODE_META[node.node_type].color)} />
+      <span className="truncate">{label ?? node.node_key}</span>
+      {label ? (
+        <span className="text-muted-foreground shrink-0 font-mono text-[10px]">{node.node_key}</span>
+      ) : summary ? (
+        <span className="text-muted-foreground max-w-[180px] truncate text-[11px]">— {summary}</span>
+      ) : null}
     </span>
   );
 }
