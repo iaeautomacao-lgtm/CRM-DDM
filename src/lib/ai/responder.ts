@@ -255,6 +255,29 @@ function extractInstallmentsFromHistory(history: any[]): number {
   return 1;
 }
 
+export type AiAutoResponseResult =
+  | {
+      outcome: "sent";
+      messageId: string;
+      providerMessageId: string | null;
+      content: string;
+      detectedTag: string | null;
+      modelUsed: string | null;
+    }
+  | {
+      outcome: "skipped";
+      reason: string;
+      detectedTag: string | null;
+      modelUsed: string | null;
+    }
+  | {
+      outcome: "failed";
+      reason: string;
+      detectedTag: string | null;
+      modelUsed: string | null;
+      providerMessageId?: string | null;
+    };
+
 export async function handleAiAutoResponse(
   accountId: string,
   contactId: string,
@@ -285,7 +308,7 @@ export async function handleAiAutoResponse(
   // it — see the three call sites (Meta webhook, WAHA webhook,
   // flows/engine.ts's runAiAgentCore).
   configId?: string,
-): Promise<string | null | void> {
+): Promise<AiAutoResponseResult> {
   const db = supabaseAdmin();
 
   // 1. Fetch AI Configuration
@@ -295,9 +318,27 @@ export async function handleAiAutoResponse(
     .eq("account_id", accountId)
     .maybeSingle();
 
-  if (aiConfigError || !aiConfig || !aiConfig.enabled) {
-    return; // AI disabled or not configured
+  if (aiConfigError) {
+    return {
+      outcome: "failed",
+      reason: `ai_config_load_failed:${aiConfigError.message}`,
+      detectedTag: null,
+      modelUsed: null,
+    };
   }
+  if (!aiConfig || !aiConfig.enabled) {
+    return {
+      outcome: "skipped",
+      reason: "ai_config_disabled_or_missing",
+      detectedTag: null,
+      modelUsed: null,
+    };
+  }
+
+  const responseModel =
+    (typeof aiConfig.api_model === "string" && aiConfig.api_model.trim()) ||
+    aiConfig.api_provider ||
+    null;
 
   // --- DEBOUNCE E DELAY DE DIGITAÇÃO ---
   // Aguarda 4 segundos antes de prosseguir. Se uma nova mensagem chegar durante esse intervalo,
@@ -334,7 +375,12 @@ export async function handleAiAutoResponse(
       // Adiciona uma tolerância de 500ms para evitar falsos cancelamentos
       if (Date.now() - lastCheckTime < 3800) {
         console.log(`[AI Agent] Debounce triggered on conversation ${conversationId}. Cancelling old execution.`);
-        return;
+        return {
+          outcome: "skipped",
+          reason: "debounced",
+          detectedTag: null,
+          modelUsed: responseModel,
+        };
       }
     }
   }
@@ -348,11 +394,41 @@ export async function handleAiAutoResponse(
   const { data: inbound, error: inboundError } = await db.from('messages')
     .select('id').eq('conversation_id', conversationId).eq('account_id', accountId)
     .eq('sender_type', 'customer').order('received_at', { ascending: false }).limit(1).maybeSingle();
-  if (inboundError || !inbound) return;
+  if (inboundError) {
+    return {
+      outcome: "failed",
+      reason: `inbound_lookup_failed:${inboundError.message}`,
+      detectedTag: null,
+      modelUsed: responseModel,
+    };
+  }
+  if (!inbound) {
+    return {
+      outcome: "skipped",
+      reason: "no_inbound_message",
+      detectedTag: null,
+      modelUsed: responseModel,
+    };
+  }
   const { data: ownsReply, error: replyClaimError } = await db.rpc('claim_ai_reply', {
     p_account: accountId, p_conversation: conversationId, p_message: inbound.id, p_node: nodeKey ?? '',
   });
-  if (replyClaimError || !ownsReply) return;
+  if (replyClaimError) {
+    return {
+      outcome: "failed",
+      reason: `reply_claim_failed:${replyClaimError.message}`,
+      detectedTag: null,
+      modelUsed: responseModel,
+    };
+  }
+  if (!ownsReply) {
+    return {
+      outcome: "skipped",
+      reason: "already_claimed",
+      detectedTag: null,
+      modelUsed: responseModel,
+    };
+  }
   // Se o processo cair depois daqui, a intenção continua registrada e a IA
   // não responde de novo a essa mensagem: preferimos revisão manual a
   // repetir efeitos (mensagem duplicada, acordo formalizado duas vezes).
@@ -374,7 +450,12 @@ export async function handleAiAutoResponse(
 
   if (messagesError) {
     console.error("[AI Agent] failed to load messages context:", messagesError);
-    return;
+    return {
+      outcome: "failed",
+      reason: `history_load_failed:${messagesError.message}`,
+      detectedTag: null,
+      modelUsed: responseModel,
+    };
   }
 
   // --- TRAVA DE MENSAGENS INADEQUADAS OU SACANAGEM (ANTI-SCAM) ---
@@ -423,7 +504,12 @@ export async function handleAiAutoResponse(
         .eq("id", conversationId);
         
       // Opcional: envia um alerta ou tag de humano no comando no banco
-      return; // Interrompe a geração da IA imediatamente sem gastar tokens
+      return {
+        outcome: "skipped",
+        reason: "handoff_anti_scam",
+        detectedTag: null,
+        modelUsed: responseModel,
+      }; // Interrompe a geração da IA imediatamente sem gastar tokens
     }
   }
 
@@ -465,7 +551,12 @@ export async function handleAiAutoResponse(
           })
           .eq("id", conversationId);
       }
-      return; // Interrompe a resposta automática da IA
+      return {
+        outcome: "skipped",
+        reason: "handoff_anti_loop",
+        detectedTag: null,
+        modelUsed: responseModel,
+      }; // Interrompe a resposta automática da IA
     }
   }
 
@@ -492,7 +583,12 @@ export async function handleAiAutoResponse(
 
   if (!activeKey) {
     console.warn(`[AI Agent] Missing API Key for provider: ${aiConfig.api_provider}`);
-    return;
+    return {
+      outcome: "failed",
+      reason: "missing_provider_api_key",
+      detectedTag: null,
+      modelUsed: responseModel,
+    };
   }
 
   // 3. Audio Message Transcription (Whisper)
@@ -1114,7 +1210,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     generatedText = AI_EMPTY_REPLY_FALLBACK_TEXT;
   }
 
-  if (!generatedText) return;
+  if (!generatedText) {
+    return {
+      outcome: "skipped",
+      reason: "empty_response",
+      detectedTag: null,
+      modelUsed: responseModel,
+    };
+  }
 
   // Captured BEFORE the known-tag strip below removes it from the text
   // that actually gets sent/persisted — this is what the ai_agent flow
@@ -1158,7 +1261,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .replace(/#AGENDAMENTO\(finalização\)/g, "")
     .trim();
 
-  if (!generatedText) return detectedTag;
+  if (!generatedText) {
+    return {
+      outcome: "skipped",
+      reason: "control_tag_only",
+      detectedTag,
+      modelUsed: responseModel,
+    };
+  }
 
   // Flow Builder nodes formalize through their configured tools (for
   // example, efetiva_acordo). Do not run the legacy CPF-based
@@ -1340,7 +1450,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   if (conversationChannel === "webchat" || isSocialChannel(conversationChannel)) {
     const send = conversationChannel === "webchat" ? sendWebchatMessage : sendSocialMessage;
     try {
-      await send({
+      const sent = await send({
         conversationId,
         senderType: "bot",
         contentType: voiceMediaUrl ? "audio" : "text",
@@ -1356,11 +1466,32 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
           mediaUrl: payBoletoUrl,
         });
       }
+      if (!sent.id) {
+        return {
+          outcome: "failed",
+          reason: "persist_failed_after_send",
+          detectedTag,
+          modelUsed: responseModel,
+          providerMessageId: sent.whatsapp_message_id || null,
+        };
+      }
+      return {
+        outcome: "sent",
+        messageId: sent.id,
+        providerMessageId: sent.whatsapp_message_id || null,
+        content: generatedText,
+        detectedTag,
+        modelUsed: responseModel,
+      };
     } catch (err) {
       console.error(`[AI Agent] ${conversationChannel} send error:`, err);
-      return;
+      return {
+        outcome: "failed",
+        reason: `channel_send_failed:${err instanceof Error ? err.message : String(err)}`,
+        detectedTag,
+        modelUsed: responseModel,
+      };
     }
-    return detectedTag;
   }
 
   // 7. Load WhatsApp configuration
@@ -1373,7 +1504,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   if (configError || !config) {
     console.error("[AI Agent] WhatsApp config not found");
-    return;
+    return {
+      outcome: "failed",
+      reason: configError
+        ? `whatsapp_config_load_failed:${configError.message}`
+        : "whatsapp_config_missing",
+      detectedTag,
+      modelUsed: responseModel,
+    };
   }
 
   // Scoped by account_id for defense in depth, matching the same
@@ -1388,7 +1526,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     .eq("account_id", accountId)
     .single();
 
-  if (!contact?.phone) return;
+  if (!contact?.phone) {
+    return {
+      outcome: "failed",
+      reason: "contact_phone_missing",
+      detectedTag,
+      modelUsed: responseModel,
+    };
+  }
 
   const sanitized = sanitizePhoneForMeta(contact.phone);
   const variants = phoneVariants(sanitized);
@@ -1482,7 +1627,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     }
   }
 
-  if (!sentMessageId) return;
+  if (!sentMessageId) {
+    return {
+      outcome: "failed",
+      reason: "provider_send_failed",
+      detectedTag,
+      modelUsed: responseModel,
+    };
+  }
 
   if (workingPhone !== sanitized) {
     await db.from("contacts").update({ phone: workingPhone }).eq("id", contactId);
@@ -1490,7 +1642,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   // 9. Save sent message to database
   const messageDate = new Date().toISOString();
-  const { error: newMsgErr } = await db
+  const { data: savedMessages, error: newMsgErr } = await db
     .from("messages")
     .insert({
       conversation_id: conversationId,
@@ -1501,11 +1653,22 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       status: "sent",
       sender_type: "bot",
       created_at: messageDate,
-    });
+    })
+    .select("id")
+    .limit(1);
 
-  if (newMsgErr) {
+  const savedMessageId = savedMessages?.[0]?.id ?? null;
+  if (newMsgErr || !savedMessageId) {
     console.error("[AI Agent] Failed to save outbound message:", newMsgErr);
-    return;
+    return {
+      outcome: "failed",
+      reason: newMsgErr
+        ? `persist_failed_after_send:${newMsgErr.message}`
+        : "persist_failed_after_send:no_message_id",
+      detectedTag,
+      modelUsed: responseModel,
+      providerMessageId: sentMessageId,
+    };
   }
 
   // 10. Update conversation values
@@ -1518,7 +1681,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     })
     .eq("id", conversationId);
 
-  return detectedTag;
+  return {
+    outcome: "sent",
+    messageId: savedMessageId,
+    providerMessageId: sentMessageId,
+    content: generatedText,
+    detectedTag,
+    modelUsed: responseModel,
+  };
 }
 
 async function generateGeminiResponse(
