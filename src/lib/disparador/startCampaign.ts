@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 
 type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
 
@@ -265,7 +266,8 @@ export async function startCampaign(
       while (true) {
         const { data: page, error: pageError } = await supabaseAdmin()
           .from("contacts")
-          .select("id, name, phone, company, phone_normalized")
+          // cpf (migration 077): chave principal do link UTM (utm-links.ts).
+          .select("id, name, phone, company, phone_normalized, cpf")
           .eq("account_id", accountId)
           .range(from, from + pageSize - 1);
 
@@ -447,7 +449,7 @@ export async function startCampaign(
         Array.isArray(m.template_variable_map) &&
         m.template_variable_map.some((e: any) => e?.type === "utm_link")
     );
-    const utmLinkByPhone = new Map<string, string>();
+    const utmLinks: UtmLinkMaps = { byCpf: new Map(), byPhone: new Map() };
     if (usaUtmLink) {
       try {
         // Paginado via .range() — mesmo padrão do restante do arquivo.
@@ -460,12 +462,13 @@ export async function startCampaign(
         while (true) {
           const { data: page, error: utmLinksError } = await supabaseAdmin()
             .from("disparador_utm_links")
-            .select("phone_normalized, link_curto")
+            .select("phone_normalized, cpf, link_curto")
             .eq("campaign_id", campaignId)
             .range(from, from + pageSize - 1);
           if (utmLinksError) throw utmLinksError;
           for (const row of page ?? []) {
-            if (row.phone_normalized) utmLinkByPhone.set(row.phone_normalized, row.link_curto);
+            if (row.cpf) utmLinks.byCpf.set(row.cpf, row.link_curto);
+            if (row.phone_normalized) utmLinks.byPhone.set(row.phone_normalized, row.link_curto);
           }
           if (!page || page.length < pageSize) break;
           from += pageSize;
@@ -671,7 +674,7 @@ export async function startCampaign(
               // Vazio se este contato não tiver link gerado (CSV sem CPF,
               // geração de UTM pulada, etc.) — degrada para {{n}} vazio em
               // vez de derrubar o enfileiramento da campanha inteira.
-              return utmLinkByPhone.get((contact as any).phone_normalized) ?? "";
+              return resolveUtmLink(utmLinks, contact as any);
             }
             if (entry?.type === "csv_var") {
               // Vazio se este contato não tiver essa coluna preenchida no
@@ -694,7 +697,7 @@ export async function startCampaign(
               if (entry?.type === "contact_field") {
                 value = String((contact as any)[entry.field] ?? "");
               } else if (entry?.type === "utm_link") {
-                value = utmLinkByPhone.get((contact as any).phone_normalized) ?? "";
+                value = resolveUtmLink(utmLinks, contact as any);
               } else if (entry?.type === "csv_var") {
                 value = csvVarMap.get(`${contact.id}:${entry.index}`) ?? "";
               } else {

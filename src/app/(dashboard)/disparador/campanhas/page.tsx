@@ -1,10 +1,17 @@
 "use client";
 
+import { utmCpfKey, utmPhoneKey } from "@/lib/disparador/utm-links";
 import { apiFetch } from "@/lib/api-fetch";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import {
+  CampaignWebchatSettings,
+  EMPTY_CAMPAIGN_WEBCHAT,
+  campaignWebchatPayload,
+  type CampaignWebchatValue,
+} from "@/components/disparador/campaign-webchat-settings";
 import { 
   Plus, 
   Play, 
@@ -69,7 +76,6 @@ import { uploadAccountMedia } from "@/lib/storage/upload-media";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { trackAction } from "@/hooks/use-telemetry";
 import { useAuth } from "@/hooks/use-auth";
-import { normalizePhone } from "@/lib/whatsapp/phone-utils";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
 import {
@@ -107,6 +113,11 @@ interface Campaign {
   // modo foi escolhido; resolvido para um batch_size absoluto em
   // startCampaign.ts no momento real do início (ver comentário lá).
   batch_percent?: number | null;
+  // Migration 127 — "Ao responder, enviar para o Webchat".
+  webchat_enabled?: boolean;
+  webchat_flow_id?: string | null;
+  webchat_message?: string | null;
+  webchat_button_text?: string | null;
 }
 
 interface TagItem {
@@ -664,6 +675,7 @@ export default function CampanhasPage() {
   const [batchPauseMinutes, setBatchPauseMinutes] = useState(30);
   const [dispatchMode, setDispatchMode] = useState<DispatchMode>("balanceado");
   const [templateMode, setTemplateMode] = useState<TemplateMode>("sequencia");
+  const [webchat, setWebchat] = useState<CampaignWebchatValue>(EMPTY_CAMPAIGN_WEBCHAT);
   const [agendarPara, setAgendarPara] = useState<string>("");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
 
@@ -800,7 +812,9 @@ export default function CampanhasPage() {
   const [queueDetailSearch, setQueueDetailSearch] = useState("");
   const [queueDetailLoading, setQueueDetailLoading] = useState(false);
   const [queueDetailExporting, setQueueDetailExporting] = useState(false);
-  const QUEUE_DETAIL_PAGE_SIZE = 20;
+  // Itens por página do detalhamento (seletor no rodapé do modal).
+  const QUEUE_DETAIL_PAGE_SIZES = [20, 50, 100, 200] as const;
+  const [queueDetailPageSize, setQueueDetailPageSize] = useState<number>(20);
 
   const [utmMetrics, setUtmMetrics] = useState<{
     total_cliques: number;
@@ -888,7 +902,7 @@ export default function CampanhasPage() {
         const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos")
+          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text")
           .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -1122,6 +1136,12 @@ export default function CampanhasPage() {
       )
     );
     setTemplateMode(parseTemplateMode(campaign.dias_permitidos));
+    setWebchat({
+      webchat_enabled: campaign.webchat_enabled ?? false,
+      webchat_flow_id: campaign.webchat_flow_id ?? null,
+      webchat_message: campaign.webchat_message ?? "",
+      webchat_button_text: campaign.webchat_button_text ?? "",
+    });
     // Edição só é permitida para campanhas em "rascunho" (ver PATCH
     // /api/disparador/campaigns/[id]), que por definição nunca têm
     // agendamento — campo sempre reseta vazio aqui.
@@ -1421,6 +1441,7 @@ export default function CampanhasPage() {
             // Reaproveita a coluna dias_permitidos — ver parseTemplateMode.
             dias_permitidos: templateMode,
             agendamento: agendamentoISO,
+            ...campaignWebchatPayload(webchat),
           }),
         });
         if (!res.ok) {
@@ -1481,6 +1502,7 @@ export default function CampanhasPage() {
           // Reaproveita a coluna dias_permitidos — ver parseTemplateMode.
           dias_permitidos: templateMode,
           agendamento: agendamentoISO,
+          ...campaignWebchatPayload(webchat),
           status: agendamentoISO ? "agendado" : "rascunho",
           created_by: user.id,
           account_id: accountId,
@@ -1563,6 +1585,7 @@ export default function CampanhasPage() {
     setBatchPercent(10);
     setBatchPauseMinutes(30);
     setTemplateMode("sequencia");
+    setWebchat(EMPTY_CAMPAIGN_WEBCHAT);
     setAgendarPara("");
     setWizardStep(1);
     setImportFile(null);
@@ -1911,9 +1934,13 @@ export default function CampanhasPage() {
       if (utmRes.ok) {
         const utmData = await utmRes.json();
         setUtmMetrics(utmData.metricas ?? null);
+      } else if (!silent) {
+        // UTM é opcional, mas falha de serviço/chave precisa aparecer.
+        console.warn("[UTM] métricas indisponíveis:", utmRes.status);
+        toast.warning(`Métricas de UTM indisponíveis (HTTP ${utmRes.status})`);
       }
     } catch {
-      // silencioso — UTM é opcional
+      // rede — silencioso, UTM é opcional
     } finally {
       setUtmMetricsLoading(false);
     }
@@ -1964,6 +1991,7 @@ export default function CampanhasPage() {
         const qs = new URLSearchParams({
           status: queueDetailModal.status,
           page: String(queueDetailPage),
+          pageSize: String(queueDetailPageSize),
         });
         if (queueDetailSearch) qs.set("search", queueDetailSearch);
         const res = await apiFetch(
@@ -1983,7 +2011,7 @@ export default function CampanhasPage() {
     return () => {
       cancelled = true;
     };
-  }, [queueDetailModal, queueDetailPage, queueDetailSearch, metricsModal]);
+  }, [queueDetailModal, queueDetailPage, queueDetailSearch, metricsModal, queueDetailPageSize]);
 
   const handleExportQueueDetailXlsx = async () => {
     if (!queueDetailModal || !metricsModal) return;
@@ -2083,7 +2111,15 @@ export default function CampanhasPage() {
         });
 
         if (!res.ok) {
-          console.warn("[UTM] Falha na requisição:", await res.text());
+          const detail = await res.text();
+          console.warn("[UTM] Falha na requisição:", detail);
+          // Antes ficava só no console: chave UTM_API_KEY ausente ou
+          // utmpay fora do ar pareciam "UTM não funciona".
+          toast.error(
+            res.status === 401 || res.status === 403
+              ? "Serviço de UTM recusou a chave (confira UTM_API_KEY no servidor)"
+              : `Falha ao gerar links UTM (HTTP ${res.status})`
+          );
           // Lote inteiro falhou — conta todos como erro, senão a barra
           // de progresso trava sem nunca chegar em "total".
           setUtmProgress(prev => prev ? { ...prev, erros: prev.erros + alunos.length } : null);
@@ -2127,20 +2163,22 @@ export default function CampanhasPage() {
         })
       );
 
-      // Re-chaveia cpf→link_curto por telefone normalizado (contacts não
-      // tem coluna de CPF — ver migration 076) e persiste em
-      // disparador_utm_links, o que de fato alimenta o envio via
-      // start/route.ts. draftId enquanto a campanha ainda não existe;
-      // editingId quando estamos editando um rascunho já criado.
+      // Persiste cpf→link_curto em disparador_utm_links, o que de fato
+      // alimenta o envio (startCampaign). Chave principal: CPF (migration
+      // 129); telefone com a MESMA regra do import (DDI 55) — antes ia o
+      // telefone cru do CSV e o envio não achava o link (ver utm-links.ts).
+      // draftId enquanto a campanha ainda não existe; editingId quando
+      // estamos editando um rascunho já criado.
       const phoneLinkRows = source
         .filter((c) => c.cpf && linkMap.has(c.cpf))
         .map((c) => ({
           campaign_id: editingId ?? null,
           draft_id: editingId ? null : draftId,
-          phone_normalized: normalizePhone(c.phone),
+          phone_normalized: utmPhoneKey(c.phone),
+          cpf: utmCpfKey(c.cpf),
           link_curto: linkMap.get(c.cpf!)!,
         }))
-        .filter((r) => r.phone_normalized);
+        .filter((r) => r.phone_normalized || r.cpf);
 
       let saved = 0;
       try {
@@ -2734,6 +2772,9 @@ export default function CampanhasPage() {
                   </p>
                 </div>
               )}
+
+              {/* Webchat de campanha (migration 127) */}
+              <CampaignWebchatSettings value={webchat} onChange={setWebchat} />
 
               {/* Agendamento futuro */}
               <div className="space-y-1">
@@ -4195,12 +4236,32 @@ export default function CampanhasPage() {
               )}
             </div>
 
-            {queueDetailTotal > QUEUE_DETAIL_PAGE_SIZE && (
+            {queueDetailTotal > QUEUE_DETAIL_PAGE_SIZES[0] && (
               <footer className="px-6 py-3 border-t border-border flex items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">
-                  Página {queueDetailPage} de{" "}
-                  {Math.max(1, Math.ceil(queueDetailTotal / QUEUE_DETAIL_PAGE_SIZE))}
-                </p>
+                <div className="flex items-center gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    Página {queueDetailPage} de{" "}
+                    {Math.max(1, Math.ceil(queueDetailTotal / queueDetailPageSize))}
+                  </p>
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    Itens por página
+                    <select
+                      value={queueDetailPageSize}
+                      onChange={(e) => {
+                        setQueueDetailPageSize(Number(e.target.value));
+                        setQueueDetailPage(1);
+                      }}
+                      disabled={queueDetailLoading}
+                      className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                    >
+                      {QUEUE_DETAIL_PAGE_SIZES.map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
@@ -4216,7 +4277,7 @@ export default function CampanhasPage() {
                     size="sm"
                     className="h-8 gap-1 text-xs"
                     disabled={
-                      queueDetailPage >= Math.ceil(queueDetailTotal / QUEUE_DETAIL_PAGE_SIZE) ||
+                      queueDetailPage >= Math.ceil(queueDetailTotal / queueDetailPageSize) ||
                       queueDetailLoading
                     }
                     onClick={() => setQueueDetailPage((p) => p + 1)}
