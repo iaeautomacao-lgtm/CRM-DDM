@@ -313,6 +313,11 @@ async function ensureCampaignMessage(
       message_id: item.waha_message_id,
       status: campaignMessageStatus(item.status),
       created_at: item.sent_at,
+      // Historical campaign messages are reconstructed only when the
+      // customer replies. Keep BOTH timestamps at the original send time;
+      // leaving received_at at its DB default (now()) makes the old template
+      // jump into the middle of the live conversation and can race with AI.
+      received_at: item.sent_at,
       campaign_id: item.campaign_id,
       queue_item_id: item.id,
     })
