@@ -58,6 +58,7 @@ import {
   summarizeNode,
   type BuilderNode,
   type NodeType,
+  nodeLabel,
 } from './shared';
 import { NodeConfigForm } from './forms/node-config-form';
 import { NodeKeySelect } from './forms/fields';
@@ -281,7 +282,7 @@ const TRIGGER_TYPE_LABELS: Record<BuilderState['trigger_type'], string> = {
   called_by_flow: 'Chamado por outro fluxo',
 };
 
-function TriggerPanel({
+export function TriggerPanel({
   state,
   setState,
   triggerIssues,
@@ -464,6 +465,9 @@ function NodeCard({
             >
               {meta.label}
             </span>
+            {nodeLabel(node) && (
+              <span className="text-foreground truncate text-sm font-medium">{nodeLabel(node)}</span>
+            )}
             <code className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px]">
               {node.node_key}
             </code>
