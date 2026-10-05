@@ -111,14 +111,12 @@ export function matchReplyId(
   reply_id: string,
 ): string | null {
   if (node.node_type === "send_buttons") {
-    // Variáveis ({{vars.x}}) no texto/cabeçalho/rodapé: antes iam literais
-  // ao cliente (só o log mostrava o texto interpolado).
-  const cfg = withInterpolatedTexts(node.config as unknown as SendButtonsNodeConfig, run.vars);
+    const cfg = node.config as unknown as SendButtonsNodeConfig;
     const hit = cfg.buttons?.find((b) => b.reply_id === reply_id);
     return hit?.next_node_key ?? null;
   }
   if (node.node_type === "send_list") {
-    const cfg = withInterpolatedTexts(node.config as unknown as SendListNodeConfig, run.vars);
+    const cfg = node.config as unknown as SendListNodeConfig;
     for (const section of cfg.sections ?? []) {
       const hit = section.rows?.find((r) => r.reply_id === reply_id);
       if (hit) return hit.next_node_key;
@@ -1011,7 +1009,9 @@ async function sendButtonsAndSuspend(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
-  const cfg = node.config as unknown as SendButtonsNodeConfig;
+  // Variáveis ({{vars.x}}) no texto/cabeçalho/rodapé: antes iam literais
+  // ao cliente (só o log mostrava o texto interpolado).
+  const cfg = withInterpolatedTexts(node.config as unknown as SendButtonsNodeConfig, run.vars);
   const { whatsapp_message_id } = await sendButtonsViaProvider(db, run, cfg);
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_buttons",
@@ -1038,7 +1038,7 @@ async function sendListAndSuspend(
   run: FlowRunRow,
   node: FlowNodeRow,
 ): Promise<{ outcome: "advanced"; node_key: string }> {
-  const cfg = node.config as unknown as SendListNodeConfig;
+  const cfg = withInterpolatedTexts(node.config as unknown as SendListNodeConfig, run.vars);
   const { whatsapp_message_id } = await sendListViaProvider(db, run, cfg);
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_list",
