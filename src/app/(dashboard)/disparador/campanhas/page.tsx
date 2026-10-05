@@ -79,6 +79,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
 import {
+  findVariableProblems,
+  previewCampaignMessage,
+  synthesizeWahaVariableMap,
+  type PreviewContact,
+} from "@/lib/disparador/preview-message";
+import {
   looksLikeImportHeader,
   normalizeImportHeader,
   resolveImportRows,
@@ -118,6 +124,9 @@ interface Campaign {
   webchat_flow_id?: string | null;
   webchat_message?: string | null;
   webchat_button_text?: string | null;
+  // Migration 132 — origem do público ("csv" | "tags" | "account"; null em
+  // campanhas antigas). Só lido na edição (passo Público).
+  audience_mode?: string | null;
 }
 
 interface TagItem {
@@ -139,7 +148,7 @@ interface WahaSession {
   display_phone_number?: string;
   waba_id?: string;
   // whatsapp_config.team_id (migration 103) — usado só pelo filtro de
-  // equipe do Step 1 (teamFilter), nunca enviado de volta ao servidor.
+  // equipe do passo Público (teamFilter), nunca enviado de volta ao servidor.
   team_id?: string | null;
 }
 
@@ -294,7 +303,7 @@ function draftStorageKey(accountId: string | null): string | null {
   return accountId ? `disparador:campaign-draft:${accountId}` : null;
 }
 
-// Campos DDM do sub-step de mapeamento de colunas (Step 2, após a prévia
+// Campos DDM do sub-step de mapeamento de colunas (passo Público, após a prévia
 // do CSV) — chave bate com o que import/route.ts espera em column_map.
 const COLUMN_MAP_FIELDS: Array<{ key: keyof ImportColumnMap; label: string }> = [
   { key: "name", label: "Nome do contato" },
@@ -304,6 +313,26 @@ const COLUMN_MAP_FIELDS: Array<{ key: keyof ImportColumnMap; label: string }> = 
   { key: "var2", label: "Variável do template {{2}}" },
   { key: "var3", label: "Variável do template {{3}}" },
 ];
+
+type WizardStep = 1 | 2 | 3 | 4;
+
+const WIZARD_STEPS: Array<{ step: WizardStep; label: string }> = [
+  { step: 1, label: "Público" },
+  { step: 2, label: "Mensagem" },
+  { step: 3, label: "Agenda" },
+  { step: 4, label: "Revisão" },
+];
+
+// Tipos de mensagem que só fazem sentido com uma URL de mídia.
+const MEDIA_MESSAGE_TYPES = ["imagem", "video", "audio", "arquivo", "ligacao"];
+
+// Contato fictício da prévia quando não há CSV (público por tabulação ou
+// conta inteira) — só nome/telefone/empresa; VARn e UTM ficam pendentes.
+const SAMPLE_PREVIEW_CONTACT = {
+  name: "Maria Silva",
+  phone: "5511999990000",
+  company: "Empresa Exemplo",
+};
 
 function formatColumnLabel(value: string | null | undefined): string {
   return !value || value === "__none__" ? "Nenhum" : value;
@@ -492,7 +521,7 @@ function estimarDisparo(
       // Janela degenerada (fim <= início) — não dá pra simular, cai pro
       // caso sem janela em vez de travar.
       fimEstimado = new Date(agora.getTime() + tempoComPausasS * 1000);
-      aviso = "Janela de horário inválida (fim antes do início) — estimativa ignora a janela.";
+      aviso = "Janela passa da meia-noite — a estimativa de tempo ignora a janela.";
     } else {
       let tempoRestanteS = tempoComPausasS;
       let cursor = new Date(agora);
@@ -633,15 +662,15 @@ export default function CampanhasPage() {
   const [tags, setTags] = useState<TagItem[]>([]);
   const [sessions, setSessions] = useState<WahaSession[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  // "" = Todas as equipes — filtra `sessions` no Step 1 (ver
+  // "" = Todas as equipes — filtra `sessions` no passo Público (ver
   // filteredSessions), nunca enviado ao servidor.
   const [teamFilter, setTeamFilter] = useState("");
   // Resolved once in loadData() — used to scope the localStorage draft key.
   const [accountId, setAccountId] = useState<string | null>(null);
   const draftKey = draftStorageKey(accountId);
   // Identifica esta sessão de criação de campanha antes que ela exista de
-  // fato em wacrm.campaigns (links UTM podem ser gerados no Step 2, antes
-  // do submit do Step 3) — ver handleGerarUTM/handleSubmit. Regenerado em
+  // fato em wacrm.campaigns (links UTM podem ser gerados no passo Público, antes
+  // do submit na Revisão) — ver handleGerarUTM/handleSubmit. Regenerado em
   // resetForm() a cada nova sessão; não usado em modo de edição
   // (editingId já tem o campaign_id real).
   const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID());
@@ -681,8 +710,20 @@ export default function CampanhasPage() {
   const [agendarPara, setAgendarPara] = useState<string>("");
   const [mensagens, setMensagens] = useState<any[]>([{ tipo: "texto", conteudo: "" }]);
 
-  const [wizardStep, setWizardStep] = useState(1);
-  // Step 2 — importação de base
+  // Assistente em 4 passos: 1 Público, 2 Mensagem, 3 Agenda, 4 Revisão.
+  // `maxVisitedStep` libera os indicadores de passos já vistos; avançar
+  // sempre passa por validateWizardStep. `errorStep` = passo cujo "Avançar"
+  // foi barrado — os erros dele ficam visíveis (e recalculados) no topo.
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
+  const [maxVisitedStep, setMaxVisitedStep] = useState<WizardStep>(1);
+  const [errorStep, setErrorStep] = useState<WizardStep | null>(null);
+  // Aceite explícito de "todos os contatos da conta" quando não há CSV nem
+  // tabulação (antes era só um aviso no resumo).
+  const [confirmAllContacts, setConfirmAllContacts] = useState(false);
+  // audience_mode da campanha em edição — "csv"/null (antiga) mantêm a base
+  // já vinculada, então o passo Público não exige reimportar.
+  const [editingAudienceMode, setEditingAudienceMode] = useState<string | null>(null);
+  // Passo Público — importação de base
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] = useState<Array<{
     phone: string;
@@ -985,7 +1026,7 @@ export default function CampanhasPage() {
       // Load Tags
       await loadTags();
 
-      // Equipes da conta — só para o filtro "Equipe" do Step 1 (ver
+      // Equipes da conta — só para o filtro "Equipe" do passo Público (ver
       // filteredSessions); mesmo padrão de fetch usado em /canais e
       // /equipes.
       const { data: teamList } = await supabase
@@ -1197,6 +1238,15 @@ export default function CampanhasPage() {
         ? campaign.mensagens
         : [{ tipo: "texto", conteudo: "" }]
     );
+    // Campanha já salva para "conta inteira" sem tabulação: o aceite já foi
+    // dado antes (na criação, ou é campanha anterior ao assistente).
+    setEditingAudienceMode(campaign.audience_mode ?? null);
+    setConfirmAllContacts(
+      campaign.audience_mode === "account" && (campaign.tags_filtro ?? []).length === 0
+    );
+    setWizardStep(1);
+    setMaxVisitedStep(1);
+    setErrorStep(null);
     setShowModal(true);
   };
 
@@ -1274,6 +1324,9 @@ export default function CampanhasPage() {
     setEditingId(null);
     setPendingDraft(null);
     setWizardStep(1);
+    setMaxVisitedStep(1);
+    setErrorStep(null);
+    setConfirmAllContacts(false);
     setImportFile(null);
     setImportPreview(null);
     setImportStats(null);
@@ -1325,7 +1378,7 @@ export default function CampanhasPage() {
       return;
     }
     if (selectedSessions.length === 0) {
-      toast.error("Selecione pelo menos uma sessão do WhatsApp.");
+      toast.error("Selecione pelo menos um canal.");
       return;
     }
     if (mensagens.some((m) => m.tipo === "texto" && !m.conteudo.trim())) {
@@ -1380,7 +1433,7 @@ export default function CampanhasPage() {
     if (usaUtmLink && !utmGerado) {
       toast.warning(
         "Uma mensagem usa \"Link UTM personalizado\" mas os links ainda não " +
-        "foram gerados — clique em \"Gerar UTM\" no Step 2 antes de salvar, " +
+        "foram gerados — clique em \"Gerar UTM\" no passo Público antes de salvar, " +
         "senão esses contatos não receberão link."
       );
     }
@@ -1406,7 +1459,7 @@ export default function CampanhasPage() {
         } else {
           formData.append("draft_id", draftId);
         }
-        // Mapeamento de colunas confirmado/ajustado no Step 2 (Correção 3)
+        // Mapeamento de colunas confirmado/ajustado no passo Público (Correção 3)
         // — só envia se o usuário chegou a importar um CSV com colunas
         // detectadas (columnMap fica vazio se parseImportFile nunca rodou,
         // ex: reimportação de um estado antigo). Vazio → import/route.ts
@@ -1451,21 +1504,11 @@ export default function CampanhasPage() {
         // direct client-side update.
         // WAHA texto livre com {{N}} no conteúdo mas sem template_variable_map
         // (mensagem digitada à mão, não veio do catálogo de templates Meta nem
-        // já foi processada) — sintetiza o mapa a partir do columnMap do Step 2
+        // já foi processada) — sintetiza o mapa a partir do columnMap do passo Público
         // pra startCampaign.ts conseguir resolver os placeholders no enqueue.
-        const mensagensComMap = mensagens.map((msg: any) => {
-          if (msg.template_name || Array.isArray(msg.template_variable_map)) return msg;
-          if (!msg.conteudo?.includes("{{")) return msg;
-          if (!columnMap.var1 && !columnMap.var2 && !columnMap.var3) return msg;
-
-          const map: any[] = [
-            columnMap.var1 ? { type: "csv_var", index: 0 } : { type: "static", value: "" },
-            columnMap.var2 ? { type: "csv_var", index: 1 } : { type: "static", value: "" },
-            columnMap.var3 ? { type: "csv_var", index: 2 } : { type: "static", value: "" },
-          ];
-
-          return { ...msg, template_variable_map: map };
-        });
+        // Regra extraída para synthesizeWahaVariableMap (preview-message.ts),
+        // a mesma usada pela prévia do passo Revisão.
+        const mensagensComMap = mensagens.map((msg: any) => synthesizeWahaVariableMap(msg, columnMap));
 
         const res = await apiFetch(`/api/disparador/campaigns/${editingId}`, {
           method: "PATCH",
@@ -1520,19 +1563,9 @@ export default function CampanhasPage() {
 
         // Mesma síntese de template_variable_map para WAHA texto livre do
         // ramo de edição (PATCH) acima — ver comentário lá.
-        const mensagensComMap = mensagens.map((msg: any) => {
-          if (msg.template_name || Array.isArray(msg.template_variable_map)) return msg;
-          if (!msg.conteudo?.includes("{{")) return msg;
-          if (!columnMap.var1 && !columnMap.var2 && !columnMap.var3) return msg;
-
-          const map: any[] = [
-            columnMap.var1 ? { type: "csv_var", index: 0 } : { type: "static", value: "" },
-            columnMap.var2 ? { type: "csv_var", index: 1 } : { type: "static", value: "" },
-            columnMap.var3 ? { type: "csv_var", index: 2 } : { type: "static", value: "" },
-          ];
-
-          return { ...msg, template_variable_map: map };
-        });
+        // Regra extraída para synthesizeWahaVariableMap (preview-message.ts),
+        // a mesma usada pela prévia do passo Revisão.
+        const mensagensComMap = mensagens.map((msg: any) => synthesizeWahaVariableMap(msg, columnMap));
 
         const campaignData = {
           nome,
@@ -1557,7 +1590,7 @@ export default function CampanhasPage() {
           audience_mode: importAllRows?.length ? "csv" : selectedTags.length > 0 ? "tags" : "account",
           created_by: user.id,
           account_id: accountId,
-          // Migration 080 — grava o draftId usado no import (Step 3 acima)
+          // Migration 080 — grava o draftId usado no import (acima)
           // para que startCampaign.ts consiga relinkar
           // contact_import_variables de forma determinística no start,
           // mesmo se o relink abaixo (best-effort, client-side) já tiver
@@ -1572,7 +1605,7 @@ export default function CampanhasPage() {
           .single();
         if (error) throw error;
 
-        // Links UTM gerados no Step 2 (antes de a campanha existir) foram
+        // Links UTM gerados no passo Público (antes de a campanha existir) foram
         // salvos sob draftId — agora que o campaign_id real existe,
         // reatribui essas linhas para que start/route.ts consiga achá-las.
         if (utmGerado) {
@@ -1586,7 +1619,7 @@ export default function CampanhasPage() {
           }
         }
 
-        // VAR1/VAR2/VAR3 do CSV (Step 2) também foram salvas sob draftId
+        // VAR1/VAR2/VAR3 do CSV (passo Público) também foram salvas sob draftId
         // em wacrm.contact_import_variables (migration 079) quando o
         // import aconteceu antes de esta campanha existir — mesmo motivo
         // do relink de UTM acima. Sem custo se nenhum import usou VARn.
@@ -1639,6 +1672,9 @@ export default function CampanhasPage() {
     setWebchat(EMPTY_CAMPAIGN_WEBCHAT);
     setAgendarPara("");
     setWizardStep(1);
+    setMaxVisitedStep(1);
+    setErrorStep(null);
+    setConfirmAllContacts(false);
     setImportFile(null);
     setImportPreview(null);
     setImportStats(null);
@@ -1654,6 +1690,7 @@ export default function CampanhasPage() {
     // anterior fica órfão (campaign_id nunca chegou a ser preenchido),
     // mas isso é inofensivo: nada mais faz join por esse draftId.
     setDraftId(crypto.randomUUID());
+    setEditingAudienceMode(null);
   };
 
   // Meta channels can only send approved templates — the picker needs to
@@ -1693,6 +1730,235 @@ export default function CampanhasPage() {
       )
     : null;
 
+  // Canais WAHA (texto livre) entre os selecionados — junto com hasMeta,
+  // decide o aviso de canais misturados e quais prévias mostrar.
+  const hasWaha = sessions
+    .filter((s) => selectedSessions.includes(s.id))
+    .some((s) => s.provider !== "meta");
+
+  // Na edição sem novo CSV, a base pode ter sido importada antes (VARn
+  // ficam no servidor) — aí não dá para conferir columnMap no cliente.
+  const csvMappingKnown = Boolean(importFile) || !editingId;
+
+  // Público já vinculado à campanha em edição ("csv" ou campanha antiga).
+  const keepsExistingAudience = Boolean(editingId) && editingAudienceMode !== "account";
+
+  // Validação de cada passo do assistente — lista de mensagens em pt-BR,
+  // vazia quando o passo está ok. handleSubmit mantém as próprias checagens
+  // (rede de segurança); estas só impedem avançar com dados incompletos.
+  const validateWizardStep = (step: WizardStep): string[] => {
+    const errors: string[] = [];
+    if (step === 1) {
+      if (!nome.trim()) errors.push("Informe o nome da campanha.");
+      if (selectedSessions.length === 0) errors.push("Selecione pelo menos um canal.");
+      if (importLoading) errors.push("Aguarde a leitura do arquivo terminar.");
+      if (importFile) {
+        if (!columnMap.phone) errors.push("No mapeamento de colunas, escolha a coluna do telefone.");
+        else if (!mappingConfirmed) errors.push("Clique em \"Confirmar mapeamento\" para usar a base importada.");
+        if (importStats && importStats.valid === 0) errors.push("A base importada não tem nenhum contato válido.");
+      } else if (selectedTags.length === 0 && !keepsExistingAudience && !confirmAllContacts) {
+        errors.push(
+          "Defina o público: importe uma base, escolha uma tabulação ou confirme o envio para todos os contatos da conta."
+        );
+      }
+    }
+    if (step === 2) {
+      if (mensagens.length === 0) errors.push("Adicione pelo menos uma mensagem.");
+      mensagens.forEach((m: CampaignMessage, i: number) => {
+        const rotulo = `${templateMode === "sequencia" ? "Mensagem" : "Template"} #${i + 1}`;
+        if (m.tipo === "texto" && !m.conteudo?.trim()) errors.push(`${rotulo}: escreva o texto.`);
+        if (m.tipo === "ia" && !m.prompt?.trim()) errors.push(`${rotulo}: escreva o prompt da IA.`);
+        if (MEDIA_MESSAGE_TYPES.includes(m.tipo) && !m.url?.trim()) {
+          errors.push(`${rotulo}: informe a URL da mídia (ou use "Upload").`);
+        }
+        for (const problem of findVariableProblems(m, { columnMap, hasCsv: csvMappingKnown })) {
+          errors.push(`${rotulo}: ${problem}`);
+        }
+      });
+    }
+    if (step === 3) {
+      const timeRegex = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+      const inicioOk = !janelaInicio || timeRegex.test(janelaInicio);
+      const fimOk = !janelaFim || timeRegex.test(janelaFim);
+      if (!inicioOk) errors.push("Início da janela inválido — use HH:MM (ex: 08:00).");
+      if (!fimOk) errors.push("Fim da janela inválido — use HH:MM (ex: 18:00).");
+      // Fim antes do início é janela que passa da meia-noite (ex.: 20:00–02:00),
+      // suportada pelo envio (send-window.ts) — não é erro.
+      if (dispatchMode === "personalizado" && intervaloMin > intervaloMax) {
+        errors.push("O intervalo mínimo não pode ser maior que o máximo.");
+      }
+      if (agendarPara) {
+        const quando = new Date(agendarPara).getTime();
+        if (Number.isNaN(quando)) errors.push("Data de agendamento inválida.");
+        else if (quando <= Date.now()) errors.push("O agendamento precisa ser numa data e hora futuras.");
+      }
+    }
+    return errors;
+  };
+
+  // Navegação do assistente: voltar é livre; avançar (pelo botão ou pelo
+  // indicador) exige que todos os passos anteriores ao destino sejam
+  // válidos — para no primeiro com erro e mostra os erros dele.
+  const goToWizardStep = (target: WizardStep): boolean => {
+    if (target <= wizardStep) {
+      setWizardStep(target);
+      setErrorStep(null);
+      return true;
+    }
+    for (let s = 1 as WizardStep; s < target; s = (s + 1) as WizardStep) {
+      const errors = validateWizardStep(s);
+      if (errors.length > 0) {
+        setWizardStep(s);
+        setErrorStep(s);
+        toast.error(errors[0]);
+        return false;
+      }
+    }
+    setWizardStep(target);
+    setErrorStep(null);
+    setMaxVisitedStep((prev) => (target > prev ? target : prev));
+    return true;
+  };
+
+  const handleWizardFinish = (e: React.FormEvent) => {
+    // Revalida tudo (algo pode ter mudado ao voltar a um passo) antes do
+    // handleSubmit de sempre.
+    for (let s = 1 as WizardStep; s < 4; s = (s + 1) as WizardStep) {
+      const errors = validateWizardStep(s);
+      if (errors.length > 0) {
+        setWizardStep(s);
+        setErrorStep(s);
+        toast.error(errors[0]);
+        return;
+      }
+    }
+    void handleSubmit(e);
+  };
+
+  const currentStepErrors = errorStep === wizardStep ? validateWizardStep(wizardStep) : [];
+
+  // Contatos da prévia do passo Revisão: até 3 linhas reais do CSV; sem
+  // CSV, um contato de exemplo. undefined = valor só conhecido no envio.
+  const previewContacts: Array<{ key: string; titulo: string; contact: PreviewContact }> =
+    importFile && importPreview && importPreview.length > 0
+      ? importPreview.slice(0, 3).map((row, idx) => ({
+          key: `csv-${idx}`,
+          titulo: `${row.name ?? "Contato"} · ${row.phone}`,
+          contact: {
+            // Sem coluna de nome mapeada, vale o nome do cadastro no CRM.
+            name: columnMap.name ? (row.name ?? null) : undefined,
+            phone: row.phone,
+            company: undefined,
+            csvVars: row.variables,
+            // Links UTM são gerados no servidor; sem "Gerar UTM" saem vazios.
+            utmLink: utmGerado ? undefined : null,
+          },
+        }))
+      : [
+          {
+            key: "exemplo",
+            titulo: `${SAMPLE_PREVIEW_CONTACT.name} (exemplo)`,
+            contact: {
+              ...SAMPLE_PREVIEW_CONTACT,
+              // Criação sem CSV: não existe VARn nem UTM para ninguém.
+              csvVars: editingId ? undefined : [],
+              utmLink: editingId ? undefined : null,
+            },
+          },
+        ];
+
+  // Bolha de prévia de uma mensagem para um contato (passo Revisão). Com
+  // template e canais Meta + WAHA, mostra as duas versões — os caminhos de
+  // envio são diferentes e nunca unificados.
+  const renderMessagePreview = (msg: CampaignMessage, idx: number, contact: PreviewContact) => {
+    const rotulo = `${templateMode === "sequencia" ? "Mensagem" : "Template"} #${idx + 1}`;
+    if (msg.tipo === "ia") {
+      return (
+        <div className="space-y-1">
+          <p className="text-[10px] font-bold text-muted-foreground">{rotulo} · IA</p>
+          <p className="rounded-lg bg-muted/40 px-3 py-2 text-xs italic text-muted-foreground">
+            Texto gerado pela IA no envio, a partir do prompt: “{msg.prompt ?? ""}”
+          </p>
+        </div>
+      );
+    }
+    if (msg.tipo === "audio" || msg.tipo === "ligacao") {
+      return (
+        <div className="space-y-1">
+          <p className="text-[10px] font-bold text-muted-foreground">
+            {rotulo} · {msg.tipo === "ligacao" ? "Ligação" : "Áudio"}
+          </p>
+          <p className="break-all rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            {msg.url || "(sem arquivo de áudio)"}
+          </p>
+        </div>
+      );
+    }
+
+    const effective = synthesizeWahaVariableMap(msg, columnMap);
+    const variantes: Array<{ titulo: string | null; isMeta: boolean }> =
+      msg.template_name && hasMeta
+        ? [
+            { titulo: hasWaha ? "Canais oficiais (Meta) — template aprovado" : null, isMeta: true },
+            ...(hasWaha ? [{ titulo: "Canais WAHA — texto com variáveis preenchidas", isMeta: false }] : []),
+          ]
+        : [{ titulo: null, isMeta: false }];
+
+    return (
+      <div className="space-y-1">
+        <p className="text-[10px] font-bold text-muted-foreground">
+          {rotulo}
+          {msg.tipo === "imagem" && " · Imagem"}
+          {msg.template_name && ` · template ${msg.template_name}`}
+        </p>
+        {msg.tipo === "imagem" && (
+          <p className="break-all text-[10px] text-muted-foreground">🖼 {msg.url || "(sem imagem)"}</p>
+        )}
+        {variantes.map((v) => {
+          const preview = previewCampaignMessage(effective, contact, { isMetaChannel: v.isMeta });
+          if (preview.segments.length === 0) return null;
+          return (
+            <div key={String(v.isMeta)} className="space-y-1">
+              {v.titulo && <p className="text-[10px] text-muted-foreground">{v.titulo}</p>}
+              <div
+                className={cn(
+                  "whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-xs text-foreground",
+                  preview.willSkip ? "border border-red-500/40 bg-red-500/5" : "bg-emerald-500/10"
+                )}
+              >
+                {preview.segments.map((seg, si) =>
+                  seg.kind === "text" ? (
+                    <span key={si}>{seg.text}</span>
+                  ) : seg.empty ? (
+                    <span key={si} className="rounded bg-red-500/15 px-1 font-medium text-red-600 dark:text-red-400">
+                      {seg.token} (vazio — este contato não será enviado)
+                    </span>
+                  ) : seg.pending ? (
+                    <span key={si} className="italic text-muted-foreground">[{seg.label}]</span>
+                  ) : (
+                    <span key={si} className="rounded bg-primary/10 px-0.5">{seg.value}</span>
+                  )
+                )}
+              </div>
+              {preview.willSkip && (
+                <p className="text-[10px] font-medium text-red-600 dark:text-red-400">
+                  Este contato não será enviado:{" "}
+                  {preview.emptyVars.map((n) => `{{${n}}}`).join(", ")} sem valor.
+                </p>
+              )}
+            </div>
+          );
+        })}
+        {hasMeta && !msg.template_name && (
+          <p className="text-[10px] text-amber-600">
+            Nos canais Meta, mensagem sem template aprovado só chega a quem conversou com você nas
+            últimas 24h.
+          </p>
+        )}
+      </div>
+    );
+  };
+
   const refreshImportResolution = (nextMap: ImportColumnMap) => {
     if (!parsedImportData) return;
     const resolved = resolveImportRows(parsedImportData.headers, parsedImportData.rows, nextMap);
@@ -1711,11 +1977,11 @@ export default function CampanhasPage() {
 
   const VAR_COLUMN_KEYS = ["var1", "var2", "var3"] as const;
 
-  // Auto-promoção: quando o Step 2 mapeia uma coluna var1/2/3 do CSV mas o
-  // {{n}} correspondente no Step 1 ainda está como "valor fixo" vazio
+  // Auto-promoção: quando o passo Público mapeia uma coluna var1/2/3 do CSV mas o
+  // {{n}} correspondente no passo Mensagem ainda está como "valor fixo" vazio
   // (default de onSelect do MessageTemplatePicker para {{2}}, {{3}}, ...),
   // promove esse slot pra csv_var em vez de exigir que o usuário repita
-  // manualmente no Step 1 uma escolha que já fez no Step 2 — sem isso o
+  // manualmente no passo Mensagem uma escolha que já fez no passo Público — sem isso o
   // submit bloqueia com "Variável {{n}} do template está vazia" mesmo com
   // o CSV corretamente mapeado (ver investigação). Não toca entries que já
   // têm valor (static preenchido) nem outros tipos (contact_field/
@@ -1898,7 +2164,7 @@ export default function CampanhasPage() {
     return metaSessions.length === 1 ? metaSessions[0].waba_id : undefined;
   }, [sessions, selectedSessions]);
 
-  // Canais filtrados pela equipe selecionada no Step 1 (teamFilter="" =
+  // Canais filtrados pela equipe selecionada no passo Público (teamFilter="" =
   // Todas as equipes, mostra tudo). Puramente client-side sobre a lista
   // já carregada em loadData() — nenhuma query nova por troca de filtro.
   const filteredSessions = useMemo(
@@ -1907,7 +2173,7 @@ export default function CampanhasPage() {
   );
 
   // Melhor estimativa de total de contatos disponível agora, para a
-  // prévia do modo "Segmentado" — import desta sessão (Step 2) tem
+  // prévia do modo "Segmentado" — import desta sessão (passo Público) tem
   // prioridade; editando uma campanha que já tem métricas reais, usa
   // total_contatos dela; sem nenhum dos dois, null (a prévia cai no
   // exemplo ilustrativo — ver segmentadoExampleBase abaixo).
@@ -2106,7 +2372,7 @@ export default function CampanhasPage() {
     const source = importAllRows ?? importPreview ?? [];
     if (source.length === 0) return;
     if (!nome.trim()) {
-      toast.error("Preencha o nome da campanha no Step 1 antes de gerar UTM");
+      toast.error("Preencha o nome da campanha no passo Público antes de gerar UTM");
       return;
     }
 
@@ -2494,31 +2760,31 @@ export default function CampanhasPage() {
                   <X className="h-5 w-5" />
                 </Button>
               </div>
-              {/* Step indicators */}
-              <div className="flex gap-2">
-                {[
-                  { step: 1, label: "Configuração" },
-                  { step: 2, label: "Importar Base" },
-                  { step: 3, label: "Resumo" },
-                ].map(({ step, label }) => (
+              {/* Indicadores de passo — voltar é livre; avançar passa pela
+                  mesma validação do botão "Avançar" (goToWizardStep). */}
+              <div className="flex flex-wrap gap-2">
+                {WIZARD_STEPS.map(({ step, label }) => (
                   <button
                     key={step}
                     type="button"
-                    onClick={() => setWizardStep(step)}
+                    onClick={() => goToWizardStep(step)}
+                    aria-current={wizardStep === step ? "step" : undefined}
                     className={cn(
                       "flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors",
                       wizardStep === step
                         ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:text-foreground"
+                        : step <= maxVisitedStep
+                          ? "bg-muted text-foreground hover:bg-muted/70"
+                          : "bg-muted text-muted-foreground hover:text-foreground"
                     )}
                   >
                     <span className={cn(
                       "flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold",
                       wizardStep === step ? "bg-primary-foreground/20" : "bg-muted-foreground/20"
                     )}>
-                      {step}
+                      {step < wizardStep ? <CheckCircle2 className="h-3 w-3" /> : step}
                     </span>
-                    {label}
+                    Passo {step} · {label}
                   </button>
                 ))}
               </div>
@@ -2535,6 +2801,24 @@ export default function CampanhasPage() {
                     Restaurar
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {/* Erros do passo atual após um "Avançar" barrado — recalculados
+                a cada render, então somem conforme o usuário corrige. */}
+            {currentStepErrors.length > 0 && (
+              <div
+                role="alert"
+                className="mx-6 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-600 dark:text-red-400"
+              >
+                <p className="mb-1 flex items-center gap-1.5 font-medium">
+                  <AlertTriangle className="h-3.5 w-3.5" /> Corrija antes de avançar:
+                </p>
+                <ul className="list-disc space-y-0.5 pl-5">
+                  {currentStepErrors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -2611,12 +2895,25 @@ export default function CampanhasPage() {
                 </div>
               </div>
 
+              {/* Canais Meta e WAHA juntos: permitido (startCampaign bifurca
+                  por canal de cada contato), só informamos a diferença. */}
+              {hasMeta && hasWaha && (
+                <div className="flex gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 p-3 text-xs text-blue-700 dark:text-blue-300">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Você selecionou canais oficiais (Meta) e não oficiais (WAHA). Contatos que caírem
+                    num canal Meta recebem o template aprovado; nos canais WAHA, o mesmo texto é
+                    enviado com as variáveis já preenchidas. Confira as duas versões na Revisão.
+                  </span>
+                </div>
+              )}
+
               {/* Filtrar por tabulação */}
               <div className="space-y-1">
                 <label className="text-xs font-medium text-muted-foreground">Filtrar por tabulação</label>
                 <p className="text-[10px] text-muted-foreground">
-                  Filtra contatos do CSV que possuem esta tabulação no atendimento. Deixe vazio para
-                  enviar para todos.
+                  Sem base importada, envia para os contatos da conta com esta tabulação. Com base
+                  importada, envia só para os contatos da base que têm a tabulação.
                 </p>
                 <div className="relative mb-2">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2
@@ -2656,195 +2953,379 @@ export default function CampanhasPage() {
                 </div>
               </div>
 
-              {/* Modo de disparo */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Modo de disparo</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {DISPATCH_MODES.map((m) => (
-                    <button
-                      key={m.key}
-                      type="button"
-                      onClick={() => handleDispatchModeChange(m.key)}
-                      className={cn(
-                        "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
-                        dispatchMode === m.key
-                          ? "border-primary bg-primary/10"
-                          : "border-input bg-background hover:bg-muted/50"
-                      )}
-                    >
-                      <span className="text-sm font-medium">
-                        {m.emoji} {m.label}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">{m.description}</span>
-                    </button>
-                  ))}
+              <div>
+                <h4 className="font-medium text-foreground mb-1">
+                  Importar Base de Contatos
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  Opcional — sem base, o público vem das tabulações acima (ou de todos os
+                  contatos da conta, se nenhuma for escolhida).
+                </p>
+              </div>
+
+              {keepsExistingAudience && !importFile && (
+                <div className="flex gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    Esta campanha mantém a base já importada. Importe um arquivo só se quiser
+                    substituí-la.
+                  </span>
                 </div>
-                {dispatchMode === "imediato" && (
-                  <p className="text-xs text-amber-500">
-                    ⚠️ Sem proteção anti-spam. Recomendado apenas para listas pequenas ou canais
-                    com histórico saudável.
+              )}
+
+              {mensagens.some((msg) =>
+                msg.template_variable_map?.some(
+                  (e: any) => e.type === "static" && !e.value
+                )
+              ) &&
+                !importFile && (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
+                    ⚠ Rascunho restaurado com variáveis de template incompletas.
+                    Reimporte o CSV para preencher automaticamente os valores de{" "}
+                    {"{{2}}"}, {"{{3}}"}, etc.
+                  </div>
+                )}
+
+              {/* Upload area */}
+              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
+                <div className="flex flex-col items-center gap-1">
+                  <Upload className="h-6 w-6 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">
+                    {importFile ? importFile.name : "Clique ou arraste CSV / XLSX"}
+                  </span>
+                  {!importFile && (
+                    <span className="text-xs text-muted-foreground/70">
+                      Formatos aceitos: .csv, .xlsx, .xls, .txt
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="file"
+                  accept=".csv,.xlsx,.xls,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) parseImportFile(file);
+                  }}
+                />
+              </label>
+
+              {/* Baixar modelo — mesmo arquivo estático usado em
+                  /disparador/contatos (não gerado client-side). */}
+              <a href="/modelo_importacao_disparador.csv" download>
+                <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
+                  <Download className="h-3.5 w-3.5" /> Baixar modelo de exemplo
+                </Button>
+              </a>
+
+              {/* Formato esperado */}
+              <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1">
+                <p className="font-medium text-foreground">Formatos aceitos:</p>
+                {hasMeta ? (
+                  <>
+                    <p className="text-muted-foreground">
+                      Meta (variáveis): <code className="bg-muted px-1 rounded">
+                        CONTATO;VAR1;VAR2;VAR3
+                      </code>
+                    </p>
+                    <p className="text-muted-foreground">
+                      Padrão CRM: <code className="bg-muted px-1 rounded">
+                        telefone;nome;empresa;tags
+                      </code>
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-muted-foreground">
+                    Padrão CRM: <code className="bg-muted px-1 rounded">
+                      telefone;nome;empresa;tags
+                    </code>
                   </p>
                 )}
               </div>
 
-              {/* Janela de horário — independente do modo de disparo */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Janela Início</label>
-                  <input
-                    type="text"
-                    value={janelaInicio}
-                    onChange={(e) => setJanelaInicio(e.target.value)}
-                    placeholder="08:00"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
-                  />
+              {importLoading && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Lendo arquivo...
                 </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Janela Fim</label>
-                  <input
-                    type="text"
-                    value={janelaFim}
-                    onChange={(e) => setJanelaFim(e.target.value)}
-                    placeholder="18:00"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
-                  />
-                </div>
-              </div>
+              )}
 
-              {/* Campos técnicos — só em modo "Personalizado" */}
-              {dispatchMode === "personalizado" && (
-                <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Delay Min (seg)</label>
-                      <input
-                        type="number"
-                        value={intervaloMin}
-                        onChange={(e) => setIntervaloMin(Number(e.target.value))}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Delay Max (seg)</label>
-                      <input
-                        type="number"
-                        value={intervaloMax}
-                        onChange={(e) => setIntervaloMax(Number(e.target.value))}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                      />
-                    </div>
+              {/* Stats */}
+              {importStats && (
+                <div className="flex gap-3">
+                  <div className="flex-1 rounded-md bg-muted/40 p-3 text-center">
+                    <p className="text-lg font-bold text-foreground">{importStats.total}</p>
+                    <p className="text-xs text-muted-foreground">Total</p>
                   </div>
+                  <div className="flex-1 rounded-md bg-green-500/10 p-3 text-center">
+                    <p className="text-lg font-bold text-green-600">{importStats.valid}</p>
+                    <p className="text-xs text-muted-foreground">Válidos</p>
+                  </div>
+                  {importStats.invalid > 0 && (
+                    <div className="flex-1 rounded-md bg-red-500/10 p-3 text-center">
+                      <p className="text-lg font-bold text-red-600">{importStats.invalid}</p>
+                      <p className="text-xs text-muted-foreground">Inválidos</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {importStats && importStats.invalid > 0 && (
+                <p className="text-xs text-amber-600">
+                  {importStats.invalid} linha{importStats.invalid > 1 ? "s" : ""} sem contato resolvido foi{importStats.invalid > 1 ? "ram" : ""} excluída{importStats.invalid > 1 ? "s" : ""} da prévia e da importação.
+                </p>
+              )}
 
-                  {/* Batch dispatch (migration 078) */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Mensagens por lote</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={500}
-                        value={batchSize}
-                        onChange={(e) => {
-                          const val = Number(e.target.value);
-                          setBatchSize(val);
-                          // Zera a pausa quando o lote volta a 1 — evita que um
-                          // batch_pause_seconds esquecido de uma edição anterior
-                          // insira uma pausa extra no comportamento de item único.
-                          if (val <= 1) setBatchPauseSeconds(0);
-                        }}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                      />
+              {/* Mapeamento de colunas (Correção 3) — sub-step depois da
+                  prévia, corrige a heurística automática antes do import
+                  de verdade em handleSubmit. */}
+              {csvHeaders.length > 0 && (
+                <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+                  <div>
+                    <p className="text-xs font-medium text-foreground">
+                      Mapeamento de colunas
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Escolha qual coluna da sua planilha alimenta cada campo do CRM e cada variável do template aprovado no WhatsApp.
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      As variáveis {"{{1}}"}, {"{{2}}"} e {"{{3}}"} seguem exatamente a ordem do template aprovado.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-3 gap-y-2">
+                    <div className="text-[10px] font-medium text-muted-foreground">Campo do CRM / Template</div>
+                    <div className="text-[10px] font-medium text-muted-foreground">Coluna da planilha</div>
+                    {COLUMN_MAP_FIELDS.map((field) => (
+                      <div key={field.key} className="col-span-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-3">
+                        <label className="block text-xs text-foreground">
+                          {field.label}
+                        </label>
+                        <Select
+                          value={columnMap[field.key] === "__none__" ? undefined : columnMap[field.key] || undefined}
+                          onValueChange={(val) => {
+                            const nextMap = (() => {
+                              const next = { ...columnMap };
+                              if (!val || val === "__none__") delete next[field.key as keyof ImportColumnMap];
+                              else next[field.key as keyof ImportColumnMap] = val;
+                              return next;
+                            })();
+                            setColumnMap(nextMap);
+                            setMappingConfirmed(false);
+                            refreshImportResolution(nextMap);
+                          }}
+                        >
+                          <SelectTrigger className="h-8 w-full border-border bg-background text-xs">
+                            <SelectValue placeholder="Nenhum">
+                              {formatColumnLabel(columnMap[field.key])}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent className="border-border bg-popover">
+                            <SelectItem value="__none__">{formatColumnLabel("__none__")}</SelectItem>
+                            {csvHeaders.map((h) => (
+                              <SelectItem key={h} value={h}>
+                                {formatColumnLabel(h)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="rounded-md border border-border/60 bg-background/50 p-2 text-[10px] text-muted-foreground">
+                    <p className="mb-1 font-medium text-foreground">Mapeamento aplicado</p>
+                    <p>{"{{1}}"} ← {formatColumnLabel(columnMap.var1)}</p>
+                    <p>{"{{2}}"} ← {formatColumnLabel(columnMap.var2)}</p>
+                    <p>CPF ← {formatColumnLabel(columnMap.cpf)}</p>
+                    <p>{"{{3}}"} ← {formatColumnLabel(columnMap.var3)}</p>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
+                    <p className="text-[10px] text-muted-foreground">
+                      O contato é obrigatório. A prévia acima usa exatamente este mapa.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={mappingConfirmed ? "outline" : "default"}
+                      disabled={!columnMap.phone}
+                      onClick={() => {
+                        setMappingConfirmed(true);
+                        autoPromoteTemplateVars(columnMap);
+                      }}
+                    >
+                      {mappingConfirmed ? "Mapeamento confirmado" : "Confirmar mapeamento"}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Gerar UTM */}
+              {importPreview && importPreview.some(p => p.cpf) &&
+               importPreview.some(p => p.variables[2]) && (
+                <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-foreground">
+                        Links de rastreamento (UTM)
+                      </p>
                       <p className="text-[10px] text-muted-foreground">
-                        Quantas mensagens enviar em paralelo por ciclo (default: 1).
+                        Gera um link curto rastreável para cada aluno via VAR3
                       </p>
                     </div>
-                    {batchSize > 1 && (
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground">Pausa entre lotes (segundos)</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={3600}
-                          value={batchPauseSeconds}
-                          onChange={(e) => setBatchPauseSeconds(Number(e.target.value))}
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                        />
-                        <p className="text-[10px] text-muted-foreground">
-                          Tempo de espera entre cada lote (0 = sem pausa extra).
-                        </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={utmGerado ? "outline" : "default"}
+                      onClick={handleGerarUTM}
+                      disabled={utmLoading}
+                      className="shrink-0 gap-1.5"
+                    >
+                      {utmLoading ? (
+                        <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando...</>
+                      ) : utmGerado ? (
+                        <><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Gerado</>
+                      ) : (
+                        "🔗 Gerar UTM"
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* Barra de progresso durante geração */}
+                  {utmLoading && utmProgress && (
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between text-[10px] text-muted-foreground">
+                        <span>Gerando links...</span>
+                        <span>{utmProgress.gerados + utmProgress.erros} / {utmProgress.total}</span>
                       </div>
-                    )}
-                  </div>
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary rounded-full transition-all duration-300"
+                          style={{
+                            width: `${utmProgress.total > 0
+                              ? ((utmProgress.gerados + utmProgress.erros) / utmProgress.total) * 100
+                              : 0}%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Resultado após geração */}
+                  {!utmLoading && utmGerado && utmProgress && (
+                    <div className={cn(
+                      "rounded-md px-3 py-2 text-xs",
+                      utmProgress.erros > 0
+                        ? "bg-amber-500/10 border border-amber-500/20"
+                        : "bg-green-500/10 border border-green-500/20"
+                    )}>
+                      <p className={utmProgress.erros > 0 ? "text-amber-600" : "text-green-600"}>
+                        {utmProgress.gerados > 0 && (
+                          <><CheckCircle2 className="h-3.5 w-3.5 inline mr-1" />
+                          {utmProgress.gerados} link{utmProgress.gerados !== 1 ? "s" : ""} UTM gerado{utmProgress.gerados !== 1 ? "s" : ""}</>
+                        )}
+                        {utmProgress.erros > 0 && (
+                          <span className="text-amber-600 ml-2">
+                            · {utmProgress.erros} erro{utmProgress.erros !== 1 ? "s" : ""}
+                          </span>
+                        )}
+                      </p>
+                      {utmProgress.erros > 0 && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5">
+                          Os erros não impactam o disparo — esses alunos receberão a URL original.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {/* Campos técnicos — só em modo "Segmentado". batchSize/
-                  batchPauseSeconds (o que de fato vai no payload) são
-                  derivados de batchPercent/batchPauseMinutes pelo useEffect
-                  logo acima de channelMap/selectedMetaWabaId — a resolução
-                  definitiva contra o total real de contatos acontece em
-                  startCampaign.ts no momento do início. */}
-              {dispatchMode === "segmentado" && (
-                <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Percentual por rodada</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={50}
-                        value={batchPercent}
-                        onChange={(e) =>
-                          setBatchPercent(Math.min(50, Math.max(1, Number(e.target.value) || 1)))
-                        }
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                      />
-                      <p className="text-[10px] text-muted-foreground">De 1% a 50% da lista por rodada.</p>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Intervalo entre rodadas (min)</label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={1440}
-                        value={batchPauseMinutes}
-                        onChange={(e) =>
-                          setBatchPauseMinutes(Math.max(1, Number(e.target.value) || 1))
-                        }
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
-                      />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Para {segmentadoExampleBase.toLocaleString("pt-BR")} contatos
-                    {!totalContatosConhecidos && " (exemplo)"}: {segmentadoPorRodada.toLocaleString("pt-BR")} por
-                    rodada a cada {batchPauseMinutes} min (~{segmentadoRodadas} rodadas, ~{segmentadoTempoLabel} para
-                    concluir).
+              {/* Preview table */}
+              {importPreview && importPreview.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Preview com mapeamento aplicado (primeiros 5 contatos):
                   </p>
+                  <div className="rounded-md border border-border overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/40">
+                        <tr>
+                          <th className="px-3 py-2 text-left font-medium">Telefone</th>
+                          {importPreview[0]?.name !== undefined && (
+                            <th className="px-3 py-2 text-left font-medium">Nome</th>
+                          )}
+                          {importPreview[0]?.cpf !== undefined && (
+                            <th className="px-3 py-2 text-left font-medium text-muted-foreground">
+                              CPF
+                            </th>
+                          )}
+                          {importPreview[0]?.variables.map((_, i) => (
+                            <th key={i} className="px-3 py-2 text-left font-medium">
+                              {"{{"}{i + 1}{"}}"}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importPreview.map((row, i) => {
+                          const altCount = countAltPhones(row.raw);
+                          const colCount =
+                            1 +
+                            (row.name !== undefined ? 1 : 0) +
+                            (row.cpf !== undefined ? 1 : 0) +
+                            row.variables.length;
+                          return (
+                            <Fragment key={i}>
+                              <tr className="border-t border-border/50">
+                                <td className="px-3 py-2 font-mono">{row.phone}</td>
+                                {row.name !== undefined && (
+                                  <td className="px-3 py-2">{row.name}</td>
+                                )}
+                                {row.cpf !== undefined && (
+                                  <td className="px-3 py-2 font-mono text-muted-foreground text-[10px]">
+                                    {row.cpf}
+                                  </td>
+                                )}
+                                {row.variables.map((v, j) => (
+                                  <td key={j} className="px-3 py-2">{v}</td>
+                                ))}
+                              </tr>
+                              {altCount > 0 && (
+                                <tr className="bg-muted/10">
+                                  <td colSpan={colCount} className="px-3 py-1 text-[10px] text-muted-foreground">
+                                    📱 +{altCount} número{altCount > 1 ? "s" : ""} alternativo{altCount > 1 ? "s" : ""}
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 
-              {/* Webchat de campanha (migration 127) */}
-              <CampaignWebchatSettings value={webchat} onChange={setWebchat} />
-
-              {/* Agendamento futuro */}
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Agendar para (opcional)
+              {/* Sem CSV e sem tabulação o público é a conta inteira — exige
+                  aceite explícito (antes era só um aviso no resumo). */}
+              {!importFile && selectedTags.length === 0 && !keepsExistingAudience && (
+                <label className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={confirmAllContacts}
+                    onChange={(e) => setConfirmAllContacts(e.target.checked)}
+                  />
+                  <span>
+                    Nenhuma base importada e nenhuma tabulação escolhida.{" "}
+                    <strong>Confirmo que quero enviar para todos os contatos da conta.</strong>
+                  </span>
                 </label>
-                <input
-                  type="datetime-local"
-                  value={agendarPara}
-                  onChange={(e) => setAgendarPara(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-                <p className="text-[10px] text-muted-foreground">
-                  Horário de Brasília. Se não preenchido, inicia imediatamente ao clicar em &quot;Iniciar&quot;.
-                </p>
-              </div>
+              )}
+            </div>
+            )}
 
+            {wizardStep === 2 && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
               {/* Messages bubbles configuration */}
-              <div className="space-y-2 border-t border-border/40 pt-4">
+              <div className="space-y-2">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                   <Layers className="h-3.5 w-3.5" />{" "}
                   {templateMode === "rotacao"
@@ -2856,40 +3337,19 @@ export default function CampanhasPage() {
                 <p className="text-[11px] text-muted-foreground">
                   Clique em uma variável abaixo do campo de texto para inseri-la na posição do
                   cursor — elas são substituídas pelos dados do contato no momento do envio.
+                  Sequência, rotação ou sorteio entre as mensagens é escolhido no passo Agenda.
                 </p>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Modo de templates</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {TEMPLATE_MODE_OPTIONS.map((opt) => (
-                      <button
-                        key={opt.key}
-                        type="button"
-                        onClick={() => setTemplateMode(opt.key)}
-                        className={cn(
-                          "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
-                          templateMode === opt.key
-                            ? "border-primary bg-primary/10"
-                            : "border-input bg-background hover:bg-muted/50"
-                        )}
-                      >
-                        <span className="text-xs font-medium">{opt.label}</span>
-                        <span className="text-[10px] text-muted-foreground">{opt.description}</span>
-                      </button>
-                    ))}
+                {/* Colunas do CSV mapeadas no passo Público — já conhecidas
+                    aqui, para o usuário saber o que {{1}}..{{3}} vão receber. */}
+                {importFile && (columnMap.var1 || columnMap.var2 || columnMap.var3) && (
+                  <div className="rounded-md border border-border/60 bg-muted/30 p-2 text-[11px] text-muted-foreground">
+                    Colunas da base disponíveis:{" "}
+                    {(["var1", "var2", "var3"] as const)
+                      .filter((k) => columnMap[k])
+                      .map((k) => `{{${k.slice(3)}}} = "${columnMap[k]}"`)
+                      .join(" · ")}
                   </div>
-                  {templateMode !== "sequencia" && (
-                    <p className="text-xs text-amber-500">
-                      ⚠ Cada contato receberá apenas 1 template.
-                    </p>
-                  )}
-                  {templateMode !== "sequencia" && mensagens.length < 2 && (
-                    <p className="text-xs text-amber-500">
-                      ⚠️ Adicione pelo menos 2 templates para que a rotação/aleatório funcione.
-                      Com apenas 1, todos os contatos receberão o mesmo template.
-                    </p>
-                  )}
-                </div>
+                )}
 
                 {mensagens.map((msg, i) => (
                   <div key={i} className="rounded-lg border border-border p-4 bg-muted/20 relative space-y-3">
@@ -3063,7 +3523,7 @@ export default function CampanhasPage() {
                                 </Select>
                                 {entry.type === "utm_link" && (
                                   <span className="flex-1 text-[10px] text-muted-foreground">
-                                    Resolvido por contato via &quot;Gerar UTM&quot; no Step 2
+                                    Resolvido por contato via &quot;Gerar UTM&quot; no passo Público
                                     (telefone → link_curto).
                                   </span>
                                 )}
@@ -3258,451 +3718,314 @@ export default function CampanhasPage() {
             </div>
             )}
 
-            {wizardStep === 2 && (
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                <div>
-                  <h4 className="font-medium text-foreground mb-1">
-                    Importar Base de Contatos
-                  </h4>
-                  <p className="text-xs text-muted-foreground">
-                    Opcional — se preferir usar contatos já cadastrados com tags,
-                    avance para o próximo passo.
-                  </p>
-                </div>
-
-                {mensagens.some((msg) =>
-                  msg.template_variable_map?.some(
-                    (e: any) => e.type === "static" && !e.value
-                  )
-                ) &&
-                  !importFile && (
-                    <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
-                      ⚠ Rascunho restaurado com variáveis de template incompletas.
-                      Reimporte o CSV para preencher automaticamente os valores de{" "}
-                      {"{{2}}"}, {"{{3}}"}, etc.
-                    </div>
-                  )}
-
-                {/* Upload area */}
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
-                  <div className="flex flex-col items-center gap-1">
-                    <Upload className="h-6 w-6 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">
-                      {importFile ? importFile.name : "Clique ou arraste CSV / XLSX"}
-                    </span>
-                    {!importFile && (
-                      <span className="text-xs text-muted-foreground/70">
-                        Formatos aceitos: .csv, .xlsx, .xls, .txt
+            {wizardStep === 3 && (
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {/* Modo de disparo */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground">Modo de disparo</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {DISPATCH_MODES.map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => handleDispatchModeChange(m.key)}
+                      className={cn(
+                        "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
+                        dispatchMode === m.key
+                          ? "border-primary bg-primary/10"
+                          : "border-input bg-background hover:bg-muted/50"
+                      )}
+                    >
+                      <span className="text-sm font-medium">
+                        {m.emoji} {m.label}
                       </span>
-                    )}
-                  </div>
-                  <input
-                    type="file"
-                    accept=".csv,.xlsx,.xls,.txt"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) parseImportFile(file);
-                    }}
-                  />
-                </label>
-
-                {/* Baixar modelo — mesmo arquivo estático usado em
-                    /disparador/contatos (não gerado client-side). */}
-                <a href="/modelo_importacao_disparador.csv" download>
-                  <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
-                    <Download className="h-3.5 w-3.5" /> Baixar modelo de exemplo
-                  </Button>
-                </a>
-
-                {/* Formato esperado */}
-                <div className="rounded-md bg-muted/40 p-3 text-xs space-y-1">
-                  <p className="font-medium text-foreground">Formatos aceitos:</p>
-                  {hasMeta ? (
-                    <>
-                      <p className="text-muted-foreground">
-                        Meta (variáveis): <code className="bg-muted px-1 rounded">
-                          CONTATO;VAR1;VAR2;VAR3
-                        </code>
-                      </p>
-                      <p className="text-muted-foreground">
-                        Padrão CRM: <code className="bg-muted px-1 rounded">
-                          telefone;nome;empresa;tags
-                        </code>
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-muted-foreground">
-                      Padrão CRM: <code className="bg-muted px-1 rounded">
-                        telefone;nome;empresa;tags
-                      </code>
-                    </p>
-                  )}
+                      <span className="text-[10px] text-muted-foreground">{m.description}</span>
+                    </button>
+                  ))}
                 </div>
-
-                {importLoading && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Lendo arquivo...
-                  </div>
-                )}
-
-                {/* Stats */}
-                {importStats && (
-                  <div className="flex gap-3">
-                    <div className="flex-1 rounded-md bg-muted/40 p-3 text-center">
-                      <p className="text-lg font-bold text-foreground">{importStats.total}</p>
-                      <p className="text-xs text-muted-foreground">Total</p>
-                    </div>
-                    <div className="flex-1 rounded-md bg-green-500/10 p-3 text-center">
-                      <p className="text-lg font-bold text-green-600">{importStats.valid}</p>
-                      <p className="text-xs text-muted-foreground">Válidos</p>
-                    </div>
-                    {importStats.invalid > 0 && (
-                      <div className="flex-1 rounded-md bg-red-500/10 p-3 text-center">
-                        <p className="text-lg font-bold text-red-600">{importStats.invalid}</p>
-                        <p className="text-xs text-muted-foreground">Inválidos</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {importStats && importStats.invalid > 0 && (
-                  <p className="text-xs text-amber-600">
-                    {importStats.invalid} linha{importStats.invalid > 1 ? "s" : ""} sem contato resolvido foi{importStats.invalid > 1 ? "ram" : ""} excluída{importStats.invalid > 1 ? "s" : ""} da prévia e da importação.
+                {dispatchMode === "imediato" && (
+                  <p className="text-xs text-amber-500">
+                    ⚠️ Sem proteção anti-spam. Recomendado apenas para listas pequenas ou canais
+                    com histórico saudável.
                   </p>
-                )}
-
-                {/* Mapeamento de colunas (Correção 3) — sub-step depois da
-                    prévia, corrige a heurística automática antes do import
-                    de verdade em handleSubmit. */}
-                {csvHeaders.length > 0 && (
-                  <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
-                    <div>
-                      <p className="text-xs font-medium text-foreground">
-                        Mapeamento de colunas
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        Escolha qual coluna da sua planilha alimenta cada campo do CRM e cada variável do template aprovado no WhatsApp.
-                      </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        As variáveis {"{{1}}"}, {"{{2}}"} e {"{{3}}"} seguem exatamente a ordem do template aprovado.
-                      </p>
-                    </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-x-3 gap-y-2">
-                      <div className="text-[10px] font-medium text-muted-foreground">Campo do CRM / Template</div>
-                      <div className="text-[10px] font-medium text-muted-foreground">Coluna da planilha</div>
-                      {COLUMN_MAP_FIELDS.map((field) => (
-                        <div key={field.key} className="col-span-2 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-3">
-                          <label className="block text-xs text-foreground">
-                            {field.label}
-                          </label>
-                          <Select
-                            value={columnMap[field.key] === "__none__" ? undefined : columnMap[field.key] || undefined}
-                            onValueChange={(val) => {
-                              const nextMap = (() => {
-                                const next = { ...columnMap };
-                                if (!val || val === "__none__") delete next[field.key as keyof ImportColumnMap];
-                                else next[field.key as keyof ImportColumnMap] = val;
-                                return next;
-                              })();
-                              setColumnMap(nextMap);
-                              setMappingConfirmed(false);
-                              refreshImportResolution(nextMap);
-                            }}
-                          >
-                            <SelectTrigger className="h-8 w-full border-border bg-background text-xs">
-                              <SelectValue placeholder="Nenhum">
-                                {formatColumnLabel(columnMap[field.key])}
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent className="border-border bg-popover">
-                              <SelectItem value="__none__">{formatColumnLabel("__none__")}</SelectItem>
-                              {csvHeaders.map((h) => (
-                                <SelectItem key={h} value={h}>
-                                  {formatColumnLabel(h)}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="rounded-md border border-border/60 bg-background/50 p-2 text-[10px] text-muted-foreground">
-                      <p className="mb-1 font-medium text-foreground">Mapeamento aplicado</p>
-                      <p>{"{{1}}"} ← {formatColumnLabel(columnMap.var1)}</p>
-                      <p>{"{{2}}"} ← {formatColumnLabel(columnMap.var2)}</p>
-                      <p>CPF ← {formatColumnLabel(columnMap.cpf)}</p>
-                      <p>{"{{3}}"} ← {formatColumnLabel(columnMap.var3)}</p>
-                    </div>
-                    <div className="flex items-center justify-between gap-3 border-t border-border pt-2">
-                      <p className="text-[10px] text-muted-foreground">
-                        O contato é obrigatório. A prévia acima usa exatamente este mapa.
-                      </p>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={mappingConfirmed ? "outline" : "default"}
-                        disabled={!columnMap.phone}
-                        onClick={() => {
-                          setMappingConfirmed(true);
-                          autoPromoteTemplateVars(columnMap);
-                        }}
-                      >
-                        {mappingConfirmed ? "Mapeamento confirmado" : "Confirmar mapeamento"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Gerar UTM */}
-                {importPreview && importPreview.some(p => p.cpf) &&
-                 importPreview.some(p => p.variables[2]) && (
-                  <div className="rounded-md border border-border bg-muted/20 p-3 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-xs font-medium text-foreground">
-                          Links de rastreamento (UTM)
-                        </p>
-                        <p className="text-[10px] text-muted-foreground">
-                          Gera um link curto rastreável para cada aluno via VAR3
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={utmGerado ? "outline" : "default"}
-                        onClick={handleGerarUTM}
-                        disabled={utmLoading}
-                        className="shrink-0 gap-1.5"
-                      >
-                        {utmLoading ? (
-                          <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Gerando...</>
-                        ) : utmGerado ? (
-                          <><CheckCircle2 className="h-3.5 w-3.5 text-green-500" /> Gerado</>
-                        ) : (
-                          "🔗 Gerar UTM"
-                        )}
-                      </Button>
-                    </div>
-
-                    {/* Barra de progresso durante geração */}
-                    {utmLoading && utmProgress && (
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[10px] text-muted-foreground">
-                          <span>Gerando links...</span>
-                          <span>{utmProgress.gerados + utmProgress.erros} / {utmProgress.total}</span>
-                        </div>
-                        <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary rounded-full transition-all duration-300"
-                            style={{
-                              width: `${utmProgress.total > 0
-                                ? ((utmProgress.gerados + utmProgress.erros) / utmProgress.total) * 100
-                                : 0}%`
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Resultado após geração */}
-                    {!utmLoading && utmGerado && utmProgress && (
-                      <div className={cn(
-                        "rounded-md px-3 py-2 text-xs",
-                        utmProgress.erros > 0
-                          ? "bg-amber-500/10 border border-amber-500/20"
-                          : "bg-green-500/10 border border-green-500/20"
-                      )}>
-                        <p className={utmProgress.erros > 0 ? "text-amber-600" : "text-green-600"}>
-                          {utmProgress.gerados > 0 && (
-                            <><CheckCircle2 className="h-3.5 w-3.5 inline mr-1" />
-                            {utmProgress.gerados} link{utmProgress.gerados !== 1 ? "s" : ""} UTM gerado{utmProgress.gerados !== 1 ? "s" : ""}</>
-                          )}
-                          {utmProgress.erros > 0 && (
-                            <span className="text-amber-600 ml-2">
-                              · {utmProgress.erros} erro{utmProgress.erros !== 1 ? "s" : ""}
-                            </span>
-                          )}
-                        </p>
-                        {utmProgress.erros > 0 && (
-                          <p className="text-[10px] text-muted-foreground mt-0.5">
-                            Os erros não impactam o disparo — esses alunos receberão a URL original.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Preview table */}
-                {importPreview && importPreview.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      Preview com mapeamento aplicado (primeiros 5 contatos):
-                    </p>
-                    <div className="rounded-md border border-border overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead className="bg-muted/40">
-                          <tr>
-                            <th className="px-3 py-2 text-left font-medium">Telefone</th>
-                            {importPreview[0]?.name !== undefined && (
-                              <th className="px-3 py-2 text-left font-medium">Nome</th>
-                            )}
-                            {importPreview[0]?.cpf !== undefined && (
-                              <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                                CPF
-                              </th>
-                            )}
-                            {importPreview[0]?.variables.map((_, i) => (
-                              <th key={i} className="px-3 py-2 text-left font-medium">
-                                {"{{"}{i + 1}{"}}"}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {importPreview.map((row, i) => {
-                            const altCount = countAltPhones(row.raw);
-                            const colCount =
-                              1 +
-                              (row.name !== undefined ? 1 : 0) +
-                              (row.cpf !== undefined ? 1 : 0) +
-                              row.variables.length;
-                            return (
-                              <Fragment key={i}>
-                                <tr className="border-t border-border/50">
-                                  <td className="px-3 py-2 font-mono">{row.phone}</td>
-                                  {row.name !== undefined && (
-                                    <td className="px-3 py-2">{row.name}</td>
-                                  )}
-                                  {row.cpf !== undefined && (
-                                    <td className="px-3 py-2 font-mono text-muted-foreground text-[10px]">
-                                      {row.cpf}
-                                    </td>
-                                  )}
-                                  {row.variables.map((v, j) => (
-                                    <td key={j} className="px-3 py-2">{v}</td>
-                                  ))}
-                                </tr>
-                                {altCount > 0 && (
-                                  <tr className="bg-muted/10">
-                                    <td colSpan={colCount} className="px-3 py-1 text-[10px] text-muted-foreground">
-                                      📱 +{altCount} número{altCount > 1 ? "s" : ""} alternativo{altCount > 1 ? "s" : ""}
-                                    </td>
-                                  </tr>
-                                )}
-                              </Fragment>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
                 )}
               </div>
+
+              {/* Janela de horário — independente do modo de disparo */}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Início da janela (HH:MM)</label>
+                  <input
+                    type="text"
+                    value={janelaInicio}
+                    onChange={(e) => setJanelaInicio(e.target.value)}
+                    placeholder="08:00"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-muted-foreground">Fim da janela (HH:MM)</label>
+                  <input
+                    type="text"
+                    value={janelaFim}
+                    onChange={(e) => setJanelaFim(e.target.value)}
+                    placeholder="18:00"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
+                  />
+                </div>
+              </div>
+
+              {/* Campos técnicos — só em modo "Personalizado" */}
+              {dispatchMode === "personalizado" && (
+                <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Intervalo mín. (s)</label>
+                      <input
+                        type="number"
+                        value={intervaloMin}
+                        onChange={(e) => setIntervaloMin(Number(e.target.value))}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Intervalo máx. (s)</label>
+                      <input
+                        type="number"
+                        value={intervaloMax}
+                        onChange={(e) => setIntervaloMax(Number(e.target.value))}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Batch dispatch (migration 078) */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Mensagens por lote</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={batchSize}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setBatchSize(val);
+                          // Zera a pausa quando o lote volta a 1 — evita que um
+                          // batch_pause_seconds esquecido de uma edição anterior
+                          // insira uma pausa extra no comportamento de item único.
+                          if (val <= 1) setBatchPauseSeconds(0);
+                        }}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Quantas mensagens enviar em paralelo por ciclo (default: 1).
+                      </p>
+                    </div>
+                    {batchSize > 1 && (
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Pausa entre lotes (segundos)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={3600}
+                          value={batchPauseSeconds}
+                          onChange={(e) => setBatchPauseSeconds(Number(e.target.value))}
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Tempo de espera entre cada lote (0 = sem pausa extra).
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Campos técnicos — só em modo "Segmentado". batchSize/
+                  batchPauseSeconds (o que de fato vai no payload) são
+                  derivados de batchPercent/batchPauseMinutes pelo useEffect
+                  logo acima de channelMap/selectedMetaWabaId — a resolução
+                  definitiva contra o total real de contatos acontece em
+                  startCampaign.ts no momento do início. */}
+              {dispatchMode === "segmentado" && (
+                <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Percentual por rodada</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        value={batchPercent}
+                        onChange={(e) =>
+                          setBatchPercent(Math.min(50, Math.max(1, Number(e.target.value) || 1)))
+                        }
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                      <p className="text-[10px] text-muted-foreground">De 1% a 50% da lista por rodada.</p>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground">Intervalo entre rodadas (min)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        value={batchPauseMinutes}
+                        onChange={(e) =>
+                          setBatchPauseMinutes(Math.max(1, Number(e.target.value) || 1))
+                        }
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Para {segmentadoExampleBase.toLocaleString("pt-BR")} contatos
+                    {!totalContatosConhecidos && " (exemplo)"}: {segmentadoPorRodada.toLocaleString("pt-BR")} por
+                    rodada a cada {batchPauseMinutes} min (~{segmentadoRodadas} rodadas, ~{segmentadoTempoLabel} para
+                    concluir).
+                  </p>
+                </div>
+              )}
+
+              {/* Agendamento futuro */}
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Agendar para (opcional)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={agendarPara}
+                  onChange={(e) => setAgendarPara(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Horário de Brasília. Se não preenchido, inicia imediatamente ao clicar em &quot;Iniciar&quot;.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Modo de templates</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {TEMPLATE_MODE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setTemplateMode(opt.key)}
+                      className={cn(
+                        "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
+                        templateMode === opt.key
+                          ? "border-primary bg-primary/10"
+                          : "border-input bg-background hover:bg-muted/50"
+                      )}
+                    >
+                      <span className="text-xs font-medium">{opt.label}</span>
+                      <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                    </button>
+                  ))}
+                </div>
+                {templateMode !== "sequencia" && (
+                  <p className="text-xs text-amber-500">
+                    ⚠ Cada contato receberá apenas 1 template.
+                  </p>
+                )}
+                {templateMode !== "sequencia" && mensagens.length < 2 && (
+                  <p className="text-xs text-amber-500">
+                    ⚠️ Adicione pelo menos 2 templates para que a rotação/aleatório funcione.
+                    Com apenas 1, todos os contatos receberão o mesmo template.
+                  </p>
+                )}
+              </div>
+
+              {/* Webchat de campanha (migration 127) */}
+              <CampaignWebchatSettings value={webchat} onChange={setWebchat} />
+            </div>
             )}
 
-            {wizardStep === 3 && (
+            {wizardStep === 4 && (
               <div className="flex-1 overflow-y-auto p-6 space-y-4">
                 <h4 className="font-medium text-foreground">Resumo da Campanha</h4>
 
                 <div className="space-y-3 rounded-lg border border-border p-4 bg-muted/20 text-sm">
-                  <div className="flex justify-between">
+                  <div className="flex justify-between gap-4">
                     <span className="text-muted-foreground">Nome</span>
-                    <span className="font-medium">{nome || "—"}</span>
+                    <span className="text-right font-medium">{nome || "—"}</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Canal</span>
-                    <span className="font-medium">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Canais</span>
+                    <span className="text-right font-medium">
                       {sessions
                         .filter(s => selectedSessions.includes(s.id))
                         .map(s => s.name)
                         .join(", ") || "—"}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Modo de disparo</span>
-                    <span className="font-medium">
-                      {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.emoji}{" "}
-                      {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.label}
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Público</span>
+                    <span className="text-right font-medium">
+                      {importStats
+                        ? `Base importada: ${importStats.valid.toLocaleString("pt-BR")} contatos válidos${selectedTags.length > 0 ? " com a tabulação escolhida" : ""}`
+                        : keepsExistingAudience
+                          ? `Base já importada na campanha${selectedTags.length > 0 ? " com a tabulação escolhida" : ""}`
+                          : selectedTags.length > 0
+                            ? "Contatos da conta com a tabulação escolhida"
+                            : "Todos os contatos da conta"}
                     </span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Modo de templates</span>
-                    <span className="font-medium">
-                      {TEMPLATE_MODE_OPTIONS.find((m) => m.key === templateMode)?.label}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Janela</span>
-                    <span className="font-medium">{janelaInicio} — {janelaFim}</span>
-                  </div>
-                  {agendarPara && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Agendado para</span>
-                      <span className="font-medium">
-                        {new Date(agendarPara).toLocaleString("pt-BR", {
-                          timeZone: "America/Sao_Paulo",
-                          day: "2-digit",
-                          month: "2-digit",
-                          year: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
+                  {selectedTags.length > 0 && (
+                    <div className="flex justify-between gap-4">
+                      <span className="text-muted-foreground">Tabulações</span>
+                      <span className="text-right font-medium">{selectedTags.join(", ")}</span>
                     </div>
                   )}
                   <div className="flex justify-between gap-4">
-                    <span className="text-muted-foreground">Template</span>
+                    <span className="text-muted-foreground">Mensagens</span>
                     <span className="text-right font-medium">
-                      {selectedTemplates.length > 0
-                        ? selectedTemplates.map((template) => (
-                            `${template.name}${template.language ? ` · ${template.language}` : ""}`
-                          )).join(", ")
-                        : "Nenhum template selecionado"}
+                      {mensagens.length} · {TEMPLATE_MODE_OPTIONS.find((m) => m.key === templateMode)?.label}
                     </span>
                   </div>
                   {selectedTemplates.length > 0 && (
                     <div className="flex justify-between gap-4">
-                      <span className="text-muted-foreground">Variáveis</span>
+                      <span className="text-muted-foreground">Templates</span>
                       <span className="text-right font-medium">
                         {selectedTemplates
-                          .flatMap((template) => Array.from(
-                            { length: template.variableCount },
-                            (_, index) => `{{${index + 1}}}`
-                          ))
-                          .join(", ") || "Nenhuma"}
+                          .map((template) => `${template.name}${template.language ? ` · ${template.language}` : ""}`)
+                          .join(", ")}
                       </span>
                     </div>
                   )}
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Mensagens</span>
-                    <span className="font-medium">{mensagens.length}</span>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Modo de disparo</span>
+                    <span className="text-right font-medium">
+                      {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.emoji}{" "}
+                      {DISPATCH_MODES.find((m) => m.key === dispatchMode)?.label}
+                    </span>
                   </div>
-                  {selectedTags.length > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Filtro de tags</span>
-                      <span className="font-medium">{selectedTags.join(", ")}</span>
-                    </div>
-                  )}
-                  {importStats && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Contatos a importar</span>
-                      <span className="font-medium text-green-600">
-                        {importStats.valid} válidos
-                      </span>
-                    </div>
-                  )}
-                  {!importStats && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Contatos</span>
-                      <span className="font-medium text-muted-foreground">
-                        {selectedTags.length > 0
-                          ? `Por tabulação (${selectedTags.length})`
-                          : "Todos os contatos da conta"}
-                      </span>
-                    </div>
-                  )}
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Janela de envio</span>
+                    <span className="text-right font-medium">
+                      {janelaInicio && janelaFim ? `${janelaInicio} às ${janelaFim}` : "Sem restrição de horário"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Início</span>
+                    <span className="text-right font-medium">
+                      {agendarPara
+                        ? `Agendado para ${new Date(agendarPara).toLocaleString("pt-BR", {
+                            timeZone: "America/Sao_Paulo",
+                            day: "2-digit",
+                            month: "2-digit",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}`
+                        : "Ao clicar em \"Iniciar\" na lista de campanhas"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Webchat ao responder</span>
+                    <span className="text-right font-medium">{webchat.webchat_enabled ? "Ativado" : "Desativado"}</span>
+                  </div>
                   {estimativa && (
                     <div className="flex flex-col gap-1">
                       <div className="flex justify-between">
@@ -3719,28 +4042,55 @@ export default function CampanhasPage() {
                   )}
                 </div>
 
-                {hasMeta && !importStats && (
+                {hasMeta && !importStats && !keepsExistingAudience && (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
                     ⚠ Canal Meta selecionado sem base importada. Certifique-se de
-                    que os contatos já estão no CRM com as tags corretas e que
+                    que os contatos já estão no CRM com as tabulações corretas e que
                     o template está configurado nas mensagens.
                   </div>
                 )}
 
-                {/* Sem criação automática de tag pelo nome da campanha (ver
-                    handleSubmit) — filtro vazio hoje sempre significa "toda
-                    a conta", inclusive logo após um import, então este
-                    aviso é o único sinal disso antes de salvar. */}
-                {/* Com base importada o público é o CSV (∩ tabulação, PR #8) —
-                    o aviso de "toda a conta" só vale sem CSV. */}
-                {selectedTags.length === 0 && !importStats && (
+                {/* Público "conta inteira" — o aceite explícito fica no passo
+                    Público; aqui só reforça antes de salvar. */}
+                {selectedTags.length === 0 && !importStats && !keepsExistingAudience && (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
-                    ⚠ Nenhuma tabulação selecionada e nenhuma base importada — a
-                    campanha será enviada para todos os contatos da conta. Para
-                    enviar só para um grupo, selecione uma tabulação em
-                    &quot;Filtrar por tabulação&quot; ou importe uma base.
+                    ⚠ Sem base importada e sem tabulação: a campanha será enviada para
+                    todos os contatos da conta (confirmado no passo Público).
                   </div>
                 )}
+
+                {/* Prévia por contato — previewCampaignMessage (preview-message.ts)
+                    espelha a resolução de variáveis do startCampaign, bifurcada
+                    por tipo de canal (template Meta × texto WAHA). */}
+                <div className="space-y-3">
+                  <div>
+                    <h4 className="font-medium text-foreground">Prévia por contato</h4>
+                    <p className="text-xs text-muted-foreground">
+                      {importFile && importPreview && importPreview.length > 0
+                        ? `Como os ${previewContacts.length} primeiros contatos da base vão receber a mensagem.`
+                        : "Sem base importada: prévia com um contato de exemplo. Os dados de cada contato (nome, empresa, variáveis) são preenchidos no envio."}
+                    </p>
+                  </div>
+                  {previewContacts.map((pc, ci) => {
+                    const doContato =
+                      templateMode === "rotacao" && mensagens.length > 0
+                        ? [{ msg: mensagens[ci % mensagens.length], idx: ci % mensagens.length }]
+                        : mensagens.map((msg, idx) => ({ msg, idx }));
+                    return (
+                      <div key={pc.key} className="space-y-2 rounded-lg border border-border p-3">
+                        <p className="text-xs font-medium text-foreground">{pc.titulo}</p>
+                        {doContato.map(({ msg, idx }) => (
+                          <Fragment key={idx}>{renderMessagePreview(msg, idx, pc.contact)}</Fragment>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  {templateMode === "aleatorio" && mensagens.length > 1 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Modo aleatório: cada contato recebe só uma destas mensagens, sorteada no envio.
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
@@ -3748,32 +4098,25 @@ export default function CampanhasPage() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => wizardStep === 1 ? closeModal() : setWizardStep(wizardStep - 1)}
+                onClick={() => wizardStep === 1 ? closeModal() : goToWizardStep((wizardStep - 1) as WizardStep)}
               >
                 {wizardStep === 1 ? "Cancelar" : "← Voltar"}
               </Button>
 
               <div className="flex gap-2">
-                {wizardStep < 3 && (
+                {wizardStep < 4 && (
                   <Button
                     type="button"
-                    onClick={() => {
-                      if (wizardStep === 2 && importFile && (!mappingConfirmed || !columnMap.phone)) {
-                        toast.error("Confirme o mapeamento e selecione a coluna de contato antes de continuar.");
-                        return;
-                      }
-                      setWizardStep(wizardStep + 1);
-                    }}
-                    disabled={wizardStep === 1 && (!nome.trim() || selectedSessions.length === 0)}
+                    onClick={() => goToWizardStep((wizardStep + 1) as WizardStep)}
                   >
-                    Próximo →
+                    Avançar →
                   </Button>
                 )}
-                {wizardStep === 3 && (
+                {wizardStep === 4 && (
                   <Button
                     type="button"
-                    onClick={handleSubmit}
-                    disabled={isSubmitting || !nome.trim() || selectedSessions.length === 0 || Boolean(importFile && (!mappingConfirmed || !columnMap.phone))}
+                    onClick={handleWizardFinish}
+                    disabled={isSubmitting}
                     className={isSubmitting ? "opacity-50 cursor-not-allowed gap-1.5" : "gap-1.5"}
                   >
                     {isSubmitting ? (
@@ -3815,13 +4158,18 @@ export default function CampanhasPage() {
             // template — ex: "Olá {{1}}, débito na {{2}}" → 2 variáveis.
             const varCount = (bodyText.match(/\{\{(\d+)\}\}/g) || []).length;
 
-            // Mapeamento padrão: {{1}} → nome do contato, demais → estático vazio
+            // Mapeamento padrão: {{n}} → coluna VARn do CSV quando ela foi
+            // mapeada no passo Público (o CSV agora vem antes da mensagem);
+            // senão {{1}} → nome do contato e demais → estático vazio.
+            const varColumns = [columnMap.var1, columnMap.var2, columnMap.var3];
             const defaultMap: CampaignMessage["template_variable_map"] = Array.from(
               { length: varCount },
               (_, idx) =>
-                idx === 0
-                  ? { type: "contact_field" as const, field: "name" as const }
-                  : { type: "static" as const, value: "" }
+                importFile && idx < 3 && varColumns[idx]
+                  ? { type: "csv_var" as const, index: idx as 0 | 1 | 2 }
+                  : idx === 0
+                    ? { type: "contact_field" as const, field: "name" as const }
+                    : { type: "static" as const, value: "" }
             );
 
             updated[templatePickerIndex] = {
