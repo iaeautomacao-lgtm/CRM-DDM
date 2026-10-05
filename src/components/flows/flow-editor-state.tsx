@@ -111,6 +111,8 @@ export interface FlowEditorContextValue {
     positions: Record<string, { x: number; y: number }>,
   ) => void;
   removeNode: (key: string) => void;
+  /** Copia o nó (mesma configuração e saídas) ao lado do original. */
+  duplicateNode: (key: string) => string | null;
   /** Troca a chave do nó e reaponta as setas. false = chave inválida/repetida. */
   renameNodeKey: (oldKey: string, newKey: string) => boolean;
   /** Posições de vários nós numa edição só (arrastar seleção múltipla). */
@@ -482,6 +484,9 @@ export function FlowEditorProvider({
   // ---- Save (PUT) ----
   // `silent` skips the success toast — used by the debounce autosave so
   // it doesn't pop a toast on every 2s tick while the user keeps typing.
+  // Versão do fluxo no servidor que este editor conhece (conflito de abas).
+  const versionRef = useRef<string>(initialFlow.updated_at);
+  const conflictRef = useRef(false);
   const isSavingRef = useRef(false);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const save = useCallback(
@@ -523,12 +528,24 @@ export function FlowEditorProvider({
             trigger_config: snapshot.trigger_config,
             entry_node_id: snapshot.entry_node_id,
             nodes: snapshot.nodes,
+            expected_updated_at: versionRef.current,
           }),
         });
         if (!res.ok) {
           const json = await res.json().catch(() => ({}));
+          if (res.status === 409 && json.code === "conflict") {
+            conflictRef.current = true;
+            toast.error(json.error, {
+              id: "flow-conflict",
+              duration: 15000,
+              action: { label: "Recarregar", onClick: () => window.location.reload() },
+            });
+            return false;
+          }
           throw new Error(json.error ?? `Falha ao salvar: ${res.status}`);
         }
+        const saved = (await res.json().catch(() => null)) as { flow?: { updated_at?: string } } | null;
+        if (saved?.flow?.updated_at) versionRef.current = saved.flow.updated_at;
         if (revision === revisionRef.current) setDirty(false);
         if (!opts?.silent) toast.success(snapshot.status === "active" ? "Alterações publicadas." : "Salvo.");
         return true;
@@ -582,7 +599,8 @@ export function FlowEditorProvider({
   useEffect(() => {
     // Autosave só em rascunho: num fluxo ativo cada salvamento entra no ar
     // para clientes reais, então lá é o botão "Publicar alterações".
-    if (!dirty || state.status === "active") return;
+    // Conflito com outra aba: não fica tentando sobrescrever a cada edição.
+    if (!dirty || state.status === "active" || conflictRef.current) return;
     const timeout = window.setTimeout(() => {
       void save({ silent: true });
     }, 2000);
@@ -628,6 +646,9 @@ export function FlowEditorProvider({
           const json = await res.json().catch(() => ({}));
           throw new Error(json.error ?? `Falha ao atualizar status: ${res.status}`);
         }
+        // Ativar/pausar também muda updated_at no servidor.
+        const activated = (await res.json().catch(() => null)) as { flow?: { updated_at?: string } } | null;
+        if (activated?.flow?.updated_at) versionRef.current = activated.flow.updated_at;
         setStateRaw((s) => ({ ...s, status: next }));
         toast.success(
           next === "active"
@@ -777,6 +798,29 @@ export function FlowEditorProvider({
     [setState],
   );
 
+  const duplicateNode = useCallback(
+    (key: string): string | null => {
+      const source = latestStateRef.current.nodes.find((n) => n.node_key === key);
+      if (!source || source.node_type === "start") return null;
+      const node_key = uniqueNodeKey(`${key}_copia`, latestStateRef.current.nodes);
+      setState((s) => ({
+        ...s,
+        nodes: [
+          ...s.nodes,
+          {
+            ...source,
+            node_key,
+            config: structuredClone(source.config),
+            position_x: (source.position_x ?? 0) + 40,
+            position_y: (source.position_y ?? 0) + 120,
+          },
+        ],
+      }));
+      return node_key;
+    },
+    [setState],
+  );
+
   const removeNode = useCallback(
     (key: string) => {
       // Auto-unlink inbound references so canvas / list deletes don't
@@ -811,6 +855,7 @@ export function FlowEditorProvider({
       updateNodePosition,
       updateNodePositions,
       removeNode,
+      duplicateNode,
       renameNodeKey,
       moveNodes,
       save,
@@ -839,6 +884,7 @@ export function FlowEditorProvider({
       updateNodePosition,
       updateNodePositions,
       removeNode,
+      duplicateNode,
       renameNodeKey,
       moveNodes,
       save,

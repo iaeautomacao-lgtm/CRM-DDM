@@ -116,6 +116,12 @@ export function validateFlowForActivation(
     issues.push(...validateNode(n, keys));
   }
 
+  // Variáveis em textos que chegam ao cliente: só {{vars.nome}} é trocado
+  // pelo motor; {{nome}}, {{1}} (padrão do Disparador) etc. iriam literais.
+  for (const n of nodes) {
+    issues.push(...validateVariableTokens(n));
+  }
+
   // Reachability — every non-orphan node must be reachable from the
   // entry. Done after per-node validation so we don't double-report
   // when a node has bad config AND is unreachable.
@@ -1217,4 +1223,51 @@ function outgoingEdges(node: NodeInput): string[] {
     default:
       return [];
   }
+}
+
+// Campos interpolados pelo motor (interpolateVars em engine.ts). O prompt
+// da IA fica de fora: chaves ali podem ser texto legítimo.
+const INTERPOLATED_FIELDS = [
+  "text",
+  "caption",
+  "prompt_text",
+  "url",
+  "body_template",
+  "message",
+  "message_text",
+  "fallback_text",
+  "note_text",
+  "header_text",
+  "footer_text",
+] as const;
+
+const VALID_VAR_TOKEN = /^{{vars.[a-zA-Z0-9_]+}}$/;
+
+/** Avisos para {{…}} fora do formato {{vars.nome}} (iriam literais ao cliente). */
+export function validateVariableTokens(node: NodeInput): ValidationIssue[] {
+  const texts: string[] = [];
+  for (const f of INTERPOLATED_FIELDS) {
+    const v = node.config[f];
+    if (typeof v === "string") texts.push(v);
+  }
+  if (node.node_type === "set_variable" && Array.isArray(node.config.assignments)) {
+    for (const a of node.config.assignments as Array<{ value?: unknown }>) {
+      if (typeof a?.value === "string") texts.push(a.value);
+    }
+  }
+  const bad = new Set<string>();
+  for (const t of texts) {
+    for (const m of t.matchAll(/{{[^{}]*}}/g)) {
+      if (!VALID_VAR_TOKEN.test(m[0])) bad.add(m[0]);
+    }
+  }
+  if (bad.size === 0) return [];
+  return [
+    {
+      severity: "warning",
+      scope: "node",
+      node_key: node.node_key,
+      message: `Variável fora do padrão em "${node.node_key}": ${[...bad].join(", ")} vai literal ao cliente — use {{vars.nome}} (ex.: a variável gravada por "Coletar resposta").`,
+    },
+  ];
 }

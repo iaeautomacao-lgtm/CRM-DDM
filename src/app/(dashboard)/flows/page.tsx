@@ -16,6 +16,7 @@ import {
   HelpCircle,
   UserPlus,
   FileText,
+  Copy,
   Download,
   Upload,
 } from "lucide-react";
@@ -218,6 +219,35 @@ export default function FlowsPage() {
     }
   }
 
+  // Duplicar = exportar + importar como cópia (rascunho, sem canal ligado).
+  async function handleDuplicate(flow: FlowRow) {
+    try {
+      const exp = await apiFetch(`/api/flows/${flow.id}/export`);
+      if (!exp.ok) throw new Error(`Falha ao ler o fluxo: ${exp.status}`);
+      const json = (await exp.json()) as Record<string, unknown>;
+      const res = await apiFetch("/api/flows/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...json, mode: "duplicate" }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error ?? `Falha ao duplicar: ${res.status}`);
+      }
+      const { flow_id } = (await res.json()) as { flow_id: string };
+      toast.success("Cópia criada como rascunho.", {
+        action: { label: "Editar", onClick: () => router.push(`/flows/${flow_id}`) },
+      });
+      const flowsRes = await apiFetch("/api/flows");
+      if (flowsRes.ok) {
+        const flowsJson = (await flowsRes.json()) as { flows: FlowRow[] };
+        setFlows(flowsJson.flows ?? []);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Não foi possível duplicar o fluxo.");
+    }
+  }
+
   async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -334,6 +364,7 @@ export default function FlowsPage() {
               flow={flow}
               onEdit={() => router.push(`/flows/${flow.id}`)}
               onExport={() => handleExport(flow)}
+              onDuplicate={canCreate ? () => handleDuplicate(flow) : undefined}
               onDelete={() => handleDelete(flow)}
             />
           ))}
@@ -457,11 +488,13 @@ function FlowCard({
   flow,
   onEdit,
   onExport,
+  onDuplicate,
   onDelete,
 }: {
   flow: FlowRow;
   onEdit: () => void;
   onExport: () => void;
+  onDuplicate?: () => void;
   onDelete: () => void;
 }) {
   const triggerSummary = describeTrigger(flow);
@@ -508,6 +541,12 @@ function FlowCard({
           <Pencil className="h-3.5 w-3.5" />
           Editar
         </Button>
+        {onDuplicate && (
+          <Button variant="ghost" size="sm" onClick={onDuplicate}>
+            <Copy className="h-3.5 w-3.5" />
+            Duplicar
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={onExport}>
           <Download className="h-3.5 w-3.5" />
           Exportar

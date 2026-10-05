@@ -58,7 +58,8 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Copy,
+  Trash2 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -365,6 +366,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     updateNodePositions,
     moveNodes,
     removeNode,
+    duplicateNode,
     flashKey,
     issues,
   } = useFlowEditor();
@@ -643,6 +645,13 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     setSelectedNodeKey(null);
   }, [selectedNodeKey, removeNode, builderNodes]);
 
+  // Duplica e já abre a cópia para editar.
+  const handleDuplicateSelected = useCallback(() => {
+    if (!selectedNodeKey) return;
+    const created = duplicateNode(selectedNodeKey);
+    if (created) setSelectedNodeKey(created);
+  }, [selectedNodeKey, duplicateNode]);
+
   const handleSetEntry = useCallback(() => {
     if (!selectedNodeKey) return;
     setState((s) => ({ ...s, entry_node_id: selectedNodeKey }));
@@ -748,6 +757,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           onClose={() => setSelectedNodeKey(null)}
           onUpdateConfig={onSelectedUpdateConfig}
           onDelete={handleDeleteSelected}
+          onDuplicate={handleDuplicateSelected}
           onSetEntry={handleSetEntry}
         />
       )}
@@ -768,6 +778,7 @@ function NodeEditSheet({
   onClose,
   onUpdateConfig,
   onDelete,
+  onDuplicate,
   onSetEntry,
 }: {
   node: BuilderNode | null;
@@ -776,6 +787,7 @@ function NodeEditSheet({
   onClose: () => void;
   onUpdateConfig: (patch: Record<string, unknown>) => void;
   onDelete: () => void;
+  onDuplicate: () => void;
   onSetEntry: () => void;
 }) {
   // Sheet is controlled — opens when a node is selected, closes via
@@ -835,15 +847,23 @@ function NodeEditSheet({
           ) : (
             <span />
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onDelete}
-            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Excluir nó
-          </Button>
+          <div className="flex items-center gap-1">
+            {node.node_type !== 'start' && (
+              <Button variant="ghost" size="sm" onClick={onDuplicate}>
+                <Copy className="h-3.5 w-3.5" />
+                Duplicar
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDelete}
+              className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Excluir nó
+            </Button>
+          </div>
         </SheetFooter>
       </SheetContent>
     </Sheet>
