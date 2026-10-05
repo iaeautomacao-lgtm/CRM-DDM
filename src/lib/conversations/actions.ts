@@ -30,24 +30,65 @@ export async function assignConversationAgent(
 
   if (error) return { error: error.message };
 
-  if (agentId) {
-    const agentName = agentFullName || "Atendente";
-    const takeoverText = `Olá, aqui é o atendente ${agentName} e agora vou dar continuidade ao seu atendimento.`;
-    try {
-      await apiFetch("/api/whatsapp/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          conversation_id: conversationId,
-          message_type: "text",
-          content_text: takeoverText,
-        }),
-      });
-    } catch (err) {
-      console.error("[assignConversationAgent] takeover message failed:", err);
-    }
-  }
+  if (agentId) await sendTakeoverMessage(conversationId, agentFullName);
 
+  return { error: null };
+}
+
+/**
+ * Mensagem de "assumi o atendimento" ao cliente. Vai pela rota de envio,
+ * que já bifurca por canal (WhatsApp Meta/WAHA, Webchat, Instagram,
+ * Messenger) — falha aqui não desfaz a atribuição.
+ */
+export async function sendTakeoverMessage(
+  conversationId: string,
+  agentFullName?: string | null,
+): Promise<void> {
+  const agentName = agentFullName || "Atendente";
+  const takeoverText = `Olá, aqui é o atendente ${agentName} e agora vou dar continuidade ao seu atendimento.`;
+  try {
+    await apiFetch("/api/whatsapp/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        message_type: "text",
+        content_text: takeoverText,
+      }),
+    });
+  } catch (err) {
+    console.error("[sendTakeoverMessage] takeover message failed:", err);
+  }
+}
+
+/**
+ * Transferência com motivo (inbox e Monitoramento): um único UPDATE na
+ * rota /api/conversations/[id]/transfer, que grava o motivo no histórico
+ * (conversation_assignments). `undefined` = não mexer; null = remover.
+ */
+export async function transferConversation(
+  conversationId: string,
+  target: { agentId?: string | null; teamId?: string | null; reason?: string },
+  agentFullName?: string | null,
+): Promise<{ error: string | null }> {
+  try {
+    const res = await apiFetch(`/api/conversations/${conversationId}/transfer`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        agent_id: target.agentId,
+        team_id: target.teamId,
+        reason: target.reason ?? "",
+      }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      return { error: json.error ?? `HTTP ${res.status}` };
+    }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "erro de rede" };
+  }
+  if (target.agentId) await sendTakeoverMessage(conversationId, agentFullName);
   return { error: null };
 }
 
