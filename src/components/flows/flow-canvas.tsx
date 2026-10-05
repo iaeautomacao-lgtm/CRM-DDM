@@ -805,6 +805,7 @@ const ADD_NODE_TYPES: NodeType[] = [
   'anchor',
   'go_to',
   'go_to_flow',
+  'send_webchat',
   'handoff',
   'handoff_agent',
   'handoff_team',

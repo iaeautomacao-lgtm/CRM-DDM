@@ -105,7 +105,8 @@ interface MessageComposerProps {
   sessionExpired: boolean;
   onSend: (text: string, replyToId?: string) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
-  onOpenTemplates: () => void;
+  /** Ausente no Webchat (template é recurso do WhatsApp): o botão some. */
+  onOpenTemplates?: () => void;
   replyTo?: ReplyDraft | null;
   onClearReply?: () => void;
   /** Set by the parent when an Undo-Send "Editar" click recalls a pending
@@ -574,17 +575,19 @@ export function MessageComposer({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          <GatedButton
-            variant="ghost"
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            title={readOnly ? undefined : "Enviar template"}
-            className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="h-4 w-4" />
-          </GatedButton>
+          {onOpenTemplates && (
+            <GatedButton
+              variant="ghost"
+              size="sm"
+              canAct={!readOnly}
+              gateReason="send messages"
+              title={readOnly ? undefined : "Enviar template"}
+              className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              onClick={onOpenTemplates}
+            >
+              <LayoutTemplate className="h-4 w-4" />
+            </GatedButton>
+          )}
 
           <textarea
             ref={textareaRef}

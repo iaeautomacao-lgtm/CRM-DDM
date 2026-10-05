@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { auditFetch } from '@/lib/audit/context'
 import { createClient } from '@/lib/supabase/server'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import {
@@ -56,6 +57,8 @@ function supabaseAdmin() {
         db: {
           schema: 'wacrm',
         },
+        // Autor/IP para as triggers de auditoria (migration 131).
+        global: { fetch: auditFetch },
       }
     ) as any
   }
@@ -266,6 +269,7 @@ export async function GET() {
               receptivo: config.receptivo,
               habilitado: config.habilitado,
               team_id: config.team_id,
+              client_id: config.client_id ?? null,
               phone_info: phoneInfo
             }
           } catch (err) {
@@ -279,6 +283,7 @@ export async function GET() {
               receptivo: config.receptivo,
               habilitado: config.habilitado,
               team_id: config.team_id,
+              client_id: config.client_id ?? null,
               reason: 'meta_api_error',
               message: `Meta API rejected credentials: ${message}`
             }
@@ -963,7 +968,7 @@ export async function PATCH(request: Request) {
     }
 
     const body = await request.json()
-    const { id, flow_id, receptivo, habilitado, team_id } = body
+    const { id, flow_id, receptivo, habilitado, team_id, client_id } = body
 
     if (!id) {
       return NextResponse.json({ error: 'id is required' }, { status: 400 })
@@ -974,10 +979,12 @@ export async function PATCH(request: Request) {
     if (receptivo !== undefined) update.receptivo = receptivo
     if (habilitado !== undefined) update.habilitado = habilitado
     if (team_id !== undefined) update.team_id = team_id
+    // Cliente da linha (migration 128): selo e filtro no inbox.
+    if (client_id !== undefined) update.client_id = client_id
 
     if (Object.keys(update).length === 0) {
       return NextResponse.json(
-        { error: 'At least one of flow_id, receptivo, habilitado, team_id is required' },
+        { error: 'At least one of flow_id, receptivo, habilitado, team_id, client_id is required' },
         { status: 400 },
       )
     }
@@ -1026,6 +1033,18 @@ export async function PATCH(request: Request) {
       }
       if (!team) {
         return NextResponse.json({ error: 'Team not found in your account' }, { status: 404 })
+      }
+    }
+
+    if (update.client_id) {
+      const { data: client } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('id', update.client_id)
+        .eq('account_id', accountId)
+        .maybeSingle()
+      if (!client) {
+        return NextResponse.json({ error: 'Client not found in your account' }, { status: 404 })
       }
     }
 

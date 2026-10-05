@@ -40,6 +40,7 @@ const NODE_TYPES = new Set([
   'anchor',
   'go_to',
   'go_to_flow',
+  'send_webchat',
   'send_template',
   'add_note',
   'receive_attachment',

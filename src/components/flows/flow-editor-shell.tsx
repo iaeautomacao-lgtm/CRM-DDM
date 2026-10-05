@@ -24,7 +24,7 @@
  * feedback was that the list shape made flows "hard to understand".
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eye, GitFork, List } from "lucide-react";
 import { format } from "date-fns";
 
@@ -63,9 +63,12 @@ interface Props {
    *  other FlowEditorShell consumer (there is currently only the one
    *  in flows/[id]/page.tsx) keeps compiling unchanged. */
   debug?: FlowDebugState;
+  /** `?node=` da URL: nó a centralizar/destacar ao abrir (atalho do
+   *  card "Fluxo" no inbox). Ignorado se o nó não existir no fluxo. */
+  focusNodeKey?: string | null;
 }
 
-export function FlowEditorShell({ initialFlow, initialNodes, debug }: Props) {
+export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey }: Props) {
   // Read the persisted choice in the useState initializer. Safe even
   // though this is a client component because the parent page only
   // mounts us AFTER a client-side fetch resolves — there's no SSR
@@ -125,6 +128,7 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug }: Props) {
 
   return (
     <FlowEditorProvider initialFlow={initialFlow} initialNodes={initialNodes}>
+      {focusNodeKey && <FocusNodeOnLoad nodeKey={focusNodeKey} />}
       <div className="flex h-full min-h-0 flex-col">
         {isDebugMode && debug && <DebugBanner debug={debug} />}
 
@@ -221,6 +225,28 @@ function useMatchMedia(query: string): boolean {
  * Types with no matching node on the current flow are inert (no
  * onClick, default cursor) — there's nothing to jump to.
  */
+// Destaca o nó de `?node=` uma vez ao abrir o editor, reaproveitando o
+// mesmo sinal `requestFlash` do painel de validação (o canvas centraliza e
+// pisca o card; a lista rola até a linha). O atraso deixa o canvas terminar
+// o fitView inicial — sem ele, o fitView sobrescreve o setCenter.
+const FOCUS_DELAY_MS = 600;
+
+function FocusNodeOnLoad({ nodeKey }: { nodeKey: string }) {
+  const { state, requestFlash } = useFlowEditor();
+  const exists = state.nodes.some((n) => n.node_key === nodeKey);
+  // Só uma vez por nodeKey: editar o fluxo depois não repete o destaque.
+  const doneRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!exists || doneRef.current === nodeKey) return;
+    const timer = window.setTimeout(() => {
+      doneRef.current = nodeKey;
+      requestFlash(nodeKey);
+    }, FOCUS_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [exists, nodeKey, requestFlash]);
+  return null;
+}
+
 function NodeLegend() {
   const { state, requestFlash } = useFlowEditor();
   return (

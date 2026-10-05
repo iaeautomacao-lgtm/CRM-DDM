@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { parseLineIds } from '@/lib/automations/line-ids'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { getTemplate } from '@/lib/automations/templates'
@@ -50,6 +51,8 @@ export async function POST(request: Request) {
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
 
   const { name, description, trigger_type, trigger_config, is_active, steps, template } = body
+  const lineIds = parseLineIds(body.line_ids)
+  if (lineIds === null) return NextResponse.json({ error: 'line_ids inválido' }, { status: 400 })
 
   let effectiveSteps: BuilderStepInput[] | undefined = steps
   let effectiveName = name
@@ -105,6 +108,7 @@ export async function POST(request: Request) {
       trigger_type: effectiveTriggerType,
       trigger_config: effectiveTriggerConfig ?? {},
       is_active: !!is_active,
+      line_ids: lineIds,
     })
     .select()
     .single()

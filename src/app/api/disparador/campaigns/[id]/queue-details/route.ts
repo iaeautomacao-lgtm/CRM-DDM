@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
+import { logAuditEvent } from "@/lib/audit/log-event";
 import * as XLSX from "xlsx";
 
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
 
-// GET /api/disparador/campaigns/[id]/queue-details?status=enviado&search=&page=1
+// GET /api/disparador/campaigns/[id]/queue-details?status=enviado&search=&page=1&pageSize=50
 // GET /api/disparador/campaigns/[id]/queue-details?status=erro&export=xlsx
 //
 // Detalhamento por contato de uma métrica do modal de métricas da
@@ -24,7 +25,9 @@ const STATUS_FILTERS: Record<string, string[]> = {
   bloqueado: ["bloqueado"],
 };
 
-const PAGE_SIZE = 20;
+// Itens por página escolhidos no modal (20 por padrão, teto de 200).
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 200;
 
 interface QueueDetailRow {
   id: string;
@@ -81,6 +84,10 @@ export async function GET(
     const search = (searchParams.get("search") ?? "").trim();
     const exportFormat = searchParams.get("export");
     const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10) || 1);
+    const PAGE_SIZE = Math.min(
+      MAX_PAGE_SIZE,
+      Math.max(1, parseInt(searchParams.get("pageSize") ?? "", 10) || DEFAULT_PAGE_SIZE)
+    );
 
     const statuses = STATUS_FILTERS[statusKey];
     if (!statuses) {
@@ -149,6 +156,15 @@ export async function GET(
       if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
 
       const rows = (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow));
+      await logAuditEvent({
+        accountId: ctx.accountId,
+        eventType: "action",
+        resourceType: "campaign",
+        resourceId: campaignId,
+        action: "campaign.exported",
+        summary: `Exportou ${rows.length} contato(s) da métrica "${statusKey}"${search ? ` (busca: ${search})` : ""}`,
+        metadata: { status: statusKey, search: search || null, rows: rows.length },
+      });
       return buildXlsxResponse(rows, statusKey);
     }
 

@@ -20,8 +20,8 @@ import { EmptyState } from "@/components/dashboard/empty-state";
 import type { Contact } from "@/types";
 import { ContactTimeline } from "@/components/contact-timeline/ContactTimeline";
 
-function contactInitial(contact: { name?: string; phone: string }) {
-  return (contact.name?.trim() || contact.phone).charAt(0).toUpperCase();
+function contactInitial(contact: { name?: string; phone: string | null }) {
+  return (contact.name?.trim() || contact.phone || "C").charAt(0).toUpperCase();
 }
 
 export default function HistoricoPage() {

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { parseLineIds } from '@/lib/automations/line-ids'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import {
@@ -75,6 +76,11 @@ export async function PATCH(
     'is_active',
   ] as const) {
     if (k in body) update[k] = body[k]
+  }
+  if ('line_ids' in body) {
+    const lineIds = parseLineIds(body.line_ids)
+    if (lineIds === null) return NextResponse.json({ error: 'line_ids inválido' }, { status: 400 })
+    update.line_ids = lineIds
   }
 
   // If this PATCH leaves the automation active (either explicitly

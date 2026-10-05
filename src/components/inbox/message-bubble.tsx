@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { privateChatMediaUrl } from '@/lib/storage/chat-media';
 import type { Message, MessageReaction } from "@/types";
@@ -17,6 +18,7 @@ import {
   BarChart2,
   User,
   Trash2,
+  Megaphone,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -29,6 +31,20 @@ interface MessageBubbleProps {
   reactions?: MessageReaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string) => void;
+  /** Campanha do Disparador ligada à mensagem (message.campaign_id). `href`
+   *  só para quem pode abrir a campanha (owner/admin). */
+  campaign?: { name: string; href: string | null } | null;
+}
+
+/** Nome da campanha, como link quando o usuário pode abri-la. */
+function CampaignName({ campaign }: { campaign: { name: string; href: string | null } }) {
+  return campaign.href ? (
+    <Link href={campaign.href} className="font-semibold underline-offset-2 hover:underline">
+      {campaign.name}
+    </Link>
+  ) : (
+    <span className="font-semibold">{campaign.name}</span>
+  );
 }
 
 function StatusIcon({ status }: { status: Message["status"] }) {
@@ -200,7 +216,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
         <div>
           <span className="mb-1 inline-flex items-center gap-1 rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
             <LayoutTemplate className="h-3 w-3" />
-            Template
+            {message.template_name ? `Template · ${message.template_name}` : "Template"}
           </span>
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
@@ -306,8 +322,13 @@ export function MessageBubble({
   reactions,
   currentUserId,
   onToggleReaction,
+  campaign,
 }: MessageBubbleProps) {
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
+  // Mensagem do disparo (saída) ganha faixa no topo; a resposta do cliente
+  // ganha uma linha abaixo dizendo a qual campanha ela responde.
+  const campaignSend = isAgent && campaign ? campaign : null;
+  const campaignReply = !isAgent && campaign && message.attribution_method ? campaign : null;
   const time = new Date(message.received_at ?? message.created_at).toLocaleTimeString("pt-BR", {
     timeZone: "America/Sao_Paulo",
     hour: "2-digit",
@@ -334,6 +355,14 @@ export function MessageBubble({
             : "rounded-bl-md bg-muted text-foreground",
         )}
       >
+        {campaignSend && (
+          <div className="mb-1.5 flex items-center gap-1 border-b border-primary-foreground/20 pb-1 text-[10px] text-primary-foreground/80">
+            <Megaphone className="h-3 w-3 shrink-0" />
+            <span>
+              Campanha: <CampaignName campaign={campaignSend} />
+            </span>
+          </div>
+        )}
         {reply && (
           <ReplyQuote
             authorLabel={reply.authorLabel}
@@ -363,6 +392,22 @@ export function MessageBubble({
           {isAgent && <StatusIcon status={message.status} />}
         </div>
       </div>
+      {campaignReply && (
+        <p
+          className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-muted-foreground"
+          title={
+            message.attribution_method === "context"
+              ? "O cliente respondeu citando a mensagem da campanha"
+              : "Último disparo para este contato nos 7 dias anteriores à resposta"
+          }
+        >
+          <Megaphone className="h-3 w-3 shrink-0" />
+          <span>
+            {message.attribution_method === "context" ? "Resposta à campanha" : "Provável resposta à campanha"}{" "}
+            <CampaignName campaign={campaignReply} />
+          </span>
+        </p>
+      )}
       {reactions && reactions.length > 0 && onToggleReaction && (
         <MessageReactions
           reactions={reactions}

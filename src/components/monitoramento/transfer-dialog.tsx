@@ -8,18 +8,19 @@
 // authorization reason to couple them). Either, both, or neither can
 // change; only fields that actually changed get written.
 //
-// Writes go through src/lib/conversations/actions.ts — the SAME
-// functions message-thread.tsx's assign dropdown now calls too, not a
-// second implementation.
+// Writes go through transferConversation (src/lib/conversations/actions.ts)
+// → POST /api/conversations/[id]/transfer: um único UPDATE e o motivo
+// gravado no histórico conversation_assignments. Usado no Monitoramento e
+// no cabeçalho da conversa no inbox.
 // ============================================================
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { createClient } from "@/lib/supabase/client";
-import { assignConversationAgent, assignConversationTeam } from "@/lib/conversations/actions";
+import { transferConversation } from "@/lib/conversations/actions";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -35,11 +36,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { MonitorConversation } from "@/lib/monitoramento/queries";
 import type { MultiSelectOption } from "./multi-select-filter";
 
 const NO_AGENT = "__none__";
 const NO_TEAM = "__none__";
+
+/** O mínimo que o diálogo precisa (MonitorConversation e Conversation servem). */
+export interface TransferTarget {
+  id: string;
+  assigned_agent_id: string | null;
+  team_id: string | null;
+}
 
 export function TransferDialog({
   conversation,
@@ -49,7 +56,7 @@ export function TransferDialog({
   onTransferred,
 }: {
   /** null = closed. Non-null opens the dialog for this conversation. */
-  conversation: MonitorConversation | null;
+  conversation: TransferTarget | null;
   onOpenChange: (open: boolean) => void;
   agentOptions: MultiSelectOption[];
   teamOptions: MultiSelectOption[];
@@ -60,37 +67,39 @@ export function TransferDialog({
 }) {
   const [agentId, setAgentId] = useState(NO_AGENT);
   const [teamId, setTeamId] = useState(NO_TEAM);
+  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!conversation) return;
     setAgentId(conversation.assigned_agent_id ?? NO_AGENT);
     setTeamId(conversation.team_id ?? NO_TEAM);
+    setReason("");
   }, [conversation]);
 
   async function handleTransfer() {
     if (!conversation) return;
     setSaving(true);
     try {
-      const db = createClient();
       const nextAgentId = agentId === NO_AGENT ? null : agentId;
       const nextTeamId = teamId === NO_TEAM ? null : teamId;
-
-      if (nextAgentId !== (conversation.assigned_agent_id ?? null)) {
-        const agentName = agentOptions.find((o) => o.id === nextAgentId)?.label;
-        const { error } = await assignConversationAgent(
-          db,
-          conversation.id,
-          nextAgentId,
-          agentName,
-        );
-        if (error) throw new Error(error);
+      const agentChanged = nextAgentId !== (conversation.assigned_agent_id ?? null);
+      const teamChanged = nextTeamId !== (conversation.team_id ?? null);
+      if (!agentChanged && !teamChanged) {
+        onOpenChange(false);
+        return;
       }
 
-      if (nextTeamId !== (conversation.team_id ?? null)) {
-        const { error } = await assignConversationTeam(db, conversation.id, nextTeamId);
-        if (error) throw new Error(error);
-      }
+      const { error } = await transferConversation(
+        conversation.id,
+        {
+          agentId: agentChanged ? nextAgentId : undefined,
+          teamId: teamChanged ? nextTeamId : undefined,
+          reason,
+        },
+        agentOptions.find((o) => o.id === nextAgentId)?.label,
+      );
+      if (error) throw new Error(error);
 
       toast.success("Conversa transferida");
       onTransferred?.();
@@ -159,6 +168,18 @@ export function TransferDialog({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="transfer-reason">Motivo (opcional)</Label>
+            <Textarea
+              id="transfer-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              rows={2}
+              placeholder="Ex.: cliente pediu negociação, fora do meu horário…"
+            />
           </div>
         </div>
 

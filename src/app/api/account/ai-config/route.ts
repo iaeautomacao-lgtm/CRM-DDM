@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { auditFetch } from '@/lib/audit/context'
 import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { encrypt, tryDecrypt } from '@/lib/whatsapp/encryption'
@@ -18,6 +19,8 @@ function supabaseAdmin(): SupabaseClient {
         db: {
           schema: 'wacrm',
         },
+        // Autor/IP para as triggers de auditoria (migration 131).
+        global: { fetch: auditFetch },
       }
     ) as any
   }

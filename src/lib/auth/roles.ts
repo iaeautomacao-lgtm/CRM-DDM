@@ -98,6 +98,16 @@ export function canViewOnly(role: AccountRole): boolean {
   return role === "viewer";
 }
 
+/**
+ * Owner / admin: see which flow ran in a conversation and open it in
+ * the flow editor (card "Fluxo" no painel do contato). Agents don't
+ * see the card — product decision, and their route allowlist doesn't
+ * include /flows anyway.
+ */
+export function canViewConversationFlows(role: AccountRole): boolean {
+  return hasMinRole(role, "admin");
+}
+
 /** Owner only: irreversible destructive operations. */
 export function canDeleteAccount(role: AccountRole): boolean {
   return role === "owner";

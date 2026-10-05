@@ -1,5 +1,6 @@
 import {
   sendInteractiveButtons,
+  sendInteractiveCtaUrl,
   sendInteractiveList,
   sendMediaMessage,
   sendTemplateMessage,
@@ -336,6 +337,30 @@ export async function engineSendInteractiveList(
   return sendInteractiveViaMeta({ ...args, kind: 'list' })
 }
 
+interface SendCtaUrlEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  bodyText: string
+  /** Rótulo do botão (≤ 20 caracteres). */
+  displayText: string
+  url: string
+  /** See SendTextEngineArgs.configId. */
+  configId?: string
+}
+
+/**
+ * Mensagem com botão que abre uma URL (convite do Webchat). Mesmo
+ * caminho das outras interativas: lookup por conta, retry de variantes
+ * de telefone e gravação em `messages` como `interactive` do bot.
+ */
+export async function engineSendCtaUrl(
+  args: SendCtaUrlEngineArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
+  return sendInteractiveViaMeta({ ...args, kind: 'cta_url' })
+}
+
 interface SendTemplateEngineArgs {
   accountId: string
   /** See SendTextEngineArgs.configId. */
@@ -461,6 +486,7 @@ export async function engineMetaSendTemplate(
 type SendInput =
   | (SendInteractiveButtonsEngineArgs & { kind: 'buttons' })
   | (SendInteractiveListEngineArgs & { kind: 'list' })
+  | (SendCtaUrlEngineArgs & { kind: 'cta_url' })
 
 async function sendInteractiveViaMeta(
   input: SendInput
@@ -509,6 +535,17 @@ async function sendInteractiveViaMeta(
         buttons: input.buttons,
         headerText: input.headerText,
         footerText: input.footerText,
+      })
+      return r.messageId
+    }
+    if (input.kind === 'cta_url') {
+      const r = await sendInteractiveCtaUrl({
+        phoneNumberId: config.phone_number_id,
+        accessToken,
+        to: phone,
+        bodyText: input.bodyText,
+        displayText: input.displayText,
+        url: input.url,
       })
       return r.messageId
     }

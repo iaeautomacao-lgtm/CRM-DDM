@@ -493,6 +493,8 @@ async function findOrCreateConversation(
     .select('*, contact:contacts(*)')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
+    // A API v1 envia por WhatsApp; nunca reaproveita a conversa de Webchat.
+    .eq('channel_type', 'whatsapp')
     .in('status', ['open', 'pending']);
 
   if (wahaSession) {

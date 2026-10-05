@@ -33,6 +33,10 @@ import {
   type TimelineConversation,
 } from "@/lib/contact-timeline/queries";
 import { ConversationCard } from "@/components/contact-timeline/ConversationCard";
+import { ConversationFlowCard } from "@/components/inbox/conversation-flow-card";
+import { ContactChannelsCard } from "@/components/inbox/contact-channels-card";
+import { useCan } from "@/hooks/use-can";
+import { canAccessRoute } from "@/lib/role-utils";
 
 // One more than the display cap — same "fetch cap+1 to detect more
 // without a second COUNT query" shape loadConversationMessages uses.
@@ -57,7 +61,11 @@ export function ContactSidebar({
   onUpdateConversation,
   onUpdateContact,
 }: ContactSidebarProps) {
-  const { accountId } = useAuth();
+  const { accountId, accountRole } = useAuth();
+  // Card "Fluxo" só para owner/admin (o agente não vê o fluxo da conversa).
+  // O link para o editor depende de quem pode abrir /flows (ROUTE_ALLOWLIST).
+  const canViewFlows = useCan("view-conversation-flows");
+  const canOpenFlowEditor = !!accountRole && canAccessRoute(accountRole, "/flows");
   const [copied, setCopied] = useState(false);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
@@ -274,7 +282,7 @@ export function ContactSidebar({
     );
   }
 
-  const displayName = contact.name || contact.phone;
+  const displayName = contact.name || contact.phone || "Contato";
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
@@ -293,7 +301,9 @@ export function ContactSidebar({
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-lg font-semibold text-foreground">
               {contact.avatar_url ? (
                 <img
-                  src={contact.avatar_url && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent((contact.phone ?? "").replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
+                  // Proxy por telefone só existe para WhatsApp; contato de
+                  // Instagram/Messenger (sem telefone) usa a foto do perfil.
+                  src={contact.phone && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
                   alt={displayName}
                   className="h-16 w-16 rounded-full object-cover"
                 />
@@ -359,7 +369,7 @@ export function ContactSidebar({
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
             >
               <Phone className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left">{contact.phone}</span>
+              <span className="flex-1 text-left">{contact.phone ?? "Sem telefone"}</span>
               {copied ? (
                 <Check className="h-3 w-3 text-primary" />
               ) : (
@@ -373,6 +383,20 @@ export function ContactSidebar({
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
+          </div>
+
+          {/* Identidades por canal + vincular telefone/e-mail (une contatos). */}
+          <div className="mt-3">
+            <ContactChannelsCard
+              key={contact.id}
+              contact={contact}
+              canEdit={accountRole !== "viewer"}
+              onLinked={(result, merged) => {
+                // Unido: a conversa agora aponta para o contato mantido.
+                if (merged) onUpdateConversation?.({ contact_id: result.id, contact: result });
+                onUpdateContact?.(result);
+              }}
+            />
           </div>
 
           {/* Divider */}
@@ -460,6 +484,20 @@ export function ContactSidebar({
                 );
               })()}
             </div>
+          )}
+
+          {/* Flow — keyed by conversation so switching conversations
+              remounts the card instead of briefly showing the previous
+              conversation's runs. */}
+          {conversation && canViewFlows && (
+            <>
+              <div className="my-4 border-t border-border" />
+              <ConversationFlowCard
+                key={conversation.id}
+                conversationId={conversation.id}
+                canOpenEditor={canOpenFlowEditor}
+              />
+            </>
           )}
 
           {/* Divider */}

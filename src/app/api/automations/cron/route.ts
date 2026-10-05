@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { registerAuditActor } from '@/lib/audit/context'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { resumePendingExecution } from '@/lib/automations/engine'
@@ -16,6 +17,8 @@ import type { AutomationContext } from '@/lib/automations/engine'
  * two-step UPDATE-by-id.
  */
 async function handler(request: Request) {
+  // Auditoria: escritas desta requisição saem como "automation" (cron_automacoes).
+  await registerAuditActor({ actorType: 'automation', source: 'cron_automacoes' })
   const expected = process.env.AUTOMATION_CRON_SECRET
   if (!expected) {
     return NextResponse.json({ error: 'cron not configured' }, { status: 503 })

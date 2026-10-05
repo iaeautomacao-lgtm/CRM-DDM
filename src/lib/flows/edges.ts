@@ -55,7 +55,8 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
       case "anchor":
       case "send_template":
       case "add_note":
-      case "receive_attachment": {
+      case "receive_attachment":
+      case "send_webchat": {
         const next = (cfg as { next_node_key?: string }).next_node_key;
         if (next && knownKeys.has(next)) {
           edges.push({
@@ -261,6 +262,7 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     case "send_template":
     case "add_note":
     case "receive_attachment":
+    case "send_webchat":
       return [{ id: "next", label: "Próximo" }];
 
     case "condition":
@@ -365,6 +367,7 @@ export function applyEdgeConnection(
     case "send_template":
     case "add_note":
     case "receive_attachment":
+    case "send_webchat":
       if (sourceHandle === "next") return { next_node_key: targetKey };
       return null;
 
@@ -496,7 +499,8 @@ function patchedConfigWithoutKey(
     case "anchor":
     case "send_template":
     case "add_note":
-    case "receive_attachment": {
+    case "receive_attachment":
+    case "send_webchat": {
       const next = (cfg as { next_node_key?: string }).next_node_key;
       if (next !== deletedKey) return null;
       return { ...cfg, next_node_key: "" };

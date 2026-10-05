@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { auditFetch } from '@/lib/audit/context'
 
 // Lazy, shared service-role client for account/member management that
 // needs to cross RLS (creating auth users, moving profiles between
@@ -15,6 +16,8 @@ export function supabaseAdmin(): SupabaseClient {
         db: {
           schema: 'wacrm',
         },
+        // Autor/IP da requisição para as triggers de auditoria (migration 131).
+        global: { fetch: auditFetch },
       }
     ) as any
   }

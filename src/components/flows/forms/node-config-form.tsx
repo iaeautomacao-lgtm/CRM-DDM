@@ -55,7 +55,11 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
-import type { AiAgentTool, AiAgentToolParameter } from "@/lib/flows/types";
+import {
+  WEBCHAT_BUTTON_TEXT_MAX,
+  type AiAgentTool,
+  type AiAgentToolParameter,
+} from "@/lib/flows/types";
 
 interface NodeConfigFormProps {
   node: BuilderNode;
@@ -362,7 +366,72 @@ export function NodeConfigForm({
           onUpdateConfig={onUpdateConfig}
         />
       );
+
+    case "send_webchat":
+      return (
+        <SendWebchatForm
+          cfg={cfg as { message_text?: string; button_text?: string; next_node_key?: string }}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
   }
+}
+
+// ============================================================
+// send_webchat
+// ============================================================
+
+function SendWebchatForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: { message_text?: string; button_text?: string; next_node_key?: string };
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const buttonText = cfg.button_text ?? "";
+  return (
+    <>
+      <TextRow
+        label="Mensagem do convite (enviada no WhatsApp)"
+        value={cfg.message_text ?? ""}
+        onChange={(v) => onUpdateConfig({ message_text: v })}
+        rows={3}
+      />
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Texto do botão ({buttonText.length}/{WEBCHAT_BUTTON_TEXT_MAX})
+        </label>
+        <Input
+          value={buttonText}
+          maxLength={WEBCHAT_BUTTON_TEXT_MAX}
+          onChange={(e) => onUpdateConfig({ button_text: e.target.value })}
+          placeholder="Abrir chat"
+          className="bg-muted text-xs"
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          Na Meta vira um botão; no WAHA o link vai no fim do texto. O link vale
+          24h e é único para o contato.
+        </p>
+      </div>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Quando o cliente abrir o Webchat, continua em"
+      />
+      <p className="text-[10px] text-muted-foreground">
+        O fluxo no WhatsApp termina aqui. Ao abrir o link, este mesmo fluxo
+        continua no Webchat a partir do nó escolhido, com as mesmas variáveis.
+      </p>
+    </>
+  );
 }
 
 // ============================================================

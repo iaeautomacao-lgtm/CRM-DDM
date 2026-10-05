@@ -51,6 +51,18 @@ import {
 } from "./waha-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
+  getConversationChannel,
+  isSocialChannel,
+  sendWebchatMessage,
+  type WebchatOutgoingMessage,
+} from "@/lib/webchat/send";
+import { sendSocialMessage } from "@/lib/channels/social";
+import {
+  createWebchatSession,
+  hasActiveWebchatSession,
+  sendWebchatInvite,
+} from "@/lib/webchat/sessions";
+import {
   type AddNoteNodeConfig,
   type AiAgentNodeConfig,
   type AiAgentTool,
@@ -72,6 +84,7 @@ import {
   type SendMediaNodeConfig,
   type SendMessageNodeConfig,
   type SendTemplateNodeConfig,
+  type SendWebchatNodeConfig,
   type SetTagNodeConfig,
   type SetVariableNodeConfig,
   type SmartDelayNodeConfig,
@@ -514,6 +527,7 @@ async function findEntryFlow(
   message: ParsedInbound,
   isFirstInbound: boolean,
   configId?: string,
+  channelId?: string,
 ): Promise<FlowRow | null> {
   // Only text messages can match an entry trigger. Interactive replies
   // are responses to existing prompts; they never start a new flow.
@@ -525,11 +539,13 @@ async function findEntryFlow(
   // the trigger. flow_id set but not active → no match (don't fall
   // through to the account-wide scan; a paused/archived binding
   // should not silently reroute to some other flow).
-  if (configId) {
+  // Linhas de Instagram/Messenger (channels, migration 128) seguem a
+  // mesma regra com channels.flow_id.
+  if (configId || channelId) {
     const { data: config } = await db
-      .from("whatsapp_config")
+      .from(channelId ? "channels" : "whatsapp_config")
       .select("flow_id")
-      .eq("id", configId)
+      .eq("id", (channelId ?? configId)!)
       .maybeSingle();
     const boundFlowId = (config as { flow_id: string | null } | null)?.flow_id ?? null;
     if (boundFlowId) {
@@ -595,10 +611,40 @@ async function getConfigProvider(
   return (data as { provider: "meta" | "waha" }).provider;
 }
 
+// Canal Webchat (migration 127): o run vive numa conversa de webchat e
+// "enviar" é só gravar a mensagem nela (src/lib/webchat/send.ts). O
+// config_id do run continua sendo a linha de WhatsApp de origem (equipe,
+// marca), por isso o canal vem da conversa e não do config.
+async function isWebchatRun(run: FlowRunRow): Promise<boolean> {
+  return (await getConversationChannel(run.conversation_id)) === "webchat";
+}
+
+/**
+ * Envio pelos canais que não são WhatsApp, decidido pelo canal da
+ * conversa do run: Webchat grava na conversa; Instagram/Messenger vão pela
+ * Graph API (src/lib/channels/social.ts). Retorna null para WhatsApp, que
+ * segue nos caminhos Meta/WAHA de cada helper abaixo (sem unificar).
+ */
+async function sendViaConversationChannel(
+  run: FlowRunRow,
+  payload: Omit<WebchatOutgoingMessage, "conversationId" | "senderType">,
+): Promise<{ whatsapp_message_id: string } | null> {
+  const channel = await getConversationChannel(run.conversation_id);
+  if (channel === "webchat") {
+    return sendWebchatMessage({ ...payload, conversationId: run.conversation_id!, senderType: "bot" });
+  }
+  if (isSocialChannel(channel)) {
+    return sendSocialMessage({ ...payload, conversationId: run.conversation_id!, senderType: "bot" });
+  }
+  return null;
+}
+
 async function sendTextViaProvider(
   run: FlowRunRow,
   args: { text: string },
 ): Promise<{ whatsapp_message_id: string }> {
+  const routed = await sendViaConversationChannel(run, { contentType: "text", text: args.text });
+  if (routed) return routed;
   const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
   if (provider === "waha") {
     return engineWahaSendText({
@@ -628,6 +674,14 @@ async function sendMediaViaProvider(
     filename?: string;
   },
 ): Promise<{ whatsapp_message_id: string }> {
+  // Webchat/Instagram/Messenger recebem a referência estável: a página do
+  // Webchat abre pela rota do token; o envio social assina a URL na hora.
+  const routed = await sendViaConversationChannel(run, {
+    contentType: args.kind,
+    text: args.caption ?? args.filename ?? null,
+    mediaUrl: args.link,
+  });
+  if (routed) return routed;
   args = { ...args, link: await resolveProviderMedia(args.link, run.account_id) };
   const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
   if (provider === "waha") {
@@ -658,6 +712,18 @@ async function sendButtonsViaProvider(
   run: FlowRunRow,
   cfg: SendButtonsNodeConfig,
 ): Promise<{ whatsapp_message_id: string }> {
+  // Webchat: os botões vão em interactive_payload e o clique volta como
+  // interactive_reply com o mesmo reply_id — o matcher do fluxo é o mesmo
+  // da Meta, sem o mapa numérico que o WAHA precisa.
+  const routed = await sendViaConversationChannel(run, {
+    contentType: "interactive",
+    text: cfg.text,
+    interactive: {
+      type: "buttons",
+      options: cfg.buttons.map((b) => ({ id: b.reply_id, title: b.title })),
+    },
+  });
+  if (routed) return routed;
   const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
   if (provider === "waha") {
     const { whatsapp_message_id, buttonMap } = await engineWahaSendButtons({
@@ -694,6 +760,23 @@ async function sendListViaProvider(
   run: FlowRunRow,
   cfg: SendListNodeConfig,
 ): Promise<{ whatsapp_message_id: string }> {
+  const routed = await sendViaConversationChannel(run, {
+    contentType: "interactive",
+    text: cfg.text,
+    interactive: {
+      type: "list",
+      button_label: cfg.button_label,
+      sections: cfg.sections.map((s) => ({
+        title: s.title,
+        options: s.rows.map((r) => ({
+          id: r.reply_id,
+          title: r.title,
+          description: r.description,
+        })),
+      })),
+    },
+  });
+  if (routed) return routed;
   const provider = run.config_id ? await getConfigProvider(run.config_id) : "meta";
   // waha-send.ts has no separate "list" primitive — WAHA gets the same
   // numbered-plain-text treatment as buttons, just flattened across
@@ -1497,7 +1580,7 @@ export async function endActiveRunForConversation(
 
   const { data: fallbackRun, error: fallbackError } = await db
     .from("flow_runs")
-    .select("id, flow_id, account_id")
+    .select("id, flow_id, account_id, conversation_id")
     .eq("account_id", conv.account_id)
     .eq("contact_id", conv.contact_id)
     .in("status", ["active", "paused_by_agent"])
@@ -1508,6 +1591,16 @@ export async function endActiveRunForConversation(
     return;
   }
   if (!fallbackRun) return;
+  // Run de outro canal (ex.: o cliente seguiu para o Webchat e o atendente
+  // fechou a conversa antiga do WhatsApp): não é desta conversa, não encerra.
+  const fallbackConversationId = (fallbackRun as { conversation_id: string | null }).conversation_id;
+  if (
+    fallbackConversationId &&
+    (await getConversationChannel(fallbackConversationId)) !==
+      (await getConversationChannel(conversationId))
+  ) {
+    return;
+  }
   await endRun(
     db,
     fallbackRun as Pick<FlowRunRow, "id" | "flow_id" | "account_id">,
@@ -2556,6 +2649,79 @@ export async function advanceFromNodeKey(
       await nodeCompleted({ target_node_key: cfg.target_node_key });
       continue;
     }
+    if (node.node_type === "send_webchat") {
+      // "Enviar para Webchat": gera a sessão, manda o convite no WhatsApp
+      // e encerra este run. O fluxo continua em cfg.next_node_key quando o
+      // cliente abrir o link (startWebchatRun, via src/lib/webchat/open.ts).
+      const cfg = node.config as unknown as SendWebchatNodeConfig;
+      if (await isWebchatRun(run)) {
+        // Já no Webchat (ex.: fluxo voltou a passar pelo nó): só segue.
+        currentKey = cfg.next_node_key;
+        await nodeCompleted({ already_in_webchat: true, next_node_key: currentKey });
+        continue;
+      }
+      const message_text = interpolateVars(cfg.message_text, run.vars);
+      let webchatSessionId: string;
+      try {
+        // Campanha de origem da conversa (migration 126), para o Webchat já
+        // abrir com esse contexto. Sem a migration o select falha e segue sem.
+        const { data: convRows } = await db
+          .from("conversations")
+          .select("origin_campaign_id, origin_queue_item_id")
+          .eq("id", run.conversation_id!)
+          .limit(1);
+        const origin = (convRows?.[0] ?? {}) as {
+          origin_campaign_id?: string | null;
+          origin_queue_item_id?: string | null;
+        };
+        const { session, url } = await createWebchatSession({
+          accountId: run.account_id,
+          contactId: run.contact_id!,
+          sourceConversationId: run.conversation_id,
+          configId: run.config_id,
+          flowId: run.flow_id,
+          startNodeKey: cfg.next_node_key,
+          initialVars: run.vars,
+          campaignId: origin.origin_campaign_id ?? null,
+          queueItemId: origin.origin_queue_item_id ?? null,
+          origin: "flow_node",
+        });
+        webchatSessionId = session.id;
+        const { whatsapp_message_id } = await sendWebchatInvite({
+          accountId: run.account_id,
+          userId: run.user_id,
+          configId: run.config_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          url,
+          text: message_text,
+          buttonText: cfg.button_text,
+        });
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_webchat",
+          whatsapp_message_id,
+          webchat_session_id: session.id,
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_webchat_failed",
+          detail,
+        });
+        await endRun(db, run, "failed", "send_webchat_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { message_text },
+        });
+        return { outcome: "completed" };
+      }
+      await nodeCompleted({ webchat_session_id: webchatSessionId, message_text });
+      await endRun(db, run, "completed", "moved_to_webchat");
+      return { outcome: "completed" };
+    }
     if (node.node_type === "go_to_flow") {
       const cfg = node.config as unknown as GoToFlowNodeConfig;
       const targetFlow = await loadFlow(db, cfg.flow_id);
@@ -2587,10 +2753,14 @@ export async function advanceFromNodeKey(
     if (node.node_type === "send_template") {
       const cfg = node.config as unknown as SendTemplateNodeConfig;
       try {
-        const provider = run.config_id
-          ? await getConfigProvider(run.config_id)
-          : "meta";
-        if (provider === "waha") {
+        // Template (HSM) é só do WhatsApp Meta: no WAHA, Webchat, Instagram e
+        // Messenger vai o fallback_text pelo canal da conversa.
+        const provider = (await getConversationChannel(run.conversation_id)) !== "whatsapp"
+          ? "other_channel"
+          : run.config_id
+            ? await getConfigProvider(run.config_id)
+            : "meta";
+        if (provider === "waha" || provider === "other_channel") {
           if (cfg.fallback_text) {
             await sendTextViaProvider(run, {
               text: interpolateVars(cfg.fallback_text, run.vars),
@@ -2942,7 +3112,7 @@ export async function dispatchInboundToFlows(
 ): Promise<DispatchInboundResult> {
   const db = supabaseAdmin();
   try {
-    const activeRun = await loadActiveRunForContact(
+    let activeRun = await loadActiveRunForContact(
       db,
       input.accountId,
       input.contactId,
@@ -2958,6 +3128,35 @@ export async function dispatchInboundToFlows(
     // conversation) or by the agent taking it back over.
     if (activeRun && activeRun.status === "paused_by_agent") {
       return { consumed: false, outcome: "no_match" };
+    }
+
+    // O run ativo do contato vive em OUTRO canal (ex.: o cliente abriu o
+    // Webchat e depois voltou a escrever no WhatsApp). Só consulta o canal
+    // quando as conversas diferem.
+    if (
+      activeRun?.conversation_id &&
+      input.conversationId &&
+      activeRun.conversation_id !== input.conversationId
+    ) {
+      const [runChannel, inboundChannel] = await Promise.all([
+        getConversationChannel(activeRun.conversation_id),
+        getConversationChannel(input.conversationId),
+      ]);
+      if (runChannel !== inboundChannel) {
+        // Run de Webchat cujo link já venceu/foi revogado: o cliente
+        // abandonou o Webchat. Encerra o run e trata esta mensagem
+        // normalmente (fluxos do canal atual podem começar).
+        if (runChannel === "webchat" && !(await hasActiveWebchatSession(activeRun.conversation_id))) {
+          await endRun(db, activeRun, "timed_out", "webchat_session_ended");
+          activeRun = null;
+        } else {
+          // Run vivo no outro canal: avançá-lo mandaria a resposta para o
+          // canal errado, e iniciar outro run colidiria com o índice de um
+          // run por contato. consumed=true para o webhook não rodar IA
+          // global/automações por cima; a mensagem fica para o atendente.
+          return { consumed: true, flow_run_id: activeRun.id, outcome: "other_channel_run" };
+        }
+      }
     }
 
     // Idempotency — only matters if there's already a run for this
@@ -3010,6 +3209,7 @@ export async function dispatchInboundToFlows(
       input.message,
       input.isFirstInboundMessage,
       input.configId,
+      input.channelId,
     );
     if (!flow || !flow.entry_node_id) {
       return { consumed: false, outcome: "no_match" };
@@ -3739,4 +3939,97 @@ async function startTransferredRun(
     console.error("[flows] execution_count rpc error:", incErr.message);
   }
   await advanceFromNodeKey(db, newRun, targetFlow.entry_node_id!, nodes);
+}
+
+/**
+ * Início do fluxo dentro do Webchat (src/lib/webchat/open.ts), na primeira
+ * vez que o cliente abre o link.
+ *
+ * - Encerra o run ativo/pausado do contato (o do WhatsApp, se ainda
+ *   existir): o índice idx_one_active_run_per_contact só permite um por
+ *   contato, e daqui em diante a conversa segue no Webchat.
+ * - Cria o run na conversa de webchat, com `config_id` da linha de origem
+ *   (equipe/marca) e as variáveis da sessão.
+ * - Começa em `startNodeKey` (nó seguinte ao "Enviar para Webchat") ou,
+ *   sem ele, no entry_node_id do fluxo (opção da campanha).
+ *
+ * Retorna false quando o fluxo não pode rodar (inexistente, de outra
+ * conta, não ativo, nó inexistente) — a conversa fica aberta para o
+ * atendente mesmo assim.
+ */
+export async function startWebchatRun(args: {
+  accountId: string;
+  contactId: string;
+  conversationId: string;
+  configId: string | null;
+  flowId: string;
+  startNodeKey: string | null;
+  vars: Record<string, unknown>;
+}): Promise<boolean> {
+  const db = supabaseAdmin();
+  const flow = await loadFlow(db, args.flowId);
+  if (!flow || flow.account_id !== args.accountId || flow.status !== "active") {
+    console.error("[flows] startWebchatRun: fluxo indisponível", args.flowId);
+    return false;
+  }
+  const nodes = await loadAllNodes(db, flow.id);
+  const startKey = args.startNodeKey ?? flow.entry_node_id;
+  if (!startKey || !nodes.has(startKey)) {
+    console.error("[flows] startWebchatRun: nó inicial inexistente", startKey);
+    return false;
+  }
+
+  const { data: previous } = await db
+    .from("flow_runs")
+    .select("id, flow_id, account_id")
+    .eq("account_id", args.accountId)
+    .eq("contact_id", args.contactId)
+    .in("status", ["active", "paused_by_agent"]);
+  for (const prev of previous ?? []) {
+    await endRun(db, prev as Pick<FlowRunRow, "id" | "flow_id" | "account_id">, "transferred", "moved_to_webchat");
+  }
+
+  const { data: inserted, error: insErr } = await db
+    .from("flow_runs")
+    .insert({
+      flow_id: flow.id,
+      account_id: flow.account_id,
+      user_id: flow.user_id,
+      contact_id: args.contactId,
+      conversation_id: args.conversationId,
+      config_id: args.configId,
+      status: "active",
+      current_node_key: startKey,
+      vars: args.vars,
+    })
+    .select("*")
+    .maybeSingle();
+  if (insErr || !inserted) {
+    // 23505: outra aba do cliente abriu o link ao mesmo tempo e já iniciou.
+    const msg = insErr?.message ?? "";
+    if (!msg.includes("23505") && !msg.includes("duplicate key")) {
+      console.error("[flows] startWebchatRun insert error:", msg);
+    }
+    return false;
+  }
+  const run = inserted as FlowRunRow;
+  await logEvent(db, run.id, "started", startKey, {
+    flow_id: flow.id,
+    trigger_type: "webchat",
+  });
+  await logRunEvent(db, {
+    run_id: run.id,
+    flow_id: flow.id,
+    account_id: flow.account_id,
+    node_key: startKey,
+    event_type: "run_started",
+    status: "success",
+    payload: { trigger_type: "webchat" },
+  });
+  const { error: incErr } = await db.rpc("increment_flow_execution_count", {
+    p_flow_id: flow.id,
+  });
+  if (incErr) console.error("[flows] execution_count rpc error:", incErr.message);
+  await advanceFromNodeKey(db, run, startKey, nodes);
+  return true;
 }

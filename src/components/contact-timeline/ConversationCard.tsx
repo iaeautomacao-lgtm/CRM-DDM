@@ -48,7 +48,8 @@ export function ConversationCard({
       ? "< 1 dia de duração"
       : `${durationDays} ${durationDays === 1 ? "dia" : "dias"} de duração`;
 
-  const channelLabel = conversation.waha_session || "WhatsApp";
+  const channelLabel =
+    conversation.channel_type === "webchat" ? "Webchat" : conversation.waha_session || "WhatsApp";
   const status = STATUS_BADGE[conversation.status];
 
   async function toggleExpand() {

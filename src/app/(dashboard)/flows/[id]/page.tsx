@@ -3,7 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 
 import { Suspense, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -113,7 +113,14 @@ function FlowEditorWithDebug({
   nodes: FlowNodeRow[];
 }) {
   const debug = useFlowDebug(flowId);
+  // `?node=` vem do atalho do card "Fluxo" no inbox (junto com `run_id`).
+  const focusNodeKey = useSearchParams().get("node");
   return (
-    <FlowEditorShell initialFlow={flow} initialNodes={nodes} debug={debug} />
+    <FlowEditorShell
+      initialFlow={flow}
+      initialNodes={nodes}
+      debug={debug}
+      focusNodeKey={focusNodeKey}
+    />
   );
 }

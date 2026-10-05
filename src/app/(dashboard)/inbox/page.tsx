@@ -202,6 +202,13 @@ export default function InboxPage() {
       const newMsg = event.new;
 
       if (event.eventType === "INSERT") {
+        // Mensagem de disparo gravada só quando o cliente respondeu
+        // (reply-tracker.ts): chega DEPOIS da resposta, com o created_at
+        // antigo do envio. Entra na posição cronológica, não remove bolhas
+        // otimistas do atendente e não mexe na prévia/não lidas da lista.
+        const isCampaignBackfill =
+          !!newMsg.campaign_id && newMsg.sender_type !== "customer";
+
         // Add to messages if it belongs to active conversation
         if (
           activeConversation &&
@@ -210,6 +217,13 @@ export default function InboxPage() {
           setMessages((prev) => {
             // Avoid duplicates
             if (prev.some((m) => m.id === newMsg.id)) return prev;
+            if (isCampaignBackfill) {
+              const sentAt = Date.parse(newMsg.created_at);
+              const at = prev.findIndex((m) => Date.parse(m.created_at) > sentAt);
+              return at === -1
+                ? [...prev, newMsg]
+                : [...prev.slice(0, at), newMsg, ...prev.slice(at)];
+            }
             // Replace optimistic message if it exists
             const withoutOptimistic = prev.filter(
               (m) => !m.id.startsWith("temp-")
@@ -217,6 +231,8 @@ export default function InboxPage() {
             return [...withoutOptimistic, newMsg];
           });
         }
+
+        if (isCampaignBackfill) return;
 
         // Update conversation list preview. We need to know *synchronously*
         // whether the conv is already in state to decide between patching

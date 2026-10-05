@@ -24,6 +24,11 @@ const EDITABLE_FIELDS = [
   // precisar de uma migration nova. Ver parseTemplateMode em
   // campanhas/page.tsx e startCampaign.ts.
   "dias_permitidos",
+  // Migration 127 — "Ao responder, enviar para o Webchat".
+  "webchat_enabled",
+  "webchat_flow_id",
+  "webchat_message",
+  "webchat_button_text",
 ] as const;
 
 export async function PATCH(

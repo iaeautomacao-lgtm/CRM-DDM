@@ -248,6 +248,12 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
         next_node_key: "",
         max_turns: 20,
       };
+    case "send_webchat":
+      return {
+        message_text: "Vamos continuar pelo nosso chat? É rapidinho.",
+        button_text: "Abrir chat",
+        next_node_key: "",
+      };
   }
 }
 

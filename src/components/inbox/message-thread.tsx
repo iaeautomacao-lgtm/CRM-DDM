@@ -33,6 +33,7 @@ import {
   Phone,
   Trash2,
   Loader2,
+  ArrowRightLeft,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
 import { Badge } from "@/components/ui/badge";
@@ -57,10 +58,14 @@ import {
 import { PendingSendBubble, type PendingSendData } from "./pending-send-bubble";
 import { createPendingSendQueue } from "@/lib/inbox/pending-send-queue";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
-import { assignConversationAgent } from "@/lib/conversations/actions";
+import { transferConversation } from "@/lib/conversations/actions";
 import { TemplatePicker } from "./template-picker";
 import { OutcomeTagPicker } from "./outcome-tag-picker";
 import { buildReplyPreview } from "./reply-quote";
+import { canAccessRoute } from "@/lib/role-utils";
+import { socialWindow } from "@/lib/channels/graph";
+import { TransferDialog } from "@/components/monitoramento/transfer-dialog";
+import { CHANNEL_BADGE } from "./conversation-list";
 import { toast } from "sonner";
 
 interface ReplyDraft {
@@ -306,8 +311,73 @@ export function MessageThread({
     };
   }, []);
 
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+  const [transferOpen, setTransferOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    createClient()
+      .from("teams")
+      .select("id, name")
+      .order("name")
+      .then(({ data }) => {
+        if (!cancelled) setTeams(data ?? []);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Objeto estável: o diálogo reinicia os campos quando ele muda.
+  const transferConvId = conversation?.id ?? null;
+  const transferAgentId = conversation?.assigned_agent_id ?? null;
+  const transferTeamId = conversation?.team_id ?? null;
+  const transferTarget = useMemo(
+    () =>
+      transferConvId
+        ? { id: transferConvId, assigned_agent_id: transferAgentId, team_id: transferTeamId }
+        : null,
+    [transferConvId, transferAgentId, transferTeamId],
+  );
+
+  const clientId = conversation?.client_id ?? null;
+  const [client, setClient] = useState<{ id: string; name: string; color: string } | null>(null);
+  useEffect(() => {
+    if (!clientId) return;
+    let cancelled = false;
+    createClient()
+      .from("clients")
+      .select("id, name, color")
+      .eq("id", clientId)
+      .limit(1)
+      .then(({ data }) => {
+        if (!cancelled) setClient(data?.[0] ?? null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+  const clientBadge = client && client.id === clientId ? client : null;
+
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
+    // Webchat não tem janela de 24h da Meta: o atendente responde quando
+    // quiser (o link do cliente é que vale 24h, controlado pela sessão).
+    if (conversation?.channel_type === "webchat") return { expired: false, remaining: "Webchat" };
+
+    // Instagram/Messenger: 24h normais; depois disso, até 7 dias só com a
+    // tag HUMAN_AGENT (resposta de atendente humano) — ver socialWindow.
+    if (conversation?.channel_type === "instagram" || conversation?.channel_type === "messenger") {
+      const lastCustomerAt =
+        [...messages].reverse().find((m) => m.sender_type === "customer")?.created_at ??
+        conversation.last_customer_message_at ??
+        null;
+      const window = socialWindow(lastCustomerAt);
+      if (window === "closed") return { expired: true, remaining: "Janela encerrada" };
+      if (window === "human_agent") return { expired: false, remaining: "Só atendente (até 7d)" };
+      const hoursLeft = 24 - differenceInHours(new Date(), new Date(lastCustomerAt as string));
+      return { expired: false, remaining: `${Math.max(hoursLeft, 1)}h restantes` };
+    }
+
     if (!messages.length) return { expired: false, remaining: "" };
 
     // If the provider is waha, or the conversation is associated with a WAHA session, the session never expires
@@ -336,7 +406,13 @@ export function MessageThread({
         : `${Math.floor(hoursLeft * 60)}m restantes`;
 
     return { expired, remaining };
-  }, [messages, whatsappProvider, conversation?.waha_session]);
+  }, [
+    messages,
+    whatsappProvider,
+    conversation?.waha_session,
+    conversation?.channel_type,
+    conversation?.last_customer_message_at,
+  ]);
 
   // Store latest callback in a ref so fetchMessages doesn't need to
   // depend on `onMessagesLoaded` — otherwise parent re-renders cause
@@ -841,6 +917,51 @@ export function MessageThread({
     return map;
   }, [messages]);
 
+  // Nomes das campanhas do Disparador citadas na conversa (mensagem do
+  // disparo + resposta atribuída, migration 126). Uma query só por conjunto
+  // de ids; a chave ordenada evita refazer a busca a cada mensagem nova.
+  const campaignIdsKey = useMemo(
+    () =>
+      [...new Set(messages.map((m) => m.campaign_id).filter((id): id is string => !!id))]
+        .sort()
+        .join(","),
+    [messages]
+  );
+  const [campaignNames, setCampaignNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!campaignIdsKey) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await createClient()
+        .from("campaigns")
+        .select("id, nome")
+        .in("id", campaignIdsKey.split(","));
+      if (cancelled) return;
+      if (error) {
+        console.error("[MessageThread] failed to load campaign names:", error);
+        return;
+      }
+      setCampaignNames(
+        new Map((data ?? []).map((c: { id: string; nome: string }) => [c.id, c.nome]))
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [campaignIdsKey]);
+  // Link para a campanha só para quem pode abrir /disparador.
+  const canOpenCampaigns = !!accountRole && canAccessRoute(accountRole, "/disparador");
+  const campaignFor = useCallback(
+    (msg: Message) => {
+      if (!msg.campaign_id) return null;
+      return {
+        name: campaignNames.get(msg.campaign_id) ?? "Campanha",
+        href: canOpenCampaigns ? `/disparador/campanhas/${msg.campaign_id}` : null,
+      };
+    },
+    [campaignNames, canOpenCampaigns]
+  );
+
   // Bucket reactions by their target message_id for O(1) per-bubble lookup.
   const reactionsByMessageId = useMemo(() => {
     const map = new Map<string, MessageReaction[]>();
@@ -1115,12 +1236,12 @@ export function MessageThread({
     async (agentId: string | null) => {
       if (!conversation) return;
 
-      const supabase = createClient();
       const assignedAgent = agentId ? profiles.find((p) => p.user_id === agentId) : undefined;
-      const { error } = await assignConversationAgent(
-        supabase,
+      // Pela rota de transferência: o agente pode passar a conversa para
+      // outro mesmo deixando de enxergá-la (RLS), e fica no histórico.
+      const { error } = await transferConversation(
         conversation.id,
-        agentId,
+        { agentId },
         assignedAgent?.full_name,
       );
 
@@ -1154,7 +1275,7 @@ export function MessageThread({
     );
   }
 
-  const displayName = contact.name || contact.phone;
+  const displayName = contact.name || contact.phone || "Contato";
   const messageGroups = groupMessagesByDate(messages);
   const currentStatus = STATUS_OPTIONS.find(
     (s) => s.value === conversation.status
@@ -1194,7 +1315,9 @@ export function MessageThread({
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden">
             {contact.avatar_url ? (
               <img
-                src={contact.avatar_url && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent((contact.phone ?? "").replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
+                // Proxy por telefone só existe para WhatsApp; contato de
+                // Instagram/Messenger (sem telefone) usa a foto do perfil.
+                src={contact.phone && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
                 alt={displayName}
                 className="h-9 w-9 rounded-full object-cover"
               />
@@ -1205,8 +1328,30 @@ export function MessageThread({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
+              {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"] && (
+                <span
+                  className={cn(
+                    "hidden shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold leading-none sm:inline-block",
+                    CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"].className
+                  )}
+                >
+                  {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"].label}
+                </span>
+              )}
+              {clientBadge && (
+                <span
+                  className="hidden shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold leading-none sm:inline-block"
+                  style={{
+                    color: clientBadge.color,
+                    backgroundColor: `${clientBadge.color}1a`,
+                    borderColor: `${clientBadge.color}40`,
+                  }}
+                >
+                  {clientBadge.name}
+                </span>
+              )}
             </div>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone}</p>
+            <p className="truncate text-xs text-muted-foreground">{contact.phone ?? contact.email ?? ""}</p>
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
               the name + back arrow keep their room. */}
@@ -1256,10 +1401,10 @@ export function MessageThread({
               sure nothing's stale. Only rendered when the parent wires
               up `onRefresh`. */}
           {/* WhatsApp WebRTC VoIP Call Button */}
-          {whatsappProvider === "waha" && contact?.phone && (
+          {whatsappProvider === "waha" && contact?.phone && conversation.channel_type !== "webchat" && (
             <button
               type="button"
-              onClick={() => startOutboundCall(contact.phone)}
+              onClick={() => contact.phone && startOutboundCall(contact.phone)}
               aria-label="Iniciar chamada de voz"
               title="Ligar pelo WhatsApp"
               className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-emerald-400"
@@ -1341,6 +1486,18 @@ export function MessageThread({
             </Badge>
           )}
 
+          {accountRole !== "viewer" && (
+            <button
+              type="button"
+              onClick={() => setTransferOpen(true)}
+              aria-label="Transferir conversa"
+              title="Transferir (atendente/equipe, com motivo)"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5" />
+            </button>
+          )}
+
           {/* Assign dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -1408,6 +1565,13 @@ export function MessageThread({
         </div>
       </div>
 
+      <TransferDialog
+        conversation={transferOpen ? transferTarget : null}
+        onOpenChange={setTransferOpen}
+        agentOptions={profiles.map((p) => ({ id: p.user_id, label: p.full_name }))}
+        teamOptions={teams.map((t) => ({ id: t.id, label: t.name }))}
+      />
+
       {/* Messages Area */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
         {loading ? (
@@ -1470,6 +1634,7 @@ export function MessageThread({
                           reactions={msgReactions}
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
+                          campaign={campaignFor(msg)}
                         />
                       </MessageActions>
                     );
@@ -1500,7 +1665,7 @@ export function MessageThread({
         sessionExpired={sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
-        onOpenTemplates={handleOpenTemplates}
+        onOpenTemplates={conversation.channel_type === "webchat" ? undefined : handleOpenTemplates}
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
         recall={recall}

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { registerAuditActor } from '@/lib/audit/context'
 import { randomUUID } from 'node:crypto';
 import { drainCallbackOutbox } from '@/lib/disparador/callback-outbox';
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
@@ -51,6 +52,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  // Auditoria: escritas desta requisição saem como "system" (cron_disparador).
+  await registerAuditActor({ actorType: 'system', source: 'cron_disparador' })
   const rejection = authorize(request);
   if (rejection) return rejection;
   // Identifica esta execução como dona do lock (renovação/liberação só

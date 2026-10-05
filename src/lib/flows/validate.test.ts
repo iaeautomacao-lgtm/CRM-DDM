@@ -547,3 +547,37 @@ describe("reachableFromEntry", () => {
     expect(set).toEqual(new Set(["a", "b"]));
   });
 });
+
+describe("validateFlowForActivation — send_webchat", () => {
+  const webchatNodes = (config: Record<string, unknown>) => [
+    { node_key: "start", node_type: "start", config: { next_node_key: "wc" } },
+    { node_key: "wc", node_type: "send_webchat", config },
+    { node_key: "ho", node_type: "handoff", config: {} },
+  ];
+
+  it("accepts a complete invite that continues on an existing node", () => {
+    const issues = validateFlowForActivation(
+      validFlow,
+      webchatNodes({ message_text: "Vamos pelo chat?", button_text: "Abrir chat", next_node_key: "ho" }),
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("enforces Meta's 20-char button limit and a continuation node", () => {
+    const issues = validateFlowForActivation(
+      validFlow,
+      webchatNodes({ message_text: "Oi", button_text: "x".repeat(21), next_node_key: "nope" }),
+    );
+    const fields = issues.filter((i) => i.node_key === "wc").map((i) => i.field);
+    expect(fields).toContain("button_text");
+    expect(fields).toContain("next_node_key");
+  });
+
+  it("follows the webchat continuation when checking reachability", () => {
+    const reachable = reachableFromEntry(
+      "start",
+      webchatNodes({ message_text: "Oi", button_text: "Abrir", next_node_key: "ho" }),
+    );
+    expect(reachable.has("ho")).toBe(true);
+  });
+});

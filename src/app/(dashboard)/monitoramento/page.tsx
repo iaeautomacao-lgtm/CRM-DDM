@@ -47,6 +47,8 @@ import { AgentColumn } from "@/components/monitoramento/agent-column";
 import { AgentDragCard } from "@/components/monitoramento/agent-drag-card";
 import { TeamColumn } from "@/components/monitoramento/team-column";
 import { TransferDialog } from "@/components/monitoramento/transfer-dialog";
+import { SlaPanel } from "@/components/monitoramento/sla-panel";
+import { DayPanel } from "@/components/monitoramento/day-panel";
 import type { ConversationCardActions } from "@/components/monitoramento/card-actions";
 import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimelineModal";
 
@@ -712,6 +714,18 @@ export default function MonitoramentoPage() {
           >
             Equipes
           </TabsTrigger>
+          <TabsTrigger
+            value="hoje"
+            className="data-active:bg-muted data-active:text-primary text-muted-foreground"
+          >
+            Hoje
+          </TabsTrigger>
+          <TabsTrigger
+            value="sla"
+            className="data-active:bg-muted data-active:text-primary text-muted-foreground"
+          >
+            SLA
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="fases" className="space-y-5">
@@ -844,6 +858,19 @@ export default function MonitoramentoPage() {
             accountId={accountId}
             onSaved={fetchTeams}
           />
+        </TabsContent>
+
+        <TabsContent value="hoje">
+          <DayPanel
+            agentNames={Object.fromEntries(
+              members.map((m) => [m.user_id, m.full_name || m.email || "Sem nome"])
+            )}
+            teamNames={Object.fromEntries(teams.map((t) => [t.id, t.name]))}
+          />
+        </TabsContent>
+
+        <TabsContent value="sla">
+          <SlaPanel teamNames={Object.fromEntries(teams.map((t) => [t.id, t.name]))} />
         </TabsContent>
       </Tabs>
 

@@ -1,4 +1,5 @@
 import { timingSafeEqual } from 'node:crypto'
+import { registerAuditActor } from '@/lib/audit/context'
 import { NextResponse } from 'next/server'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
@@ -30,6 +31,8 @@ import type { FlowRunRow, SmartDelayNodeConfig } from '@/lib/flows/types'
  * tenants.
  */
 export async function POST(request: Request) {
+  // Auditoria: escritas desta requisição saem como "flow" (cron_fluxos).
+  await registerAuditActor({ actorType: 'flow', source: 'cron_fluxos' })
   const expected = process.env.AUTOMATION_CRON_SECRET
   if (!expected) {
     return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
