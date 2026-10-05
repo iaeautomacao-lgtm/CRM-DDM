@@ -241,14 +241,28 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
-            {visibleNavItems.map((item) => {
+            {visibleNavItems.map((item, index) => {
               const isActive = item.href === activeNavHref;
+              // Título da seção antes do 1º item visível dela (um agente,
+              // que só vê Conversas, não vê seções vazias).
+              const groupHeading =
+                item.group && item.group !== visibleNavItems[index - 1]?.group
+                  ? item.group
+                  : null;
 
               const showUnreadDot =
                 item.href === "/inbox" && totalUnread > 0 && !isActive;
 
               return (
                 <Fragment key={item.href}>
+                  {groupHeading && (
+                    <li
+                      aria-hidden="true"
+                      className="px-3 pt-4 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70"
+                    >
+                      {groupHeading}
+                    </li>
+                  )}
                   <li>
                     <Link
                       href={item.href}
