@@ -82,6 +82,7 @@ import {
   findVariableProblems,
   previewCampaignMessage,
   synthesizeWahaVariableMap,
+  placeholderNumbers,
   type PreviewContact,
 } from "@/lib/disparador/preview-message";
 import {
@@ -127,6 +128,7 @@ interface Campaign {
   // Migration 132 — origem do público ("csv" | "tags" | "account"; null em
   // campanhas antigas). Só lido na edição (passo Público).
   audience_mode?: string | null;
+  import_draft_id?: string | null;
 }
 
 interface TagItem {
@@ -720,9 +722,11 @@ export default function CampanhasPage() {
   // Aceite explícito de "todos os contatos da conta" quando não há CSV nem
   // tabulação (antes era só um aviso no resumo).
   const [confirmAllContacts, setConfirmAllContacts] = useState(false);
-  // audience_mode da campanha em edição — "csv"/null (antiga) mantêm a base
-  // já vinculada, então o passo Público não exige reimportar.
-  const [editingAudienceMode, setEditingAudienceMode] = useState<string | null>(null);
+  // Campanha em edição já tem base importada vinculada ("csv", ou antiga
+  // sem audience_mode mas com import_draft_id) — o passo Público não exige
+  // reimportar. Campanha por tabulação/conta NÃO entra aqui: zerar as
+  // tabulações dela exige o aceite de "toda a conta".
+  const [editingHasImportedBase, setEditingHasImportedBase] = useState(false);
   // Passo Público — importação de base
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importPreview, setImportPreview] = useState<Array<{
@@ -956,7 +960,7 @@ export default function CampanhasPage() {
         const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text")
+          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text, audience_mode, import_draft_id")
           .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -1240,7 +1244,10 @@ export default function CampanhasPage() {
     );
     // Campanha já salva para "conta inteira" sem tabulação: o aceite já foi
     // dado antes (na criação, ou é campanha anterior ao assistente).
-    setEditingAudienceMode(campaign.audience_mode ?? null);
+    setEditingHasImportedBase(
+      campaign.audience_mode === "csv" ||
+        (campaign.audience_mode == null && Boolean(campaign.import_draft_id))
+    );
     setConfirmAllContacts(
       campaign.audience_mode === "account" && (campaign.tags_filtro ?? []).length === 0
     );
@@ -1516,7 +1523,13 @@ export default function CampanhasPage() {
           body: JSON.stringify({
             // Só muda a origem do público quando houve import nesta edição;
             // senão uma campanha de CSV viraria "conta inteira".
-            ...(importAllRows?.length ? { audience_mode: "csv" } : {}),
+            // Sem base importada, o público passa a ser o que a tela mostra:
+            // tabulação, ou toda a conta (já confirmada no passo Público).
+            ...(importAllRows?.length
+              ? { audience_mode: "csv" }
+              : keepsExistingAudience
+                ? {}
+                : { audience_mode: selectedTags.length > 0 ? "tags" : "account" }),
             nome,
             descricao,
             session_ids: selectedSessions,
@@ -1690,7 +1703,7 @@ export default function CampanhasPage() {
     // anterior fica órfão (campaign_id nunca chegou a ser preenchido),
     // mas isso é inofensivo: nada mais faz join por esse draftId.
     setDraftId(crypto.randomUUID());
-    setEditingAudienceMode(null);
+    setEditingHasImportedBase(false);
   };
 
   // Meta channels can only send approved templates — the picker needs to
@@ -1741,7 +1754,7 @@ export default function CampanhasPage() {
   const csvMappingKnown = Boolean(importFile) || !editingId;
 
   // Público já vinculado à campanha em edição ("csv" ou campanha antiga).
-  const keepsExistingAudience = Boolean(editingId) && editingAudienceMode !== "account";
+  const keepsExistingAudience = Boolean(editingId) && editingHasImportedBase;
 
   // Validação de cada passo do assistente — lista de mensagens em pt-BR,
   // vazia quando o passo está ok. handleSubmit mantém as próprias checagens
@@ -4085,6 +4098,11 @@ export default function CampanhasPage() {
                       </div>
                     );
                   })}
+                  {templateMode === "rotacao" && mensagens.length > 1 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Modo rotação: exemplo da alternância — no envio a ordem segue a lista do público.
+                    </p>
+                  )}
                   {templateMode === "aleatorio" && mensagens.length > 1 && (
                     <p className="text-[11px] text-muted-foreground">
                       Modo aleatório: cada contato recebe só uma destas mensagens, sorteada no envio.
@@ -4156,7 +4174,8 @@ export default function CampanhasPage() {
           if (hasMeta) {
             // Detecta quantas variáveis posicionais existem no body do
             // template — ex: "Olá {{1}}, débito na {{2}}" → 2 variáveis.
-            const varCount = (bodyText.match(/\{\{(\d+)\}\}/g) || []).length;
+            // Maior {{n}} (não o número de ocorrências: "{{1}} … {{1}}" é 1).
+            const varCount = Math.max(0, ...placeholderNumbers(bodyText));
 
             // Mapeamento padrão: {{n}} → coluna VARn do CSV quando ela foi
             // mapeada no passo Público (o CSV agora vem antes da mensagem);
