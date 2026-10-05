@@ -21,7 +21,7 @@ const COLUMNS =
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('supervisor')
     const param = new URL(request.url).searchParams.get('date')
     const today = todayInBrazil()
     const date = isValidDay(param) ? param : today
@@ -53,9 +53,11 @@ export async function GET(request: Request) {
     }
 
     // Transferências do dia (histórico da migration 128).
+    // O embed !inner aplica a RLS de conversas: o supervisor conta só as
+    // transferências das conversas que ele enxerga (140).
     const { count: transfers } = await supabase
       .from('conversation_assignments')
-      .select('id', { count: 'exact', head: true })
+      .select('id, conversations!conversation_id!inner(id)', { count: 'exact', head: true })
       .eq('account_id', accountId)
       .gte('created_at', start)
       .lt('created_at', end)

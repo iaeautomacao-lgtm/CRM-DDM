@@ -101,7 +101,7 @@ interface Member {
 
 interface Invitation {
   id: string;
-  role: 'admin' | 'agent' | 'viewer';
+  role: 'admin' | 'supervisor' | 'agent' | 'viewer';
   label: string | null;
   created_at: string;
   expires_at: string;
@@ -111,7 +111,7 @@ interface Invitation {
 // promotions go through the (deferred) Transfer Ownership flow. Labels
 // come from ROLE_META so this dropdown can't drift from the roster
 // chips / invite dialog.
-const EDITABLE_ROLES: AccountRole[] = ['admin', 'agent', 'viewer'];
+const EDITABLE_ROLES: AccountRole[] = ['admin', 'supervisor', 'agent', 'viewer'];
 
 const MIN_RESET_PASSWORD_LENGTH = 8;
 
@@ -120,6 +120,7 @@ const MIN_RESET_PASSWORD_LENGTH = 8;
 const ROLE_FILTER_OPTIONS: { value: 'all' | AccountRole; label: string }[] = [
   { value: 'all', label: 'Todos os papéis' },
   { value: 'agent', label: ROLE_META.agent.label },
+  { value: 'supervisor', label: ROLE_META.supervisor.label },
   { value: 'admin', label: ROLE_META.admin.label },
   { value: 'owner', label: ROLE_META.owner.label },
   { value: 'viewer', label: ROLE_META.viewer.label },

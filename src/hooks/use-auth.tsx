@@ -421,6 +421,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accountId: profile?.account_id ?? null,
       isOwner: role === "owner",
       isAdmin: role === "admin",
+      isSupervisor: role === "supervisor",
       isAgent: role === "agent",
       isViewer: role === "viewer",
       canManageMembers: role ? canManageMembersFor(role) : false,

@@ -21,7 +21,7 @@ function iso(v: string | null): string | null {
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('supervisor')
     const p = new URL(request.url).searchParams
     const metric = p.get('metric') as Metric | null
     if (!metric || !METRICS.includes(metric)) {

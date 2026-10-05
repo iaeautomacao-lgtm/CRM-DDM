@@ -24,10 +24,10 @@ export async function GET() {
   try {
     const { supabase, accountId, userId, role } = await getCurrentAccount()
     const db = supabaseAdmin()
-    // Agente vê as linhas da(s) equipe(s) dele + as sem equipe — mesma regra
-    // da RLS de whatsapp_config (migration 103).
+    // Agente/supervisor vê as linhas da(s) equipe(s) dele + as sem equipe —
+    // mesma regra da RLS de whatsapp_config (migrations 103/140).
     let agentTeams: string[] | null = null
-    if (role === 'agent') {
+    if (role === 'agent' || role === 'supervisor') {
       const { data } = await db.from('team_members').select('team_id').eq('user_id', userId)
       agentTeams = (data ?? []).map((r: { team_id: string }) => r.team_id)
     }

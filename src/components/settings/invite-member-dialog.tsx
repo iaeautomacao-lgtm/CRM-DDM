@@ -47,7 +47,7 @@ interface InviteMemberDialogProps {
 // the settings UI, but the server rejects it — the account can only
 // ever have one owner, reassigned via Transfer Ownership, never
 // created here.
-const INVITE_ROLES: AccountRole[] = ['agent', 'admin', 'owner', 'viewer'];
+const INVITE_ROLES: AccountRole[] = ['agent', 'supervisor', 'admin', 'owner', 'viewer'];
 
 const MIN_PASSWORD_LENGTH = 6;
 

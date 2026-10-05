@@ -16,6 +16,10 @@ import type { AccountRole } from "@/lib/auth/roles";
 //   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings,
 //            /equipes, /perfil, /templates, /tabulacoes, /usuarios,
 //            /flows, /disparador
+//   supervisor → /dashboard, /monitoramento, /inbox
+//            (dados só das suas equipes — RLS da migration 140). Sem
+//            /relatorios: as RPCs de relatório são SECURITY DEFINER e
+//            devolvem a conta inteira — liberar só depois de escopá-las.
 //   agent  → /inbox
 //   viewer → /dashboard
 // /templates, /tabulacoes, /usuarios are TemplateManager/
@@ -55,9 +59,9 @@ import type { AccountRole } from "@/lib/auth/roles";
 export type UserRole = AccountRole;
 
 export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
-  "/dashboard": ["owner", "admin", "viewer"],
-  "/monitoramento": ["owner", "admin"],
-  "/inbox": ["owner", "admin", "agent"],
+  "/dashboard": ["owner", "admin", "supervisor", "viewer"],
+  "/monitoramento": ["owner", "admin", "supervisor"],
+  "/inbox": ["owner", "admin", "supervisor", "agent"],
   "/relatorios": ["owner", "admin"],
 
   // Owner-only — no other role's route list above claims these.
@@ -71,7 +75,7 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/settings": ["owner", "admin"],
   "/equipes": ["owner", "admin"],
   "/perfil": ["owner", "admin"],
-  "/seguranca": ["owner", "admin", "agent", "viewer"],
+  "/seguranca": ["owner", "admin", "supervisor", "agent", "viewer"],
   "/templates": ["owner", "admin"],
   "/tabulacoes": ["owner", "admin"],
   // Cadastro das respostas rápidas (142); o uso no Inbox vale para todos.
@@ -108,5 +112,7 @@ export function canAccessRoute(role: UserRole, pathname: string): boolean {
 
 /** Landing route after login, or after a blocked-route redirect. */
 export function getDefaultRoute(role: UserRole): string {
-  return role === "agent" ? "/inbox" : "/dashboard";
+  if (role === "agent") return "/inbox";
+  if (role === "supervisor") return "/monitoramento";
+  return "/dashboard";
 }

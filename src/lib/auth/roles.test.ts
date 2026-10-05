@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_ROLES,
+  canSuperviseTeams,
   type AccountRole,
   canDeleteAccount,
   canEditSettings,
@@ -23,12 +24,21 @@ describe("roleRank", () => {
 
   it("matches the SQL helper's numeric mapping", () => {
     // Keep these in lockstep with `is_account_member`'s CASE expression
-    // in supabase/migrations/017_account_sharing.sql — any change here
-    // means the SQL helper needs the same change.
-    expect(roleRank("owner")).toBe(4);
-    expect(roleRank("admin")).toBe(3);
+    // in supabase/migrations/135_supervisor_role_access.sql — any change
+    // here means the SQL helper needs the same change.
+    expect(roleRank("owner")).toBe(5);
+    expect(roleRank("admin")).toBe(4);
+    expect(roleRank("supervisor")).toBe(3);
     expect(roleRank("agent")).toBe(2);
     expect(roleRank("viewer")).toBe(1);
+  });
+
+  it("supervisor: tudo do agente, nada de admin", () => {
+    expect(hasMinRole("supervisor", "agent")).toBe(true);
+    expect(hasMinRole("supervisor", "admin")).toBe(false);
+    expect(canSuperviseTeams("supervisor")).toBe(true);
+    expect(canSuperviseTeams("agent")).toBe(false);
+    expect(canManageMembers("supervisor")).toBe(false);
   });
 });
 

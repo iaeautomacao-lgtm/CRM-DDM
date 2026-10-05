@@ -58,7 +58,7 @@ import { createClient } from '@/lib/supabase/client';
 interface PeekOk {
   ok: true;
   account_name: string;
-  role: 'admin' | 'agent' | 'viewer';
+  role: 'admin' | 'supervisor' | 'agent' | 'viewer';
   expires_at: string;
 }
 interface PeekFail {
@@ -68,12 +68,13 @@ interface PeekFail {
 type PeekResult = PeekOk | PeekFail;
 
 // PT-BR labels, matching the canonical mapping in role-meta.ts
-// (owner=Administrador, admin=Supervisor, agent=Operador,
+// (admin=Administrador, supervisor=Supervisor, agent=Operador,
 // viewer=Visualizador) even though the rest of this page is English —
 // this page has no AuthProvider to pull role-meta.ts's icon-bearing
-// ROLE_META from, so the three non-owner labels are duplicated here.
+// ROLE_META from, so the non-owner labels are duplicated here.
 const ROLE_LABEL: Record<PeekOk['role'], string> = {
-  admin: 'Supervisor',
+  admin: 'Administrador',
+  supervisor: 'Supervisor',
   agent: 'Operador',
   viewer: 'Visualizador',
 };
