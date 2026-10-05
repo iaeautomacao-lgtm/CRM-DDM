@@ -16,10 +16,9 @@ import type { AccountRole } from "@/lib/auth/roles";
 //   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings,
 //            /equipes, /perfil, /templates, /tabulacoes, /usuarios,
 //            /flows, /disparador
-//   supervisor → /dashboard, /monitoramento, /inbox
-//            (dados só das suas equipes — RLS da migration 140). Sem
-//            /relatorios: as RPCs de relatório são SECURITY DEFINER e
-//            devolvem a conta inteira — liberar só depois de escopá-las.
+//   supervisor → /dashboard, /monitoramento, /inbox e os relatórios de
+//            Atendimentos/Conversas/Agentes (dados só das suas equipes —
+//            RLS da migration 140 e RPCs escopadas na 143)
 //   agent  → /inbox
 //   viewer → /dashboard
 // /templates, /tabulacoes, /usuarios are TemplateManager/
@@ -62,6 +61,13 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/dashboard": ["owner", "admin", "supervisor", "viewer"],
   "/monitoramento": ["owner", "admin", "supervisor"],
   "/inbox": ["owner", "admin", "supervisor", "agent"],
+  // Supervisor: só os relatórios de atendimento, já escopados às equipes
+  // dele (migration 143). Precisa vir ANTES de "/relatorios" — a busca usa
+  // o primeiro prefixo que casar. Envio em lote, Exportações e Auditoria
+  // continuam só owner/admin.
+  "/relatorios/atendimentos": ["owner", "admin", "supervisor"],
+  "/relatorios/conversas": ["owner", "admin", "supervisor"],
+  "/relatorios/agentes": ["owner", "admin", "supervisor"],
   "/relatorios": ["owner", "admin"],
 
   // Owner-only — no other role's route list above claims these.

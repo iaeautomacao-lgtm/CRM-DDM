@@ -8,10 +8,15 @@ describe("supervisor (migrations 139/140)", () => {
     }
   });
   it("não acessa configuração nem ferramentas de admin", () => {
-    // Relatórios: RPCs SECURITY DEFINER devolvem a conta inteira.
-    for (const path of ["/settings", "/usuarios", "/canais", "/flows", "/disparador", "/equipes", "/relatorios/atendimentos"]) {
+    for (const path of ["/settings", "/usuarios", "/canais", "/flows", "/disparador", "/equipes", "/relatorios/envio-em-lote", "/relatorios/exportacoes", "/relatorios/auditoria"]) {
       expect(canAccessRoute("supervisor", path)).toBe(false);
     }
+  });
+  it("vê os relatórios de atendimento (escopados pela 143)", () => {
+    for (const path of ["/relatorios/atendimentos", "/relatorios/conversas", "/relatorios/agentes"]) {
+      expect(canAccessRoute("supervisor", path)).toBe(true);
+    }
+    expect(canAccessRoute("agent", "/relatorios/atendimentos")).toBe(false);
   });
   it("cai no Monitoramento depois do login", () => {
     expect(getDefaultRoute("supervisor")).toBe("/monitoramento");
