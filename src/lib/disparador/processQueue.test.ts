@@ -167,12 +167,14 @@ describe('isDefinitiveRejection (item não fica preso em "enviando")', () => {
     expect(isDefinitiveRejection(new PreSendError('Canal Meta sem token de acesso configurado'))).toBe(true);
     expect(isDefinitiveRejection(new MetaApiError('bad param (code 131008)', 131008, 400))).toBe(true);
     expect(isDefinitiveRejection(new Error('Chamada não atendida (tempo esgotado)'))).toBe(true);
+    expect(isDefinitiveRejection(new Error('Failed to start WaCalls call: 404 - x'))).toBe(true);
   });
   it('resultado desconhecido continua aguardando reconciliação', () => {
     expect(isDefinitiveRejection(new TypeError('fetch failed'))).toBe(false);
     expect(isDefinitiveRejection(new Error('WAHA sendText failed (500): oops'))).toBe(false);
     expect(isDefinitiveRejection(new Error('WAHA sendText failed (408): timeout'))).toBe(false);
     expect(isDefinitiveRejection(new MetaApiError('server', null, 503))).toBe(false);
+    expect(isDefinitiveRejection(new Error('Não foi possível gerar um CallID para a ligação'))).toBe(false);
   });
 });
 

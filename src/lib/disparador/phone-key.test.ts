@@ -17,6 +17,14 @@ describe("phoneKey", () => {
     expect(phoneKey("+551199998888")).toBe(k); // sem o 9º dígito
     expect(phoneKey("+5521999998888")).not.toBe(k); // outro DDD
   });
+  it("fixo não bate com celular de mesmos dígitos", () => {
+    expect(phoneKey("1134567890")).not.toBe(phoneKey("11934567890"));
+    expect(phoneVariants("+551134567890")).not.toContain("+5511934567890");
+  });
+  it("DDD 55 sem DDI", () => {
+    expect(formatBrazilianPhone("55991234567")).toBe("+5555991234567");
+    expect(phoneKey("55991234567")).toBe(phoneKey("+5555991234567"));
+  });
 });
 
 describe("phoneVariants", () => {

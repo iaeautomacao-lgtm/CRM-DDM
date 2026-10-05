@@ -174,12 +174,18 @@ function isPermanentSendError(err: unknown): boolean {
     if (err.metaCode === null) return false;
     return META_INVALID_PHONE_CODES.has(err.metaCode) || META_PERMANENT_CODES.has(err.metaCode);
   }
-  // Erros WAHA: heurística original por HTTP 4xx (exceto 429) embutido na mensagem.
   const message = err instanceof Error ? err.message : String(err);
-  const match = message.match(/\b(4\d{2})\b/);
-  if (!match) return false;
-  const status = Number(match[1]);
-  return status >= 400 && status < 500 && status !== 429;
+  // Ligação recusada/encerrada/não atendida: não religar automaticamente
+  // (antes o retry ligava de novo após 1, 4, 9 e 16 min).
+  if (/^Chamada (rejeitada|não atendida)/.test(message)) return true;
+  // WAHA: só 400 (requisição inválida) é permanente. 401/403/404/422
+  // aparecem com a sessão caída/reiniciando (QR, STARTING) — retry com
+  // backoff em vez de condenar a base inteira por uma queda de minutos.
+  const waha = message.match(/^WAHA \w+ failed \((\d{3})\)/);
+  if (waha) return Number(waha[1]) === 400;
+  const wacalls = message.match(/^Failed to start WaCalls call: (\d{3})/);
+  if (wacalls) return Number(wacalls[1]) === 400;
+  return false;
 }
 
 /**
@@ -188,6 +194,14 @@ function isPermanentSendError(err: unknown): boolean {
  * "aguardando reconciliação".
  */
 export class PreSendError extends Error {}
+
+function decryptOrPreSend(value: string, what: string): string {
+  try {
+    return decrypt(value);
+  } catch {
+    throw new PreSendError(`Não foi possível ler a ${what} do canal (reconecte o canal)`);
+  }
+}
 
 /**
  * O provedor REJEITOU o envio (nada chegou ao cliente)? true = pode marcar
@@ -205,13 +219,15 @@ export function isDefinitiveRejection(err: unknown): boolean {
   if (err instanceof MetaApiError) return err.httpStatus > 0 && err.httpStatus < 500;
   const message = err instanceof Error ? err.message : String(err);
   const waha = message.match(/^WAHA \w+ failed \((\d{3})\)/);
-  if (waha) {
-    const status = Number(waha[1]);
+  const wacalls = message.match(/^Failed to start WaCalls call: (\d{3})/);
+  const httpStatus = waha ? Number(waha[1]) : wacalls ? Number(wacalls[1]) : null;
+  if (httpStatus !== null) {
     // 408 (timeout do lado deles) pode ter enviado; 4xx restantes não.
-    return status >= 400 && status < 500 && status !== 408;
+    return httpStatus >= 400 && httpStatus < 500 && httpStatus !== 408;
   }
-  // Ligação recusada/não atendida: nenhuma mensagem foi entregue.
-  if (/^(Chamada (rejeitada|não atendida)|Não foi possível gerar um CallID)/.test(message)) return true;
+  // Ligação recusada/não atendida: concluída, sem nada pendente. "CallID
+  // ausente" fica de fora: a chamada pode ter sido iniciada.
+  if (/^Chamada (rejeitada|não atendida)/.test(message)) return true;
   return false;
 }
 
@@ -571,8 +587,14 @@ export async function processQueueItem(
     .select("*")
     .eq("id", item.session_id);
   if (campaign.account_id) configQuery = configQuery.eq("account_id", campaign.account_id);
-  const { data: config } = await configQuery.maybeSingle();
+  const { data: config, error: configError } = await configQuery.maybeSingle();
 
+  if (configError) {
+    // Falha momentânea do banco: retry, não condena o contato.
+    const message = `Falha ao carregar o canal: ${configError.message}`;
+    await markQueueError(item.id, message, false, item.campaign_id, tentativasAtuais + 1);
+    return { outcome: "error", error: message };
+  }
   if (!config) {
     // O item já foi reivindicado ('enviando'): sem canal nada foi enviado,
     // então fecha como erro em vez de deixá-lo preso.
@@ -589,8 +611,10 @@ export async function processQueueItem(
     try {
       item = { ...item, media_url: await resolveProviderMedia(item.media_url, config.account_id) };
     } catch (mediaErr) {
-      const message = `Mídia indisponível: ${mediaErr instanceof Error ? mediaErr.message : String(mediaErr)}`;
-      await markQueueError(item.id, message, true, item.campaign_id, tentativasAtuais + 1);
+      const detail = mediaErr instanceof Error ? mediaErr.message : String(mediaErr);
+      const message = `Mídia indisponível: ${detail}`;
+      // Anexo de outra conta é definitivo; falha ao assinar a URL, não.
+      await markQueueError(item.id, message, /não autorizado/i.test(detail), item.campaign_id, tentativasAtuais + 1);
       return { outcome: "error", error: message };
     }
   }
@@ -840,7 +864,7 @@ async function sendViaWaha(
   const wahaConfig = {
     waha_url: config.waha_url,
     waha_session: config.waha_session,
-    waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
+    waha_api_key: config.waha_api_key ? decryptOrPreSend(config.waha_api_key, "chave da API WAHA") : null,
   };
 
   // Mesma validação do caminho Meta (sendViaMeta, abaixo) — sem isso,
@@ -939,7 +963,7 @@ async function sendViaMeta(
     throw new PreSendError("Ligação não é suportada em canais Meta (API oficial)");
   }
 
-  const accessToken = config.access_token ? decrypt(config.access_token) : null;
+  const accessToken = config.access_token ? decryptOrPreSend(config.access_token, "token de acesso Meta") : null;
   if (!accessToken) {
     throw new PreSendError(`Canal Meta sem token de acesso configurado (session_id: ${item.session_id})`);
   }

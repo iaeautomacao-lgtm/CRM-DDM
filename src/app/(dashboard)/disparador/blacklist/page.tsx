@@ -214,7 +214,12 @@ export default function BlacklistPage() {
 
     // Mesmo formato de contacts.phone (+55DDDNÚMERO). Antes gravava sem o
     // 55 ("+11999998888") e o bloqueio nunca batia com o contato.
-    const cleanPhone = formatBrazilianPhone(telefone);
+    // Número estrangeiro digitado com "+" (fora do +55) fica como está.
+    const trimmed = telefone.trim();
+    const cleanPhone =
+      trimmed.startsWith("+") && !trimmed.startsWith("+55")
+        ? `+${trimmed.replace(/\D/g, "")}`
+        : formatBrazilianPhone(trimmed);
 
     try {
       const supabase = createClient();

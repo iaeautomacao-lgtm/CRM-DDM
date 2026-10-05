@@ -9,16 +9,7 @@ import {
   assignImportedContactTags,
   type ContactTagAssignment,
 } from "@/lib/contacts/resolve-import-tags";
-import { phoneKey } from "@/lib/disparador/phone-key";
-
-function formatBrazilianPhone(raw: string): string {
-  if (!raw) return "";
-  const cleaned = raw.replace(/\D/g, "");
-  if (cleaned.startsWith("55")) {
-    return `+${cleaned}`;
-  }
-  return `+55${cleaned}`;
-}
+import { formatBrazilianPhone, phoneKey } from "@/lib/disparador/phone-key";
 
 // Looks up a value in `row` by trying each of `keys` against the row's
 // keys lowercased/trimmed, so CSV/XLSX headers can vary in case, spacing,

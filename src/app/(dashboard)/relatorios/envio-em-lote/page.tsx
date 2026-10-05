@@ -95,7 +95,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 // qualquer linha que não seja status=erro com o código correspondente.
 const ERROR_TYPE_OPTIONS = [
   { value: "all", label: "Todos os erros" },
-  { value: "131026", label: "Janela 24h (131026)" },
+  { value: "131026", label: "Janela 24h (131026/131047)" },
   { value: "131009", label: "Número inválido (131009)" },
   { value: "outros", label: "Outros" },
 ] as const;
@@ -358,9 +358,9 @@ export default function EnvioEmLotePage() {
     return items.filter((it) => {
       if (it.status !== "erro") return false;
       const codigo = extrairCodigoMetaErro(it.erro);
-      if (errorTypeFilter === "131026") return codigo === 131026;
+      if (errorTypeFilter === "131026") return codigo === 131026 || codigo === 131047;
       if (errorTypeFilter === "131009") return codigo === 131009;
-      return codigo !== 131026 && codigo !== 131009;
+      return codigo !== 131026 && codigo !== 131047 && codigo !== 131009;
     });
   }, [items, errorTypeFilter]);
 

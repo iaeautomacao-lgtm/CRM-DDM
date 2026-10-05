@@ -22,15 +22,22 @@ function nationalDigits(raw: string): string | null {
   return d.length === 10 || d.length === 11 ? d : null;
 }
 
+/** Celular no formato antigo/novo: 8 dígitos começando com 6–9. */
+const isMobileLocal8 = (local8: string) => /^[6-9]/.test(local8);
+
 /**
- * Chave de comparação: DDD + últimos 8 dígitos. Iguala "+55 11 99999-8888",
- * "11999998888", "+11999998888" e o mesmo número sem o 9º dígito.
- * Números fora do padrão BR caem para os próprios dígitos.
+ * Chave de comparação. Iguala "+55 11 99999-8888", "11999998888",
+ * "+11999998888" e o mesmo celular sem o 9º dígito — o 9 só é ignorado na
+ * faixa de celular (6–9), para um fixo (11 3456-7890) não bater com o
+ * celular 11 93456-7890. Números fora do padrão BR: os próprios dígitos.
  */
 export function phoneKey(raw: string): string {
   const n = nationalDigits(raw);
   if (!n) return (raw ?? "").replace(/\D/g, "");
-  return n.slice(0, 2) + n.slice(-8);
+  const ddd = n.slice(0, 2);
+  const local = n.slice(2);
+  if (local.length === 9 && local[0] === "9" && isMobileLocal8(local.slice(1))) return ddd + local.slice(1);
+  return ddd + local;
 }
 
 /**
@@ -43,8 +50,12 @@ export function phoneVariants(raw: string): string[] {
   const n = nationalDigits(raw);
   if (!n) return [...out];
   const ddd = n.slice(0, 2);
-  const last8 = n.slice(-8);
-  for (const national of [ddd + last8, ddd + "9" + last8]) {
+  const local = n.slice(2);
+  const nationals = [n];
+  // Com/sem o 9º dígito só para celular (ver phoneKey).
+  if (local.length === 9 && local[0] === "9" && isMobileLocal8(local.slice(1))) nationals.push(ddd + local.slice(1));
+  if (local.length === 8 && isMobileLocal8(local)) nationals.push(ddd + "9" + local);
+  for (const national of nationals) {
     out.add(`+55${national}`);
     out.add(`55${national}`);
     out.add(`+${national}`);
