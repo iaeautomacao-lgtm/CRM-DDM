@@ -266,28 +266,12 @@ export default function JoinPage() {
               >
                 Try again
               </Button>
-              <Link href="/signup">
-                <Button
-                  variant="outline"
-                  className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Create a new account instead
-                </Button>
-              </Link>
             </>
           ) : (
             <>
-              <Link href="/signup">
-                <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-                  Create a new account instead
-                </Button>
-              </Link>
               <Link href="/login">
-                <Button
-                  variant="outline"
-                  className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  Sign in
+                <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
+                  Entrar
                 </Button>
               </Link>
             </>
@@ -419,19 +403,15 @@ export default function JoinPage() {
     <Card className="w-full max-w-md border-border bg-card">
       {inviteHeader}
       <CardContent className="flex flex-col gap-2">
-        <Link href={`/signup?invite=${encodeURIComponent(token!)}`}>
-          <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-            Create account &amp; join
-          </Button>
-        </Link>
+        {/* Sem cadastro público: quem ainda não tem usuário pede ao admin. */}
         <Link href={`/login?invite=${encodeURIComponent(token!)}`}>
-          <Button
-            variant="outline"
-            className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            I already have an account
+          <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
+            Entrar para aceitar o convite
           </Button>
         </Link>
+        <p className="text-center text-xs text-muted-foreground">
+          Ainda não tem usuário? Peça ao administrador para criá-lo.
+        </p>
       </CardContent>
     </Card>
   );

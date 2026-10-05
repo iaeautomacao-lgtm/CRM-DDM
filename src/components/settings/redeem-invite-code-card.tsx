@@ -99,9 +99,8 @@ export function RedeemInviteCodeCard() {
     setSigningOut(true);
     try {
       await createClient().auth.signOut();
-      // Their very next step has to be "sign up with a different
-      // email" — send them straight there instead of /login.
-      window.location.href = '/signup';
+      // Sem cadastro público: entra com outro usuário (criado pelo admin).
+      window.location.href = '/login';
     } catch (err) {
       console.error('[RedeemInviteCodeCard] sign-out error:', err);
       toast.error('Could not sign out. Try refreshing the page.');
