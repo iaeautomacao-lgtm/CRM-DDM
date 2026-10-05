@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
     const body = await request.json()
     const conversationId = body?.conversation_id as string | undefined
-    const reason = (body?.reason as string | undefined) || 'conversation_closed'
+    const requestedReason = body?.reason as string | undefined
     if (!conversationId) {
       return NextResponse.json({ error: 'conversation_id is required' }, { status: 400 })
     }
@@ -47,13 +47,22 @@ export async function POST(request: Request) {
     // other admin-client entry point (flows/engine.ts, whatsapp/send).
     const { data: conversation } = await supabaseAdmin()
       .from('conversations')
-      .select('id')
+      .select('id, status')
       .eq('id', conversationId)
       .eq('account_id', accountId)
       .maybeSingle()
     if (!conversation) {
       return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
     }
+
+    // Motivo real: antes, sem reason, gravava "conversation_closed" mesmo
+    // com a conversa aberta — execução encerrada "porque a conversa
+    // fechou" numa conversa aberta (estado que a análise encontrou).
+    const reason =
+      requestedReason?.trim() ||
+      ((conversation as { status?: string }).status === 'closed'
+        ? 'conversation_closed'
+        : 'ended_manually')
 
     await endActiveRunForConversation(conversationId, reason)
 

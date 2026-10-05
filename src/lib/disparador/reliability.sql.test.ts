@@ -20,7 +20,7 @@ beforeAll(async()=>{
  CREATE TABLE wacrm.profiles(user_id uuid PRIMARY KEY,full_name text,email text,account_id uuid);
  CREATE TABLE wacrm.system_logs(id uuid,account_id uuid,user_id uuid,page text,action text,level text,source text,event text,message text,payload jsonb,created_at timestamptz);
  INSERT INTO wacrm.whatsapp_config VALUES('${channel}');`);
- for(const file of ['113_cron_locks.sql','118_dispatch_safety.sql','119_dispatch_status_transitions.sql','120_account_scoped_logs.sql','122_callback_outbox_ai_intents.sql','123_cron_progress.sql','124_send_idempotency.sql','125_pending_dispatch_receipts.sql']) await db.exec(readFileSync(resolve('supabase/migrations',file),'utf8'));
+ for(const file of ['113_cron_locks.sql','118_dispatch_safety.sql','119_dispatch_status_transitions.sql','120_account_scoped_logs.sql','122_callback_outbox_ai_intents.sql','123_cron_progress.sql','124_send_idempotency.sql','125_pending_dispatch_receipts.sql','146_release_ai_reply.sql']) await db.exec(readFileSync(resolve('supabase/migrations',file),'utf8'));
 },30000);
 afterAll(async()=>{await db?.close()});
 beforeEach(async()=>{
@@ -40,6 +40,14 @@ it('reserves one AI reply per inbound intent and validates its account',async()=
  const claim=()=>db.query<{owned:boolean}>('SELECT wacrm.claim_ai_reply($1,$2,$3,$4) AS owned',[account,campaign,message,'node']);
  expect((await claim()).rows[0].owned).toBe(true);expect((await claim()).rows[0].owned).toBe(false);
  expect((await db.query<{owned:boolean}>('SELECT wacrm.claim_ai_reply($1,$2,$3,$4) AS owned',[channel,campaign,message,'other'])).rows[0].owned).toBe(false);
+});
+it('releases an AI reply reservation so a safe retry can claim it again',async()=>{
+ const claim=()=>db.query<{owned:boolean}>('SELECT wacrm.claim_ai_reply($1,$2,$3,$4) AS owned',[account,campaign,message,'node']);
+ const release=()=>db.query<{released:boolean}>('SELECT wacrm.release_ai_reply($1,$2,$3,$4) AS released',[account,campaign,message,'node']);
+ expect((await claim()).rows[0].owned).toBe(true);expect((await claim()).rows[0].owned).toBe(false);
+ expect((await release()).rows[0].released).toBe(true);
+ expect((await claim()).rows[0].owned).toBe(true);
+ expect((await db.query<{allowed:boolean}>("SELECT has_function_privilege('authenticated','wacrm.release_ai_reply(uuid,uuid,uuid,text)','execute') AS allowed")).rows[0].allowed).toBe(false);
 });
 it('isolates ranking, actions and feedback between two accounts',async()=>{
  await db.exec(`INSERT INTO wacrm.profiles VALUES('${message}','Alice','alice@example.test','${account}'),('${item}','Bob','bob@example.test','${channel}');
