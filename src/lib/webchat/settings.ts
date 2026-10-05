@@ -59,8 +59,10 @@ export function normalizeWebchatSettings(input: Record<string, unknown>): Webcha
 
 /** Boas-vindas da página do cliente, com o primeiro nome no lugar de {nome}. */
 export function renderWelcome(template: string | null, firstName: string | null): string {
-  if (!template) return `${firstName ? `Olá, ${firstName}! ` : "Olá! "}Já vamos te atender.`;
-  return template.replace(/\{nome\}/gi, firstName ?? "").replace(/\s+([,!.?])/g, "$1").trim();
+  const fallback = `${firstName ? `Olá, ${firstName}! ` : "Olá! "}Já vamos te atender.`;
+  if (!template) return fallback;
+  const rendered = template.replace(/\{nome\}/gi, firstName ?? "").replace(/\s+([,!.?])/g, "$1").trim();
+  return rendered || fallback;
 }
 
 export async function loadWebchatSettings(db: SupabaseClient, accountId: string): Promise<WebchatSettings> {

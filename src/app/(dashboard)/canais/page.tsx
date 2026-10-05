@@ -121,7 +121,7 @@ function searchHaystack(c: ChannelConfig): string {
 export default function CanaisPage() {
   const { accountId } = useAuth();
   const [configs, setConfigs] = useState<ChannelConfig[]>([]);
-  const [flows, setFlows] = useState<{ id: string; name: string }[]>([]);
+  const [flows, setFlows] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -204,8 +204,8 @@ export default function CanaisPage() {
     apiFetch("/api/flows")
       .then((res) => res.json())
       .then((data) => {
-        const list = (data.flows ?? []) as { id: string; name: string }[];
-        setFlows(list.map((f) => ({ id: f.id, name: f.name })));
+        const list = (data.flows ?? []) as { id: string; name: string; status?: string }[];
+        setFlows(list.map((f) => ({ id: f.id, name: f.name, status: f.status })));
       })
       .catch((err) => console.error("[canais] failed to load flows:", err));
   }, []);
@@ -599,7 +599,8 @@ export default function CanaisPage() {
 
       <SocialChannelsSection flows={flows} teams={teams} clients={clients} />
 
-      <WebchatSettingsSection flows={flows} />
+      {/* Só fluxos ativos: o motor recusa iniciar Webchat em rascunho. */}
+      <WebchatSettingsSection flows={flows.filter((f) => f.status === "active")} />
 
       <ClientsDialog
         accountId={accountId}

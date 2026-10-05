@@ -37,8 +37,11 @@ export async function PUT(request: Request) {
         .select('id')
         .eq('id', settings.default_flow_id)
         .eq('account_id', accountId)
+        .eq('status', 'active')
         .limit(1)
-      if (!data?.[0]) return NextResponse.json({ error: 'Fluxo inválido' }, { status: 400 })
+      if (!data?.[0]) {
+        return NextResponse.json({ error: 'Escolha um fluxo ativo para o Webchat' }, { status: 400 })
+      }
     }
 
     const { error } = await db

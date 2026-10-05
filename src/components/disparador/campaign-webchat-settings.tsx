@@ -98,7 +98,7 @@ export function CampaignWebchatSettings({
               onChange={(e) => set({ webchat_flow_id: e.target.value || null })}
               className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
             >
-              <option value="">{loading ? "Carregando fluxos…" : "Selecione um fluxo ativo"}</option>
+              <option value="">{loading ? "Carregando fluxos…" : "Fluxo padrão do Webchat (/canais)"}</option>
               {flows.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
@@ -136,7 +136,7 @@ export function CampaignWebchatSettings({
           </div>
           {!value.webchat_flow_id && (
             <p className="text-[10px] text-amber-500">
-              Escolha um fluxo: sem ele a opção fica desligada na prática.
+              Sem fluxo aqui, vale o fluxo padrão do Webchat em /canais. Se não houver padrão, o convite não é enviado.
             </p>
           )}
         </div>

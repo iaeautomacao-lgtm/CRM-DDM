@@ -143,7 +143,14 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
                 min={1}
                 max={WEBCHAT_SESSION_HOURS_MAX}
                 value={form.session_hours}
-                onChange={(e) => set({ session_hours: Number(e.target.value) })}
+                onChange={(e) =>
+                  set({
+                    session_hours: Math.min(
+                      WEBCHAT_SESSION_HOURS_MAX,
+                      Math.max(1, Math.trunc(Number(e.target.value)) || 1),
+                    ),
+                  })
+                }
               />
             </div>
             <div className="space-y-1.5">
@@ -161,6 +168,9 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
                   </option>
                 ))}
               </select>
+              <p className="text-[11px] text-muted-foreground">
+                Só fluxos ativos. Campanhas com Webchat ligado e sem fluxo próprio passam a usar este.
+              </p>
             </div>
             <div className="space-y-1.5 md:col-span-2">
               <Label htmlFor="wc-invite">Texto padrão do convite</Label>

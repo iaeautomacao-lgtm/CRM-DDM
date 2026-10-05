@@ -20,6 +20,24 @@ const POLL_OVERLAP_MS = 5000;
 // Suporte a gravação não muda durante a vida da página: não há o que assinar.
 const noopSubscribe = () => () => {};
 
+/**
+ * Variáveis do tema a partir da cor do Webchat (/canais): primária, hover,
+ * foco e texto preto ou branco conforme a luminosidade (cor clara não fica
+ * com texto branco ilegível).
+ */
+function accentVars(hex: string): CSSProperties {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return {
+    "--primary": hex,
+    "--primary-hover": `color-mix(in srgb, ${hex} 85%, black)`,
+    "--primary-soft": `color-mix(in srgb, ${hex} 15%, transparent)`,
+    "--ring": hex,
+    "--primary-foreground": luminance > 0.6 ? "#111111" : "#ffffff",
+  } as CSSProperties;
+}
+
 type PageState =
   | { kind: "loading" }
   | { kind: "gone"; reason: "expired" | "revoked" | "not_found" | "error" }
@@ -107,7 +125,7 @@ export function WebchatClient({ token }: { token: string }) {
           kind: "ready",
           brand: body.brand?.name ?? "Atendimento",
           firstName,
-          welcome: body.welcome ?? `${firstName ? `Olá, ${firstName}! ` : "Olá! "}Já vamos te atender.`,
+          welcome: body.welcome || `${firstName ? `Olá, ${firstName}! ` : "Olá! "}Já vamos te atender.`,
           accent: typeof body.brand?.accent_color === "string" ? body.brand.accent_color : null,
         });
         await poll();
@@ -220,9 +238,7 @@ export function WebchatClient({ token }: { token: string }) {
   if (page.kind === "gone") return <GoneScreen reason={page.reason} />;
 
   // Cor da configuração do Webchat: sobrescreve o --primary da página.
-  const accentStyle = page.accent
-    ? ({ "--primary": page.accent, "--primary-foreground": "#ffffff" } as CSSProperties)
-    : undefined;
+  const accentStyle = page.accent ? accentVars(page.accent) : undefined;
 
   return (
     <div className="flex h-dvh flex-col bg-background" style={accentStyle}>
@@ -290,7 +306,7 @@ function GoneScreen({ reason }: { reason: "expired" | "revoked" | "not_found" | 
   const copy = {
     expired: {
       title: "Este link expirou",
-      body: "O link do atendimento vale por 24 horas. Volte à conversa no WhatsApp para receber um novo.",
+      body: "Este link de atendimento expirou. Volte à conversa no WhatsApp para receber um novo.",
     },
     revoked: {
       title: "Este link foi substituído",
