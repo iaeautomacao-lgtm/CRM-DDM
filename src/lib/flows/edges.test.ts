@@ -4,6 +4,8 @@ import {
   deriveCanvasEdges,
   outgoingSlots,
   unlinkNodeReferences,
+  replaceNodeReferences,
+  countIncomingReferences,
 } from "./edges";
 import type { BuilderNode } from "@/components/flows/shared";
 
@@ -587,5 +589,33 @@ describe("unlinkNodeReferences", () => {
     expect(after).toHaveLength(2);
     expect(after[0]).toBe(nodes[0]);
     expect(after[1]).toBe(nodes[1]);
+  });
+});
+
+describe("replaceNodeReferences / countIncomingReferences", () => {
+  const nodes = [
+    { node_key: "start", node_type: "start", config: { next_node_key: "menu" } },
+    {
+      node_key: "menu",
+      node_type: "send_buttons",
+      config: { text: "x", buttons: [{ reply_id: "a", title: "A", next_node_key: "fim" }] },
+    },
+    { node_key: "cond", node_type: "condition", config: { true_next: "fim", false_next: "menu" } },
+    { node_key: "fim", node_type: "end", config: {} },
+  ] as unknown as Parameters<typeof replaceNodeReferences>[0];
+
+  it("renomear reaponta botões, condição e next_node_key", () => {
+    const out = replaceNodeReferences(nodes, "fim", "encerrar");
+    const menu = out.find((n) => n.node_key === "menu")!;
+    const cond = out.find((n) => n.node_key === "cond")!;
+    expect((menu.config as { buttons: Array<{ next_node_key: string }> }).buttons[0].next_node_key).toBe("encerrar");
+    expect((cond.config as { true_next: string }).true_next).toBe("encerrar");
+    expect((cond.config as { false_next: string }).false_next).toBe("menu");
+  });
+
+  it("conta quantos nós apontam para a chave", () => {
+    expect(countIncomingReferences(nodes, "fim")).toBe(2);
+    expect(countIncomingReferences(nodes, "menu")).toBe(2);
+    expect(countIncomingReferences(nodes, "start")).toBe(0);
   });
 });

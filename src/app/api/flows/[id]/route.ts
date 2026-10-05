@@ -155,6 +155,20 @@ export async function PUT(
     }
   }
 
+  // Chave repetida faria o insert falhar depois de apagar os nós.
+  if (body.nodes !== undefined) {
+    const seen = new Set<string>()
+    for (const n of body.nodes) {
+      if (seen.has(n.node_key)) {
+        return NextResponse.json(
+          { error: `Chave de nó repetida: "${n.node_key}". Renomeie um dos nós.` },
+          { status: 400 },
+        )
+      }
+      seen.add(n.node_key)
+    }
+  }
+
   // Update the flow row first — the body may not include `nodes` (a
   // header-only save for editing the trigger config without touching
   // the graph). Skip node replacement in that case.
@@ -181,8 +195,18 @@ export async function PUT(
   }
 
   if (body.nodes !== undefined) {
-    // Delete-then-insert. Not transactional but the runner handles
-    // mid-edit reads safely (a node_not_found ends the run cleanly).
+    // Delete-then-insert (sem transação no PostgREST). Guarda os nós
+    // atuais antes: se o insert falhar, eles voltam — antes o fluxo
+    // ficava sem nenhum nó no banco.
+    const { data: previousNodes, error: prevErr } = await admin
+      .from('flow_nodes')
+      .select('*')
+      .eq('flow_id', id)
+      .order('created_at')
+      .range(0, 999)
+    if (prevErr) {
+      return NextResponse.json({ error: prevErr.message }, { status: 500 })
+    }
     const { error: delErr } = await admin
       .from('flow_nodes')
       .delete()
@@ -191,18 +215,29 @@ export async function PUT(
       return NextResponse.json({ error: delErr.message }, { status: 500 })
     }
     if (body.nodes.length > 0) {
+      // created_at escalonado (1 ms por nó) mantém a ordem da Lista ao
+      // recarregar — antes todos tinham o mesmo instante e a ordem variava.
+      const base = Date.now()
       const { error: insErr } = await admin.from('flow_nodes').insert(
-        body.nodes.map((n) => ({
+        body.nodes.map((n, i) => ({
           flow_id: id,
           node_key: n.node_key,
           node_type: n.node_type,
           config: n.config,
           position_x: n.position_x ?? 0,
           position_y: n.position_y ?? 0,
+          created_at: new Date(base + i).toISOString(),
         })),
       )
       if (insErr) {
-        return NextResponse.json({ error: insErr.message }, { status: 500 })
+        if (previousNodes && previousNodes.length > 0) {
+          const { error: restoreErr } = await admin.from('flow_nodes').insert(previousNodes)
+          if (restoreErr) console.error('[flows PUT] falha ao restaurar nós:', restoreErr.message)
+        }
+        return NextResponse.json(
+          { error: `Falha ao salvar os nós (nada foi alterado): ${insErr.message}` },
+          { status: 500 },
+        )
       }
     }
   }

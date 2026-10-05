@@ -38,7 +38,8 @@ import {
   summarizeRun,
 } from "@/lib/flows/run-log";
 import { toast } from "sonner";
-import { format, formatDistanceToNow } from "date-fns";
+import { format, formatDistanceStrict } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -219,7 +220,7 @@ const STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "completed", label: "Concluído" },
   { value: "handed_off", label: "Transferido" },
   { value: "failed", label: "Falhou" },
-  { value: "timed_out", label: "Timeout" },
+  { value: "timed_out", label: "Expirado" },
   { value: "paused_by_agent", label: "Pausado" },
   { value: "error", label: "Erro" },
 ];
@@ -754,8 +755,9 @@ function RunCard({
   const contactLabel =
     run.contact?.name?.trim() || run.contact?.phone || "Contato desconhecido";
   const duration = run.ended_at
-    ? formatDistanceToNow(new Date(run.ended_at), {
-        addSuffix: false,
+    ? // Duração = início → fim (antes media o tempo desde o fim).
+      formatDistanceStrict(new Date(run.started_at), new Date(run.ended_at), {
+        locale: ptBR,
       })
     : null;
   // null until the run has been expanded at least once — events are
@@ -805,7 +807,7 @@ function RunCard({
             )}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-            <span>Iniciado em {format(new Date(run.started_at), "PP p")}</span>
+            <span>Iniciado em {format(new Date(run.started_at), "dd/MM/yyyy HH:mm", { locale: ptBR })}</span>
             <span>
               · {run.hops_count} {run.hops_count === 1 ? "nó executado" : "nós executados"}
             </span>
@@ -1238,7 +1240,7 @@ function EventDetailSheet({
 
         <SheetFooter className="border-t border-border px-5 py-3">
           <span className="text-[11px] text-muted-foreground">
-            {format(new Date(ev.created_at), "PPpp")}
+            {format(new Date(ev.created_at), "dd/MM/yyyy HH:mm:ss", { locale: ptBR })}
           </span>
         </SheetFooter>
       </SheetContent>

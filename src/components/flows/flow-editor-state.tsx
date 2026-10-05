@@ -30,11 +30,8 @@ import { apiFetch } from "@/lib/api-fetch";
  *   - Canvas-view UI state (selected node id, side-sheet open) —
  *     those are canvas-only and stay in `flow-canvas.tsx`.
  *
- * `removeNode` does NOT auto-clean inbound edges. The list-view's
- * NodeKeySelect dropdowns and the validator both surface dangling
- * `next_node_key` references; that visibility is enough for v1. PR 2b
- * (canvas delete via keyboard) will revisit if the canvas adds an
- * implicit-delete affordance that's easier to trip accidentally.
+ * `removeNode` desliga as setas que chegavam no nó (unlinkNodeReferences);
+ * `renameNodeKey` troca a chave e reaponta essas setas.
  */
 
 import {
@@ -54,7 +51,7 @@ import {
   validateFlowForActivation,
   type ValidationIssue,
 } from "@/lib/flows/validate";
-import { unlinkNodeReferences } from "@/lib/flows/edges";
+import { replaceNodeReferences, unlinkNodeReferences } from "@/lib/flows/edges";
 import {
   createHistory,
   historyShortcut,
@@ -114,6 +111,10 @@ export interface FlowEditorContextValue {
     positions: Record<string, { x: number; y: number }>,
   ) => void;
   removeNode: (key: string) => void;
+  /** Troca a chave do nó e reaponta as setas. false = chave inválida/repetida. */
+  renameNodeKey: (oldKey: string, newKey: string) => boolean;
+  /** Posições de vários nós numa edição só (arrastar seleção múltipla). */
+  moveNodes: (positions: Record<string, { x: number; y: number }>) => void;
 
   // Actions
   save: (opts?: { silent?: boolean }) => Promise<boolean>;
@@ -139,6 +140,12 @@ export interface FlowEditorContextValue {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  /**
+   * Muda a cada desfazer/refazer. Formulários com rascunho local
+   * (palavras-chave, cabeçalhos JSON, unidade do Aguardar) usam como
+   * `key` para recarregar o valor restaurado.
+   */
+  historyEpoch: number;
 }
 
 // ============================================================
@@ -381,8 +388,15 @@ export function FlowEditorProvider({
     setStateRaw(next);
     setHistoryTick((t) => t + 1);
   }, []);
-  const undo = useCallback(() => applyHistory("undo"), [applyHistory]);
-  const redo = useCallback(() => applyHistory("redo"), [applyHistory]);
+  const [historyEpoch, setHistoryEpoch] = useState(0);
+  const undo = useCallback(() => {
+    applyHistory("undo");
+    setHistoryEpoch((e) => e + 1);
+  }, [applyHistory]);
+  const redo = useCallback(() => {
+    applyHistory("redo");
+    setHistoryEpoch((e) => e + 1);
+  }, [applyHistory]);
   const canUndo = historyTick >= 0 && historyRef.current.past.length > 0;
   const canRedo = historyTick >= 0 && historyRef.current.future.length > 0;
 
@@ -396,6 +410,7 @@ export function FlowEditorProvider({
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       e.preventDefault();
       applyHistory(action);
+      setHistoryEpoch((n) => n + 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -574,6 +589,18 @@ export function FlowEditorProvider({
     return () => window.clearTimeout(timeout);
   }, [dirty, save, state.status]);
 
+  // Ctrl/⌘+S = Salvar / Publicar alterações (antes abria o "salvar
+  // página" do navegador).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== "s") return;
+      e.preventDefault();
+      void save();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [save]);
+
   // ---- Activate / Pause / Archive ----
   const setStatus = useCallback(
     async (next: BuilderState["status"]) => {
@@ -721,6 +748,35 @@ export function FlowEditorProvider({
     [setState],
   );
 
+  const renameNodeKey = useCallback(
+    (oldKey: string, rawKey: string): boolean => {
+      const newKey = slugify(rawKey, oldKey);
+      if (!newKey || newKey === oldKey) return newKey === oldKey;
+      if (latestStateRef.current.nodes.some((n) => n.node_key === newKey)) {
+        toast.error(`Já existe um nó com a chave "${newKey}".`);
+        return false;
+      }
+      setState((s) => ({
+        ...s,
+        nodes: replaceNodeReferences(
+          s.nodes.map((n) => (n.node_key === oldKey ? { ...n, node_key: newKey } : n)),
+          oldKey,
+          newKey,
+        ),
+        entry_node_id: s.entry_node_id === oldKey ? newKey : s.entry_node_id,
+      }));
+      return true;
+    },
+    [setState],
+  );
+
+  const moveNodes = useCallback(
+    (positions: Record<string, { x: number; y: number }>) => {
+      setState((s) => ({ ...s, nodes: applyNodePositions(s.nodes, positions) }));
+    },
+    [setState],
+  );
+
   const removeNode = useCallback(
     (key: string) => {
       // Auto-unlink inbound references so canvas / list deletes don't
@@ -755,6 +811,8 @@ export function FlowEditorProvider({
       updateNodePosition,
       updateNodePositions,
       removeNode,
+      renameNodeKey,
+      moveNodes,
       save,
       setStatus,
       deleteFlow,
@@ -764,6 +822,7 @@ export function FlowEditorProvider({
       redo,
       canUndo,
       canRedo,
+      historyEpoch,
     }),
     [
       initialFlow,
@@ -780,6 +839,8 @@ export function FlowEditorProvider({
       updateNodePosition,
       updateNodePositions,
       removeNode,
+      renameNodeKey,
+      moveNodes,
       save,
       setStatus,
       deleteFlow,
@@ -789,6 +850,7 @@ export function FlowEditorProvider({
       redo,
       canUndo,
       canRedo,
+      historyEpoch,
     ],
   );
 

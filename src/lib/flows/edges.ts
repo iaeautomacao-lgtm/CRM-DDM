@@ -476,15 +476,34 @@ export function unlinkNodeReferences(
   nodes: BuilderNode[],
   deletedKey: string,
 ): BuilderNode[] {
+  return replaceNodeReferences(nodes, deletedKey, "");
+}
+
+/**
+ * Troca toda referência a `fromKey` (next_node_key, ramos, botões,
+ * linhas, go_to…) por `toKey` — usado ao renomear a chave de um nó
+ * para as setas continuarem ligadas. `toKey` "" desliga.
+ */
+export function replaceNodeReferences(
+  nodes: BuilderNode[],
+  fromKey: string,
+  toKey: string,
+): BuilderNode[] {
   return nodes.map((n) => {
-    const patched = patchedConfigWithoutKey(n, deletedKey);
+    const patched = patchedConfigReplacingKey(n, fromKey, toKey);
     return patched ? { ...n, config: patched } : n;
   });
 }
 
-function patchedConfigWithoutKey(
+/** Quantos nós apontam para `key` (setas que chegam nele). */
+export function countIncomingReferences(nodes: BuilderNode[], key: string): number {
+  return nodes.filter((n) => n.node_key !== key && patchedConfigReplacingKey(n, key, "") !== null).length;
+}
+
+function patchedConfigReplacingKey(
   node: BuilderNode,
   deletedKey: string,
+  replacement: string,
 ): Record<string, unknown> | null {
   const cfg = node.config;
   switch (node.node_type) {
@@ -503,19 +522,19 @@ function patchedConfigWithoutKey(
     case "send_webchat": {
       const next = (cfg as { next_node_key?: string }).next_node_key;
       if (next !== deletedKey) return null;
-      return { ...cfg, next_node_key: "" };
+      return { ...cfg, next_node_key: replacement };
     }
 
     case "go_to": {
       const target = (cfg as { target_node_key?: string }).target_node_key;
       if (target !== deletedKey) return null;
-      return { ...cfg, target_node_key: "" };
+      return { ...cfg, target_node_key: replacement };
     }
 
     case "ai_agent": {
       const next = (cfg as { next_node_key?: string }).next_node_key;
       if (next !== deletedKey) return null;
-      return { ...cfg, next_node_key: "" };
+      return { ...cfg, next_node_key: replacement };
     }
 
     case "condition": {
@@ -525,8 +544,8 @@ function patchedConfigWithoutKey(
       if (!trueMatch && !falseMatch) return null;
       return {
         ...cfg,
-        ...(trueMatch ? { true_next: "" } : {}),
-        ...(falseMatch ? { false_next: "" } : {}),
+        ...(trueMatch ? { true_next: replacement } : {}),
+        ...(falseMatch ? { false_next: replacement } : {}),
       };
     }
 
@@ -542,9 +561,9 @@ function patchedConfigWithoutKey(
       return {
         ...cfg,
         branches: branches.map((b) =>
-          b.next_node_key === deletedKey ? { ...b, next_node_key: "" } : b,
+          b.next_node_key === deletedKey ? { ...b, next_node_key: replacement } : b,
         ),
-        ...(defaultMatch ? { default_next: "" } : {}),
+        ...(defaultMatch ? { default_next: replacement } : {}),
       };
     }
 
@@ -558,7 +577,7 @@ function patchedConfigWithoutKey(
       return {
         ...cfg,
         buttons: buttons.map((b) =>
-          b.next_node_key === deletedKey ? { ...b, next_node_key: "" } : b,
+          b.next_node_key === deletedKey ? { ...b, next_node_key: replacement } : b,
         ),
       };
     }
@@ -579,7 +598,7 @@ function patchedConfigWithoutKey(
           rows: rows.map((r) => {
             if (r.next_node_key === deletedKey) {
               dirty = true;
-              return { ...r, next_node_key: "" };
+              return { ...r, next_node_key: replacement };
             }
             return r;
           }),

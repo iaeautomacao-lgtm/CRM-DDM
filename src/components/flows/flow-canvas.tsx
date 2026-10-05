@@ -37,6 +37,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { confirmNodeRemoval } from './confirm-removal';
 import {
   applyNodeChanges,
   Background,
@@ -115,6 +116,9 @@ interface NodeData extends Record<string, unknown> {
   isFlashed: boolean;
   /** null outside debug mode. See use-flow-debug.ts's classification. */
   debugStatus: NodeDebugStatus | null;
+  /** Problemas do validador neste nó (o card mostra o selo). */
+  errorCount: number;
+  warningCount: number;
 }
 
 /**
@@ -182,7 +186,7 @@ function slotColor(nodeType: NodeType, slotId: string, fallback: string) {
 }
 
 function FlowNodeCard({ data, selected }: NodeProps) {
-  const { node, isEntry, isFlashed, debugStatus } = data as NodeData;
+  const { node, isEntry, isFlashed, debugStatus, errorCount, warningCount } = data as NodeData;
   const meta = NODE_META[node.node_type];
   const c = nodeColors(node.node_type);
   const summary = summarizeNode(node);
@@ -223,9 +227,25 @@ function FlowNodeCard({ data, selected }: NodeProps) {
         // Flash overrides hover/selected colors briefly. Tailwind's
         // built-in `animate-pulse` is too gentle; a ring with the
         // amber accent matches the list view's flash semantics.
-        isFlashed && '!border-amber-400 ring-2 ring-amber-400/60'
+        isFlashed && '!border-amber-400 ring-2 ring-amber-400/60',
+        !isFlashed && !selected && errorCount > 0 && '!border-red-500/60'
       )}
     >
+      {!debugVisual && (errorCount > 0 || warningCount > 0) && (
+        <span
+          className={cn(
+            'absolute -top-2 -right-2 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]',
+            errorCount > 0 ? 'bg-red-500' : 'bg-amber-500'
+          )}
+          title={
+            errorCount > 0
+              ? `${errorCount} erro(s) neste nó — clique para corrigir`
+              : `${warningCount} aviso(s) neste nó`
+          }
+        >
+          {errorCount > 0 ? errorCount : '!'}
+        </span>
+      )}
       {debugVisual?.badge && (
         <span
           className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
@@ -343,8 +363,10 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     updateNodeConfig,
     updateNodePosition,
     updateNodePositions,
+    moveNodes,
     removeNode,
     flashKey,
+    issues,
   } = useFlowEditor();
   const reactFlow = useReactFlow();
   const builderNodes = state.nodes;
@@ -394,6 +416,18 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     );
   }, [autoLayoutPositions, updateNodePositions]);
 
+  const issueCounts = useMemo(() => {
+    const m = new Map<string, { errors: number; warnings: number }>();
+    for (const i of issues) {
+      if (i.scope !== 'node' || !i.node_key) continue;
+      const cur = m.get(i.node_key) ?? { errors: 0, warnings: 0 };
+      if (i.severity === 'error') cur.errors += 1;
+      else cur.warnings += 1;
+      m.set(i.node_key, cur);
+    }
+    return m;
+  }, [issues]);
+
   const derivedRfNodes = useMemo(() => {
     const nodes: RfNode<NodeData>[] = builderNodes.map((n) => {
       const fallback = autoLayoutPositions?.get(n.node_key);
@@ -409,17 +443,25 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           isEntry: n.node_key === entryNodeId,
           isFlashed: n.node_key === flashKey,
           debugStatus: debug ? debug.nodeStatus(n.node_key) : null,
+          errorCount: issueCounts.get(n.node_key)?.errors ?? 0,
+          warningCount: issueCounts.get(n.node_key)?.warnings ?? 0,
         },
       };
     });
 
     return nodes;
-  }, [builderNodes, entryNodeId, flashKey, autoLayoutPositions, debug]);
+  }, [builderNodes, entryNodeId, flashKey, autoLayoutPositions, debug, issueCounts]);
 
   const [rfNodes, setRfNodes] = useState<RfNode<NodeData>[]>(derivedRfNodes);
 
+  // Re-deriva a cada edição mantendo a seleção do React Flow (antes a
+  // seleção — inclusive a múltipla — sumia a cada tecla no formulário).
   useEffect(() => {
-    setRfNodes(derivedRfNodes);
+    setRfNodes((prev) => {
+      const selected = new Set(prev.filter((n) => n.selected).map((n) => n.id));
+      if (selected.size === 0) return derivedRfNodes;
+      return derivedRfNodes.map((n) => (selected.has(n.id) ? { ...n, selected: true } : n));
+    });
   }, [derivedRfNodes]);
 
   // Aresta selecionada (clique). Apagar só com Delete/Backspace — antes um
@@ -465,11 +507,19 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   // Writing only on dragStop (not on every position-change tick during
   // the drag) keeps state updates cheap on long drags.
   const handleNodeDragStop = useCallback<OnNodeDrag<RfNode<NodeData>>>(
-    (_event, node) => {
+    (_event, node, dragged) => {
       if (isDebugMode) return;
+      // Seleção múltipla: grava todos os nós arrastados numa edição só
+      // (antes só o nó sob o cursor ficava; os outros voltavam).
+      if (dragged && dragged.length > 1) {
+        moveNodes(
+          Object.fromEntries(dragged.map((n) => [n.id, { x: n.position.x, y: n.position.y }]))
+        );
+        return;
+      }
       updateNodePosition(node.id, node.position.x, node.position.y);
     },
-    [updateNodePosition, isDebugMode]
+    [updateNodePosition, moveNodes, isDebugMode]
   );
 
   // Pan to the flashed node when the validator panel requests one.
@@ -479,13 +529,17 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     if (!flashKey) return;
     const node = builderNodes.find((n) => n.node_key === flashKey);
     if (!node) return;
+    // Clicar num problema do painel abre o formulário do nó, não só
+    // centraliza a tela.
+    if (!isDebugMode) setSelectedNodeKey(node.node_key);
     const x = (node.position_x ?? 0) + NODE_WIDTH / 2;
     const y = (node.position_y ?? 0) + NODE_HEIGHT / 2;
     reactFlow.setCenter(x, y, {
       zoom: reactFlow.getZoom(),
       duration: 400,
     });
-  }, [flashKey, builderNodes, reactFlow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só no flash
+  }, [flashKey]);
 
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: RfNode<NodeData>) => {
@@ -584,9 +638,10 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
 
   const handleDeleteSelected = useCallback(() => {
     if (!selectedNodeKey) return;
+    if (!confirmNodeRemoval(builderNodes, [selectedNodeKey])) return;
     removeNode(selectedNodeKey);
     setSelectedNodeKey(null);
-  }, [selectedNodeKey, removeNode]);
+  }, [selectedNodeKey, removeNode, builderNodes]);
 
   const handleSetEntry = useCallback(() => {
     if (!selectedNodeKey) return;
@@ -619,6 +674,12 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           onNodeDragStop={handleNodeDragStop}
           onNodeClick={handleNodeClick}
           onConnect={handleConnect}
+          onBeforeDelete={async ({ nodes, edges }) =>
+            nodes.length === 0 ||
+            confirmNodeRemoval(builderNodes, nodes.map((n) => n.id))
+              ? { nodes, edges }
+              : false
+          }
           onNodesDelete={handleNodesDelete}
           onEdgesDelete={handleEdgesDelete}
           onEdgeClick={handleEdgeClick}
@@ -719,6 +780,7 @@ function NodeEditSheet({
 }) {
   // Sheet is controlled — opens when a node is selected, closes via
   // Esc / overlay / close button (all delegated to onClose).
+  const { historyEpoch } = useFlowEditor();
   const open = node !== null;
   if (!node) {
     return (
@@ -757,6 +819,7 @@ function NodeEditSheet({
 
         <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
           <NodeConfigForm
+            key={historyEpoch}
             node={node}
             allNodes={allNodes}
             showAdvanced={false}
