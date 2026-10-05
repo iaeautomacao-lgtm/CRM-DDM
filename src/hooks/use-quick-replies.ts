@@ -48,7 +48,7 @@ export function useQuickReplies(): { replies: QuickReply[]; loading: boolean; re
           .order("shortcut", { ascending: true })
           .range(0, 499)
           .then(({ data, error }) => {
-            // Tabela ainda não criada (137 não aplicada) ou falha de rede:
+            // Tabela ainda não criada (142 não aplicada) ou falha de rede:
             // o composer só fica sem sugestões.
             if (error) console.error("[quick-replies] falha ao carregar:", error.message);
             const list = (data ?? []) as QuickReply[];

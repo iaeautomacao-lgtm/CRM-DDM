@@ -2,7 +2,7 @@
 
 // ============================================================
 // QuickRepliesManager — cadastro das respostas rápidas da conta
-// (/respostas-rapidas, migration 137). Escrita direto pelo cliente
+// (/respostas-rapidas, migration 142). Escrita direto pelo cliente
 // Supabase: a RLS só deixa owner/admin gravar; todos os membros leem
 // (o campo de mensagem do Inbox usa a mesma tabela).
 // ============================================================

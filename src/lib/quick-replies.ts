@@ -1,4 +1,4 @@
-// Respostas rápidas do Inbox (migration 137): regras puras usadas pelo
+// Respostas rápidas do Inbox (migration 142): regras puras usadas pelo
 // campo de mensagem e pela tela de cadastro.
 
 import { normalizeForSearch } from "@/lib/utils";
@@ -24,7 +24,7 @@ export const QUICK_REPLY_VARIABLES = [
   { key: "{atendente}", label: "Seu primeiro nome" },
 ] as const;
 
-/** "Boas Vindas!" → "boas-vindas" (mesma regra do CHECK da 137). */
+/** "Boas Vindas!" → "boas-vindas" (mesma regra do CHECK da 142). */
 export function normalizeShortcut(raw: string): string {
   return normalizeForSearch(raw.trim().replace(/^\/+/, ""))
     .replace(/\s+/g, "-")

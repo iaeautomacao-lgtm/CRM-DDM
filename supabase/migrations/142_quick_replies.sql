@@ -1,8 +1,8 @@
--- Migration 137: respostas rápidas do Inbox.
+-- Migration 142: respostas rápidas do Inbox.
 -- APLICAR MANUALMENTE no Supabase SQL Editor ANTES do deploy.
--- Conferir o schema live antes (CLAUDE.md). Número 137 porque 134–136 estão
--- reservados para o PR do papel supervisor / Intelligence (PRD-04); esta
--- migration não depende delas.
+-- Conferir o schema live antes (CLAUDE.md). Número 142: 134–138 são do PR #13
+-- (IA/handoff) e 139–141 do PR #16 (supervisor); esta migration não
+-- depende de nenhuma delas.
 --
 -- Textos prontos da conta: o atendente digita "/atalho" no campo de
 -- mensagem (ou abre a lista pelo botão) e o texto entra no campo, com
