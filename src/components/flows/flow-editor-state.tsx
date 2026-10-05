@@ -19,6 +19,9 @@ import { apiFetch } from "@/lib/api-fetch";
  *   - Side effects: save (PUT), setStatus (POST /activate),
  *     deleteFlow (DELETE then router.push).
  *   - Validation issues + the canActivate boolean.
+ *   - Desfazer/refazer (src/lib/flows/history.ts): toda edição passa
+ *     por `setState`, que registra o estado anterior; Ctrl/⌘+Z e
+ *     Ctrl/⌘+Shift+Z (ou Ctrl+Y) fora de campos de texto.
  *
  * What does NOT live here:
  *   - List-view UI state (expanded card set, scroll refs,
@@ -52,6 +55,14 @@ import {
   type ValidationIssue,
 } from "@/lib/flows/validate";
 import { unlinkNodeReferences } from "@/lib/flows/edges";
+import {
+  createHistory,
+  historyShortcut,
+  recordEdit,
+  redo as redoHistory,
+  undo as undoHistory,
+  type History,
+} from "@/lib/flows/history";
 import type { FlowNodeRow, FlowRow } from "@/lib/flows/types";
 import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
 
@@ -122,6 +133,12 @@ export interface FlowEditorContextValue {
    */
   flashKey: string | null;
   requestFlash: (key: string) => void;
+
+  /** Desfazer/refazer edições (o status do fluxo não entra no histórico). */
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 // ============================================================
@@ -331,13 +348,58 @@ export function FlowEditorProvider({
   const latestStateRef = useRef(state);
   latestStateRef.current = state;
   const revisionRef = useRef(0);
+  // Histórico em ref (não re-renderiza a cada tecla); `historyTick` só
+  // atualiza os botões Desfazer/Refazer.
+  const historyRef = useRef<History<BuilderState>>(createHistory());
+  const [historyTick, setHistoryTick] = useState(0);
   const setState = useCallback<typeof setStateRaw>((updaterOrValue) => {
-    const next = typeof updaterOrValue === "function" ? updaterOrValue(latestStateRef.current) : updaterOrValue;
+    const prev = latestStateRef.current;
+    const next = typeof updaterOrValue === "function" ? updaterOrValue(prev) : updaterOrValue;
+    if (next === prev) return;
+    historyRef.current = recordEdit(historyRef.current, prev, Date.now());
+    setHistoryTick((t) => t + 1);
     latestStateRef.current = next;
     revisionRef.current += 1;
     setDirty(true);
     setStateRaw(next);
   }, []);
+
+  // Restaura um estado do histórico mantendo o status atual (ativar/pausar
+  // é ação de servidor, não edição). Conta como edição para salvar/publicar.
+  const applyHistory = useCallback((direction: "undo" | "redo") => {
+    const current = latestStateRef.current;
+    const step =
+      direction === "undo"
+        ? undoHistory(historyRef.current, current)
+        : redoHistory(historyRef.current, current);
+    if (!step) return;
+    historyRef.current = step.history;
+    const next = { ...step.state, status: current.status };
+    latestStateRef.current = next;
+    revisionRef.current += 1;
+    setDirty(true);
+    setStateRaw(next);
+    setHistoryTick((t) => t + 1);
+  }, []);
+  const undo = useCallback(() => applyHistory("undo"), [applyHistory]);
+  const redo = useCallback(() => applyHistory("redo"), [applyHistory]);
+  const canUndo = historyTick >= 0 && historyRef.current.past.length > 0;
+  const canRedo = historyTick >= 0 && historyRef.current.future.length > 0;
+
+  // Atalhos. Dentro de campo de texto fica o desfazer nativo do navegador
+  // (desfaz a digitação daquele campo).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const action = historyShortcut(e);
+      if (!action) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+      e.preventDefault();
+      applyHistory(action);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [applyHistory]);
 
   // Cross-view "look here" signal (see FlowEditorContextValue docs).
   // Tracked via a ref alongside state so a rapid second click on a
@@ -698,6 +760,10 @@ export function FlowEditorProvider({
       deleteFlow,
       flashKey,
       requestFlash,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
     }),
     [
       initialFlow,
@@ -719,6 +785,10 @@ export function FlowEditorProvider({
       deleteFlow,
       flashKey,
       requestFlash,
+      undo,
+      redo,
+      canUndo,
+      canRedo,
     ],
   );
 

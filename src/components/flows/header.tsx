@@ -31,8 +31,10 @@ import {
   Loader2,
   PauseCircle,
   PlayCircle,
+  Redo2,
   Save,
   Trash2,
+  Undo2,
   Workflow,
 } from "lucide-react";
 
@@ -56,6 +58,10 @@ export function EditorHeader() {
     save,
     setStatus,
     deleteFlow,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useFlowEditor();
 
   // Best-effort save before leaving the editor via its own nav actions
@@ -102,6 +108,30 @@ export function EditorHeader() {
 
         {/* ---- right: runs · delete · activate · save ---- */}
         <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <div className="flex items-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={undo}
+              disabled={!canUndo}
+              title="Desfazer (Ctrl+Z)"
+              aria-label="Desfazer"
+              className="h-8 w-8 p-0"
+            >
+              <Undo2 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={redo}
+              disabled={!canRedo}
+              title="Refazer (Ctrl+Shift+Z)"
+              aria-label="Refazer"
+              className="h-8 w-8 p-0"
+            >
+              <Redo2 className="h-4 w-4" />
+            </Button>
+          </div>
           <Button
             variant="ghost"
             size="sm"
