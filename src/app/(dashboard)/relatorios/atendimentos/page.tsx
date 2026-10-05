@@ -55,6 +55,8 @@ import { MetricCard } from "@/components/relatorios/MetricCard";
 import { AttendanceTable, type AttendanceTableColumn } from "@/components/relatorios/AttendanceTable";
 import { formatDuration } from "@/lib/relatorios/format-duration";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
+import { loadSharedPeriod, saveSharedPeriod } from "@/lib/relatorios/period";
+import { PeriodFilter } from "@/components/relatorios/period-filter";
 
 const ALL = "all";
 
@@ -475,6 +477,17 @@ export default function AtendimentosPage() {
   const [draft, setDraft] = useState<Filters>(defaultFilters);
   const [applied, setApplied] = useState<Filters>(defaultFilters);
 
+  // Período único: herda o recorte escolhido em outro relatório desta aba.
+  useEffect(() => {
+    const shared = loadSharedPeriod();
+    if (!shared) return;
+    queueMicrotask(() => {
+      const patch = { dateFrom: shared.dateFrom, dateTo: shared.dateTo };
+      setDraft((d) => ({ ...d, ...patch }));
+      setApplied((a) => ({ ...a, ...patch }));
+    });
+  }, []);
+
   const [teamRows, setTeamRows] = useState<AttendanceRow[]>([]);
   const [agentRows, setAgentRows] = useState<AttendanceRow[]>([]);
   const [summary, setSummary] = useState<Summary>(normalizeSummary(null));
@@ -563,6 +576,7 @@ export default function AtendimentosPage() {
 
   function handlePesquisar() {
     setApplied(draft);
+    saveSharedPeriod({ dateFrom: draft.dateFrom, dateTo: draft.dateTo });
   }
 
   return (
@@ -576,24 +590,10 @@ export default function AtendimentosPage() {
 
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Período (de)</label>
-            <Input
-              type="date"
-              value={draft.dateFrom}
-              onChange={(e) => setDraft((d) => ({ ...d, dateFrom: e.target.value }))}
-              className="w-40"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Período (até)</label>
-            <Input
-              type="date"
-              value={draft.dateTo}
-              onChange={(e) => setDraft((d) => ({ ...d, dateTo: e.target.value }))}
-              className="w-40"
-            />
-          </div>
+          <PeriodFilter
+            value={{ dateFrom: draft.dateFrom, dateTo: draft.dateTo }}
+            onChange={(r) => setDraft((d) => ({ ...d, ...r }))}
+          />
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground">Equipes</label>
             <Select value={draft.teamId} onValueChange={(v) => v && setDraft((d) => ({ ...d, teamId: v }))}>
