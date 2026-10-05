@@ -58,7 +58,7 @@ vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({
   sendTextMessage: mocks.send,
 }));
 import { MetaApiError } from '@/lib/whatsapp/meta-api';
-import { processQueueItem, type QueueItem } from './processQueue';
+import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
 
 const item: QueueItem = {
   id: 'item',
@@ -157,5 +157,41 @@ describe('queue provider outcomes', () => {
     expect(
       mocks.rpc.mock.calls.some(([name]) => name === 'mark_queue_item_sent')
     ).toBe(false);
+  });
+});
+
+describe('isDefinitiveRejection (item não fica preso em "enviando")', () => {
+  it('rejeições explícitas viram erro', () => {
+    expect(isDefinitiveRejection(new Error('WAHA sendText failed (404): session not found'))).toBe(true);
+    expect(isDefinitiveRejection(new Error('WAHA sendFile failed (422): bad file'))).toBe(true);
+    expect(isDefinitiveRejection(new PreSendError('Canal Meta sem token de acesso configurado'))).toBe(true);
+    expect(isDefinitiveRejection(new MetaApiError('bad param (code 131008)', 131008, 400))).toBe(true);
+    expect(isDefinitiveRejection(new Error('Chamada não atendida (tempo esgotado)'))).toBe(true);
+    expect(isDefinitiveRejection(new Error('Failed to start WaCalls call: 404 - x'))).toBe(true);
+  });
+  it('resultado desconhecido continua aguardando reconciliação', () => {
+    expect(isDefinitiveRejection(new TypeError('fetch failed'))).toBe(false);
+    expect(isDefinitiveRejection(new Error('WAHA sendText failed (500): oops'))).toBe(false);
+    expect(isDefinitiveRejection(new Error('WAHA sendText failed (408): timeout'))).toBe(false);
+    expect(isDefinitiveRejection(new MetaApiError('server', null, 503))).toBe(false);
+    expect(isDefinitiveRejection(new Error('Não foi possível gerar um CallID para a ligação'))).toBe(false);
+  });
+});
+
+describe('janela de 24h (131047)', () => {
+  beforeEach(() => {
+    mocks.claimed = true;
+    mocks.updates.length = 0;
+    mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
+      data: name === 'claim_dispatch_item' ? true : null,
+      error: null,
+    }));
+  });
+  it('é erro permanente e não marca o telefone como inválido', async () => {
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('Re-engagement message (code 131047)', 131047, 400));
+    const res = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    expect(res).toMatchObject({ outcome: 'error' });
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true)).toBe(true);
+    expect(mocks.updates.some((u) => u.status === 'invalido')).toBe(false);
   });
 });

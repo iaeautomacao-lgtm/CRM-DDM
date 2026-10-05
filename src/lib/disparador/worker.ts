@@ -32,7 +32,7 @@ export function ensureQueueWorkerRunning() {
     try {
       const { data: activeCampaigns } = await supabaseAdmin()
         .from("campaigns")
-        .select("id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora")
+        .select("id, account_id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora")
         .eq("status", "em_execucao");
 
       if (!activeCampaigns?.length) return;

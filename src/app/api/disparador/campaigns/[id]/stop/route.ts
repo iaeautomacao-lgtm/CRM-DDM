@@ -22,7 +22,7 @@ export async function POST(
     // do usuário (antes só o created_by era conferido, sem escopo de conta).
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("account_id")
+      .select("account_id, account_role")
       .eq("user_id", user.id)
       .maybeSingle();
     if (profileError || !profile?.account_id)
@@ -44,7 +44,12 @@ export async function POST(
       );
     }
 
-    if (campaign.created_by !== user.id) {
+    // Mesma regra do iniciar: o criador ou owner/admin da conta (a campanha
+    // já foi escopada à conta acima). Antes só o criador — um admin não
+    // conseguia frear em emergência a campanha de um colega.
+    const isPrivilegedRole =
+      profile.account_role === "owner" || profile.account_role === "admin";
+    if (campaign.created_by !== user.id && !isPrivilegedRole) {
       return NextResponse.json(
         { error: "Você não tem permissão para executar esta campanha." },
         { status: 403 }

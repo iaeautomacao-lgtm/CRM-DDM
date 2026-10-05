@@ -24,6 +24,7 @@ import OpenAI from "openai";
 // Marcador de contato externo WAHA — definido em queue-markers.ts e
 // reexportado aqui para os imports existentes continuarem funcionando.
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/queue-markers";
+import { phoneVariants } from "@/lib/disparador/phone-key";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -61,6 +62,8 @@ export interface Campaign {
   batch_size?: number;
   batch_pause_seconds?: number;
   limite_por_hora?: number;
+  /** Quando presente, o canal (whatsapp_config) precisa ser desta conta. */
+  account_id?: string;
 }
 
 // Resultado de processQueueItem:
@@ -130,9 +133,12 @@ export async function claimQueueItem(campaignId: string): Promise<QueueItem | nu
 // Códigos Meta que indicam número inválido ou sem WhatsApp — não adianta
 // retentar o mesmo número, deve ir direto para a escada de número
 // alternativo (feature ainda não implementada — ver contact_phones,
-// migration 077). 131030/131045/131047: número inválido/não registrado/
-// não entregue. 131021: remetente e destinatário são o mesmo número.
-const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131047, 131021]);
+// migration 077). 131030/131045: número inválido/não registrado.
+// 131021: remetente e destinatário são o mesmo número.
+// 131047 (janela de 24h fechada) NÃO é número inválido: o telefone é bom,
+// só não aceita texto livre agora — ver META_PERMANENT_CODES. Antes ele
+// marcava contact_phones como 'invalido' e pulava para TELEFONE2/3.
+const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131021]);
 
 // Códigos Meta que são permanentes mas NÃO são "número inválido" (ex:
 // conta suspensa, parâmetro inválido, token expirado/inválido) — sem
@@ -151,7 +157,9 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131047, 131021]);
 // 131026: Meta aceitou a requisição mas declarou o destino inacessível. O
 // próprio CRM coloca esse número na blacklist automática, portanto não faz
 // sentido tratá-lo como transitório nem reenfileirá-lo depois.
-const META_PERMANENT_CODES = new Set([131026, 131031, 131051, 368, 190, 131008, 131009, 132000, 132001]);
+// 131047: mensagem fora da janela de 24h — retentar texto livre não muda
+// nada; precisa de template.
+const META_PERMANENT_CODES = new Set([131026, 131031, 131047, 131051, 368, 190, 131008, 131009, 132000, 132001]);
 
 // Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
 // permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
@@ -161,16 +169,66 @@ const META_PERMANENT_CODES = new Set([131026, 131031, 131051, 368, 190, 131008, 
 // sem WhatsApp" da Meta retentar até MAX_TENTATIVAS antes de virar
 // permanente. Agora usa err.metaCode (estruturado) quando disponível.
 function isPermanentSendError(err: unknown): boolean {
+  if (err instanceof PreSendError) return true;
   if (err instanceof MetaApiError) {
     if (err.metaCode === null) return false;
     return META_INVALID_PHONE_CODES.has(err.metaCode) || META_PERMANENT_CODES.has(err.metaCode);
   }
-  // Erros WAHA: heurística original por HTTP 4xx (exceto 429) embutido na mensagem.
   const message = err instanceof Error ? err.message : String(err);
-  const match = message.match(/\b(4\d{2})\b/);
-  if (!match) return false;
-  const status = Number(match[1]);
-  return status >= 400 && status < 500 && status !== 429;
+  // Ligação recusada/encerrada/não atendida: não religar automaticamente
+  // (antes o retry ligava de novo após 1, 4, 9 e 16 min).
+  if (/^Chamada (rejeitada|não atendida)/.test(message)) return true;
+  // WAHA: só 400 (requisição inválida) é permanente. 401/403/404/422
+  // aparecem com a sessão caída/reiniciando (QR, STARTING) — retry com
+  // backoff em vez de condenar a base inteira por uma queda de minutos.
+  const waha = message.match(/^WAHA \w+ failed \((\d{3})\)/);
+  if (waha) return Number(waha[1]) === 400;
+  const wacalls = message.match(/^Failed to start WaCalls call: (\d{3})/);
+  if (wacalls) return Number(wacalls[1]) === 400;
+  return false;
+}
+
+/**
+ * Falha ANTES de falar com o provedor (canal sem token, item sem mídia,
+ * tipo não suportado…): nada foi enviado, então é erro comum — não fica
+ * "aguardando reconciliação".
+ */
+export class PreSendError extends Error {}
+
+function decryptOrPreSend(value: string, what: string): string {
+  try {
+    return decrypt(value);
+  } catch {
+    throw new PreSendError(`Não foi possível ler a ${what} do canal (reconecte o canal)`);
+  }
+}
+
+/**
+ * O provedor REJEITOU o envio (nada chegou ao cliente)? true = pode marcar
+ * erro (e retentar se transitório). false = resultado desconhecido
+ * (timeout, rede, 5xx): o item fica 'enviando' para reconciliação, sem
+ * segundo POST.
+ *
+ * Antes todo erro que não fosse MetaApiError 4xx caía em "desconhecido" —
+ * inclusive WAHA 4xx e falhas de configuração. Esses itens ficavam presos
+ * em 'enviando' para sempre: a campanha nunca encerrava e o canal contava
+ * cada um no max_in_flight, travando o número para todas as campanhas.
+ */
+export function isDefinitiveRejection(err: unknown): boolean {
+  if (err instanceof PreSendError) return true;
+  if (err instanceof MetaApiError) return err.httpStatus > 0 && err.httpStatus < 500;
+  const message = err instanceof Error ? err.message : String(err);
+  const waha = message.match(/^WAHA \w+ failed \((\d{3})\)/);
+  const wacalls = message.match(/^Failed to start WaCalls call: (\d{3})/);
+  const httpStatus = waha ? Number(waha[1]) : wacalls ? Number(wacalls[1]) : null;
+  if (httpStatus !== null) {
+    // 408 (timeout do lado deles) pode ter enviado; 4xx restantes não.
+    return httpStatus >= 400 && httpStatus < 500 && httpStatus !== 408;
+  }
+  // Ligação recusada/não atendida: concluída, sem nada pendente. "CallID
+  // ausente" fica de fora: a chamada pode ter sido iniciada.
+  if (/^Chamada (rejeitada|não atendida)/.test(message)) return true;
+  return false;
 }
 
 // Exportada para a escada de número alternativo (próxima etapa) decidir
@@ -333,13 +391,13 @@ async function tryNextPhone(item: QueueItem): Promise<boolean> {
     // Mesmo campo (telefone, não phone_normalized) usado pela checagem
     // de blacklist em processQueueItem, pra bater com o formato real
     // gravado em wacrm.blacklist.telefone.
-    const { data: blacklistHit } = await supabaseAdmin()
+    const { data: blacklistHits } = await supabaseAdmin()
       .from("blacklist")
       .select("id")
-      .eq("telefone", nextPhone.phone)
-      .maybeSingle();
+      .in("telefone", phoneVariants(nextPhone.phone))
+      .limit(1);
 
-    if (blacklistHit) {
+    if (blacklistHits?.length) {
       nextOrder++;
       continue;
     }
@@ -476,11 +534,14 @@ export async function processQueueItem(
     phone = item.mensagem_final;
   }
 
-  const { data: blacklisted, error: blacklistCheckError } = await supabaseAdmin()
+  // Variações do número (com/sem 55, com/sem 9º dígito): entradas antigas
+  // da blacklist gravadas em outro formato também bloqueiam.
+  const { data: blacklistRows, error: blacklistCheckError } = await supabaseAdmin()
     .from("blacklist")
     .select("id")
-    .eq("telefone", phone)
-    .maybeSingle();
+    .in("telefone", phoneVariants(phone))
+    .limit(1);
+  const blacklisted = (blacklistRows?.length ?? 0) > 0;
 
   if (blacklistCheckError) {
     // Falha fechada: antes, um erro transitório aqui deixava `blacklisted`
@@ -519,21 +580,44 @@ export async function processQueueItem(
     return { outcome: "blocked", reason: "blacklisted" };
   }
 
-  const { data: config } = await supabaseAdmin()
+  // Canal sempre da conta da campanha (quando conhecida): session_ids vêm
+  // do cliente e antes bastava um UUID de outra conta para disparar por ela.
+  let configQuery = supabaseAdmin()
     .from("whatsapp_config")
     .select("*")
-    .eq("id", item.session_id)
-    .maybeSingle();
+    .eq("id", item.session_id);
+  if (campaign.account_id) configQuery = configQuery.eq("account_id", campaign.account_id);
+  const { data: config, error: configError } = await configQuery.maybeSingle();
 
+  if (configError) {
+    // Falha momentânea do banco: retry, não condena o contato.
+    const message = `Falha ao carregar o canal: ${configError.message}`;
+    await markQueueError(item.id, message, false, item.campaign_id, tentativasAtuais + 1);
+    return { outcome: "error", error: message };
+  }
   if (!config) {
-    throw new Error(`Canal não encontrado para session_id: ${item.session_id}`);
+    // O item já foi reivindicado ('enviando'): sem canal nada foi enviado,
+    // então fecha como erro em vez de deixá-lo preso.
+    const message = `Canal não encontrado para esta conta (session_id: ${item.session_id})`;
+    await markQueueError(item.id, message, true, item.campaign_id, tentativasAtuais + 1);
+    return { outcome: "error", error: message };
   }
 
   const provider = config.provider as "waha" | "meta";
   // Bucket chat-media é privado: troca a referência interna por URL
   // assinada curta que Meta/WAHA conseguem baixar. Valida que o anexo
   // pertence à conta do canal.
-  if (item.media_url) item = { ...item, media_url: await resolveProviderMedia(item.media_url, config.account_id) };
+  if (item.media_url) {
+    try {
+      item = { ...item, media_url: await resolveProviderMedia(item.media_url, config.account_id) };
+    } catch (mediaErr) {
+      const detail = mediaErr instanceof Error ? mediaErr.message : String(mediaErr);
+      const message = `Mídia indisponível: ${detail}`;
+      // Anexo de outra conta é definitivo; falha ao assinar a URL, não.
+      await markQueueError(item.id, message, /não autorizado/i.test(detail), item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: message };
+    }
+  }
   const tipo = item.tipo || "texto";
   // Contato externo com texto livre WAHA: mensagem_final guarda o
   // telefone (única forma de resolvê-lo sem contact_id), o texto real
@@ -593,12 +677,12 @@ export async function processQueueItem(
         ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
         : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
   } catch (sendErr: any) {
-    // Timeout, erro de rede, erro WAHA (não-MetaApiError) ou 5xx da Meta NÃO
-    // provam que o POST foi rejeitado — o provedor pode ter entregue a
-    // mensagem. Mantém o item em 'enviando' (reservado) e só anota o motivo:
-    // um segundo POST automático poderia duplicar o envio para o cliente.
-    // Apenas MetaApiError 4xx (rejeição explícita) segue para o retry abaixo.
-    if (!(sendErr instanceof MetaApiError) || sendErr.httpStatus >= 500) {
+    // Timeout, erro de rede ou 5xx NÃO provam que o POST foi rejeitado — o
+    // provedor pode ter entregue a mensagem. Mantém o item em 'enviando'
+    // (reservado) e só anota o motivo: um segundo POST automático poderia
+    // duplicar o envio. Rejeições explícitas (Meta/WAHA 4xx, falha antes do
+    // envio) seguem para o erro/retry abaixo — ver isDefinitiveRejection.
+    if (!isDefinitiveRejection(sendErr)) {
       const { error } = await supabaseAdmin()
         .from("disp_message_queue")
         .update({
@@ -780,7 +864,7 @@ async function sendViaWaha(
   const wahaConfig = {
     waha_url: config.waha_url,
     waha_session: config.waha_session,
-    waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
+    waha_api_key: config.waha_api_key ? decryptOrPreSend(config.waha_api_key, "chave da API WAHA") : null,
   };
 
   // Mesma validação do caminho Meta (sendViaMeta, abaixo) — sem isso,
@@ -791,7 +875,7 @@ async function sendViaWaha(
     (tipo === "imagem" || tipo === "video" || tipo === "audio" || tipo === "arquivo") &&
     !item.media_url
   ) {
-    throw new Error(`Item ${item.id} do tipo ${tipo} não tem media_url`);
+    throw new PreSendError(`Item ${item.id} do tipo ${tipo} não tem mídia (media_url)`);
   }
 
   if (tipo === "imagem") {
@@ -876,16 +960,16 @@ async function sendViaMeta(
   tipo: string
 ): Promise<string> {
   if (tipo === "ligacao") {
-    throw new Error("Tipo 'ligacao' não é suportado em canais Meta Cloud API");
+    throw new PreSendError("Ligação não é suportada em canais Meta (API oficial)");
   }
 
-  const accessToken = config.access_token ? decrypt(config.access_token) : null;
+  const accessToken = config.access_token ? decryptOrPreSend(config.access_token, "token de acesso Meta") : null;
   if (!accessToken) {
-    throw new Error(`Canal Meta sem access_token configurado (session_id: ${item.session_id})`);
+    throw new PreSendError(`Canal Meta sem token de acesso configurado (session_id: ${item.session_id})`);
   }
   const phoneNumberId = config.phone_number_id;
   if (!phoneNumberId) {
-    throw new Error(`Canal Meta sem phone_number_id configurado (session_id: ${item.session_id})`);
+    throw new PreSendError(`Canal Meta sem phone_number_id configurado (session_id: ${item.session_id})`);
   }
 
   // Caminho template (business-initiated obrigatório fora da janela 24h)
@@ -922,7 +1006,7 @@ async function sendViaMeta(
       arquivo: "document",
     };
     if (!item.media_url) {
-      throw new Error(`Item ${item.id} do tipo ${tipo} não tem media_url`);
+      throw new PreSendError(`Item ${item.id} do tipo ${tipo} não tem mídia (media_url)`);
     }
     const result = await sendMediaMessage({
       phoneNumberId,

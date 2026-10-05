@@ -1343,7 +1343,7 @@ export default function CampanhasPage() {
     if (
       mensagens.some(
         (m) =>
-          ["imagem", "audio", "ligacao"].includes(m.tipo) && !m.url?.trim()
+          ["imagem", "video", "audio", "arquivo", "ligacao"].includes(m.tipo) && !m.url?.trim()
       )
     ) {
       toast.error("A URL da mídia é obrigatória para este tipo de mensagem.");
@@ -3697,7 +3697,9 @@ export default function CampanhasPage() {
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Contatos</span>
                       <span className="font-medium text-muted-foreground">
-                        Via tags do CRM
+                        {selectedTags.length > 0
+                          ? `Por tabulação (${selectedTags.length})`
+                          : "Todos os contatos da conta"}
                       </span>
                     </div>
                   )}
@@ -3729,12 +3731,14 @@ export default function CampanhasPage() {
                     handleSubmit) — filtro vazio hoje sempre significa "toda
                     a conta", inclusive logo após um import, então este
                     aviso é o único sinal disso antes de salvar. */}
-                {selectedTags.length === 0 && (
+                {/* Com base importada o público é o CSV (∩ tabulação, PR #8) —
+                    o aviso de "toda a conta" só vale sem CSV. */}
+                {selectedTags.length === 0 && !importStats && (
                   <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
-                    ⚠ Nenhuma tabulação selecionada — a campanha será enviada
-                    para todos os contatos da conta. Para enviar só para um
-                    grupo específico, selecione uma tabulação em &quot;Filtrar por
-                    tabulação&quot; no Step 1.
+                    ⚠ Nenhuma tabulação selecionada e nenhuma base importada — a
+                    campanha será enviada para todos os contatos da conta. Para
+                    enviar só para um grupo, selecione uma tabulação em
+                    &quot;Filtrar por tabulação&quot; ou importe uma base.
                   </div>
                 )}
               </div>

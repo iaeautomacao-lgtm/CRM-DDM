@@ -124,7 +124,7 @@ export async function POST(request: Request) {
     const { data: active, error: activeError } = await db
       .from("campaigns")
       .select(
-        "id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora"
+        "id, account_id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora"
       )
       .eq("status", "em_execucao").order('next_batch_at', { ascending: true, nullsFirst: true });
     if (activeError) throw activeError;

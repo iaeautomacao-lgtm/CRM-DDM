@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 
 interface BlacklistEntry {
   id: string;
@@ -211,11 +212,14 @@ export default function BlacklistPage() {
       return;
     }
 
-    // Sanitize phone input
-    let cleanPhone = telefone.replace(/\D/g, "");
-    if (!cleanPhone.startsWith("+")) {
-      cleanPhone = "+" + cleanPhone;
-    }
+    // Mesmo formato de contacts.phone (+55DDDNÚMERO). Antes gravava sem o
+    // 55 ("+11999998888") e o bloqueio nunca batia com o contato.
+    // Número estrangeiro digitado com "+" (fora do +55) fica como está.
+    const trimmed = telefone.trim();
+    const cleanPhone =
+      trimmed.startsWith("+") && !trimmed.startsWith("+55")
+        ? `+${trimmed.replace(/\D/g, "")}`
+        : formatBrazilianPhone(trimmed);
 
     try {
       const supabase = createClient();

@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
 import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
+import { phoneKey } from "@/lib/disparador/phone-key";
 
 // Payload esperado pelo sistema externo (Planejamento)
 interface ExternalCampaignPayload {
@@ -159,7 +160,7 @@ export async function POST(request: Request) {
     const { data: blacklist } = await db
       .from("blacklist")
       .select("telefone");
-    const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
+    const blacklistSet = new Set((blacklist ?? []).map((b) => phoneKey(b.telefone)));
 
     // Criar campanha
     const { data: campaign, error: campaignError } = await db
@@ -226,7 +227,7 @@ export async function POST(request: Request) {
 
       // Checar blacklist
       const phoneWithPlus = `+${normalizedPhone}`;
-      if (blacklistSet.has(normalizedPhone) || blacklistSet.has(phoneWithPlus)) {
+      if (blacklistSet.has(phoneKey(normalizedPhone))) {
         skipped++;
         continue;
       }

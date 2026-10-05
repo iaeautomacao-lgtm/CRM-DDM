@@ -9,15 +9,7 @@ import {
   assignImportedContactTags,
   type ContactTagAssignment,
 } from "@/lib/contacts/resolve-import-tags";
-
-function formatBrazilianPhone(raw: string): string {
-  if (!raw) return "";
-  const cleaned = raw.replace(/\D/g, "");
-  if (cleaned.startsWith("55")) {
-    return `+${cleaned}`;
-  }
-  return `+55${cleaned}`;
-}
+import { formatBrazilianPhone, phoneKey } from "@/lib/disparador/phone-key";
 
 // Looks up a value in `row` by trying each of `keys` against the row's
 // keys lowercased/trimmed, so CSV/XLSX headers can vary in case, spacing,
@@ -253,7 +245,7 @@ export async function POST(request: Request) {
     // single shared list across every account on this instance, not scoped
     // per-tenant. Left unfiltered here; scoping it requires a migration.
     const { data: blacklist } = await supabaseAdmin().from("blacklist").select("telefone");
-    const blacklistSet = new Set((blacklist ?? []).map((b) => b.telefone));
+    const blacklistSet = new Set((blacklist ?? []).map((b) => phoneKey(b.telefone)));
 
     // Existing contacts for this account, keyed by normalized phone. Used
     // instead of a DB-level upsert because the real unique constraint,
@@ -360,7 +352,7 @@ export async function POST(request: Request) {
       }
 
       // Check Blacklist
-      if (blacklistSet.has(normalized)) {
+      if (blacklistSet.has(phoneKey(normalized))) {
         results.blacklisted++;
         continue;
       }

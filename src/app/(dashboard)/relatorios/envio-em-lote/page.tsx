@@ -67,6 +67,7 @@ import { buildPageList } from "@/lib/relatorios/pagination";
 import { exportWithHistory } from "@/lib/relatorios/export-with-history";
 import { MessageModal } from "@/components/relatorios/MessageModal";
 import { normalizarErroMeta, extrairCodigoMetaErro } from "@/lib/disparador/normalize-meta-error";
+import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 
 const ALL = "all";
 const PAGE_SIZE = 60;
@@ -94,7 +95,7 @@ const STATUS_BADGE: Record<string, { label: string; className: string }> = {
 // qualquer linha que não seja status=erro com o código correspondente.
 const ERROR_TYPE_OPTIONS = [
   { value: "all", label: "Todos os erros" },
-  { value: "131026", label: "Janela 24h (131026)" },
+  { value: "131026", label: "Janela 24h (131026/131047)" },
   { value: "131009", label: "Número inválido (131009)" },
   { value: "outros", label: "Outros" },
 ] as const;
@@ -357,9 +358,9 @@ export default function EnvioEmLotePage() {
     return items.filter((it) => {
       if (it.status !== "erro") return false;
       const codigo = extrairCodigoMetaErro(it.erro);
-      if (errorTypeFilter === "131026") return codigo === 131026;
+      if (errorTypeFilter === "131026") return codigo === 131026 || codigo === 131047;
       if (errorTypeFilter === "131009") return codigo === 131009;
-      return codigo !== 131026 && codigo !== 131009;
+      return codigo !== 131026 && codigo !== 131047 && codigo !== 131009;
     });
   }, [items, errorTypeFilter]);
 
@@ -421,8 +422,7 @@ export default function EnvioEmLotePage() {
       toast.error("Telefone não disponível para este contato.");
       return;
     }
-    let cleanPhone = item.contactPhone.replace(/\D/g, "");
-    if (!cleanPhone.startsWith("+")) cleanPhone = "+" + cleanPhone;
+    const cleanPhone = formatBrazilianPhone(item.contactPhone);
 
     try {
       const db = createClient();
