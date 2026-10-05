@@ -5,6 +5,7 @@ import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
 import { advanceFromNodeKey, loadAllNodes } from '@/lib/flows/engine'
+import { sweepStalledAiConversations } from '@/lib/flows/ai-watchdog'
 import type { FlowRunRow, SmartDelayNodeConfig } from '@/lib/flows/types'
 
 /**
@@ -161,7 +162,11 @@ export async function POST(request: Request) {
     woken += 1
   }
 
-  return NextResponse.json({ swept, woken })
+  // IA travada: cliente falou por último, fluxo ativo e ninguém respondeu
+  // há mais de ~90 s → fila humana (ver ai-watchdog.ts).
+  const stalled = await sweepStalledAiConversations(admin, now)
+
+  return NextResponse.json({ swept, woken, stalled })
 }
 
 // GET = só diagnóstico (health check): confere o segredo e se a tabela
