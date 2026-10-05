@@ -119,7 +119,7 @@ export interface FlowEditorContextValue {
   moveNodes: (positions: Record<string, { x: number; y: number }>) => void;
 
   // Actions
-  save: (opts?: { silent?: boolean }) => Promise<boolean>;
+  save: (opts?: { silent?: boolean; confirmOrphanRuns?: boolean }) => Promise<boolean>;
   setStatus: (status: BuilderState["status"]) => Promise<void>;
   deleteFlow: () => Promise<void>;
 
@@ -487,10 +487,12 @@ export function FlowEditorProvider({
   // Versão do fluxo no servidor que este editor conhece (conflito de abas).
   const versionRef = useRef<string>(initialFlow.updated_at);
   const conflictRef = useRef(false);
+  // Usuário aceitou publicar com clientes em nós removidos (ver PUT).
+  const orphanConfirmRef = useRef(false);
   const isSavingRef = useRef(false);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const save = useCallback(
-    async (opts?: { silent?: boolean }): Promise<boolean> => {
+    async (opts?: { silent?: boolean; confirmOrphanRuns?: boolean }): Promise<boolean> => {
       if (savePromiseRef.current) {
         if (!await savePromiseRef.current) return false;
         return save(opts);
@@ -529,10 +531,22 @@ export function FlowEditorProvider({
             entry_node_id: snapshot.entry_node_id,
             nodes: snapshot.nodes,
             expected_updated_at: versionRef.current,
+            confirm_orphan_runs: opts?.confirmOrphanRuns ?? false,
           }),
         });
         if (!res.ok) {
           const json = await res.json().catch(() => ({}));
+          if (res.status === 409 && json.code === "orphan_runs") {
+            // Confirmação explícita; "sim" reenvia já confirmado.
+            if (window.confirm(`${json.error}
+
+Publicar mesmo assim?`)) {
+              orphanConfirmRef.current = true;
+            } else {
+              toast.info("Alterações não publicadas.");
+            }
+            return false;
+          }
           if (res.status === 409 && json.code === "conflict") {
             conflictRef.current = true;
             toast.error(json.error, {
@@ -561,6 +575,10 @@ export function FlowEditorProvider({
       })();
       savePromiseRef.current = operation;
       const success = await operation;
+      if (orphanConfirmRef.current) {
+        orphanConfirmRef.current = false;
+        return save({ ...opts, confirmOrphanRuns: true });
+      }
       if (success && revision !== revisionRef.current) return save(opts);
       return success;
     },

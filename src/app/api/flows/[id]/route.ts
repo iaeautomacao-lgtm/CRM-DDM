@@ -80,6 +80,8 @@ interface PutBody {
   fallback_policy?: Record<string, unknown>
   /** updated_at que o editor carregou — se mudou, outra aba/pessoa salvou. */
   expected_updated_at?: string
+  /** O usuário confirmou publicar mesmo com clientes parados em nós removidos. */
+  confirm_orphan_runs?: boolean
   nodes?: Array<{
     node_key: string
     node_type: string
@@ -174,6 +176,32 @@ export async function PUT(
           { error: 'Fluxo ativo: corrija os erros antes de publicar as alterações.', issues: blockers },
           { status: 400 },
         )
+      }
+      // Clientes parados (execução em andamento) num nó que esta versão
+      // remove ou renomeia: ao publicar, essas execuções terminam com "nó
+      // não encontrado". Pede confirmação explícita antes.
+      if (body.nodes !== undefined && !body.confirm_orphan_runs) {
+        const newKeys = new Set(body.nodes.map((n) => n.node_key))
+        const { data: liveRuns } = await admin
+          .from('flow_runs')
+          .select('current_node_key')
+          .eq('flow_id', id)
+          .in('status', ['active', 'paused_by_agent'])
+          .range(0, 4999)
+        const orphaned = (liveRuns ?? []).filter(
+          (r: { current_node_key: string | null }) => r.current_node_key && !newKeys.has(r.current_node_key),
+        )
+        if (orphaned.length > 0) {
+          const nodesHit = [...new Set(orphaned.map((r: { current_node_key: string | null }) => r.current_node_key))]
+          return NextResponse.json(
+            {
+              error: `${orphaned.length} cliente(s) estão agora em nó(s) que esta alteração remove (${nodesHit.join(', ')}). Publicando, essas execuções serão encerradas.`,
+              code: 'orphan_runs',
+              count: orphaned.length,
+            },
+            { status: 409 },
+          )
+        }
       }
     }
   }
