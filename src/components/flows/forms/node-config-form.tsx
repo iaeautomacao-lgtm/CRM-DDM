@@ -1412,6 +1412,8 @@ function useUserTags(): UserTag[] {
 // ============================================================
 
 interface HandoffCfg {
+  reason_code?: string;
+  reason_subcode?: string;
   note?: string;
   assign_to?: string;
   team_id?: string;
@@ -1429,6 +1431,80 @@ interface HandoffAgentOption {
 
 const HANDOFF_ANY_TEAM = "__any_team__";
 const HANDOFF_ANY_AGENT = "__any_agent__";
+
+const HANDOFF_REASON_CODES = [
+  "CLIENTE_PEDIU_HUMANO",
+  "CPF_INVALIDO",
+  "CPF_NAO_LOCALIZADO",
+  "CPF_NAO_INFORMADO",
+  "DEBITO_NAO_LOCALIZADO",
+  "DADOS_INCONSISTENTES",
+  "RECUSA_PRECO",
+  "RECUSA_SEM_RECURSOS",
+  "RECUSA_NAO_RECONHECE_DIVIDA",
+  "RECUSA_OUTRO",
+  "AGENDAMENTO",
+  "TOOL_TIMEOUT",
+  "TOOL_ERROR",
+  "ACORDO_EXISTENTE",
+  "ERRO_EFETIVACAO",
+  "EXCECAO_COMERCIAL",
+  "CONTESTACAO_DIVIDA",
+  "FALLBACK_EXAURIDO",
+  "INDEFINIDO",
+] as const;
+
+function HandoffReasonFields({
+  reasonCode,
+  reasonSubcode,
+  onUpdateConfig,
+}: {
+  reasonCode?: string;
+  reasonSubcode?: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Motivo estruturado
+        </label>
+        <Select
+          value={reasonCode || "INDEFINIDO"}
+          onValueChange={(v) => onUpdateConfig({ reason_code: v })}
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {HANDOFF_REASON_CODES.map((reason) => (
+              <SelectItem key={reason} value={reason}>
+                {reason}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          Submotivo (opcional)
+        </label>
+        <Input
+          value={reasonSubcode ?? ""}
+          onChange={(e) =>
+            onUpdateConfig({
+              reason_subcode: e.target.value
+                .toUpperCase()
+                .replace(/[^A-Z0-9_]/g, "_"),
+            })
+          }
+          placeholder="ex.: API_TIMEOUT_APOS_RETRY"
+          className="bg-muted font-mono text-xs"
+        />
+      </div>
+    </div>
+  );
+}
 
 /**
  * Loads the account's teams + agents for the handoff node's Selects.
@@ -1549,6 +1625,11 @@ function HandoffForm({
 
   return (
     <>
+      <HandoffReasonFields
+        reasonCode={cfg.reason_code}
+        reasonSubcode={cfg.reason_subcode}
+        onUpdateConfig={onUpdateConfig}
+      />
       <div className="flex flex-col gap-3">
         <div className="w-full">
           <label className="mb-1 block text-xs text-muted-foreground">Equipe</label>
@@ -1629,6 +1710,8 @@ function HandoffForm({
 // ============================================================
 
 interface HandoffAgentCfg {
+  reason_code?: string;
+  reason_subcode?: string;
   note?: string;
   assign_to?: string;
 }
@@ -1649,6 +1732,11 @@ function HandoffAgentForm({
 
   return (
     <>
+      <HandoffReasonFields
+        reasonCode={cfg.reason_code}
+        reasonSubcode={cfg.reason_subcode}
+        onUpdateConfig={onUpdateConfig}
+      />
       <div className="w-full">
         <label className="mb-1 block text-xs text-muted-foreground">Agente</label>
         <Select
@@ -1691,6 +1779,8 @@ function HandoffAgentForm({
 // ============================================================
 
 interface HandoffTeamCfg {
+  reason_code?: string;
+  reason_subcode?: string;
   note?: string;
   team_id?: string;
 }
@@ -1710,6 +1800,11 @@ function HandoffTeamForm({
 
   return (
     <>
+      <HandoffReasonFields
+        reasonCode={cfg.reason_code}
+        reasonSubcode={cfg.reason_subcode}
+        onUpdateConfig={onUpdateConfig}
+      />
       <div className="w-full">
         <label className="mb-1 block text-xs text-muted-foreground">Equipe</label>
         <Select
