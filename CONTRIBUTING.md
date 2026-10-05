@@ -1,124 +1,106 @@
-# Using this template
+# Contribuindo com o CRM DDM
 
-This is a **template repository**, not a collaborative product. The
-expected flow is:
+Este repositório evolui um sistema operacional usado pelo Grupo DDM. Mudanças devem privilegiar correção, rastreabilidade e baixo risco de regressão.
 
-1. **Fork** it to your own GitHub account or organisation.
-2. **Deploy** the fork — see [`docs/`](./docs/README.md).
-3. **Customise** your fork. Rebrand, add the features you need, remove
-   the ones you don't, swap hosting, change the schema.
+## Fluxo
 
-You **don't** need to send changes back upstream. The fact that your
-fork diverges is the whole point — the upstream is deliberately
-opinionated about stack, UX, and scope, and your fork is where those
-opinions become yours.
+1. atualize `main`;
+2. crie uma branch descritiva;
+3. faça uma mudança lógica por PR;
+4. adicione/ajuste testes;
+5. atualize documentação se houver mudança de contrato;
+6. rode os checks locais;
+7. abra PR com impacto e plano de teste.
 
-## Fork and run
-
-```bash
-# 1. Fork on GitHub: https://github.com/ArnasDon/wacrm → Fork
-# 2. Clone your fork
-git clone https://github.com/<your-username>/wacrm.git
-cd wacrm
-
-cp .env.local.example .env.local   # fill in Supabase + Meta creds
-npm install
-npm run dev
-```
-
-Full setup (Supabase migrations, WhatsApp Business API, deploy) lives in
-[`docs/`](./docs/README.md).
-
-## Keeping your fork up to date
-
-Pull in upstream bug fixes and security patches periodically:
+Exemplo:
 
 ```bash
-git remote add upstream https://github.com/ArnasDon/wacrm.git  # once
-git fetch upstream
 git checkout main
-git merge upstream/main     # or: git rebase upstream/main
-# Resolve any conflicts (likely in areas you've customised), then push
-git push origin main
+git pull
+git checkout -b fix/ai-tool-failure
+
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npm run build
 ```
 
-If you've made heavy local customisations, rebasing can surface
-conflicts every time you pull. Pinning to a specific upstream tag and
-updating on your schedule is a valid alternative.
+## Critério de pronto
 
-## Reporting bugs in the upstream template
+Uma mudança está pronta quando:
 
-If you find a bug in the upstream code — not one you introduced in your
-fork — please file it using the
-[bug report](https://github.com/ArnasDon/wacrm/issues/new?template=bug_report.yml)
-template. Including the commit SHA, the runtime (Hostinger / Vercel /
-local / other), and logs will get to a fix fastest.
+- comportamento esperado está claro;
+- edge cases relevantes estão cobertos;
+- lint/typecheck/test/build passam;
+- migrations foram revisadas contra o schema live quando necessário;
+- segredos/PII não aparecem no diff;
+- documentação acompanha mudança operacional;
+- o PR explica risco e validação.
 
-## Reporting security issues
+## Banco
 
-**Do not file security issues publicly.** Follow the private flow in
-[SECURITY.md](./.github/SECURITY.md).
+Antes de escrever migration:
 
-## Upstream pull requests
+1. inspecione o schema live;
+2. identifique dependências;
+3. considere dados existentes;
+4. prefira mudanças compatíveis e idempotentes;
+5. atualize `schema:check` se o objeto virar requisito de deploy.
 
-Not the primary flow, but welcome in specific cases:
+Nunca altere migration aplicada como forma de corrigir produção.
 
-- **Security fixes** — always welcome, please follow SECURITY.md first
-  for disclosure.
-- **Bug fixes** that match upstream intent (crash, correctness,
-  documentation errors, typos) — land quickly.
-- **Small improvements** (accessibility, obvious UX nits) — usually
-  welcome, open an issue first to check alignment.
+## WhatsApp
 
-Less likely to land:
+Meta Cloud API e WAHA possuem semânticas distintas. Preserve a bifurcação de provider quando o comportamento divergir.
 
-- **New features.** The template's scope is intentionally narrow. A
-  "great idea for a CRM" is often a great idea for *your* CRM — i.e.
-  your fork — but would dilute the template for the next forker.
-- **Stack changes** (different ORM, different UI kit, different auth
-  provider). These belong in a fork, not upstream.
-- **Opinionated refactors** without a concrete correctness or
-  performance motivation.
+Teste recebimento, envio e status no provider afetado.
 
-If you do send a PR, the usual rules apply:
+## IA e tools
 
-- Branch off the latest `main` (don't push to a merged branch — commits
-  end up orphaned).
-- Run `npm run typecheck` and `npm run format` locally first.
-- Fill in the PR template, especially the **Test plan**.
-- One logical change per PR.
-- Commit-message first line is imperative + terse; the body explains
-  the *why*, the diff shows the *what*.
+- resposta de LLM não substitui dados autoritativos;
+- tool result é input não confiável;
+- erro de integração precisa terminar em retry controlado, fallback ou handoff;
+- nunca deixe run ativo indefinidamente;
+- não logue segredos ou PII desnecessária.
 
-Expect a review within a few days. PRs opened without an issue may be
-closed — open the issue first to align.
+## Concorrência
 
-## If you maintain a public fork
+Antes de remover lock, claim, lease, debounce ou idempotency key, documente qual corrida o mecanismo previne e crie teste que demonstre que a remoção é segura.
 
-- Rebrand. The "CRM Template for WhatsApp" name, favicon, and
-  `wacrm.tech` URL belong to the upstream project; please swap them
-  for your own before putting your deployment in front of users.
-- Keep the MIT [`LICENSE`](./LICENSE) file — that's how the template's
-  permissions travel with the code. Attribution in a `README` section
-  is appreciated but not required.
-- You are free to re-license additions to your fork however you like.
+## Commits
 
-## Dev-loop reference
+Prefira mensagens curtas e imperativas:
 
-Even if you never send a PR upstream, these are the scripts you'll use
-in your fork:
+```text
+fix: classify textual DDM tool errors
+docs: document flow engine recovery
+feat: add supervisor report scope
+```
 
-| Command | What it does |
-| --- | --- |
-| `npm run dev` | Turbopack dev server on port 3000. |
-| `npm run build` | Production build. Next also runs its own typecheck here. |
-| `npm run typecheck` | `tsc --noEmit`. Fast TS-only pass. |
-| `npm run lint` | ESLint. |
-| `npm run format` | Prettier write. |
-| `npm run format:check` | Prettier in check-only mode. Useful in CI. |
+## Pull request
 
-## Licensing
+Inclua:
 
-This template is MIT ([`LICENSE`](./LICENSE)). Anything you contribute
-upstream is assumed to be MIT too. Your fork's additions are yours to
-license however you like.
+- resumo;
+- motivação;
+- mudanças;
+- riscos;
+- plano de teste;
+- impacto em banco/configuração/deploy;
+- screenshots quando a UI mudar.
+
+## Segurança
+
+Não abra issue pública com vulnerabilidade ou credencial. Consulte [`.github/SECURITY.md`](./.github/SECURITY.md).
+
+## Documentação
+
+O índice fica em [docs/README.md](./docs/README.md). Atualize a seção correta sempre que mudar:
+
+- variável de ambiente;
+- endpoint;
+- integração;
+- schema;
+- operação de deploy;
+- procedimento de incidente.

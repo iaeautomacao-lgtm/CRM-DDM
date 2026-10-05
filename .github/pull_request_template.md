@@ -1,42 +1,46 @@
-<!--
-Heads up: this is a template, not a collaborative product. Most
-changes belong in your fork. See CONTRIBUTING.md for which kinds of
-upstream PRs tend to land (security, correctness, docs) vs. which
-belong in a fork (new features, stack swaps, opinionated refactors).
-If you haven't opened an issue yet for a non-trivial change, consider
-doing that first to check alignment.
+## Resumo
 
-Keep this short and specific. The commit message is where the "why"
-lives; this is where the reviewer gets the "what" and "how to try it".
--->
+<!-- O que este PR muda e por quê? Seja específico. -->
 
-## Summary
+## Mudanças
 
-<!-- One or two sentences. What does this PR do? -->
+- 
 
-## What changed
+## Impacto
 
-<!-- Bullet list of the actual changes. Link file paths when useful. -->
+Marque o que se aplica:
 
-## Test plan
+- [ ] UI/UX
+- [ ] API/contrato
+- [ ] Banco/migration
+- [ ] WhatsApp/Meta/WAHA
+- [ ] IA/flows
+- [ ] Disparador
+- [ ] Configuração/variáveis de ambiente
+- [ ] Deploy/operação
+- [ ] Documentação
 
-<!--
-How did you verify this works? How should the reviewer verify it?
-Tick the boxes as you go.
--->
+## Riscos e compatibilidade
 
-- [ ] `npm run typecheck` clean.
-- [ ] `npm run lint` — no new errors beyond the pre-existing backlog.
-- [ ] `npm run build` succeeds.
-- [ ] Feature / fix manually exercised in the browser (or the reason it can't be).
+<!-- Concorrência, idempotência, dados existentes, rollback, providers etc. -->
 
-## Related
+## Plano de teste
 
-<!-- Link the issue this closes, or "Part of #N" for multi-PR work. -->
+- [ ] `npm run lint`
+- [ ] `npm run typecheck`
+- [ ] `npm test`
+- [ ] `npm run build`
+- [ ] cenário alterado validado manualmente quando aplicável
+- [ ] schema live/migration revisado quando aplicável
 
-<!--
-Heads up:
-- Security issues: do not disclose here; see .github/SECURITY.md.
-- New deps: please justify briefly in the commit message or PR body.
-- Runtime behaviour changes affecting forkers: update docs/*.
--->
+## Evidências
+
+<!-- Screenshots, logs mascarados, IDs internos ou resultados de teste. Nunca inclua segredos/PII. -->
+
+## Rollback
+
+<!-- Como desfazer com segurança se houver regressão? -->
+
+## Relacionado
+
+<!-- Issue, incidente, tarefa ou PR relacionado. -->

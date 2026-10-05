@@ -1,62 +1,69 @@
-# Security Policy
+# Política de segurança
 
-Thanks for taking the time to look into the security of this template.
+O CRM DDM processa conversas, dados cadastrais e integrações com provedores externos. Vulnerabilidades devem ser tratadas de forma privada.
 
-## Reporting a vulnerability
+## Reporte
 
-**Do not open a public GitHub issue for security bugs.** Public issues are
-indexed by search engines and seen by every fork long before the upstream fix
-lands.
+**Não abra issue pública para vulnerabilidades, segredos expostos ou acesso indevido a dados.**
 
-Instead, please report privately via one of:
+Use um canal privado da equipe responsável pelo repositório ou o mecanismo de Security Advisories do GitHub quando disponível.
 
-- [GitHub Security Advisories](https://github.com/ArnasDon/wacrm/security/advisories/new)
-  (preferred — keeps the disclosure, fix, and CVE all in one place).
-- Email: `a.donauskas@hostinger.com` with `[CRM template security]` in the subject.
+Inclua:
 
-Include, if you can:
+- impacto;
+- passos de reprodução;
+- componente afetado;
+- commit/ambiente;
+- evidências mínimas necessárias;
+- mitigação conhecida, se houver.
 
-- A description of the issue and the impact.
-- Reproduction steps or a proof-of-concept.
-- The commit or release you're testing against.
-- Whether you'd like credit in the eventual disclosure (we default to
-  crediting by the name or handle you give us, unless you prefer anonymous).
+Não inclua mais dados de clientes que o necessário para reproduzir.
 
-## What to expect
+## Escopo prioritário
 
-- **Acknowledgement** within 72 hours.
-- **Initial assessment** (severity, affected versions, whether a workaround
-  exists) within one week.
-- **Fix + coordinated disclosure** on a timeline proportional to severity.
-  Critical issues ship a patch as soon as one's ready; medium issues bundle
-  with the next release.
+- autenticação e autorização;
+- RLS e account scoping;
+- service role;
+- webhooks Meta/WAHA/Social;
+- criptografia de credenciais;
+- API keys;
+- uploads e URLs assinadas;
+- execução de tools pela IA;
+- crons públicos;
+- VoIP service secret;
+- logs/auditoria com dados sensíveis.
 
-## Scope
+## Segredos
 
-In scope:
-- Anything in this repository (`ArnasDon/wacrm`), including webhook and auth
-  flows, token encryption, RLS policies, and the built-in cron endpoints.
-- Default configurations shipped in `docs/` — e.g. if the setup guide leaves
-  an unsafe default.
+Segredos nunca devem ser:
 
-Out of scope:
-- Vulnerabilities in Supabase, Next.js, Node.js, or other upstream
-  dependencies — please report those to their maintainers. We'll happily
-  bump versions on request.
-- Issues that require a pre-compromised deployment (e.g. a leaked
-  service-role key) unless they widen the blast radius beyond the initial
-  compromise.
-- Social engineering, physical attacks, or third-party services your fork
-  adds after deploy.
+- commitados;
+- enviados ao browser;
+- gravados em logs;
+- incluídos em screenshots públicos;
+- persistidos em config de flow quando existe armazenamento seguro dedicado.
 
-## Safe harbor
+Se um segredo vazar, considere-o comprometido e rotacione-o.
 
-Research conducted under this policy is authorized. We won't pursue legal
-action against anyone who:
+## Dados pessoais
 
-- Makes a good-faith effort to avoid data destruction, privacy violations,
-  or service disruption.
-- Gives us reasonable time to respond before any public disclosure.
-- Doesn't exploit the issue beyond what's necessary to demonstrate it.
+Ao investigar incidentes:
 
-Thanks for helping keep this template (and its forks) safe.
+- prefira IDs internos;
+- masque CPF, telefone e e-mail;
+- não copie payloads completos para issues;
+- limite acesso às evidências.
+
+## Dependências
+
+Falhas em Next.js, Supabase, Node, bibliotecas ou providers externos devem ser avaliadas quanto ao impacto no CRM e corrigidas por upgrade/configuração quando aplicável.
+
+## Resposta a incidente
+
+1. conter o problema;
+2. preservar logs/evidências;
+3. identificar contas e período afetados;
+4. rotacionar credenciais se necessário;
+5. aplicar correção;
+6. reconciliar ações pendentes;
+7. documentar causa raiz e prevenção.

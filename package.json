@@ -2,27 +2,29 @@
   "name": "wacrm",
   "version": "0.2.2",
   "private": true,
-  "description": "Self-hostable CRM template for WhatsApp built on Next.js and Supabase — shared inbox, contacts, sales pipelines, broadcasts, and no-code automations.",
+  "description": "Plataforma omnichannel de atendimento, cobrança, automação e IA do Grupo DDM.",
   "license": "MIT",
-  "author": "Arnas Donauskas",
-  "homepage": "https://github.com/ArnasDon/wacrm",
+  "author": "Grupo DDM — Time de IA",
+  "homepage": "https://github.com/iaeautomacao-lgtm/CRM-DDM",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ArnasDon/wacrm.git"
+    "url": "git+https://github.com/iaeautomacao-lgtm/CRM-DDM.git"
   },
   "bugs": {
-    "url": "https://github.com/ArnasDon/wacrm/issues"
+    "url": "https://github.com/iaeautomacao-lgtm/CRM-DDM/issues"
   },
   "keywords": [
     "crm",
+    "omnichannel",
     "whatsapp",
-    "whatsapp-business-api",
+    "meta-cloud-api",
+    "waha",
     "nextjs",
     "supabase",
     "automation",
-    "broadcast",
-    "self-hosted",
-    "template"
+    "ai-agent",
+    "collections",
+    "grupo-ddm"
   ],
   "engines": {
     "node": ">=20.0.0",

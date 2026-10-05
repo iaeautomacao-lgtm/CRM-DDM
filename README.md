@@ -1,161 +1,229 @@
-# wacrm — CRM Template for WhatsApp
+# CRM DDM
 
-> Self-hostable CRM template for WhatsApp® — shared inbox, contacts,
-> sales pipelines, broadcasts, and no-code automations. Fork it, brand
-> it, host it.
+> Plataforma omnichannel de atendimento, cobrança e automação do Grupo DDM, com operação de WhatsApp, fluxos visuais, agentes de IA, disparos em lote, monitoramento e relatórios sobre uma base central no Supabase.
 
-<p align="center">
-  <a href="https://www.hostinger.com/web-apps-hosting">
-    <img src="./.github/assets/hostinger-deploy.png" alt="Ship your Node.js app in one click — Deploy to Hostinger" width="900">
-  </a>
-</p>
+[![CI](https://github.com/iaeautomacao-lgtm/CRM-DDM/actions/workflows/ci.yml/badge.svg)](https://github.com/iaeautomacao-lgtm/CRM-DDM/actions/workflows/ci.yml)
+[![Next.js 16](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)](https://nextjs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Auth-3ECF8E?logo=supabase&logoColor=white)](https://supabase.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-violet.svg)](./LICENSE)
-[![CI](https://github.com/ArnasDon/wacrm/actions/workflows/ci.yml/badge.svg)](https://github.com/ArnasDon/wacrm/actions/workflows/ci.yml)
-[![Next.js 16](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)](https://nextjs.org)
-[![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Auth-3ecf8e?logo=supabase)](https://supabase.com)
-[![Stars](https://img.shields.io/github/stars/ArnasDon/wacrm?style=social)](https://github.com/ArnasDon/wacrm/stargazers)
+O CRM DDM centraliza canais de atendimento, contexto do cliente e automações operacionais em uma única aplicação. O objetivo é reduzir fragmentação entre atendimento humano, campanhas, cobrança automatizada e observabilidade, mantendo rastreabilidade de cada conversa e execução.
 
-The marketing site and self-host docs live in a separate repo:
-[ArnasDon/wacrm-site](https://github.com/ArnasDon/wacrm-site)
-([wacrm.tech](https://wacrm.tech)). This repo is the product —
-clone or fork it to run your own CRM.
+## Visão geral
 
-## What you get out of the box
+O produto principal é uma aplicação **Next.js 16 + React 19 + TypeScript**, conectada ao **Supabase** no schema `wacrm`. Além do frontend e das APIs do CRM, o repositório contém motores de fluxo e disparo, integrações de WhatsApp, camada de IA, serviços de Webchat, relatórios e um serviço VoIP auxiliar em Go.
 
-- **Shared inbox** on the official WhatsApp Business API — multiple
-  agents working one number, per-conversation assignment, status, and
-  notes.
-- **Contacts + tags + custom fields**, CSV import, deduplication.
-- **Sales pipelines** (Kanban) with deals linked to conversations.
-- **Broadcasts** with Meta-approved templates, delivery + read
-  tracking, per-recipient variable substitution.
-- **No-code automations** — triggers on inbound messages, new
-  contacts, keywords, or schedule; conditional branches, waits,
-  tags, webhooks. Visual builder.
-- **Real-time dashboard** — response times, daily volume, pipeline
-  value, cross-module activity feed.
-- **Team accounts** — invite teammates by link, role-based access
-  (owner / admin / agent / viewer), ownership transfer. Every install
-  is account-scoped, so one shared inbox can be staffed by a whole
-  team. Solo use stays single-user with zero setup.
-- **Account management** — email, password, avatar, global sign-out.
-- **Public REST API** (`/api/v1`) with scoped, revocable API keys —
-  build your own automations on top of your CRM. See
-  [docs/public-api.md](./docs/public-api.md).
+### Capacidades principais
 
-## Why fork this?
+| Área | O que o CRM oferece |
+| --- | --- |
+| Atendimento | Inbox compartilhada, atribuição por agente/equipe, histórico, notas, tabulações, respostas rápidas e transferência |
+| Omnichannel | WhatsApp via Meta Cloud API e WAHA, Webchat, Instagram/Messenger e fundação para múltiplos canais |
+| IA | Agente conversacional, tool calling, análise de sentimento, handoff para humanos e recuperação de falhas |
+| Fluxos | Builder visual com nós de envio, condições, waits, IA, handoff, chamadas HTTP e encadeamento de fluxos |
+| Disparador | Importação de base, segmentação, fila de envio, templates, retries, idempotência, blacklist, métricas, UTM e callbacks |
+| Gestão | Contatos, equipes, usuários, permissões, pipelines, templates e configurações por conta |
+| Observabilidade | Monitoramento operacional, logs, auditoria, relatórios, métricas de IA/fluxos e health checks |
+| API | API REST autenticada por chaves com escopos em `/api/v1` |
+| Voz | Serviço VoIP auxiliar em Go com integração ao CRM |
 
-This is a **template**, not a product. Forking means you get:
+## Arquitetura em alto nível
 
-- **Full ownership** — your code, your Supabase project, your domain,
-  your data. No SaaS lock-in, no seat pricing, no trust dance.
-- **Full customisation** — add the fields your team needs, remove the
-  modules you don't, redesign anything. The stack is boring on
-  purpose (Next.js + Supabase + Tailwind) so the learning curve is
-  short.
-- **Zero ops to start** — [Hostinger](https://www.hostinger.com/web-apps-hosting)
-  Managed Node.js deploys a fork in a few clicks. No Docker, no
-  Kubernetes, no infra team needed.
-  ([See below ↓](#-deploy-on-hostinger-recommended))
-- **Real security primitives** — token encryption (AES-256-GCM), RLS
-  on every table, HMAC-verified webhooks, CSP, rate limiting, CI
-  typecheck/build on every PR.
+```mermaid
+flowchart LR
+    U[Usuários do CRM] --> WEB[Next.js / React]
+    C[Clientes] --> CH[Meta / WAHA / Webchat / Social]
 
-Not a framework. Not an SDK. A concrete, working CRM you can stand up
-in an afternoon and make yours.
+    CH --> API[Route Handlers / Webhooks]
+    WEB --> API
 
-## Quick start
+    API --> FLOW[Flow Engine]
+    API --> DISP[Disparador]
+    API --> AI[Camada de IA]
+    API --> CORE[Serviços de domínio]
 
-```bash
-# Fork on GitHub first: https://github.com/ArnasDon/wacrm → Fork
-git clone https://github.com/<your-username>/wacrm.git
-cd wacrm
-npm install
-cp .env.local.example .env.local   # fill in Supabase + Meta creds
-npm run dev
+    FLOW --> DB[(Supabase / PostgreSQL\nschema wacrm)]
+    DISP --> DB
+    AI --> DB
+    CORE --> DB
+
+    AI --> DDM[DDM Acordos]
+    AI --> LLM[OpenAI / Gemini / Claude / OpenRouter]
+    DISP --> META[Meta / WAHA]
+    DISP --> UTM[UTMPay]
+    CORE --> VOIP[Serviço VoIP]
 ```
 
-Open <http://localhost:3000>. You'll be redirected to `/login` (or
-`/dashboard` if already signed in).
-
-## 🚀 Deploy on Hostinger (recommended)
-
-<p align="center">
-  <a href="https://www.hostinger.com/web-apps-hosting">
-    <img src="./.github/assets/hostinger-deploy.png" alt="Ship your Node.js app in one click — Deploy to Hostinger" width="1000">
-  </a>
-</p>
-<p align="center">
-  <a href="https://wacrm.tech/docs/deployment-hostinger">
-    <img src="https://img.shields.io/badge/Step--by--step_guide-wacrm.tech%2Fdocs-111?style=for-the-badge" alt="Step-by-step guide" height="44">
-  </a>
-</p>
-
-**wacrm is built to run on [Hostinger](https://www.hostinger.com/web-apps-hosting).**
-It's the path we test, document, and recommend — and the fastest way
-to get a production-grade CRM live without owning a VPS or a
-Kubernetes cluster.
-
-### Why Hostinger?
-
-| | |
-|---|---|
-| **One-click Git deploy** | Connect your fork, push to `main`, Hostinger builds and ships it. No SSH, no Docker, no CI to wire up — this repo's own `main` deploys this way. |
-| **Managed Node.js** | Next.js 16 (App Router, server actions, ISR) runs out of the box on [Premium, Business, and Cloud](https://www.hostinger.com/web-apps-hosting) shared plans. You don't manage Node versions, processes, or reverse proxies. |
-| **Free SSL + free domain** | Automatic Let's Encrypt on your custom domain (or a free one included with annual plans). HTTPS is on by default — required for the WhatsApp Business webhook. |
-| **Global CDN + LiteSpeed** | Static assets cached at the edge, dynamic routes served from LiteSpeed. Snappy dashboards out of the box, no Cloudflare setup required. |
-| **Env vars + logs in hPanel** | Set `SUPABASE_*`, `WHATSAPP_*`, and `ENCRYPTION_KEY` from the panel — no `.env` on the server. Live application logs in the same UI. |
-| **DDoS protection + daily backups** | Built-in, no add-ons. The webhook endpoint is a public target — having protection at the edge matters. |
-| **Cheaper than a VPS** | Plans start at a few dollars a month — order-of-magnitude less than a comparable managed Node.js host, and you don't pay extra for the database (that's Supabase). |
-| **24/7 human support** | Live chat support in 20+ languages — useful when your CRM is the thing your team relies on to talk to customers. |
-
-### The 60-second version
-
-1. **Fork** this repo on GitHub.
-2. In **hPanel → Websites → Create**, pick **Node.js** and connect
-   your fork.
-3. Paste your Supabase + Meta env vars into hPanel.
-4. Push to `main`. Hostinger builds and serves it. Done.
-
-Full walkthrough with screenshots:
-**[wacrm.tech/docs/deployment-hostinger](https://wacrm.tech/docs/deployment-hostinger)**.
-
-> _Note: wacrm is MIT-licensed and runs anywhere Node.js does
-> (Vercel, Railway, your own VPS). Hostinger is recommended, not
-> required._
-
-## Documentation
-
-Full self-host documentation — Supabase migrations, WhatsApp Business
-API config, and production deploy — lives at
-**[wacrm.tech/docs](https://wacrm.tech/docs)**
-(source: [ArnasDon/wacrm-site](https://github.com/ArnasDon/wacrm-site)).
-
-Key pages:
-- [Getting started](https://wacrm.tech/docs/getting-started)
-- [Supabase setup](https://wacrm.tech/docs/supabase-setup)
-- [WhatsApp setup](https://wacrm.tech/docs/whatsapp-setup)
-- [Environment variables](https://wacrm.tech/docs/environment-variables)
-- [Deploy on Hostinger](https://wacrm.tech/docs/deployment-hostinger)
-- [Architecture](https://wacrm.tech/docs/architecture)
-- [Troubleshooting](https://wacrm.tech/docs/troubleshooting)
+Detalhes de componentes, fronteiras e fluxos estão em [docs/architecture.md](./docs/architecture.md).
 
 ## Stack
 
-- **App** — Next.js 16 (App Router), React 19, TypeScript, Tailwind v4.
-- **Data** — Supabase (Postgres + Auth + Storage + RLS).
-- **WhatsApp** — Meta Cloud API (official WhatsApp Business API).
+- **Aplicação:** Next.js 16, React 19, TypeScript, App Router.
+- **UI:** Tailwind CSS 4, shadcn, Base UI, Lucide.
+- **Banco e autenticação:** Supabase/PostgreSQL, Supabase Auth, Storage e Realtime.
+- **Mensageria:** Meta WhatsApp Cloud API e WAHA.
+- **IA:** OpenAI e suporte de infraestrutura para Gemini, Claude e OpenRouter/Hermes.
+- **Testes:** Vitest; testes de unidade, integração SQL e cenários de stress.
+- **CI:** GitHub Actions com lint, typecheck, testes, build principal, subprojeto do disparador e VoIP.
+- **VoIP:** serviço auxiliar em Go.
+- **Runtime de produção atual:** Node.js 20 com processo reiniciado por Passenger/cPanel.
 
-## Contributing
+## Início rápido
 
-This is a template, not a collaborative product — the expected flow is
-fork → customise → deploy, **not** upstream contribution. Bug reports
-and security issues are welcome; feature PRs often belong in your fork
-rather than here. Details in
-[`CONTRIBUTING.md`](./CONTRIBUTING.md) and
-[`.github/SECURITY.md`](./.github/SECURITY.md).
+Pré-requisitos:
 
-## License
+- Node.js 20+
+- npm 10
+- projeto Supabase compatível com o schema esperado
+- credenciais dos canais e integrações que serão utilizadas
 
-[MIT](./LICENSE). Fork it, brand it, host it.
+```bash
+git clone https://github.com/iaeautomacao-lgtm/CRM-DDM.git
+cd CRM-DDM
+
+npm ci
+cp .env.local.example .env.local
+npm run schema:check
+npm run dev
+```
+
+Abra `http://localhost:3000`.
+
+> `schema:check` consulta o banco configurado e bloqueia o deploy quando objetos críticos do schema não estão disponíveis. Para um ambiente novo, veja [docs/getting-started.md](./docs/getting-started.md) antes de executar migrations.
+
+## Configuração
+
+O arquivo [`.env.local.example`](./.env.local.example) documenta as variáveis suportadas. As mais importantes para o runtime principal são:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+ENCRYPTION_KEY=
+META_APP_SECRET=
+```
+
+Recursos adicionais exigem variáveis próprias, como `DDM_ACORDOS_API_TOKEN`, chaves de LLM, `UTM_API_KEY`, `WAHA_WEBHOOK_SECRET`, `VOIP_SERVICE_SECRET` e segredos dos crons.
+
+Veja a matriz completa em [docs/configuration.md](./docs/configuration.md).
+
+## Banco de dados e migrations
+
+- O schema de aplicação é `wacrm`; não assuma o schema `public`.
+- As migrations versionadas ficam em [`supabase/migrations/`](./supabase/migrations/).
+- Em ambientes existentes, o **schema live deve ser verificado antes de escrever ou aplicar uma migration**.
+- `all_migrations.sql` é um artefato consolidado histórico e não substitui a revisão do histórico versionado.
+- O deploy executa `npm run schema:check` antes do build.
+
+Mais detalhes: [docs/database.md](./docs/database.md).
+
+## Qualidade e testes
+
+Antes de abrir um PR:
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+Comandos úteis:
+
+| Comando | Finalidade |
+| --- | --- |
+| `npm run dev` | desenvolvimento local |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | validação TypeScript sem emissão |
+| `npm test` | suíte Vitest |
+| `npm run build` | build de produção |
+| `npm run schema:check` | compatibilidade do banco |
+| `npm run stress:e2e` | cenários de stress end-to-end |
+
+O workflow de CI também compila os subprojetos em `disparador/` e executa testes/build do serviço `voip/`.
+
+## Deploy
+
+O repositório possui automação cPanel em [`.cpanel.yml`](./.cpanel.yml). A sequência de produção é deliberadamente simples e stateless:
+
+```bash
+nvm use 20.19.0
+npm install --no-audit --no-fund
+npm run schema:check
+npm run build
+touch tmp/restart.txt
+```
+
+Jobs recorrentes não devem depender de `setInterval` dentro do processo da aplicação. Fluxos recorrentes usam endpoints de cron protegidos e mecanismos persistidos no banco.
+
+Runbook: [docs/operations.md](./docs/operations.md).
+
+## Documentação
+
+A documentação técnica está organizada em [`docs/`](./docs/README.md):
+
+- [Getting started](./docs/getting-started.md)
+- [Arquitetura](./docs/architecture.md)
+- [Configuração e variáveis de ambiente](./docs/configuration.md)
+- [Banco de dados e migrations](./docs/database.md)
+- [Integrações](./docs/integrations.md)
+- [Operação e deploy](./docs/operations.md)
+- [Troubleshooting](./docs/troubleshooting.md)
+- [API pública](./docs/public-api.md)
+- [VoIP](./voip/README.md)
+- [Disparador auxiliar](./disparador/README.md)
+
+## Estrutura do repositório
+
+```text
+CRM-DDM/
+├── src/
+│   ├── app/
+│   │   ├── (dashboard)/     # páginas autenticadas
+│   │   └── api/             # APIs, webhooks e crons
+│   ├── components/          # componentes de UI
+│   ├── hooks/               # hooks React
+│   └── lib/
+│       ├── ai/              # LLM, ferramentas e handoff
+│       ├── flows/           # motor e validação de fluxos
+│       ├── disparador/      # campanhas, fila e segurança de envio
+│       ├── whatsapp/        # Meta/WAHA
+│       ├── intelligence/    # métricas e ferramentas analíticas
+│       └── webchat/         # sessões e mensagens web
+├── supabase/migrations/     # evolução do schema wacrm
+├── docs/                    # documentação técnica
+├── tests/                   # stress e cenários auxiliares
+├── disparador/              # serviços auxiliares do disparador
+└── voip/                    # serviço VoIP em Go
+```
+
+## Segurança
+
+O projeto processa dados de clientes e credenciais de provedores. Regras mínimas:
+
+- nunca commitar segredos, tokens ou service-role keys;
+- manter credenciais somente no ambiente do servidor;
+- respeitar RLS e escopo por `account_id`;
+- validar assinatura de webhooks;
+- evitar logs com PII/segredos;
+- rotacionar credenciais após qualquer suspeita de vazamento;
+- reportar vulnerabilidades de forma privada.
+
+Consulte [`.github/SECURITY.md`](./.github/SECURITY.md).
+
+## Contribuição
+
+Fluxo recomendado:
+
+1. branch curta a partir de `main`;
+2. mudança focada;
+3. testes locais;
+4. PR com impacto, riscos e plano de validação;
+5. CI verde antes do merge.
+
+Detalhes em [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+## Licença e origem
+
+O repositório preserva a licença MIT do projeto-base e evolui o produto para as necessidades operacionais do Grupo DDM. Consulte [LICENSE](./LICENSE) para os termos aplicáveis.
