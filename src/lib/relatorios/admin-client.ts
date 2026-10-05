@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { auditFetch } from '@/lib/audit/context'
 
 // Lazy, shared service-role client for the export-history write path
 // (storage upload/remove + export_history insert/delete). Mirrors the
@@ -15,6 +16,8 @@ export function supabaseAdmin(): SupabaseClient {
         db: {
           schema: 'wacrm',
         },
+        // Autor/IP da requisição para as triggers de auditoria (migration 131).
+        global: { fetch: auditFetch },
       }
     ) as any
   }

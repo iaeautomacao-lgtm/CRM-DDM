@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { auditFetch } from '@/lib/audit/context'
 
 // Lazy, shared service-role client for automation engine work.
 // Mirrors the pattern used by the webhook handler
@@ -14,6 +15,8 @@ export function supabaseAdmin(): SupabaseClient {
         db: {
           schema: 'wacrm',
         },
+        // Autor/IP da requisição para as triggers de auditoria (migration 131).
+        global: { fetch: auditFetch },
       }
     ) as any
   }

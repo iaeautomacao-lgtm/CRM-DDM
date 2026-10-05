@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { auditFetch } from '@/lib/audit/context'
 import { resolveActiveApiKey, fetchRecentHistoryText, callLlmForAnalysis, stripJsonFences } from "./llm-shared";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -10,7 +11,9 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
   db: {
     schema: 'wacrm'
-  }
+  },
+        // Auditoria (migration 131): escritas da IA saem como ator "ai".
+        global: { fetch: auditFetch, headers: { 'x-audit-actor-type': 'ai', 'x-audit-source': 'ia' } },
 }) as unknown as SupabaseClient;
 
 export async function analyzeConversationSentimentAndTags(
