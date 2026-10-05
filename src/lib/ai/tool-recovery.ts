@@ -135,14 +135,50 @@ export function classifyHttpFailure(status: number): ToolFailure | null {
   };
 }
 
+// Resposta HTTP 200 que na verdade é erro em TEXTO (não JSON). A API DDM
+// devolve, por exemplo, "Erro ao executar a query:" com status 200 — antes
+// isso passava como sucesso, a IA recebia lixo e a conversa travava.
+const TEXT_ERROR_PATTERNS: RegExp[] = [
+  /^\s*(erro|error|exception|fatal)\b/i,
+  /erro ao executar a query/i,
+  /\b(sqlstate|syntax error|query failed|uncaught exception|stack trace)\b/i,
+  /^\s*<(!doctype html|html)\b/i,
+];
+
+function classifyTextBodyFailure(body: string): ToolFailure | null {
+  const text = body.trim();
+  if (!text) {
+    return {
+      code: "TOOL_PROVIDER_ERROR",
+      message: "A integração respondeu sem conteúdo.",
+      retryable: true,
+    };
+  }
+  if (TEXT_ERROR_PATTERNS.some((re) => re.test(text))) {
+    return {
+      code: "TOOL_SERVER_ERROR",
+      message: `A integração retornou erro: ${text.slice(0, 120)}`,
+      retryable: true,
+    };
+  }
+  return null;
+}
+
 export function classifyToolBodyFailure(body: string): ToolFailure | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(body);
   } catch {
-    return null;
+    // Não é JSON: pode ser texto de erro (ou HTML de erro do servidor).
+    return classifyTextBodyFailure(body);
   }
 
+  if (parsed === null || parsed === "") {
+    return classifyTextBodyFailure("");
+  }
+  if (typeof parsed === "string") {
+    return classifyTextBodyFailure(parsed);
+  }
   if (!parsed || typeof parsed !== "object" || !("error" in parsed)) {
     return null;
   }
@@ -229,6 +265,24 @@ export function shouldRetryTool(
 
 export function retryDelayMs(attempt: number): number {
   return Math.min(300 * 2 ** Math.max(0, attempt - 1), 1200);
+}
+
+/**
+ * Falha de INTEGRAÇÃO (fora do controle do cliente) — depois das
+ * tentativas, a conversa não pode ficar parada esperando o modelo decidir:
+ * ver forceInstabilityExit em responder.ts. CPF inválido e parâmetro
+ * ausente não entram (o modelo resolve pedindo o dado de novo).
+ */
+export function isIntegrationOutage(code: ToolFailureCode | undefined | null): boolean {
+  return (
+    code === "TOOL_TIMEOUT" ||
+    code === "TOOL_RATE_LIMIT" ||
+    code === "TOOL_SERVER_ERROR" ||
+    code === "TOOL_HTTP_ERROR" ||
+    code === "TOOL_NETWORK_ERROR" ||
+    code === "TOOL_INVALID_CLIENT" ||
+    code === "TOOL_PROVIDER_ERROR"
+  );
 }
 
 export function serializeToolFailure(

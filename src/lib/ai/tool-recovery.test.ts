@@ -3,6 +3,7 @@ import {
   classifyFetchFailure,
   classifyHttpFailure,
   classifyToolBodyFailure,
+  isIntegrationOutage,
   isValidCpf,
   normalizeCpf,
   prepareToolArgs,
@@ -130,5 +131,33 @@ describe("tool recovery — HTTP classification", () => {
       http_status: 503,
       attempts: 3,
     });
+  });
+});
+
+describe("classifyToolBodyFailure — erro em texto (HTTP 200)", () => {
+  it("reconhece o erro da API DDM em texto puro", () => {
+    const f = classifyToolBodyFailure("Erro ao executar a query: ");
+    expect(f?.code).toBe("TOOL_SERVER_ERROR");
+    expect(f?.retryable).toBe(true);
+  });
+  it("reconhece HTML de erro, corpo vazio e string JSON de erro", () => {
+    expect(classifyToolBodyFailure("<!DOCTYPE html><html><body>502</body></html>")?.code).toBe("TOOL_SERVER_ERROR");
+    expect(classifyToolBodyFailure("")?.code).toBe("TOOL_PROVIDER_ERROR");
+    expect(classifyToolBodyFailure('"Erro interno"')?.code).toBe("TOOL_SERVER_ERROR");
+  });
+  it("não acusa resposta válida", () => {
+    expect(classifyToolBodyFailure('{"nome":"Maria","debitos":[]}')).toBeNull();
+    expect(classifyToolBodyFailure("[]")).toBeNull();
+    expect(classifyToolBodyFailure("Cliente localizado: Maria")).toBeNull();
+  });
+});
+
+describe("isIntegrationOutage", () => {
+  it("integração fora do ar sim; CPF inválido e parâmetro ausente não", () => {
+    expect(isIntegrationOutage("TOOL_SERVER_ERROR")).toBe(true);
+    expect(isIntegrationOutage("TOOL_TIMEOUT")).toBe(true);
+    expect(isIntegrationOutage("CPF_INVALIDO")).toBe(false);
+    expect(isIntegrationOutage("TOOL_SCHEMA_ERROR")).toBe(false);
+    expect(isIntegrationOutage(undefined)).toBe(false);
   });
 });
