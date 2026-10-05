@@ -98,6 +98,8 @@ describe("tool recovery — HTTP classification", () => {
         retryable: true,
       }),
     );
+
+    expect(classifyToolBodyFailure('{"error":null,"data":[]}')).toBeNull();
   });
 
   it("retries only known read-only DDM tools", () => {
