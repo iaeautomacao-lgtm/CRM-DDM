@@ -48,12 +48,19 @@ export function SocialChannelsSection({
 }) {
   const [channels, setChannels] = useState<SocialChannel[]>([]);
   const [loading, setLoading] = useState(true);
+  // Variáveis que faltam no servidor por canal (GET /api/channels).
+  const [setup, setSetup] = useState<{
+    instagram: { missing: string[] };
+    messenger: { missing: string[] };
+    webhook_verify_token: boolean;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await apiFetch("/api/channels");
       const json = await res.json();
       setChannels(json.channels ?? []);
+      setSetup(json.setup ?? null);
     } catch {
       toast.error("Falha ao carregar Instagram/Messenger");
     } finally {
@@ -121,16 +128,40 @@ export function SocialChannelsSection({
         </div>
         <div className="flex gap-2">
           {/* Navegação completa: o OAuth sai para a Meta e volta em /canais. */}
-          <Button variant="outline" onClick={() => (window.location.href = "/api/channels/instagram/connect")}>
+          <Button
+            variant="outline"
+            disabled={!!setup && setup.instagram.missing.length > 0}
+            title={setup?.instagram.missing.length ? `Faltam no servidor: ${setup.instagram.missing.join(", ")}` : undefined}
+            onClick={() => (window.location.href = "/api/channels/instagram/connect")}
+          >
             <AtSign className="size-4 text-pink-500" />
             Conectar Instagram
           </Button>
-          <Button variant="outline" onClick={() => (window.location.href = "/api/channels/messenger/connect")}>
+          <Button
+            variant="outline"
+            disabled={!!setup && setup.messenger.missing.length > 0}
+            title={setup?.messenger.missing.length ? `Faltam no servidor: ${setup.messenger.missing.join(", ")}` : undefined}
+            onClick={() => (window.location.href = "/api/channels/messenger/connect")}
+          >
             <MessageCircle className="size-4 text-blue-500" />
             Conectar Messenger
           </Button>
         </div>
       </div>
+
+      {setup && (setup.instagram.missing.length > 0 || setup.messenger.missing.length > 0 || !setup.webhook_verify_token) && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+          <p className="font-medium">Configuração pendente no servidor (.env)</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4">
+            {setup.instagram.missing.length > 0 && <li>Instagram: {setup.instagram.missing.join(", ")}</li>}
+            {setup.messenger.missing.length > 0 && <li>Messenger: {setup.messenger.missing.join(", ")}</li>}
+            {!setup.webhook_verify_token && (
+              <li>Webhook da Meta: META_WEBHOOK_VERIFY_TOKEN (sem ele as mensagens não chegam)</li>
+            )}
+          </ul>
+          <p className="mt-1">Depois de configurar, reinicie o app e recarregue esta página.</p>
+        </div>
+      )}
 
       <div className="rounded-xl border border-border bg-card">
         {loading ? (

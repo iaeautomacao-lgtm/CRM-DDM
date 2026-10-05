@@ -37,6 +37,19 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * Variáveis de ambiente que faltam para conectar cada canal. A tela de
+ * /canais usa para desabilitar o botão com a explicação, em vez de mandar
+ * o usuário para uma página de erro.
+ */
+export function socialConnectMissingEnv(type: SocialChannelType): string[] {
+  const needed =
+    type === "instagram"
+      ? ["INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET", "NEXT_PUBLIC_APP_URL"]
+      : ["META_APP_ID", "META_APP_SECRET", "NEXT_PUBLIC_APP_URL"];
+  return needed.filter((name) => !process.env[name]);
+}
+
 export function oauthRedirectUri(type: SocialChannelType): string {
   return new URL(`/api/channels/${type}/callback`, requireEnv("NEXT_PUBLIC_APP_URL")).toString();
 }

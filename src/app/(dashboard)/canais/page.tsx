@@ -70,6 +70,7 @@ import { ConnectWahaDialog } from "@/components/canais/ConnectWahaDialog";
 import { TestChannelDialog } from "@/components/canais/TestChannelDialog";
 import { ClientsDialog, type ClientOption } from "@/components/canais/ClientsDialog";
 import { SocialChannelsSection } from "@/components/canais/SocialChannelsSection";
+import { WebchatSettingsSection } from "@/components/canais/WebchatSettingsSection";
 
 function channelName(c: ChannelConfig): string {
   if (c.provider === "waha") return c.waha_session || "Sessão WAHA";
@@ -597,6 +598,8 @@ export default function CanaisPage() {
       </div>
 
       <SocialChannelsSection flows={flows} teams={teams} clients={clients} />
+
+      <WebchatSettingsSection flows={flows} />
 
       <ClientsDialog
         accountId={accountId}

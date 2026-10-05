@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { FileText, Loader2, Mic, Paperclip, Send, Square, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,7 @@ const noopSubscribe = () => () => {};
 type PageState =
   | { kind: "loading" }
   | { kind: "gone"; reason: "expired" | "revoked" | "not_found" | "error" }
-  | { kind: "ready"; brand: string; firstName: string | null };
+  | { kind: "ready"; brand: string; firstName: string | null; welcome: string; accent: string | null };
 
 export function WebchatClient({ token }: { token: string }) {
   const api = `/api/webchat/${token}`;
@@ -102,7 +102,14 @@ export function WebchatClient({ token }: { token: string }) {
           return !cancelled && setPage(goneFrom(open.status, openBody) ?? { kind: "gone", reason: "error" });
         }
         if (cancelled) return;
-        setPage({ kind: "ready", brand: body.brand?.name ?? "Atendimento", firstName: body.contact?.first_name ?? null });
+        const firstName = body.contact?.first_name ?? null;
+        setPage({
+          kind: "ready",
+          brand: body.brand?.name ?? "Atendimento",
+          firstName,
+          welcome: body.welcome ?? `${firstName ? `Olá, ${firstName}! ` : "Olá! "}Já vamos te atender.`,
+          accent: typeof body.brand?.accent_color === "string" ? body.brand.accent_color : null,
+        });
         await poll();
       } catch {
         if (!cancelled) setPage({ kind: "gone", reason: "error" });
@@ -212,8 +219,13 @@ export function WebchatClient({ token }: { token: string }) {
   }
   if (page.kind === "gone") return <GoneScreen reason={page.reason} />;
 
+  // Cor da configuração do Webchat: sobrescreve o --primary da página.
+  const accentStyle = page.accent
+    ? ({ "--primary": page.accent, "--primary-foreground": "#ffffff" } as CSSProperties)
+    : undefined;
+
   return (
-    <div className="flex h-dvh flex-col bg-background">
+    <div className="flex h-dvh flex-col bg-background" style={accentStyle}>
       <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-3">
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
           {page.brand.charAt(0).toUpperCase()}
@@ -232,7 +244,7 @@ export function WebchatClient({ token }: { token: string }) {
         <div className="mx-auto flex max-w-2xl flex-col gap-2">
           {messages.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
-              {page.firstName ? `Olá, ${page.firstName}! ` : "Olá! "}Já vamos te atender.
+              {page.welcome}
             </p>
           )}
           {messages.map((m, i) => {
