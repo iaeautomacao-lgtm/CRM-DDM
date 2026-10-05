@@ -314,15 +314,24 @@ export default function CanaisPage() {
     if (!deleteTargets || deleteTargets.length === 0) return;
     setDeleteBusy(true);
     try {
-      await Promise.all(
+      // apiFetch não lança em 4xx/5xx: confere cada resposta para não
+      // anunciar "removido" quando a API recusou.
+      const responses = await Promise.all(
         deleteTargets.map((c) =>
           apiFetch(`/api/whatsapp/config?id=${c.id}`, { method: "DELETE" }),
         ),
       );
-      toast.success(deleteTargets.length > 1 ? "Canais removidos." : "Canal removido.");
+      const removed = deleteTargets.filter((_, i) => responses[i].ok);
+      const failed = deleteTargets.length - removed.length;
+      if (removed.length > 0) {
+        toast.success(removed.length > 1 ? `${removed.length} canais removidos.` : "Canal removido.");
+      }
+      if (failed > 0) {
+        toast.error(failed > 1 ? `${failed} canais não puderam ser removidos.` : "Não foi possível remover o canal.");
+      }
       setSelected((prev) => {
         const next = new Set(prev);
-        deleteTargets.forEach((c) => next.delete(c.id));
+        removed.forEach((c) => next.delete(c.id));
         return next;
       });
       await fetchConfigs();

@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 
 type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
@@ -238,6 +239,14 @@ export async function startCampaign(
       }
     }
 
+    // Público da campanha (src/lib/disparador/audience.ts): CSV ∩
+    // tabulações, nunca "a conta inteira" quando a campanha é de CSV.
+    // Calculado antes de mexer na fila.
+    const audience = await loadCampaignAudience(supabaseAdmin(), accountId, campaign);
+    if (!audience.ok) {
+      return { ok: false, status: 400, error: audience.error };
+    }
+
     // 2. Remove previously scheduled/pending items to prevent duplication.
     // 'enviando' incluído para limpar itens travados por crash/deploy
     // anterior (processo derrubado entre o claim e o update final). Erro
@@ -254,133 +263,9 @@ export async function startCampaign(
       return { ok: false, status: 500, error: cleanupError.message };
     }
 
-    // 3. Load active contacts — scoped to the caller's account so a
-    // campaign never sends to another account's contacts. Paginado via
-    // .range() — mesmo padrão do filtro por tag abaixo (contact_tags) —
-    // sem isso, o cap de resposta do PostgREST (1000 linhas) trunca
-    // contas com mais de 1000 contatos silenciosamente.
-    const allContacts: any[] = [];
-    {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await supabaseAdmin()
-          .from("contacts")
-          // cpf (migration 077): chave principal do link UTM (utm-links.ts).
-          .select("id, name, phone, company, phone_normalized, cpf")
-          .eq("account_id", accountId)
-          .range(from, from + pageSize - 1);
-
-        if (pageError) {
-          throw new Error(`Erro ao carregar contatos: ${pageError.message}`);
-        }
-        allContacts.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-    }
-
-    if (allContacts.length === 0) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Nenhum contato ativo encontrado no CRM.",
-      };
-    }
-
-    // Filter contacts by tag — filtra pelo lado pequeno (nomes em
-    // tags_filtro, tipicamente 1-5) em vez de carregar contact_tags de
-    // TODOS os contatos da conta (que já foi tentado em duas voltas
-    // anteriores e falhou nas duas):
-    //   1) sem filtro nenhum: contact_tags não tem account_id, então a
-    //      query batia no cap de resposta do PostgREST (db-max-rows,
-    //      confirmado ao vivo em 1000) e truncava silenciosamente — sem
-    //      erro, só menos contatos enfileirados que o esperado.
-    //   2) com .in('contact_id', chunk) em chunks de 500: corrigia o
-    //      truncamento mas um array de centenas de UUIDs num filtro GET
-    //      gera uma URL de dezenas de KB, o que bateu em algum limite de
-    //      tamanho de URL da infra em produção ("TypeError: fetch failed").
-    // Filtrar por tag_id (poucos valores) e paginar a RESPOSTA com
-    // .range() resolve os dois problemas ao mesmo tempo: o filtro de
-    // entrada nunca é grande, e a paginação explícita nunca depende do
-    // cap implícito do PostgREST pra trazer tudo.
-    const tagsFiltro = Array.isArray(campaign.tags_filtro) ? campaign.tags_filtro : [];
-    let contacts = allContacts;
-
-    if (tagsFiltro.length > 0) {
-      const { data: matchingTags, error: matchingTagsError } = await supabaseAdmin()
-        .from("tags")
-        .select("id")
-        .eq("account_id", accountId)
-        .in("name", tagsFiltro);
-
-      if (matchingTagsError) {
-        throw new Error(`Erro ao resolver tags de filtro: ${matchingTagsError.message}`);
-      }
-
-      const tagIds = (matchingTags ?? []).map((t) => t.id);
-      const matchingContactIds = new Set<string>();
-
-      if (tagIds.length > 0) {
-        const pageSize = 1000;
-        let from = 0;
-        while (true) {
-          const { data: page, error: pageError } = await supabaseAdmin()
-            .from("contact_tags")
-            .select("contact_id")
-            .in("tag_id", tagIds)
-            .range(from, from + pageSize - 1);
-
-          if (pageError) {
-            throw new Error(`Erro ao carregar tags dos contatos: ${pageError.message}`);
-          }
-          for (const row of page ?? []) {
-            if (row.contact_id) matchingContactIds.add(row.contact_id);
-          }
-          if (!page || page.length < pageSize) break;
-          from += pageSize;
-        }
-      }
-
-      contacts = allContacts.filter((c) => matchingContactIds.has(c.id));
-    }
-
-    // Se a campanha tem um import associado e nenhuma tag foi usada como
-    // filtro, restringe os contatos aos que pertencem a esse import —
-    // evita disparar para toda a conta quando o usuário não selecionou tags.
-    if (campaign.import_draft_id && tagsFiltro.length === 0) {
-      const importedContactIds = new Set<string>();
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await supabaseAdmin()
-          .from("contact_import_variables")
-          .select("contact_id")
-          .eq("draft_id", campaign.import_draft_id)
-          .range(from, from + pageSize - 1);
-
-        if (pageError) {
-          throw new Error(`Erro ao carregar contatos do import: ${pageError.message}`);
-        }
-        for (const row of page ?? []) {
-          if (row.contact_id) importedContactIds.add(row.contact_id);
-        }
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-
-      if (importedContactIds.size > 0) {
-        contacts = contacts.filter((c) => importedContactIds.has(c.id));
-      }
-    }
-
-    if (contacts.length === 0) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Nenhum contato encontrado com as tags de filtro selecionadas.",
-      };
-    }
+    // 3. Público (contatos já filtrados por CSV ∩ tabulações) — calculado
+    // antes da limpeza da fila, ver audience acima.
+    const contacts = audience.contacts;
 
     // Fetch Blacklist to skip — paginado via .range(), mesmo padrão de
     // allContacts/contact_import_variables acima: sem filtro nenhum (a
