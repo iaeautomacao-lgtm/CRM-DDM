@@ -21,7 +21,7 @@ const validNodes = [
       ],
     },
   },
-  { node_key: "ho", node_type: "handoff", config: {} },
+  { node_key: "ho", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
 ];
 
 describe("validateFlowForActivation — happy path", () => {
@@ -85,7 +85,7 @@ describe("validateFlowForActivation — flow-level", () => {
     const dupes = [
       { node_key: "a", node_type: "start", config: { next_node_key: "b" } },
       { node_key: "a", node_type: "end", config: {} },
-      { node_key: "b", node_type: "handoff", config: {} },
+      { node_key: "b", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "a" },
@@ -169,7 +169,7 @@ describe("validateFlowForActivation — nodes", () => {
           buttons: [{ reply_id: "x", title: "X", next_node_key: "h" }],
         },
       },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "s" },
@@ -188,7 +188,7 @@ describe("validateFlowForActivation — nodes", () => {
         node_type: "send_buttons",
         config: { text: "Hi", buttons: [] },
       },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "s" },
@@ -220,7 +220,7 @@ describe("validateFlowForActivation — nodes", () => {
           ],
         },
       },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "s" },
@@ -250,7 +250,7 @@ describe("validateFlowForActivation — nodes", () => {
           ],
         },
       },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "s" },
@@ -307,7 +307,7 @@ describe("validateFlowForActivation — nodes", () => {
           ],
         },
       },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "s" },
@@ -335,7 +335,7 @@ describe("validateFlowForActivation — nodes", () => {
           sections: [{ rows: eleven }],
         },
       },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "s" },
@@ -374,7 +374,7 @@ describe("validateFlowForActivation — nodes", () => {
           ],
         },
       },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ];
     const issues = validateFlowForActivation(
       { ...validFlow, entry_node_id: "s" },
@@ -388,7 +388,7 @@ describe("validateFlowForActivation — nodes", () => {
   it("warns about unreachable nodes", () => {
     const nodes = [
       { node_key: "s", node_type: "start", config: { next_node_key: "h" } },
-      { node_key: "h", node_type: "handoff", config: {} },
+      { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
       // Orphaned — nothing points at it.
       { node_key: "orphan", node_type: "end", config: {} },
     ];
@@ -402,6 +402,25 @@ describe("validateFlowForActivation — nodes", () => {
           i.node_key === "orphan" &&
           i.severity === "warning" &&
           i.message.includes("alcançável"),
+      ),
+    ).toBe(true);
+  });
+
+  it("warns when a handoff has no structured reason", () => {
+    const nodes = [
+      { node_key: "s", node_type: "start", config: { next_node_key: "h" } },
+      { node_key: "h", node_type: "handoff", config: {} },
+    ];
+    const issues = validateFlowForActivation(
+      { ...validFlow, entry_node_id: "s" },
+      nodes,
+    );
+    expect(
+      issues.some(
+        (i) =>
+          i.node_key === "h" &&
+          i.field === "reason_code" &&
+          i.severity === "warning",
       ),
     ).toBe(true);
   });
@@ -425,7 +444,7 @@ describe("validateFlowForActivation — send_media", () => {
   const nodesWith = (mediaConfig: Record<string, unknown>) => [
     { node_key: "s", node_type: "start", config: { next_node_key: "m" } },
     { node_key: "m", node_type: "send_media", config: mediaConfig },
-    { node_key: "h", node_type: "handoff", config: {} },
+    { node_key: "h", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
   ];
 
   it("passes on a fully-populated send_media node", () => {
@@ -526,7 +545,7 @@ describe("reachableFromEntry", () => {
 
   it("returns the entry alone when no edges lead out", () => {
     const set = reachableFromEntry("only", [
-      { node_key: "only", node_type: "handoff", config: {} },
+      { node_key: "only", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
     ]);
     expect(set).toEqual(new Set(["only"]));
   });
@@ -552,7 +571,7 @@ describe("validateFlowForActivation — send_webchat", () => {
   const webchatNodes = (config: Record<string, unknown>) => [
     { node_key: "start", node_type: "start", config: { next_node_key: "wc" } },
     { node_key: "wc", node_type: "send_webchat", config },
-    { node_key: "ho", node_type: "handoff", config: {} },
+    { node_key: "ho", node_type: "handoff", config: { reason_code: "INDEFINIDO" } },
   ];
 
   it("accepts a complete invite that continues on an existing node", () => {
