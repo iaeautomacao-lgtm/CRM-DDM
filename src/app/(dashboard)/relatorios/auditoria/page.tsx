@@ -240,7 +240,7 @@ export default function AuditoriaPage() {
               className="w-56"
             />
           </div>
-          <Button onClick={handlePesquisar} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
+          <Button onClick={handlePesquisar} className="bg-primary text-primary-foreground hover:bg-primary/90">
             <Search className="size-4" />
             Pesquisar
           </Button>

@@ -9,8 +9,10 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
 import { Search, ChevronDown, Plus, Loader2 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
+import { CONVERSATION_STATUS_LABELS, CONVERSATION_STATUS_LABELS_PLURAL } from "./status-labels";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,9 +63,9 @@ const STATUS_COLORS: Record<ConversationStatus, string> = {
 const STATUS_OPTIONS: { label: string; value: InboxStatus }[] = [
   { label: "Em andamento", value: "active" },
   { label: "Não lidas", value: "unread" },
-  { label: "Em atendimento", value: "open" },
-  { label: "Em espera", value: "pending" },
-  { label: "Fechadas", value: "closed" },
+  { label: CONVERSATION_STATUS_LABELS_PLURAL.open, value: "open" },
+  { label: CONVERSATION_STATUS_LABELS_PLURAL.pending, value: "pending" },
+  { label: CONVERSATION_STATUS_LABELS_PLURAL.closed, value: "closed" },
 ];
 
 const CHANNEL_TABS: { label: string; value: InboxChannel | null }[] = [
@@ -467,7 +469,7 @@ export function ConversationList({
         ) : grouped ? (
           <div className="flex flex-col py-1">
             <SectionHeader
-              label="Em Atendimento"
+              label={CONVERSATION_STATUS_LABELS_PLURAL.open}
               count={openGroup.length}
               expanded={openSectionExpanded}
               onToggle={() => toggleSection("open")}
@@ -480,7 +482,7 @@ export function ConversationList({
               ))}
             <div className="mt-2">
               <SectionHeader
-                label="Em Espera"
+                label={CONVERSATION_STATUS_LABELS_PLURAL.pending}
                 count={pendingGroup.length}
                 expanded={pendingSectionExpanded}
                 onToggle={() => toggleSection("pending")}
@@ -614,6 +616,20 @@ function waitingLabel(c: Conversation): string | null {
   return hours < 24 ? `aguardando ${hours} h` : `aguardando ${Math.floor(hours / 24)} d`;
 }
 
+/** Tempo compacto desde a última mensagem: "agora", "5 min", "2 h", "3 d";
+ *  a partir de 7 dias mostra a data (dd/MM/yy). */
+function compactTimeAgo(iso: string): string {
+  const date = new Date(iso);
+  const minutes = Math.floor((Date.now() - date.getTime()) / 60_000);
+  if (minutes < 1) return "agora";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} d`;
+  return format(date, "dd/MM/yy", { locale: ptBR });
+}
+
 function ConversationItem({ conversation, isActive, onSelect, client }: ConversationItemProps) {
   const { accountId } = useAuth();
   const contact = conversation.contact;
@@ -622,18 +638,11 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
   const channelBadge = CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"];
   const waiting = waitingLabel(conversation);
 
-  const timeAgo = conversation.last_message_at
-    ? formatDistanceToNow(new Date(conversation.last_message_at), {
-        addSuffix: false,
-      })
-        .replace("about", "")
-        .replace("less than a minute", "agora")
-        .replace("minute", "min")
-        .replace("hours", "h")
-        .replace("hour", "h")
-        .replace("days", "d")
-        .replace("day", "d")
-    : "";
+  const timeAgo = conversation.last_message_at ? compactTimeAgo(conversation.last_message_at) : "";
+  // Tooltip com a forma longa em pt-BR ("há 3 dias").
+  const timeAgoTitle = conversation.last_message_at
+    ? formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: true, locale: ptBR })
+    : undefined;
 
   return (
     <button
@@ -663,7 +672,9 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-          <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
+          <span className="shrink-0 text-[10px] text-muted-foreground" title={timeAgoTitle}>
+            {timeAgo}
+          </span>
         </div>
 
         {/* Canal (fora do WhatsApp), cliente da linha e sessão WAHA. */}
@@ -712,7 +723,7 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
                 {conversation.unread_count}
               </span>
             )}
-            <span className={cn("h-2 w-2 rounded-full", STATUS_COLORS[conversation.status])} title={conversation.status} />
+            <span className={cn("h-2 w-2 rounded-full", STATUS_COLORS[conversation.status])} title={CONVERSATION_STATUS_LABELS[conversation.status]} />
           </div>
         </div>
         {waiting && <p className="mt-0.5 text-[10px] font-medium text-amber-600">{waiting}</p>}

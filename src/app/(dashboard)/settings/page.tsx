@@ -47,7 +47,7 @@ function SettingsContent() {
   // already in context.
   const hints: Partial<Record<SettingsSection, ReactNode>> = useMemo(
     () => ({
-      appearance: mode.charAt(0).toUpperCase() + mode.slice(1),
+      appearance: mode === 'dark' ? 'Escuro' : mode === 'light' ? 'Claro' : mode,
       deals: defaultCurrency,
     }),
     [mode, defaultCurrency],

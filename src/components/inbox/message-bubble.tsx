@@ -47,18 +47,25 @@ function CampaignName({ campaign }: { campaign: { name: string; href: string | n
   );
 }
 
+// Só aparece em bolhas de saída (fundo primary): os ícones usam a cor do
+// texto sobre primary; azul fica reservado para "lida".
 function StatusIcon({ status }: { status: Message["status"] }) {
   switch (status) {
     case "sending":
-      return <Clock className="h-3 w-3 text-muted-foreground" />;
+      return <Clock className="h-3 w-3 text-primary-foreground/70" />;
     case "sent":
-      return <Check className="h-3 w-3 text-muted-foreground" />;
+      return <Check className="h-3 w-3 text-primary-foreground/70" />;
     case "delivered":
-      return <CheckCheck className="h-3 w-3 text-muted-foreground" />;
+      return <CheckCheck className="h-3 w-3 text-primary-foreground/70" />;
     case "read":
       return <CheckCheck className="h-3 w-3 text-blue-400" />;
     case "failed":
-      return <XCircle className="h-3 w-3 text-red-400" />;
+      return (
+        <span className="inline-flex items-center gap-0.5 rounded bg-red-500 px-1 text-[10px] font-medium text-white">
+          <XCircle className="h-3 w-3" />
+          Falha no envio
+        </span>
+      );
     default:
       return null;
   }
@@ -377,6 +384,15 @@ export function MessageBubble({
             isAgent ? "justify-end" : "justify-start",
           )}
         >
+          {/* Bot = IA, fluxo, automação ou disparo — distingue do atendente humano. */}
+          {message.sender_type === "bot" && (
+            <span
+              className="rounded bg-primary-foreground/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-primary-foreground/80"
+              title="Enviada por automação (IA, fluxo ou disparo)"
+            >
+              Automação
+            </span>
+          )}
           <span
             className={cn(
               "text-[10px]",

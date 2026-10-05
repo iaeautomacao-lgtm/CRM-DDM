@@ -26,14 +26,14 @@ import { cn } from '@/lib/utils';
 import type { Tag } from '@/types';
 
 const PRESET_COLORS = [
-  { name: 'Red', value: '#ef4444' },
-  { name: 'Orange', value: '#f97316' },
-  { name: 'Amber', value: '#f59e0b' },
-  { name: 'Emerald', value: '#10b981' },
-  { name: 'Cyan', value: '#06b6d4' },
-  { name: 'Blue', value: '#3b82f6' },
-  { name: 'Violet', value: '#8b5cf6' },
-  { name: 'Pink', value: '#ec4899' },
+  { name: 'Vermelho', value: '#ef4444' },
+  { name: 'Laranja', value: '#f97316' },
+  { name: 'Âmbar', value: '#f59e0b' },
+  { name: 'Esmeralda', value: '#10b981' },
+  { name: 'Ciano', value: '#06b6d4' },
+  { name: 'Azul', value: '#3b82f6' },
+  { name: 'Violeta', value: '#8b5cf6' },
+  { name: 'Rosa', value: '#ec4899' },
 ];
 
 /**
@@ -77,7 +77,7 @@ export function TagManager() {
       setTags(data || []);
     } catch (err) {
       console.error('Failed to fetch tags:', err);
-      toast.error('Failed to load tags');
+      toast.error('Não foi possível carregar as tags');
     } finally {
       setLoading(false);
     }
@@ -85,14 +85,14 @@ export function TagManager() {
 
   async function handleCreate() {
     if (!newTagName.trim()) {
-      toast.error('Tag name is required');
+      toast.error('Informe o nome da tag');
       return;
     }
 
     try {
       setSaving(true);
       if (!user || !accountId) {
-        toast.error('Not authenticated');
+        toast.error('Sessão expirada. Entre novamente.');
         return;
       }
 
@@ -107,13 +107,13 @@ export function TagManager() {
 
       if (error) throw error;
 
-      toast.success('Tag created');
+      toast.success('Tag criada');
       setNewTagName('');
       setSelectedColor(PRESET_COLORS[3].value);
       await fetchTags(user.id);
     } catch (err) {
       console.error('Create error:', err);
-      toast.error('Failed to create tag');
+      toast.error('Não foi possível criar a tag');
     } finally {
       setSaving(false);
     }
@@ -136,13 +136,13 @@ export function TagManager() {
 
       if (error) throw error;
 
-      toast.success('Tag deleted');
+      toast.success('Tag excluída');
       setTags((prev) => prev.filter((t) => t.id !== tagToDelete.id));
       setDeleteDialogOpen(false);
       setTagToDelete(null);
     } catch (err) {
       console.error('Delete error:', err);
-      toast.error('Failed to delete tag');
+      toast.error('Não foi possível excluir a tag');
     } finally {
       setDeleting(false);
     }
@@ -156,7 +156,7 @@ export function TagManager() {
           Tags
         </CardTitle>
         <CardDescription className="text-muted-foreground">
-          Colour-coded labels for grouping and filtering contacts.
+          Etiquetas coloridas para agrupar e filtrar contatos.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -186,7 +186,7 @@ export function TagManager() {
                     <button
                       type="button"
                       onClick={() => confirmDelete(tag)}
-                      aria-label={`Delete ${tag.name}`}
+                      aria-label={`Excluir ${tag.name}`}
                       className="ml-0.5 rounded-full p-0.5 opacity-60 transition-opacity hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
                     >
                       <X className="size-3" />
@@ -196,14 +196,14 @@ export function TagManager() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No tags yet — create your first one below.
+                Nenhuma tag ainda — crie a primeira abaixo.
               </p>
             )}
 
             {/* Inline create row */}
             <div className="flex flex-wrap items-center gap-2.5">
               <Input
-                placeholder="e.g. Newsletter"
+                placeholder="ex.: Cliente VIP"
                 value={newTagName}
                 onChange={(e) => setNewTagName(e.target.value)}
                 onKeyDown={(e) => {
@@ -219,7 +219,7 @@ export function TagManager() {
                     key={color.value}
                     type="button"
                     onClick={() => setSelectedColor(color.value)}
-                    aria-label={`Use ${color.name}`}
+                    aria-label={`Usar ${color.name}`}
                     aria-pressed={selectedColor === color.value}
                     className={cn(
                       'size-6 rounded-md transition-transform hover:scale-110',
@@ -242,7 +242,7 @@ export function TagManager() {
                 ) : (
                   <Plus className="size-4" />
                 )}
-                Add tag
+                Adicionar tag
               </Button>
             </div>
           </>
@@ -253,10 +253,10 @@ export function TagManager() {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete tag</DialogTitle>
+            <DialogTitle>Excluir tag</DialogTitle>
             <DialogDescription>
-              Delete the tag &quot;{tagToDelete?.name}&quot;? This removes it
-              from all contacts and cannot be undone.
+              Excluir a tag &quot;{tagToDelete?.name}&quot;? Ela será removida
+              de todos os contatos e esta ação não pode ser desfeita.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -265,7 +265,7 @@ export function TagManager() {
               onClick={() => setDeleteDialogOpen(false)}
               disabled={deleting}
             >
-              Cancel
+              Cancelar
             </Button>
             <Button
               variant="destructive"
@@ -275,10 +275,10 @@ export function TagManager() {
               {deleting ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  Deleting...
+                  Excluindo...
                 </>
               ) : (
-                'Delete tag'
+                'Excluir tag'
               )}
             </Button>
           </DialogFooter>

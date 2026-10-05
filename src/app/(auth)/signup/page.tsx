@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE, translateAuthError } from "@/lib/auth/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,8 +55,8 @@ function SignupPageInner() {
       return;
     }
 
-    if (password.length < 6) {
-      setError("A senha deve ter pelo menos 6 caracteres");
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(PASSWORD_TOO_SHORT_MESSAGE);
       return;
     }
 
@@ -81,7 +82,7 @@ function SignupPageInner() {
     });
 
     if (error) {
-      setError(error.message);
+      setError(translateAuthError(error));
       setLoading(false);
       return;
     }
@@ -155,7 +156,7 @@ function SignupPageInner() {
         <CardContent>
           <form onSubmit={handleSignup} className="flex flex-col gap-4">
             {error && (
-              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -197,7 +198,7 @@ function SignupPageInner() {
               <Input
                 id="password"
                 type="password" autoComplete="new-password"
-                placeholder="Pelo menos 6 caracteres"
+                placeholder={`Pelo menos ${MIN_PASSWORD_LENGTH} caracteres`}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

@@ -280,7 +280,16 @@ export function SettingsOverview({
 
       {/* Status tiles */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {tiles.map((tile) => {
+        {tiles
+          // Mesma regra do SettingsRail: seções `ownerOnly` (ex.: Agente
+          // de IA) não aparecem para quem não é owner.
+          .filter(
+            (tile) =>
+              tile.kind !== 'section' ||
+              !SECTION_META[tile.section].ownerOnly ||
+              accountRole === 'owner',
+          )
+          .map((tile) => {
           const Icon = tile.kind === 'section' ? SECTION_META[tile.section].icon : tile.icon;
           const label = tile.kind === 'section' ? SECTION_META[tile.section].label : tile.label;
           const inner = (

@@ -63,7 +63,7 @@ import { Skeleton } from "@/components/dashboard/skeleton";
 const BUCKET = "relatorio-exports";
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  completed: { label: "Concluído", className: "bg-[#CCFBF1] text-[#0F766E]" },
+  completed: { label: "Concluído", className: "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300" },
 };
 
 interface RawExportRow {

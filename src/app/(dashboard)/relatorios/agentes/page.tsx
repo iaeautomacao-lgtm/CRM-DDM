@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/dashboard/empty-state";
+import { ErrorState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { AccountMember } from "@/types";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
@@ -106,6 +107,7 @@ export default function AgentesPage() {
   const [applied, setApplied] = useState<Filters>(defaultFilters);
   const [rows, setRows] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,6 +125,7 @@ export default function AgentesPage() {
   const runSearch = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc("get_agent_sessions_report", {
@@ -135,6 +138,7 @@ export default function AgentesPage() {
       setRows(normalizeRows((data ?? []) as RawSessionRow[]));
     } catch (err) {
       console.error("[agentes] failed to load agent sessions:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -214,7 +218,7 @@ export default function AgentesPage() {
             </Select>
           </div>
 
-          <Button onClick={handlePesquisar} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
+          <Button onClick={handlePesquisar} className="bg-primary text-primary-foreground hover:bg-primary/90">
             <Search className="size-4" />
             Pesquisar
           </Button>
@@ -227,6 +231,10 @@ export default function AgentesPage() {
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="p-4">
+            <ErrorState title="Não foi possível carregar as sessões" onRetry={() => runSearch()} />
           </div>
         ) : rows.length === 0 ? (
           <div className="p-4">
@@ -266,7 +274,7 @@ export default function AgentesPage() {
                           {row.loggedOutAt ? (
                             format(new Date(row.loggedOutAt), "dd/MM/yyyy HH:mm:ss")
                           ) : (
-                            <Badge className="bg-[#DCFCE7] text-[#166534]">Ativo</Badge>
+                            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300">Ativo</Badge>
                           )}
                         </TableCell>
                         <TableCell className="text-right">

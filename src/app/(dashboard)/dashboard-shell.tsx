@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { DDM_SESSION_STORAGE_KEY, trackError, trackPageView } from "@/hooks/use-telemetry";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -40,7 +41,18 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
 
     if (isRouteGated(pathname) && !canAccessRoute(accountRole, pathname)) {
       const fallback = getDefaultRoute(accountRole);
-      if (pathname !== fallback) router.replace(fallback);
+      if (pathname !== fallback) {
+        // Explica o redirecionamento — o id fixo deduplica o toast caso
+        // o efeito rode de novo antes da navegação concluir. /dashboard é
+        // o destino padrão pós-login de todo mundo: lá o redirecionamento
+        // é só "ir para a sua tela inicial", sem aviso.
+        if (pathname !== "/dashboard") {
+          toast.error("Você não tem permissão para acessar esta página.", {
+            id: "route-forbidden",
+          });
+        }
+        router.replace(fallback);
+      }
     }
   }, [accountRole, loading, pathname, profileLoading, router, user, authError]);
 

@@ -6,9 +6,9 @@ import { apiFetch } from "@/lib/api-fetch";
 // /relatorios/atendimentos — main operational report: attendance
 // time/volume metrics by team and by agent. Backed by the three RPCs
 // in supabase/migrations/051_attendance_report_rpc.sql, which do all
-// aggregation in Postgres (see that file's header for exactly which
-// indicators are real data vs. documented proxy/zero — this page
-// trusts those RPCs and does no re-derivation of its own).
+// aggregation in Postgres. Indicadores que a RPC devolve como zero fixo
+// ou cópia de outro (Transferidos, Receptivos, TME, TMR) ficam ocultos
+// na UI; a única derivação local é a linha "Total" (médias ponderadas).
 //
 // Chart color: DDM-orange-anchored 5-slot categorical palette,
 // validated with the dataviz skill's validate_palette.js (both light
@@ -23,7 +23,7 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, startOfMonth } from "date-fns";
-import { Bot, Filter, Headphones, Search } from "lucide-react";
+import { Bot, Headphones, Search } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -49,10 +49,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/dashboard/skeleton";
+import { ErrorState } from "@/components/dashboard/error-state";
 import type { Team } from "@/types";
 import { MetricCard } from "@/components/relatorios/MetricCard";
 import { AttendanceTable, type AttendanceTableColumn } from "@/components/relatorios/AttendanceTable";
 import { formatDuration } from "@/lib/relatorios/format-duration";
+import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
 
 const ALL = "all";
 
@@ -215,14 +217,8 @@ function buildColumns(nameHeader: string): AttendanceTableColumn<AttendanceRow>[
       render: (r) => r.finalized,
       total: (rows) => rows.reduce((s, r) => s + r.finalized, 0),
     },
-    {
-      key: "transferred",
-      header: "Transferidos",
-      align: "right",
-      tooltip: "Não disponível no schema atual — sempre 0 (não há histórico de transferência persistido; ver migration 051).",
-      render: (r) => r.transferred,
-      total: (rows) => rows.reduce((s, r) => s + r.transferred, 0),
-    },
+    // "Transferidos" fica oculto: sempre 0 (não há histórico de
+    // transferência salvo). O campo segue em AttendanceRow.
     {
       key: "active",
       header: "Ativos",
@@ -230,14 +226,8 @@ function buildColumns(nameHeader: string): AttendanceTableColumn<AttendanceRow>[
       render: (r) => r.active,
       total: (rows) => rows.reduce((s, r) => s + r.active, 0),
     },
-    {
-      key: "inbound",
-      header: "Receptivos",
-      align: "right",
-      tooltip: "Não disponível no schema atual — sempre 0 (não há campo de origem/direção da conversa; ver migration 051).",
-      render: (r) => r.inbound,
-      total: (rows) => rows.reduce((s, r) => s + r.inbound, 0),
-    },
+    // "Receptivos" fica oculto: sempre 0 (não há origem/direção da
+    // conversa). O campo segue em AttendanceRow.
     {
       key: "messages_count",
       header: "Mensagens",
@@ -267,8 +257,12 @@ function buildColumns(nameHeader: string): AttendanceTableColumn<AttendanceRow>[
       align: "right",
       tooltip: "Tempo Médio de Atendimento — média da duração das conversas finalizadas.",
       render: (r) => formatDuration(r.tma_seconds),
-      total: (rows) =>
-        formatDuration(rows.length ? rows.reduce((s, r) => s + r.tma_seconds, 0) / rows.length : 0),
+      // Média ponderada pelas conversas finalizadas (TTA total ÷
+      // finalizados), não média das médias de cada linha.
+      total: (rows) => {
+        const finalized = rows.reduce((s, r) => s + r.finalized, 0);
+        return formatDuration(finalized ? rows.reduce((s, r) => s + r.tta_seconds, 0) / finalized : 0);
+      },
     },
     {
       key: "ttp",
@@ -284,27 +278,16 @@ function buildColumns(nameHeader: string): AttendanceTableColumn<AttendanceRow>[
       align: "right",
       tooltip: "Tempo Médio de Primeira Resposta — média do tempo até a primeira mensagem do agente.",
       render: (r) => formatDuration(r.tmp_seconds),
-      total: (rows) =>
-        formatDuration(rows.length ? rows.reduce((s, r) => s + r.tmp_seconds, 0) / rows.length : 0),
+      // Média ponderada pelas conversas com primeira resposta. A RPC não
+      // devolve essa contagem, mas ela é exatamente TTP ÷ TMP (o TMP é a
+      // média sobre essas mesmas conversas).
+      total: (rows) => {
+        const answered = rows.reduce((s, r) => s + (r.tmp_seconds > 0 ? r.ttp_seconds / r.tmp_seconds : 0), 0);
+        return formatDuration(answered ? rows.reduce((s, r) => s + r.ttp_seconds, 0) / answered : 0);
+      },
     },
-    {
-      key: "tme",
-      header: "TME",
-      align: "right",
-      tooltip: "Tempo Médio de Espera — simplificação: usa o mesmo cálculo do TMP como proxy (ver migration 051).",
-      render: (r) => formatDuration(r.tme_seconds),
-      total: (rows) =>
-        formatDuration(rows.length ? rows.reduce((s, r) => s + r.tme_seconds, 0) / rows.length : 0),
-    },
-    {
-      key: "tmr",
-      header: "TMR",
-      align: "right",
-      tooltip: "Tempo Médio de Resposta — simplificação: usa o mesmo cálculo do TME/TMP como proxy (ver migration 051).",
-      render: (r) => formatDuration(r.tmr_seconds),
-      total: (rows) =>
-        formatDuration(rows.length ? rows.reduce((s, r) => s + r.tmr_seconds, 0) / rows.length : 0),
-    },
+    // TME e TMR ficam ocultos: hoje são cópias do TMP (sem cálculo
+    // próprio de espera/resposta). Os campos seguem em AttendanceRow.
   ];
 }
 
@@ -496,6 +479,7 @@ export default function AtendimentosPage() {
   const [agentRows, setAgentRows] = useState<AttendanceRow[]>([]);
   const [summary, setSummary] = useState<Summary>(normalizeSummary(null));
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!accountId) return;
@@ -533,10 +517,11 @@ export default function AtendimentosPage() {
   const runSearch = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const db = createClient();
-      const p_date_from = `${applied.dateFrom}T00:00:00`;
-      const p_date_to = `${applied.dateTo}T23:59:59`;
+      const p_date_from = startOfDayIso(applied.dateFrom);
+      const p_date_to = endOfDayIso(applied.dateTo);
 
       const [teamRes, agentRes, summaryRes] = await Promise.all([
         db.rpc("get_attendance_report_by_team", { p_account_id: accountId, p_date_from, p_date_to }),
@@ -554,6 +539,7 @@ export default function AtendimentosPage() {
       setSummary(normalizeSummary((summaryRow ?? null) as RawSummary | null));
     } catch (err) {
       console.error("[atendimentos] failed to load report:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -626,44 +612,42 @@ export default function AtendimentosPage() {
               </SelectContent>
             </Select>
           </div>
-          <Button onClick={handlePesquisar} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
+          <Button onClick={handlePesquisar} className="bg-primary text-primary-foreground hover:bg-primary/90">
             <Search className="size-4" />
             Pesquisar
           </Button>
         </div>
       </div>
 
+      {loadError && !loading && (
+        <ErrorState title="Não foi possível carregar o relatório" onRetry={() => runSearch()} />
+      )}
+
+      {/* Card "Classificação" (Ativos/Receptivos) oculto: não há dado real
+          de origem da conversa para preenchê-lo. */}
       {loading ? (
-        <div className="grid gap-4 sm:grid-cols-3">
-          {[0, 1, 2].map((i) => (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {[0, 1].map((i) => (
             <Skeleton key={i} className="h-32 w-full rounded-xl" />
           ))}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           <MetricCard
             title="Atendimento Humano"
             icon={Headphones}
             metrics={[
               { label: "Agentes", value: summary.totalAgents },
-              { label: "Msgs", value: summary.humanMessages },
-              { label: "Atend", value: summary.humanAttendances },
+              { label: "Mensagens", value: summary.humanMessages },
+              { label: "Atendimentos", value: summary.humanAttendances },
             ]}
           />
           <MetricCard
             title="Autoatendimento"
             icon={Bot}
             metrics={[
-              { label: "Msgs", value: summary.botMessages },
-              { label: "Atend", value: summary.botAttendances },
-            ]}
-          />
-          <MetricCard
-            title="Classificação"
-            icon={Filter}
-            metrics={[
-              { label: "Ativos", value: "—" },
-              { label: "Receptivos", value: "—" },
+              { label: "Mensagens", value: summary.botMessages },
+              { label: "Atendimentos", value: summary.botAttendances },
             ]}
           />
         </div>

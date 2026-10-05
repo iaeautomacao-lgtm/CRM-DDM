@@ -407,7 +407,7 @@ export default function ContactsPage() {
                 // set shrinks/grows, page N may no longer be valid.
                 setPage(0);
               }}
-              placeholder="Search by name, phone, or email..."
+              placeholder="Buscar por nome, telefone ou e-mail..."
               className="pl-8 bg-card border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
@@ -476,7 +476,7 @@ export default function ContactsPage() {
                           <Checkbox
                             checked={selectedTagIds.includes(tag.id)}
                             onCheckedChange={() => toggleTagFilter(tag.id)}
-                            aria-label={`Filter by ${tag.name}`}
+                            aria-label={`Filtrar por ${tag.name}`}
                           />
                           <span
                             className="size-2.5 shrink-0 rounded-full"
@@ -513,7 +513,7 @@ export default function ContactsPage() {
                   {tag.name}
                   <button
                     onClick={() => toggleTagFilter(id)}
-                    aria-label={`Remove ${tag.name} filter`}
+                    aria-label={`Remover filtro ${tag.name}`}
                     className="hover:opacity-70"
                   >
                     <X className="size-3" />
@@ -572,7 +572,7 @@ export default function ContactsPage() {
                   indeterminate={!allOnPageSelected && someOnPageSelected}
                   onCheckedChange={toggleSelectAll}
                   disabled={contacts.length === 0}
-                  aria-label="Select all contacts on this page"
+                  aria-label="Selecionar todos os contatos desta página"
                 />
               </TableHead>
               <TableHead className="text-muted-foreground">Nome</TableHead>
@@ -629,7 +629,7 @@ export default function ContactsPage() {
                     <Checkbox
                       checked={selected.has(contact.id)}
                       onCheckedChange={() => toggleSelect(contact.id)}
-                      aria-label={`Select ${contact.name || contact.phone}`}
+                      aria-label={`Selecionar ${contact.name || contact.phone}`}
                     />
                   </TableCell>
                   <TableCell className="text-foreground font-medium">

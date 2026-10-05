@@ -8,36 +8,26 @@ import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import {
-  Activity,
   BarChart2,
   ChevronDown,
   ChevronUp,
-  Download,
-  FileText,
   Headphones,
   KeyRound,
-  LayoutDashboard,
   LogOut,
-  Megaphone,
-  MessageSquare,
-  Radio,
-  Send,
   Settings,
-  Shield,
-  ShieldAlert,
-  Tags,
   User,
-  UserCheck,
-  Users,
   UsersRound,
-  Wifi,
-  Workflow,
   X,
-  Bot,
-  HelpCircle,
 } from "lucide-react";
 import type { AccountRole } from "@/lib/auth/roles";
-import { canAccessRoute, isRouteGated } from "@/lib/role-utils";
+import { canAccessRoute, getDefaultRoute, isRouteGated } from "@/lib/role-utils";
+import {
+  bottomNavItems,
+  longestMatchingHref,
+  matchesPrefix,
+  navItems,
+  reportNavItems,
+} from "@/lib/nav";
 import { ROLE_META } from "@/components/settings/role-meta";
 import { DdmLogo } from "@/components/ui/ddm-logo";
 import { ChangePasswordDialog } from "@/components/layout/change-password-dialog";
@@ -55,50 +45,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: typeof LayoutDashboard;
-  /**
-   * When true, the nav row renders a small "Beta" chip after the label.
-   * Purely informational — doesn't affect routing or access.
-   */
-  beta?: boolean;
-}
-
-const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/monitoramento", label: "Monitoramento", icon: Activity },
-  { href: "/canais", label: "Canais", icon: Wifi },
-  { href: "/inbox", label: "Conversas", icon: MessageSquare },
-  { href: "/contacts", label: "Contatos", icon: Users },
-  { href: "/flows", label: "Fluxos", icon: Workflow, beta: true },
-  { href: "/disparador", label: "Disparador", icon: Megaphone },
-  { href: "/disparador/blacklist", label: "Blacklist", icon: ShieldAlert },
-  { href: "/equipes", label: "Equipes", icon: Users },
-  { href: "/templates", label: "Templates", icon: FileText },
-  { href: "/tabulacoes", label: "Tabulações", icon: Tags },
-  { href: "/usuarios", label: "Usuários", icon: UsersRound },
-  { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot },
-];
-
-// Sub-items of the "Relatórios" collapsible group — currently just
-// Auditoria, but kept as a list (not a single link) since more report
-// pages are the expected next additions here.
-const reportNavItems: NavItem[] = [
-  { href: "/relatorios/auditoria", label: "Auditoria", icon: Shield },
-  { href: "/relatorios/atendimentos", label: "Atendimentos", icon: Headphones },
-  { href: "/relatorios/agentes", label: "Agentes", icon: UserCheck },
-  { href: "/relatorios/conversas", label: "Conversas", icon: MessageSquare },
-  { href: "/relatorios/envio-em-lote", label: "Envio em lote", icon: Send },
-  { href: "/relatorios/exportacoes", label: "Exportações", icon: Download },
-];
-
-const bottomNavItems = [
-  { href: "/ajuda", label: "Central de Ajuda", icon: HelpCircle },
-  { href: "/settings", label: "Configurações", icon: Settings },
-];
 
 // RBAC visibility for a single nav item's href (which may carry a
 // query string, e.g. "/settings?tab=ai"). Items whose path isn't in
@@ -200,6 +146,27 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     isNavItemVisible(item.href, accountRole, profileLoading),
   );
 
+  // Um único item ativo no menu principal: o de prefixo mais longo que
+  // casar com a rota (evita destacar Disparador e Blacklist juntos em
+  // /disparador/blacklist). "Agente de IA" só fica ativo com ?tab=ai;
+  // links de /settings ficam de fora aqui (o rodapé cuida deles).
+  const isAiTab = pathname === "/settings" && searchParams.get("tab") === "ai";
+  const activeNavHref = isAiTab
+    ? "/settings?tab=ai"
+    : longestMatchingHref(
+        pathname,
+        visibleNavItems
+          .map((item) => item.href)
+          .filter((href) => !href.startsWith("/settings")),
+      );
+  const activeReportHref = longestMatchingHref(
+    pathname,
+    visibleReportNavItems.map((item) => item.href),
+  );
+  const canSeeSettings = !!accountRole && canAccessRoute(accountRole, "/settings");
+  const canSeeProfile = !!accountRole && canAccessRoute(accountRole, "/perfil");
+  const homeHref = accountRole ? getDefaultRoute(accountRole) : "/dashboard";
+
   // Close the drawer when route changes — users opened it to navigate,
   // so once they pick a destination the drawer should get out of the way.
   useEffect(() => {
@@ -231,7 +198,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           part of the main flex row there. */}
       <button
         type="button"
-        aria-label="Close menu"
+        aria-label="Fechar menu"
         onClick={onClose}
         className={cn(
           "fixed inset-0 z-30 bg-background/70 backdrop-blur-sm transition-opacity lg:hidden",
@@ -250,12 +217,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           // Desktop: static, always visible — reset all the mobile framing.
           "lg:static lg:z-0 lg:w-60 lg:translate-x-0 lg:transition-none",
         )}
-        aria-label="Primary"
+        aria-label="Navegação principal"
       >
         {/* Logo row. On mobile we put a close button here; on desktop the
             close button is hidden since the sidebar is always-visible. */}
         <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-          <Link href="/dashboard" className="flex items-center gap-2">
+          <Link href={homeHref} className="flex items-center gap-2">
             <DdmLogo showBackground />
             <span className="text-sm font-semibold text-foreground">
               DDM CRM
@@ -264,7 +231,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close menu"
+            aria-label="Fechar menu"
             className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
           >
             <X className="h-5 w-5" />
@@ -275,13 +242,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           <ul className="flex flex-col gap-1">
             {visibleNavItems.map((item) => {
-              const isActive =
-                item.href.includes("?tab=ai")
-                  ? pathname === "/settings" && searchParams.get("tab") === "ai"
-                  : pathname === item.href ||
-                    (item.href !== "/dashboard" &&
-                     !item.href.startsWith("/settings") &&
-                     pathname.startsWith(item.href));
+              const isActive = item.href === activeNavHref;
 
               const showUnreadDot =
                 item.href === "/inbox" && totalUnread > 0 && !isActive;
@@ -304,7 +265,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       {item.beta && (
                         <span
                           aria-label="Recurso Beta"
-                          className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300"
+                          className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-300"
                         >
                           Beta
                         </span>
@@ -412,7 +373,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 {reportsOpen && (
                   <ul className="mt-1 flex flex-col gap-1 pl-4">
                     {visibleReportNavItems.map((item) => {
-                      const isActive = pathname.startsWith(item.href);
+                      const isActive = item.href === activeReportHref;
                       return (
                         <li key={item.href}>
                           <Link
@@ -444,8 +405,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             {visibleBottomNavItems.map((item) => {
               const isActive =
                 item.href === "/settings"
-                  ? pathname.startsWith(item.href) && searchParams.get("tab") !== "ai"
-                  : pathname.startsWith(item.href);
+                  ? matchesPrefix(pathname, item.href) && !isAiTab
+                  : matchesPrefix(pathname, item.href);
               return (
                 <li key={item.href}>
                   <Link
@@ -520,7 +481,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               </Avatar>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-foreground">
-                  {profile?.full_name ?? "User"}
+                  {profile?.full_name ?? "Usuário"}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
                   {profile?.email ?? ""}
@@ -538,7 +499,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               sideOffset={6}
               className="min-w-56 bg-popover text-popover-foreground ring-border"
             >
-              {accountRole !== "agent" && (
+              {canSeeProfile && (
                 <DropdownMenuItem
                   render={
                     <Link
@@ -552,19 +513,25 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   Meu Perfil
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem
-                render={
-                  <Link
-                    href="/settings?tab=whatsapp"
-                    onClick={onClose}
-                    className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
-                  />
-                }
-              >
-                <Settings className="size-4" />
-                Configurações
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="bg-border" />
+              {/* Mesmo gate da rota (/settings é owner/admin) — antes o
+                  item aparecia para agent/viewer e só redirecionava. */}
+              {canSeeSettings && (
+                <DropdownMenuItem
+                  render={
+                    <Link
+                      href="/settings"
+                      onClick={onClose}
+                      className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
+                    />
+                  }
+                >
+                  <Settings className="size-4" />
+                  Configurações
+                </DropdownMenuItem>
+              )}
+              {(canSeeProfile || canSeeSettings) && (
+                <DropdownMenuSeparator className="bg-border" />
+              )}
               <DropdownMenuItem
                 onClick={signOut}
                 className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"

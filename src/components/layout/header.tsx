@@ -17,24 +17,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ModeToggle } from "@/components/layout/mode-toggle";
-
-const pageTitles: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/inbox": "Conversas",
-  "/contacts": "Contatos",
-  "/pipelines": "Funis",
-  "/broadcasts": "Transmissões",
-  "/automations": "Automações",
-  "/settings": "Configurações",
-};
-
-function getPageTitle(pathname: string): string {
-  if (pageTitles[pathname]) return pageTitles[pathname];
-  const match = Object.entries(pageTitles).find(([path]) =>
-    pathname.startsWith(path),
-  );
-  return match ? match[1] : "Dashboard";
-}
+// Título derivado dos itens da sidebar (fonte única em lib/nav.ts).
+import { getPageTitle } from "@/lib/nav";
+import { canAccessRoute } from "@/lib/role-utils";
 
 interface HeaderProps {
   /** Wired to the shell's drawer state. Used only on mobile — the
@@ -106,7 +91,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             </p>
           </div>
           <DropdownMenuSeparator className="bg-border" />
-          {(accountRole === "owner" || accountRole === "admin") && (
+          {accountRole && canAccessRoute(accountRole, "/perfil") && (
             <DropdownMenuItem
               render={
                 <Link
@@ -119,10 +104,10 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               Meu Perfil
             </DropdownMenuItem>
           )}
-          {(accountRole === "owner" || accountRole === "admin") && <DropdownMenuItem
+          {accountRole && canAccessRoute(accountRole, "/settings") && <DropdownMenuItem
             render={
               <Link
-                href="/settings?tab=whatsapp"
+                href="/settings"
                 className="text-popover-foreground focus:bg-accent focus:text-accent-foreground"
               />
             }

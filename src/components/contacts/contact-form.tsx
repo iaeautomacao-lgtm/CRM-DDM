@@ -262,7 +262,7 @@ export function ContactForm({
               id="cf-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="John Doe"
+              placeholder="Maria da Silva"
               className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
@@ -279,7 +279,7 @@ export function ContactForm({
                 if (dupMatch) setDupMatch(null);
               }}
               onBlur={checkDuplicate}
-              placeholder="+1 234 567 8900"
+              placeholder="+55 11 91234-5678"
               className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
             />
             {dupMatch ? (
@@ -324,7 +324,7 @@ export function ContactForm({
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="john@example.com"
+              placeholder="maria@exemplo.com.br"
               className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
@@ -337,7 +337,7 @@ export function ContactForm({
               id="cf-company"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
-              placeholder="Acme Inc."
+              placeholder="Empresa Ltda."
               className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>

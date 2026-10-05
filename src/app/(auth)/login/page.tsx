@@ -4,6 +4,7 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { translateAuthError } from "@/lib/auth/auth-errors";
 import { safeReturnPath } from "@/lib/auth/return-path";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +66,7 @@ function LoginPageInner() {
     });
 
     if (error) {
-      setError(error.message);
+      setError(translateAuthError(error));
       setLoading(false);
       return;
     }
@@ -117,7 +118,7 @@ function LoginPageInner() {
             {error && (
               <div
                 role="alert"
-                className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400"
+                className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive"
               >
                 {error}
               </div>

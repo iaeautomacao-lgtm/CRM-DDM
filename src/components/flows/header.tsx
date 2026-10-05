@@ -117,7 +117,7 @@ export function EditorHeader() {
             variant="ghost"
             size="sm"
             onClick={() => void deleteFlow()}
-            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-700 dark:hover:text-red-300"
           >
             <Trash2 className="h-3.5 w-3.5" />
             Excluir
@@ -211,7 +211,7 @@ function StatusChip({ status }: { status: BuilderState["status"] }) {
       label: "Rascunho",
     },
     active: {
-      cls: "border-emerald-600/40 bg-emerald-500/10 text-emerald-300",
+      cls: "border-emerald-600/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
       label: "Ativo",
     },
     archived: {
