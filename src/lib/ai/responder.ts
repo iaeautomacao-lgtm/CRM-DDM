@@ -11,6 +11,7 @@ import {
   retryDelayMs,
   serializeToolFailure,
   shouldRetryTool,
+  type ToolExecutionMeta,
 } from "@/lib/ai/tool-recovery";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
@@ -260,7 +261,12 @@ export async function handleAiAutoResponse(
   historyBefore?: string,
   tools?: AiAgentTool[],
   onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
-  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>,
+  onToolResult?: (
+    toolName: string,
+    result: string,
+    durationMs: number,
+    meta?: ToolExecutionMeta,
+  ) => Promise<void>,
   // Node key of the calling ai_agent flow node — only "agente_de_ia"
   // (BEN) gets the #NEGOCIACAO auto-exit in generateOpenAiResponse.
   // "agente_de_ia_2" (Aleh) needs consultar_debitos' data to present
@@ -1612,7 +1618,12 @@ async function generateOpenAiResponse(
   history: any[],
   tools?: AiAgentTool[],
   onToolCall?: (toolName: string, args: Record<string, unknown>) => Promise<void>,
-  onToolResult?: (toolName: string, result: string, durationMs: number) => Promise<void>,
+  onToolResult?: (
+    toolName: string,
+    result: string,
+    durationMs: number,
+    meta?: ToolExecutionMeta,
+  ) => Promise<void>,
   nodeKey?: string,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
@@ -1758,6 +1769,12 @@ async function generateOpenAiResponse(
               toolName,
               toolResult,
               Date.now() - toolStartedAt,
+              {
+                attempts: 0,
+                recovered: false,
+                failureCode: prepared.failure.code,
+                httpStatus: prepared.failure.httpStatus,
+              },
             ).catch(() => {});
           }
         } else {
@@ -1779,6 +1796,9 @@ async function generateOpenAiResponse(
 
           const maxAttempts = 3;
           let attempt = 0;
+          let finalFailure:
+            | ReturnType<typeof classifyFetchFailure>
+            | null = null;
 
           while (attempt < maxAttempts) {
             attempt += 1;
@@ -1801,9 +1821,11 @@ async function generateOpenAiResponse(
 
               if (!failure) {
                 toolResult = httpText;
+                finalFailure = null;
                 break;
               }
 
+              finalFailure = failure;
               toolResult = serializeToolFailure(failure, attempt);
 
               if (
@@ -1824,6 +1846,7 @@ async function generateOpenAiResponse(
               break;
             } catch (err) {
               const failure = classifyFetchFailure(err);
+              finalFailure = failure;
               toolResult = serializeToolFailure(failure, attempt);
 
               if (
@@ -1850,6 +1873,12 @@ async function generateOpenAiResponse(
               toolName,
               toolResult,
               Date.now() - toolStartedAt,
+              {
+                attempts: attempt,
+                recovered: !finalFailure && attempt > 1,
+                failureCode: finalFailure?.code,
+                httpStatus: finalFailure?.httpStatus,
+              },
             ).catch(() => {});
           }
         }
