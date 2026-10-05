@@ -5,10 +5,10 @@ import { drainCallbackOutbox } from '@/lib/disparador/callback-outbox';
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
 import {
   processQueueItem,
-  checkWithinWindow,
   type QueueItem,
   type Campaign,
 } from "@/lib/disparador/processQueue";
+import { canSendNow } from "@/lib/disparador/send-window";
 import { processWithConcurrency } from "@/lib/disparador/concurrency";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -137,7 +137,7 @@ export async function POST(request: Request) {
     const { data: active, error: activeError } = await db
       .from("campaigns")
       .select(
-        "id, account_id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora"
+        "id, account_id, status, janela_inicio, janela_fim, dias_envio, batch_size, batch_pause_seconds, limite_por_hora"
       )
       .eq("status", "em_execucao").order('next_batch_at', { ascending: true, nullsFirst: true });
     if (activeError) throw activeError;
@@ -148,7 +148,10 @@ export async function POST(request: Request) {
     }> = [];
     for (const campaign of (active ?? []) as Campaign[]) {
       if (lostLease || Date.now() > deadline - 5_000) break;
-      if (!checkWithinWindow(campaign.janela_inicio ?? "", campaign.janela_fim ?? "")) continue;
+      if (
+        !canSendNow({ inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio })
+      )
+        continue;
       // Reserva o próximo lote da campanha no banco: grava next_batch_at =
       // agora + batch_pause_seconds. Se outro tick já reservou dentro da
       // pausa, retorna false e a campanha é pulada — ticks extras não

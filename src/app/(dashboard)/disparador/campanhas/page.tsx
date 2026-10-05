@@ -85,6 +85,7 @@ import {
   placeholderNumbers,
   type PreviewContact,
 } from "@/lib/disparador/preview-message";
+import { WEEKDAY_LABELS } from "@/lib/disparador/send-window";
 import {
   looksLikeImportHeader,
   normalizeImportHeader,
@@ -105,6 +106,8 @@ interface Campaign {
   intervalo_max: number;
   janela_inicio: string;
   janela_fim: string;
+  /** 0=dom…6=sáb; vazio/null = todos os dias (migration 144). */
+  dias_envio?: number[] | null;
   agendamento?: string | null;
   created_at: string;
   // Migration 078 — disparo em lote (ver worker.ts)
@@ -697,6 +700,8 @@ export default function CampanhasPage() {
   const [intervaloMax, setIntervaloMax] = useState(3);
   const [janelaInicio, setJanelaInicio] = useState("08:00");
   const [janelaFim, setJanelaFim] = useState("18:00");
+  // Dias da semana permitidos (vazio = todos).
+  const [diasEnvio, setDiasEnvio] = useState<number[]>([]);
   const [batchSize, setBatchSize] = useState(1);
   const [batchPauseSeconds, setBatchPauseSeconds] = useState(0);
   // Modo "Segmentado" — % da lista por rodada + intervalo entre rodadas
@@ -960,7 +965,7 @@ export default function CampanhasPage() {
         const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text, audience_mode, import_draft_id")
+          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text, audience_mode, import_draft_id, dias_envio")
           .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -1211,6 +1216,7 @@ export default function CampanhasPage() {
     setIntervaloMax(campaign.intervalo_max);
     setJanelaInicio(campaign.janela_inicio);
     setJanelaFim(campaign.janela_fim);
+    setDiasEnvio(campaign.dias_envio ?? []);
     setBatchSize(campaign.batch_size ?? 1);
     setBatchPauseSeconds(campaign.batch_pause_seconds ?? 0);
     if (campaign.batch_percent != null) {
@@ -1539,6 +1545,7 @@ export default function CampanhasPage() {
             intervalo_max: intervaloMax,
             janela_inicio: janelaInicio,
             janela_fim: janelaFim,
+            dias_envio: diasEnvio.length > 0 ? diasEnvio : null,
             batch_size: batchSize,
             batch_pause_seconds: batchPauseSeconds,
             // Migration 114 — modo "Segmentado"; null em qualquer outro modo.
@@ -1590,6 +1597,9 @@ export default function CampanhasPage() {
           intervalo_max: intervaloMax,
           janela_inicio: janelaInicio,
           janela_fim: janelaFim,
+          // Só envia a coluna quando há restrição: sem a 144 aplicada, uma
+          // campanha sem restrição continua salvando normalmente.
+          ...(diasEnvio.length > 0 ? { dias_envio: diasEnvio } : {}),
           batch_size: batchSize,
           batch_pause_seconds: batchPauseSeconds,
           // Migration 114 — modo "Segmentado"; null em qualquer outro modo.
@@ -1665,6 +1675,7 @@ export default function CampanhasPage() {
   };
 
   const resetForm = () => {
+    setDiasEnvio([]);
     setNome("");
     setDescricao("");
     setSelectedSessions([]);
@@ -3788,6 +3799,45 @@ export default function CampanhasPage() {
                 </div>
               </div>
 
+              {/* Dias da semana — vazio = todos */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Dias de envio <span className="font-normal">(nenhum marcado = todos os dias)</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dias de envio">
+                  {WEEKDAY_LABELS.map((label, day) => {
+                    const on = diasEnvio.includes(day);
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          setDiasEnvio((prev) =>
+                            on ? prev.filter((d) => d !== day) : [...prev, day].sort((a, b) => a - b)
+                          )
+                        }
+                        className={cn(
+                          "h-8 min-w-11 rounded-md border px-2 text-xs font-medium transition-colors",
+                          on
+                            ? "border-primary bg-primary/10 text-primary"
+                            : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                        )}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setDiasEnvio([1, 2, 3, 4, 5])}
+                    className="h-8 rounded-md px-2 text-xs text-muted-foreground underline-offset-2 hover:underline"
+                  >
+                    Seg a Sex
+                  </button>
+                </div>
+              </div>
+
               {/* Campos técnicos — só em modo "Personalizado" */}
               {dispatchMode === "personalizado" && (
                 <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
@@ -4018,6 +4068,14 @@ export default function CampanhasPage() {
                     <span className="text-muted-foreground">Janela de envio</span>
                     <span className="text-right font-medium">
                       {janelaInicio && janelaFim ? `${janelaInicio} às ${janelaFim}` : "Sem restrição de horário"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-muted-foreground">Dias de envio</span>
+                    <span className="text-right font-medium">
+                      {diasEnvio.length === 0 || diasEnvio.length === 7
+                        ? "Todos os dias"
+                        : diasEnvio.map((d) => WEEKDAY_LABELS[d]).join(", ")}
                     </span>
                   </div>
                   <div className="flex justify-between gap-4">

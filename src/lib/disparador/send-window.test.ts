@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWithinSendWindow, nextWindowStart, parseHHMM } from "./send-window";
+import { canSendNow, isAllowedDay, isWithinSendWindow, nextSendSlot, nextWindowStart, parseHHMM } from "./send-window";
 
 // Horário de Brasília → instante UTC (BR = UTC-3).
 const br = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 15, hh + 3, mm));
@@ -27,5 +27,29 @@ describe("janela de envio", () => {
   it("parseHHMM", () => {
     expect(parseHHMM("8:05")).toBe(485);
     expect(parseHHMM("24:00")).toBeNull();
+  });
+});
+
+describe("dias da semana", () => {
+  // 15/10/2026 é quinta-feira (4); 17 sábado; 19 segunda.
+  const at = (day: number, hh: number, mm = 0) => new Date(Date.UTC(2026, 9, day, hh + 3, mm));
+  it("dia permitido", () => {
+    expect(isAllowedDay([1, 2, 3, 4, 5], at(15, 10))).toBe(true);
+    expect(isAllowedDay([1, 2, 3, 4, 5], at(17, 10))).toBe(false);
+    expect(isAllowedDay(null, at(17, 10))).toBe(true);
+    expect(canSendNow({ inicio: "08:00", fim: "18:00", dias: [1, 2, 3, 4, 5] }, at(17, 10))).toBe(false);
+  });
+  it("sábado → segunda no início da janela", () => {
+    expect(nextSendSlot({ inicio: "08:00", fim: "18:00", dias: [1, 2, 3, 4, 5] }, at(17, 10)).toISOString()).toBe(at(19, 8).toISOString());
+  });
+  it("sexta depois da janela → segunda", () => {
+    expect(nextSendSlot({ inicio: "08:00", fim: "18:00", dias: [1, 2, 3, 4, 5] }, at(16, 19)).toISOString()).toBe(at(19, 8).toISOString());
+  });
+  it("sem janela: meia-noite do próximo dia permitido", () => {
+    expect(nextSendSlot({ dias: [1] }, at(17, 10)).toISOString()).toBe(at(19, 0).toISOString());
+  });
+  it("dia e horário ok: agora", () => {
+    const now = at(15, 10);
+    expect(nextSendSlot({ inicio: "08:00", fim: "18:00", dias: [4] }, now).toISOString()).toBe(now.toISOString());
   });
 });
