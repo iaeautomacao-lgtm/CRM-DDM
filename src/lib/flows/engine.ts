@@ -892,7 +892,13 @@ async function executeHandoff(
 ): Promise<void> {
   const startedAt = Date.now();
   const input = { ...run.vars };
-  const cfg = node.config as { assign_to?: string; team_id?: string; note?: string };
+  const cfg = node.config as {
+    assign_to?: string;
+    team_id?: string;
+    note?: string;
+    reason_code?: string;
+    reason_subcode?: string;
+  };
   try {
     const convUpdate: Record<string, unknown> = {
       status: "pending",
@@ -914,11 +920,20 @@ async function executeHandoff(
       error_message: detail,
       err,
       input,
-      output: { assigned_to: cfg.assign_to ?? null, team_id: cfg.team_id ?? null },
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     });
     return;
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
+    reason_code: cfg.reason_code ?? "INDEFINIDO",
+    reason_subcode: cfg.reason_subcode ?? null,
+    ai_exit_code: run.vars?.ai_exit_code ?? null,
+    conversation_id: run.conversation_id ?? null,
     note: cfg.note ?? null,
     assigned_to: cfg.assign_to ?? null,
     team_id: cfg.team_id ?? null,
@@ -952,7 +967,12 @@ async function executeHandoffAgent(
 ): Promise<void> {
   const startedAt = Date.now();
   const input = { ...run.vars };
-  const cfg = node.config as { assign_to?: string; note?: string };
+  const cfg = node.config as {
+    assign_to?: string;
+    note?: string;
+    reason_code?: string;
+    reason_subcode?: string;
+  };
   try {
     const convUpdate: Record<string, unknown> = {
       status: "pending",
@@ -978,6 +998,10 @@ async function executeHandoffAgent(
     return;
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
+    reason_code: cfg.reason_code ?? "INDEFINIDO",
+    reason_subcode: cfg.reason_subcode ?? null,
+    ai_exit_code: run.vars?.ai_exit_code ?? null,
+    conversation_id: run.conversation_id ?? null,
     note: cfg.note ?? null,
     assigned_to: cfg.assign_to ?? null,
     team_id: null,
@@ -991,7 +1015,14 @@ async function executeHandoffAgent(
     event_type: "node_completed",
     status: "success",
     duration_ms: Date.now() - startedAt,
-    payload: { input, output: { assigned_to: cfg.assign_to ?? null } },
+    payload: {
+      input,
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
+    },
   });
   await endRun(db, run, "handed_off", "handoff_node");
 }
@@ -1224,7 +1255,12 @@ async function executeHandoffTeam(
 ): Promise<void> {
   const startedAt = Date.now();
   const input = { ...run.vars };
-  const cfg = node.config as { team_id?: string; note?: string };
+  const cfg = node.config as {
+    team_id?: string;
+    note?: string;
+    reason_code?: string;
+    reason_subcode?: string;
+  };
   let selectedAgent: string | null = null;
   try {
     const convUpdate: Record<string, unknown> = {
@@ -1262,6 +1298,10 @@ async function executeHandoffTeam(
     return;
   }
   await logEvent(db, run.id, "handoff", node.node_key, {
+    reason_code: cfg.reason_code ?? "INDEFINIDO",
+    reason_subcode: cfg.reason_subcode ?? null,
+    ai_exit_code: run.vars?.ai_exit_code ?? null,
+    conversation_id: run.conversation_id ?? null,
     note: cfg.note ?? null,
     assigned_to: selectedAgent ?? null,
     team_id: cfg.team_id ?? null,
@@ -1275,7 +1315,15 @@ async function executeHandoffTeam(
     event_type: "node_completed",
     status: "success",
     duration_ms: Date.now() - startedAt,
-    payload: { input, output: { assigned_to: cfg.team_id ?? null } },
+    payload: {
+      input,
+      output: {
+        assigned_to: selectedAgent ?? null,
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
+    },
   });
   await endRun(db, run, "handed_off", "handoff_node");
 }
