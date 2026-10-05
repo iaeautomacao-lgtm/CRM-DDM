@@ -115,19 +115,21 @@ export async function loadCampaignAudience(
     if (!data || data.length < PAGE) break;
   }
 
-  // Vínculo explícito do import (migration 132), por rascunho e por campanha.
+  // Vínculo explícito do import (migration 132). O da campanha (import
+  // feito ao editar) substitui o do rascunho (import feito na criação) —
+  // nunca os dois somados, senão reimportar enviaria lista antiga + nova.
   const importRows = new Set<string>();
-  const filters = [
-    campaign.import_draft_id ? `draft_id.eq.${campaign.import_draft_id}` : null,
-    `campaign_id.eq.${campaign.id}`,
-  ].filter(Boolean) as string[];
-  for (const id of await pagedIds(
-    (from, to) =>
-      db.from("disp_import_contacts").select("contact_id").or(filters.join(",")).range(from, to),
-    "contact_id",
-  )) {
-    importRows.add(id);
+  const linked = (column: "campaign_id" | "draft_id", value: string) =>
+    pagedIds(
+      (from, to) =>
+        db.from("disp_import_contacts").select("contact_id").eq(column, value).order("id").range(from, to),
+      "contact_id",
+    );
+  let linkedIds = await linked("campaign_id", campaign.id);
+  if (linkedIds.length === 0 && campaign.import_draft_id) {
+    linkedIds = await linked("draft_id", campaign.import_draft_id);
   }
+  for (const id of linkedIds) importRows.add(id);
   // Imports anteriores à 132: só deixavam rastro quando tinham VARn.
   if (importRows.size === 0 && campaign.import_draft_id) {
     for (const id of await pagedIds(
@@ -136,6 +138,7 @@ export async function loadCampaignAudience(
           .from("contact_import_variables")
           .select("contact_id")
           .eq("draft_id", campaign.import_draft_id as string)
+          .order("id")
           .range(from, to),
       "contact_id",
     )) {
@@ -157,7 +160,14 @@ export async function loadCampaignAudience(
       ids.length === 0
         ? []
         : await pagedIds(
-            (from, to) => db.from("contact_tags").select("contact_id").in("tag_id", ids).range(from, to),
+            (from, to) =>
+              db
+                .from("contact_tags")
+                .select("contact_id")
+                .in("tag_id", ids)
+                .order("contact_id")
+                .order("tag_id")
+                .range(from, to),
             "contact_id",
           ),
     );

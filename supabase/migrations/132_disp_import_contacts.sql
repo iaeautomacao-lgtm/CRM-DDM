@@ -28,6 +28,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS disp_import_contacts_draft_contact
   ON wacrm.disp_import_contacts (draft_id, contact_id) WHERE draft_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS disp_import_contacts_campaign_contact
   ON wacrm.disp_import_contacts (campaign_id, contact_id) WHERE campaign_id IS NOT NULL;
+-- ON DELETE CASCADE de contacts sem varredura sequencial.
+CREATE INDEX IF NOT EXISTS disp_import_contacts_contact
+  ON wacrm.disp_import_contacts (contact_id);
 
 -- Só o servidor (service role) lê e escreve.
 ALTER TABLE wacrm.disp_import_contacts ENABLE ROW LEVEL SECURITY;

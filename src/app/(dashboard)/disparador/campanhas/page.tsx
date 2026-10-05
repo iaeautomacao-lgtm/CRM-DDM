@@ -792,6 +792,8 @@ export default function CampanhasPage() {
   >(null);
   const [starting, setStarting] = useState(false);
   const [stopConfirm, setStopConfirm] = useState<{ id: string; nome: string } | null>(null);
+  // Campanha cujo público está sendo calculado (descarta resposta atrasada).
+  const audienceForRef = useRef<string | null>(null);
 
   // Modal de métricas por campanha
   const [metricsModal, setMetricsModal] = useState<{
@@ -1023,10 +1025,27 @@ export default function CampanhasPage() {
     setCampaignInfo(null);
     setAudienceInfo(null);
     setInfoLoading(true);
-    apiFetch(`/api/disparador/campaigns/${id}/audience`)
-      .then((r) => r.json())
-      .then((data) => setAudienceInfo(data?.ok === true || data?.ok === false ? data : { ok: false, error: data?.error ?? "Não foi possível calcular o público" }))
-      .catch(() => setAudienceInfo({ ok: false, error: "Não foi possível calcular o público" }));
+    audienceForRef.current = id;
+    // Retomar campanha pausada não recalcula o público (startCampaign retoma
+    // a fila existente) — só campanhas que ainda vão montar a fila.
+    const isResume = campaigns.find((c) => c.id === id)?.status === "pausada";
+    if (isResume) {
+      setAudienceInfo({ ok: true, total: -1, source: "resume", source_label: "", tags: [], already_sent: 0 });
+    } else {
+      apiFetch(`/api/disparador/campaigns/${id}/audience`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (audienceForRef.current !== id) return;
+          setAudienceInfo(
+            data?.ok === true || data?.ok === false
+              ? data
+              : { ok: false, error: data?.error ?? "Não foi possível calcular o público" },
+          );
+        })
+        .catch(() => {
+          if (audienceForRef.current === id) setAudienceInfo({ ok: false, error: "Não foi possível calcular o público" });
+        });
+    }
     try {
       const res = await apiFetch(`/api/disparador/campaigns/${id}/info`);
       if (res.ok) {
@@ -3839,6 +3858,10 @@ export default function CampanhasPage() {
                 {/* Público real (PRD-01): quantos e de onde, antes de enviar. */}
                 {audienceInfo === null ? (
                   <p className="text-sm text-muted-foreground">Calculando público…</p>
+                ) : audienceInfo.ok && audienceInfo.source === "resume" ? (
+                  <p className="text-sm text-muted-foreground">
+                    A campanha está pausada: os envios que ficaram na fila serão retomados.
+                  </p>
                 ) : audienceInfo.ok ? (
                   <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
                     <p className="text-foreground">

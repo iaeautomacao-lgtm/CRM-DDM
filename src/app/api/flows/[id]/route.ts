@@ -110,7 +110,19 @@ export async function PUT(
 
   // Fluxo ativo atende clientes reais: alteração de nós/gatilho só entra
   // se o resultado continuar válido (PRD-01). Rascunho salva como antes.
-  if (body.nodes !== undefined || body.trigger_config !== undefined || body.entry_node_id !== undefined) {
+  if (
+    body.nodes !== undefined &&
+    (!Array.isArray(body.nodes) ||
+      body.nodes.some((n) => !n || typeof n.node_key !== 'string' || typeof n.config !== 'object' || n.config === null))
+  ) {
+    return NextResponse.json({ error: 'nodes inválido' }, { status: 400 })
+  }
+  if (
+    body.nodes !== undefined ||
+    body.trigger_type !== undefined ||
+    body.trigger_config !== undefined ||
+    body.entry_node_id !== undefined
+  ) {
     const { data: current } = await admin
       .from('flows')
       .select('status, name, trigger_type, trigger_config, entry_node_id')

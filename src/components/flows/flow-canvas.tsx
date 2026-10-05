@@ -490,6 +490,8 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: RfNode<NodeData>) => {
       setSelectedNodeKey(node.id);
+      // Senão Delete apagaria o nó E a aresta que estava selecionada.
+      setSelectedEdgeId(null);
     },
     []
   );
@@ -558,6 +560,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
         const patch = applyEdgeConnection(sourceNode, e.sourceHandle, '');
         if (patch) updateNodeConfig(e.source, patch);
       }
+      setSelectedEdgeId(null);
     },
     [builderNodes, updateNodeConfig, isDebugMode]
   );

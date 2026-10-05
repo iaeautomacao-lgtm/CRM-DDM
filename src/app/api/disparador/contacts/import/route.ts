@@ -548,6 +548,18 @@ export async function POST(request: Request) {
             importedContactIds.add(singleData.id);
           } else if (isUniqueViolation(singleErr)) {
             results.duplicados++;
+            // Já existia (corrida ou chave normalizada diferente): continua
+            // sendo um contato do CSV, então entra no vínculo do import.
+            const digits = String(insertRows[j]?.phone ?? "").replace(/\D/g, "");
+            if (digits) {
+              const { data: existing } = await supabaseAdmin()
+                .from("contacts")
+                .select("id")
+                .eq("account_id", accountId)
+                .eq("phone_normalized", digits)
+                .limit(1);
+              if (existing?.[0]?.id) importedContactIds.add(existing[0].id);
+            }
           } else {
             results.erros.push(`${source.phone}: ${singleErr?.message}`);
           }
@@ -677,10 +689,27 @@ export async function POST(request: Request) {
     if (campaignIdRaw || draftIdRaw) {
       const idColumn = campaignIdRaw ? "campaign_id" : "draft_id";
       const idValue = (campaignIdRaw ?? draftIdRaw) as string;
-      const { error: clearErr } = await supabaseAdmin()
+      let { error: clearErr } = await supabaseAdmin()
         .from("disp_import_contacts")
         .delete()
         .eq(idColumn, idValue);
+      // Reimport ao editar: o vínculo antigo da criação (por rascunho) sai
+      // também — a lista nova substitui a antiga, nunca soma.
+      if (!clearErr && campaignIdRaw) {
+        const { data: camp } = await supabaseAdmin()
+          .from("campaigns")
+          .select("import_draft_id")
+          .eq("id", campaignIdRaw)
+          .eq("account_id", accountId)
+          .limit(1);
+        const draftOfCampaign = camp?.[0]?.import_draft_id;
+        if (draftOfCampaign) {
+          ({ error: clearErr } = await supabaseAdmin()
+            .from("disp_import_contacts")
+            .delete()
+            .eq("draft_id", draftOfCampaign));
+        }
+      }
       if (clearErr) {
         console.error("[Contacts Import] Failed to clear import link:", clearErr);
         return NextResponse.json(
