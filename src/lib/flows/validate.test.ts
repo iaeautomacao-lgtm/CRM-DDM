@@ -618,3 +618,20 @@ describe("validateVariableTokens", () => {
     expect(validateVariableTokens(node({ system_prompt_override: "Responda {{assim}}" }, "ai_agent"))).toEqual([]);
   });
 });
+
+describe("validateFlowForActivation — token em texto nas ferramentas", () => {
+  const flow = { name: "F", trigger_type: "manual" as const, trigger_config: {}, entry_node_id: "ia" };
+  const aiNode = (url: string) => ({
+    node_key: "ia",
+    node_type: "ai_agent",
+    config: { mode: "takeover", tools: [{ name: "localizar_devedor", http: { url } }] },
+  });
+  it("avisa token em texto", () => {
+    const issues = validateFlowForActivation(flow, [aiNode("https://www.ddmacordos.com/calc/localiza_dev.php?tk=a1b2c3d4e5f6g7h8&cpf={{cpf}}")]);
+    expect(issues.some((i) => i.severity === "warning" && i.message.includes("{{secret.DDM_TOKEN}}"))).toBe(true);
+  });
+  it("não avisa com o marcador", () => {
+    const issues = validateFlowForActivation(flow, [aiNode("https://www.ddmacordos.com/calc/localiza_dev.php?tk={{secret.DDM_TOKEN}}&cpf={{cpf}}")]);
+    expect(issues.some((i) => i.message.includes("token em texto"))).toBe(false);
+  });
+});

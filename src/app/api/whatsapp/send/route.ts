@@ -14,6 +14,7 @@ import {
 } from '@/lib/whatsapp/waha-api'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { persistOutboundMessage } from '@/lib/messages/persist-outbound'
 import { sendWebchatMessage } from '@/lib/webchat/send'
 import { hasActiveWebchatSession } from '@/lib/webchat/sessions'
 import { SocialWindowClosedError, sendSocialMessage } from '@/lib/channels/social'
@@ -620,22 +621,22 @@ export async function POST(request: Request) {
       // (see supabase/migrations/001_initial_schema.sql):
       //   conversation_id, sender_type, content_type, content_text,
       //   media_url, template_name, message_id, status, created_at
-      const { data: messageRecord, error: msgError } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id,
-          sender_type: 'agent',
-          content_type: message_type,
-          content_text: content_text || null,
-          media_url: originalMediaUrl || null,
-          template_name: template_name || null,
-          message_id: waMessageId,
-          status: 'sent',
-          reply_to_message_id: reply_to_message_id || null,
-          waha_session: config.provider === 'waha' ? config.waha_session : null,
-        })
-        .select()
-        .single()
+      // Se o eco do WAHA já gravou este message_id, persistOutboundMessage
+      // assume a linha para esta conversa em vez de falhar.
+      const persisted = await persistOutboundMessage(supabase, {
+        conversation_id,
+        sender_type: 'agent',
+        content_type: message_type,
+        content_text: content_text || null,
+        media_url: originalMediaUrl || null,
+        template_name: template_name || null,
+        message_id: waMessageId,
+        status: 'sent',
+        reply_to_message_id: reply_to_message_id || null,
+        waha_session: config.provider === 'waha' ? config.waha_session : null,
+      })
+      const msgError = persisted.error
+      const messageRecord = { id: persisted.id }
 
       if (msgError) {
         console.error('Error inserting sent message:', msgError)
