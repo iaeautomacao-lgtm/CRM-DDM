@@ -82,11 +82,11 @@ export function renderQuickReply(content: string, vars: QuickReplyVars): string 
     atendente: firstName(vars.agentName),
   };
   return content
-    .replace(/([,\s]*)\{(nome|primeiro_nome|atendente)\}/g, (_m, lead: string, key: string) => {
+    .replace(/([ \t]*,?[ \t]*)\{(nome|primeiro_nome|atendente)\}/g, (_m, lead: string, key: string) => {
       const value = values[key];
       return value ? `${lead}${value}` : "";
     })
     // Variável vazia no começo: não começa a mensagem com vírgula.
-    .replace(/^[,;\s]+/, "")
+    .replace(/^[,; \t]+/, "")
     .trim();
 }

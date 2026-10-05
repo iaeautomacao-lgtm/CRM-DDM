@@ -135,12 +135,15 @@ export function QuickRepliesManager() {
     setSaving(true);
     try {
       if (editing) {
-        const { error } = await supabase
+        const { data: updated, error } = await supabase
           .from('quick_replies')
           .update({ shortcut, title, content, updated_at: new Date().toISOString() })
           .eq('id', editing.id)
-          .eq('account_id', accountId);
+          .eq('account_id', accountId)
+          .select('id');
         if (error) throw error;
+        // RLS barrando devolve 0 linhas sem erro.
+        if (!updated?.length) throw { code: '42501' };
         toast.success('Resposta rápida atualizada');
       } else {
         const { error } = await supabase
@@ -171,12 +174,14 @@ export function QuickRepliesManager() {
     if (!deleteTarget || !accountId) return;
     setDeleting(true);
     try {
-      const { error } = await supabase
+      const { data: removed, error } = await supabase
         .from('quick_replies')
         .delete()
         .eq('id', deleteTarget.id)
-        .eq('account_id', accountId);
+        .eq('account_id', accountId)
+        .select('id');
       if (error) throw error;
+      if (!removed?.length) throw new Error('Sem permissão para excluir');
       toast.success('Resposta rápida excluída');
       setDeleteTarget(null);
       invalidateQuickReplies();

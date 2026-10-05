@@ -25,6 +25,11 @@ describe("shouldAnalyzeSentiment", () => {
     ).toBe(false);
   });
 
+  it("marcadores de tipo não vão à IA", () => {
+    expect(shouldAnalyzeSentiment({ text: "[Unsupported message type: button]", flowConsumed: true })).toBe(false);
+    expect(shouldAnalyzeSentiment({ text: "[image]", flowConsumed: false })).toBe(false);
+  });
+
   it("com fluxo, analisa texto de conversa", () => {
     expect(shouldAnalyzeSentiment({ text: "isso é um absurdo", flowConsumed: true })).toBe(true);
     expect(shouldAnalyzeSentiment({ text: "péssimoatendimento", flowConsumed: true })).toBe(true);

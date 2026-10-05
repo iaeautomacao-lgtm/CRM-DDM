@@ -23,12 +23,17 @@ export async function POST(
     // 2. Fetch profile to get account_id
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('account_id')
+      .select('account_id, account_role')
       .eq('user_id', user.id)
       .maybeSingle()
 
     if (profileError || !profile?.account_id) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
+    }
+
+    // Visualizador é somente leitura: a análise grava na conversa.
+    if (profile.account_role === 'viewer') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const accountId = profile.account_id

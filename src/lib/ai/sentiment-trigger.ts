@@ -30,6 +30,9 @@ interface SentimentInbound {
 export function shouldAnalyzeSentiment(msg: SentimentInbound): boolean {
   const text = (msg.text ?? "").trim();
   if (!text) return false;
+  // "[Unsupported message type: button]", "[image]"… são marcadores, não
+  // fala do cliente.
+  if (/^\[[^\]]*\]$/.test(text)) return false;
   if (!msg.flowConsumed) return true;
   if (msg.isInteractiveReply) return false;
   // Com fluxo: ignora escolhas de menu ("1", "2.", "sim", "ok").

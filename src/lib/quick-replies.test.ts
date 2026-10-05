@@ -65,5 +65,7 @@ describe("renderQuickReply", () => {
   it("sem o dado, a variável some sem deixar vírgula solta", () => {
     expect(renderQuickReply("Olá, {primeiro_nome}! Tudo bem?", { contactName: null })).toBe("Olá! Tudo bem?");
     expect(renderQuickReply("{primeiro_nome}, seu boleto", {})).toBe("seu boleto");
+    expect(renderQuickReply("Segue o boleto.\n\n{atendente}", {})).toBe("Segue o boleto.");
+    expect(renderQuickReply("Oi {primeiro_nome}\nLinha 2", {})).toBe("Oi\nLinha 2");
   });
 });

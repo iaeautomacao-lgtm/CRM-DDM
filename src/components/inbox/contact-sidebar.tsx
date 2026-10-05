@@ -146,14 +146,17 @@ export function ContactSidebar({
   analyzeRef.current = handleAnalyzeSentiment;
   const conversationIdForAuto = conversation?.id;
   const sentimentForAuto = conversation?.sentiment;
-  const hasMessagesForAuto = Boolean(conversation?.last_message_at);
+  // Só quando o cliente já escreveu (last_customer_message_at, trigger da
+  // 128) — conversa só de campanha/bot não tem o que analisar.
+  const hasCustomerMessageForAuto = Boolean(conversation?.last_customer_message_at);
+  const canAutoAnalyze = !!accountRole && accountRole !== "viewer";
   useEffect(() => {
-    if (!conversationIdForAuto || !hasMessagesForAuto) return;
+    if (!canAutoAnalyze || !conversationIdForAuto || !hasCustomerMessageForAuto) return;
     if (sentimentForAuto && sentimentForAuto !== "unknown") return;
     if (autoAnalyzedRef.current.has(conversationIdForAuto)) return;
     autoAnalyzedRef.current.add(conversationIdForAuto);
     void analyzeRef.current();
-  }, [conversationIdForAuto, sentimentForAuto, hasMessagesForAuto]);
+  }, [canAutoAnalyze, conversationIdForAuto, sentimentForAuto, hasCustomerMessageForAuto]);
 
   const fetchContactData = useCallback(async (isCancelled: () => boolean) => {
     if (!contact) return;

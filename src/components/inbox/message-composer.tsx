@@ -250,9 +250,15 @@ export function MessageComposer({
   const [qr, setQr] = useState<{ start: number | null; query: string } | null>(null);
   const [qrIndex, setQrIndex] = useState(0);
   const qrQuery = qr?.query ?? null;
+  const qrFromButton = qr !== null && qr.start === null;
   const qrItems = useMemo(
-    () => (qrQuery === null ? [] : filterQuickReplies(quickReplies, qrQuery)),
-    [quickReplies, qrQuery],
+    () =>
+      qrQuery === null
+        ? []
+        : qrFromButton
+          ? quickReplies
+          : filterQuickReplies(quickReplies, qrQuery),
+    [quickReplies, qrQuery, qrFromButton],
   );
 
   const closeQuickReplies = useCallback(() => {
@@ -304,8 +310,17 @@ export function MessageComposer({
     closeQuickReplies();
   }, [conversationId, closeQuickReplies]);
 
+  // Campo esvaziado por fora (envio) fecha o menu aberto pelo "/".
+  const textEmpty = text === "";
+  const qrStart = qr?.start ?? null;
+  useEffect(() => {
+    if (textEmpty && qrStart !== null) closeQuickReplies();
+  }, [textEmpty, qrStart, closeQuickReplies]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Enter que confirma composição de IME (acentos) não escolhe nem envia.
+      if (e.nativeEvent.isComposing) return;
       if (qr) {
         if (e.key === "Escape") {
           e.preventDefault();
@@ -324,6 +339,13 @@ export function MessageComposer({
             pickQuickReply(qrItems[Math.min(qrIndex, qrItems.length - 1)]);
             return;
           }
+        }
+        // Menu aberto sem itens (atalho errado ou lista carregando): Enter
+        // só fecha — não manda "/bolto" para o cliente.
+        if (e.key === "Enter" && !e.shiftKey && qr.start !== null) {
+          e.preventDefault();
+          closeQuickReplies();
+          return;
         }
       }
       if (e.key === "Enter" && !e.shiftKey) {
@@ -359,6 +381,7 @@ export function MessageComposer({
   useEffect(() => {
     if (!recall) return;
     if ("text" in recall) {
+      setQr(null);
       setText(recall.text);
       requestAnimationFrame(() => {
         adjustHeight();
