@@ -57,10 +57,10 @@ function nodeLabel(run: ConversationFlowRun): string | null {
  * Link do editor no ponto em que o run está: `run_id` liga o modo debug
  * (caminho percorrido) e `node` centraliza/destaca o nó atual.
  */
+// Abre a EXECUÇÃO deste contato (página de execuções já expandida nela),
+// não só o fluxo — de lá, "Ver no diagrama" mostra o caminho no editor.
 function editorHref(run: ConversationFlowRun): string {
-  const params = new URLSearchParams({ run_id: run.id });
-  if (run.current_node_key) params.set("node", run.current_node_key);
-  return `/flows/${run.flow_id}?${params.toString()}`;
+  return `/flows/${run.flow_id}/runs?run_id=${encodeURIComponent(run.id)}`;
 }
 
 export function ConversationFlowCard({
@@ -199,7 +199,7 @@ function RunRow({
   );
 
   return canOpen ? (
-    <Link href={editorHref(run)} className={className} title="Abrir no editor de fluxo">
+    <Link href={editorHref(run)} className={className} title="Abrir a execução deste contato">
       {body}
     </Link>
   ) : (

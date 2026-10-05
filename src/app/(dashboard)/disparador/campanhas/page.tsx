@@ -357,12 +357,9 @@ interface CampaignMetrics {
 
 // Chaves de métrica clicável no modal de métricas — mapeiam 1:1 para
 // os status aceitos por /api/disparador/campaigns/[id]/queue-details
-// (ver STATUS_FILTERS naquela rota). "Respostas" fica de fora: não tem
-// status correspondente em disp_message_queue (total_respostas vem de
-// correlação em reply-tracker.ts, sem gravar qual item foi "a
-// resposta"), então não há como abrir um drilldown que bata com o
-// número do card.
-type QueueDetailStatusKey = "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado";
+// (ver STATUS_FILTERS naquela rota). "respondido" = enviados com
+// replied_at (migration 126), a mesma contagem do card "Respostas".
+type QueueDetailStatusKey = "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado" | "respondido";
 
 interface QueueDetailRow {
   id: string;
@@ -372,6 +369,9 @@ interface QueueDetailRow {
   mensagem_final: string | null;
   erro: string | null;
   tipo_erro: string | null;
+  contact_id?: string | null;
+  /** Conversa do contato no inbox (link do nome). */
+  conversation_id?: string | null;
   data_hora: string | null;
 }
 
@@ -4069,7 +4069,7 @@ export default function CampanhasPage() {
                       { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500", status: "enviado" as const },
                       { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500", status: "entregue" as const },
                       { label: "Lidos", value: metricsData.total_lidos, color: "text-purple-500", status: "lido" as const },
-                      { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500", status: null },
+                      { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500", status: "respondido" as const },
                       { label: "Blacklist", value: metricsData.total_blacklist, color: "text-yellow-500", status: "bloqueado" as const },
                       { label: "Erros", value: metricsData.total_erros, color: "text-red-500", status: "erro" as const },
                       {
@@ -4291,6 +4291,15 @@ export default function CampanhasPage() {
               </Button>
             </div>
 
+            {queueDetailModal.status === "respondido" &&
+              !queueDetailLoading &&
+              metricsData &&
+              queueDetailTotal < metricsData.total_respostas && (
+                <p className="mx-6 mt-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                  O card conta {metricsData.total_respostas} respostas; {metricsData.total_respostas - queueDetailTotal}{" "}
+                  foram registradas antes do rastreio por envio e não aparecem nesta lista.
+                </p>
+              )}
             <div className="flex-1 overflow-y-auto">
               {queueDetailLoading ? (
                 <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
@@ -4316,7 +4325,21 @@ export default function CampanhasPage() {
                   <TableBody>
                     {queueDetailRows.map((row) => (
                       <TableRow key={row.id}>
-                        <TableCell>{row.contact_name || "-"}</TableCell>
+                        <TableCell>
+                          {row.conversation_id ? (
+                            <Link
+                              href={`/inbox?c=${row.conversation_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-primary hover:underline"
+                              title="Abrir a conversa no inbox"
+                            >
+                              {row.contact_name || row.phone || "Abrir conversa"}
+                            </Link>
+                          ) : (
+                            row.contact_name || "-"
+                          )}
+                        </TableCell>
                         <TableCell>{row.phone || "-"}</TableCell>
                         <TableCell className="capitalize">{row.status}</TableCell>
                         <TableCell className="max-w-xs truncate" title={row.mensagem_final || ""}>

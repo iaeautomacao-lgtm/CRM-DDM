@@ -23,7 +23,11 @@ const STATUS_FILTERS: Record<string, string[]> = {
   lido: ["lido"],
   erro: ["erro"],
   bloqueado: ["bloqueado"],
+  // "Respostas": enviados cujo contato respondeu (replied_at, gravado por
+  // reply-tracker.ts junto com o total_respostas do card — mesma contagem).
+  respondido: ["enviado", "entregue", "lido"],
 };
+const REPLIED_KEY = "respondido";
 
 // Itens por página escolhidos no modal (20 por padrão, teto de 200).
 const DEFAULT_PAGE_SIZE = 20;
@@ -37,6 +41,9 @@ interface QueueDetailRow {
   mensagem_final: string | null;
   erro: string | null;
   tipo_erro: string | null;
+  contact_id: string | null;
+  /** Conversa do contato para o link "abrir no inbox". */
+  conversation_id: string | null;
   // sent_at quando disponível (envio real já aconteceu); cai para
   // scheduled_at pra itens ainda não enviados — disp_message_queue.
   // updated_at nunca é mantido por trigger nem setado manualmente nos
@@ -52,6 +59,8 @@ type QueueRow = {
   status: string;
   scheduled_at: string | null;
   sent_at: string | null;
+  replied_at?: string | null;
+  contact_id: string | null;
   contacts: { name: string | null; phone: string | null } | null;
 };
 
@@ -64,12 +73,43 @@ function toDetailRow(row: QueueRow): QueueDetailRow {
     mensagem_final: row.mensagem_final,
     erro: row.erro,
     tipo_erro: row.status === "erro" ? classificarTipoErro(row.erro) : null,
-    data_hora: row.sent_at ?? row.scheduled_at,
+    contact_id: row.contact_id,
+    conversation_id: null,
+    // Em "Respostas", a hora que importa é a da resposta.
+    data_hora: row.replied_at ?? row.sent_at ?? row.scheduled_at,
   };
 }
 
+/**
+ * Conversa de cada contato para o link do detalhamento: a que veio desta
+ * campanha (origin_campaign_id) ou, sem ela, a mais recente do contato.
+ */
+async function attachConversations(
+  rows: QueueDetailRow[],
+  accountId: string,
+  campaignId: string,
+): Promise<QueueDetailRow[]> {
+  const contactIds = [...new Set(rows.map((r) => r.contact_id).filter(Boolean))] as string[];
+  if (contactIds.length === 0) return rows;
+  const { data } = await supabaseAdmin()
+    .from("conversations")
+    .select("id, contact_id, origin_campaign_id, last_message_at")
+    .eq("account_id", accountId)
+    .in("contact_id", contactIds)
+    .order("last_message_at", { ascending: false, nullsFirst: false });
+  const rowsByRecency = (data ?? []) as Array<{ id: string; contact_id: string; origin_campaign_id: string | null }>;
+  const byContact = new Map<string, string>();
+  // Mais recente de cada contato; a conversa desta campanha tem prioridade.
+  for (const c of rowsByRecency) if (!byContact.has(c.contact_id)) byContact.set(c.contact_id, c.id);
+  for (const c of rowsByRecency) if (c.origin_campaign_id === campaignId) byContact.set(c.contact_id, c.id);
+  return rows.map((r) => ({ ...r, conversation_id: r.contact_id ? byContact.get(r.contact_id) ?? null : null }));
+}
+
 const SELECT_COLUMNS =
-  "id, mensagem_final, erro, status, scheduled_at, sent_at, contacts!contact_id(name, phone)";
+  "id, contact_id, mensagem_final, erro, status, scheduled_at, sent_at, contacts!contact_id(name, phone)";
+// Com replied_at (migration 126) só para "Respostas" — as demais métricas
+// seguem funcionando mesmo sem a coluna.
+const SELECT_COLUMNS_REPLIED = `${SELECT_COLUMNS}, replied_at`;
 
 export async function GET(
   request: Request,
@@ -142,13 +182,15 @@ export async function GET(
     }
 
     if (exportFormat === "xlsx") {
+      const replied = statusKey === REPLIED_KEY;
       let query = supabaseAdmin()
         .from("disp_message_queue")
-        .select(SELECT_COLUMNS)
+        .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS)
         .eq("campaign_id", campaignId)
-        .in("status", statuses)
-        .order("sent_at", { ascending: false, nullsFirst: false })
-        .order("scheduled_at", { ascending: false });
+        .in("status", statuses);
+      query = replied
+        ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
+        : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false });
 
       if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
 
@@ -171,21 +213,34 @@ export async function GET(
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
+    const replied = statusKey === REPLIED_KEY;
     let query = supabaseAdmin()
       .from("disp_message_queue")
-      .select(SELECT_COLUMNS, { count: "exact" })
+      .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS, { count: "exact" })
       .eq("campaign_id", campaignId)
-      .in("status", statuses)
-      .order("sent_at", { ascending: false, nullsFirst: false })
-      .order("scheduled_at", { ascending: false })
-      .range(from, to);
+      .in("status", statuses);
+    query = (
+      replied
+        ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
+        : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false })
+    ).range(from, to);
 
     if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
 
     const { data, error, count } = await query;
+    if (error?.code === "42703" && replied) {
+      return NextResponse.json(
+        { error: "O detalhamento de respostas precisa da migration 126 aplicada." },
+        { status: 400 },
+      );
+    }
     if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
 
-    const rows = (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow));
+    const rows = await attachConversations(
+      (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow)),
+      ctx.accountId,
+      campaignId,
+    );
     return NextResponse.json({ rows, total: count ?? 0, page, pageSize: PAGE_SIZE });
   } catch (err) {
     return toErrorResponse(err);
@@ -198,6 +253,7 @@ const STATUS_FILE_LABELS: Record<string, string> = {
   entregue: "entregues",
   lido: "lidos",
   erro: "erros",
+  respondido: "respostas",
   bloqueado: "blacklist",
 };
 
