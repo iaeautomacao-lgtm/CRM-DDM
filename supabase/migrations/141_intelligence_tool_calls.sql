@@ -1,9 +1,9 @@
 -- ============================================================
--- 136_intelligence_tool_calls.sql — auditoria do DDM Intelligence (PRD-04)
+-- 141_intelligence_tool_calls.sql — auditoria do DDM Intelligence (PRD-04)
 -- APLICAR MANUALMENTE no Supabase SQL Editor ANTES do deploy.
 -- Conferir o schema live antes (CLAUDE.md): wacrm.accounts e
 -- wacrm.profiles(account_id, account_role) precisam existir (017).
--- Depois da 134 e da 135 (papel supervisor).
+-- Depois da 139 e da 140 (papel supervisor).
 --
 -- Uma linha por chamada de ferramenta (src/lib/intelligence/audit.ts):
 -- quem chamou, qual ferramenta, argumentos, duração, sucesso, tamanho do

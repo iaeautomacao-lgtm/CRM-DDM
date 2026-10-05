@@ -54,7 +54,7 @@ export async function GET(request: Request) {
 
     // Transferências do dia (histórico da migration 128).
     // O embed !inner aplica a RLS de conversas: o supervisor conta só as
-    // transferências das conversas que ele enxerga (135).
+    // transferências das conversas que ele enxerga (140).
     const { count: transfers } = await supabase
       .from('conversation_assignments')
       .select('id, conversations!conversation_id!inner(id)', { count: 'exact', head: true })

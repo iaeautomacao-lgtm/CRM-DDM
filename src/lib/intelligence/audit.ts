@@ -1,5 +1,5 @@
 // Auditoria das chamadas de ferramenta (wacrm.intelligence_tool_calls,
-// migration 136). Best-effort: falha ao gravar nunca derruba a resposta.
+// migration 141). Best-effort: falha ao gravar nunca derruba a resposta.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/flows/admin-client";

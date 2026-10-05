@@ -17,7 +17,7 @@ import type { AccountRole } from "@/lib/auth/roles";
 //            /equipes, /perfil, /templates, /tabulacoes, /usuarios,
 //            /flows, /disparador
 //   supervisor → /dashboard, /monitoramento, /inbox
-//            (dados só das suas equipes — RLS da migration 135). Sem
+//            (dados só das suas equipes — RLS da migration 140). Sem
 //            /relatorios: as RPCs de relatório são SECURITY DEFINER e
 //            devolvem a conta inteira — liberar só depois de escopá-las.
 //   agent  → /inbox

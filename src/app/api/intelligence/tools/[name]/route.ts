@@ -9,7 +9,7 @@ import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit'
 // POST /api/intelligence/tools/[name] — executa uma ferramenta do DDM
 // Intelligence (Fase 1, validação sem chat). Corpo = input da ferramenta.
 // O escopo (conta/equipes) vem da sessão, nunca do corpo. Toda chamada
-// que passa da autenticação é auditada (intelligence_tool_calls, 136).
+// que passa da autenticação é auditada (intelligence_tool_calls, 141).
 
 const RATE = { limit: 60, windowMs: 60_000 }
 

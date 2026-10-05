@@ -1,8 +1,8 @@
--- Migration 134: novo papel "supervisor" no enum de papéis (PRD-04).
--- APLICAR MANUALMENTE, SOZINHA, no Supabase SQL Editor — e só DEPOIS a 135.
+-- Migration 139: novo papel "supervisor" no enum de papéis (PRD-04).
+-- APLICAR MANUALMENTE, SOZINHA, no Supabase SQL Editor — e só DEPOIS a 140.
 --
 -- Por que separada: um valor novo de enum só pode ser usado depois do
--- COMMIT que o criou. A 135 (regras de acesso) compara com 'supervisor'
+-- COMMIT que o criou. A 140 (regras de acesso) compara com 'supervisor'
 -- e falharia ("unsafe use of new value") se rodasse na mesma transação.
 --
 -- O enum foi criado na 017 sem schema explícito; aqui ele é localizado

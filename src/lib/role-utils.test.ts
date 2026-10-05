@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { canAccessRoute, getDefaultRoute } from "./role-utils";
 
-describe("supervisor (migrations 134/135)", () => {
+describe("supervisor (migrations 139/140)", () => {
   it("acessa Inbox, Monitoramento e Dashboard", () => {
     for (const path of ["/inbox", "/monitoramento", "/dashboard"]) {
       expect(canAccessRoute("supervisor", path)).toBe(true);

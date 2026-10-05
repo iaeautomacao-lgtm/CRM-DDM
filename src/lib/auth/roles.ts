@@ -2,10 +2,10 @@
 // Account role helpers — pure, unit-testable, no I/O.
 //
 // Mirrors the `account_role_enum` Postgres type from migration
-// 017_account_sharing.sql (+ 'supervisor', migrations 134/135). The
+// 017_account_sharing.sql (+ 'supervisor', migrations 139/140). The
 // hierarchy is intentionally a flat ordinal (owner=5 … viewer=1) — it
 // matches the same CASE expression the
-// `is_account_member(account_id, min_role)` SQL helper uses (135), so
+// `is_account_member(account_id, min_role)` SQL helper uses (140), so
 // server-side TypeScript guards and database-side RLS speak the same
 // language. Supervisor: tudo do agente + Monitoramento das suas
 // equipes; nada que exija admin.
@@ -125,7 +125,7 @@ export function canTransferOwnership(role: AccountRole): boolean {
 
 /**
  * DDM Intelligence e painéis de supervisão (Monitoramento):
- * supervisor ou acima. O supervisor vê só as suas equipes (RLS, 135).
+ * supervisor ou acima. O supervisor vê só as suas equipes (RLS, 140).
  */
 export function canSuperviseTeams(role: AccountRole): boolean {
   return hasMinRole(role, "supervisor");

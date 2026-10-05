@@ -1,5 +1,5 @@
--- Migration 135: regras de acesso do papel "supervisor" (PRD-04).
--- APLICAR MANUALMENTE no Supabase SQL Editor DEPOIS da 134 (já commitada).
+-- Migration 140: regras de acesso do papel "supervisor" (PRD-04).
+-- APLICAR MANUALMENTE no Supabase SQL Editor DEPOIS da 139 (já commitada).
 -- Conferir o schema live antes (CLAUDE.md) — em especial as policies
 -- conversations_select (128) e whatsapp_config_select (103), que esta
 -- migration substitui.

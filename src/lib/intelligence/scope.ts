@@ -8,7 +8,7 @@
 //   demais       → sem acesso
 //
 // `role` é string porque "supervisor" entra no AccountRole em outra
-// mudança (migration 134); aqui não dependemos disso.
+// mudança (migration 139); aqui não dependemos disso.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ForbiddenError } from "@/lib/auth/account";
