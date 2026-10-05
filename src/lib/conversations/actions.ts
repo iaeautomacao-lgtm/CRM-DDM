@@ -116,41 +116,28 @@ export async function assignConversationTeam(
  * tabulação tag, matching the Inbox's existing guarantee exactly.
  */
 export async function closeConversationWithOutcomeTag(
-  db: DB,
+  _db: DB,
   conversationId: string,
   tag: Tag,
 ): Promise<{ error: string | null }> {
-  const { error } = await db
-    .from("conversations")
-    .update({ status: "closed", outcome_tag_id: tag.id })
-    .eq("id", conversationId);
-  if (error) return { error: error.message };
-
-  await endActiveFlowRun(conversationId);
-  return { error: null };
-}
-
-/**
- * Ends the conversation's active flow run, if any — a human closing/
- * tabulating a conversation is the strongest "stop the automated flow"
- * signal there is, but the flow engine's admin-only queries aren't
- * reachable from the browser client these actions run under, hence the
- * API route. Best-effort: a failure here shouldn't block the close
- * itself, which already committed via the direct `conversations` update
- * above.
- */
-async function endActiveFlowRun(conversationId: string): Promise<void> {
   try {
-    await apiFetch("/api/flows/end-run", {
+    const res = await apiFetch(`/api/conversations/${conversationId}/close`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversation_id: conversationId,
-        reason: "conversation_closed",
-      }),
+      body: JSON.stringify({ outcome_tag_id: tag.id }),
     });
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      return { error: json.error ?? `HTTP ${res.status}` };
+    }
+
+    return { error: null };
   } catch (err) {
-    console.error("[endActiveFlowRun] failed:", err);
+    return {
+      error: err instanceof Error ? err.message : "erro de rede",
+    };
   }
 }
+
 import { apiFetch } from "@/lib/api-fetch";
