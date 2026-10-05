@@ -25,6 +25,8 @@ const EDITABLE_FIELDS = [
   // campanhas/page.tsx e startCampaign.ts.
   "dias_permitidos",
   // Migration 127 — "Ao responder, enviar para o Webchat".
+  // Migration 132 — origem do público ("csv" | "tags" | "account").
+  "audience_mode",
   "webchat_enabled",
   "webchat_flow_id",
   "webchat_message",

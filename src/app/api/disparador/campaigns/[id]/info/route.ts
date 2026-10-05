@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { decrypt } from "@/lib/whatsapp/encryption";
 
@@ -16,11 +16,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createServerClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
+    // Campanha e canais só da conta de quem pede (antes qualquer usuário
+    // logado consultava qualquer campanha pelo id).
+    const { accountId } = await getCurrentAccount();
 
     const { id: campaignId } = await params;
 
@@ -29,7 +27,8 @@ export async function GET(
       .from("campaigns")
       .select("id, session_ids, mensagens")
       .eq("id", campaignId)
-      .single();
+      .eq("account_id", accountId)
+      .maybeSingle();
 
     if (!campaign) {
       return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
@@ -44,6 +43,7 @@ export async function GET(
     const { data: channels } = await supabaseAdmin()
       .from("whatsapp_config")
       .select("id, provider, phone_number_id, access_token")
+      .eq("account_id", accountId)
       .in("id", sessionIds);
 
     const metaChannels = (channels ?? []).filter((c) => c.provider === "meta");
@@ -131,7 +131,8 @@ export async function GET(
       hasMeta: true,
       channels: channelInfos,
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+  } catch (err) {
+    // 401/403 do getCurrentAccount; o resto vira 500 sem vazar detalhe.
+    return toErrorResponse(err);
   }
 }

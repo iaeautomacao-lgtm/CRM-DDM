@@ -422,6 +422,10 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     setRfNodes(derivedRfNodes);
   }, [derivedRfNodes]);
 
+  // Aresta selecionada (clique). Apagar só com Delete/Backspace — antes um
+  // clique apagava a conexão sem querer (PRD-01).
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
   const rfEdges = useMemo(() => {
     const canvasEdges = deriveCanvasEdges(builderNodes);
 
@@ -436,11 +440,15 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       target: e.target,
       sourceHandle: e.sourceHandle,
       label: e.label,
-      style: { stroke: 'var(--border)', strokeWidth: 1.5 },
+      selected: e.id === selectedEdgeId,
+      style:
+        e.id === selectedEdgeId
+          ? { stroke: 'var(--primary)', strokeWidth: 2.5 }
+          : { stroke: 'var(--border)', strokeWidth: 1.5 },
     }));
 
     return rfEdges;
-  }, [builderNodes]);
+  }, [builderNodes, selectedEdgeId]);
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<RfNode<NodeData>>[]) => {
@@ -482,6 +490,8 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   const handleNodeClick = useCallback(
     (_event: React.MouseEvent, node: RfNode<NodeData>) => {
       setSelectedNodeKey(node.id);
+      // Senão Delete apagaria o nó E a aresta que estava selecionada.
+      setSelectedEdgeId(null);
     },
     []
   );
@@ -550,22 +560,17 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
         const patch = applyEdgeConnection(sourceNode, e.sourceHandle, '');
         if (patch) updateNodeConfig(e.source, patch);
       }
+      setSelectedEdgeId(null);
     },
     [builderNodes, updateNodeConfig, isDebugMode]
   );
 
-  // Click-to-delete: replaces the inline trash button DeletableEdge used
-  // to render (see EDGE_TYPES comment above). Keyboard delete
-  // (Backspace/Delete on a selected edge, via handleEdgesDelete) still
-  // works too — this just restores one-click removal without the
-  // custom edge component.
-  const handleEdgeClick = useCallback(
-    (event: React.MouseEvent, edge: RfEdge) => {
-      event.stopPropagation();
-      handleEdgesDelete([edge]);
-    },
-    [handleEdgesDelete]
-  );
+  // Clique na aresta só seleciona (destaque); Delete/Backspace apaga via
+  // handleEdgesDelete. Clicar de novo ou no fundo tira a seleção.
+  const handleEdgeClick = useCallback((event: React.MouseEvent, edge: RfEdge) => {
+    event.stopPropagation();
+    setSelectedEdgeId((cur) => (cur === edge.id ? null : edge.id));
+  }, []);
 
   // Wrapped mutators that target the currently-selected node — pass to
   // the form so each keystroke goes through the editor context (which
@@ -614,6 +619,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           onNodesDelete={handleNodesDelete}
           onEdgesDelete={handleEdgesDelete}
           onEdgeClick={handleEdgeClick}
+          onPaneClick={() => setSelectedEdgeId(null)}
           // Default is "Backspace" only — accept both so Mac users
           // hitting Delete (Fn+Backspace) get the same behavior.
           deleteKeyCode={isDebugMode ? [] : ['Backspace', 'Delete']}

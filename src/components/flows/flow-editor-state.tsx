@@ -415,6 +415,23 @@ export function FlowEditorProvider({
       }
       const snapshot = latestStateRef.current;
       const revision = revisionRef.current;
+      // Fluxo ativo: salvar = publicar para clientes reais. Com erro de
+      // validação não publica (a API também recusa — PRD-01).
+      if (snapshot.status === "active") {
+        const blockers = validateFlowForActivation(
+          {
+            name: snapshot.name,
+            trigger_type: snapshot.trigger_type,
+            trigger_config: snapshot.trigger_config,
+            entry_node_id: snapshot.entry_node_id,
+          },
+          snapshot.nodes,
+        ).filter((i) => i.severity === "error");
+        if (blockers.length > 0) {
+          toast.error(`Fluxo ativo: corrija ${blockers.length} erro(s) antes de publicar as alterações.`);
+          return false;
+        }
+      }
       isSavingRef.current = true;
       setSaving(true);
       const operation = (async () => {
@@ -436,7 +453,7 @@ export function FlowEditorProvider({
           throw new Error(json.error ?? `Falha ao salvar: ${res.status}`);
         }
         if (revision === revisionRef.current) setDirty(false);
-        if (!opts?.silent) toast.success("Salvo.");
+        if (!opts?.silent) toast.success(snapshot.status === "active" ? "Alterações publicadas." : "Salvo.");
         return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Falha ao salvar";
@@ -466,7 +483,15 @@ export function FlowEditorProvider({
       if (url.origin !== window.location.origin || url.href === window.location.href) return;
       event.preventDefault();
       event.stopPropagation();
-      void save({ silent: true }).then(ok => { if (ok) router.push(url.pathname + url.search + url.hash); });
+      const href = url.pathname + url.search + url.hash;
+      // Fluxo ativo não publica ao sair: só com "Publicar alterações".
+      if (latestStateRef.current.status === "active") {
+        if (window.confirm("Este fluxo está ativo e tem alterações não publicadas. Sair sem publicar?")) {
+          router.push(href);
+        }
+        return;
+      }
+      void save({ silent: true }).then(ok => { if (ok) router.push(href); });
     };
     document.addEventListener("click", protect, true);
     return () => document.removeEventListener("click", protect, true);
@@ -478,12 +503,14 @@ export function FlowEditorProvider({
   // change" — no separate change-tracking needed. Clears itself once
   // `dirty` flips back to false after a successful save.
   useEffect(() => {
-    if (!dirty) return;
+    // Autosave só em rascunho: num fluxo ativo cada salvamento entra no ar
+    // para clientes reais, então lá é o botão "Publicar alterações".
+    if (!dirty || state.status === "active") return;
     const timeout = window.setTimeout(() => {
       void save({ silent: true });
     }, 2000);
     return () => window.clearTimeout(timeout);
-  }, [dirty, save]);
+  }, [dirty, save, state.status]);
 
   // ---- Activate / Pause / Archive ----
   const setStatus = useCallback(

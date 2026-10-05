@@ -64,6 +64,12 @@ export function EditorHeader() {
   // only chance to persist edits made in the last <2s before the
   // debounce autosave would have caught them.
   const navigateAway = async (href: string) => {
+    if (dirty && state.status === "active") {
+      // Fluxo ativo: sair não publica (PRD-01).
+      if (!window.confirm("Este fluxo está ativo e tem alterações não publicadas. Sair sem publicar?")) return;
+      router.push(href);
+      return;
+    }
     if (dirty && !await save({ silent: true })) return;
     router.push(href);
   };
@@ -170,12 +176,12 @@ export function EditorHeader() {
             ) : dirty ? (
               <>
                 <Save className="h-3.5 w-3.5" />
-                Salvar
+                {state.status === "active" ? "Publicar alterações" : "Salvar"}
               </>
             ) : (
               <>
                 <Check className="h-3.5 w-3.5" />
-                Salvo
+                {state.status === "active" ? "Publicado" : "Salvo"}
               </>
             )}
           </Button>

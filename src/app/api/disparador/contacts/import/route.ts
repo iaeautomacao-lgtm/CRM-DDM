@@ -330,6 +330,10 @@ export async function POST(request: Request) {
     // mesmo padrão para VAR1/VAR2/VAR3 (migration 079).
     const altPhoneAssignments: Array<{ contact_id: string; phone: string; phone_normalized: string; ordem: number }> = [];
     const csvVarAssignments: Array<{ contact_id: string; var_index: number; value: string }> = [];
+    // Todo contato deste import (novo ou já existente) — vínculo do import
+    // com a campanha (disp_import_contacts, migration 132). Independe de o
+    // CSV ter VARn: sem ele a campanha não sabe quem é "do CSV".
+    const importedContactIds = new Set<string>();
     const seenInFile = new Set<string>();
     const seenCpfInFile = new Set<string>();
 
@@ -456,6 +460,7 @@ export async function POST(request: Request) {
         csvVars.forEach((v, idx) => {
           if (v) csvVarAssignments.push({ contact_id: matched.id, var_index: idx, value: v });
         });
+        importedContactIds.add(matched.id);
         results.duplicados++;
         continue;
       }
@@ -540,8 +545,21 @@ export async function POST(request: Request) {
             source.csvVars.forEach((v, idx) => {
               if (v) csvVarAssignments.push({ contact_id: singleData.id, var_index: idx, value: v });
             });
+            importedContactIds.add(singleData.id);
           } else if (isUniqueViolation(singleErr)) {
             results.duplicados++;
+            // Já existia (corrida ou chave normalizada diferente): continua
+            // sendo um contato do CSV, então entra no vínculo do import.
+            const digits = String(insertRows[j]?.phone ?? "").replace(/\D/g, "");
+            if (digits) {
+              const { data: existing } = await supabaseAdmin()
+                .from("contacts")
+                .select("id")
+                .eq("account_id", accountId)
+                .eq("phone_normalized", digits)
+                .limit(1);
+              if (existing?.[0]?.id) importedContactIds.add(existing[0].id);
+            }
           } else {
             results.erros.push(`${source.phone}: ${singleErr?.message}`);
           }
@@ -561,6 +579,7 @@ export async function POST(request: Request) {
           source.csvVars.forEach((v, idx) => {
             if (v) csvVarAssignments.push({ contact_id: inserted[j].id, var_index: idx, value: v });
           });
+          importedContactIds.add(inserted[j].id);
         }
       }
     }
@@ -663,7 +682,62 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ success: true, results });
+    // 9. Vínculo import → campanha (migration 132). Diferente dos passos
+    // acima, NÃO é best-effort: sem ele a campanha de CSV não pode iniciar
+    // (startCampaign recusa), então a falha volta como erro do import.
+    // Reimportar o CSV substitui o vínculo anterior do mesmo rascunho/campanha.
+    if (campaignIdRaw || draftIdRaw) {
+      const idColumn = campaignIdRaw ? "campaign_id" : "draft_id";
+      const idValue = (campaignIdRaw ?? draftIdRaw) as string;
+      let { error: clearErr } = await supabaseAdmin()
+        .from("disp_import_contacts")
+        .delete()
+        .eq(idColumn, idValue);
+      // Reimport ao editar: o vínculo antigo da criação (por rascunho) sai
+      // também — a lista nova substitui a antiga, nunca soma.
+      if (!clearErr && campaignIdRaw) {
+        const { data: camp } = await supabaseAdmin()
+          .from("campaigns")
+          .select("import_draft_id")
+          .eq("id", campaignIdRaw)
+          .eq("account_id", accountId)
+          .limit(1);
+        const draftOfCampaign = camp?.[0]?.import_draft_id;
+        if (draftOfCampaign) {
+          ({ error: clearErr } = await supabaseAdmin()
+            .from("disp_import_contacts")
+            .delete()
+            .eq("draft_id", draftOfCampaign));
+        }
+      }
+      if (clearErr) {
+        console.error("[Contacts Import] Failed to clear import link:", clearErr);
+        return NextResponse.json(
+          { error: "Contatos importados, mas não foi possível vinculá-los à campanha. Tente importar de novo." },
+          { status: 500 }
+        );
+      }
+      const linkRows = [...importedContactIds].map((contact_id) => ({
+        account_id: accountId,
+        contact_id,
+        campaign_id: campaignIdRaw,
+        draft_id: campaignIdRaw ? null : draftIdRaw,
+      }));
+      for (let i = 0; i < linkRows.length; i += 500) {
+        const { error: linkErr } = await supabaseAdmin()
+          .from("disp_import_contacts")
+          .insert(linkRows.slice(i, i + 500));
+        if (linkErr) {
+          console.error("[Contacts Import] Failed to link import contacts:", linkErr);
+          return NextResponse.json(
+            { error: "Contatos importados, mas não foi possível vinculá-los à campanha. Tente importar de novo." },
+            { status: 500 }
+          );
+        }
+      }
+    }
+
+    return NextResponse.json({ success: true, results, linked: importedContactIds.size });
   } catch (err: any) {
     console.error("[Contacts Import] Failed:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });

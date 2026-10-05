@@ -174,6 +174,7 @@ const STATUS_COLORS: Record<string, string> = {
   em_execucao: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
   pausada: "bg-amber-500/10 text-amber-500 border border-amber-500/20",
   encerrada: "bg-zinc-500/10 text-zinc-500 border border-zinc-500/20",
+  preparando: "bg-blue-500/10 text-blue-600 border border-blue-500/20 dark:text-blue-400",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -182,6 +183,7 @@ const STATUS_LABELS: Record<string, string> = {
   em_execucao: "Em Execução",
   pausada: "Pausada",
   encerrada: "Encerrada",
+  preparando: "Preparando envio",
 };
 
 type DispatchMode = "imediato" | "balanceado" | "cauteloso" | "personalizado" | "segmentado";
@@ -781,6 +783,17 @@ export default function CampanhasPage() {
     }>;
   } | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
+  // Público real da campanha no modal de início (PRD-01) — mesma resolução
+  // do startCampaign (GET .../audience).
+  const [audienceInfo, setAudienceInfo] = useState<
+    | { ok: true; total: number; source: string; source_label: string; tags: string[]; already_sent: number }
+    | { ok: false; error: string }
+    | null
+  >(null);
+  const [starting, setStarting] = useState(false);
+  const [stopConfirm, setStopConfirm] = useState<{ id: string; nome: string } | null>(null);
+  // Campanha cujo público está sendo calculado (descarta resposta atrasada).
+  const audienceForRef = useRef<string | null>(null);
 
   // Modal de métricas por campanha
   const [metricsModal, setMetricsModal] = useState<{
@@ -1010,7 +1023,29 @@ export default function CampanhasPage() {
   const handleStartClick = async (id: string) => {
     setStartConfirmId(id);
     setCampaignInfo(null);
+    setAudienceInfo(null);
     setInfoLoading(true);
+    audienceForRef.current = id;
+    // Retomar campanha pausada não recalcula o público (startCampaign retoma
+    // a fila existente) — só campanhas que ainda vão montar a fila.
+    const isResume = campaigns.find((c) => c.id === id)?.status === "pausada";
+    if (isResume) {
+      setAudienceInfo({ ok: true, total: -1, source: "resume", source_label: "", tags: [], already_sent: 0 });
+    } else {
+      apiFetch(`/api/disparador/campaigns/${id}/audience`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (audienceForRef.current !== id) return;
+          setAudienceInfo(
+            data?.ok === true || data?.ok === false
+              ? data
+              : { ok: false, error: data?.error ?? "Não foi possível calcular o público" },
+          );
+        })
+        .catch(() => {
+          if (audienceForRef.current === id) setAudienceInfo({ ok: false, error: "Não foi possível calcular o público" });
+        });
+    }
     try {
       const res = await apiFetch(`/api/disparador/campaigns/${id}/info`);
       if (res.ok) {
@@ -1026,10 +1061,9 @@ export default function CampanhasPage() {
 
   // Confirmação efetiva — chama o start real
   const handleStartConfirm = async () => {
-    if (!startConfirmId) return;
+    if (!startConfirmId || starting) return;
     const id = startConfirmId;
-    setStartConfirmId(null);
-    setCampaignInfo(null);
+    setStarting(true);
     try {
       const res = await apiFetch(`/api/disparador/campaigns/${id}/start`, {
         method: "POST",
@@ -1037,13 +1071,18 @@ export default function CampanhasPage() {
       if (res.ok) {
         toast.success("Campanha iniciada e disparos agendados!");
         trackAction("campaign_started", { campaign_id: id });
+        setStartConfirmId(null);
+        setCampaignInfo(null);
+        setAudienceInfo(null);
         loadData();
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         throw new Error(err.error || "Erro ao iniciar campanha");
       }
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setStarting(false);
     }
   };
 
@@ -1086,6 +1125,9 @@ export default function CampanhasPage() {
       if (res.ok) {
         toast.success("Campanha pausada com sucesso.");
         loadData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Erro ao pausar campanha.");
       }
     } catch (err: any) {
       toast.error("Erro ao pausar campanha.");
@@ -1094,11 +1136,15 @@ export default function CampanhasPage() {
 
   // Stop/Close Campaign
   const handleStop = async (id: string) => {
+    setStopConfirm(null);
     try {
       const res = await apiFetch(`/api/disparador/campaigns/${id}/stop?action=stop`, { method: "POST" });
       if (res.ok) {
         toast.success("Campanha encerrada e fila cancelada.");
         loadData();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || "Erro ao encerrar campanha.");
       }
     } catch (err: any) {
       toast.error("Erro ao encerrar campanha.");
@@ -1425,6 +1471,9 @@ export default function CampanhasPage() {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            // Só muda a origem do público quando houve import nesta edição;
+            // senão uma campanha de CSV viraria "conta inteira".
+            ...(importAllRows?.length ? { audience_mode: "csv" } : {}),
             nome,
             descricao,
             session_ids: selectedSessions,
@@ -1504,6 +1553,8 @@ export default function CampanhasPage() {
           agendamento: agendamentoISO,
           ...campaignWebchatPayload(webchat),
           status: agendamentoISO ? "agendado" : "rascunho",
+          // Migration 132: com "csv", startCampaign nunca cai para a conta inteira.
+          audience_mode: importAllRows?.length ? "csv" : selectedTags.length > 0 ? "tags" : "account",
           created_by: user.id,
           account_id: accountId,
           // Migration 080 — grava o draftId usado no import (Step 3 acima)
@@ -2384,12 +2435,12 @@ export default function CampanhasPage() {
                         <Pause className="h-3.5 w-3.5" /> Pausar
                       </Button>
                     ) : (
-                      <Button size="sm" onClick={() => handleStartClick(c.id)} disabled={c.status === "encerrada"} className="h-8 gap-1 text-xs">
+                      <Button size="sm" onClick={() => handleStartClick(c.id)} disabled={c.status === "encerrada" || c.status === "preparando"} className="h-8 gap-1 text-xs">
                         <Play className="h-3.5 w-3.5" /> Iniciar
                       </Button>
                     )}
                     {c.status === "em_execucao" || c.status === "pausada" ? (
-                      <Button size="sm" variant="outline" onClick={() => handleStop(c.id)} className="h-8 text-xs">
+                      <Button size="sm" variant="outline" onClick={() => setStopConfirm({ id: c.id, nome: c.nome })} className="h-8 text-xs">
                         Encerrar
                       </Button>
                     ) : null}
@@ -3804,6 +3855,40 @@ export default function CampanhasPage() {
             <AlertDialogTitle>Confirmar início da campanha</AlertDialogTitle>
             <AlertDialogDescription render={<div />}>
               <div className="space-y-3">
+                {/* Público real (PRD-01): quantos e de onde, antes de enviar. */}
+                {audienceInfo === null ? (
+                  <p className="text-sm text-muted-foreground">Calculando público…</p>
+                ) : audienceInfo.ok && audienceInfo.source === "resume" ? (
+                  <p className="text-sm text-muted-foreground">
+                    A campanha está pausada: os envios que ficaram na fila serão retomados.
+                  </p>
+                ) : audienceInfo.ok ? (
+                  <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+                    <p className="text-foreground">
+                      Enviar para{" "}
+                      <span className="text-base font-semibold">{audienceInfo.total.toLocaleString("pt-BR")}</span>{" "}
+                      {audienceInfo.source_label}
+                      {audienceInfo.tags.length > 0 && <> ({audienceInfo.tags.join(", ")})</>}.
+                    </p>
+                    {audienceInfo.already_sent > 0 && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {audienceInfo.already_sent.toLocaleString("pt-BR")} já receberam nesta campanha e serão pulados.
+                      </p>
+                    )}
+                    <p className="mt-1 text-xs text-muted-foreground">Contatos na blacklist são pulados no envio.</p>
+                    {audienceInfo.source === "account" && (
+                      <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        Sem CSV e sem tabulação: a campanha vai para a conta inteira.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 rounded-md border border-red-500/50 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-400">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{audienceInfo.error}</span>
+                  </div>
+                )}
                 {infoLoading && (
                   <p className="text-sm text-muted-foreground">
                     Consultando limites do canal...
@@ -3901,12 +3986,31 @@ export default function CampanhasPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
+            <Button
               onClick={handleStartConfirm}
-              disabled={infoLoading}
+              disabled={infoLoading || starting || !audienceInfo || !audienceInfo.ok}
             >
-              {infoLoading ? "Consultando..." : "Iniciar campanha"}
-            </AlertDialogAction>
+              {starting ? "Iniciando…" : infoLoading ? "Consultando..." : "Iniciar campanha"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Encerrar cancela a fila: confirmação com o nome da campanha. */}
+      <AlertDialog open={stopConfirm !== null} onOpenChange={(open) => !open && setStopConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Encerrar campanha?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &quot;{stopConfirm?.nome}&quot; será encerrada e os envios que ainda estão na fila serão cancelados. Não
+              dá para retomar depois.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => stopConfirm && handleStop(stopConfirm.id)}>
+              Encerrar campanha
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

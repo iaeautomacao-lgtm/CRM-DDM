@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { validateFlowForActivation } from '@/lib/flows/validate'
 
 /**
  * GET   /api/flows/[id]  — fetch one flow with its nodes.
@@ -106,6 +107,53 @@ export async function PUT(
   }
 
   const admin = supabaseAdmin()
+
+  // Fluxo ativo atende clientes reais: alteração de nós/gatilho só entra
+  // se o resultado continuar válido (PRD-01). Rascunho salva como antes.
+  if (
+    body.nodes !== undefined &&
+    (!Array.isArray(body.nodes) ||
+      body.nodes.some((n) => !n || typeof n.node_key !== 'string' || typeof n.config !== 'object' || n.config === null))
+  ) {
+    return NextResponse.json({ error: 'nodes inválido' }, { status: 400 })
+  }
+  if (
+    body.nodes !== undefined ||
+    body.trigger_type !== undefined ||
+    body.trigger_config !== undefined ||
+    body.entry_node_id !== undefined
+  ) {
+    const { data: current } = await admin
+      .from('flows')
+      .select('status, name, trigger_type, trigger_config, entry_node_id')
+      .eq('id', id)
+      .maybeSingle()
+    if (current?.status === 'active') {
+      let nodes = body.nodes
+      if (nodes === undefined) {
+        const { data: existing } = await admin
+          .from('flow_nodes')
+          .select('node_key, node_type, config')
+          .eq('flow_id', id)
+        nodes = (existing ?? []) as NonNullable<PutBody['nodes']>
+      }
+      const blockers = validateFlowForActivation(
+        {
+          name: body.name ?? current.name,
+          trigger_type: body.trigger_type ?? current.trigger_type,
+          trigger_config: body.trigger_config ?? current.trigger_config,
+          entry_node_id: body.entry_node_id !== undefined ? body.entry_node_id : current.entry_node_id,
+        },
+        nodes,
+      ).filter((i) => i.severity === 'error')
+      if (blockers.length > 0) {
+        return NextResponse.json(
+          { error: 'Fluxo ativo: corrija os erros antes de publicar as alterações.', issues: blockers },
+          { status: 400 },
+        )
+      }
+    }
+  }
 
   // Update the flow row first — the body may not include `nodes` (a
   // header-only save for editing the trigger config without touching
