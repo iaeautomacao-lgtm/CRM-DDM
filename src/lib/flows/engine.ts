@@ -461,6 +461,8 @@ type AiDecisionInput = {
   ai_exit_code?: string | null;
   tool_name?: string | null;
   tool_status?: string | null;
+  ai_node?: string | null;
+  tool_error?: string | null;
   model?: string | null;
   prompt_version?: string | null;
 };
@@ -486,6 +488,8 @@ async function logAiDecision(
     ai_exit_code: input.ai_exit_code ?? null,
     tool_name: input.tool_name ?? null,
     tool_status: input.tool_status ?? null,
+    ai_node: input.ai_node ?? null,
+    tool_error: input.tool_error ?? null,
     model: input.model ?? null,
     prompt_version: input.prompt_version ?? null,
   });
@@ -535,7 +539,7 @@ async function loadLatestAiHandoffContext(
 }> {
   const { data } = await db
     .from("flow_run_events")
-    .select("node_key,event_type,payload,created_at")
+    .select("node_key,node_type,event_type,payload,created_at")
     .eq("flow_run_id", runId)
     .in("event_type", ["tool_result", "node_completed"])
     .order("created_at", { ascending: false })
@@ -548,10 +552,13 @@ async function loadLatestAiHandoffContext(
   for (const row of data ?? []) {
     const event = row as {
       node_key: string | null;
+      node_type: string | null;
       event_type: string;
       payload: Record<string, unknown> | null;
     };
-    if (!aiNode && event.node_key) aiNode = event.node_key;
+    if (!aiNode && event.node_type === "ai_agent" && event.node_key) {
+      aiNode = event.node_key;
+    }
 
     if (event.event_type === "tool_result" && event.payload) {
       const result =
@@ -603,6 +610,8 @@ async function recordHandoffDecision(
       typeof run.vars?.ai_exit_code === "string" ? run.vars.ai_exit_code : null,
     tool_name: ctx.toolName,
     tool_status: ctx.toolError ? "error" : null,
+    ai_node: ctx.aiNode,
+    tool_error: ctx.toolError,
   });
 }
 
@@ -2214,6 +2223,8 @@ async function runAiAgentCore(
           needs_human: false,
           tool_name: toolName,
           tool_status: toolFailure ? "error" : "success",
+          ai_node: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
+          tool_error: toolFailure,
           model: modelUsed,
         });
       },
@@ -2294,6 +2305,7 @@ async function runAiAgentCore(
         reason: "ai_exit_code",
         needs_human: false,
         ai_exit_code: exitCodeFound,
+        ai_node: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
         model: modelUsed,
       });
     }
