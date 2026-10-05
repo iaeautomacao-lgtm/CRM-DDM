@@ -2100,7 +2100,6 @@ async function runAiAgentCore(
     // already serializes replies per run_id before this ever runs, so
     // responder.ts's own 4s sleep-and-recheck would just double the delay
     // for no extra protection.
-    const beforeAiCall = new Date().toISOString();
 
     // herdar_contexto_anterior: injeta no system prompt os tool_results
     // gravados por OUTROS nós ai_agent deste mesmo run (node_key != o
@@ -2162,7 +2161,7 @@ async function runAiAgentCore(
     // which could cut off the "nominal" field on a large response.
     const collectedToolResults: { toolName: string; result: string }[] = [];
 
-    const detectedTag = await handleAiAutoResponse(
+    const aiResponse = await handleAiAutoResponse(
       run.account_id,
       run.contact_id!,
       run.conversation_id!,
@@ -2259,21 +2258,30 @@ async function runAiAgentCore(
       run.config_id ?? undefined,
     );
 
-    // Filtra pelo momento imediatamente anterior à chamada da IA —
-    // garante que pegamos apenas a mensagem recém-enviada, ignorando
-    // bot messages de runs anteriores que possam ter timestamps mais recentes.
-    const { data: lastBotMsg } = await db
-      .from("messages")
-      .select("content_text")
-      .eq("conversation_id", run.conversation_id!)
-      .eq("sender_type", "bot")
-      .gt("received_at", beforeAiCall)
-      .order("received_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    lastReply =
-      (lastBotMsg as { content_text: string | null } | null)?.content_text ??
-      "";
+    // The responder returns the exact persisted message it created.
+    // Never infer an AI response by scanning for "any bot message after X":
+    // campaign-history reconstruction and other workers can insert bot rows
+    // concurrently and were previously misclassified as the AI reply.
+    if (aiResponse.outcome === "failed") {
+      return {
+        ok: false,
+        detail: aiResponse.reason,
+        err: new Error(aiResponse.reason),
+        lastReply: "",
+        exitCodeFound: aiResponse.detectedTag,
+        modelUsed: aiResponse.modelUsed ?? modelUsed,
+        aiConfigUsable,
+        messageSent: false,
+        messageId: null,
+        responseOutcome: aiResponse.outcome,
+        responseReason: aiResponse.reason,
+      };
+    }
+
+    const detectedTag = aiResponse.detectedTag;
+    lastReply = aiResponse.outcome === "sent" ? aiResponse.content : "";
+    const aiMessageId = aiResponse.outcome === "sent" ? aiResponse.messageId : null;
+    const responseReason = aiResponse.outcome === "skipped" ? aiResponse.reason : null;
 
     // Exit-code convention: the AI's system prompt can instruct it to
     // end a reply with a #TAG keyword (e.g. #NEGOCIACAO) that a Switch
@@ -2340,7 +2348,10 @@ async function runAiAgentCore(
     const baseOutput = {
       last_reply: lastReply.slice(-300),
       ai_exit_code: exitCodeFound,
-      model_used: modelUsed,
+      model_used: aiResponse.modelUsed ?? modelUsed,
+      ai_message_id: aiMessageId,
+      response_outcome: aiResponse.outcome,
+      ...(responseReason ? { response_reason: responseReason } : {}),
       ...(!aiConfigUsable
         ? { error_reason: "ai_config_disabled_or_missing" }
         : {}),
@@ -2360,13 +2371,29 @@ async function runAiAgentCore(
       ok: true,
       lastReply,
       exitCodeFound,
-      modelUsed,
+      modelUsed: aiResponse.modelUsed ?? modelUsed,
       aiConfigUsable,
+      messageSent: aiResponse.outcome === "sent",
+      messageId: aiMessageId,
+      responseOutcome: aiResponse.outcome,
+      responseReason,
       baseOutput,
     };
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
-    return { ok: false, detail, err, lastReply, exitCodeFound, modelUsed, aiConfigUsable };
+    return {
+      ok: false,
+      detail,
+      err,
+      lastReply,
+      exitCodeFound,
+      modelUsed,
+      aiConfigUsable,
+      messageSent: false,
+      messageId: null,
+      responseOutcome: "failed" as const,
+      responseReason: detail,
+    };
   }
 }
 
@@ -3248,11 +3275,30 @@ export async function advanceFromNodeKey(
       }
 
       const { lastReply, exitCodeFound, baseOutput } = core;
-      await logEvent(db, run.id, "message_sent", node.node_key, {
-        node_type: "ai_agent",
-        mode: cfg.mode,
-        last_reply: lastReply.slice(-300),
-      });
+      if (core.messageSent) {
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "ai_agent",
+          mode: cfg.mode,
+          message_id: core.messageId,
+          last_reply: lastReply.slice(-300),
+        });
+      } else {
+        await logRunEvent(db, {
+          run_id: run.id,
+          flow_id: run.flow_id,
+          account_id: run.account_id,
+          node_key: node.node_key,
+          node_type: "ai_agent",
+          event_type: "node_entered",
+          status: "warning",
+          duration_ms: 0,
+          payload: {
+            response_outcome: core.responseOutcome,
+            response_reason: core.responseReason,
+            message_sent: false,
+          },
+        });
+      }
 
       if (cfg.mode === "takeover") {
         await logEvent(db, run.id, "handoff", node.node_key, {
