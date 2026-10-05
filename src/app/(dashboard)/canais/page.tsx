@@ -70,6 +70,7 @@ import { ConnectWahaDialog } from "@/components/canais/ConnectWahaDialog";
 import { TestChannelDialog } from "@/components/canais/TestChannelDialog";
 import { ClientsDialog, type ClientOption } from "@/components/canais/ClientsDialog";
 import { SocialChannelsSection } from "@/components/canais/SocialChannelsSection";
+import { WebchatSettingsSection } from "@/components/canais/WebchatSettingsSection";
 
 function channelName(c: ChannelConfig): string {
   if (c.provider === "waha") return c.waha_session || "Sessão WAHA";
@@ -120,7 +121,7 @@ function searchHaystack(c: ChannelConfig): string {
 export default function CanaisPage() {
   const { accountId } = useAuth();
   const [configs, setConfigs] = useState<ChannelConfig[]>([]);
-  const [flows, setFlows] = useState<{ id: string; name: string }[]>([]);
+  const [flows, setFlows] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -203,8 +204,8 @@ export default function CanaisPage() {
     apiFetch("/api/flows")
       .then((res) => res.json())
       .then((data) => {
-        const list = (data.flows ?? []) as { id: string; name: string }[];
-        setFlows(list.map((f) => ({ id: f.id, name: f.name })));
+        const list = (data.flows ?? []) as { id: string; name: string; status?: string }[];
+        setFlows(list.map((f) => ({ id: f.id, name: f.name, status: f.status })));
       })
       .catch((err) => console.error("[canais] failed to load flows:", err));
   }, []);
@@ -597,6 +598,9 @@ export default function CanaisPage() {
       </div>
 
       <SocialChannelsSection flows={flows} teams={teams} clients={clients} />
+
+      {/* Só fluxos ativos: o motor recusa iniciar Webchat em rascunho. */}
+      <WebchatSettingsSection flows={flows.filter((f) => f.status === "active")} />
 
       <ClientsDialog
         accountId={accountId}

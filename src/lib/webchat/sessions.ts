@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/flows/admin-client";
+import { loadWebchatSettings } from "./settings";
 import { engineSendCtaUrl } from "@/lib/flows/meta-send";
 import { engineWahaSendText } from "@/lib/flows/waha-send";
 import {
@@ -64,6 +65,9 @@ export async function createWebchatSession(
   const token = generateWebchatToken();
   // webchatUrl lança se NEXT_PUBLIC_APP_URL faltar — antes de gravar nada.
   const url = webchatUrl(token);
+  // Validade do link configurada em /canais → Webchat (padrão 24h).
+  const { session_hours } = await loadWebchatSettings(db, input.accountId);
+  const ttlMs = session_hours * 60 * 60 * 1000 || WEBCHAT_TTL_MS;
 
   // Um link por contato: revoga o anterior antes de inserir o novo. O
   // índice único parcial (status='active') protege contra corrida; se
@@ -91,7 +95,7 @@ export async function createWebchatSession(
         queue_item_id: input.queueItemId ?? null,
         origin: input.origin,
         token_hash: hashWebchatToken(token),
-        expires_at: new Date(Date.now() + WEBCHAT_TTL_MS).toISOString(),
+        expires_at: new Date(Date.now() + ttlMs).toISOString(),
       })
       .select("*")
       .limit(1);

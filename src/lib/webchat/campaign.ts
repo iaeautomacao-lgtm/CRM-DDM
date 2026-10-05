@@ -1,6 +1,7 @@
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { resolveCampaignAttribution } from "@/lib/disparador/reply-tracker";
 import { createWebchatSession, sendWebchatInvite } from "./sessions";
+import { loadWebchatSettings } from "./settings";
 
 // Opção da campanha "Ao responder, enviar para o Webchat" (campaigns.webchat_*,
 // migration 127). Chamada pelos webhooks de WhatsApp ANTES do motor de
@@ -46,7 +47,11 @@ export async function maybeStartCampaignWebchat(input: CampaignWebchatInput): Pr
     // Sem a migration 127 o select falha: segue o caminho antigo.
     if (campaignError) return false;
     const campaign = campaigns?.[0];
-    if (!campaign?.webchat_enabled || !campaign.webchat_flow_id) return false;
+    if (!campaign?.webchat_enabled) return false;
+    // Sem fluxo na campanha, vale o fluxo padrão do Webchat (/canais).
+    const settings = await loadWebchatSettings(db, input.accountId);
+    const flowId = campaign.webchat_flow_id ?? settings.default_flow_id;
+    if (!flowId) return false;
 
     // Não interrompe um atendimento em andamento: conversa já com
     // atendente/na fila humana, ou contato no meio de outro fluxo.
@@ -84,7 +89,7 @@ export async function maybeStartCampaignWebchat(input: CampaignWebchatInput): Pr
       contactId: input.contactId,
       sourceConversationId: input.conversationId,
       configId: input.configId,
-      flowId: campaign.webchat_flow_id,
+      flowId,
       startNodeKey: null,
       campaignId: item.campaign_id,
       queueItemId: item.id,
@@ -97,8 +102,8 @@ export async function maybeStartCampaignWebchat(input: CampaignWebchatInput): Pr
       conversationId: input.conversationId,
       contactId: input.contactId,
       url,
-      text: campaign.webchat_message?.trim() || DEFAULT_CAMPAIGN_WEBCHAT_MESSAGE,
-      buttonText: campaign.webchat_button_text?.trim() || DEFAULT_CAMPAIGN_WEBCHAT_BUTTON,
+      text: campaign.webchat_message?.trim() || settings.default_invite_message || DEFAULT_CAMPAIGN_WEBCHAT_MESSAGE,
+      buttonText: campaign.webchat_button_text?.trim() || settings.default_button_text || DEFAULT_CAMPAIGN_WEBCHAT_BUTTON,
     });
     console.log("[webchat] convite de campanha enviado:", session.id);
     return true;
