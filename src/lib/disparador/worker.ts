@@ -6,6 +6,7 @@ import {
   type QueueItem,
   type Campaign,
 } from "@/lib/disparador/processQueue";
+import { isAllowedDay } from "@/lib/disparador/send-window";
 
 // KNOWN LOCAL-TEST RISK: o worker de produção (branch main) compete pelos
 // mesmos itens de disp_message_queue. Um item criado em dev pode ser
@@ -32,7 +33,7 @@ export function ensureQueueWorkerRunning() {
     try {
       const { data: activeCampaigns } = await supabaseAdmin()
         .from("campaigns")
-        .select("id, account_id, status, janela_inicio, janela_fim, batch_size, batch_pause_seconds, limite_por_hora")
+        .select("id, account_id, status, janela_inicio, janela_fim, dias_envio, batch_size, batch_pause_seconds, limite_por_hora")
         .eq("status", "em_execucao");
 
       if (!activeCampaigns?.length) return;
@@ -40,7 +41,10 @@ export function ensureQueueWorkerRunning() {
       for (const campaign of activeCampaigns as Campaign[]) {
         try {
           // Mesma regra do cron/envio (send-window.ts).
-          if (!checkWithinWindow(campaign.janela_inicio ?? "", campaign.janela_fim ?? "")) {
+          if (
+            !checkWithinWindow(campaign.janela_inicio ?? "", campaign.janela_fim ?? "") ||
+            !isAllowedDay(campaign.dias_envio)
+          ) {
             continue;
           }
 

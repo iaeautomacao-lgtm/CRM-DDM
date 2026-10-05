@@ -54,3 +54,52 @@ export function nextWindowStart(inicio: string, now: Date = new Date()): Date {
   next.setUTCSeconds(0, 0);
   return next;
 }
+
+// ---- Dias da semana (campaigns.dias_envio, migration 144) ----
+// 0 = domingo … 6 = sábado, no fuso de Brasília. Vazio/null = todos.
+
+export const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"] as const;
+
+export function brasiliaWeekday(now: Date = new Date()): number {
+  return new Date(now.getTime() - BR_OFFSET_HOURS * 3_600_000).getUTCDay();
+}
+
+export function isAllowedDay(dias: number[] | null | undefined, now: Date = new Date()): boolean {
+  if (!dias || dias.length === 0) return true;
+  return dias.includes(brasiliaWeekday(now));
+}
+
+/** Pode enviar agora? Dia permitido E dentro da janela de horário. */
+export function canSendNow(
+  janela: { inicio?: string | null; fim?: string | null; dias?: number[] | null },
+  now: Date = new Date(),
+): boolean {
+  return isAllowedDay(janela.dias, now) && isWithinSendWindow(janela.inicio, janela.fim, now);
+}
+
+/** Próxima meia-noite de Brasília depois de `now`. */
+function nextBrasiliaMidnight(now: Date): Date {
+  const mins = brasiliaMinutes(now);
+  const next = new Date(now.getTime() + (24 * 60 - mins) * 60_000);
+  next.setUTCSeconds(0, 0);
+  return next;
+}
+
+/**
+ * Próximo momento em que a campanha pode enviar: respeita a janela de
+ * horário e pula os dias não permitidos (ex.: sábado/domingo).
+ */
+export function nextSendSlot(
+  janela: { inicio?: string | null; fim?: string | null; dias?: number[] | null },
+  now: Date = new Date(),
+): Date {
+  const hasWindow = parseHHMM(janela.inicio) !== null && parseHHMM(janela.fim) !== null && janela.inicio !== janela.fim;
+  let candidate = isWithinSendWindow(janela.inicio, janela.fim, now) || !hasWindow ? now : nextWindowStart(janela.inicio!, now);
+  for (let i = 0; i < 8 && !isAllowedDay(janela.dias, candidate); i++) {
+    const midnight = nextBrasiliaMidnight(candidate);
+    candidate = hasWindow && !isWithinSendWindow(janela.inicio, janela.fim, midnight)
+      ? nextWindowStart(janela.inicio!, midnight)
+      : midnight;
+  }
+  return candidate;
+}

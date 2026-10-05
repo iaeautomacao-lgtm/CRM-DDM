@@ -25,7 +25,7 @@ import OpenAI from "openai";
 // reexportado aqui para os imports existentes continuarem funcionando.
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/queue-markers";
 import { phoneVariants } from "@/lib/disparador/phone-key";
-import { isWithinSendWindow, nextWindowStart } from "@/lib/disparador/send-window";
+import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/send-window";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -63,6 +63,8 @@ export interface Campaign {
   batch_size?: number;
   batch_pause_seconds?: number;
   limite_por_hora?: number;
+  /** Dias da semana permitidos (0=dom…6=sáb, Brasília); vazio = todos (144). */
+  dias_envio?: number[] | null;
   /** Quando presente, o canal (whatsapp_config) precisa ser desta conta. */
   account_id?: string;
 }
@@ -441,12 +443,12 @@ export async function processQueueItem(
   item: QueueItem,
   campaign: Campaign
 ): Promise<ProcessResult> {
-  const { janela_inicio, janela_fim } = campaign;
+  const janela = { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio };
 
-  if (!isWithinSendWindow(janela_inicio, janela_fim)) {
-    // Fora da janela: adia para a PRÓXIMA abertura (hoje, se ainda não
-    // abriu; senão amanhã) — antes era sempre "amanhã".
-    const tomorrowUtc = nextWindowStart(janela_inicio!);
+  if (!canSendNow(janela)) {
+    // Fora da janela ou em dia não permitido: adia para a PRÓXIMA abertura
+    // válida (hoje, se ainda não abriu; senão o próximo dia permitido).
+    const tomorrowUtc = nextSendSlot(janela);
 
     await supabaseAdmin()
       .from("disp_message_queue")
