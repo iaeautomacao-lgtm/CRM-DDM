@@ -67,6 +67,7 @@ import { buildPageList } from "@/lib/relatorios/pagination";
 import { exportWithHistory } from "@/lib/relatorios/export-with-history";
 import { MessageModal } from "@/components/relatorios/MessageModal";
 import { normalizarErroMeta, extrairCodigoMetaErro } from "@/lib/disparador/normalize-meta-error";
+import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 
 const ALL = "all";
 const PAGE_SIZE = 60;
@@ -421,8 +422,7 @@ export default function EnvioEmLotePage() {
       toast.error("Telefone não disponível para este contato.");
       return;
     }
-    let cleanPhone = item.contactPhone.replace(/\D/g, "");
-    if (!cleanPhone.startsWith("+")) cleanPhone = "+" + cleanPhone;
+    const cleanPhone = formatBrazilianPhone(item.contactPhone);
 
     try {
       const db = createClient();

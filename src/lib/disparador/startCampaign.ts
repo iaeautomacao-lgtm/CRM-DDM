@@ -1,6 +1,8 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
+import { phoneKey } from "@/lib/disparador/phone-key";
+import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
 
 type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
 
@@ -160,12 +162,23 @@ export async function startCampaign(
     }
 
     // Buscar provider de cada canal selecionado na campanha
+    // Só canais da própria conta: session_ids vêm do cliente (antes um UUID
+    // de outra conta bastava para disparar por ela).
     const { data: channelConfigs } = await supabaseAdmin()
       .from("whatsapp_config")
       .select("id, provider, phone_number_id")
-      .in("id", sessionIds);
+      .in("id", sessionIds)
+      .eq("account_id", accountId);
 
     const channelMap = new Map((channelConfigs ?? []).map((c) => [c.id, c]));
+    const validSessionIds = sessionIds.filter((id: string) => channelMap.has(id));
+    if (validSessionIds.length === 0) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Nenhum dos canais selecionados pertence a esta conta.",
+      };
+    }
 
     // IDs dos canais Meta nesta campanha
     const metaSessionIds = (channelConfigs ?? [])
@@ -290,7 +303,9 @@ export async function startCampaign(
         from += pageSize;
       }
     }
-    const blacklistSet = new Set(blacklist.map((b) => b.telefone));
+    // Comparação por chave (DDD + 8 últimos dígitos): entradas antigas sem
+    // 55 ou sem o 9º dígito também bloqueiam — ver phone-key.ts.
+    const blacklistSet = new Set(blacklist.map((b) => phoneKey(b.telefone)));
 
     // Contatos que já receberam com sucesso numa tentativa anterior desta
     // campanha (ex: a campanha falhou no meio — chunk de insert quebrou,
@@ -477,7 +492,7 @@ export async function startCampaign(
       const contact = contacts[i];
 
       // Skip if phone is blacklisted
-      if (contact.phone && blacklistSet.has(contact.phone)) continue;
+      if (contact.phone && blacklistSet.has(phoneKey(contact.phone))) continue;
 
       // Skip contatos que já receberam com sucesso numa tentativa
       // anterior desta mesma campanha (ver alreadySentContactIds acima).
@@ -486,7 +501,7 @@ export async function startCampaign(
       // Distribuição round-robin entre os canais selecionados — cada canal
       // recebe uma fatia igual dos contatos, em vez do sorteio aleatório
       // anterior (só estatisticamente uniforme, sem garantia de balanço).
-      const sessionId = sessionIds[i % sessionIds.length];
+      const sessionId = validSessionIds[i % validSessionIds.length];
 
       let contactBaseDelay: number;
       if (batchSize > 1) {
@@ -548,7 +563,11 @@ export async function startCampaign(
         let templateLanguage: string | null = null;
         let templateVariables: string[] | null = null;
 
-        if (msg.template_name && Array.isArray(msg.template_variable_map)) {
+        // Bifurcação Meta × WAHA pelo CANAL do contato, não pela mensagem:
+        // numa campanha com canais dos dois tipos, o contato que cai num
+        // canal WAHA recebe o corpo do template com {{n}} substituído no
+        // código; antes ia com template_name e "{{1}} {{2}}" literal.
+        if (isMetaChannel && msg.template_name && Array.isArray(msg.template_variable_map)) {
           templateName = msg.template_name;
           templateLanguage = msg.template_language || "pt_BR";
           templateVariables = msg.template_variable_map.map((entry: any) => {
@@ -575,7 +594,8 @@ export async function startCampaign(
         // WAHA free-text: apply {{N}} substitution at enqueue time because there
         // is no Meta API to resolve placeholders — the text must arrive at
         // processQueueItem already substituted.
-        if (!msg.template_name && Array.isArray(msg.template_variable_map)) {
+        let wahaEmptyVar: number | null = null;
+        if (!(isMetaChannel && msg.template_name) && Array.isArray(msg.template_variable_map)) {
           resolvedText = msg.template_variable_map.reduce(
             (text: string, entry: any, idx: number) => {
               let value = "";
@@ -588,7 +608,9 @@ export async function startCampaign(
               } else {
                 value = String(entry?.value ?? "");
               }
-              return text.replace(new RegExp(`\\{\\{${idx + 1}\\}\\}`, "g"), value);
+              const placeholder = new RegExp(`\\{\\{${idx + 1}\\}\\}`, "g");
+              if (!value.trim() && wahaEmptyVar === null && placeholder.test(text)) wahaEmptyVar = idx + 1;
+              return text.replace(placeholder, value);
             },
             resolvedText
           );
@@ -611,6 +633,10 @@ export async function startCampaign(
               session_id: sessionId,
               mensagem_final: resolvedText,
               status: "erro",
+              // Permanente: sem isso o retry automático reenviava como texto
+              // livre, a Meta devolvia 131047 e o telefone (bom) era marcado
+              // como inválido.
+              erro_permanente: true,
               erro: "Janela de 24h encerrada — use um template aprovado para este contato",
               tipo: msg.tipo || "texto",
               media_url: msg.url || null,
@@ -622,6 +648,33 @@ export async function startCampaign(
             enqueued++;
             continue;
           }
+        }
+
+        // Variável vazia ou {{n}} sem fonte: não envia "Olá , seu débito de
+        // R$ " para o cliente (na Meta ainda daria erro 131008). O contato
+        // fica com erro permanente explicando qual variável faltou.
+        const emptyVarProblem = templateName
+          ? describeEmptyTemplateVar(templateVariables ?? [])
+          : describeUnresolvedPlaceholder(resolvedText, wahaEmptyVar);
+        if (emptyVarProblem) {
+          queueRows.push({
+            campaign_id: campaignId,
+            account_id: accountId,
+            contact_id: contact.id,
+            session_id: sessionId,
+            mensagem_final: resolvedText,
+            status: "erro",
+            erro_permanente: true,
+            erro: emptyVarProblem,
+            tipo: msg.tipo || "texto",
+            media_url: msg.url || null,
+            scheduled_at: scheduledAt,
+            template_name: templateName,
+            template_language: templateLanguage,
+            template_variables: templateVariables,
+          });
+          enqueued++;
+          continue;
         }
 
         queueRows.push({

@@ -80,6 +80,10 @@ async function throwMetaError(response: Response, fallback: string): Promise<nev
   } catch {
     // response body wasn't JSON — keep the fallback
   }
+  // Código no texto ("(code 131008)"): é o que o relatório usa para
+  // traduzir o erro (normalizarErroMeta); a mensagem da Meta sozinha não
+  // traz o número e aparecia crua, em inglês.
+  if (code !== null && !message.includes(String(code))) message = `${message} (code ${code})`
   throw new MetaApiError(message, code, response.status)
 }
 

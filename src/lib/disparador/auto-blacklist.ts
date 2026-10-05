@@ -1,17 +1,9 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { writeLog, maskPhone } from "@/lib/logger";
 
-// Mesma normalização de contacts.phone (ver formatBrazilianPhone em
-// src/app/api/disparador/contacts/import/route.ts) — startCampaign.ts
-// compara blacklist.telefone com contact.phone por igualdade EXATA de
-// string (sem normalizar na hora do envio), então uma entrada de
-// blacklist em formato diferente nunca bloqueia ninguém de verdade.
-function formatBrazilianPhone(raw: string): string {
-  if (!raw) return "";
-  const cleaned = raw.replace(/\D/g, "");
-  if (cleaned.startsWith("55")) return `+${cleaned}`;
-  return `+55${cleaned}`;
-}
+// Formato canônico +55DDDNÚMERO (phone-key.ts); a comparação no envio usa
+// variações do número, então formatos antigos também bloqueiam.
+import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 
 const ERROR_131026_MOTIVO =
   "Meta: Número inacessível (131026) — adicionado automaticamente";
