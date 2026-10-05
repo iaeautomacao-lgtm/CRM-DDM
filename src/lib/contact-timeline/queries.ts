@@ -21,13 +21,15 @@ export interface TimelineConversation {
   assigned_agent_id: string | null;
   team_id: string | null;
   waha_session: string | null;
+  /** Canal (migration 127): o mesmo contato pode ter conversa de WhatsApp e de Webchat. */
+  channel_type?: "whatsapp" | "webchat";
   outcome_tag_id: string | null;
   outcome_tag: { name: string; color: string } | null;
 }
 
 const TIMELINE_SELECT = `
   id, status, created_at, updated_at, contact_id, assigned_agent_id,
-  team_id, waha_session, outcome_tag_id,
+  team_id, waha_session, channel_type, outcome_tag_id,
   outcome_tag:outcome_tag_id ( name, color )
 `;
 

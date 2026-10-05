@@ -7,6 +7,7 @@ import {
   canManageMembers,
   canSendMessages,
   canTransferOwnership,
+  canViewConversationFlows,
   canViewOnly,
   hasMinRole,
   isAccountRole,
@@ -98,6 +99,13 @@ describe("capability predicates", () => {
     expect(canEditSettings("admin")).toBe(true);
     expect(canEditSettings("agent")).toBe(false);
     expect(canEditSettings("viewer")).toBe(false);
+  });
+
+  it("canViewConversationFlows: admin+ only", () => {
+    expect(canViewConversationFlows("owner")).toBe(true);
+    expect(canViewConversationFlows("admin")).toBe(true);
+    expect(canViewConversationFlows("agent")).toBe(false);
+    expect(canViewConversationFlows("viewer")).toBe(false);
   });
 
   it("canSendMessages: agent+ only", () => {

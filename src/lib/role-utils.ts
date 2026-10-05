@@ -14,7 +14,8 @@ import type { AccountRole } from "@/lib/auth/roles";
 // Per-role reach, owner aside (owner always passes in canAccessRoute
 // before this table is even consulted):
 //   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings,
-//            /equipes, /perfil, /templates, /tabulacoes, /usuarios
+//            /equipes, /perfil, /templates, /tabulacoes, /usuarios,
+//            /flows, /disparador
 //   agent  → /inbox
 //   viewer → /dashboard
 // /templates, /tabulacoes, /usuarios are TemplateManager/
@@ -27,8 +28,12 @@ import type { AccountRole } from "@/lib/auth/roles";
 // viewer currently has no self-service password change path at all
 // as a result of this narrowing (flagged, not something this change
 // added a replacement for).
+// /flows and /disparador opened to admin (decisão de 02/10/2026): o
+// admin abre o fluxo e a campanha a partir do inbox (card "Fluxo" e
+// faixa "Campanha"). As APIs dessas páginas já são escopadas por conta
+// via RLS, então nenhuma rota de API precisou mudar.
 // Routes no role above claims (/canais, /contacts, /pipelines,
-// /flows, /disparador, /ajuda) are owner-only. Adding a new nav
+// /ajuda) are owner-only. Adding a new nav
 // route = one new ROUTE_ALLOWLIST entry, or isRouteGated silently
 // stops covering it.
 //
@@ -59,8 +64,8 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/canais": ["owner"],
   "/contacts": ["owner"],
   "/pipelines": ["owner"],
-  "/flows": ["owner"],
-  "/disparador": ["owner"],
+  "/flows": ["owner", "admin"],
+  "/disparador": ["owner", "admin"],
   "/ajuda": ["owner"],
 
   "/settings": ["owner", "admin"],
