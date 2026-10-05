@@ -571,6 +571,41 @@ async function loadLatestAiHandoffContext(
   return { aiNode, toolError, toolName };
 }
 
+async function recordHandoffDecision(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  reasonCode: string,
+  reasonSubcode: string | null,
+  assignedTo: string | null,
+  teamId: string | null,
+): Promise<void> {
+  const ctx = await loadLatestAiHandoffContext(db, run.id);
+
+  await logAiDecision(db, {
+    account_id: run.account_id,
+    conversation_id: run.conversation_id ?? null,
+    flow_run_id: run.id,
+    flow_id: run.flow_id,
+    node_key: node.node_key,
+    decision_type: "handoff",
+    decision: {
+      assigned_to: assignedTo,
+      team_id: teamId,
+      ai_node: ctx.aiNode,
+      tool_error: ctx.toolError,
+    },
+    reason: ctx.toolError,
+    needs_human: true,
+    handoff_reason: reasonCode,
+    handoff_subreason: reasonSubcode,
+    ai_exit_code:
+      typeof run.vars?.ai_exit_code === "string" ? run.vars.ai_exit_code : null,
+    tool_name: ctx.toolName,
+    tool_status: ctx.toolError ? "error" : null,
+  });
+}
+
 /**
  * Builds the rich `node_error` payload shared by every failure path —
  * the loop's own `nodeError` closure AND `endRun`'s `errorContext`
@@ -1056,6 +1091,15 @@ async function executeHandoff(
     });
     return;
   }
+  await recordHandoffDecision(
+    db,
+    run,
+    node,
+    cfg.reason_code ?? "INDEFINIDO",
+    cfg.reason_subcode ?? null,
+    cfg.assign_to ?? null,
+    cfg.team_id ?? null,
+  );
   await logEvent(db, run.id, "handoff", node.node_key, {
     reason_code: cfg.reason_code ?? "INDEFINIDO",
     reason_subcode: cfg.reason_subcode ?? null,
@@ -1076,7 +1120,12 @@ async function executeHandoff(
     duration_ms: Date.now() - startedAt,
     payload: {
       input,
-      output: { assigned_to: cfg.assign_to ?? null, team_id: cfg.team_id ?? null },
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     },
   });
   await endRun(db, run, "handed_off", "handoff_node");
@@ -1120,10 +1169,23 @@ async function executeHandoffAgent(
       error_message: detail,
       err,
       input,
-      output: { assigned_to: cfg.assign_to ?? null },
+      output: {
+        assigned_to: cfg.assign_to ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     });
     return;
   }
+  await recordHandoffDecision(
+    db,
+    run,
+    node,
+    cfg.reason_code ?? "INDEFINIDO",
+    cfg.reason_subcode ?? null,
+    cfg.assign_to ?? null,
+    null,
+  );
   await logEvent(db, run.id, "handoff", node.node_key, {
     reason_code: cfg.reason_code ?? "INDEFINIDO",
     reason_subcode: cfg.reason_subcode ?? null,
@@ -1420,10 +1482,23 @@ async function executeHandoffTeam(
       error_message: detail,
       err,
       input,
-      output: { assigned_to: cfg.team_id ?? null },
+      output: {
+        team_id: cfg.team_id ?? null,
+        handoff_reason: cfg.reason_code ?? "INDEFINIDO",
+        handoff_subreason: cfg.reason_subcode ?? null,
+      },
     });
     return;
   }
+  await recordHandoffDecision(
+    db,
+    run,
+    node,
+    cfg.reason_code ?? "INDEFINIDO",
+    cfg.reason_subcode ?? null,
+    selectedAgent ?? null,
+    cfg.team_id ?? null,
+  );
   await logEvent(db, run.id, "handoff", node.node_key, {
     reason_code: cfg.reason_code ?? "INDEFINIDO",
     reason_subcode: cfg.reason_subcode ?? null,
