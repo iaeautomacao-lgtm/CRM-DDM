@@ -1,4 +1,6 @@
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
+import { writeLog } from '@/lib/logger';
 import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
@@ -1699,26 +1701,32 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     await db.from("contacts").update({ phone: workingPhone }).eq("id", contactId);
   }
 
-  // 9. Save sent message to database
+  // 9. Save sent message to database — assumindo o eco do WAHA se ele
+  // chegou antes (senão a resposta ia ao cliente e sumia do Inbox).
   const messageDate = new Date().toISOString();
-  const { data: savedMessages, error: newMsgErr } = await db
-    .from("messages")
-    .insert({
-      conversation_id: conversationId,
-      message_id: sentMessageId,
-      content_type: voiceMediaUrl ? "audio" : "text",
-      content_text: generatedText,
-      media_url: voiceMediaUrl || null,
-      status: "sent",
-      sender_type: "bot",
-      created_at: messageDate,
-    })
-    .select("id")
-    .limit(1);
+  const persisted = await persistOutboundMessage(db, {
+    conversation_id: conversationId,
+    message_id: sentMessageId,
+    content_type: voiceMediaUrl ? "audio" : "text",
+    content_text: generatedText,
+    media_url: voiceMediaUrl || null,
+    status: "sent",
+    sender_type: "bot",
+    created_at: messageDate,
+  });
+  const newMsgErr = persisted.error;
 
-  const savedMessageId = savedMessages?.[0]?.id ?? null;
+  const savedMessageId = persisted.id;
   if (newMsgErr || !savedMessageId) {
     console.error("[AI Agent] Failed to save outbound message:", newMsgErr);
+    void writeLog({
+      account_id: accountId,
+      level: "error",
+      source: "ai_agent",
+      event: "ai_outbound_not_persisted",
+      message: "Resposta da IA enviada ao cliente, mas não gravada no Inbox",
+      payload: { conversation_id: conversationId, message_id: sentMessageId, erro: newMsgErr?.message ?? "no_message_id" },
+    });
     return {
       outcome: "failed",
       reason: newMsgErr

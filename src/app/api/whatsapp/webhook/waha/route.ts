@@ -12,6 +12,10 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { writeLog, maskPhone } from '@/lib/logger'
+import { phoneVariants } from '@/lib/disparador/phone-key'
+
+// Espera antes de gravar o eco de uma mensagem nossa (ver abaixo).
+const OWN_SEND_ECHO_WAIT_MS = 3000
 
 export async function POST(request: Request) {
   // Auditoria: escritas desta requisição saem como "webhook" (webhook_waha).
@@ -245,7 +249,23 @@ export async function POST(request: Request) {
         .eq('message_id', messageId)
         .maybeSingle()
 
-      if (existingMsg) {
+      // Eco de mensagem enviada por NÓS (IA, fluxo, Inbox): o WAHA avisa
+      // antes de quem enviou gravar. Espera um pouco e confere de novo —
+      // se já foi gravada, não cria nada (antes o eco virava outra
+      // conversa e a mensagem sumia do Inbox). Mensagem enviada pelo
+      // celular continua sendo gravada depois da espera.
+      let echoAlreadySaved = false
+      if (!existingMsg && fromMe) {
+        await new Promise((resolve) => setTimeout(resolve, OWN_SEND_ECHO_WAIT_MS))
+        const { data: recheck } = await db
+          .from('messages')
+          .select('id')
+          .eq('message_id', messageId)
+          .limit(1)
+        echoAlreadySaved = (recheck?.length ?? 0) > 0
+      }
+
+      if (existingMsg || echoAlreadySaved) {
         return NextResponse.json({
           success: true,
           message: 'Message already synchronized',
@@ -274,11 +294,13 @@ export async function POST(request: Request) {
         contactName = rawPhone
       }
 
+      // Mesmo número com/sem o 9º dígito (o WhatsApp devolve JIDs antigos
+      // sem ele): evita criar contato e conversa duplicados.
       const { data: contactsList, error: contactFetchError } = await db
         .from('contacts')
-        .select('id, avatar_url, name')
+        .select('id, avatar_url, name, phone')
         .eq('account_id', accountId)
-        .eq('phone', phone)
+        .in('phone', phoneVariants(phone))
 
       if (contactFetchError) {
         console.error('[waha/webhook] Error fetching contacts:', contactFetchError)
