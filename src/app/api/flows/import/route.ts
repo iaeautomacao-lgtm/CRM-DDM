@@ -56,6 +56,8 @@ interface ImportNode {
 }
 
 interface ImportPayload {
+  /** "duplicate": cópia de um fluxo da própria conta ("<nome> (cópia)"). */
+  mode?: 'import' | 'duplicate'
   version?: string
   flow?: {
     name?: string
@@ -147,7 +149,8 @@ export async function POST(request: Request) {
   // Avoid "X (importado) (importado)" when re-importing a flow that
   // was already exported from a previously-imported one.
   const baseName = body.flow.name.trim()
-  const name = baseName.endsWith(' (importado)') ? baseName : `${baseName} (importado)`
+  const suffix = body.mode === 'duplicate' ? ' (cópia)' : ' (importado)'
+  const name = baseName.endsWith(suffix) ? baseName : `${baseName}${suffix}`
 
   const { data: flow, error: flowErr } = await admin
     .from('flows')

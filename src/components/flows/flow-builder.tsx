@@ -23,6 +23,7 @@ import {
   CircleAlert,
   Plus,
   Trash2,
+  Copy,
   ChevronDown,
   ChevronUp,
   CornerDownRight,
@@ -83,6 +84,7 @@ export function FlowBuilder() {
     updateNode,
     updateNodeConfig,
     removeNode: removeNodeCtx,
+    duplicateNode,
   } = useFlowEditor();
 
   // List-only UI state: which cards are expanded + scroll refs for
@@ -196,6 +198,14 @@ export function FlowBuilder() {
               onUpdate={(patch) => updateNode(node.node_key, patch)}
               onUpdateConfig={(patch) => updateNodeConfig(node.node_key, patch)}
               onRemove={() => removeNode(node.node_key)}
+              onDuplicate={
+                node.node_type === 'start'
+                  ? undefined
+                  : () => {
+                      const created = duplicateNode(node.node_key);
+                      if (created) setExpanded((prev) => new Set([...prev, created]));
+                    }
+              }
               onSetEntry={() =>
                 setState((s) => ({ ...s, entry_node_id: node.node_key }))
               }
@@ -401,6 +411,7 @@ function NodeCard({
   onUpdate,
   onUpdateConfig,
   onRemove,
+  onDuplicate,
   onSetEntry,
 }: {
   node: BuilderNode;
@@ -414,6 +425,7 @@ function NodeCard({
   onUpdate: (patch: Partial<BuilderNode>) => void;
   onUpdateConfig: (patch: Record<string, unknown>) => void;
   onRemove: () => void;
+  onDuplicate?: () => void;
   onSetEntry: () => void;
 }) {
   const meta = NODE_META[node.node_type];
@@ -492,6 +504,12 @@ function NodeCard({
               {!isEntry && (
                 <Button variant="ghost" size="sm" onClick={onSetEntry}>
                   Definir como entrada
+                </Button>
+              )}
+              {onDuplicate && (
+                <Button variant="ghost" size="sm" onClick={onDuplicate}>
+                  <Copy className="h-3.5 w-3.5" />
+                  Duplicar
                 </Button>
               )}
             </div>

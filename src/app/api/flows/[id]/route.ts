@@ -78,6 +78,10 @@ interface PutBody {
   trigger_config?: Record<string, unknown>
   entry_node_id?: string | null
   fallback_policy?: Record<string, unknown>
+  /** updated_at que o editor carregou — se mudou, outra aba/pessoa salvou. */
+  expected_updated_at?: string
+  /** O usuário confirmou publicar mesmo com clientes parados em nós removidos. */
+  confirm_orphan_runs?: boolean
   nodes?: Array<{
     node_key: string
     node_type: string
@@ -107,6 +111,27 @@ export async function PUT(
   }
 
   const admin = supabaseAdmin()
+
+  // Duas abas (ou duas pessoas) no mesmo fluxo: sem isto o autosave da aba
+  // antiga sobrescrevia o trabalho da outra em silêncio.
+  if (body.expected_updated_at) {
+    const { data: currentVersion } = await admin
+      .from('flows')
+      .select('updated_at')
+      .eq('id', id)
+      .maybeSingle()
+    const current = currentVersion?.updated_at ? new Date(currentVersion.updated_at).getTime() : null
+    const expected = new Date(body.expected_updated_at).getTime()
+    if (current !== null && Number.isFinite(expected) && current !== expected) {
+      return NextResponse.json(
+        {
+          error: 'Este fluxo foi alterado em outra aba ou por outra pessoa. Recarregue a página para ver a versão atual antes de salvar.',
+          code: 'conflict',
+        },
+        { status: 409 },
+      )
+    }
+  }
 
   // Fluxo ativo atende clientes reais: alteração de nós/gatilho só entra
   // se o resultado continuar válido (PRD-01). Rascunho salva como antes.
@@ -151,6 +176,32 @@ export async function PUT(
           { error: 'Fluxo ativo: corrija os erros antes de publicar as alterações.', issues: blockers },
           { status: 400 },
         )
+      }
+      // Clientes parados (execução em andamento) num nó que esta versão
+      // remove ou renomeia: ao publicar, essas execuções terminam com "nó
+      // não encontrado". Pede confirmação explícita antes.
+      if (body.nodes !== undefined && !body.confirm_orphan_runs) {
+        const newKeys = new Set(body.nodes.map((n) => n.node_key))
+        const { data: liveRuns } = await admin
+          .from('flow_runs')
+          .select('current_node_key')
+          .eq('flow_id', id)
+          .in('status', ['active', 'paused_by_agent'])
+          .range(0, 4999)
+        const orphaned = (liveRuns ?? []).filter(
+          (r: { current_node_key: string | null }) => r.current_node_key && !newKeys.has(r.current_node_key),
+        )
+        if (orphaned.length > 0) {
+          const nodesHit = [...new Set(orphaned.map((r: { current_node_key: string | null }) => r.current_node_key))]
+          return NextResponse.json(
+            {
+              error: `${orphaned.length} cliente(s) estão agora em nó(s) que esta alteração remove (${nodesHit.join(', ')}). Publicando, essas execuções serão encerradas.`,
+              code: 'orphan_runs',
+              count: orphaned.length,
+            },
+            { status: 409 },
+          )
+        }
       }
     }
   }

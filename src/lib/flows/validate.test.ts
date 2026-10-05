@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateFlowForActivation, reachableFromEntry } from "./validate";
+import { validateFlowForActivation, reachableFromEntry, validateVariableTokens } from "./validate";
 
 const validFlow = {
   name: "Welcome",
@@ -598,5 +598,23 @@ describe("validateFlowForActivation — send_webchat", () => {
       webchatNodes({ message_text: "Oi", button_text: "Abrir", next_node_key: "ho" }),
     );
     expect(reachable.has("ho")).toBe(true);
+  });
+});
+
+describe("validateVariableTokens", () => {
+  const node = (config: Record<string, unknown>, node_type = "send_message") => ({ node_key: "msg", node_type, config });
+  it("aceita {{vars.x}}", () => {
+    expect(validateVariableTokens(node({ text: "Olá {{vars.nome}}" }))).toEqual([]);
+  });
+  it("avisa {{nome}} e {{1}} que iriam literais", () => {
+    const issues = validateVariableTokens(node({ text: "Olá {{nome}}, parcela {{1}}" }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe("warning");
+    expect(issues[0].message).toContain("{{nome}}");
+    expect(issues[0].message).toContain("{{1}}");
+  });
+  it("olha os valores do Definir variável e ignora o prompt da IA", () => {
+    expect(validateVariableTokens(node({ assignments: [{ variable: "a", value: "{{x}}" }] }, "set_variable"))).toHaveLength(1);
+    expect(validateVariableTokens(node({ system_prompt_override: "Responda {{assim}}" }, "ai_agent"))).toEqual([]);
   });
 });
