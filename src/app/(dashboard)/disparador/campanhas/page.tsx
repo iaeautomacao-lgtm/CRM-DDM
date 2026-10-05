@@ -110,6 +110,7 @@ interface Campaign {
   dias_envio?: number[] | null;
   agendamento?: string | null;
   created_at: string;
+  updated_at?: string | null;
   // Migration 078 — disparo em lote (ver worker.ts)
   batch_size?: number;
   batch_pause_seconds?: number;
@@ -375,6 +376,50 @@ function formatResponseTime(seconds: number): string {
   const days = Math.floor(hours / 24);
   const remainHours = hours % 24;
   return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
+}
+
+function getCampaignDurationSeconds(campaign?: Campaign | null): number | null {
+  if (!campaign?.agendamento) return null;
+
+  const startedAt = Date.parse(campaign.agendamento);
+  if (!Number.isFinite(startedAt)) return null;
+
+  const usesStoredEnd = ["encerrada", "erro", "bloqueada_por_risco", "pausada"].includes(
+    campaign.status
+  );
+  const endedAt =
+    usesStoredEnd && campaign.updated_at
+      ? Date.parse(campaign.updated_at)
+      : Date.now();
+
+  if (!Number.isFinite(endedAt) || endedAt < startedAt) return null;
+  return Math.max(0, Math.round((endedAt - startedAt) / 1000));
+}
+
+function formatCampaignDuration(seconds: number | null): string {
+  if (seconds === null) return "—";
+
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (days > 0) {
+    return hours > 0
+      ? `${days}d ${hours}h ${minutes}min`
+      : `${days}d ${minutes}min`;
+  }
+  if (hours > 0) {
+    return minutes > 0
+      ? `${hours}h ${minutes}min ${secs}s`
+      : `${hours}h ${secs}s`;
+  }
+  if (minutes > 0) return `${minutes}min ${secs}s`;
+  return `${secs}s`;
+}
+
+function campaignDurationLabel(campaign?: Campaign | null): string {
+  return formatCampaignDuration(getCampaignDurationSeconds(campaign));
 }
 
 interface CampaignMetrics {
@@ -965,7 +1010,7 @@ export default function CampanhasPage() {
         const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text, audience_mode, import_draft_id, dias_envio")
+          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, updated_at, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text, audience_mode, import_draft_id, dias_envio")
           .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -2689,13 +2734,19 @@ export default function CampanhasPage() {
                   </div>
                 )}
 
-                {/* Tempo estimado — pré-carregado junto com as métricas
-                    resumidas acima (mesmo metricsMap); "—" só quando a
-                    campanha ainda não tem métrica nenhuma (envio nunca
-                    começou). */}
+                {/* Tempo real para campanhas que já começaram. Encerradas
+                    mostram o total efetivo início→fim; enquanto executam,
+                    mostramos o decorrido. Antes do primeiro início seguimos
+                    exibindo a estimativa calculada pela configuração. */}
                 <div className="text-[11px] text-muted-foreground">
                   ⏱{" "}
-                  {metricsMap[c.id]?.total_contatos ? (
+                  {c.status === "encerrada" && campaignDurationLabel(c) !== "—" ? (
+                    <>{campaignDurationLabel(c)} total</>
+                  ) : c.status === "em_execucao" && campaignDurationLabel(c) !== "—" ? (
+                    <>{campaignDurationLabel(c)} em execução</>
+                  ) : c.status === "pausada" && campaignDurationLabel(c) !== "—" ? (
+                    <>{campaignDurationLabel(c)} até a pausa</>
+                  ) : metricsMap[c.id]?.total_contatos ? (
                     <>
                       {estimarDisparo(
                         metricsMap[c.id].total_contatos,
@@ -4504,6 +4555,14 @@ export default function CampanhasPage() {
                       {
                         label: "Tempo Médio Resposta",
                         value: formatResponseTime(metricsData.tempo_medio_resposta),
+                        color: "text-foreground",
+                        status: null,
+                      },
+                      {
+                        label: "Tempo Total Campanha",
+                        value: campaignDurationLabel(
+                          campaigns.find((campaign) => campaign.id === metricsModal.campaignId)
+                        ),
                         color: "text-foreground",
                         status: null,
                       },
