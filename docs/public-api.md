@@ -1,8 +1,6 @@
-# Public API (`/api/v1`)
+# API pública (`/api/v1`)
 
-The public API lets you drive your wacrm instance from your own
-scripts and automations — send messages, manage contacts, launch
-broadcasts — without going through the dashboard UI.
+A API pública permite integrar sistemas e automações ao CRM DDM sem depender da interface do dashboard. Ela expõe operações autenticadas para envio de mensagens, campanhas e consultas de contexto operacional.
 
 > **Status:** authentication, scopes, rate limiting, `GET /api/v1/me`,
 > `POST /api/v1/whatsapp/send`, `POST /api/v1/disparador/campaigns`,
@@ -29,7 +27,7 @@ In the dashboard: **Settings → API keys → New API key**. Only
 
 1. Give the key a name (after the integration that will use it).
 2. Grant the **scopes** it needs — nothing more (see below).
-3. Copy the key. **The full key is shown exactly once.** wacrm
+3. Copy the key. **The full key is shown exactly once.** o CRM
    stores only a SHA-256 hash, so it can never be shown again. If you
    lose it, revoke it and create a new one.
 
