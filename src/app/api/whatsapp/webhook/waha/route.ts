@@ -7,6 +7,7 @@ import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -804,15 +805,20 @@ export async function POST(request: Request) {
           }
         }
 
-        // Trigger Sentiment and Auto-Tagging Analysis
         if (direction === 'inbound' && contactId && conversationId) {
-          const { analyzeConversationSentimentAndTags } = await import('@/lib/ai/sentiment')
-          void analyzeConversationSentimentAndTags(accountId, contactId, conversationId)
-
           // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
           const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
           void autoTagAcordoRealizado(accountId, contactId, conversationId)
         }
+      }
+
+      // Sentimento: também com fluxo ativo (só texto de conversa, não
+      // toque em menu) — ver src/lib/ai/sentiment-trigger.ts.
+      if (direction === 'inbound' && contactId && conversationId) {
+        maybeScheduleSentiment(
+          { accountId, contactId, conversationId },
+          { text: textBody, flowConsumed },
+        )
       }
 
       return NextResponse.json({ success: true })

@@ -9,6 +9,7 @@ import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
+import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
@@ -846,19 +847,17 @@ async function processMessage(
       })
     }
 
-    // Trigger Sentiment and Auto-Tagging Analysis
-    const { analyzeConversationSentimentAndTags } =
-      await import('@/lib/ai/sentiment')
-    void analyzeConversationSentimentAndTags(
-      accountId,
-      contactRecord.id,
-      conversation.id
-    )
-
     // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
     const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
     void autoTagAcordoRealizado(accountId, contactRecord.id, conversation.id)
   }
+
+  // Sentimento: também com fluxo ativo (só texto de conversa, não toque
+  // em menu/botão) — ver src/lib/ai/sentiment-trigger.ts.
+  maybeScheduleSentiment(
+    { accountId, contactId: contactRecord.id, conversationId: conversation.id },
+    { text: contentText, flowConsumed, isInteractiveReply: Boolean(interactiveReplyId) },
+  )
 
   // Fire any automations that react to this webhook event. All dispatches
   // run here (not earlier) so the contact, conversation, and inbound

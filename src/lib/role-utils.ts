@@ -74,6 +74,8 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/seguranca": ["owner", "admin", "agent", "viewer"],
   "/templates": ["owner", "admin"],
   "/tabulacoes": ["owner", "admin"],
+  // Cadastro das respostas rápidas (137); o uso no Inbox vale para todos.
+  "/respostas-rapidas": ["owner", "admin"],
   "/usuarios": ["owner", "admin"],
   // /membros itself now just redirects to /usuarios (kept for old
   // links/bookmarks) — still gated here too, defense in depth, even

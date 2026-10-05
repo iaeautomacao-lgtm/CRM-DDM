@@ -5,6 +5,7 @@ import {
   useRef,
   useCallback,
   useEffect,
+  useMemo,
   KeyboardEvent,
 } from "react";
 import {
@@ -18,6 +19,7 @@ import {
   Square,
   X,
   Loader2,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -36,6 +38,16 @@ import {
   MEDIA_MAX_BYTES_BY_KIND,
 } from "@/lib/storage/upload-media";
 import { ReplyQuote } from "./reply-quote";
+import { QuickReplyMenu, QUICK_REPLY_MENU_ID } from "./quick-reply-menu";
+import { useQuickReplies } from "@/hooks/use-quick-replies";
+import { useAuth } from "@/hooks/use-auth";
+import { canAccessRoute } from "@/lib/role-utils";
+import {
+  filterQuickReplies,
+  matchSlashQuery,
+  renderQuickReply,
+  type QuickReply,
+} from "@/lib/quick-replies";
 
 /** Media content types an agent can send from the composer. */
 export type ComposerMediaKind = "image" | "video" | "document" | "audio";
@@ -114,6 +126,8 @@ interface MessageComposerProps {
   recall?: RecallDraft | null;
   /** Fired once the recall above has been applied, so the parent can clear it. */
   onRecallHandled?: () => void;
+  /** Nome do contato para {nome}/{primeiro_nome} das respostas rápidas. */
+  contactName?: string | null;
 }
 
 function formatDuration(seconds: number): string {
@@ -137,6 +151,7 @@ export function MessageComposer({
   onClearReply,
   recall,
   onRecallHandled,
+  contactName,
 }: MessageComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -226,14 +241,97 @@ export function MessageComposer({
     }
   }, [text, sending, sessionExpired, onSend, replyTo?.id, conversationId]);
 
+  // ---- Respostas rápidas ("/atalho" ou botão ⚡) ----------------------
+  const { profile, accountRole } = useAuth();
+  const { replies: quickReplies, loading: quickRepliesLoading } = useQuickReplies();
+  const canManageQuickReplies = accountRole ? canAccessRoute(accountRole, "/respostas-rapidas") : false;
+  // start = posição da "/" no texto; null = aberto pelo botão (insere no
+  // cursor). Menu fechado = qr null.
+  const [qr, setQr] = useState<{ start: number | null; query: string } | null>(null);
+  const [qrIndex, setQrIndex] = useState(0);
+  const qrQuery = qr?.query ?? null;
+  const qrItems = useMemo(
+    () => (qrQuery === null ? [] : filterQuickReplies(quickReplies, qrQuery)),
+    [quickReplies, qrQuery],
+  );
+
+  const closeQuickReplies = useCallback(() => {
+    setQr(null);
+    setQrIndex(0);
+  }, []);
+
+  const saveDraft = useCallback(
+    (val: string) => {
+      try {
+        if (val) localStorage.setItem(`wacrm:draft:${conversationId}`, val);
+        else localStorage.removeItem(`wacrm:draft:${conversationId}`);
+      } catch (err) {
+        console.error("[Draft] Failed to save draft:", err);
+      }
+    },
+    [conversationId],
+  );
+
+  const pickQuickReply = useCallback(
+    (reply: QuickReply) => {
+      const el = textareaRef.current;
+      const rendered = renderQuickReply(reply.content, {
+        contactName,
+        agentName: profile?.full_name ?? null,
+      });
+      const caret = el?.selectionStart ?? text.length;
+      // Pelo "/": troca "/consulta" pelo texto. Pelo botão: insere no cursor.
+      const from = qr?.start ?? caret;
+      const to = qr?.start != null ? qr.start + 1 + qr.query.length : (el?.selectionEnd ?? caret);
+      const next = text.slice(0, from) + rendered + text.slice(to);
+      setText(next);
+      saveDraft(next);
+      closeQuickReplies();
+      requestAnimationFrame(() => {
+        const t = textareaRef.current;
+        if (!t) return;
+        t.focus();
+        const pos = from + rendered.length;
+        t.setSelectionRange(pos, pos);
+        adjustHeight();
+      });
+    },
+    [contactName, profile?.full_name, text, qr, saveDraft, closeQuickReplies, adjustHeight],
+  );
+
+  // Trocar de conversa fecha o menu.
+  useEffect(() => {
+    closeQuickReplies();
+  }, [conversationId, closeQuickReplies]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (qr) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          closeQuickReplies();
+          return;
+        }
+        if (qrItems.length > 0) {
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            const delta = e.key === "ArrowDown" ? 1 : -1;
+            setQrIndex((i) => (i + delta + qrItems.length) % qrItems.length);
+            return;
+          }
+          if ((e.key === "Enter" && !e.shiftKey) || e.key === "Tab") {
+            e.preventDefault();
+            pickQuickReply(qrItems[Math.min(qrIndex, qrItems.length - 1)]);
+            return;
+          }
+        }
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend, qr, qrItems, qrIndex, pickQuickReply, closeQuickReplies]
   );
 
   // Load draft on mount / conversationId change
@@ -277,18 +375,21 @@ export function MessageComposer({
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
       const val = e.target.value;
       setText(val);
-      try {
-        if (val) {
-          localStorage.setItem(`wacrm:draft:${conversationId}`, val);
-        } else {
-          localStorage.removeItem(`wacrm:draft:${conversationId}`);
-        }
-      } catch (err) {
-        console.error("[Draft] Failed to save draft:", err);
+      saveDraft(val);
+      // "/" no começo ou depois de espaço abre as respostas rápidas.
+      const caret = e.target.selectionStart ?? val.length;
+      const match = matchSlashQuery(val.slice(0, caret));
+      if (match) {
+        if (qr?.query !== match.query || qr?.start !== match.start) setQrIndex(0);
+        setQr(match);
+      } else if (qr) {
+        // Digitar texto comum fecha (senão o Enter inseriria uma resposta
+        // em vez de enviar).
+        closeQuickReplies();
       }
       adjustHeight();
     },
-    [conversationId, adjustHeight]
+    [saveDraft, qr, closeQuickReplies, adjustHeight]
   );
 
   // Upload a captured file to chat-media and stage it as a draft.
@@ -539,7 +640,18 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="flex items-end gap-2">
+        <div className="relative flex items-end gap-2">
+          {qr && !inputsDisabled && (
+            <QuickReplyMenu
+              items={qrItems}
+              activeIndex={Math.min(qrIndex, Math.max(qrItems.length - 1, 0))}
+              loading={quickRepliesLoading}
+              query={qr.query}
+              canManage={canManageQuickReplies}
+              onPick={pickQuickReply}
+              onHover={setQrIndex}
+            />
+          )}
           {/* Attach menu — photo / video / document / voice. */}
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -594,9 +706,41 @@ export function MessageComposer({
             </GatedButton>
           )}
 
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={inputsDisabled}
+            title='Respostas rápidas (ou digite "/")'
+            aria-label="Respostas rápidas"
+            aria-expanded={Boolean(qr)}
+            className={cn(
+              "h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground",
+              qr && "text-primary",
+            )}
+            // Mantém o cursor do campo para inserir no lugar certo.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => {
+              if (qr) closeQuickReplies();
+              else {
+                setQrIndex(0);
+                setQr({ start: null, query: "" });
+                textareaRef.current?.focus();
+              }
+            }}
+          >
+            <Zap className="h-4 w-4" />
+          </Button>
+
           <textarea
             ref={textareaRef}
             aria-label="Mensagem"
+            aria-controls={qr ? QUICK_REPLY_MENU_ID : undefined}
+            aria-activedescendant={qr && qrItems.length > 0 ? `${QUICK_REPLY_MENU_ID}-${Math.min(qrIndex, qrItems.length - 1)}` : undefined}
+            onBlur={() => {
+              // Clique fora fecha (o clique no menu não tira o foco).
+              if (qr) closeQuickReplies();
+            }}
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -605,7 +749,7 @@ export function MessageComposer({
                 ? "Somente leitura — visualizadores podem navegar mas não responder"
                 : sessionExpired
                   ? "Sessão expirada - use um template"
-                  : "Digite uma mensagem... (Shift+Enter para nova linha)"
+                  : "Digite uma mensagem… (/ para respostas rápidas, Shift+Enter nova linha)"
             }
             disabled={sessionExpired || readOnly}
             rows={1}

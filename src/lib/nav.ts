@@ -18,6 +18,7 @@ import {
   UsersRound,
   Wifi,
   Workflow,
+  Zap,
 } from "lucide-react";
 
 // ============================================================
@@ -51,6 +52,7 @@ export const navItems: NavItem[] = [
   { href: "/equipes", label: "Equipes", icon: Users },
   { href: "/templates", label: "Templates", icon: FileText },
   { href: "/tabulacoes", label: "Tabulações", icon: Tags },
+  { href: "/respostas-rapidas", label: "Respostas rápidas", icon: Zap },
   { href: "/usuarios", label: "Usuários", icon: UsersRound },
   { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot },
 ];

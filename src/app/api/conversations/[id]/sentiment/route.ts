@@ -55,7 +55,7 @@ export async function POST(
       .eq('id', conversationId)
       .maybeSingle()
 
-    return NextResponse.json({ success: true, sentiment: updatedConv?.sentiment || 'unknown' })
+    return NextResponse.json({ success: true, sentiment: updatedConv?.sentiment ?? 'unknown' })
   } catch (err: any) {
     console.error('[API Sentiment] Error:', err)
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
