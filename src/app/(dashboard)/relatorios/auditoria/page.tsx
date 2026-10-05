@@ -39,6 +39,8 @@ import {
   type AuditLog,
 } from "@/lib/audit/labels";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
+import { loadSharedPeriod, saveSharedPeriod } from "@/lib/relatorios/period";
+import { PeriodFilter } from "@/components/relatorios/period-filter";
 
 const ALL = "all";
 const PAGE_SIZES = [50, 100, 200] as const;
@@ -116,6 +118,17 @@ export default function AuditoriaPage() {
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [draft, setDraft] = useState<AuditFilters>(defaultFilters);
   const [applied, setApplied] = useState<AuditFilters>(defaultFilters);
+
+  // Período único: herda o recorte escolhido em outro relatório desta aba.
+  useEffect(() => {
+    const shared = loadSharedPeriod();
+    if (!shared) return;
+    queueMicrotask(() => {
+      const patch = { from: shared.dateFrom, to: shared.dateTo };
+      setDraft((d) => ({ ...d, ...patch }));
+      setApplied((a) => ({ ...a, ...patch }));
+    });
+  }, []);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -168,6 +181,7 @@ export default function AuditoriaPage() {
   function handlePesquisar() {
     // Objeto novo: refaz a busca mesmo com os mesmos filtros.
     setApplied({ ...draft });
+    saveSharedPeriod({ dateFrom: draft.from, dateTo: draft.to });
     setPage(1);
   }
 
@@ -217,14 +231,10 @@ export default function AuditoriaPage() {
 
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Período (de)</label>
-            <Input type="date" value={draft.from} onChange={(e) => set({ from: e.target.value })} className="w-40" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Período (até)</label>
-            <Input type="date" value={draft.to} onChange={(e) => set({ to: e.target.value })} className="w-40" />
-          </div>
+          <PeriodFilter
+            value={{ dateFrom: draft.from, dateTo: draft.to }}
+            onChange={(r) => set({ from: r.dateFrom, to: r.dateTo })}
+          />
           <FilterSelect label="Usuário" value={draft.userId} options={userOptions} onChange={(v) => set({ userId: v })} width="w-44" />
           <FilterSelect label="Tipo de autor" value={draft.actor} options={ACTOR_OPTIONS} onChange={(v) => set({ actor: v })} width="w-36" />
           <FilterSelect label="Ação" value={draft.action} options={ACTION_OPTIONS} onChange={(v) => set({ action: v })} width="w-52" />
