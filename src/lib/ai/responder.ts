@@ -2,6 +2,7 @@ import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
 import { resolveToolSecrets } from '@/lib/ai/tool-secrets';
+import { describeAttemptStop, newAttemptTrace, type AiAttemptTrace } from '@/lib/ai/attempt-telemetry';
 import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
@@ -301,6 +302,8 @@ export type AiAutoResponseResult =
 interface AiAttemptTracker {
   claim: { account: string; conversation: string; message: string; node: string } | null;
   externalEffect: boolean;
+  /** Última etapa alcançada (ver attempt-telemetry.ts). */
+  trace: AiAttemptTrace;
 }
 
 /**
@@ -316,11 +319,49 @@ export async function handleAiAutoResponse(
   ...args: AttemptArgs
 ): Promise<AiAutoResponseResult> {
   const first = await runAiAttempt(args);
-  if (!first.retryable) return first.finish();
+  if (!first.retryable) {
+    logAttempt(args, first, 1, false);
+    return first.finish();
+  }
+  logAttempt(args, first, 1, true);
   console.warn("[AI Agent] Falha antes de efeito externo — nova tentativa:", first.reason);
   await new Promise((resolve) => setTimeout(resolve, AI_RETRY_DELAY_MS));
   const second = await runAiAttempt(args);
+  logAttempt(args, second, 2, false);
   return second.finish();
+}
+
+/**
+ * Log `ai_attempt` com a etapa em que a tentativa parou — só quando NÃO
+ * terminou em "sent" ou quando houve nova tentativa (sucesso normal não
+ * gera log, para não inundar system_logs).
+ */
+function logAttempt(
+  args: AttemptArgs,
+  attempt: AttemptOutcome,
+  number: 1 | 2,
+  willRetry: boolean,
+): void {
+  if (attempt.outcome === "sent" && number === 1) return;
+  const [accountId, , conversationId] = args;
+  const failed = attempt.outcome === "failed" || attempt.outcome === "error";
+  void writeLog({
+    account_id: accountId,
+    level: failed ? (willRetry ? "warn" : "error") : "info",
+    source: "ai_agent",
+    event: "ai_attempt",
+    message: describeAttemptStop(attempt.trace, attempt.outcome),
+    payload: {
+      conversation_id: conversationId,
+      attempt: number,
+      will_retry: willRetry,
+      outcome: attempt.outcome,
+      reason: attempt.reason,
+      phase: attempt.trace.phase,
+      tools: attempt.trace.tools,
+      duration_ms: Date.now() - attempt.trace.startedAt,
+    },
+  });
 }
 
 const AI_RETRY_DELAY_MS = 3000;
@@ -329,13 +370,19 @@ type AttemptArgs = Parameters<typeof handleAiAutoResponseAttempt> extends [...in
   ? P
   : never;
 
-/** Uma tentativa; `retryable` = falhou sem efeito externo e a reserva foi liberada. */
-async function runAiAttempt(args: AttemptArgs): Promise<{
+interface AttemptOutcome {
   retryable: boolean;
   reason: string | null;
+  /** "error" = exceção relançada (efeito externo já iniciado). */
+  outcome: AiAutoResponseResult["outcome"] | "error";
+  trace: AiAttemptTrace;
   finish: () => AiAutoResponseResult;
-}> {
-  const tracker: AiAttemptTracker = { claim: null, externalEffect: false };
+}
+
+/** Uma tentativa; `retryable` = falhou sem efeito externo e a reserva foi liberada. */
+async function runAiAttempt(args: AttemptArgs): Promise<AttemptOutcome> {
+  const tracker: AiAttemptTracker = { claim: null, externalEffect: false, trace: newAttemptTrace() };
+  const trace = tracker.trace;
   const releaseIfSafe = async (): Promise<boolean> => {
     if (!tracker.claim || tracker.externalEffect) return false;
     const { error } = await supabaseAdmin().rpc("release_ai_reply", {
@@ -349,11 +396,12 @@ async function runAiAttempt(args: AttemptArgs): Promise<{
   };
   try {
     const result = await handleAiAutoResponseAttempt(...args, tracker);
+    const reason = result.outcome === "sent" ? null : result.reason;
     if (result.outcome === "failed" && (await releaseIfSafe())) {
       const failed = { ...result, retryable: true };
-      return { retryable: true, reason: result.reason, finish: () => failed };
+      return { retryable: true, reason, outcome: "failed", trace, finish: () => failed };
     }
-    return { retryable: false, reason: null, finish: () => result };
+    return { retryable: false, reason, outcome: result.outcome, trace, finish: () => result };
   } catch (err) {
     // Exceção (ex.: provedor do modelo fora do ar): mesma regra — sem
     // efeito externo, libera e devolve "failed" retentável; com efeito,
@@ -366,11 +414,13 @@ async function runAiAttempt(args: AttemptArgs): Promise<{
         modelUsed: null,
         retryable: true,
       };
-      return { retryable: true, reason: failed.reason, finish: () => failed };
+      return { retryable: true, reason: failed.reason, outcome: "failed", trace, finish: () => failed };
     }
     return {
       retryable: false,
-      reason: null,
+      reason: err instanceof Error ? err.message : String(err),
+      outcome: "error",
+      trace,
       finish: () => {
         throw err;
       },
@@ -532,6 +582,7 @@ async function handleAiAutoResponseAttempt(
   }
   if (tracker) {
     tracker.claim = { account: accountId, conversation: conversationId, message: inbound.id, node: nodeKey ?? '' };
+    tracker.trace.phase = "claimed";
   }
   // Se o processo cair depois daqui, a intenção continua registrada e a IA
   // não responde de novo a essa mensagem: preferimos revisão manual a
@@ -1282,12 +1333,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   ) => {
     if (isIntegrationOutage(meta?.failureCode)) failedIntegrationTools.set(toolName, meta!.failureCode!);
     else failedIntegrationTools.delete(toolName);
+    // Tool terminou: o modelo volta a trabalhar com o resultado.
+    if (tracker) tracker.trace.phase = "llm";
     if (onToolResult) await onToolResult(toolName, result, durationMs, meta);
   };
 
   // Isolado num closure pra poder chamar duas vezes (tentativa + retry
   // automático abaixo) sem duplicar o if/else de provider.
   const callProvider = (): Promise<string> => {
+    if (tracker) tracker.trace.phase = "llm";
     if (aiConfig.api_provider === "openai") {
       return generateOpenAiResponse(
         activeKey,
@@ -1297,7 +1351,11 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         async (toolName: string, toolArgs: Record<string, unknown>) => {
           // A partir daqui pode haver efeito externo (ex.: efetiva_acordo):
           // uma falha posterior não libera a reserva da mensagem.
-          if (tracker) tracker.externalEffect = true;
+          if (tracker) {
+            tracker.externalEffect = true;
+            tracker.trace.phase = "tool";
+            tracker.trace.tools.push(toolName);
+          }
           if (onToolCall) await onToolCall(toolName, toolArgs);
         },
         trackedOnToolResult,
@@ -1713,7 +1771,10 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   const accessToken = isWaha ? "" : decrypt(config.access_token);
 
   // Envio ao cliente: efeito externo — daqui em diante, nada de retry.
-  if (tracker) tracker.externalEffect = true;
+  if (tracker) {
+    tracker.externalEffect = true;
+    tracker.trace.phase = "send";
+  }
 
   // 8. Send message via WAHA or Meta
   // Simulação de digitação: aguarda 2 segundos adicionais antes de enviar a mensagem de fato
@@ -1841,6 +1902,8 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       providerMessageId: sentMessageId,
     };
   }
+
+  if (tracker) tracker.trace.phase = "persisted";
 
   // 10. Update conversation values
   await db
