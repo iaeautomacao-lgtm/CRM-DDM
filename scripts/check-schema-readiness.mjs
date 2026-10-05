@@ -1,4 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
+import { existsSync, readFileSync } from "node:fs";
+
+// O Next carrega .env/.env.local sozinho no build; este script roda com
+// node puro (passo schema:check do deploy), então carrega os mesmos
+// arquivos — sem sobrescrever o que já veio do ambiente.
+for (const file of [".env.local", ".env.production.local", ".env.production", ".env"]) {
+  if (!existsSync(file)) continue;
+  for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+    const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m || process.env[m[1]] !== undefined) continue;
+    let value = m[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[m[1]] = value;
+  }
+}
 
 const EXPECTED_SCHEMA_VERSION = 143;
 
