@@ -2270,19 +2270,28 @@ async function runAiAgentCore(
     // Never infer an AI response by scanning for "any bot message after X":
     // campaign-history reconstruction and other workers can insert bot rows
     // concurrently and were previously misclassified as the AI reply.
-    if (aiResponse.outcome === "failed") {
+    const fatalSkipReasons = new Set([
+      "ai_config_disabled_or_missing",
+      "no_inbound_message",
+      "empty_response",
+    ]);
+    if (
+      aiResponse.outcome === "failed" ||
+      (aiResponse.outcome === "skipped" && fatalSkipReasons.has(aiResponse.reason))
+    ) {
+      const reason = aiResponse.reason;
       return {
         ok: false,
-        detail: aiResponse.reason,
-        err: new Error(aiResponse.reason),
+        detail: reason,
+        err: new Error(reason),
         lastReply: "",
         exitCodeFound: aiResponse.detectedTag,
         modelUsed: aiResponse.modelUsed ?? modelUsed,
         aiConfigUsable,
         messageSent: false,
         messageId: null,
-        responseOutcome: aiResponse.outcome,
-        responseReason: aiResponse.reason,
+        responseOutcome: "failed",
+        responseReason: reason,
       };
     }
 
@@ -3292,6 +3301,57 @@ export async function advanceFromNodeKey(
           message_id: core.messageId,
           last_reply: lastReply.slice(-300),
         });
+      }
+
+      // Duplicate/debounced executions are intentional no-ops. Do not count
+      // them as an AI turn or advance the node: the invocation that owns the
+      // reply claim is responsible for sending and mutating the run.
+      if (
+        core.responseOutcome === "skipped" &&
+        (core.responseReason === "already_claimed" ||
+          core.responseReason === "debounced")
+      ) {
+        await logRunEvent(db, {
+          run_id: run.id,
+          flow_id: run.flow_id,
+          account_id: run.account_id,
+          node_key: node.node_key,
+          node_type: node.node_type,
+          event_type: "node_completed",
+          status: "skipped",
+          duration_ms: Date.now() - nodeStartedAt,
+          payload: {
+            input: inputSnapshot,
+            output: {
+              ...baseOutput,
+              exit_reason: core.responseReason,
+            },
+          },
+        });
+        return { outcome: "advanced" };
+      }
+
+      // The responder may intentionally hand the conversation to a human
+      // before calling the model (anti-scam / anti-loop guards). Once the
+      // assignment succeeded, end the flow as a handoff instead of leaving an
+      // active run that will later be swept as a timeout.
+      if (
+        core.responseOutcome === "skipped" &&
+        (core.responseReason === "handoff_anti_scam" ||
+          core.responseReason === "handoff_anti_loop")
+      ) {
+        await logEvent(db, run.id, "handoff", node.node_key, {
+          reason: core.responseReason,
+          turns_used: 1,
+          exit_reason: "guard_handoff",
+        });
+        await nodeCompleted({
+          ...baseOutput,
+          turns_used: 1,
+          exit_reason: "guard_handoff",
+        });
+        await endRun(db, run, "handed_off", core.responseReason);
+        return { outcome: "handed_off" };
       }
 
       if (cfg.mode === "takeover") {
