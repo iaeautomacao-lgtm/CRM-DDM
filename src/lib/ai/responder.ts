@@ -52,10 +52,10 @@ const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
 
 // Enviada quando o modelo retorna "" tanto na primeira tentativa quanto
 // no retry automático (ver handleAiAutoResponse, passo 5) — mantém a
-// conversa andando em vez de deixar o cliente sem resposta. Exportada
-// para runAiAgentCore (flows/engine.ts) comparar contra last_reply e
-// registrar "ai_returned_empty_reply_fallback_sent" no node_completed,
-// em vez de mudar o contrato de retorno de handleAiAutoResponse.
+// conversa andando em vez de deixar o cliente sem resposta. O resultado
+// estruturado devolvido ao Flow Engine inclui o id e o conteúdo exatos da
+// mensagem persistida, então o engine não precisa inferir a resposta
+// procurando outra linha sender_type="bot" por timestamp.
 export const AI_EMPTY_REPLY_FALLBACK_TEXT =
   "Olá! 😊 Tudo bem? Sou o Ben, do Grupo DDM. Para verificarmos sua situação, preciso do seu CPF (apenas os números). Pode me passar?";
 
