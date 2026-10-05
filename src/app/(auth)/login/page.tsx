@@ -171,18 +171,9 @@ function LoginPageInner() {
             </Button>
           </form>
 
+          {/* Sem cadastro público: CRM interno, usuários criados pelo admin. */}
           <p className="text-muted-foreground mt-6 text-center text-sm">
-            Não tem uma conta?{" "}
-            <Link
-              href={
-                inviteToken
-                  ? `/signup?invite=${encodeURIComponent(inviteToken)}`
-                  : "/signup"
-              }
-              className="text-primary hover:text-primary/80"
-            >
-              Criar conta
-            </Link>
+            Sem acesso? Peça ao administrador para criar o seu usuário.
           </p>
         </CardContent>
       </Card>
