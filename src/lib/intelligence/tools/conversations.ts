@@ -35,6 +35,9 @@ import {
   reqUuid,
 } from "./validate";
 
+/** Candidatos avaliados quando a busca filtra por fluxo/transferência. */
+const RUN_FILTER_MAX_CANDIDATES = 5_000;
+
 export const SEARCH_MAX_LIMIT = 50;
 export const MESSAGE_TEXT_MAX = 500;
 export const TIMELINE_MAX_MESSAGES = 500;
@@ -161,7 +164,9 @@ export const searchConversations = defineTool({
       page = (data ?? []) as unknown as ConversationRow[];
       total = count ?? page.length;
     } else {
-      const candidates = await paginate<ConversationRow>((a, b) => base(false).range(a, b));
+      // Teto menor que o padrão: cada candidato vira consulta de flow_runs
+      // e a ferramenta pode ser chamada várias vezes por minuto.
+      const candidates = await paginate<ConversationRow>((a, b) => base(false).range(a, b), RUN_FILTER_MAX_CANDIDATES);
       truncated = candidates.truncated;
       const runs = await runsByConversation(
         db,
@@ -365,7 +370,7 @@ export const getConversationTimeline = defineTool({
             to: a.changes?.status?.after ?? null,
             action: a.action,
             summary: truncateText(a.summary, 200),
-            by: a.user_name ?? a.actor_type ?? null,
+            by: (scope.teamIds === null ? a.user_name : null) ?? a.actor_type ?? null,
           }));
 
     const ids = [

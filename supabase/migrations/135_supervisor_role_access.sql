@@ -13,32 +13,40 @@
 --   - pode tudo que o agente pode (ranking ≥ agent);
 --   - NÃO pode o que exige admin (configurações, membros, canais…);
 --   - enxerga as conversas das equipes de que participa (team_members),
---     atribuídas ou não, mais as atribuídas a ele ou a membros dessas
---     equipes — Inbox, Monitoramento, Relatórios e Intelligence leem
---     com a sessão do usuário e ficam escopados por esta regra;
+--     atribuídas ou não, as atribuídas a ele e as SEM equipe atribuídas a
+--     membros dessas equipes — Inbox e Monitoramento leem com a sessão do
+--     usuário e ficam escopados por esta regra; o Intelligence escopa no
+--     servidor pelas mesmas equipes;
+--   - NÃO acessa Relatórios nesta fase: as RPCs de relatório são
+--     SECURITY DEFINER e devolveriam a conta inteira;
 --   - enxerga as linhas (whatsapp_config) das suas equipes e as sem
 --     equipe, como o agente.
 
 BEGIN;
 
 -- ---- ranking de papéis (mantém nome, assinatura, dono e grants) -------
+-- Atualiza TODAS as cópias de is_account_member(uuid, account_role_enum)
+-- (017 criou sem schema; 103+ chamam wacrm.is_account_member): uma cópia
+-- esquecida com o CASE antigo devolveria NULL para o supervisor.
 DO $$
 DECLARE
   v_schema text;
   v_enum_schema text;
+  v_count int := 0;
 BEGIN
-  SELECT n.nspname INTO v_schema
-  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-  WHERE p.proname = 'is_account_member' AND p.pronargs = 2
-  LIMIT 1;
   SELECT n.nspname INTO v_enum_schema
   FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
-  WHERE t.typname = 'account_role_enum'
-  LIMIT 1;
-  IF v_schema IS NULL OR v_enum_schema IS NULL THEN
-    RAISE EXCEPTION 'is_account_member/account_role_enum não encontrados';
+  WHERE t.typname = 'account_role_enum';
+  IF v_enum_schema IS NULL THEN
+    RAISE EXCEPTION 'account_role_enum não encontrado';
   END IF;
 
+  FOR v_schema IN
+    SELECT n.nspname
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE p.proname = 'is_account_member' AND p.pronargs = 2
+  LOOP
+  v_count := v_count + 1;
   EXECUTE format($f$
     CREATE OR REPLACE FUNCTION %1$I.is_account_member(
       target_account_id UUID,
@@ -47,7 +55,7 @@ BEGIN
     LANGUAGE sql
     STABLE
     SECURITY DEFINER
-    SET search_path = %1$I, wacrm, public
+    SET search_path = ''
     AS $body$
       SELECT EXISTS (
         SELECT 1
@@ -72,6 +80,14 @@ BEGIN
       );
     $body$
   $f$, v_schema, v_enum_schema);
+  END LOOP;
+
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'is_account_member(uuid, account_role_enum) não encontrada';
+  END IF;
+  IF to_regprocedure(format('wacrm.is_account_member(uuid, %I.account_role_enum)', v_enum_schema)) IS NULL THEN
+    RAISE EXCEPTION 'wacrm.is_account_member não existe — as policies abaixo dependem dela';
+  END IF;
 END;
 $$;
 
@@ -101,17 +117,19 @@ REVOKE ALL ON FUNCTION wacrm.current_user_role() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION wacrm.current_user_role() TO authenticated, service_role;
 
 -- ---- conversas: agente (128) + supervisor por equipe ------------------
+-- Funções em (SELECT …): o Postgres calcula uma vez por consulta (initPlan)
+-- em vez de uma vez por linha.
 DROP POLICY IF EXISTS conversations_select ON wacrm.conversations;
 CREATE POLICY conversations_select ON wacrm.conversations FOR SELECT USING (
-  is_account_member(account_id)
+  wacrm.is_account_member(account_id)
   AND (
     -- owner/admin/viewer: conta toda (inalterado)
-    coalesce(wacrm.current_user_role(), '') NOT IN ('agent', 'supervisor')
+    coalesce((SELECT wacrm.current_user_role()), '') NOT IN ('agent', 'supervisor')
     -- agente: as dele + fila sem atendente da(s) equipe(s) (128)
     OR (
-      wacrm.current_user_role() = 'agent'
+      (SELECT wacrm.current_user_role()) = 'agent'
       AND (
-        assigned_agent_id = auth.uid()
+        assigned_agent_id = (SELECT auth.uid())
         OR (
           assigned_agent_id IS NULL
           AND status IN ('open', 'pending')
@@ -119,16 +137,20 @@ CREATE POLICY conversations_select ON wacrm.conversations FOR SELECT USING (
         )
       )
     )
-    -- supervisor: tudo das suas equipes + o que está com ele ou com
-    -- membros delas (conversa sem equipe atribuída a alguém da equipe)
+    -- supervisor: tudo das suas equipes + o que está com ele + as SEM
+    -- equipe atribuídas a membros delas. Conversa de OUTRA equipe com um
+    -- membro em comum não entra (o membro pode estar em várias equipes).
     OR (
-      wacrm.current_user_role() = 'supervisor'
+      (SELECT wacrm.current_user_role()) = 'supervisor'
       AND (
         team_id IN (SELECT wacrm.current_user_team_ids())
-        OR assigned_agent_id = auth.uid()
-        OR assigned_agent_id IN (
-          SELECT tm.user_id FROM wacrm.team_members tm
-          WHERE tm.team_id IN (SELECT wacrm.current_user_team_ids())
+        OR assigned_agent_id = (SELECT auth.uid())
+        OR (
+          team_id IS NULL
+          AND assigned_agent_id IN (
+            SELECT tm.user_id FROM wacrm.team_members tm
+            WHERE tm.team_id IN (SELECT wacrm.current_user_team_ids())
+          )
         )
       )
     )
@@ -140,7 +162,7 @@ DROP POLICY IF EXISTS whatsapp_config_select ON wacrm.whatsapp_config;
 CREATE POLICY whatsapp_config_select ON wacrm.whatsapp_config FOR SELECT USING (
   wacrm.is_account_member(account_id)
   AND (
-    coalesce(wacrm.current_user_role(), '') NOT IN ('agent', 'supervisor')
+    coalesce((SELECT wacrm.current_user_role()), '') NOT IN ('agent', 'supervisor')
     OR team_id IN (SELECT wacrm.current_user_team_ids())
     OR team_id IS NULL
   )

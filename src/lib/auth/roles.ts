@@ -7,8 +7,8 @@
 // matches the same CASE expression the
 // `is_account_member(account_id, min_role)` SQL helper uses (135), so
 // server-side TypeScript guards and database-side RLS speak the same
-// language. Supervisor: tudo do agente + Monitoramento/Relatórios das
-// suas equipes; nada que exija admin.
+// language. Supervisor: tudo do agente + Monitoramento das suas
+// equipes; nada que exija admin.
 //
 // Predicates (`canManageMembers`, `canEditSettings`, …) are the
 // single source of truth for "what can this role do?" — both
@@ -124,7 +124,7 @@ export function canTransferOwnership(role: AccountRole): boolean {
 }
 
 /**
- * DDM Intelligence e painéis de supervisão (Monitoramento, Relatórios):
+ * DDM Intelligence e painéis de supervisão (Monitoramento):
  * supervisor ou acima. O supervisor vê só as suas equipes (RLS, 135).
  */
 export function canSuperviseTeams(role: AccountRole): boolean {

@@ -2,6 +2,8 @@
 // do PostgREST (thenable) e aplica de verdade os filtros que data.ts usa
 // (eq, neq, in, gte, lt, not in, limit, range). `.or()` é ignorado (devolve
 // o superconjunto — os módulos de cálculo filtram o período de novo).
+// Filtro em tabela embutida ("conversations.team_id", embed !inner) segue
+// a FK <tabela no singular>_id.
 // `.select()` não projeta colunas: a linha volta inteira.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -41,7 +43,15 @@ export function fakeDb(tables: Tables): { db: SupabaseClient; log: QueryLog[] } 
     chain("or", () => {});
     chain("eq", (c, v) => (rows = rows.filter((r) => r[c as string] === v)));
     chain("neq", (c, v) => (rows = rows.filter((r) => r[c as string] !== v)));
-    chain("in", (c, vs) => (rows = rows.filter((r) => (vs as unknown[]).includes(r[c as string]))));
+    const valueOf = (r: Row, col: string): unknown => {
+      const dot = col.indexOf(".");
+      if (dot < 0) return r[col];
+      const rel = col.slice(0, dot);
+      const fk = `${rel.replace(/s$/, "")}_id`;
+      const parent = (tables[rel] ?? []).find((x) => x.id === r[fk]);
+      return parent?.[col.slice(dot + 1)];
+    };
+    chain("in", (c, vs) => (rows = rows.filter((r) => (vs as unknown[]).includes(valueOf(r, c as string)))));
     chain("gte", (c, v) => (rows = rows.filter((r) => cmp(r[c as string], v) >= 0)));
     chain("lt", (c, v) => (rows = rows.filter((r) => r[c as string] !== null && cmp(r[c as string], v) < 0)));
     chain("not", (c, op, v) => {

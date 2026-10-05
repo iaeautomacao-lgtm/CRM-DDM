@@ -163,16 +163,26 @@ export async function loadFlowRuns(
   period: Period,
   opts: { withConversationMeta?: boolean; flowId?: string } = {},
 ): Promise<ScopedRuns> {
+  if (scope.teamIds !== null && scope.teamIds.length === 0) {
+    return { rows: [], truncated: false, conversationMeta: new Map() };
+  }
+  const teamIds = scope.teamIds;
   const loaded = await paginate<FlowRunRow>((a, b) => {
     let q = db
       .from("flow_runs")
-      .select(RUN_COLUMNS)
+      .select(teamIds === null ? RUN_COLUMNS : `${RUN_COLUMNS}, conversations!conversation_id!inner(team_id)`)
       .eq("account_id", scope.accountId)
       .gte("started_at", period.from)
       .lt("started_at", period.to);
+    // Supervisor: o teto de linhas vale para as equipes dele, não para a
+    // conta toda.
+    if (teamIds !== null) q = q.in("conversations.team_id", teamIds);
     if (opts.flowId) q = q.eq("flow_id", opts.flowId);
     return q.order("id").range(a, b);
   });
+  if (teamIds !== null) {
+    for (const r of loaded.rows as Array<FlowRunRow & { conversations?: unknown }>) delete r.conversations;
+  }
 
   const needMeta = scope.teamIds !== null || opts.withConversationMeta === true;
   if (!needMeta) return { ...loaded, conversationMeta: null };

@@ -6,6 +6,9 @@
 import type { FlowEventRow, FlowRunRow } from "../types";
 
 export const TAKEOVER_REASON = "ai_agent_takeover";
+// paused_by_agent NÃO entra aqui de propósito: o atendente assumiu e a IA
+// deixou de conter a conversa — conta como "agent_intervened" no retrato
+// do momento, mesmo que a execução volte depois (PRD-04, catálogo).
 const NOT_FINISHED = new Set(["active", "delayed"]);
 const FAILED = new Set(["failed", "error"]);
 
