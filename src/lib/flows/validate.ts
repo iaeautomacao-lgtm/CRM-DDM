@@ -23,6 +23,7 @@
  * `node_key`; trigger-scoped use `scope: 'trigger'`.
  */
 
+import { findInlineSecrets } from "@/lib/ai/tool-secrets";
 import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
 import { WEBCHAT_BUTTON_TEXT_MAX } from "@/lib/flows/types";
 
@@ -1106,6 +1107,23 @@ function validateNode(
           field: "max_turns",
           message: "O limite de turnos do loop precisa ser um número maior que zero.",
         });
+      }
+      // Token em texto na URL de uma ferramenta: fica gravado no banco e
+      // visível no editor — usar o marcador resolvido no servidor.
+      const tools = Array.isArray((node.config as { tools?: unknown }).tools)
+        ? (node.config as { tools: Array<{ name?: string; http?: { url?: string } }> }).tools
+        : [];
+      for (const tool of tools) {
+        const inline = findInlineSecrets(tool.http?.url ?? "");
+        if (inline.length > 0) {
+          issues.push({
+            severity: "warning",
+            scope: "node",
+            node_key: node.node_key,
+            field: "tools",
+            message: `A ferramenta "${tool.name ?? "sem nome"}" tem um token em texto na URL (${inline.join(", ")}=…). Troque o valor por {{secret.DDM_TOKEN}} — o token fica só no servidor.`,
+          });
+        }
       }
       break;
     }

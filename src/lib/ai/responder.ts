@@ -1,6 +1,7 @@
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
+import { resolveToolSecrets } from '@/lib/ai/tool-secrets';
 import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
@@ -2016,22 +2017,45 @@ async function generateOpenAiResponse(
                 : ""
             );
 
-          const resolvedUrl = interpolate(toolDef.http.url);
+          // Segredos ({{secret.DDM_TOKEN}}) vêm do ambiente do servidor e
+          // são trocados ANTES dos argumentos do modelo — ver tool-secrets.ts.
+          const missingSecrets: string[] = [];
+          const withSecrets = (str: string, encode: boolean) => {
+            const r = resolveToolSecrets(str, toolDef.http.url, process.env, { encode });
+            missingSecrets.push(...r.missing);
+            return r.value;
+          };
+
+          const resolvedUrl = interpolate(withSecrets(toolDef.http.url, true));
           const resolvedBody = toolDef.http.body
-            ? interpolate(toolDef.http.body)
+            ? interpolate(withSecrets(toolDef.http.body, false))
             : undefined;
           const resolvedHeaders: Record<string, string> = {};
           for (const [k, v] of Object.entries(toolDef.http.headers || {})) {
-            resolvedHeaders[k] = interpolate(v);
+            resolvedHeaders[k] = interpolate(withSecrets(v, false));
+          }
+
+          // Credencial da integração ausente no servidor: não chama a API
+          // sem token (falharia de forma confusa) — vira falha da integração.
+          const secretFailure = missingSecrets.length
+            ? {
+                code: "TOOL_PROVIDER_ERROR" as const,
+                message: `Credencial da integração não configurada no servidor (${[...new Set(missingSecrets)].join(", ")}).`,
+                retryable: false,
+              }
+            : null;
+          if (secretFailure) {
+            console.error("[AI Agent] Tool sem credencial no ambiente:", toolName, missingSecrets);
           }
 
           const maxAttempts = 3;
           let attempt = 0;
           let finalFailure:
             | ReturnType<typeof classifyFetchFailure>
-            | null = null;
+            | null = secretFailure;
+          if (secretFailure) toolResult = serializeToolFailure(secretFailure, 0);
 
-          while (attempt < maxAttempts) {
+          while (!secretFailure && attempt < maxAttempts) {
             attempt += 1;
 
             try {
