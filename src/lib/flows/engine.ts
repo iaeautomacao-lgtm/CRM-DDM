@@ -2181,7 +2181,7 @@ async function runAiAgentCore(
           },
         });
       },
-      async (toolName, result, durationMs) => {
+      async (toolName, result, durationMs, meta) => {
         collectedToolResults.push({ toolName, result });
         // Truncate result to 8000 chars for readability in logs — 500 era
         // curto demais pra respostas grandes (ex: consultar_debitos da API
@@ -2207,6 +2207,10 @@ async function runAiAgentCore(
           payload: {
             tool_name: toolName,
             result: truncated,
+            attempts: meta?.attempts ?? 1,
+            recovered: meta?.recovered ?? false,
+            failure_code: meta?.failureCode ?? null,
+            http_status: meta?.httpStatus ?? null,
           },
         });
         await logAiDecision(db, {
@@ -2218,11 +2222,19 @@ async function runAiAgentCore(
           decision_type: "tool_result",
           decision: {
             duration_ms: durationMs,
+            attempts: meta?.attempts ?? 1,
+            recovered: meta?.recovered ?? false,
+            failure_code: meta?.failureCode ?? null,
+            http_status: meta?.httpStatus ?? null,
           },
           reason: toolFailure,
           needs_human: false,
           tool_name: toolName,
-          tool_status: toolFailure ? "error" : "success",
+          tool_status: toolFailure
+            ? "error"
+            : meta?.recovered
+              ? "recovered"
+              : "success",
           ai_node: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
           tool_error: toolFailure,
           model: modelUsed,
