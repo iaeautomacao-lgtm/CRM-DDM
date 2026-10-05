@@ -68,13 +68,18 @@ export interface MessagePreview {
   willSkip: boolean;
 }
 
+// Template Meta: a Meta resolve {{ 1 }} também.
 const NUMERIC_PLACEHOLDER = /\{\{\s*(\d+)\s*\}\}/g;
-const ANY_PLACEHOLDER = /\{\{\s*(\d+|nome|primeiro_nome|empresa|data_hoje)\s*\}\}/gi;
+// Texto livre: o envio (startCampaign) só troca {{N}} exato — "{{ 1 }}" vai
+// literal, então a prévia também não o trata como variável.
+const STRICT_NUMERIC = /\{\{(\d+)\}\}/g;
+const ANY_PLACEHOLDER = /\{\{(\d+)\}\}|\{\{\s*(nome|primeiro_nome|empresa|data_hoje)\s*\}\}/gi;
+const SPACED_NUMERIC = /\{\{\s+\d+\s*\}\}|\{\{\s*\d+\s+\}\}/;
 
 /** {{n}} distintos usados no texto, em ordem crescente. */
 export function placeholderNumbers(text: string | null | undefined): number[] {
   const found = new Set<number>();
-  for (const m of (text ?? "").matchAll(NUMERIC_PLACEHOLDER)) found.add(Number(m[1]));
+  for (const m of (text ?? "").matchAll(STRICT_NUMERIC)) found.add(Number(m[1]));
   return [...found].sort((a, b) => a - b);
 }
 
@@ -179,7 +184,7 @@ export function previewCampaignMessage(
     const start = m.index ?? 0;
     if (start > last) segments.push({ kind: "text", text: body.slice(last, start) });
     last = start + m[0].length;
-    const key = m[1].toLowerCase();
+    const key = (m[1] ?? m[2] ?? "").toLowerCase();
 
     if (/^\d+$/.test(key)) {
       const n = Number(key);
@@ -249,6 +254,9 @@ export function findVariableProblems(
   if (effective.template_name && map) map.forEach((_, idx) => toCheck.add(idx + 1));
 
   const problems: string[] = [];
+  if (!effective.template_name && SPACED_NUMERIC.test(effective.conteudo ?? "")) {
+    problems.push("Escreva as variáveis sem espaços, como {{1}} — \"{{ 1 }}\" chegaria literal ao cliente.");
+  }
   for (const n of [...toCheck].sort((a, b) => a - b)) {
     const entry = map?.[n - 1];
     if (!entry) {

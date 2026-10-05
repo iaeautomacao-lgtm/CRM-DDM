@@ -168,3 +168,14 @@ describe("findVariableProblems", () => {
     expect(findVariableProblems({ tipo: "texto", conteudo: "Oi {{nome}}" }, { columnMap: {}, hasCsv: false })).toEqual([]);
   });
 });
+
+describe("placeholder com espaço (texto livre)", () => {
+  it("é apontado como problema e não conta como variável", () => {
+    const problems = findVariableProblems(
+      { tipo: "texto", conteudo: "Olá {{ 1 }}" } as never,
+      { columnMap: {} as never, hasCsv: true },
+    );
+    expect(problems.some((p) => p.includes("sem espaços"))).toBe(true);
+    expect(placeholderNumbers("Olá {{ 1 }} e {{2}}")).toEqual([2]);
+  });
+});
