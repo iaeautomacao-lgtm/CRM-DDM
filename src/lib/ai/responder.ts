@@ -7,6 +7,7 @@ import {
   classifyFetchFailure,
   classifyHttpFailure,
   classifyToolBodyFailure,
+  isIntegrationOutage,
   prepareToolArgs,
   retryDelayMs,
   serializeToolFailure,
@@ -58,6 +59,11 @@ const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
 // em vez de mudar o contrato de retorno de handleAiAutoResponse.
 export const AI_EMPTY_REPLY_FALLBACK_TEXT =
   "Olá! 😊 Tudo bem? Sou o Ben, do Grupo DDM. Para verificarmos sua situação, preciso do seu CPF (apenas os números). Pode me passar?";
+
+// Enviada quando uma integração (API DDM etc.) falha de vez e o modelo não
+// encerrou com tag — vai junto com #INSTABILIDADE para o fluxo transferir.
+export const AI_INSTABILITY_TEXT =
+  "Estamos com uma instabilidade no sistema para consultar seus dados agora. Vou te encaminhar para um de nossos atendentes, que continua seu atendimento por aqui. Só um instante!";
 
 /**
  * Token da API DDM Acordos (localiza_dev, calc, CalculaDebitos). Só vem do
@@ -1042,6 +1048,21 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   // 5. Generate response using chosen LLM API
   //
+  // Ferramentas de integração que falharam de vez nesta resposta (já
+  // depois das tentativas). Uma chamada bem-sucedida posterior da mesma
+  // ferramenta tira ela da lista. Ver forceInstabilityExit abaixo.
+  const failedIntegrationTools = new Map<string, string>();
+  const trackedOnToolResult = async (
+    toolName: string,
+    result: string,
+    durationMs: number,
+    meta?: ToolExecutionMeta,
+  ) => {
+    if (isIntegrationOutage(meta?.failureCode)) failedIntegrationTools.set(toolName, meta!.failureCode!);
+    else failedIntegrationTools.delete(toolName);
+    if (onToolResult) await onToolResult(toolName, result, durationMs, meta);
+  };
+
   // Isolado num closure pra poder chamar duas vezes (tentativa + retry
   // automático abaixo) sem duplicar o if/else de provider.
   const callProvider = (): Promise<string> => {
@@ -1052,7 +1073,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         history,
         tools,
         onToolCall,
-        onToolResult,
+        trackedOnToolResult,
         nodeKey,
       );
     } else if (aiConfig.api_provider === "claude") {
@@ -1097,6 +1118,16 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   }
 
   generatedText = generatedText.trim();
+
+  // Integração fora do ar (ex.: API DDM respondeu "Erro ao executar a
+  // query") e o modelo não encerrou com nenhuma tag: a política "falha de
+  // tool → #INSTABILIDADE" não pode depender só do prompt — senão a
+  // conversa fica parada no nó de IA. Força a mensagem de instabilidade com
+  // a tag, que leva o fluxo ao caminho de transferência.
+  if (failedIntegrationTools.size > 0 && !extractAiExitTag(generatedText)) {
+    console.warn("[AI Agent] Integração indisponível sem tag de saída — forçando #INSTABILIDADE:", [...failedIntegrationTools.entries()]);
+    generatedText = `${AI_INSTABILITY_TEXT} #INSTABILIDADE`;
+  }
 
   // Mesmo depois do retry acima, o modelo não produziu nenhum texto —
   // em vez de deixar o cliente sem resposta (comportamento anterior:
