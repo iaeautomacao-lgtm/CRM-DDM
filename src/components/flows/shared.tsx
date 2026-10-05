@@ -445,6 +445,20 @@ export function truncate(s: string, max = 80): string {
   return clean.slice(0, max - 1) + '…';
 }
 
+/**
+ * Nome dado pelo usuário ao nó (config.label) — só exibição: o motor e
+ * as setas continuam usando node_key. null quando não preenchido.
+ */
+export function nodeLabel(node: BuilderNode): string | null {
+  const v = (node.config as { label?: unknown }).label;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+/** Texto para buscar o nó: nome, chave e resumo. */
+export function nodeSearchText(node: BuilderNode): string {
+  return [nodeLabel(node), node.node_key, summarizeNode(node)].filter(Boolean).join(" ");
+}
+
 export function summarizeNode(node: BuilderNode): string | null {
   const cfg = node.config;
   switch (node.node_type) {
