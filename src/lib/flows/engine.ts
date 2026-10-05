@@ -3432,6 +3432,58 @@ async function advanceCurrentNodeKey(
 // Public entry point — the webhook calls this on every inbound.
 // ============================================================
 
+/**
+ * Mesmo canal, conversa diferente: o cliente está escrevendo numa conversa
+ * que não é a do run ativo — típico quando a conversa foi FECHADA e o
+ * webhook abriu uma nova (o run continuou preso à fechada), ou quando uma
+ * campanha abriu outra conversa.
+ *
+ * Antes o run seguia na conversa antiga: a IA/fluxo respondia o cliente,
+ * mas a mensagem era gravada na conversa antiga — "a IA respondeu e não
+ * apareceu no Inbox".
+ *
+ * - Mesma linha (config_id): o run passa a acompanhar a conversa atual.
+ * - Linha diferente: responder pelo run antigo sairia pelo número errado;
+ *   encerra o run antigo e esta mensagem segue o fluxo normal da linha.
+ */
+async function followInboundConversation(
+  db: AdminClient,
+  run: FlowRunRow,
+  input: DispatchInboundInput,
+): Promise<FlowRunRow | null> {
+  const sameLine = !run.config_id || !input.configId || run.config_id === input.configId;
+  if (sameLine) {
+    const { error } = await db
+      .from("flow_runs")
+      .update({ conversation_id: input.conversationId })
+      .eq("id", run.id)
+      .in("status", ["active", "paused_by_agent"]);
+    if (error) {
+      console.error("[flows] falha ao religar run à conversa atual:", error.message);
+      return run;
+    }
+    void writeLog({
+      account_id: input.accountId,
+      level: "info",
+      source: "flows",
+      event: "flow_run_rebound",
+      message: "Execução do fluxo passou a acompanhar a conversa atual do contato",
+      payload: { flow_run_id: run.id, from_conversation_id: run.conversation_id, to_conversation_id: input.conversationId },
+    });
+    return { ...run, conversation_id: input.conversationId ?? run.conversation_id };
+  }
+  await endRun(db, run, "timed_out", "superseded_by_other_line");
+  void writeLog({
+    account_id: input.accountId,
+    level: "info",
+    source: "flows",
+    event: "flow_run_superseded",
+    message: "Execução encerrada: o contato passou a falar por outra linha",
+    payload: { flow_run_id: run.id, from_conversation_id: run.conversation_id, to_conversation_id: input.conversationId },
+  });
+  return null;
+}
+
 export async function dispatchInboundToFlows(
   input: DispatchInboundInput & { isFirstInboundMessage: boolean },
 ): Promise<DispatchInboundResult> {
@@ -3481,6 +3533,8 @@ export async function dispatchInboundToFlows(
           // global/automações por cima; a mensagem fica para o atendente.
           return { consumed: true, flow_run_id: activeRun.id, outcome: "other_channel_run" };
         }
+      } else {
+        activeRun = await followInboundConversation(db, activeRun, input);
       }
     }
 
