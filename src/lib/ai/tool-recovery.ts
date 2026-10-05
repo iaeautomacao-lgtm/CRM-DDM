@@ -5,7 +5,9 @@ export type ToolFailureCode =
   | "TOOL_SERVER_ERROR"
   | "TOOL_HTTP_ERROR"
   | "TOOL_NETWORK_ERROR"
-  | "TOOL_SCHEMA_ERROR";
+  | "TOOL_SCHEMA_ERROR"
+  | "TOOL_INVALID_CLIENT"
+  | "TOOL_PROVIDER_ERROR";
 
 export interface ToolFailure {
   code: ToolFailureCode;
@@ -130,6 +132,54 @@ export function classifyHttpFailure(status: number): ToolFailure | null {
     message: `A integração retornou HTTP ${status}.`,
     retryable: false,
     httpStatus: status,
+  };
+}
+
+export function classifyToolBodyFailure(body: string): ToolFailure | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== "object" || !("error" in parsed)) {
+    return null;
+  }
+
+  const rawError = String(
+    (parsed as { error?: unknown }).error ?? "",
+  ).trim();
+  if (!rawError) return null;
+
+  if (rawError === "invalid_client") {
+    return {
+      code: "TOOL_INVALID_CLIENT",
+      message: "A integração recusou temporariamente o identificador do cliente.",
+      retryable: true,
+    };
+  }
+
+  if (/timeout|timed out|aborted/i.test(rawError)) {
+    return {
+      code: "TOOL_TIMEOUT",
+      message: "A integração excedeu o tempo de resposta.",
+      retryable: true,
+    };
+  }
+
+  if (/fetch failed|network|connection refused|econn/i.test(rawError)) {
+    return {
+      code: "TOOL_NETWORK_ERROR",
+      message: "Falha de rede ao consultar a integração.",
+      retryable: true,
+    };
+  }
+
+  return {
+    code: "TOOL_PROVIDER_ERROR",
+    message: `A integração rejeitou a operação: ${rawError}`,
+    retryable: false,
   };
 }
 
