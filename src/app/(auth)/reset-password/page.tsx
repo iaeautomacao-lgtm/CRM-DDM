@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE, translateAuthError } from "@/lib/auth/auth-errors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,8 +36,8 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    if (password.length < 6) {
-      setError("A senha deve ter pelo menos 6 caracteres.");
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(PASSWORD_TOO_SHORT_MESSAGE);
       return;
     }
 
@@ -47,7 +48,7 @@ export default function ResetPasswordPage() {
     });
 
     if (error) {
-      setError(error.message);
+      setError(translateAuthError(error));
       setLoading(false);
       return;
     }
@@ -98,7 +99,7 @@ export default function ResetPasswordPage() {
         <CardContent>
           <form onSubmit={handleUpdatePassword} className="flex flex-col gap-4">
             {error && (
-              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive">
                 {error}
               </div>
             )}
@@ -110,7 +111,7 @@ export default function ResetPasswordPage() {
               <Input
                 id="password"
                 type="password" autoComplete="new-password"
-                placeholder="******"
+                placeholder={`Pelo menos ${MIN_PASSWORD_LENGTH} caracteres`}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required

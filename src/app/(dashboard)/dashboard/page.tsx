@@ -36,8 +36,13 @@ import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
 import { AiPerformance } from '@/components/dashboard/ai-performance'
 import { FinancialPerformance } from '@/components/dashboard/financial-performance'
+import { ErrorState } from '@/components/dashboard/error-state'
 
 type RangeDays = 7 | 30 | 90
+
+// Seções carregadas por loadAll — usadas para rastrear quais falharam
+// e oferecer "Tentar novamente" em vez de skeletons eternos.
+type DashboardSection = 'metrics' | 'series' | 'status' | 'responseTime' | 'activity' | 'ai'
 
 export default function DashboardPage() {
   const [metrics, setMetrics] = useState<MetricsBundle | null>(null)
@@ -63,43 +68,89 @@ export default function DashboardPage() {
   const [aiPerformance, setAiPerformance] = useState<AiAnalyticsData | null>(null)
   const [aiPerformanceLoading, setAiPerformanceLoading] = useState(true)
 
+  const [failed, setFailed] = useState<Set<DashboardSection>>(() => new Set())
+  const markFailed = useCallback((section: DashboardSection) => {
+    setFailed((prev) => new Set(prev).add(section))
+  }, [])
+
   const loadAll = useCallback(() => {
     const db = createClient()
 
     void loadMetrics(db)
       .then((m) => setMetrics(m))
-      .catch((err) => console.error('[dashboard] metrics failed:', err))
+      .catch((err) => {
+        console.error('[dashboard] metrics failed:', err)
+        markFailed('metrics')
+      })
       .finally(() => setMetricsLoading(false))
 
     void loadConversationsSeries(db, 30)
       .then((s) => setSeries((prev) => ({ ...prev, 30: s })))
-      .catch((err) => console.error('[dashboard] series failed:', err))
+      .catch((err) => {
+        console.error('[dashboard] series failed:', err)
+        markFailed('series')
+      })
       .finally(() => setSeriesLoading(false))
 
     void loadConversationsStatusDonut(db)
       .then((p) => setStatusData(p))
-      .catch((err) => console.error('[dashboard] status donut failed:', err))
+      .catch((err) => {
+        console.error('[dashboard] status donut failed:', err)
+        markFailed('status')
+      })
       .finally(() => setStatusLoading(false))
 
     void loadResponseTime(db)
       .then((r) => setResponseTime(r))
-      .catch((err) => console.error('[dashboard] response time failed:', err))
+      .catch((err) => {
+        console.error('[dashboard] response time failed:', err)
+        markFailed('responseTime')
+      })
       .finally(() => setResponseTimeLoading(false))
 
     void loadActivity(db, 50)
       .then((a) => setActivity(a))
-      .catch((err) => console.error('[dashboard] activity failed:', err))
+      .catch((err) => {
+        console.error('[dashboard] activity failed:', err)
+        markFailed('activity')
+      })
       .finally(() => setActivityLoading(false))
 
     void loadAiAnalytics(db)
       .then((a) => setAiPerformance(a))
-      .catch((err) => console.error('[dashboard] ai performance failed:', err))
+      .catch((err) => {
+        console.error('[dashboard] ai performance failed:', err)
+        markFailed('ai')
+      })
       .finally(() => setAiPerformanceLoading(false))
-  }, [])
+  }, [markFailed])
 
   useEffect(() => {
     loadAll()
   }, [loadAll])
+
+  // "Tentar novamente": reinicia os estados (volta a mostrar os
+  // skeletons) e recarrega tudo.
+  const retryAll = useCallback(() => {
+    setFailed(new Set())
+    setMetricsLoading(true)
+    setSeriesLoading(true)
+    setStatusLoading(true)
+    setResponseTimeLoading(true)
+    setActivityLoading(true)
+    setAiPerformanceLoading(true)
+    loadAll()
+    // loadAll só traz a série de 30 dias; o período escolhido (7/90) que
+    // falhou precisa ser buscado de novo, senão o gráfico fica no skeleton.
+    if (range !== 30) {
+      loadConversationsSeries(createClient(), range)
+        .then((s) => setSeries((prev) => ({ ...prev, [range]: s })))
+        .catch((err) => {
+          console.error('[dashboard] series failed:', err)
+          markFailed('series')
+        })
+    }
+  }, [loadAll, range, markFailed])
 
   const handleRangeChange = useCallback(
     (r: RangeDays) => {
@@ -109,10 +160,13 @@ export default function DashboardPage() {
       const db = createClient()
       loadConversationsSeries(db, r)
         .then((s) => setSeries((prev) => ({ ...prev, [r]: s })))
-        .catch((err) => console.error('[dashboard] series failed:', err))
+        .catch((err) => {
+          console.error('[dashboard] series failed:', err)
+          markFailed('series')
+        })
         .finally(() => setSeriesLoading(false))
     },
-    [series],
+    [series, markFailed],
   )
 
   return (
@@ -128,9 +182,26 @@ export default function DashboardPage() {
         Análise em tempo real de conversas, contatos, negócios, transmissões e automações.
       </p>
 
+      {/* Falha parcial: gráficos que não carregaram ficariam em skeleton
+          para sempre — avisa e permite recarregar tudo. As seções de
+          métricas e IA têm o próprio estado de erro abaixo. */}
+      {(failed.has('series') || failed.has('status') || failed.has('responseTime') || failed.has('activity')) && (
+        <ErrorState
+          className="mt-5 min-h-0"
+          title="Parte do painel não pôde ser carregada"
+          onRetry={retryAll}
+        />
+      )}
+
       {/* Metric cards */}
       <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {metricsLoading || !metrics ? (
+        {failed.has('metrics') ? (
+          <ErrorState
+            className="sm:col-span-2 lg:col-span-4"
+            title="Não foi possível carregar os indicadores"
+            onRetry={retryAll}
+          />
+        ) : metricsLoading || !metrics ? (
           Array.from({ length: 4 }).map((_, i) => (
             <SkeletonCard key={i} className="min-h-[120px]" />
           ))
@@ -188,16 +259,24 @@ export default function DashboardPage() {
         <QuickActions />
       </div>
 
-      {/* Recuperação Financeira e Metas */}
+      {/* Recuperação Financeira */}
       <div className="mt-10">
         <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Recuperação Financeira</h3>
-        <FinancialPerformance data={aiPerformance} loading={aiPerformanceLoading} />
+        {failed.has('ai') ? (
+          <ErrorState title="Não foi possível carregar a recuperação financeira" onRetry={retryAll} />
+        ) : (
+          <FinancialPerformance data={aiPerformance} loading={aiPerformanceLoading} />
+        )}
       </div>
 
       {/* Desempenho da IA e Vendas */}
       <div className="mt-10">
         <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Desempenho da IA & Conversão</h3>
-        <AiPerformance data={aiPerformance} loading={aiPerformanceLoading} />
+        {failed.has('ai') ? (
+          <ErrorState title="Não foi possível carregar o desempenho da IA" onRetry={retryAll} />
+        ) : (
+          <AiPerformance data={aiPerformance} loading={aiPerformanceLoading} />
+        )}
       </div>
 
       {/* Charts row */}

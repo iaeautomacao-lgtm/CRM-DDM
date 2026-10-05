@@ -339,24 +339,28 @@ export function ContactSidebar({
                 </Button>
               </div>
             ) : (
-              <div 
-                className="group mt-3 flex items-center justify-center gap-1.5 cursor-pointer hover:opacity-80"
+              // <button> (não <div>) para o nome ser editável pelo teclado.
+              <button
+                type="button"
+                className="group mt-3 flex w-full items-center justify-center gap-1.5 cursor-pointer rounded-md hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
                 onClick={() => setIsEditingName(true)}
                 title="Clique para editar o nome"
+                aria-label={`Editar nome: ${displayName}`}
               >
-                <h3 className="text-sm font-semibold text-foreground group-hover:text-primary">
+                <span className="text-sm font-semibold text-foreground group-hover:text-primary">
                   {displayName}
-                </h3>
+                </span>
                 <svg
-                  className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity"
                   fill="none"
+                  aria-hidden="true"
                   stroke="currentColor"
                   strokeWidth="2"
                   viewBox="0 0 24 24"
                 >
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                 </svg>
-              </div>
+              </button>
             )}
             {contact.company && (
               <p className="text-xs text-muted-foreground">{contact.company}</p>
@@ -601,6 +605,7 @@ export function ContactSidebar({
                   className="h-auto bg-primary px-2 hover:bg-primary/90"
                   onClick={handleAddNote}
                   disabled={!newNote.trim() || addingNote}
+                  aria-label="Adicionar nota"
                 >
                   <Plus className="h-3 w-3" />
                 </Button>
@@ -616,7 +621,7 @@ export function ContactSidebar({
                       {note.note_text}
                     </p>
                     <p className="mt-1 text-[10px] text-muted-foreground">
-                      {format(new Date(note.created_at), "MMM d, yyyy HH:mm")}
+                      {format(new Date(note.created_at), "dd/MM/yyyy HH:mm")}
                     </p>
                   </div>
                 ))}

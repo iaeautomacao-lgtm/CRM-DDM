@@ -56,7 +56,7 @@ export default function AutomationLogsPage({
         setAutomation(autRes.data as Automation | null)
         setLogs((logRes.data ?? []) as AutomationLog[])
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load logs")
+        setError(err instanceof Error ? err.message : "Falha ao carregar os logs")
       }
     }
     load()
@@ -67,7 +67,7 @@ export default function AutomationLogsPage({
       <div className="flex h-64 flex-col items-center justify-center gap-3">
         <p className="text-sm text-red-400">{error}</p>
         <Button variant="outline" onClick={() => router.push("/automations")}>
-          Back
+          Voltar
         </Button>
       </div>
     )
@@ -88,21 +88,21 @@ export default function AutomationLogsPage({
           type="button"
           onClick={() => router.push("/automations")}
           className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Back"
+          aria-label="Voltar"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div>
           <h1 className="text-2xl font-bold text-foreground">{automation.name}</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">Execution logs</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">Logs de execução</p>
         </div>
       </div>
 
       {logs.length === 0 ? (
         <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40">
-          <p className="text-sm text-foreground">No executions yet</p>
+          <p className="text-sm text-foreground">Nenhuma execução ainda</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Trigger this automation to see runs here.
+            Dispare esta automação para ver as execuções aqui.
           </p>
         </div>
       ) : (
@@ -127,10 +127,10 @@ export default function AutomationLogsPage({
                   <StatusBadge status={log.status} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-foreground">
-                      {log.contact?.name ?? log.contact?.phone ?? "Unknown contact"}
+                      {log.contact?.name ?? log.contact?.phone ?? "Contato desconhecido"}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {log.trigger_event} · {log.steps_executed?.length ?? 0} step
+                      {log.trigger_event} · {log.steps_executed?.length ?? 0} etapa
                       {log.steps_executed?.length === 1 ? "" : "s"}
                     </div>
                   </div>
@@ -150,7 +150,7 @@ export default function AutomationLogsPage({
                         <StepRow key={i} result={r} />
                       ))}
                       {(log.steps_executed ?? []).length === 0 && (
-                        <li className="text-xs text-muted-foreground">No steps recorded.</li>
+                        <li className="text-xs text-muted-foreground">Nenhuma etapa registrada.</li>
                       )}
                     </ul>
                   </div>
@@ -164,13 +164,19 @@ export default function AutomationLogsPage({
   )
 }
 
+const STATUS_LABEL: Record<string, string> = {
+  success: "Sucesso",
+  partial: "Parcial",
+  failed: "Falhou",
+}
+
 function StatusBadge({ status }: { status: AutomationLog["status"] }) {
   const classes =
     status === "success"
       ? "border-primary/30 bg-primary/10 text-primary"
       : status === "partial"
-      ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-      : "border-red-500/30 bg-red-500/10 text-red-300"
+      ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+      : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
   return (
     <span
       className={cn(
@@ -178,7 +184,7 @@ function StatusBadge({ status }: { status: AutomationLog["status"] }) {
         classes,
       )}
     >
-      {status}
+      {STATUS_LABEL[status] ?? status}
     </span>
   )
 }

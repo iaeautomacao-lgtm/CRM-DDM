@@ -31,7 +31,7 @@ export function validateStepsForActivation(steps: StepLike[]): ValidationIssue[]
   if (!Array.isArray(steps) || steps.length === 0) {
     issues.push({
       path: 'steps',
-      message: 'active automations need at least one step',
+      message: 'automações ativas precisam de pelo menos uma etapa',
     })
     return issues
   }
@@ -55,69 +55,69 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
   switch (step.step_type) {
     case 'send_message':
       if (!nonEmpty(c.text)) {
-        issues.push({ path: `${path}.text`, message: 'message text is required' })
+        issues.push({ path: `${path}.text`, message: 'o texto da mensagem é obrigatório' })
       }
       break
     case 'send_template':
       if (!nonEmpty(c.template_name)) {
-        issues.push({ path: `${path}.template_name`, message: 'template name is required' })
+        issues.push({ path: `${path}.template_name`, message: 'o nome do template é obrigatório' })
       }
       break
     case 'add_tag':
     case 'remove_tag':
       if (!nonEmpty(c.tag_id)) {
-        issues.push({ path: `${path}.tag_id`, message: 'tag is required' })
+        issues.push({ path: `${path}.tag_id`, message: 'a tag é obrigatória' })
       }
       break
     case 'assign_conversation':
       if (c.mode === 'specific' && !nonEmpty(c.agent_id)) {
         issues.push({
           path: `${path}.agent_id`,
-          message: 'agent is required when mode is "specific"',
+          message: 'o atendente é obrigatório quando o modo é "atendente específico"',
         })
       }
       break
     case 'update_contact_field':
       if (!nonEmpty(c.field)) {
-        issues.push({ path: `${path}.field`, message: 'field name is required' })
+        issues.push({ path: `${path}.field`, message: 'o nome do campo é obrigatório' })
       }
       if (c.value === undefined || c.value === null || c.value === '') {
-        issues.push({ path: `${path}.value`, message: 'field value is required' })
+        issues.push({ path: `${path}.value`, message: 'o valor do campo é obrigatório' })
       }
       break
     case 'create_deal':
       if (!nonEmpty(c.pipeline_id)) {
-        issues.push({ path: `${path}.pipeline_id`, message: 'pipeline is required' })
+        issues.push({ path: `${path}.pipeline_id`, message: 'o pipeline é obrigatório' })
       }
       if (!nonEmpty(c.stage_id)) {
-        issues.push({ path: `${path}.stage_id`, message: 'stage is required' })
+        issues.push({ path: `${path}.stage_id`, message: 'a etapa é obrigatória' })
       }
       if (!nonEmpty(c.title)) {
-        issues.push({ path: `${path}.title`, message: 'title is required' })
+        issues.push({ path: `${path}.title`, message: 'o título é obrigatório' })
       }
       break
     case 'wait':
       if (typeof c.amount !== 'number' || !Number.isFinite(c.amount) || c.amount <= 0) {
-        issues.push({ path: `${path}.amount`, message: 'wait amount must be greater than 0' })
+        issues.push({ path: `${path}.amount`, message: 'a quantidade de espera deve ser maior que 0' })
       }
       if (!['minutes', 'hours', 'days'].includes(String(c.unit))) {
         issues.push({
           path: `${path}.unit`,
-          message: 'wait unit must be minutes, hours, or days',
+          message: 'a unidade de espera deve ser minutos, horas ou dias',
         })
       }
       break
     case 'condition':
       if (!nonEmpty(c.subject)) {
-        issues.push({ path: `${path}.subject`, message: 'condition subject is required' })
+        issues.push({ path: `${path}.subject`, message: 'o critério da condição é obrigatório' })
       }
       if (!nonEmpty(c.operand)) {
-        issues.push({ path: `${path}.operand`, message: 'condition operand is required' })
+        issues.push({ path: `${path}.operand`, message: 'o operando da condição é obrigatório' })
       }
       break
     case 'send_webhook':
       if (!nonEmpty(c.url)) {
-        issues.push({ path: `${path}.url`, message: 'webhook URL is required' })
+        issues.push({ path: `${path}.url`, message: 'a URL do webhook é obrigatória' })
         break
       }
       try {
@@ -125,11 +125,11 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
         if (u.protocol !== 'http:' && u.protocol !== 'https:') {
           issues.push({
             path: `${path}.url`,
-            message: 'webhook URL must use http or https',
+            message: 'a URL do webhook deve usar http ou https',
           })
         }
       } catch {
-        issues.push({ path: `${path}.url`, message: 'webhook URL is not a valid URL' })
+        issues.push({ path: `${path}.url`, message: 'a URL do webhook não é válida' })
       }
       break
     case 'close_conversation':
@@ -138,7 +138,7 @@ function validateOne(step: StepLike, path: string, issues: ValidationIssue[]): v
       // before this field existed still validate and run fine.
       break
     default:
-      issues.push({ path, message: `unknown step type: ${step.step_type}` })
+      issues.push({ path, message: `tipo de etapa desconhecido: ${step.step_type}` })
   }
 }
 
@@ -152,9 +152,9 @@ export function validateTriggerForActivation(
   if (triggerType === 'keyword_match') {
     const k = cfg.keywords
     if (!Array.isArray(k) || k.length === 0) {
-      issues.push({ path: 'trigger.keywords', message: 'at least one keyword is required' })
+      issues.push({ path: 'trigger.keywords', message: 'informe pelo menos uma palavra-chave' })
     } else if (k.some((v) => typeof v !== 'string' || v.trim() === '')) {
-      issues.push({ path: 'trigger.keywords', message: 'keywords cannot be empty strings' })
+      issues.push({ path: 'trigger.keywords', message: 'palavras-chave não podem ser vazias' })
     }
     // A missing match_type defaults to "contains" at runtime (see
     // automations/engine.ts and flows/engine.ts, which both read
@@ -165,16 +165,16 @@ export function validateTriggerForActivation(
     if (cfg.match_type != null && cfg.match_type !== 'exact' && cfg.match_type !== 'contains') {
       issues.push({
         path: 'trigger.match_type',
-        message: 'match type must be "exact" or "contains"',
+        message: 'o tipo de correspondência deve ser "exata" ou "contém"',
       })
     }
   } else if (triggerType === 'time_based') {
     if (!nonEmpty(cfg.schedule)) {
-      issues.push({ path: 'trigger.schedule', message: 'schedule is required' })
+      issues.push({ path: 'trigger.schedule', message: 'o agendamento é obrigatório' })
     }
   } else if (triggerType === 'tag_added') {
     if (!nonEmpty(cfg.tag_id)) {
-      issues.push({ path: 'trigger.tag_id', message: 'tag is required' })
+      issues.push({ path: 'trigger.tag_id', message: 'a tag é obrigatória' })
     }
   }
 

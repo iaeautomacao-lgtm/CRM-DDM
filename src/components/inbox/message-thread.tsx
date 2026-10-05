@@ -57,6 +57,7 @@ import {
   type RecallDraft,
 } from "./message-composer";
 import { PendingSendBubble, type PendingSendData } from "./pending-send-bubble";
+import { CONVERSATION_STATUS_LABELS } from "./status-labels";
 import { createPendingSendQueue } from "@/lib/inbox/pending-send-queue";
 import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import { transferConversation } from "@/lib/conversations/actions";
@@ -178,10 +179,13 @@ function groupMessagesByDate(messages: Message[]) {
 }
 
 const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string }[] = [
-  { label: "Aberto", value: "open", color: "text-primary" },
-  { label: "Pendente", value: "pending", color: "text-amber-400" },
-  { label: "Fechado", value: "closed", color: "text-muted-foreground" },
+  { label: CONVERSATION_STATUS_LABELS.open, value: "open", color: "text-primary" },
+  { label: CONVERSATION_STATUS_LABELS.pending, value: "pending", color: "text-amber-400" },
+  { label: CONVERSATION_STATUS_LABELS.closed, value: "closed", color: "text-muted-foreground" },
 ];
+
+// Distância do fim (px) abaixo da qual a thread ainda conta como "no fim".
+const SCROLL_NEAR_BOTTOM_PX = 120;
 
 /**
  * WhatsApp-style doodle background applied to the chat area (both the
@@ -433,6 +437,9 @@ export function MessageThread({
   // messages fetch. Reconnect/foreground resyncs should update the
   // existing thread silently instead of replacing it with the main loader.
   const loadedConversationIdRef = useRef<string | null>(null);
+  // Conversa cujo 1º fetch terminou (com sucesso OU erro) — libera a
+  // rolagem inicial; com erro, sem isso a rolagem nunca era liberada.
+  const settledConversationIdRef = useRef<string | null>(null);
 
   // Fetch messages whenever the selected conversation changes. Kept
   // separate from the unread-reset effect so that incoming messages
@@ -466,6 +473,7 @@ export function MessageThread({
         onMessagesLoadedRef.current(data ?? []);
         loadedConversationIdRef.current = conversationId;
       }
+      settledConversationIdRef.current = conversationId;
 
       if (!cancelled && showInitialLoading) setLoading(false);
     })();
@@ -616,14 +624,6 @@ export function MessageThread({
         if (error) console.error("Failed to reset unread_count:", error);
       });
   }, [conversationId, hasUnread]);
-
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    if (scrollRef.current) {
-      const el = scrollRef.current;
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messages]);
 
   // ---- Undo-Send: commit helpers ------------------------------------
   //
@@ -1169,6 +1169,64 @@ export function MessageThread({
     [conversation, enqueuePending],
   );
 
+  // ---- Auto-scroll -------------------------------------------------------
+  //
+  // Só desce sozinho quando o atendente já está perto do fim (< 120px), no
+  // 1º load da conversa ou quando a mudança é um envio dele (bolha de
+  // "Desfazer" nova ou mensagem otimista `temp-`). Se ele rolou para cima
+  // para ler o histórico, mensagens novas mostram o botão "Novas mensagens"
+  // em vez de arrancá-lo da posição.
+  const nearBottomRef = useRef(true);
+  const initialScrollConvRef = useRef<string | null>(null);
+  const prevMsgCountRef = useRef(0);
+  const prevPendingCountRef = useRef(0);
+  const [showNewMessages, setShowNewMessages] = useState(false);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    nearBottomRef.current = true;
+    setShowNewMessages(false);
+  }, []);
+
+  const handleThreadScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < SCROLL_NEAR_BOTTOM_PX;
+    nearBottomRef.current = near;
+    if (near) setShowNewMessages(false);
+  }, []);
+
+  const pendingCount = pendingSends.length;
+  useEffect(() => {
+    const grewMsgs = messages.length > prevMsgCountRef.current;
+    const grewPending = pendingCount > prevPendingCountRef.current;
+    prevMsgCountRef.current = messages.length;
+    prevPendingCountRef.current = pendingCount;
+
+    if (!scrollRef.current || loading || !conversationId) return;
+
+    // 1º load da conversa: espera o fetch dela terminar e vai pro fim.
+    if (initialScrollConvRef.current !== conversationId) {
+      if (settledConversationIdRef.current !== conversationId) {
+        setShowNewMessages(false);
+        return;
+      }
+      initialScrollConvRef.current = conversationId;
+      scrollToBottom();
+      return;
+    }
+
+    const last = messages[messages.length - 1];
+    const ownSend = grewPending || (grewMsgs && !!last?.id.startsWith("temp-"));
+    if (ownSend || nearBottomRef.current) {
+      scrollToBottom();
+    } else if (grewMsgs) {
+      setShowNewMessages(true);
+    }
+  }, [messages, pendingCount, loading, conversationId, scrollToBottom]);
+
   // Single reaction-set primitive. emoji === "" removes; otherwise adds/swaps.
   // The "toggle" semantic (pill click) is computed at the call site where the
   // current reactions for the bubble are already in scope — keeps this
@@ -1355,17 +1413,20 @@ export function MessageThread({
             <p className="truncate text-xs text-muted-foreground">{contact.phone ?? contact.email ?? ""}</p>
           </div>
           {/* Session timer badge — hidden on the narrowest phones so
-              the name + back arrow keep their room. */}
-          <Badge
-            variant="outline"
-            className={cn(
-              "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
-              sessionInfo.expired ? "text-red-400" : "text-primary"
-            )}
-          >
-            <Clock className="h-3 w-3" />
-            {sessionInfo.remaining}
-          </Badge>
+              the name + back arrow keep their room. Sem texto (WAHA, sem
+              janela de 24h) não renderiza — evita o relógio vazio. */}
+          {sessionInfo.remaining && (
+            <Badge
+              variant="outline"
+              className={cn(
+                "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
+                sessionInfo.expired ? "text-red-400" : "text-primary"
+              )}
+            >
+              <Clock className="h-3 w-3" />
+              {sessionInfo.remaining}
+            </Badge>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -1577,89 +1638,100 @@ export function MessageThread({
       <ConversationOriginBanner key={conversation.id} conversationId={conversation.id} />
 
       {/* Messages Area */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          </div>
-        ) : messages.length === 0 && pendingSends.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12">
-            <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
-            <p className="text-xs text-muted-foreground">
-              Envie um template para iniciar a conversa
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {messageGroups.map((group) => (
-              <div key={group.date}>
-                {/* Date separator */}
-                <div className="mb-4 flex items-center justify-center">
-                  <span className="rounded-full bg-muted px-3 py-1 text-[10px] font-medium text-muted-foreground">
-                    {formatDateSeparator(group.date)}
-                  </span>
-                </div>
-                {/* Messages */}
-                <div className="space-y-2">
-                  {group.messages.map((msg) => {
-                    const parent = msg.reply_to_message_id
-                      ? messagesById.get(msg.reply_to_message_id)
-                      : null;
-                    const reply = parent
-                      ? {
-                          authorLabel: authorLabelFor(parent),
-                          preview: buildReplyPreview(parent),
-                        }
-                      : null;
-                    const msgReactions = reactionsByMessageId.get(msg.id);
-                    // Toggle is computed at the call site — `msgReactions`
-                    // and `user?.id` are already in scope, no extra hook.
-                    const handlePillToggle = (emoji: string) => {
-                      const own = msgReactions?.find(
-                        (r) =>
-                          r.actor_type === "agent" &&
-                          r.actor_id === user?.id,
-                      );
-                      const next = own?.emoji === emoji ? "" : emoji;
-                      void postReaction(msg.id, next);
-                    };
-                    return (
-                      <MessageActions
-                        key={msg.id}
-                        message={msg}
-                        onReply={() => handleStartReply(msg)}
-                        onReact={(emoji) => {
-                          if (emoji) void postReaction(msg.id, emoji);
-                        }}
-                      >
-                        <MessageBubble
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-4 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          ) : messages.length === 0 && pendingSends.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
+              <p className="text-xs text-muted-foreground">
+                Envie um template para iniciar a conversa
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {messageGroups.map((group) => (
+                <div key={group.date}>
+                  {/* Date separator */}
+                  <div className="mb-4 flex items-center justify-center">
+                    <span className="rounded-full bg-muted px-3 py-1 text-[10px] font-medium text-muted-foreground">
+                      {formatDateSeparator(group.date)}
+                    </span>
+                  </div>
+                  {/* Messages */}
+                  <div className="space-y-2">
+                    {group.messages.map((msg) => {
+                      const parent = msg.reply_to_message_id
+                        ? messagesById.get(msg.reply_to_message_id)
+                        : null;
+                      const reply = parent
+                        ? {
+                            authorLabel: authorLabelFor(parent),
+                            preview: buildReplyPreview(parent),
+                          }
+                        : null;
+                      const msgReactions = reactionsByMessageId.get(msg.id);
+                      // Toggle is computed at the call site — `msgReactions`
+                      // and `user?.id` are already in scope, no extra hook.
+                      const handlePillToggle = (emoji: string) => {
+                        const own = msgReactions?.find(
+                          (r) =>
+                            r.actor_type === "agent" &&
+                            r.actor_id === user?.id,
+                        );
+                        const next = own?.emoji === emoji ? "" : emoji;
+                        void postReaction(msg.id, next);
+                      };
+                      return (
+                        <MessageActions
+                          key={msg.id}
                           message={msg}
-                          reply={reply}
-                          reactions={msgReactions}
-                          currentUserId={user?.id}
-                          onToggleReaction={handlePillToggle}
-                          campaign={campaignFor(msg)}
-                        />
-                      </MessageActions>
-                    );
-                  })}
+                          onReply={() => handleStartReply(msg)}
+                          onReact={(emoji) => {
+                            if (emoji) void postReaction(msg.id, emoji);
+                          }}
+                        >
+                          <MessageBubble
+                            message={msg}
+                            reply={reply}
+                            reactions={msgReactions}
+                            currentUserId={user?.id}
+                            onToggleReaction={handlePillToggle}
+                            campaign={campaignFor(msg)}
+                          />
+                        </MessageActions>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
-            {pendingSends.length > 0 && (
-              <div className="space-y-2">
-                {pendingSends.map((p) => (
-                  <PendingSendBubble
-                    key={p.id}
-                    data={p.data}
-                    secondsLeft={p.secondsLeft}
-                    onUndo={() => cancelPending(p.id)}
-                    onEdit={() => editPending(p.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+              ))}
+              {pendingSends.length > 0 && (
+                <div className="space-y-2">
+                  {pendingSends.map((p) => (
+                    <PendingSendBubble
+                      key={p.id}
+                      data={p.data}
+                      secondsLeft={p.secondsLeft}
+                      onUndo={() => cancelPending(p.id)}
+                      onEdit={() => editPending(p.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {showNewMessages && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-md transition-colors hover:bg-primary/90"
+          >
+            ↓ Novas mensagens
+          </button>
         )}
       </div>
 

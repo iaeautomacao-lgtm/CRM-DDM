@@ -92,17 +92,17 @@ interface StepMeta {
 }
 
 const STEP_META: Record<AutomationStepType, StepMeta> = {
-  send_message: { label: "Send Message", icon: MessageSquare, border: "border-l-primary" },
-  send_template: { label: "Send Template", icon: FileText, border: "border-l-primary" },
-  add_tag: { label: "Add Tag", icon: Tag, border: "border-l-primary" },
-  remove_tag: { label: "Remove Tag", icon: TagIcon, border: "border-l-primary" },
-  assign_conversation: { label: "Assign Conversation", icon: UserCheck, border: "border-l-primary" },
-  update_contact_field: { label: "Update Contact Field", icon: PencilLine, border: "border-l-primary" },
-  create_deal: { label: "Create Deal", icon: Briefcase, border: "border-l-primary" },
-  wait: { label: "Wait", icon: Hourglass, border: "border-l-border" },
-  condition: { label: "Condition (If/Else)", icon: GitBranch, border: "border-l-amber-500" },
-  send_webhook: { label: "Send Webhook", icon: Webhook, border: "border-l-primary" },
-  close_conversation: { label: "Close Conversation", icon: CircleSlash, border: "border-l-primary" },
+  send_message: { label: "Enviar mensagem", icon: MessageSquare, border: "border-l-primary" },
+  send_template: { label: "Enviar template", icon: FileText, border: "border-l-primary" },
+  add_tag: { label: "Adicionar tag", icon: Tag, border: "border-l-primary" },
+  remove_tag: { label: "Remover tag", icon: TagIcon, border: "border-l-primary" },
+  assign_conversation: { label: "Atribuir conversa", icon: UserCheck, border: "border-l-primary" },
+  update_contact_field: { label: "Atualizar campo do contato", icon: PencilLine, border: "border-l-primary" },
+  create_deal: { label: "Criar negócio", icon: Briefcase, border: "border-l-primary" },
+  wait: { label: "Aguardar", icon: Hourglass, border: "border-l-border" },
+  condition: { label: "Condição (Se/Senão)", icon: GitBranch, border: "border-l-amber-500" },
+  send_webhook: { label: "Enviar webhook", icon: Webhook, border: "border-l-primary" },
+  close_conversation: { label: "Encerrar conversa", icon: CircleSlash, border: "border-l-primary" },
 }
 
 const ADDABLE_STEPS: AutomationStepType[] = [
@@ -120,17 +120,17 @@ const ADDABLE_STEPS: AutomationStepType[] = [
 ]
 
 const TRIGGER_OPTIONS: { value: AutomationTriggerType; label: string; hint: string }[] = [
-  { value: "new_message_received", label: "New Message Received", hint: "Any incoming message" },
+  { value: "new_message_received", label: "Nova mensagem recebida", hint: "Qualquer mensagem recebida" },
   {
     value: "first_inbound_message",
-    label: "First Message from Contact",
-    hint: "First time this contact ever messages you (works for manually-added contacts too)",
+    label: "Primeira mensagem do contato",
+    hint: "Primeira vez que o contato envia mensagem (vale também para contatos adicionados manualmente)",
   },
-  { value: "keyword_match", label: "Keyword Match", hint: "Message contains specific keyword(s)" },
-  { value: "new_contact_created", label: "New Contact Created", hint: "When a contact is auto-created from an incoming message" },
-  { value: "conversation_assigned", label: "Conversation Assigned", hint: "When assigned to an agent" },
-  { value: "tag_added", label: "Tag Added", hint: "When a tag is added to a contact" },
-  { value: "time_based", label: "Time-Based", hint: "On a recurring schedule" },
+  { value: "keyword_match", label: "Palavra-chave", hint: "A mensagem contém palavra(s)-chave específica(s)" },
+  { value: "new_contact_created", label: "Novo contato criado", hint: "Quando um contato é criado automaticamente a partir de uma mensagem recebida" },
+  { value: "conversation_assigned", label: "Conversa atribuída", hint: "Quando a conversa é atribuída a um atendente" },
+  { value: "tag_added", label: "Tag adicionada", hint: "Quando uma tag é adicionada a um contato" },
+  { value: "time_based", label: "Agendada", hint: "Em um horário recorrente" },
 ]
 
 function cid(): string {
@@ -276,7 +276,7 @@ function TagSelect({
   if (scopedTags.length === 0) {
     return (
       <Input
-        placeholder="Tag id"
+        placeholder="ID da tag"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="bg-muted text-foreground"
@@ -296,7 +296,7 @@ function TagSelect({
         onChange={(e) => onChange(e.target.value)}
         className={SELECT_CLASS}
       >
-        <option value="">Select a tag…</option>
+        <option value="">Selecione uma tag…</option>
         {scopedTags.map((t) => (
           <option key={t.id} value={t.id}>
             {t.name}
@@ -305,7 +305,7 @@ function TagSelect({
         {/* Preserve a saved tag that's since been deleted so editing an
             existing automation doesn't silently drop it. */}
         {value && !selected && (
-          <option value={value}>{value} (unknown tag)</option>
+          <option value={value}>{value} (tag desconhecida)</option>
         )}
       </select>
     </div>
@@ -333,11 +333,11 @@ function ContactFieldSelect({
       onChange={(e) => onChange(e.target.value)}
       className={SELECT_CLASS}
     >
-      <option value="name">Name</option>
+      <option value="name">Nome</option>
       <option value="email">Email</option>
-      <option value="company">Company</option>
+      <option value="company">Empresa</option>
       {customFields.length > 0 && (
-        <optgroup label="Custom fields">
+        <optgroup label="Campos personalizados">
           {customFields.map((f) => (
             <option key={f.id} value={`custom:${f.id}`}>
               {f.field_name}
@@ -346,7 +346,7 @@ function ContactFieldSelect({
         </optgroup>
       )}
       {customValue && !knownCustom && (
-        <option value={customValue}>{customValue} (unknown field)</option>
+        <option value={customValue}>{customValue} (campo desconhecido)</option>
       )}
     </select>
   )
@@ -365,7 +365,7 @@ function AgentSelect({
   if (members.length === 0) {
     return (
       <Input
-        placeholder="Agent id"
+        placeholder="ID do atendente"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="bg-muted text-foreground"
@@ -379,14 +379,14 @@ function AgentSelect({
       onChange={(e) => onChange(e.target.value)}
       className={SELECT_CLASS}
     >
-      <option value="">Select an agent…</option>
+      <option value="">Selecione um atendente…</option>
       {members.map((m) => (
         <option key={m.user_id} value={m.user_id}>
           {m.full_name || m.email || m.user_id}
         </option>
       ))}
       {value && !selected && (
-        <option value={value}>{value} (unknown agent)</option>
+        <option value={value}>{value} (atendente desconhecido)</option>
       )}
     </select>
   )
@@ -409,7 +409,7 @@ function SendTemplateFields({
   if (templates.length === 0) {
     return (
       <>
-        <FieldBlock label="Template name">
+        <FieldBlock label="Nome do template">
           <Input
             value={templateName}
             onChange={(e) =>
@@ -418,7 +418,7 @@ function SendTemplateFields({
             className="bg-muted text-foreground"
           />
         </FieldBlock>
-        <FieldBlock label="Language">
+        <FieldBlock label="Idioma">
           <Input
             value={language}
             onChange={(e) =>
@@ -449,7 +449,7 @@ function SendTemplateFields({
         }}
         className={SELECT_CLASS}
       >
-        <option value="">Select a template…</option>
+        <option value="">Selecione um template…</option>
         {templates.map((t) => {
           const lang = t.language ?? "en_US"
           return (
@@ -460,7 +460,7 @@ function SendTemplateFields({
         })}
         {current && !hasMatch && (
           <option value={current}>
-            {templateName} ({language || "unknown"}) — not in approved list
+            {templateName} ({language || "desconhecido"}) — fora da lista de aprovados
           </option>
         )}
       </select>
@@ -512,7 +512,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
     setSaving(true)
     try {
       const payload = {
-        name: state.name || "Untitled automation",
+        name: state.name || "Automação sem nome",
         description: state.description || null,
         trigger_type: state.trigger_type,
         trigger_config: state.trigger_config,
@@ -542,14 +542,14 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           body?.issues?.[0]
         if (firstIssue?.message) {
           toast.error(firstIssue.message, {
-            description: firstIssue.path ? `at ${firstIssue.path}` : undefined,
+            description: firstIssue.path ? `em ${firstIssue.path}` : undefined,
           })
         } else {
-          toast.error(body?.error ?? "Save failed")
+          toast.error(body?.error ?? "Falha ao salvar")
         }
         return
       }
-      toast.success(isEditing ? "Automation saved" : "Automation created")
+      toast.success(isEditing ? "Automação salva" : "Automação criada")
       if (!isEditing && body?.automation?.id) {
         router.replace(`/automations/${body.automation.id}/edit`)
       }
@@ -560,7 +560,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-background">
-      {/* Top bar. At sub-sm widths the "Active" label is hidden and the
+      {/* Top bar. At sub-sm widths the "Ativar ao salvar" label is hidden and the
           switch moves to the right of the save button, so the name input
           gets maximum width. */}
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-border bg-card/80 px-3 py-3 sm:gap-3 sm:px-4">
@@ -568,22 +568,27 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           type="button"
           onClick={() => router.push("/automations")}
           className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Back to automations"
+          aria-label="Voltar para automações"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
         <input
           value={state.name}
           onChange={(e) => patchTop("name", e.target.value)}
-          placeholder="Untitled automation"
+          placeholder="Automação sem nome"
           className="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:bg-muted focus:outline-none sm:text-base"
         />
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="hidden sm:inline">Active</span>
+        {/* O switch só vale ao salvar — o rótulo deixa isso explícito
+            para ninguém achar que ligou/desligou a automação na hora. */}
+        <div
+          className="flex items-center gap-2 text-xs text-muted-foreground"
+          title="A automação só é ativada ou desativada quando você salvar."
+        >
+          <span className="hidden sm:inline">Ativar ao salvar</span>
           <Switch
             checked={state.is_active}
             onCheckedChange={(v) => patchTop("is_active", !!v)}
-            aria-label="Active"
+            aria-label="Ativar ao salvar"
           />
         </div>
         <Button
@@ -592,7 +597,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {isEditing ? "Save" : "Save Draft"}
+          {isEditing ? "Salvar" : "Salvar rascunho"}
         </Button>
       </header>
 
@@ -725,7 +730,7 @@ function TriggerCard({
             <Zap className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-blue-300">Trigger</div>
+            <div className="text-[11px] uppercase tracking-wide text-blue-300">Gatilho</div>
             <div className="truncate text-sm font-medium text-foreground">
               {TRIGGER_OPTIONS.find((o) => o.value === type)?.label ?? type}
             </div>
@@ -738,7 +743,7 @@ function TriggerCard({
           <div className="space-y-3 border-t border-border px-4 py-3">
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                Trigger type
+                Tipo de gatilho
               </label>
               <select
                 value={type}
@@ -774,7 +779,7 @@ function TriggerCard({
             )}
             {type === "time_based" && (
               <Input
-                placeholder="Cron expression or HH:mm"
+                placeholder="Expressão cron ou HH:mm"
                 value={(config.schedule as string) ?? ""}
                 onChange={(e) =>
                   onConfigChange({ ...config, schedule: e.target.value })
@@ -830,7 +835,7 @@ function KeywordMatchConfig({
     <div className="space-y-2">
       <div>
         <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          Keywords (comma-separated)
+          Palavras-chave (separadas por vírgula)
         </label>
         <Input
           value={draft}
@@ -842,21 +847,21 @@ function KeywordMatchConfig({
               commit()
             }
           }}
-          placeholder="e.g. pricing, demo request, talk to sales"
+          placeholder="ex.: preço, orçamento, falar com vendas"
           className="bg-muted text-foreground"
         />
       </div>
       <div>
         <label className="mb-1 block text-xs font-medium text-muted-foreground">
-          Match type
+          Tipo de correspondência
         </label>
         <select
           value={config?.match_type ?? "contains"}
           onChange={(e) => onChange({ ...config, match_type: e.target.value as "exact" | "contains" })}
           className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:outline-none"
         >
-          <option value="contains">Contains</option>
-          <option value="exact">Exact</option>
+          <option value="contains">Contém</option>
+          <option value="exact">Exata</option>
         </select>
       </div>
     </div>
@@ -967,7 +972,7 @@ function StepRenderer({
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                {isCondition ? "Condition" : step.step_type === "wait" ? "Wait" : "Action"}
+                {isCondition ? "Condição" : step.step_type === "wait" ? "Espera" : "Ação"}
               </div>
               <div className="truncate text-sm font-medium text-foreground">{meta.label}</div>
               <div className="truncate text-[11px] text-muted-foreground">{previewFor(step)}</div>
@@ -988,7 +993,7 @@ function StepRenderer({
                     variant="ghost"
                     size="icon"
                     disabled={index === 0}
-                    aria-label="Move up"
+                    aria-label="Mover para cima"
                     onClick={() => props.moveStepAt(path, -1)}
                   >
                     <ArrowUp className="h-4 w-4" />
@@ -997,7 +1002,7 @@ function StepRenderer({
                     variant="ghost"
                     size="icon"
                     disabled={index === total - 1}
-                    aria-label="Move down"
+                    aria-label="Mover para baixo"
                     onClick={() => props.moveStepAt(path, 1)}
                   >
                     <ArrowDown className="h-4 w-4" />
@@ -1009,7 +1014,7 @@ function StepRenderer({
                   onClick={() => props.deleteStepAt(path)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                  Delete
+                  Excluir
                 </Button>
               </div>
             </div>
@@ -1059,10 +1064,10 @@ function ConditionBranches({
     // cram each branch to ~170px which is too narrow for the nested
     // cards. Two-column grid returns on sm+.
     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      <BranchColumn label="Yes" color="text-primary">
+      <BranchColumn label="Sim" color="text-primary">
         <StepList {...props} steps={yes} parentPath={yesPath} />
       </BranchColumn>
-      <BranchColumn label="No" color="text-rose-400">
+      <BranchColumn label="Não" color="text-rose-400">
         <StepList {...props} steps={no} parentPath={noPath} />
       </BranchColumn>
     </div>
@@ -1093,7 +1098,7 @@ function AddButton({ onPick }: { onPick: (t: AutomationStepType) => void }) {
       <DropdownMenu>
         <DropdownMenuTrigger
           className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-dashed border-border bg-background text-muted-foreground transition-colors hover:border-primary hover:bg-primary/10 hover:text-primary data-[popup-open]:border-primary data-[popup-open]:bg-primary/20 data-[popup-open]:text-primary"
-          aria-label="Add step"
+          aria-label="Adicionar etapa"
         >
           <Plus className="h-4 w-4" />
         </DropdownMenuTrigger>
@@ -1135,11 +1140,11 @@ function StepEditor({
   switch (step.step_type) {
     case "send_message":
       return (
-        <FieldBlock label="Message text">
+        <FieldBlock label="Texto da mensagem">
           <Textarea
             value={(cfg.text as string) ?? ""}
             onChange={(e) => set({ text: e.target.value })}
-            placeholder="Hi! Thanks for reaching out…"
+            placeholder="Olá! Obrigado pelo contato…"
             className="min-h-24 bg-muted text-foreground"
           />
         </FieldBlock>
@@ -1165,18 +1170,18 @@ function StepEditor({
     case "assign_conversation":
       return (
         <>
-          <FieldBlock label="Mode">
+          <FieldBlock label="Modo">
             <select
               value={(cfg.mode as string) ?? "round_robin"}
               onChange={(e) => set({ mode: e.target.value })}
               className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
             >
-              <option value="round_robin">Round-robin</option>
-              <option value="specific">Specific agent</option>
+              <option value="round_robin">Rodízio (round-robin)</option>
+              <option value="specific">Atendente específico</option>
             </select>
           </FieldBlock>
           {cfg.mode === "specific" && (
-            <FieldBlock label="Agent">
+            <FieldBlock label="Atendente">
               <AgentSelect
                 value={(cfg.agent_id as string) ?? ""}
                 onChange={(v) => set({ agent_id: v })}
@@ -1188,17 +1193,17 @@ function StepEditor({
     case "update_contact_field":
       return (
         <>
-          <FieldBlock label="Field">
+          <FieldBlock label="Campo">
             <ContactFieldSelect
               value={(cfg.field as string) ?? "name"}
               onChange={(v) => set({ field: v })}
             />
           </FieldBlock>
-          <FieldBlock label="Value">
+          <FieldBlock label="Valor">
             <Input
               value={(cfg.value as string) ?? ""}
               onChange={(e) => set({ value: e.target.value })}
-              placeholder="Text or {{ vars.x }} / {{ message.text }}"
+              placeholder="Texto ou {{ vars.x }} / {{ message.text }}"
               className="bg-muted text-foreground"
             />
           </FieldBlock>
@@ -1207,28 +1212,28 @@ function StepEditor({
     case "create_deal":
       return (
         <>
-          <FieldBlock label="Pipeline id">
+          <FieldBlock label="ID do pipeline">
             <Input
               value={(cfg.pipeline_id as string) ?? ""}
               onChange={(e) => set({ pipeline_id: e.target.value })}
               className="bg-muted text-foreground"
             />
           </FieldBlock>
-          <FieldBlock label="Stage id">
+          <FieldBlock label="ID da etapa">
             <Input
               value={(cfg.stage_id as string) ?? ""}
               onChange={(e) => set({ stage_id: e.target.value })}
               className="bg-muted text-foreground"
             />
           </FieldBlock>
-          <FieldBlock label="Title">
+          <FieldBlock label="Título">
             <Input
               value={(cfg.title as string) ?? ""}
               onChange={(e) => set({ title: e.target.value })}
               className="bg-muted text-foreground"
             />
           </FieldBlock>
-          <FieldBlock label="Value">
+          <FieldBlock label="Valor">
             <Input
               type="number"
               value={(cfg.value as number) ?? 0}
@@ -1241,7 +1246,7 @@ function StepEditor({
     case "wait":
       return (
         <div className="grid grid-cols-2 gap-2">
-          <FieldBlock label="Amount">
+          <FieldBlock label="Quantidade">
             <Input
               type="number"
               min={1}
@@ -1250,15 +1255,15 @@ function StepEditor({
               className="bg-muted text-foreground"
             />
           </FieldBlock>
-          <FieldBlock label="Unit">
+          <FieldBlock label="Unidade">
             <select
               value={(cfg.unit as string) ?? "hours"}
               onChange={(e) => set({ unit: e.target.value })}
               className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
             >
-              <option value="minutes">Minutes</option>
-              <option value="hours">Hours</option>
-              <option value="days">Days</option>
+              <option value="minutes">Minutos</option>
+              <option value="hours">Horas</option>
+              <option value="days">Dias</option>
             </select>
           </FieldBlock>
         </div>
@@ -1266,19 +1271,19 @@ function StepEditor({
     case "condition":
       return (
         <>
-          <FieldBlock label="Subject">
+          <FieldBlock label="Critério">
             <select
               value={(cfg.subject as string) ?? "tag_presence"}
               onChange={(e) => set({ subject: e.target.value })}
               className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground"
             >
-              <option value="tag_presence">Tag presence</option>
-              <option value="contact_field">Contact field</option>
-              <option value="message_content">Message content</option>
-              <option value="time_of_day">Time of day</option>
+              <option value="tag_presence">Possui tag</option>
+              <option value="contact_field">Campo do contato</option>
+              <option value="message_content">Conteúdo da mensagem</option>
+              <option value="time_of_day">Horário do dia</option>
             </select>
           </FieldBlock>
-          <FieldBlock label="Operand">
+          <FieldBlock label="Operando">
             <Input
               placeholder={
                 cfg.subject === "time_of_day"
@@ -1286,7 +1291,7 @@ function StepEditor({
                   : cfg.subject === "contact_field"
                   ? "name / email / company"
                   : cfg.subject === "tag_presence"
-                  ? "tag id"
+                  ? "ID da tag"
                   : ""
               }
               value={(cfg.operand as string) ?? ""}
@@ -1295,7 +1300,7 @@ function StepEditor({
             />
           </FieldBlock>
           {(cfg.subject === "contact_field" || cfg.subject === "message_content") && (
-            <FieldBlock label="Value">
+            <FieldBlock label="Valor">
               <Input
                 value={(cfg.value as string) ?? ""}
                 onChange={(e) => set({ value: e.target.value })}
@@ -1315,7 +1320,7 @@ function StepEditor({
               className="bg-muted text-foreground"
             />
           </FieldBlock>
-          <FieldBlock label="Body template (JSON)">
+          <FieldBlock label="Template do corpo (JSON)">
             <Textarea
               value={(cfg.body_template as string) ?? ""}
               onChange={(e) => set({ body_template: e.target.value })}
@@ -1326,16 +1331,15 @@ function StepEditor({
       )
     case "close_conversation":
       return (
-        <FieldBlock label="Outcome tag (tabulação)">
+        <FieldBlock label="Tag de tabulação">
           <TagSelect
             value={(cfg.outcome_tag_id as string) ?? ""}
             onChange={(v) => set({ outcome_tag_id: v })}
             kind="outcome"
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Sets the conversation status to &quot;closed&quot; and applies this
-            tag. Leave unset to fall back to the account&apos;s
-            &quot;Sem Tabulação&quot; tag.
+            Encerra a conversa e aplica esta tag. Se ficar vazio, usa a tag
+            &quot;Sem Tabulação&quot; da conta.
           </p>
         </FieldBlock>
       )
@@ -1359,18 +1363,32 @@ function FieldBlock({
   )
 }
 
+// Rótulos pt-BR só para o resumo do card; os valores salvos não mudam.
+const UNIT_LABEL: Record<string, string> = {
+  minutes: "minuto(s)",
+  hours: "hora(s)",
+  days: "dia(s)",
+}
+
+const SUBJECT_LABEL: Record<string, string> = {
+  tag_presence: "possui tag",
+  contact_field: "campo do contato",
+  message_content: "conteúdo da mensagem",
+  time_of_day: "horário do dia",
+}
+
 function previewFor(step: BuilderStep): string {
   switch (step.step_type) {
     case "send_message":
-      return (step.step_config.text as string) || "no text yet"
+      return (step.step_config.text as string) || "sem texto ainda"
     case "send_template":
-      return (step.step_config.template_name as string) || "pick a template"
+      return (step.step_config.template_name as string) || "escolha um template"
     case "wait":
-      return `${step.step_config.amount ?? "?"} ${step.step_config.unit ?? ""}`
+      return `${step.step_config.amount ?? "?"} ${UNIT_LABEL[String(step.step_config.unit)] ?? step.step_config.unit ?? ""}`
     case "condition":
-      return `when ${step.step_config.subject ?? "?"}`
+      return `quando ${SUBJECT_LABEL[String(step.step_config.subject)] ?? step.step_config.subject ?? "?"}`
     case "send_webhook":
-      return (step.step_config.url as string) || "no url"
+      return (step.step_config.url as string) || "sem URL"
     default:
       return ""
   }

@@ -119,14 +119,14 @@ export function TransferDialog({
         <DialogHeader>
           <DialogTitle>Transferir para</DialogTitle>
           <DialogDescription>
-            Escolha um agente e/ou uma equipe — os dois são independentes, mude
+            Escolha um atendente e/ou uma equipe — os dois são independentes, mude
             só o que precisar.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label>Agente</Label>
+            <Label>Atendente</Label>
             <Select value={agentId} onValueChange={(v) => v && setAgentId(v)}>
               <SelectTrigger className="w-full">
                 {/* Bare <SelectValue /> shows the raw id once selected —
@@ -134,12 +134,12 @@ export function TransferDialog({
                     the label ourselves. */}
                 <SelectValue>
                   {(v: string) =>
-                    v === NO_AGENT ? "Sem agente" : agentOptions.find((o) => o.id === v)?.label ?? "Sem agente"
+                    v === NO_AGENT ? "Sem atendente" : agentOptions.find((o) => o.id === v)?.label ?? "Sem atendente"
                   }
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={NO_AGENT}>Sem agente</SelectItem>
+                <SelectItem value={NO_AGENT}>Sem atendente</SelectItem>
                 {agentOptions.map((opt) => (
                   <SelectItem key={opt.id} value={opt.id}>
                     {opt.label}

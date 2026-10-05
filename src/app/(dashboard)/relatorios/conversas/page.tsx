@@ -47,7 +47,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import { EmptyState } from "@/components/dashboard/empty-state";
+import { ErrorState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { AccountMember, Team } from "@/types";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
@@ -199,32 +201,32 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") toggleExpand();
         }}
-        className="flex cursor-pointer flex-wrap items-center justify-between gap-2 bg-[#1e293b] px-4 py-3 text-white"
+        className="flex cursor-pointer flex-wrap items-center justify-between gap-2 bg-muted/60 px-4 py-3 text-foreground transition-colors hover:bg-muted"
       >
         <div className="flex min-w-0 items-center gap-2">
-          <UserRound className="size-4 shrink-0 text-slate-300" />
+          <UserRound className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate text-sm font-medium">
             {contactLabel(row.contactName, row.contactPhone)}
           </span>
           {row.wahaSession ? (
             <MessageCircle className="size-4 shrink-0 text-[#25D366]" />
           ) : (
-            <Globe className="size-4 shrink-0 text-slate-400" />
+            <Globe className="size-4 shrink-0 text-muted-foreground" />
           )}
-          <span className="truncate text-xs text-slate-300">
+          <span className="truncate text-xs text-muted-foreground">
             {row.wahaSession || "Meta/Webchat"}
           </span>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <span className="text-xs text-slate-300">{formatRange(row.startedAt, row.endedAt)}</span>
-          <Badge className={isClosed ? "bg-white/10 text-slate-300" : "bg-white/15 text-white"}>
+          <span className="text-xs text-muted-foreground">{formatRange(row.startedAt, row.endedAt)}</span>
+          <Badge className={isClosed ? "bg-background text-muted-foreground" : "bg-primary/10 text-primary"}>
             {isClosed ? "Encerrado" : "Em andamento"}
           </Badge>
           {expanded ? (
-            <ChevronDown className="size-4 shrink-0 text-slate-300" />
+            <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
           ) : (
-            <ChevronRight className="size-4 shrink-0 text-slate-300" />
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
           )}
         </div>
       </div>
@@ -260,6 +262,7 @@ export default function ConversasPage() {
   const [rows, setRows] = useState<ConversationRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "csv" | null>(null);
 
   useEffect(() => {
@@ -351,6 +354,7 @@ export default function ConversasPage() {
   const runSearch = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc(
@@ -363,6 +367,7 @@ export default function ConversasPage() {
       setTotalCount(raw.length > 0 ? Number(raw[0].total_count) || 0 : 0);
     } catch (err) {
       console.error("[conversas] failed to load conversations:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -428,13 +433,14 @@ export default function ConversasPage() {
           { key: "mensagens", label: "Mensagens" },
         ],
         exportType: "conversas",
-        description: `Conversas - ${format(new Date(applied.dateFrom), "dd/MM/yyyy")} a ${format(new Date(applied.dateTo), "dd/MM/yyyy")}`,
-        periodFrom: new Date(applied.dateFrom),
-        periodTo: new Date(applied.dateTo),
+        description: `Conversas - ${format(new Date(startOfDayIso(applied.dateFrom)), "dd/MM/yyyy")} a ${format(new Date(startOfDayIso(applied.dateTo)), "dd/MM/yyyy")}`,
+        periodFrom: new Date(startOfDayIso(applied.dateFrom)),
+        periodTo: new Date(endOfDayIso(applied.dateTo)),
         format: kind,
       });
     } catch (err) {
       console.error("[conversas] export failed:", err);
+      toast.error("Falha ao exportar as conversas. Tente novamente.");
     } finally {
       setExporting(null);
     }
@@ -602,7 +608,7 @@ export default function ConversasPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <Button onClick={handlePesquisar} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
+                <Button onClick={handlePesquisar} className="bg-primary text-primary-foreground hover:bg-primary/90">
                   <Search className="size-4" />
                   Pesquisar
                 </Button>
@@ -636,6 +642,10 @@ export default function ConversasPage() {
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-14 w-full rounded-xl" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="rounded-xl border border-border bg-card p-4">
+            <ErrorState title="Não foi possível carregar as conversas" onRetry={() => runSearch()} />
           </div>
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-border bg-card p-4">
@@ -685,7 +695,7 @@ export default function ConversasPage() {
                       variant={p === page ? "default" : "outline"}
                       size="icon-sm"
                       onClick={() => setPage(p)}
-                      className={p === page ? "bg-[#FF5706] text-white hover:bg-[#FF5706]/90" : ""}
+                      className={p === page ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}
                     >
                       {p}
                     </Button>

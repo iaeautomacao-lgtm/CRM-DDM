@@ -15,13 +15,14 @@ import { cn } from "@/lib/utils";
  */
 export function ModeToggle({ className }: { className?: string }) {
   const { mode, toggleMode } = useTheme();
-  const goingTo = mode === "dark" ? "light" : "dark";
+  // Rótulo nomeia o destino do clique (modo para o qual vai trocar).
+  const label = mode === "dark" ? "Mudar para o modo claro" : "Mudar para o modo escuro";
   return (
     <button
       type="button"
       onClick={toggleMode}
-      aria-label={`Switch to ${goingTo} mode`}
-      title={`Switch to ${goingTo} mode`}
+      aria-label={label}
+      title={label}
       className={cn(
         "flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
         className,

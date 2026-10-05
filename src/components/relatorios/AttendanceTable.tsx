@@ -93,7 +93,7 @@ export function AttendanceTable<T>({
             </TableRow>
           ) : (
             rows.map((row) => (
-              <TableRow key={getRowKey(row)} className="hover:bg-[#FFF7F4]">
+              <TableRow key={getRowKey(row)} className="hover:bg-muted/50">
                 {columns.map((col) => (
                   <TableCell key={col.key} className={cn(col.align === "right" && "text-right")}>
                     {col.render(row)}

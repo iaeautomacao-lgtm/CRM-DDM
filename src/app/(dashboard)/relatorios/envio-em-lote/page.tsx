@@ -81,11 +81,11 @@ const STATUS_OPTIONS = [
 ] as const;
 
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
-  agendado: { label: "Agendado", className: "bg-[#FEF3C7] text-[#92400E]" },
-  enviando: { label: "Enviando", className: "bg-[#F3E8FF] text-[#7C3AED]" },
-  enviado: { label: "Enviado", className: "bg-[#DBEAFE] text-[#1D4ED8]" },
-  erro: { label: "Erro", className: "bg-[#FEE2E2] text-[#B91C1C]" },
-  cancelado: { label: "Cancelado", className: "bg-[#F3F4F6] text-[#374151]" },
+  agendado: { label: "Agendado", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
+  enviando: { label: "Enviando", className: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300" },
+  enviado: { label: "Enviado", className: "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" },
+  erro: { label: "Erro", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300" },
+  cancelado: { label: "Cancelado", className: "bg-muted text-muted-foreground" },
 };
 
 // Filtro "Tipo de erro" — aplicado client-side sobre os itens já
@@ -403,6 +403,7 @@ export default function EnvioEmLotePage() {
       });
     } catch (err) {
       console.error("[envio-em-lote] export failed:", err);
+      toast.error("Falha ao exportar. Tente novamente.");
     } finally {
       setExporting(false);
     }
@@ -555,7 +556,7 @@ export default function EnvioEmLotePage() {
                 <Button
                   onClick={handlePesquisar}
                   disabled={!campaignId}
-                  className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
+                  className="bg-primary text-primary-foreground hover:bg-primary/90"
                 >
                   <Search className="size-4" />
                   Pesquisar
@@ -755,7 +756,7 @@ export default function EnvioEmLotePage() {
                       variant={p === page ? "default" : "outline"}
                       size="icon-sm"
                       onClick={() => setPage(p)}
-                      className={p === page ? "bg-[#FF5706] text-white hover:bg-[#FF5706]/90" : ""}
+                      className={p === page ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}
                     >
                       {p}
                     </Button>

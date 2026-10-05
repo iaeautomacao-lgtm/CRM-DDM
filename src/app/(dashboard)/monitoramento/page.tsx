@@ -51,6 +51,7 @@ import { SlaPanel } from "@/components/monitoramento/sla-panel";
 import { DayPanel } from "@/components/monitoramento/day-panel";
 import type { ConversationCardActions } from "@/components/monitoramento/card-actions";
 import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimelineModal";
+import { ErrorState } from "@/components/dashboard/error-state";
 
 export default function MonitoramentoPage() {
   const { accountId, canManageMembers } = useAuth();
@@ -58,16 +59,19 @@ export default function MonitoramentoPage() {
     () => new Map(),
   );
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const db = createClient();
       const rows = await loadActiveConversations(db, accountId);
       setConversations(new Map(rows.map((r) => [r.id, r])));
     } catch (err) {
       console.error("[monitoramento] failed to load conversations:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -594,7 +598,7 @@ export default function MonitoramentoPage() {
           });
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
-            throw new Error(payload.error || "Failed to remove agent from previous team");
+            throw new Error(payload.error || "Falha ao remover o agente da equipe anterior");
           }
         }
         if (nextTeamId) {
@@ -605,19 +609,19 @@ export default function MonitoramentoPage() {
           });
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
-            throw new Error(payload.error || "Failed to add agent to team");
+            throw new Error(payload.error || "Falha ao adicionar o agente à equipe");
           }
         }
         const teamName = nextTeamId ? teams.find((t) => t.id === nextTeamId)?.name : null;
         toast.success(
           nextTeamId
-            ? `Moved ${agent.full_name || "agent"} to ${teamName ?? "team"}`
-            : `Removed ${agent.full_name || "agent"} from team`,
+            ? `${agent.full_name || "Agente"} movido para ${teamName ?? "a equipe"}`
+            : `${agent.full_name || "Agente"} removido da equipe`,
         );
       } catch (err) {
         revert();
         console.error("[monitoramento] agent team change error:", err);
-        toast.error(err instanceof Error ? err.message : "Could not reach the server");
+        toast.error(err instanceof Error ? err.message : "Não foi possível conectar ao servidor");
       }
     },
     [teams],
@@ -693,6 +697,17 @@ export default function MonitoramentoPage() {
         onApply={setAppliedFilters}
         onClear={() => setAppliedFilters(EMPTY_FILTERS)}
       />
+
+      {/* Sem isso, uma falha no carregamento inicial mostraria as colunas
+          vazias como se não houvesse conversas abertas. */}
+      {loadError && !loading && (
+        <ErrorState
+          className="min-h-0"
+          title="Não foi possível carregar as conversas"
+          hint="O painel pode estar desatualizado. Verifique sua conexão e tente novamente."
+          onRetry={() => load()}
+        />
+      )}
 
       <Tabs defaultValue="fases" className="space-y-5">
         <TabsList>

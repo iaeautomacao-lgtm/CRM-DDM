@@ -46,7 +46,7 @@ export function ValidationPanel({ onClose }: { onClose: () => void }) {
     // sticky-positioned over scrolled-behind node cards (a translucent
     // bg-emerald-500/10 would bleed through ugly).
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-emerald-600/50 bg-background p-3 text-sm font-medium text-emerald-300">
+      <div className="flex items-center gap-2 rounded-lg border border-emerald-600/50 bg-background p-3 text-sm font-medium text-emerald-700 dark:text-emerald-300">
         <CircleCheck className="h-4 w-4 shrink-0" />
         <span className="flex-1">Nenhum problema. Pronto para ativar.</span>
         <CloseButton onClose={onClose} />
@@ -65,9 +65,9 @@ export function ValidationPanel({ onClose }: { onClose: () => void }) {
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {errors.length > 0 ? (
-            <CircleAlert className="h-4 w-4 text-red-400" />
+            <CircleAlert className="h-4 w-4 text-red-600 dark:text-red-400" />
           ) : (
-            <CircleAlert className="h-4 w-4 text-amber-400" />
+            <CircleAlert className="h-4 w-4 text-amber-600 dark:text-amber-400" />
           )}
           {errors.length} erro{errors.length === 1 ? "" : "s"},{" "}
           {warnings.length} aviso{warnings.length === 1 ? "" : "s"}
@@ -102,10 +102,10 @@ export function ValidationPanelBadge({ onClick }: { onClick: () => void }) {
       className={cn(
         "absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-full border bg-background px-3 py-1.5 text-xs font-medium shadow-md transition-colors hover:bg-muted",
         errors > 0
-          ? "border-red-500/40 text-red-300"
+          ? "border-red-500/40 text-red-700 dark:text-red-300"
           : warnings > 0
-            ? "border-amber-500/40 text-amber-300"
-            : "border-emerald-600/50 text-emerald-300",
+            ? "border-amber-500/40 text-amber-700 dark:text-amber-300"
+            : "border-emerald-600/50 text-emerald-700 dark:text-emerald-300",
       )}
     >
       {errors === 0 && warnings === 0 ? (
@@ -114,7 +114,7 @@ export function ValidationPanelBadge({ onClick }: { onClick: () => void }) {
         <CircleAlert
           className={cn(
             "h-3.5 w-3.5 shrink-0",
-            errors > 0 ? "text-red-400" : "text-amber-400",
+            errors > 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400",
           )}
         />
       )}
@@ -138,9 +138,9 @@ export function IssueLine({
   onJump?: (key: string) => void;
 }) {
   const tone =
-    issue.severity === "error" ? "text-red-300" : "text-amber-300";
+    issue.severity === "error" ? "text-red-700 dark:text-red-300" : "text-amber-700 dark:text-amber-300";
   const iconTone =
-    issue.severity === "error" ? "text-red-400" : "text-amber-400";
+    issue.severity === "error" ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400";
   const body = (
     <>
       <CircleAlert className={cn("mt-0.5 h-3 w-3 shrink-0", iconTone)} />

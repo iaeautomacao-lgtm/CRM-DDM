@@ -23,8 +23,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MIN_PASSWORD_LENGTH, translateAuthError } from "@/lib/auth/auth-errors";
 
-const MIN_PASSWORD = 8;
+// Regra única de tamanho mínimo (lib/auth/auth-errors.ts).
+const MIN_PASSWORD = MIN_PASSWORD_LENGTH;
 
 interface ChangePasswordDialogProps {
   open: boolean;
@@ -85,7 +87,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
 
       const { error: updateError } = await supabase.auth.updateUser({ password: next });
       if (updateError) {
-        toast.error(`Falha ao atualizar senha: ${updateError.message}`);
+        toast.error(`Falha ao atualizar senha: ${translateAuthError(updateError)}`);
         return;
       }
 

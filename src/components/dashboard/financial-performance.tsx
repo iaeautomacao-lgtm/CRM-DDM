@@ -1,6 +1,6 @@
 "use client";
 
-import { DollarSign, Award, Target, TrendingUp, UserCheck } from "lucide-react";
+import { DollarSign, Award } from "lucide-react";
 import type { AiAnalyticsData } from "@/lib/dashboard/types";
 
 interface FinancialPerformanceProps {
@@ -11,8 +11,8 @@ interface FinancialPerformanceProps {
 export function FinancialPerformance({ data, loading }: FinancialPerformanceProps) {
   if (loading || !data || !data.financials) {
     return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-pulse">
-        {Array.from({ length: 3 }).map((_, i) => (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 animate-pulse">
+        {Array.from({ length: 2 }).map((_, i) => (
           <div key={i} className="bg-card border border-border rounded-xl p-5 h-48 space-y-4">
             <div className="h-4 bg-muted rounded w-1/3" />
             <div className="h-8 bg-muted rounded w-1/2" />
@@ -25,9 +25,10 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
 
   const { totalWonValue, totalOpenValue, ticketMedio, operators } = data.financials;
 
-  // Meta de recuperação (Exemplo: R$ 50.000,00)
-  const monthlyGoal = 50000;
-  const pctGoal = Math.min(100, Math.round((totalWonValue / monthlyGoal) * 100));
+  // O card "Meta de Recuperação" foi removido: comparava o total histórico
+  // de acordos ganhos com uma meta fixa de exemplo (R$ 50.000), o que dava
+  // um percentual sem significado. Volta quando houver meta configurável
+  // e um total filtrado pelo mesmo período da meta.
 
   const formatBRL = (val: number) => {
     return val.toLocaleString("pt-BR", {
@@ -38,19 +39,19 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {/* 1. Indicadores Financeiros Rápidos */}
       <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-5 shadow-sm flex flex-col justify-between h-52">
         <div className="space-y-1.5">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <DollarSign className="h-4 w-4 text-emerald-500" />
-            Recuperação de Caixa
+            Acordos ganhos (total)
           </div>
           <div className="text-2xl font-extrabold text-foreground mt-1">
             {formatBRL(totalWonValue)}
           </div>
           <p className="text-xs text-muted-foreground">
-            Total recuperado de acordos fechados (Ganhos)
+            Soma de todos os acordos marcados como ganhos, desde o início
           </p>
         </div>
 
@@ -66,33 +67,7 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
         </div>
       </div>
 
-      {/* 2. Meta do Mês */}
-      <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-5 shadow-sm flex flex-col justify-between h-52">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Target className="h-4 w-4 text-amber-500" />
-            Meta de Recuperação
-          </div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="text-2xl font-extrabold text-foreground">
-              {pctGoal}%
-            </span>
-            <span className="text-xs text-muted-foreground">
-              alcançado de {formatBRL(monthlyGoal)}
-            </span>
-          </div>
-        </div>
-
-        <div className="space-y-1">
-          <RecoveryGoalGauge pctGoal={pctGoal} />
-          <div className="flex justify-between text-[11px] text-muted-foreground">
-            <span>Progresso</span>
-            <span className="font-bold text-foreground">{formatBRL(totalWonValue)} / {formatBRL(monthlyGoal)}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Ranking de Atendentes (Cobradores) */}
+      {/* 2. Ranking de Atendentes (Cobradores) */}
       <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-5 shadow-sm flex flex-col justify-between h-52 overflow-hidden">
         <div className="space-y-1.5 mb-2">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -124,74 +99,3 @@ export function FinancialPerformance({ data, loading }: FinancialPerformanceProp
   );
 }
 
-// ------------------------------------------------------------
-// Segmented arc gauge for "Meta de Recuperação" — a 180° semicircle
-// (left = 0%, right = 100%) split into 10 discrete segments with small
-// gaps between them, filled left-to-right based on pctGoal. Hand-rolled
-// SVG, same approach as the other dashboard charts (no chart lib).
-// ------------------------------------------------------------
-const GAUGE_CX = 100;
-const GAUGE_CY = 100;
-const GAUGE_R = 80;
-const GAUGE_STROKE = 16;
-const GAUGE_SEGMENT_COUNT = 10;
-const GAUGE_SEGMENT_ANGLE = 16;
-const GAUGE_GAP_ANGLE = 2;
-const GAUGE_STEP_ANGLE = GAUGE_SEGMENT_ANGLE + GAUGE_GAP_ANGLE;
-
-function pointOnGaugeArc(angleDeg: number) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return {
-    x: GAUGE_CX + GAUGE_R * Math.cos(rad),
-    y: GAUGE_CY - GAUGE_R * Math.sin(rad),
-  };
-}
-
-function gaugeArcPath(startAngle: number, endAngle: number) {
-  const start = pointOnGaugeArc(startAngle);
-  const end = pointOnGaugeArc(endAngle);
-  return `M ${start.x} ${start.y} A ${GAUGE_R} ${GAUGE_R} 0 0 1 ${end.x} ${end.y}`;
-}
-
-function RecoveryGoalGauge({ pctGoal }: { pctGoal: number }) {
-  const filledSegments = Math.min(
-    GAUGE_SEGMENT_COUNT,
-    Math.round((pctGoal / 100) * GAUGE_SEGMENT_COUNT),
-  );
-
-  return (
-    <svg viewBox="0 0 200 110" className="mx-auto h-28 w-full" role="img" aria-label={`Meta de recuperação: ${pctGoal}%`}>
-      <path
-        d={gaugeArcPath(180, 0)}
-        stroke="var(--muted)"
-        strokeWidth={GAUGE_STROKE}
-        fill="none"
-      />
-      {Array.from({ length: GAUGE_SEGMENT_COUNT }).map((_, i) => {
-        const startAngle = 180 - i * GAUGE_STEP_ANGLE;
-        const endAngle = startAngle - GAUGE_SEGMENT_ANGLE;
-        const filled = i < filledSegments;
-        return (
-          <path
-            key={i}
-            d={gaugeArcPath(startAngle, endAngle)}
-            stroke={filled ? '#FF5706' : 'var(--border)'}
-            strokeWidth={GAUGE_STROKE}
-            strokeLinecap="round"
-            fill="none"
-          />
-        );
-      })}
-      <text
-        x={GAUGE_CX}
-        y={90}
-        textAnchor="middle"
-        fontSize={28}
-        fontWeight="bold"
-        fill="var(--foreground)"
-      >
-        {pctGoal}%
-      </text>
-    </svg>
-  );
-}

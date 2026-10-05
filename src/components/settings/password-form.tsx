@@ -16,8 +16,10 @@ import {
   CardTitle,
   CardDescription,
 } from '@/components/ui/card';
+import { MIN_PASSWORD_LENGTH, translateAuthError } from '@/lib/auth/auth-errors';
 
-const MIN_PASSWORD = 8;
+// Regra única de tamanho mínimo (lib/auth/auth-errors.ts).
+const MIN_PASSWORD = MIN_PASSWORD_LENGTH;
 
 export function PasswordForm() {
   const { profile } = useAuth();
@@ -64,7 +66,7 @@ export function PasswordForm() {
         password: next,
       });
       if (updateError) {
-        toast.error(`Falha ao atualizar senha: ${updateError.message}`);
+        toast.error(`Falha ao atualizar senha: ${translateAuthError(updateError)}`);
         return;
       }
 

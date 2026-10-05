@@ -244,6 +244,10 @@ export function MessageComposer({
       setText(saved || "");
       setTimeout(() => {
         adjustHeight();
+        // Foca o campo ao abrir/trocar de conversa (no-op se desabilitado).
+        // Só com ponteiro fino (desktop): no celular abriria o teclado
+        // virtual cobrindo a conversa.
+        if (window.matchMedia?.("(pointer: fine)").matches) textareaRef.current?.focus();
       }, 50);
     } catch {
       setText("");
@@ -309,7 +313,7 @@ export function MessageComposer({
         removeStaged(draftRef.current?.path);
         setDraft({ kind, mediaUrl: publicUrl, path, filename: file.name, caption: "" });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Upload failed.");
+        toast.error(err instanceof Error ? err.message : "Falha no envio do arquivo");
       } finally {
         setBusy(false);
       }
@@ -346,7 +350,7 @@ export function MessageComposer({
         removeStaged(draftRef.current?.path);
         setDraft({ kind: "audio", mediaUrl: publicUrl, path, filename: file.name, caption: "" });
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Upload failed.");
+        toast.error(err instanceof Error ? err.message : "Falha no envio do arquivo");
       } finally {
         setBusy(false);
       }
@@ -582,6 +586,7 @@ export function MessageComposer({
               canAct={!readOnly}
               gateReason="send messages"
               title={readOnly ? undefined : "Enviar template"}
+              aria-label="Enviar template"
               className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
               onClick={onOpenTemplates}
             >
@@ -591,6 +596,7 @@ export function MessageComposer({
 
           <textarea
             ref={textareaRef}
+            aria-label="Mensagem"
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
@@ -625,15 +631,6 @@ export function MessageComposer({
             <Send className="h-4 w-4" />
           </GatedButton>
         </div>
-      )}
-
-      {/* Hint sits outside the flex row so its height doesn't push
-          `items-end` buttons below the textarea. Indented to line up
-          under the textarea left edge. */}
-      {!draft && !recording && (
-        <p className="mt-1 pl-[5.5rem] text-[10px] text-muted-foreground">
-          Digite &apos;/&apos; para respostas rápidas
-        </p>
       )}
     </div>
   );

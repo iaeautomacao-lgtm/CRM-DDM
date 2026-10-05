@@ -597,6 +597,9 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     return (
       <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-3 text-sm">
         <p>Nenhum nó ainda.</p>
+        <p className="max-w-xs text-center text-xs">
+          Adicione o primeiro nó: uma mensagem de boas-vindas ou um menu de botões.
+        </p>
         {!isDebugMode && <CanvasAddNodeButton />}
       </div>
     );

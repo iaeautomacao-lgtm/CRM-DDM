@@ -2,6 +2,7 @@
 
 import { Activity, Bot, Clock, UserCheck } from "lucide-react";
 import type { ComponentType } from "react";
+import { PHASE_META } from "@/lib/monitoramento/phases";
 
 interface KpiRowProps {
   total: number;
@@ -16,10 +17,12 @@ const ITEMS: {
   label: string;
   icon: ComponentType<{ className?: string }>;
 }[] = [
-  { key: "total", label: "Geral", icon: Activity },
-  { key: "navegando", label: "Auto", icon: Bot },
-  { key: "espera", label: "Espera", icon: Clock },
-  { key: "atendimento", label: "Humano", icon: UserCheck },
+  // Rótulos alinhados com as colunas de fase (PHASE_META em
+  // src/lib/monitoramento/phases.ts).
+  { key: "total", label: "Total", icon: Activity },
+  { key: "navegando", label: PHASE_META.navegando.label, icon: Bot },
+  { key: "espera", label: PHASE_META.espera.label, icon: Clock },
+  { key: "atendimento", label: PHASE_META.atendimento.label, icon: UserCheck },
 ];
 
 /**
