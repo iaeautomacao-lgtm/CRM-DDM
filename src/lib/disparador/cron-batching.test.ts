@@ -10,8 +10,9 @@ describe("disparador cron batching", () => {
     expect(resolveCronBatchCandidateLimit(614)).toBe(614);
   });
 
-  it("keeps a defensive upper bound for very large immediate campaigns", () => {
-    expect(resolveCronBatchCandidateLimit(999999)).toBe(MAX_CRON_BATCH_CANDIDATES);
+  it("keeps a defensive upper bound of 700 for very large immediate campaigns", () => {
+    expect(resolveCronBatchCandidateLimit(999999)).toBe(700);
+    expect(MAX_CRON_BATCH_CANDIDATES).toBe(700);
   });
 
   it("keeps sequential campaigns on database cadence reservation", () => {
