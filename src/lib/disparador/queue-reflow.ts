@@ -15,7 +15,8 @@
 //   ordem, a 3 s um do outro — igual ao startCampaign;
 // - contatos agrupados em rodadas de batch_size, com o horário de cada
 //   rodada dado por scheduleRounds (pausa medida em tempo ABERTO) a partir
-//   de agora, + 100 ms por posição na rodada (desempate estável).
+//   de agora, + espalhamento de no máximo 2 s na rodada inteira
+//   (roundSpreadOffsetMs, o mesmo do startCampaign).
 // Depois do reflow todos os itens ficam em tempo aberto, então o detector
 // volta a dar false — não há reflow repetido.
 //
@@ -27,15 +28,21 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { processWithConcurrency } from "@/lib/disparador/concurrency";
 import {
+  INTRA_CONTACT_MS,
   isScheduledInClosedWindow,
+  roundContactTimeMs,
   scheduleRounds,
   type SendWindowConfig,
 } from "@/lib/disparador/window-clock";
 
-/** Mesmo espaçamento do startCampaign entre itens de uma rodada. */
-export const REFLOW_ROUND_JITTER_MS = 100;
+/**
+ * Passo por posição das filas montadas ANTES do espalhamento limitado (100 ms
+ * × posição). Só entra na tolerância de transbordo: filas antigas ainda
+ * podem estar no banco.
+ */
+export const LEGACY_ROUND_JITTER_MS = 100;
 /** Mesmo espaçamento do startCampaign entre mensagens do mesmo contato. */
-export const REFLOW_INTRA_CONTACT_MS = 3000;
+export const REFLOW_INTRA_CONTACT_MS = INTRA_CONTACT_MS;
 /** Tamanho de cada gravação (RPC ou fallback). */
 export const REFLOW_CHUNK_SIZE = 500;
 const PAGE_SIZE = 1000;
@@ -53,11 +60,13 @@ export interface ReflowAssignment {
 
 /**
  * Quanto um item de uma rodada pode legitimamente passar do fechamento:
- * rodada no último instante aberto + jitter da rodada inteira + folga para
- * sequências de mensagens. Itens dentro disso não disparam o reflow.
+ * rodada no último instante aberto + espalhamento da rodada inteira + folga
+ * para sequências de mensagens. Itens dentro disso não disparam o reflow.
+ * Usa o passo antigo (100 ms × posição), que cobre com sobra o espalhamento
+ * novo (< 2 s) e as filas montadas antes dele.
  */
 export function spillToleranceMs(batchSize: number): number {
-  return Math.max(1, batchSize) * REFLOW_ROUND_JITTER_MS + 10 * 60_000;
+  return Math.max(1, batchSize) * LEGACY_ROUND_JITTER_MS + 10 * 60_000;
 }
 
 /**
@@ -108,14 +117,11 @@ export function planQueueReflow(
   );
   const assignments: ReflowAssignment[] = [];
   unitList.forEach((ids, index) => {
-    const base = roundTimes[Math.floor(index / batchSize)].getTime();
-    const position = index % batchSize;
+    const base = roundContactTimeMs(roundTimes, index, batchSize, unitList.length);
     ids.forEach((id, j) => {
       assignments.push({
         id,
-        scheduled_at: new Date(
-          base + position * REFLOW_ROUND_JITTER_MS + j * REFLOW_INTRA_CONTACT_MS
-        ).toISOString(),
+        scheduled_at: new Date(base + j * REFLOW_INTRA_CONTACT_MS).toISOString(),
       });
     });
   });

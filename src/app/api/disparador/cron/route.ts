@@ -323,7 +323,10 @@ export async function POST(request: Request) {
         .eq("campaign_id", campaign.id)
         .eq("status", "agendado")
         .lte("scheduled_at", new Date().toISOString())
+        // Desempate por id: a rodada inteira vence em < 2 s
+        // (roundSpreadOffsetMs), então muitos itens dividem o scheduled_at.
         .order("scheduled_at", { ascending: true })
+        .order("id", { ascending: true })
         .limit(batchSize);
       if (queryError) throw queryError;
       if (!items?.length) {

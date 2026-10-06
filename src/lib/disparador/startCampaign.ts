@@ -6,7 +6,7 @@ import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import { formatStartFailureReason, parseTemplateMode } from "@/lib/disparador/campaign-validation";
-import { scheduleRounds } from "@/lib/disparador/window-clock";
+import { INTRA_CONTACT_MS, roundContactTimeMs, scheduleRounds } from "@/lib/disparador/window-clock";
 import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
 import { writeLog } from "@/lib/logger";
 
@@ -526,7 +526,7 @@ async function prepareCampaign(
     // como falsy e silenciosamente forçaria os defaults de 90s/300s.
     const minDelay = (campaign.intervalo_min ?? 90) * 1000;
     const maxDelay = (campaign.intervalo_max ?? 300) * 1000;
-    const intraDelay = 3000; // 3 seconds between messages for the same contact
+    const intraDelay = INTRA_CONTACT_MS; // 3 s entre mensagens do mesmo contato
 
     // batch_size > 1: contatos são agrupados em lotes que saem juntos (ver
     // abaixo), e o cron processa até batch_size itens "agendado" em
@@ -608,19 +608,20 @@ async function prepareCampaign(
 
       let contactBaseDelay: number;
       if (batchSize > 1) {
-        // Contatos do mesmo lote (mesmo Math.floor(i / batchSize)) recebem
-        // o mesmo scheduled_at base — só um jitter de 100ms entre eles pra
-        // desempate estável no ORDER BY scheduled_at do cron, não pra
-        // espaçar o envio de verdade (o cron já processa o lote inteiro em
-        // paralelo). O próximo lote só fica agendado batch_pause_seconds
+        // Contatos do mesmo lote (mesmo Math.floor(i / batchSize)) vencem
+        // juntos: horário da rodada + um espalhamento de no máximo 2 s na
+        // rodada inteira (roundSpreadOffsetMs) — só para manter a ordem e
+        // os empates do ORDER BY (scheduled_at, id) do cron pequenos, não
+        // para espaçar o envio. Antes era 100 ms × posição: no "Imediato"
+        // (rodada única) 50 mil contatos levavam ~83 min só para vencer.
+        // Quem dá o ritmo são as vagas do motor (max_in_flight por número,
+        // concorrência, limite_por_hora). O próximo lote só fica agendado batch_pause_seconds
         // de janela aberta depois (roundTimes). Pausas anti-spam fixas (1h/100, 10min/20) NÃO se
         // aplicam aqui — o usuário já configurou o ritmo manualmente via
         // batch_size/batch_pause_seconds (mesma regra já usada na
         // estimativa de tempo em campanhas/page.tsx: estimarDisparo
         // suprime essas pausas quando batchSizeEfetivo > 1).
-        const loteIndex = Math.floor(i / batchSize);
-        const jitter = (i % batchSize) * 100;
-        contactBaseDelay = roundTimes[loteIndex].getTime() - baseTime + jitter;
+        contactBaseDelay = roundContactTimeMs(roundTimes, i, batchSize, contacts.length) - baseTime;
       } else {
         // Comportamento original: pacing sequencial por contato via
         // intervalo_min/max, com pausas anti-spam fixas.
