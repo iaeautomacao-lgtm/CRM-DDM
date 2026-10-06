@@ -29,6 +29,7 @@ import { phoneVariants } from "@/lib/disparador/phone-key";
 import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/send-window";
 import { classifyProviderError, type BackoffReason } from "@/lib/disparador/provider-signals";
 import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
+import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -155,6 +156,14 @@ export interface ProviderCallObservation {
 export interface ProcessQueueItemOptions {
   /** Teto por número quando o canal não tem linha em dispatch_channel_limits. */
   defaultMaxInFlight?: number;
+  /**
+   * Linha de whatsapp_config carregada uma vez no tick (cron), já filtrada
+   * pela conta da campanha: null = canal não encontrado para a conta;
+   * undefined = não carregada (consulta por envio, como antes).
+   */
+  channelConfig?: Record<string, any> | null;
+  /** Blacklist revalidada uma vez no tick (tick-preload.ts); undefined = consultar. */
+  blacklistLookup?: BlacklistLookup;
   /** Só observa: nunca altera o destino do item. */
   onProviderCall?: (observation: ProviderCallObservation) => void;
 }
@@ -551,47 +560,49 @@ export async function processQueueItem(
   // número inválido) indica que a tentativa atual é com um telefone
   // alternativo de wacrm.contact_phones, não o contacts.phone principal.
   let phone: string;
-  if (item.contact_id) {
-    const attemptOrder = item.phone_attempt_order ?? 1;
-    if (attemptOrder > 1) {
-      const { data: altPhone } = await supabaseAdmin()
-        .from("contact_phones")
-        .select("phone")
-        .eq("contact_id", item.contact_id)
-        .eq("ordem", attemptOrder)
-        .maybeSingle();
-      phone = altPhone?.phone || item.contacts?.phone || item.mensagem_final;
-    } else {
-      phone = item.contacts?.phone || item.mensagem_final;
-    }
+  if (item.contact_id && (item.phone_attempt_order ?? 1) > 1) {
+    const { data: altPhone } = await supabaseAdmin()
+      .from("contact_phones")
+      .select("phone")
+      .eq("contact_id", item.contact_id)
+      .eq("ordem", item.phone_attempt_order ?? 1)
+      .maybeSingle();
+    phone = altPhone?.phone || item.contacts?.phone || item.mensagem_final;
   } else {
-    phone = item.mensagem_final;
+    // Mesma regra que o cron usa para pré-carregar a blacklist.
+    phone = queueItemPrimaryPhone(item) ?? item.mensagem_final;
   }
 
-  // Variações do número (com/sem 55, com/sem 9º dígito): entradas antigas
-  // da blacklist gravadas em outro formato também bloqueiam.
-  const { data: blacklistRows, error: blacklistCheckError } = await supabaseAdmin()
-    .from("blacklist")
-    .select("id")
-    .in("telefone", phoneVariants(phone))
-    .limit(1);
-  const blacklisted = (blacklistRows?.length ?? 0) > 0;
+  // Revalidação do tick (cron): mesma chave do startCampaign, que também
+  // cobre as variações abaixo. Sem ela (telefone alternativo, RPC ausente,
+  // worker), consulta por envio.
+  let blacklisted = options?.blacklistLookup?.(phone);
+  if (blacklisted === undefined) {
+    // Variações do número (com/sem 55, com/sem 9º dígito): entradas antigas
+    // da blacklist gravadas em outro formato também bloqueiam.
+    const { data: blacklistRows, error: blacklistCheckError } = await supabaseAdmin()
+      .from("blacklist")
+      .select("id")
+      .in("telefone", phoneVariants(phone))
+      .limit(1);
 
-  if (blacklistCheckError) {
-    // Falha fechada: antes, um erro transitório aqui deixava `blacklisted`
-    // undefined e o código seguia como "não bloqueado", enviando a
-    // mensagem mesmo sem conseguir confirmar que o número não está na
-    // blacklist. permanent=false — é um erro técnico da checagem, não
-    // uma rejeição de negócio; deixa retry_transient_queue_errors tentar
-    // de novo no próximo tick em vez de desistir permanentemente.
-    await markQueueError(
-      item.id,
-      `Falha ao checar blacklist: ${blacklistCheckError.message}`,
-      false,
-      item.campaign_id,
-      tentativasAtuais + 1
-    );
-    return { outcome: "error", error: blacklistCheckError.message };
+    if (blacklistCheckError) {
+      // Falha fechada: antes, um erro transitório aqui deixava `blacklisted`
+      // undefined e o código seguia como "não bloqueado", enviando a
+      // mensagem mesmo sem conseguir confirmar que o número não está na
+      // blacklist. permanent=false — é um erro técnico da checagem, não
+      // uma rejeição de negócio; deixa retry_transient_queue_errors tentar
+      // de novo no próximo tick em vez de desistir permanentemente.
+      await markQueueError(
+        item.id,
+        `Falha ao checar blacklist: ${blacklistCheckError.message}`,
+        false,
+        item.campaign_id,
+        tentativasAtuais + 1
+      );
+      return { outcome: "error", error: blacklistCheckError.message };
+    }
+    blacklisted = (blacklistRows?.length ?? 0) > 0;
   }
 
   if (blacklisted) {
@@ -616,18 +627,25 @@ export async function processQueueItem(
 
   // Canal sempre da conta da campanha (quando conhecida): session_ids vêm
   // do cliente e antes bastava um UUID de outra conta para disparar por ela.
-  let configQuery = supabaseAdmin()
-    .from("whatsapp_config")
-    .select("*")
-    .eq("id", item.session_id);
-  if (campaign.account_id) configQuery = configQuery.eq("account_id", campaign.account_id);
-  const { data: config, error: configError } = await configQuery.maybeSingle();
+  // O cron já traz a linha (uma leitura por tick, mesmo filtro de conta).
+  let config: Record<string, any> | null;
+  if (options?.channelConfig !== undefined) {
+    config = options.channelConfig;
+  } else {
+    let configQuery = supabaseAdmin()
+      .from("whatsapp_config")
+      .select("*")
+      .eq("id", item.session_id);
+    if (campaign.account_id) configQuery = configQuery.eq("account_id", campaign.account_id);
+    const { data, error: configError } = await configQuery.maybeSingle();
 
-  if (configError) {
-    // Falha momentânea do banco: retry, não condena o contato.
-    const message = `Falha ao carregar o canal: ${configError.message}`;
-    await markQueueError(item.id, message, false, item.campaign_id, tentativasAtuais + 1);
-    return { outcome: "error", error: message };
+    if (configError) {
+      // Falha momentânea do banco: retry, não condena o contato.
+      const message = `Falha ao carregar o canal: ${configError.message}`;
+      await markQueueError(item.id, message, false, item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: message };
+    }
+    config = data;
   }
   if (!config) {
     // O item já foi reivindicado ('enviando'): sem canal nada foi enviado,
@@ -875,7 +893,7 @@ export async function processQueueItem(
   // deixava a mensagem marcada 'enviado' mas sem log de auditoria e/ou
   // sem incrementar campaign_metrics.total_enviados, sem reconciliação
   // possível depois.
-  const { error: markSentError } = await supabaseAdmin().rpc("mark_queue_item_sent", {
+  const { error: markSentError, replayed } = await confirmItemSent({
     p_item_id: item.id,
     p_campaign_id: item.campaign_id,
     p_contact_id: item.contact_id,
@@ -915,9 +933,34 @@ export async function processQueueItem(
   // confirmação local; nesse caso ele ficou guardado em
   // dispatch_status_receipts (migration 125). Reaplica agora que o item
   // está 'enviado'. Falha aqui não é crítica: o cron reconcilia depois.
-  const { error: replayError } = await supabaseAdmin().rpc('replay_dispatch_receipts', { p_message_id: externalMessageId });
-  if (replayError) console.error('[Disparador] Confirmações antecipadas aguardam reconciliação:', replayError.message);
+  // Com a migration 167 o replay já rodou dentro da confirmação.
+  if (!replayed) {
+    const { error: replayError } = await supabaseAdmin().rpc('replay_dispatch_receipts', { p_message_id: externalMessageId });
+    if (replayError) console.error('[Disparador] Confirmações antecipadas aguardam reconciliação:', replayError.message);
+  }
   return { outcome: "sent", messageId: externalMessageId };
+}
+
+// Confirmação local do envio. Com a migration 167, confirm_dispatch_item_sent
+// faz mark_queue_item_sent + replay dos recibos antecipados na mesma
+// transação (uma ida ao banco a menos por envio). Sem ela, cai no
+// mark_queue_item_sent e o replay roda à parte, como antes.
+let confirmRpcUnavailable = false;
+
+async function confirmItemSent(
+  args: Record<string, unknown>
+): Promise<{ error: { message: string } | null; replayed: boolean }> {
+  if (!confirmRpcUnavailable) {
+    const { error } = await supabaseAdmin().rpc("confirm_dispatch_item_sent", args);
+    if (!error) return { error: null, replayed: true };
+    if (!isMissingFunction(error)) return { error, replayed: false };
+    confirmRpcUnavailable = true;
+    console.warn(
+      "[Disparador] confirm_dispatch_item_sent indisponível (migration 167 não aplicada); usando mark_queue_item_sent + replay."
+    );
+  }
+  const { error } = await supabaseAdmin().rpc("mark_queue_item_sent", args);
+  return { error, replayed: false };
 }
 
 async function sendViaWaha(

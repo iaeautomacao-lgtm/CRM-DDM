@@ -59,11 +59,13 @@ describe('cron: agendador por número', () => {
   const upserts: unknown[] = [];
   function setup(limits: Array<Record<string, unknown>> = []) {
     vi.stubEnv('CRON_SECRET', 'test-secret');
-    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === 'blacklisted_phone_keys' ? { data: [], error: null } : { data: true, error: null }
+    );
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: unknown } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'update', 'in'])
+      for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in'])
         builder[m] = () => builder;
       builder.eq = (column: string, value: unknown) => {
         if (table === 'campaigns' && value === 'em_execucao') result = { data: campaigns, error: null };
@@ -73,7 +75,7 @@ describe('cron: agendador por número', () => {
       };
       builder.select = () => {
         if (table === 'whatsapp_config')
-          result = { data: [{ id: 'ch-meta', provider: 'meta' }, { id: 'ch-waha', provider: 'waha' }], error: null };
+          result = { data: [{ id: 'ch-meta', provider: 'meta', account_id: 'acc' }, { id: 'ch-waha', provider: 'waha', account_id: 'acc' }], error: null };
         if (table === 'dispatch_channel_limits') result = { data: limits, error: null };
         return builder;
       };
@@ -202,6 +204,119 @@ describe('cron: agendador por número', () => {
     const tick = logMocks.writeLog.mock.calls.find(([entry]) => entry.event === 'cron_tick')?.[0];
     expect(tick.payload).toMatchObject({ stopped_early: true, totals: { not_started: 4 } });
   });
+
+  it('canal e blacklist carregados uma vez no tick e repassados a cada envio', async () => {
+    setup();
+    queue.small[0].mensagem_final = '+5511999998888';
+    queue.small[1].mensagem_final = '21987654321';
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === 'blacklisted_phone_keys' ? { data: [{ key: '1199998888' }], error: null } : { data: true, error: null }
+    );
+    mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+    try {
+      expect((await post()).status).toBe(200);
+    } finally {
+      delete queue.small[0].mensagem_final;
+      delete queue.small[1].mensagem_final;
+    }
+    const keyCalls = mocks.rpc.mock.calls.filter(([name]) => name === 'blacklisted_phone_keys');
+    expect(keyCalls).toHaveLength(1);
+    expect([...keyCalls[0][1].p_keys].sort()).toEqual(['1199998888', '2187654321']);
+    const optionsFor = (id: string) => mocks.process.mock.calls.find(([item]) => item.id === id)?.[2];
+    const small0 = optionsFor('small0');
+    expect(small0.channelConfig).toMatchObject({ id: 'ch-meta', provider: 'meta' });
+    expect(small0.blacklistLookup('+55 11 99999-8888')).toBe(true);
+    expect(small0.blacklistLookup('21 98765-4321')).toBe(false);
+    // Telefone que não estava no tick: o envio consulta o banco.
+    expect(small0.blacklistLookup('31911112222')).toBeUndefined();
+    expect(optionsFor('small1').channelConfig).toMatchObject({ id: 'ch-waha' });
+    // whatsapp_config lido uma vez só no tick.
+    expect(mocks.from.mock.calls.filter(([table]) => table === 'whatsapp_config')).toHaveLength(1);
+  });
+
+  it('canal de outra conta chega como null (o envio fecha como canal não encontrado)', async () => {
+    setup();
+    campaigns[1].account_id = 'other';
+    mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+    try {
+      await post();
+    } finally {
+      campaigns[1].account_id = 'acc';
+    }
+    const small0 = mocks.process.mock.calls.find(([item]) => item.id === 'small0')?.[2];
+    expect(small0.channelConfig).toBeNull();
+  });
+
+  it('retry de erros transitórios só no tick que pega o lock; falha nele não derruba o tick', async () => {
+    setup();
+    mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+    mocks.rpc.mockImplementation(async (name: string, args?: { p_name?: string }) => {
+      if (name === 'try_acquire_cron_lock' && args?.p_name === 'disparador_retry') return { data: false, error: null };
+      if (name === 'blacklisted_phone_keys') return { data: [], error: null };
+      return { data: true, error: null };
+    });
+    expect((await post()).status).toBe(200);
+    expect(mocks.rpc.mock.calls.some(([name]) => name === 'retry_transient_queue_errors')).toBe(false);
+    const lockCall = mocks.rpc.mock.calls.find(([name, args]) => name === 'try_acquire_cron_lock' && args.p_name === 'disparador_retry');
+    expect(lockCall?.[1].p_ttl_seconds).toBe(270);
+
+    vi.clearAllMocks();
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'retry_transient_queue_errors') return { data: null, error: { message: 'statement timeout' } };
+      if (name === 'blacklisted_phone_keys') return { data: [], error: null };
+      return { data: true, error: null };
+    });
+    mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+    expect((await post()).status).toBe(200);
+    expect(mocks.rpc.mock.calls.some(([name]) => name === 'retry_transient_queue_errors')).toBe(true);
+    expect(mocks.process).toHaveBeenCalled();
+  });
+});
+
+describe('cron: candidatos por campanha', () => {
+  it('teto derivado da vazão do tick, em páginas de 1.000 (max-rows do PostgREST)', async () => {
+    vi.stubEnv('CRON_SECRET', 'test-secret');
+    vi.stubEnv('DISPATCH_PROCESS_CONCURRENCY', '48');
+    vi.stubEnv('DISPARADOR_TICK_BUDGET_MS', '45000');
+    const campaign = {
+      id: 'imediato', account_id: 'acc', status: 'em_execucao', janela_inicio: '00:00', janela_fim: '23:59',
+      dias_envio: [], batch_size: 999_999, batch_pause_seconds: 0,
+    };
+    const ranges: Array<[number, number]> = [];
+    const total = 10_000;
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === 'blacklisted_phone_keys' ? { data: [], error: null } : { data: true, error: null }
+    );
+    mocks.from.mockImplementation((table: string) => {
+      let result: { data: unknown; error: null } = { data: [], error: null };
+      const builder: Record<string, unknown> = {};
+      for (const m of ['lte', 'lt', 'order', 'limit', 'update', 'in', 'select']) builder[m] = () => builder;
+      builder.eq = (_column: string, value: unknown) => {
+        if (table === 'campaigns' && value === 'em_execucao') result = { data: [campaign], error: null };
+        return builder;
+      };
+      builder.range = (from: number, to: number) => {
+        ranges.push([from, to]);
+        const rows = [];
+        for (let i = from; i <= Math.min(to, from + 999, total - 1); i++)
+          rows.push({ id: `i${i}`, campaign_id: 'imediato', session_id: 'ch', tentativas: 0 });
+        result = { data: rows, error: null };
+        return builder;
+      };
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve);
+      return builder;
+    });
+    mocks.process.mockResolvedValue({ outcome: 'deferred', reason: 'already_claimed' });
+    try {
+      expect((await POST(new Request('https://crm.test/api/disparador/cron', { method: 'POST', headers: { 'x-cron-secret': 'test-secret' } }))).status).toBe(200);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    // 48 × 45 s ÷ 0,5 s = 4.320 (antes: 700 fixos).
+    expect(ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999], [3000, 3999], [4000, 4319]]);
+    expect(mocks.process).toHaveBeenCalledTimes(4320);
+    vi.clearAllMocks();
+  });
 });
 
 describe('cron: reflow da fila de campanha em lote', () => {
@@ -219,11 +334,13 @@ describe('cron: reflow da fila de campanha em lote', () => {
   };
   function setup(dueItems: Array<Record<string, unknown>>) {
     vi.stubEnv('CRON_SECRET', 'test-secret');
-    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === 'blacklisted_phone_keys' ? { data: [], error: null } : { data: true, error: null }
+    );
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: null } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['eq', 'lte', 'lt', 'order', 'limit', 'update'])
+      for (const m of ['eq', 'lte', 'lt', 'order', 'limit', 'range', 'update'])
         builder[m] = (...args: unknown[]) => {
           if (table === 'campaigns' && m === 'eq' && args[1] === 'em_execucao') result = { data: [campaign], error: null };
           return builder;

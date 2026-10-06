@@ -130,7 +130,7 @@ describe("planQueueReflow", () => {
     expect(new Date(plan[0].scheduled_at).getTime()).toBeLessThan(br(27, 0).getTime());
   });
 
-  it("sequência do mesmo contato fica junta, em ordem, a 3 s; contatos externos são unidades sozinhas", () => {
+  it("sequência do mesmo contato fica junta, em ordem, a 7 s; contatos externos são unidades sozinhas", () => {
     const at = (mm: number, ss = 0) => br(16, 19, mm, ss).toISOString();
     const items: ReflowSourceItem[] = [
       { id: "a1", contact_id: "A", scheduled_at: at(0) },
@@ -144,15 +144,15 @@ describe("planQueueReflow", () => {
     const t = (ms: number) => new Date(br(19, 8).getTime() + ms).toISOString();
     expect(plan).toEqual([
       { id: "a1", scheduled_at: t(0) },
-      { id: "a2", scheduled_at: t(3000) },
+      { id: "a2", scheduled_at: t(7000) },
       { id: "b1", scheduled_at: t(100) },
-      { id: "b2", scheduled_at: t(3100) },
+      { id: "b2", scheduled_at: t(7100) },
       { id: "x", scheduled_at: t(10 * MIN) },
       { id: "y", scheduled_at: t(10 * MIN + 100) },
     ]);
   });
 
-  it("rodada grande (Imediato 50 mil): a rodada inteira vence em < 2 s, ordem mantida, sequência a 3 s", () => {
+  it("rodada grande (Imediato 50 mil): a rodada inteira vence em < 2 s, ordem mantida, sequência a 7 s", () => {
     // Fila antiga de 50 mil contatos × 2 mensagens com o espalhamento antigo
     // (100 ms × posição: a última só vencia ~83 min depois do início).
     const from = br(16, 19);
@@ -177,7 +177,7 @@ describe("planQueueReflow", () => {
       const m2 = at.get(`m2-${n}`)!;
       if (m1 < prev) outOfOrder++; // FIFO entre contatos
       prev = m1;
-      if (m2 - m1 !== 3000) badGap++;
+      if (m2 - m1 !== 7000) badGap++;
       firstMax = Math.max(firstMax, m1);
       secondMin = Math.min(secondMin, m2);
     }
