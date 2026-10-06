@@ -665,7 +665,7 @@ describe("validateFlowForActivation — modelo do ai_agent", () => {
   it("bloqueia modelo de outro provider", () => {
     const issues = validateFlowForActivation(
       flow,
-      nodes("gemini-2.5-flash"),
+      nodes("gemini-3.8-flash"),
       { aiProvider: "openai" },
     );
     expect(
