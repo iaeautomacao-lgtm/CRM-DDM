@@ -469,11 +469,14 @@ export function validateCampaignSettings(
   }
 
   const batchSize = input.batch_size;
-  if (batchSize != null && (!isFiniteNumber(batchSize) || !Number.isInteger(batchSize) || batchSize < 1)) {
+  if (
+    batchSize != null &&
+    (!isFiniteNumber(batchSize) || !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 999_999)
+  ) {
     errors.push("Tamanho de lote inválido.");
   }
   const pause = input.batch_pause_seconds;
-  if (pause != null && (!isFiniteNumber(pause) || pause < 0 || pause > 86_400)) {
+  if (pause != null && (!isFiniteNumber(pause) || !Number.isInteger(pause) || pause < 0 || pause > 86_400)) {
     errors.push("O intervalo entre rodadas precisa ficar entre 0 e 24 h.");
   }
   const percent = input.batch_percent;
@@ -485,8 +488,8 @@ export function validateCampaignSettings(
   }
   const imin = input.intervalo_min;
   const imax = input.intervalo_max;
-  if (imin != null && (!isFiniteNumber(imin) || imin < 0)) errors.push("Intervalo mínimo inválido.");
-  if (imax != null && (!isFiniteNumber(imax) || imax < 0)) errors.push("Intervalo máximo inválido.");
+  if (imin != null && (!isFiniteNumber(imin) || imin < 0 || imin > 86_400)) errors.push("Intervalo mínimo inválido.");
+  if (imax != null && (!isFiniteNumber(imax) || imax < 0 || imax > 86_400)) errors.push("Intervalo máximo inválido.");
   if (isFiniteNumber(imin) && isFiniteNumber(imax) && imin > imax) {
     errors.push("O intervalo mínimo não pode ser maior que o máximo.");
   }

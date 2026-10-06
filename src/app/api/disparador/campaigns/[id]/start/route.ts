@@ -113,7 +113,10 @@ export async function POST(
 
     ensureQueueWorkerRunning();
 
-    const result = await startCampaign(campaignId, accountId);
+    // "Iniciar agora" numa campanha agendada ({ agora: true }): a fila começa
+    // agora, não no horário agendado. Corpo vazio/inválido = início normal.
+    const body = (await request.json().catch(() => null)) as { agora?: unknown } | null;
+    const result = await startCampaign(campaignId, accountId, { startNow: body?.agora === true });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
