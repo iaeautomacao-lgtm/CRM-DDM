@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  getAiModelDefinition,
   isAiProvider,
   resolveAiModel,
 } from "@/lib/ai/models";
@@ -148,6 +149,13 @@ export async function callLlmForAnalysis(
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
         response_format: { type: "json_object" },
+        ...(getAiModelDefinition("openai", effectiveModel)?.openai_chat
+          ?.reasoning_effort
+          ? {
+              reasoning_effort: getAiModelDefinition("openai", effectiveModel)!
+                .openai_chat!.reasoning_effort,
+            }
+          : {}),
       }),
     });
     if (!response.ok) throw new Error(`OpenAI error: ${response.status}`);
@@ -169,7 +177,10 @@ export async function callLlmForAnalysis(
     });
     if (!response.ok) throw new Error(`Claude error: ${response.status}`);
     const data = await response.json();
-    return data?.content?.[0]?.text || "";
+    const textBlock = Array.isArray(data?.content)
+      ? data.content.find((block: { type?: string; text?: string }) => block?.type === "text")
+      : null;
+    return textBlock?.text || "";
   } else if (provider === "hermes") {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
