@@ -270,6 +270,7 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
     case "ai_agent":
       return {
         mode: "once",
+        model: null,
         system_prompt_override: "",
         next_node_key: "",
         max_turns: 20,
