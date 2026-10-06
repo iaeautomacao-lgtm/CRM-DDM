@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -103,27 +104,19 @@ function normalizeCpf(raw: string | undefined): string | null {
   return digits.length === 11 ? digits : null;
 }
 
+const MAX_IMPORT_FILE_BYTES = 20 * 1024 * 1024;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function POST(request: Request) {
   try {
-    // 1. Authenticate user and resolve their account
-    const supabase = await createServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("account_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    const accountId = profile?.account_id;
-    if (!accountId) {
-      return NextResponse.json(
-        { error: "Seu perfil não está vinculado a uma conta." },
-        { status: 400 }
-      );
+    // 1. Sessão + conta + papel (mesmo das rotas de campanha). Antes só
+    // exigia login: qualquer papel importava contatos e mexia em vínculos.
+    let accountId: string;
+    let userId: string;
+    try {
+      ({ accountId, userId } = await requireDisparadorAccess());
+    } catch (err) {
+      return toErrorResponse(err);
     }
 
     // 2. Parse request FormData
@@ -131,6 +124,12 @@ export async function POST(request: Request) {
     const file = formData.get("file") as File | null;
     if (!file) {
       return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 });
+    }
+    if (file.size > MAX_IMPORT_FILE_BYTES) {
+      return NextResponse.json(
+        { error: "Arquivo muito grande (máximo de 20 MB)." },
+        { status: 413 }
+      );
     }
     // campaign_id só vem preenchido quando o import acontece numa edição
     // de campanha já existente; draft_id cobre a criação de campanha nova
@@ -140,6 +139,25 @@ export async function POST(request: Request) {
     // aqui depende disso pra continuar funcionando se vier vazio.
     const campaignIdRaw = (formData.get("campaign_id") as string | null)?.trim() || null;
     const draftIdRaw = (formData.get("draft_id") as string | null)?.trim() || null;
+    if (
+      (campaignIdRaw && !UUID_RE.test(campaignIdRaw)) ||
+      (draftIdRaw && !UUID_RE.test(draftIdRaw))
+    ) {
+      return NextResponse.json({ error: "Identificador inválido." }, { status: 400 });
+    }
+    // campaign_id vem do cliente: a campanha precisa ser desta conta (outra
+    // conta → 404) antes de qualquer escrita com service role.
+    if (campaignIdRaw) {
+      const { data: ownCampaign } = await supabaseAdmin()
+        .from("campaigns")
+        .select("id")
+        .eq("id", campaignIdRaw)
+        .eq("account_id", accountId)
+        .limit(1);
+      if (!ownCampaign || ownCampaign.length === 0) {
+        return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
+      }
+    }
 
     // column_map (Correção 3) — JSON opcional { name, phone, cpf, var1,
     // var2, var3 } vindo do sub-step de mapeamento do wizard. JSON
@@ -539,7 +557,7 @@ export async function POST(request: Request) {
     if (allTagNames.length > 0) {
       ({ tagIdByKey } = await resolveImportTagIds(supabaseAdmin(), {
         accountId,
-        userId: user.id,
+        userId: userId,
         tagNames: allTagNames,
         canCreateTags: true,
       }));
@@ -553,7 +571,7 @@ export async function POST(request: Request) {
     for (let i = 0; i < pending.length; i += chunkSize) {
       const chunk = pending.slice(i, i + chunkSize);
       const insertRows = chunk.map((p) => ({
-        user_id: user.id,
+        user_id: userId,
         account_id: accountId,
         phone: p.phone,
         name: p.name,
@@ -777,6 +795,7 @@ export async function POST(request: Request) {
       let { error: clearErr } = await supabaseAdmin()
         .from("disp_import_contacts")
         .delete()
+        .eq("account_id", accountId)
         .eq(idColumn, idValue);
       // Reimport ao editar: o vínculo antigo da criação (por rascunho) sai
       // também — a lista nova substitui a antiga, nunca soma.
@@ -792,6 +811,7 @@ export async function POST(request: Request) {
           ({ error: clearErr } = await supabaseAdmin()
             .from("disp_import_contacts")
             .delete()
+            .eq("account_id", accountId)
             .eq("draft_id", draftOfCampaign));
         }
       }
@@ -825,6 +845,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, results, linked: importedContactIds.size });
   } catch (err: any) {
     console.error("[Contacts Import] Failed:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Falha ao importar os contatos." }, { status: 500 });
   }
 }
