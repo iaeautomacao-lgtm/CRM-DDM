@@ -27,6 +27,11 @@ describe("janela de envio", () => {
   it("parseHHMM", () => {
     expect(parseHHMM("8:05")).toBe(485);
     expect(parseHHMM("24:00")).toBeNull();
+    // coluna time do Postgres volta com segundos
+    expect(parseHHMM("08:00:00")).toBe(480);
+    expect(parseHHMM("18:30:00.000")).toBe(1110);
+    expect(isWithinSendWindow("08:00:00", "18:00:00", br(3))).toBe(false);
+    expect(isWithinSendWindow("08:00:00", "18:00:00", br(9))).toBe(true);
   });
 });
 
