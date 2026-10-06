@@ -25,11 +25,12 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Eye, GitFork, List } from "lucide-react";
+import { Eye, FlaskConical, GitFork, List } from "lucide-react";
 import { format } from "date-fns";
 
 import { FlowBuilder } from "./flow-builder";
 import { FlowCanvas } from "./flow-canvas";
+import { FlowSimulatorPanel } from "./flow-simulator-panel";
 import { FlowEditorProvider, useFlowEditor } from "./flow-editor-state";
 import { EditorHeader } from "./header";
 import { EditorNotices } from "./editor-notices";
@@ -118,6 +119,9 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
     return true;
   });
 
+  // Painel "Testar fluxo" (simulador, PRD 05) — não persiste entre visitas.
+  const [simOpen, setSimOpen] = useState(false);
+
   const setPanelOpenPersisted = (next: boolean) => {
     setPanelOpen(next);
     try {
@@ -162,24 +166,41 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
                 label="Lista"
               />
             </div>
+            <button
+              type="button"
+              onClick={() => setSimOpen((v) => !v)}
+              aria-pressed={simOpen}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium transition-colors",
+                simOpen ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              Testar fluxo
+            </button>
             <NodeLegend />
           </div>
         )}
 
-        {/* ---- stage: the active view, owning its own overflow ---- */}
-        <div className="relative mx-6 min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card-2">
-          {effectiveView === "canvas" ? (
-            <FlowCanvas debug={debug} />
-          ) : (
-            <div className="absolute inset-0 overflow-y-auto">
-              <FlowBuilder />
-            </div>
-          )}
-          {/* Reopen affordance — only rendered while the bar below is
-              collapsed, in both views (the bar itself is shared across
-              views too, per its own header comment). */}
-          {!panelOpen && (
-            <ValidationPanelBadge onClick={() => setPanelOpenPersisted(true)} />
+        {/* ---- stage (+ painel "Testar fluxo" ao lado, quando aberto) ---- */}
+        <div className="mx-6 flex min-h-0 flex-1 gap-3">
+          <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card-2">
+            {effectiveView === "canvas" ? (
+              <FlowCanvas debug={debug} />
+            ) : (
+              <div className="absolute inset-0 overflow-y-auto">
+                <FlowBuilder />
+              </div>
+            )}
+            {/* Reopen affordance — only rendered while the bar below is
+                collapsed, in both views (the bar itself is shared across
+                views too, per its own header comment). */}
+            {!panelOpen && (
+              <ValidationPanelBadge onClick={() => setPanelOpenPersisted(true)} />
+            )}
+          </div>
+          {simOpen && !isMobile && !isDebugMode && (
+            <FlowSimulatorPanel onClose={() => setSimOpen(false)} />
           )}
         </div>
 
