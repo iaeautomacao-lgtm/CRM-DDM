@@ -32,6 +32,7 @@ describe("priority AI intents", () => {
   it("does not treat 'não sou …' expressions as wrong person", () => {
     expect(classifyPriorityIntent("Não sou capaz de pagar agora")).toBeNull();
     expect(classifyPriorityIntent("não sou obrigado a pagar juros")).toBeNull();
+    expect(classifyPriorityIntent("não sou a favor de pagar esses juros")).toBeNull();
     expect(classifyPriorityIntent("não sou de fugir das minhas contas")).toBeNull();
     expect(classifyPriorityIntent("não sou o tipo de pessoa que deixa de pagar")).toBeNull();
     expect(classifyPriorityIntent("não sou caloteiro, só estou sem dinheiro")).toBeNull();

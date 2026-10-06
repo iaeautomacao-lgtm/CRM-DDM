@@ -33,7 +33,7 @@ const OPT_OUT_PATTERNS = [
 // fugir" e "não sou o tipo de…" seguem para a IA (antes viravam
 // #CONTATO_DIVERGENTE e iam para humano).
 const NOT_A_NAME_AFTER_ARTICLE =
-  "(?:tipo|unic[oa]|culpad[oa]|mesm[oa]|melhor|pior|primeir[oa]|ultim[oa]|responsavel|devedor|devedora|caloteir[oa]|obrigad[oa])";
+  "(?:tipo|favor|unic[oa]|culpad[oa]|mesm[oa]|melhor|pior|primeir[oa]|ultim[oa]|responsavel|devedor|devedora|caloteir[oa]|obrigad[oa])";
 
 const WRONG_PERSON_PATTERNS = [
   /\bnao sou (?:essa|esse|esta|este) (?:pessoa|cliente|senhor|senhora|moca|moco|rapaz|mulher|homem)\b/,
