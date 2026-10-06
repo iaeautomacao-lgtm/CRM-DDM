@@ -32,6 +32,14 @@ import { apiFetch } from "@/lib/api-fetch";
  *
  * `removeNode` desliga as setas que chegavam no nó (unlinkNodeReferences);
  * `renameNodeKey` troca a chave e reaponta essas setas.
+ *
+ * Não perder trabalho (PRD 03, P-2):
+ *   - rascunho local (src/lib/flows/local-draft.ts): toda edição não salva
+ *     vai para o localStorage; ao reabrir, `draftOffer` oferece recuperar;
+ *   - voltar/avançar do navegador: entrada-sentinela no histórico +
+ *     `popstate` (além do beforeunload e da proteção de links);
+ *   - `saveError` / `conflict` alimentam o indicador do cabeçalho e o aviso
+ *     de conflito com "Recarregar versão do servidor".
  */
 
 import {
@@ -60,6 +68,14 @@ import {
   undo as undoHistory,
   type History,
 } from "@/lib/flows/history";
+import {
+  FLOW_DRAFT_DEBOUNCE_MS,
+  clearFlowDraft,
+  decideDraftOffer,
+  getBrowserDraftStorage,
+  readFlowDraft,
+  writeFlowDraft,
+} from "@/lib/flows/local-draft";
 import type { FlowNodeRow, FlowRow } from "@/lib/flows/types";
 import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
 
@@ -75,6 +91,77 @@ export interface BuilderState {
   entry_node_id: string | null;
   status: FlowRow["status"];
   nodes: BuilderNode[];
+}
+
+/** O que vai para o rascunho local: tudo menos o status (ação de servidor). */
+export type DraftContent = Omit<BuilderState, "status">;
+
+export function toDraftContent(state: BuilderState): DraftContent {
+  return {
+    name: state.name,
+    description: state.description,
+    trigger_type: state.trigger_type,
+    trigger_config: state.trigger_config,
+    entry_node_id: state.entry_node_id,
+    nodes: state.nodes,
+  };
+}
+
+const TRIGGER_TYPES: ReadonlyArray<BuilderState["trigger_type"]> = [
+  "keyword",
+  "first_inbound_message",
+  "manual",
+  "called_by_flow",
+];
+
+/** Confere a forma do rascunho lido do navegador antes de aplicar. */
+export function isDraftContent(value: unknown): value is DraftContent {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.name === "string" &&
+    typeof v.description === "string" &&
+    TRIGGER_TYPES.includes(v.trigger_type as BuilderState["trigger_type"]) &&
+    !!v.trigger_config &&
+    typeof v.trigger_config === "object" &&
+    (v.entry_node_id === null || typeof v.entry_node_id === "string") &&
+    Array.isArray(v.nodes) &&
+    v.nodes.every(
+      (n) =>
+        !!n &&
+        typeof n === "object" &&
+        typeof (n as BuilderNode).node_key === "string" &&
+        typeof (n as BuilderNode).node_type === "string" &&
+        !!(n as BuilderNode).config &&
+        typeof (n as BuilderNode).config === "object",
+    )
+  );
+}
+
+export function buildInitialState(flow: FlowRow, nodes: FlowNodeRow[]): BuilderState {
+  return {
+    name: flow.name,
+    description: flow.description ?? "",
+    trigger_type: flow.trigger_type,
+    trigger_config: flow.trigger_config as Record<string, unknown>,
+    entry_node_id: flow.entry_node_id,
+    status: flow.status,
+    nodes: nodes.map((n) => ({
+      node_key: n.node_key,
+      node_type: n.node_type as NodeType,
+      config: n.config as Record<string, unknown>,
+      position_x: n.position_x,
+      position_y: n.position_y,
+    })),
+  };
+}
+
+/** Rascunho local oferecido ao abrir o editor. */
+export interface DraftOffer {
+  content: DraftContent;
+  savedAt: number;
+  /** Feito sobre uma versão do servidor que já mudou (outra aba/usuário). */
+  basedOnOlderVersion: boolean;
 }
 
 export interface FlowEditorContextValue {
@@ -120,6 +207,21 @@ export interface FlowEditorContextValue {
 
   // Actions
   save: (opts?: { silent?: boolean; confirmOrphanRuns?: boolean }) => Promise<boolean>;
+  /** Última falha de salvamento (null depois de salvar com sucesso). */
+  saveError: string | null;
+  /** O servidor recusou por conflito: outra aba/usuário salvou antes. */
+  conflict: boolean;
+  /** Recarrega a página com a versão do servidor (rascunho local fica guardado). */
+  reloadFromServer: () => void;
+  /**
+   * Antes de sair do editor: salva (rascunho) ou pede confirmação (fluxo
+   * ativo / falha ao salvar). true = pode navegar.
+   */
+  confirmLeave: () => Promise<boolean>;
+  /** Rascunho local mais novo que o servidor, aguardando Recuperar/Descartar. */
+  draftOffer: DraftOffer | null;
+  recoverDraft: () => void;
+  discardDraft: () => void;
   setStatus: (status: BuilderState["status"]) => Promise<void>;
   deleteFlow: () => Promise<void>;
 
@@ -305,6 +407,17 @@ export function applyNodePositions(
 
 const FlowEditorCtx = createContext<FlowEditorContextValue | null>(null);
 
+/** Marca da entrada-sentinela no histórico (guarda do voltar/avançar). */
+const FLOW_GUARD_STATE_KEY = "__wacrmFlowEditorGuard";
+
+function isFlowGuardState(historyState: unknown, flowId: string): boolean {
+  return (
+    !!historyState &&
+    typeof historyState === "object" &&
+    (historyState as Record<string, unknown>)[FLOW_GUARD_STATE_KEY] === flowId
+  );
+}
+
 export function useFlowEditor(): FlowEditorContextValue {
   const ctx = useContext(FlowEditorCtx);
   if (!ctx) {
@@ -332,21 +445,9 @@ export function FlowEditorProvider({
 }: ProviderProps) {
   const router = useRouter();
 
-  const [state, setStateRaw] = useState<BuilderState>(() => ({
-    name: initialFlow.name,
-    description: initialFlow.description ?? "",
-    trigger_type: initialFlow.trigger_type,
-    trigger_config: initialFlow.trigger_config as Record<string, unknown>,
-    entry_node_id: initialFlow.entry_node_id,
-    status: initialFlow.status,
-    nodes: initialNodes.map((n) => ({
-      node_key: n.node_key,
-      node_type: n.node_type as NodeType,
-      config: n.config as Record<string, unknown>,
-      position_x: n.position_x,
-      position_y: n.position_y,
-    })),
-  }));
+  const [state, setStateRaw] = useState<BuilderState>(() =>
+    buildInitialState(initialFlow, initialNodes),
+  );
 
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
@@ -354,9 +455,14 @@ export function FlowEditorProvider({
   // API succeeds) use setStateRaw so they don't falsely re-flag the
   // form as dirty.
   const [dirty, setDirty] = useState(false);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
   const latestStateRef = useRef(state);
   latestStateRef.current = state;
   const revisionRef = useRef(0);
+  // Revisão confirmada pelo servidor no último salvamento com sucesso:
+  // igual a `revisionRef` = nada a guardar no rascunho local.
+  const savedRevisionRef = useRef(0);
   // Histórico em ref (não re-renderiza a cada tecla); `historyTick` só
   // atualiza os botões Desfazer/Refazer.
   const historyRef = useRef<History<BuilderState>>(createHistory());
@@ -443,18 +549,18 @@ export function FlowEditorProvider({
     [],
   );
 
-  // Browser-level reload / tab-close / external-link guard. Fires a
-  // best-effort save instead of blocking with a confirm prompt —
-  // `keepalive` tells the browser to finish the request even after the
-  // page is gone. SPA navigation (sidebar links, back button) isn't
-  // covered here — Next's App Router doesn't fire beforeunload on
-  // client-side route changes — but the 2s debounce autosave below
-  // means there's rarely more than a couple seconds of edits at risk,
-  // and the editor's own nav actions (see header.tsx) save explicitly
-  // before navigating.
+  // Browser-level reload / tab-close / external-link guard: native
+  // "leave site?" prompt while dirty. SPA navigation isn't covered here
+  // (Next's App Router doesn't fire beforeunload on client-side route
+  // changes) — internal links and the browser back/forward button are
+  // guarded further down (`confirmLeave`), and every unsaved edit is
+  // also kept in the local draft.
+  // "Recarregar versão do servidor" já guardou o rascunho: sem prompt.
+  const skipUnloadPromptRef = useRef(false);
   useEffect(() => {
     if (!dirty) return;
     const handler = (event: BeforeUnloadEvent) => {
+      if (skipUnloadPromptRef.current) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -487,6 +593,72 @@ export function FlowEditorProvider({
   // Versão do fluxo no servidor que este editor conhece (conflito de abas).
   const versionRef = useRef<string>(initialFlow.updated_at);
   const conflictRef = useRef(false);
+  const [conflict, setConflict] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // ---- Rascunho local (localStorage) ----
+  // Grava o estado atual se houver edição ainda não confirmada pelo
+  // servidor. Chamado com debounce a cada mudança, no pagehide, ao
+  // desmontar e antes de recarregar por conflito.
+  const flowId = initialFlow.id;
+  const writeDraftNow = useCallback(() => {
+    if (revisionRef.current === savedRevisionRef.current) return;
+    writeFlowDraft(getBrowserDraftStorage(), {
+      v: 1,
+      flowId,
+      baseVersion: versionRef.current,
+      savedAt: Date.now(),
+      conflict: conflictRef.current,
+      state: toDraftContent(latestStateRef.current),
+    });
+  }, [flowId]);
+
+  // Decisão pura no inicializador (esta subárvore só monta no cliente,
+  // ver FlowEditorShell); a limpeza de rascunho vencido/igual fica no efeito.
+  const [draftOffer, setDraftOffer] = useState<DraftOffer | null>(() => {
+    const draft = readFlowDraft(getBrowserDraftStorage(), initialFlow.id, isDraftContent);
+    const decision = decideDraftOffer({
+      draft,
+      serverVersion: initialFlow.updated_at,
+      serverState: toDraftContent(buildInitialState(initialFlow, initialNodes)),
+      now: Date.now(),
+    });
+    return decision.offer && draft
+      ? { content: draft.state, savedAt: draft.savedAt, basedOnOlderVersion: decision.basedOnOlderVersion }
+      : null;
+  });
+  useEffect(() => {
+    // Rascunho vencido ou igual ao servidor não serve mais: limpa.
+    const storage = getBrowserDraftStorage();
+    const draft = readFlowDraft(storage, flowId, isDraftContent);
+    if (!draft) return;
+    const decision = decideDraftOffer({
+      draft,
+      serverVersion: initialFlow.updated_at,
+      serverState: toDraftContent(buildInitialState(initialFlow, initialNodes)),
+      now: Date.now(),
+    });
+    if (decision.reason === "expired" || decision.reason === "identical") {
+      clearFlowDraft(storage, flowId);
+    }
+    // Só na abertura do editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const timeout = window.setTimeout(writeDraftNow, FLOW_DRAFT_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [dirty, state, writeDraftNow]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    window.addEventListener("pagehide", writeDraftNow);
+    return () => window.removeEventListener("pagehide", writeDraftNow);
+  }, [dirty, writeDraftNow]);
+
+  // Saída por navegação interna (SPA) não dispara pagehide.
+  useEffect(() => () => writeDraftNow(), [writeDraftNow]);
   // Usuário aceitou publicar com clientes em nós removidos (ver PUT).
   const orphanConfirmRef = useRef(false);
   const isSavingRef = useRef(false);
@@ -549,23 +721,31 @@ Publicar mesmo assim?`)) {
           }
           if (res.status === 409 && json.code === "conflict") {
             conflictRef.current = true;
-            toast.error(json.error, {
-              id: "flow-conflict",
-              duration: 15000,
-              action: { label: "Recarregar", onClick: () => window.location.reload() },
-            });
+            setConflict(true);
+            // Guarda já o trabalho local marcado como conflito, para
+            // continuar recuperável depois de recarregar.
+            writeDraftNow();
+            // O aviso com "Recarregar versão do servidor" fica no editor
+            // (editor-notices.tsx); o toast só chama a atenção.
+            toast.error(json.error, { id: "flow-conflict", duration: 8000 });
             return false;
           }
           throw new Error(json.error ?? `Falha ao salvar: ${res.status}`);
         }
         const saved = (await res.json().catch(() => null)) as { flow?: { updated_at?: string } } | null;
         if (saved?.flow?.updated_at) versionRef.current = saved.flow.updated_at;
-        if (revision === revisionRef.current) setDirty(false);
+        savedRevisionRef.current = revision;
+        setSaveError(null);
+        if (revision === revisionRef.current) {
+          setDirty(false);
+          clearFlowDraft(getBrowserDraftStorage(), initialFlow.id);
+        }
         if (!opts?.silent) toast.success(snapshot.status === "active" ? "Alterações publicadas." : "Salvo.");
         return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Falha ao salvar";
-        toast.error(msg);
+        setSaveError(msg);
+        toast.error(msg, { id: "flow-save-error" });
         return false;
       } finally {
         setSaving(false);
@@ -582,8 +762,32 @@ Publicar mesmo assim?`)) {
       if (success && revision !== revisionRef.current) return save(opts);
       return success;
     },
-    [initialFlow.id, state],
+    [initialFlow.id, state, writeDraftNow],
   );
+
+  const reloadFromServer = useCallback(() => {
+    writeDraftNow();
+    skipUnloadPromptRef.current = true;
+    window.location.reload();
+  }, [writeDraftNow]);
+
+  // Antes de sair do editor com edições pendentes. Fluxo ativo não publica
+  // ao sair (só com "Publicar alterações"); rascunho tenta salvar e, se não
+  // der (erro, conflito), pergunta. Em todos os casos o trabalho fica no
+  // rascunho local.
+  const confirmLeave = useCallback(async (): Promise<boolean> => {
+    if (!dirtyRef.current) return true;
+    writeDraftNow();
+    if (latestStateRef.current.status === "active") {
+      return window.confirm(
+        "Este fluxo está ativo e tem alterações não publicadas. Sair sem publicar?\n\nAs alterações ficam guardadas neste navegador para recuperar depois.",
+      );
+    }
+    if (!conflictRef.current && (await save({ silent: true }))) return true;
+    return window.confirm(
+      "Não foi possível salvar as alterações deste fluxo. Sair mesmo assim?\n\nElas ficam guardadas neste navegador e podem ser recuperadas ao reabrir o fluxo.",
+    );
+  }, [save, writeDraftNow]);
 
   // Protect internal links, including the dashboard sidebar, before unmount.
   useEffect(() => {
@@ -596,18 +800,69 @@ Publicar mesmo assim?`)) {
       event.preventDefault();
       event.stopPropagation();
       const href = url.pathname + url.search + url.hash;
-      // Fluxo ativo não publica ao sair: só com "Publicar alterações".
-      if (latestStateRef.current.status === "active") {
-        if (window.confirm("Este fluxo está ativo e tem alterações não publicadas. Sair sem publicar?")) {
-          router.push(href);
-        }
-        return;
-      }
-      void save({ silent: true }).then(ok => { if (ok) router.push(href); });
+      void confirmLeave().then((ok) => { if (ok) router.push(href); });
     };
     document.addEventListener("click", protect, true);
     return () => document.removeEventListener("click", protect, true);
-  }, [dirty, save, router]);
+  }, [dirty, confirmLeave, router]);
+
+  // ---- Voltar/avançar do navegador ----
+  // O App Router não dispara beforeunload no voltar. Com edição pendente,
+  // empilha uma entrada-sentinela (mesma URL; o pushState do Next copia o
+  // estado interno dele). O "voltar" sai da sentinela para a entrada
+  // original — mesma página, nada desmonta — e aqui decidimos: salvar ou
+  // confirmar e seguir voltando, ou reempilhar a sentinela e ficar.
+  const guardActiveRef = useRef(false);
+  useEffect(() => {
+    // Reaberto numa sentinela (voltou de outra página até ela).
+    if (isFlowGuardState(window.history.state, flowId)) guardActiveRef.current = true;
+  }, [flowId]);
+  useEffect(() => {
+    if (!dirty || guardActiveRef.current) return;
+    window.history.pushState({ [FLOW_GUARD_STATE_KEY]: flowId }, "");
+    guardActiveRef.current = true;
+  }, [dirty, flowId]);
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      if (!guardActiveRef.current) return;
+      // Avançou de volta para a sentinela: nada a fazer.
+      if (isFlowGuardState(event.state, flowId)) return;
+      guardActiveRef.current = false;
+      void confirmLeave().then((ok) => {
+        if (ok) {
+          window.history.back();
+          return;
+        }
+        window.history.pushState({ [FLOW_GUARD_STATE_KEY]: flowId }, "");
+        guardActiveRef.current = true;
+      });
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [confirmLeave, flowId]);
+
+  // ---- Recuperar / descartar o rascunho local ----
+  const recoverDraft = useCallback(() => {
+    const offer = draftOffer;
+    if (!offer) return;
+    // Pelo setState: entra no histórico (Ctrl+Z desfaz a recuperação) e
+    // marca como sujo, então o autosave (fluxo em rascunho) salva sozinho.
+    setState((s) => ({ ...offer.content, status: s.status }));
+    setHistoryEpoch((e) => e + 1);
+    setDraftOffer(null);
+    toast.success(
+      latestStateRef.current.status === "active"
+        ? "Alterações recuperadas. Use \"Publicar alterações\" para colocá-las no ar."
+        : "Alterações recuperadas.",
+    );
+  }, [draftOffer, setState]);
+
+  const discardDraft = useCallback(() => {
+    setDraftOffer(null);
+    // Edições novas desta sessão (se houver) voltam a ser gravadas no
+    // próximo debounce.
+    clearFlowDraft(getBrowserDraftStorage(), flowId);
+  }, [flowId]);
 
   // ---- Debounced autosave ----
   // `save`'s identity changes on every edit (it closes over `state`),
@@ -618,12 +873,12 @@ Publicar mesmo assim?`)) {
     // Autosave só em rascunho: num fluxo ativo cada salvamento entra no ar
     // para clientes reais, então lá é o botão "Publicar alterações".
     // Conflito com outra aba: não fica tentando sobrescrever a cada edição.
-    if (!dirty || state.status === "active" || conflictRef.current) return;
+    if (!dirty || state.status === "active" || conflict) return;
     const timeout = window.setTimeout(() => {
       void save({ silent: true });
     }, 2000);
     return () => window.clearTimeout(timeout);
-  }, [dirty, save, state.status]);
+  }, [dirty, save, state.status, conflict]);
 
   // Ctrl/⌘+S = Salvar / Publicar alterações (antes abria o "salvar
   // página" do navegador).
@@ -877,6 +1132,13 @@ Publicar mesmo assim?`)) {
       renameNodeKey,
       moveNodes,
       save,
+      saveError,
+      conflict,
+      reloadFromServer,
+      confirmLeave,
+      draftOffer,
+      recoverDraft,
+      discardDraft,
       setStatus,
       deleteFlow,
       flashKey,
@@ -906,6 +1168,13 @@ Publicar mesmo assim?`)) {
       renameNodeKey,
       moveNodes,
       save,
+      saveError,
+      conflict,
+      reloadFromServer,
+      confirmLeave,
+      draftOffer,
+      recoverDraft,
+      discardDraft,
       setStatus,
       deleteFlow,
       flashKey,
