@@ -177,15 +177,19 @@ export async function getWahaSessionInfo(config: WahaConfig): Promise<any> {
   }
 }
 
+/**
+ * `webhook` vem de `wahaWebhookFor(config.id)` (lib/whatsapp/waha-webhook-auth):
+ * URL a partir de env confiável e segredo derivado por canal. O segredo
+ * global WAHA_WEBHOOK_SECRET nunca é enviado ao servidor WAHA.
+ */
 export async function startWahaSession(
   config: WahaConfig,
-  webhookUrl?: string
+  webhook?: { url: string; secret: string }
 ): Promise<void> {
-  const webhookSecret = process.env.WAHA_WEBHOOK_SECRET;
+  const webhookUrl = webhook?.url;
+  const webhookSecret = webhook?.secret;
   if (webhookUrl && !webhookSecret)
-    throw new Error(
-      'WAHA_WEBHOOK_SECRET must be configured before starting a webhook session'
-    );
+    throw new Error('WAHA webhook secret must be provided with the webhook URL');
   // If webhookUrl is provided, we stop and delete the session first to recreate it with the webhook config
   if (webhookUrl) {
     try {
