@@ -34,6 +34,8 @@ export interface ChannelConfig {
   reason?: string;
   message?: string;
   needs_reset?: boolean;
+  /** Meta: só indica se há App Secret salvo — o valor nunca vem no GET. */
+  has_app_secret?: boolean;
   flow_id: string | null;
   receptivo: boolean;
   habilitado: boolean;

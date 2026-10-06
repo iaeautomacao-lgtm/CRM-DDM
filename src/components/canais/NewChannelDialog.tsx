@@ -497,6 +497,8 @@ export function NewChannelDialog({
                   <Input
                     id="new-meta-app-secret"
                     type="password"
+                    // Evita o navegador preencher a senha de login aqui.
+                    autoComplete="new-password"
                     value={appSecret}
                     onChange={(e) => {
                       setAppSecret(e.target.value);

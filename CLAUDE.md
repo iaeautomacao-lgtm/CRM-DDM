@@ -65,7 +65,7 @@ Nunca unificar esses dois caminhos — as lógicas são incompatíveis. Sempre b
 | Gotcha | Motivo |
 |---|---|
 | `engine.ts` tem truncagem intencional | Decisão deliberada, não commitar sem confirmação |
-| `app_secret` pode chegar em plaintext pela UI | Bug de segurança conhecido, bypass da criptografia AES-256-GCM |
+| Segredos de canal (`app_secret`, `verify_token`, tokens) | Sempre gravar pelo `resolveSecretForWrite` (cifra no servidor); nunca gravar direto no banco. Texto puro legado: `scripts/encrypt-plaintext-app-secrets.mjs` |
 | `/api/v1/disparador/campaigns` não chama `startCampaign()` | Lógica própria, não tem `import_draft_id` |
 | Migration files podem não refletir produção | Sempre verificar schema live no Supabase SQL Editor antes de escrever migrations |
 | `hasRunLeftNodeSnapshot` no engine | Guard anti-race-condition BEN→Aleh, não remover |
