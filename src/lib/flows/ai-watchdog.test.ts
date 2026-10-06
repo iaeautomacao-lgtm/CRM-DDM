@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 vi.mock("@/lib/logger", () => ({ writeLog: vi.fn() }));
 
-import { AI_STALL_REASON, stallWindow, sweepStalledAiConversations } from "./ai-watchdog";
+import { AI_STALL_HANDOFF_REASON, AI_STALL_REASON, stallWindow, sweepStalledAiConversations } from "./ai-watchdog";
 
 type Row = Record<string, unknown>;
 
@@ -65,11 +65,21 @@ describe("sweepStalledAiConversations", () => {
       messages: [{ id: "m1", conversation_id: "c1", sender_type: "customer", created_at: ago(120) }],
       flow_runs: [{ id: "r1", flow_id: "f", conversation_id: "c1", status: "active", current_node_key: "agente_ddm" }],
       flow_run_events: [],
+      ai_decisions: [],
     });
     expect(await sweepStalledAiConversations(db, now)).toBe(1);
     expect(tables.flow_runs[0]).toMatchObject({ status: "handed_off", end_reason: AI_STALL_REASON });
     expect(tables.conversations[0]).toMatchObject({ status: "pending" });
     expect(tables.flow_run_events[0]).toMatchObject({ flow_run_id: "r1", event_type: "handoff" });
+    expect(tables.ai_decisions).toHaveLength(1);
+    expect(tables.ai_decisions[0]).toMatchObject({
+      flow_run_id: "r1",
+      conversation_id: "c1",
+      decision_type: "handoff",
+      needs_human: true,
+      handoff_reason: AI_STALL_HANDOFF_REASON,
+      handoff_subreason: "WATCHDOG_SEM_RESPOSTA",
+    });
   });
 
   it("não mexe se alguém já respondeu depois do cliente", async () => {

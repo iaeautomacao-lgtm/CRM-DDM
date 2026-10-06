@@ -13,13 +13,16 @@ import {
   classifyFetchFailure,
   classifyHttpFailure,
   classifyToolBodyFailure,
-  isIntegrationOutage,
+  fullyFailedIntegrations,
   prepareToolArgs,
   retryDelayMs,
   serializeToolFailure,
   shouldRetryTool,
+  tallyToolResult,
   type ToolExecutionMeta,
+  type ToolRoundTally,
 } from "@/lib/ai/tool-recovery";
+import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
 import {
@@ -267,6 +270,23 @@ function extractInstallmentsFromHistory(history: any[]): number {
   return 1;
 }
 
+/**
+ * Tag de saída imposta pelo código, não escolhida pelo modelo (hoje só
+ * #INSTABILIDADE quando todas as chamadas de uma integração falharam).
+ * Vai para a telemetria do handoff (ai_decisions.decision.forced).
+ */
+export interface ForcedAiExit {
+  tag: string;
+  /** tool → código da última falha (todas as chamadas da rodada falharam). */
+  tools: Record<string, string>;
+}
+
+/** Trava que tirou a conversa da IA antes do modelo (anti-abuso/anti-loop). */
+export interface AiGuardDetail {
+  subreason: string;
+  [key: string]: unknown;
+}
+
 export type AiAutoResponseResult =
   | {
       outcome: "sent";
@@ -275,12 +295,15 @@ export type AiAutoResponseResult =
       content: string;
       detectedTag: string | null;
       modelUsed: string | null;
+      forcedExit?: ForcedAiExit | null;
     }
   | {
       outcome: "skipped";
       reason: string;
       detectedTag: string | null;
       modelUsed: string | null;
+      forcedExit?: ForcedAiExit | null;
+      guard?: AiGuardDetail;
     }
   | {
       outcome: "failed";
@@ -460,6 +483,10 @@ async function handleAiAutoResponseAttempt(
   // it — see the three call sites (Meta webhook, WAHA webhook,
   // flows/engine.ts's runAiAgentCore).
   configId?: string,
+  // Tags de saída que o fluxo usa nos ramos do switch/condição
+  // (subject_key "ai_exit_code") — aceitas além de KNOWN_AI_EXIT_TAGS,
+  // para fluxos com tags próprias. Ver exit-tags.ts.
+  flowExitTags?: string[],
   tracker?: AiAttemptTracker,
 ): Promise<AiAutoResponseResult> {
   const db = supabaseAdmin();
@@ -652,70 +679,71 @@ async function handleAiAutoResponseAttempt(
     }
   }
 
-  // --- TRAVA DE MENSAGENS INADEQUADAS OU SACANAGEM (ANTI-SCAM) ---
-  // Impede gasto desnecessário de tokens se o cliente estiver xingando, mandando piadas ou tentando "quebrar" o bot.
-  const lowerMsg = (incomingText || "").toLowerCase().trim();
-  const blacklistedKeywords = [
-    "fudido", "corno", "puta", "viado", "caralho", "bosta", "merda", "vsf", "vtnc",
-    "chatgpt", "gemini", "prompt", "sistema", "jailbreak", "ignorar instruções", "ignore instructions",
-    "sacanagem", "otario", "otário", "imbecil", "idiota", "palhaço", "palhaco",
-    "robô", "robo", "bot", "inteligencia artificial", "máquina", "maquina"
-  ];
+  // --- TRAVA DE OFENSA / JAILBREAK (ANTI-SCAM) ---
+  // Impede gasto de tokens com xingamento ou tentativa clara de "quebrar"
+  // o agente. Palavra inteira, sem acento — ver abuse-guard.ts (a versão
+  // antiga casava "enviado", "computador", "sistema", "botão"…).
+  // Comportamento mantido (vai para humano; decisão de produto pendente),
+  // mas para a FILA DA EQUIPE como o nó handoff_team — não mais para o
+  // dono da conversa/do número.
+  const abuse = priorityIntent ? null : detectAbusiveInput(incomingText || "");
 
-  const containsBlacklisted = blacklistedKeywords.some(keyword => lowerMsg.includes(keyword));
+  if (abuse) {
+    console.warn(`[AI Agent] Anti-scam (${abuse.kind}: "${abuse.term}") na conversa ${conversationId}. Transferindo para a fila humana.`);
 
-  if (!priorityIntent && containsBlacklisted) {
-    console.warn(`[AI Agent] Anti-scam triggered on conversation ${conversationId}. Suspicious input: "${incomingText}". Transferring to human.`);
-    
-    // Busca o agente para transferir
-    const { data: convData } = await db
+    const { data: convRows } = await db
       .from("conversations")
-      .select("user_id")
+      .select("team_id")
       .eq("id", conversationId)
-      .single();
+      .limit(1);
+    const teamId = (convRows?.[0] as { team_id?: string | null } | undefined)?.team_id ?? null;
 
-    let targetAgentId = convData?.user_id;
-
-    if (!targetAgentId) {
-      const { data: wahaCfg } = await db
-        .from("whatsapp_config")
-        .select("user_id")
-        .eq("account_id", accountId)
-        .maybeSingle();
-      if (wahaCfg?.user_id) {
-        targetAgentId = wahaCfg.user_id;
-      }
+    // Import dinâmico: engine.ts importa este arquivo (evita ciclo no load).
+    const { selectAgentForTeam, selectAnyAgentForAccount } = await import("@/lib/flows/engine");
+    const engineDb = db as unknown as Parameters<typeof selectAgentForTeam>[0];
+    let selectedAgent: string | null = null;
+    try {
+      selectedAgent = teamId
+        ? await selectAgentForTeam(engineDb, teamId, accountId)
+        : await selectAnyAgentForAccount(engineDb, accountId);
+    } catch (err) {
+      // Sem atendente escolhido a conversa fica na fila (pending, sem dono).
+      console.error("[AI Agent] Anti-scam: falha ao escolher atendente:", err);
     }
 
-    if (targetAgentId) {
-      // Atribui o chat ao atendente e só declara handoff depois que a
-      // persistência for confirmada. Sem isso o Flow Engine pode encerrar
-      // o run como handed_off enquanto a conversa continua sem responsável.
-      const { error: assignmentError } = await db
-        .from("conversations")
-        .update({
-          assigned_agent_id: targetAgentId,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", conversationId);
+    // Só declara handoff depois que a persistência for confirmada. Sem isso
+    // o Flow Engine pode encerrar o run como handed_off enquanto a conversa
+    // continua sem ir para a fila.
+    const { error: assignmentError } = await db
+      .from("conversations")
+      .update({
+        status: "pending",
+        assigned_agent_id: selectedAgent,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", conversationId);
 
-      if (assignmentError) {
-        return {
-          outcome: "failed",
-          reason: `handoff_anti_scam_assignment_failed:${assignmentError.message}`,
-          detectedTag: null,
-          modelUsed: responseModel,
-        };
-      }
-        
-      // Opcional: envia um alerta ou tag de humano no comando no banco
+    if (assignmentError) {
       return {
-        outcome: "skipped",
-        reason: "handoff_anti_scam",
+        outcome: "failed",
+        reason: `handoff_anti_scam_assignment_failed:${assignmentError.message}`,
         detectedTag: null,
         modelUsed: responseModel,
-      }; // Interrompe a geração da IA imediatamente sem gastar tokens
+      };
     }
+
+    return {
+      outcome: "skipped",
+      reason: "handoff_anti_scam",
+      detectedTag: null,
+      modelUsed: responseModel,
+      guard: {
+        subreason: abuse.kind === "jailbreak" ? "JAILBREAK" : "OFENSA",
+        term: abuse.term,
+        team_id: teamId,
+        assigned_to: selectedAgent,
+      },
+    }; // Interrompe a geração da IA imediatamente sem gastar tokens
   }
 
   // --- ANTI-LOOP GUARD ---
@@ -778,6 +806,11 @@ async function handleAiAutoResponseAttempt(
         reason: "handoff_anti_loop",
         detectedTag: null,
         modelUsed: responseModel,
+        guard: {
+          subreason: "MENSAGENS_RAPIDAS",
+          window_seconds: diffSeconds,
+          assigned_to: targetUserId,
+        },
       }; // Interrompe a resposta automática da IA
     }
   }
@@ -1360,18 +1393,19 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 
   // 5. Generate response using chosen LLM API
   //
-  // Ferramentas de integração que falharam de vez nesta resposta (já
-  // depois das tentativas). Uma chamada bem-sucedida posterior da mesma
-  // ferramenta tira ela da lista. Ver forceInstabilityExit abaixo.
-  const failedIntegrationTools = new Map<string, string>();
+  // Resultado final (já depois das tentativas) de CADA chamada de tool
+  // nesta resposta. Só força #INSTABILIDADE a tool cujas chamadas TODAS
+  // caíram por falha de integração — 1 de N registros falhando, ou uma
+  // resposta de negócio (404, "CPF não encontrado"), deixa o modelo
+  // responder com o que tem. Ver fullyFailedIntegrations abaixo.
+  const toolTally = new Map<string, ToolRoundTally>();
   const trackedOnToolResult = async (
     toolName: string,
     result: string,
     durationMs: number,
     meta?: ToolExecutionMeta,
   ) => {
-    if (isIntegrationOutage(meta?.failureCode)) failedIntegrationTools.set(toolName, meta!.failureCode!);
-    else failedIntegrationTools.delete(toolName);
+    tallyToolResult(toolTally, toolName, meta?.failureCode);
     // Tool terminou: o modelo volta a trabalhar com o resultado.
     if (tracker) tracker.trace.phase = "llm";
     if (onToolResult) await onToolResult(toolName, result, durationMs, meta);
@@ -1450,9 +1484,15 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   // tool → #INSTABILIDADE" não pode depender só do prompt — senão a
   // conversa fica parada no nó de IA. Força a mensagem de instabilidade com
   // a tag, que leva o fluxo ao caminho de transferência.
-  if (failedIntegrationTools.size > 0 && !extractAiExitTag(generatedText)) {
-    console.warn("[AI Agent] Integração indisponível sem tag de saída — forçando #INSTABILIDADE:", [...failedIntegrationTools.entries()]);
+  const downIntegrations = fullyFailedIntegrations(toolTally);
+  let forcedExit: ForcedAiExit | null = null;
+  if (
+    Object.keys(downIntegrations).length > 0 &&
+    !extractAiExitTag(generatedText, flowExitTags)
+  ) {
+    console.warn("[AI Agent] Integração indisponível sem tag de saída — forçando #INSTABILIDADE:", downIntegrations);
     generatedText = `${AI_INSTABILITY_TEXT} #INSTABILIDADE`;
+    forcedExit = { tag: "#INSTABILIDADE", tools: downIntegrations };
   }
 
   // Mesmo depois do retry acima, o modelo não produziu nenhum texto —
@@ -1485,7 +1525,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   // node needs back as `ai_exit_code`. Re-reading the saved message and
   // regex-matching it (the old approach) never found anything, because
   // by the time it's saved the tag is already gone.
-  const detectedTag = extractAiExitTag(generatedText);
+  const detectedTag = extractAiExitTag(generatedText, flowExitTags);
 
   let payBoletoUrl = "";
   let shouldTransferToHuman = false;
@@ -1515,12 +1555,10 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   });
 
   // Exit codes are control-plane markers, not customer-facing text.
-  // Strip exactly the detected tag so newer structured codes such as
-  // #RECUSA_CONFIRMADA or #CLIENTE_PEDIU_HUMANO never leak into chat.
-  generatedText = stripAiExitTag(generatedText, detectedTag)
-    .replace(/#ACORDOFORMALIZADO\(finalização\)/g, "")
-    .replace(/#AGENDAMENTO\(finalização\)/g, "")
-    .trim();
+  // Strip EVERY known/flow tag (not only the detected one) so a second
+  // tag such as #RECUSA next to #EQUIPEHUMANA never leaks into chat.
+  // Ver exit-tags.ts (inclui o sufixo legado "(finalização)").
+  generatedText = stripAiExitTag(generatedText, detectedTag, flowExitTags);
 
   if (!generatedText) {
     return {
@@ -1528,6 +1566,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       reason: "control_tag_only",
       detectedTag,
       modelUsed: responseModel,
+      forcedExit,
     };
   }
 
@@ -1743,6 +1782,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         content: generatedText,
         detectedTag,
         modelUsed: responseModel,
+        forcedExit,
       };
     } catch (err) {
       console.error(`[AI Agent] ${conversationChannel} send error:`, err);
@@ -1963,6 +2003,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     content: generatedText,
     detectedTag,
     modelUsed: responseModel,
+    forcedExit,
   };
 }
 
@@ -2278,7 +2319,7 @@ async function generateOpenAiResponse(
 
               const httpText = await httpRes.text();
               const failure =
-                classifyHttpFailure(httpRes.status) ??
+                classifyHttpFailure(httpRes.status, httpText) ??
                 classifyToolBodyFailure(httpText);
 
               if (!failure) {
