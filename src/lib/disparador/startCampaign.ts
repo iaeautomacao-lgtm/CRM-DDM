@@ -533,7 +533,7 @@ async function prepareCampaign(
     // como falsy e silenciosamente forçaria os defaults de 90s/300s.
     const minDelay = (campaign.intervalo_min ?? 90) * 1000;
     const maxDelay = (campaign.intervalo_max ?? 300) * 1000;
-    const intraDelay = INTRA_CONTACT_MS; // 3 s entre mensagens do mesmo contato
+    const intraDelay = INTRA_CONTACT_MS; // 7 s entre mensagens do mesmo contato (131056)
 
     // batch_size > 1: contatos são agrupados em lotes que saem juntos (ver
     // abaixo), e o cron processa até batch_size itens "agendado" em

@@ -12,7 +12,7 @@
 // restante ('agendado') é recalculada UMA vez:
 // - ordem preservada: (scheduled_at, id);
 // - os itens do mesmo contato (sequência de mensagens) ficam juntos, em
-//   ordem, a 3 s um do outro — igual ao startCampaign;
+//   ordem, a INTRA_CONTACT_MS (7 s) um do outro — igual ao startCampaign;
 // - contatos agrupados em rodadas de batch_size, com o horário de cada
 //   rodada dado por scheduleRounds (pausa medida em tempo ABERTO) a partir
 //   de agora, + espalhamento de no máximo 2 s na rodada inteira
