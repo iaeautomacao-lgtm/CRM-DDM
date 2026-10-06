@@ -8,6 +8,7 @@
 // Antes, esse erro saía do loop e todos os lotes seguintes eram pulados em
 // silêncio, com o import reportando sucesso.
 
+import { processWithConcurrency } from "./concurrency";
 import { phoneKey } from "./phone-key";
 
 /**
@@ -67,18 +68,21 @@ export interface BatchWriteSummary {
 /**
  * Grava `rows` em lotes de `size`. Um lote com erro NÃO interrompe os
  * seguintes: o erro é contabilizado e o próximo lote é tentado. `write`
- * devolve o erro do lote (ou null) e também pode lançar.
+ * devolve o erro do lote (ou null) e também pode lançar. Com
+ * `concurrency` > 1, até esse número de lotes grava ao mesmo tempo.
  */
 export async function writeInBatches<T>(
   rows: readonly T[],
   size: number,
   write: (chunk: T[]) => Promise<{ message: string } | null>,
+  concurrency = 1,
 ): Promise<BatchWriteSummary> {
   const summary: BatchWriteSummary = { totalBatches: 0, failedBatches: 0, failedRows: 0, firstError: null };
   const step = Math.max(1, size);
-  for (let i = 0; i < rows.length; i += step) {
-    const chunk = rows.slice(i, i + step);
-    summary.totalBatches++;
+  const chunks: T[][] = [];
+  for (let i = 0; i < rows.length; i += step) chunks.push(rows.slice(i, i + step));
+  summary.totalBatches = chunks.length;
+  await processWithConcurrency(chunks, Math.max(1, Math.floor(concurrency)), async (chunk) => {
     let error: { message: string } | null;
     try {
       error = await write(chunk);
@@ -90,6 +94,6 @@ export async function writeInBatches<T>(
       summary.failedRows += chunk.length;
       summary.firstError ??= error.message;
     }
-  }
+  });
   return summary;
 }
