@@ -922,8 +922,9 @@ export default function CampanhasPage() {
   // Só tem dado pra campanhas cujo modal de métricas já foi aberto
   // nesta sessão.
   const [metricsMap, setMetricsMap] = useState<Record<string, CampaignMetrics>>({});
-  // Contagem de status='agendado' na fila — não vem de campaign_metrics
-  // (não existe coluna pra isso), buscada à parte via queue-details.
+  // Contagem do card "A enviar" — não vem de campaign_metrics. A rota
+  // queue-details agrega trabalho ainda não concluído:
+  // agendado + pendente + pausado + enviando.
   const [agendadosCount, setAgendadosCount] = useState<number | null>(null);
 
   // Drilldown por contato de uma métrica do modal acima (segundo modal,
@@ -2463,9 +2464,9 @@ export default function CampanhasPage() {
       if (!silent) toast.error("Erro ao carregar métricas");
     }
 
-    // "A enviar" não vem de campaign_metrics (sem coluna pra isso) —
-    // lê o total retornado por queue-details?status=agendado, ignorando
-    // as linhas (só a contagem interessa aqui).
+    // "A enviar" não vem de campaign_metrics. O status lógico "agendado"
+    // da rota agrega agendado + pendente + pausado + enviando; assim a
+    // contagem não zera só porque a campanha foi pausada.
     try {
       const res = await apiFetch(
         `/api/disparador/campaigns/${campaignId}/queue-details?status=agendado&page=1`

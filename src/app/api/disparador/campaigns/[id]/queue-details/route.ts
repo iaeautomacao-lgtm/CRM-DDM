@@ -5,6 +5,10 @@ import * as XLSX from "xlsx";
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
+import {
+  QUEUE_DETAIL_STATUS_FILTERS,
+  REPLIED_QUEUE_DETAIL_KEY,
+} from "@/lib/disparador/queue-status-filters";
 
 // GET /api/disparador/campaigns/[id]/queue-details?status=enviado&search=&page=1&pageSize=50
 // GET /api/disparador/campaigns/[id]/queue-details?status=erro&export=xlsx
@@ -12,22 +16,14 @@ import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
 // Detalhamento por contato de uma métrica do modal de métricas da
 // campanha (campanhas/page.tsx). `status` é a chave da métrica clicada,
 // não necessariamente um valor literal de disp_message_queue.status —
-// "enviado" e "entregue" agregam mais de um status real (ver
-// STATUS_FILTERS), espelhando como wacrm.recalculate_campaign_metrics
+// "agendado" representa o card "A enviar" e agrega trabalho ainda não
+// concluído (agendado/pendente/pausado/enviando); "enviado" e "entregue"
+// também agregam mais de um status real (ver STATUS_FILTERS), espelhando
+// como wacrm.recalculate_campaign_metrics
 // (migration 112) calcula os KPIs, para que a contagem do drilldown
 // bata com o número exibido no card.
-const STATUS_FILTERS: Record<string, string[]> = {
-  agendado: ["agendado"],
-  enviado: ["enviado", "entregue", "lido"],
-  entregue: ["entregue", "lido"],
-  lido: ["lido"],
-  erro: ["erro"],
-  bloqueado: ["bloqueado"],
-  // "Respostas": enviados cujo contato respondeu (replied_at, gravado por
-  // reply-tracker.ts junto com o total_respostas do card — mesma contagem).
-  respondido: ["enviado", "entregue", "lido"],
-};
-const REPLIED_KEY = "respondido";
+const STATUS_FILTERS = QUEUE_DETAIL_STATUS_FILTERS;
+const REPLIED_KEY = REPLIED_QUEUE_DETAIL_KEY;
 
 // Itens por página escolhidos no modal (20 por padrão, teto de 200).
 const DEFAULT_PAGE_SIZE = 20;
