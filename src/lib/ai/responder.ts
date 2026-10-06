@@ -2445,7 +2445,10 @@ async function generateClaudeResponse(
   }
 
   const data = await response.json();
-  return data?.content?.[0]?.text || "";
+  const textBlock = Array.isArray(data?.content)
+    ? data.content.find((block: { type?: string; text?: string }) => block?.type === "text")
+    : null;
+  return textBlock?.text || "";
 }
 
 async function generateHermesResponse(
