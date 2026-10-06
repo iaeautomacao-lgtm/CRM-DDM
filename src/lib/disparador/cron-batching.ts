@@ -1,4 +1,4 @@
-export const MAX_CRON_BATCH_CANDIDATES = 1000;
+export const MAX_CRON_BATCH_CANDIDATES = 700;
 
 export function resolveCronBatchCandidateLimit(batchSize: number | null | undefined): number {
   return Math.min(MAX_CRON_BATCH_CANDIDATES, Math.max(1, batchSize ?? 1));
