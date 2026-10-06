@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  getAiModelDefinition,
+  isAiProvider,
+  resolveAiModel,
+} from "@/lib/ai/models";
 
 /**
  * Shared building blocks behind the account's AI analysis pipelines
@@ -12,6 +18,7 @@ import { tryDecrypt } from "@/lib/whatsapp/encryption";
 export interface ActiveApiKey {
   provider: string;
   apiKey: string;
+  model: string;
 }
 
 /**
@@ -53,9 +60,22 @@ export async function resolveActiveApiKey(
   }
 
   const activeKey = !configKey ? masterKey : configKey;
-  if (!activeKey) return null;
+  if (!activeKey || !isAiProvider(aiConfig.api_provider)) return null;
 
-  return { provider: aiConfig.api_provider, apiKey: activeKey };
+  const resolvedModel = resolveAiModel({
+    provider: aiConfig.api_provider,
+    accountModel:
+      typeof (aiConfig as { api_model?: unknown }).api_model === "string"
+        ? (aiConfig as { api_model: string }).api_model
+        : null,
+  });
+  if (!resolvedModel) return null;
+
+  return {
+    provider: aiConfig.api_provider,
+    apiKey: activeKey,
+    model: resolvedModel.model,
+  };
 }
 
 /**
@@ -107,8 +127,16 @@ export function stripJsonFences(raw: string): string {
 export async function callLlmForAnalysis(
   provider: string,
   apiKey: string,
-  prompt: string
+  prompt: string,
+  model?: string,
 ): Promise<string> {
+  const effectiveModel =
+    model ||
+    (isAiProvider(provider) ? DEFAULT_MODEL_BY_PROVIDER[provider] : null);
+  if (!effectiveModel) {
+    throw new Error(`Unsupported AI provider: ${provider}`);
+  }
+
   if (provider === "openai") {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -117,10 +145,17 @@ export async function callLlmForAnalysis(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: effectiveModel,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
         response_format: { type: "json_object" },
+        ...(getAiModelDefinition("openai", effectiveModel)?.openai_chat
+          ?.reasoning_effort
+          ? {
+              reasoning_effort: getAiModelDefinition("openai", effectiveModel)!
+                .openai_chat!.reasoning_effort,
+            }
+          : {}),
       }),
     });
     if (!response.ok) throw new Error(`OpenAI error: ${response.status}`);
@@ -135,14 +170,17 @@ export async function callLlmForAnalysis(
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-3-5-sonnet-20241022",
+        model: effectiveModel,
         max_tokens: 500,
         messages: [{ role: "user", content: prompt }],
       }),
     });
     if (!response.ok) throw new Error(`Claude error: ${response.status}`);
     const data = await response.json();
-    return data?.content?.[0]?.text || "";
+    const textBlock = Array.isArray(data?.content)
+      ? data.content.find((block: { type?: string; text?: string }) => block?.type === "text")
+      : null;
+    return textBlock?.text || "";
   } else if (provider === "hermes") {
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -153,7 +191,7 @@ export async function callLlmForAnalysis(
         "X-Title": "WA CRM",
       },
       body: JSON.stringify({
-        model: "nousresearch/hermes-3-llama-3.1-405b",
+        model: effectiveModel,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
         response_format: { type: "json_object" },
@@ -164,8 +202,7 @@ export async function callLlmForAnalysis(
     return data?.choices?.[0]?.message?.content || "";
   } else {
     // Gemini
-    const model = "gemini-1.5-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${effectiveModel}:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

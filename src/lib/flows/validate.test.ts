@@ -635,3 +635,71 @@ describe("validateFlowForActivation — token em texto nas ferramentas", () => {
     expect(issues.some((i) => i.message.includes("token em texto"))).toBe(false);
   });
 });
+
+
+describe("validateFlowForActivation — modelo do ai_agent", () => {
+  const flow = {
+    name: "F",
+    trigger_type: "manual" as const,
+    trigger_config: {},
+    entry_node_id: "ia",
+  };
+
+  const nodes = (model: string | null) => [
+    {
+      node_key: "ia",
+      node_type: "ai_agent",
+      config: { mode: "takeover", model },
+    },
+  ];
+
+  it("aceita modelo do provider configurado", () => {
+    const issues = validateFlowForActivation(
+      flow,
+      nodes("gpt-4.1-mini"),
+      { aiProvider: "openai" },
+    );
+    expect(issues.some((i) => i.field === "model")).toBe(false);
+  });
+
+  it("bloqueia modelo de outro provider", () => {
+    const issues = validateFlowForActivation(
+      flow,
+      nodes("gemini-3.8-flash"),
+      { aiProvider: "openai" },
+    );
+    expect(
+      issues.some(
+        (i) =>
+          i.field === "model" &&
+          i.severity === "error" &&
+          i.message.includes("OpenAI"),
+      ),
+    ).toBe(true);
+  });
+
+  it("bloqueia modelo fora do registry", () => {
+    const issues = validateFlowForActivation(
+      flow,
+      nodes("modelo-inventado"),
+      { aiProvider: "openai" },
+    );
+    expect(
+      issues.some(
+        (i) =>
+          i.field === "model" &&
+          i.severity === "error" &&
+          i.message.includes("registry"),
+      ),
+    ).toBe(true);
+  });
+
+  it("aceita null para usar o padrão da conta/provider", () => {
+    const issues = validateFlowForActivation(
+      flow,
+      nodes(null),
+      { aiProvider: "openai" },
+    );
+    expect(issues.some((i) => i.field === "model")).toBe(false);
+  });
+});

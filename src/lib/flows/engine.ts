@@ -38,6 +38,10 @@ import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
   type AiGuardDetail,
 } from "@/lib/ai/responder";
+import {
+  isModelCompatibleWithProvider,
+  resolveAiModel,
+} from "@/lib/ai/models";
 import { normalizeExitTag } from "@/lib/ai/exit-tags";
 import {
   isTurnFreeInbound,
@@ -842,21 +846,6 @@ function buildErrorPayload(
     node_type,
   };
 }
-
-/**
- * api_provider → the hardcoded model string `handleAiAutoResponse`
- * (src/lib/ai/responder.ts) actually calls for that provider. Kept
- * here (not imported) because responder.ts doesn't return which model
- * it used — this is a best-effort mirror for the debug timeline, not
- * a guarantee; if responder.ts's model strings change this drifts
- * stale until updated to match.
- */
-const MODEL_BY_PROVIDER: Record<string, string> = {
-  gemini: "gemini-1.5-flash",
-  openai: "gpt-4o-mini",
-  claude: "claude-3-5-sonnet-20241022",
-  hermes: "nousresearch/hermes-3-llama-3.1-405b",
-};
 
 /**
  * Idempotency check — has a `reply_received` event with this Meta
@@ -2182,6 +2171,7 @@ async function runAiAgentCore(
   // Tags de saída usadas pelos ramos do fluxo (flowExitTagsFromNodes) —
   // aceitas pela IA além das tags conhecidas (exit-tags.ts).
   flowExitTags?: string[],
+  modelOverride?: string | null,
 ): Promise<
   | {
       ok: true;
@@ -2229,26 +2219,47 @@ async function runAiAgentCore(
   let lastReply = "";
   let exitCodeFound: string | null = null;
   let modelUsed: string | null = null;
+  let modelSource: "node" | "account" | "provider_default" | null = null;
+  let providerUsed: string | null = null;
   let aiConfigUsable = false;
   let inboundTurnFree = false;
   try {
-    // Best-effort — mirrors ai_config.api_provider to the model
-    // string handleAiAutoResponse actually calls (see
-    // MODEL_BY_PROVIDER's own comment on the duplication risk).
-    // Also doubles as the "is there even a usable config" check
-    // for the output.error_reason below — same row, no extra query.
+    // Resolve o modelo antes da chamada para que telemetria e tool_result
+    // registrem exatamente o modelo que será enviado ao provider.
     const { data: aiConfigRow } = await db
       .from("ai_config")
-      .select("api_provider, enabled")
+      .select("*")
       .eq("account_id", run.account_id)
       .maybeSingle();
     const configRow = aiConfigRow as
-      | { api_provider: string; enabled: boolean }
+      | {
+          api_provider: string;
+          enabled: boolean;
+          api_model?: string | null;
+        }
       | null;
     aiConfigUsable = !!configRow?.enabled;
-    modelUsed = configRow?.api_provider
-      ? (MODEL_BY_PROVIDER[configRow.api_provider] ?? configRow.api_provider)
+    providerUsed = configRow?.api_provider ?? null;
+
+    if (
+      modelOverride?.trim() &&
+      configRow?.api_provider &&
+      !isModelCompatibleWithProvider(modelOverride, configRow.api_provider)
+    ) {
+      throw new Error(
+        `ai_model_provider_mismatch:${modelOverride} is not compatible with ${configRow.api_provider}`,
+      );
+    }
+
+    const resolvedModel = configRow?.api_provider
+      ? resolveAiModel({
+          provider: configRow.api_provider,
+          nodeModel: modelOverride,
+          accountModel: configRow.api_model,
+        })
       : null;
+    modelUsed = resolvedModel?.model ?? null;
+    modelSource = resolvedModel?.source ?? null;
 
     // Last customer message is the AI's input — same "what does the
     // customer want answered" the standalone auto-responder uses.
@@ -2466,6 +2477,8 @@ async function runAiAgentCore(
           node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
           decision_type: "tool_result",
           decision: {
+            provider: providerUsed,
+            model_source: modelSource,
             duration_ms: durationMs,
             attempts: meta?.attempts ?? 1,
             recovered: meta?.recovered ?? false,
@@ -2488,6 +2501,7 @@ async function runAiAgentCore(
       currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
       run.config_id ?? undefined,
       flowExitTags,
+      modelOverride,
     );
 
     // The responder returns the exact persisted message it created.
@@ -2590,6 +2604,8 @@ async function runAiAgentCore(
         decision_type: "ai_exit",
         decision: {
           exit_code: exitCodeFound,
+          provider: providerUsed,
+          model_source: modelSource,
         },
         reason: "ai_exit_code",
         needs_human: false,
@@ -2602,7 +2618,9 @@ async function runAiAgentCore(
     const baseOutput = {
       last_reply: lastReply.slice(-300),
       ai_exit_code: exitCodeFound,
+      provider_used: providerUsed,
       model_used: aiResponse.modelUsed ?? modelUsed,
+      model_source: modelSource,
       ai_message_id: aiMessageId,
       response_outcome: aiResponse.outcome,
       ...(responseReason ? { response_reason: responseReason } : {}),
@@ -3557,6 +3575,7 @@ export async function advanceFromNodeKey(
         node.node_key,
         cfg.herdar_contexto_anterior,
         flowExitTagsFromNodes(nodes.values()),
+        cfg.model,
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
@@ -4283,6 +4302,7 @@ async function handleReplyForActiveRun(
       undefined,       // currentNodeKeyOverride — run.current_node_key já é o nó certo aqui
       cfg.herdar_contexto_anterior,
       flowExitTagsFromNodes(nodes.values()),
+      cfg.model,
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {

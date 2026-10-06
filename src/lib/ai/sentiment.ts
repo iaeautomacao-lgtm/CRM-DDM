@@ -27,7 +27,7 @@ export async function analyzeConversationSentimentAndTags(
   // master key for that provider)
   const activeConfig = await resolveActiveApiKey(db, accountId);
   if (!activeConfig) return;
-  const { provider, apiKey: activeKey } = activeConfig;
+  const { provider, apiKey: activeKey, model } = activeConfig;
 
   // 2. Fetch existing tags for the account
   const { data: existingTags, error: tagsErr } = await db
@@ -55,7 +55,7 @@ ${historyText}
 """`;
 
   try {
-    const rawResult = await callLlmForAnalysis(provider, activeKey, prompt);
+    const rawResult = await callLlmForAnalysis(provider, activeKey, prompt, model);
 
     const cleanJson = stripJsonFences(rawResult);
 
