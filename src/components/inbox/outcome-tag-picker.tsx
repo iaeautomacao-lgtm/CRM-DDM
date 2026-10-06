@@ -35,6 +35,7 @@ export function OutcomeTagPicker({
     tag_id: string;
     tag_name: string;
     motivo: string;
+    confidence?: number;
   } | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -142,6 +143,11 @@ export function OutcomeTagPicker({
                   <span className="text-xs font-semibold text-primary uppercase tracking-wide">
                     ✨ Sugestão da IA
                   </span>
+                  {typeof aiSuggestion.confidence === "number" && (
+                    <span className="text-xs text-muted-foreground">
+                      {Math.round(aiSuggestion.confidence * 100)}% de confiança
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm font-medium text-foreground">
                   {aiSuggestion.tag_name}
