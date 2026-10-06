@@ -6,6 +6,10 @@ import { createClient } from "@/lib/supabase/client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { normalizarErroMeta } from "@/lib/disparador/normalize-meta-error";
 import {
+  STUCK_SENDING_MINUTES, stuckSendingCutoff, summarizeStuckSending,
+  type StuckSendingRow, type StuckSendingSummary,
+} from "@/lib/disparador/stuck-sending";
+import {
   Megaphone,
   Clock,
   CheckCircle2,
@@ -96,6 +100,8 @@ export default function DisparadorMonitorPage() {
   });
   const [queueLimit, setQueueLimit] = useState(15);
   const [hasMoreQueue, setHasMoreQueue] = useState(false);
+  const [stuckSending, setStuckSending] = useState<StuckSendingSummary[]>([]);
+  const [autoPaused, setAutoPaused] = useState<Array<{ id: string; nome: string; motivo: string }>>([]);
 
   // Cached once on mount — account scope doesn't change during the
   // session, so re-deriving it every tick just costs 3 extra queries.
@@ -152,6 +158,8 @@ export default function DisparadorMonitorPage() {
       if (campaignIds.length === 0) {
         setQueue([]);
         setStats({ scheduled: 0, sending: 0, success: 0, failed: 0 });
+        setStuckSending([]);
+        setAutoPaused([]);
         setLoading(false);
         return;
       }
@@ -232,6 +240,27 @@ export default function DisparadorMonitorPage() {
         else if (status === "erro") counts.failed += qty;
       });
       setStats(counts);
+      // Só leitura: resultado externo desconhecido nunca autoriza reenvio.
+      // Pagina para o teto de 1000 linhas do PostgREST não ocultar campanhas.
+      const stuckRows: StuckSendingRow[] = [];
+      const cutoff = stuckSendingCutoff();
+      let stuckFailed = false;
+      for (let offset = 0; ; offset += 1000) {
+        const { data, error } = await supabase.from("disp_message_queue")
+          .select("campaign_id, campaigns:campaign_id ( nome )")
+          .in("campaign_id", campaignIds).eq("status", "enviando")
+          .lt("updated_at", cutoff).order("id").range(offset, offset + 999);
+        if (error) { stuckFailed = true; break; }
+        stuckRows.push(...((data ?? []) as unknown as StuckSendingRow[]));
+        if ((data?.length ?? 0) < 1000) break;
+      }
+      if (!stuckFailed) setStuckSending(summarizeStuckSending(stuckRows));
+      // select("*") mantém o monitor funcionando antes da migration 159.
+      const { data: pausedRows, error: pausedError } = await supabase.from("campaigns")
+        .select("*").in("id", campaignIds).eq("status", "pausada");
+      if (!pausedError) setAutoPaused((pausedRows ?? [])
+        .filter((c) => !!c.pausa_automatica_motivo)
+        .map((c) => ({ id: c.id, nome: c.nome ?? "Campanha sem nome", motivo: c.pausa_automatica_motivo })));
     } catch (err) {
       console.error("Failed to load queue dashboard stats:", err);
     } finally {
@@ -267,6 +296,34 @@ export default function DisparadorMonitorPage() {
       </div>
 
       {/* Metrics Grid */}
+      {(autoPaused.length > 0 || stuckSending.length > 0) && (
+        <div className="shrink-0 max-h-64 overflow-y-auto space-y-3">
+          {autoPaused.length > 0 && (
+            <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/5 p-4 space-y-2">
+              <p className="flex items-center gap-2 text-sm font-semibold text-red-600 dark:text-red-400">
+                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Campanha pausada automaticamente por excesso de erros
+              </p>
+              <ul className="space-y-1 text-xs">
+                {autoPaused.map((c) => <li key={c.id}><strong>{c.nome}:</strong> {c.motivo}</li>)}
+              </ul>
+              <p className="text-xs text-muted-foreground">Confira os erros em Campanhas → Métricas, corrija o template ou canal e só então retome.</p>
+            </div>
+          )}
+          {stuckSending.length > 0 && (
+            <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 space-y-2">
+              <p className="flex items-center gap-2 text-sm font-semibold text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {stuckSending.reduce((sum, s) => sum + s.count, 0)} envio(s) em &quot;Enviando&quot; há mais de {STUCK_SENDING_MINUTES} minutos
+              </p>
+              <ul className="space-y-1 text-xs">
+                {stuckSending.map((s) => <li key={s.campaignId}><strong>{s.campaignName}:</strong> {s.count}</li>)}
+              </ul>
+              <p className="text-xs text-muted-foreground">O resultado desses envios é desconhecido. Para evitar duplicatas, o sistema não reenvia sozinho. Eles ocupam vagas do canal; confira no WhatsApp/Meta e acione o suporte para reconciliar.</p>
+            </div>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
         <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
           <span className="text-[10px] font-bold text-muted-foreground uppercase">Agendados na Fila</span>

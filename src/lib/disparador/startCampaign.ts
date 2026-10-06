@@ -54,6 +54,7 @@ export async function startCampaign(
   // card (antes uma campanha agendada que falhava voltava a rascunho em
   // silêncio e o agendamento simplesmente sumia).
   const state: PrepareState = { preparing: false, agendamento: null };
+  const evaluationSince = new Date().toISOString();
   let result: StartCampaignResult;
   try {
     result = await prepareCampaign(campaignId, accountId, state, options);
@@ -78,6 +79,12 @@ export async function startCampaign(
     if (!result.ok) await recordStartFailure(campaignId, accountId, state.agendamento, result.error);
   } else if (result.ok) {
     await clearStartFailure(campaignId);
+    // Vale tanto para retomada sequencial quanto para o reflow do lote.
+    // Não reutilizar os erros que motivaram a pausa anterior.
+    const { error } = await supabaseAdmin().from("campaigns")
+      .update({ pausa_automatica_motivo: null, auto_pausa_avaliar_desde: evaluationSince })
+      .eq("id", campaignId).eq("account_id", accountId).eq("status", "em_execucao");
+    if (error) console.error("[startCampaign] Falha ao reiniciar avaliação de pausa automática:", error.message);
   }
   return result;
 }
