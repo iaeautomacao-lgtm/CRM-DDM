@@ -86,12 +86,19 @@ import {
   placeholderNumbers,
   type PreviewContact,
 } from "@/lib/disparador/preview-message";
-import { WEEKDAY_LABELS } from "@/lib/disparador/send-window";
+import { WEEKDAY_LABELS, brasiliaLocalToIso, formatBrasilia } from "@/lib/disparador/send-window";
 import {
   TEMPLATE_VALIDATION_COLUMNS,
   validateCampaignTemplate,
   type LocalTemplateRow,
 } from "@/lib/disparador/template-validation";
+import {
+  campaignChannelGroupKey,
+  stripMessageTemplate,
+  validateCampaignChannels,
+  validateCampaignMessages,
+  type CampaignChannel,
+} from "@/lib/disparador/campaign-validation";
 import {
   looksLikeImportHeader,
   normalizeImportHeader,
@@ -139,6 +146,9 @@ interface Campaign {
   // campanhas antigas). Só lido na edição (passo Público).
   audience_mode?: string | null;
   import_draft_id?: string | null;
+  // Migration 160 — por que o último início falhou (a campanha voltou para
+  // rascunho). Limpo ao editar ou ao iniciar com sucesso.
+  motivo_falha_inicio?: string | null;
 }
 
 interface TagItem {
@@ -162,6 +172,9 @@ interface WahaSession {
   // whatsapp_config.team_id (migration 103) — usado só pelo filtro de
   // equipe do passo Público (teamFilter), nunca enviado de volta ao servidor.
   team_id?: string | null;
+  // Canal desabilitado não recebe envio: só aparece na lista se já estiver
+  // selecionado (campanha antiga), para poder ser desmarcado.
+  habilitado?: boolean;
 }
 
 interface CampaignMessage {
@@ -1016,7 +1029,7 @@ export default function CampanhasPage() {
         const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
         const { data: campaignList } = await supabase
           .from("campaigns")
-          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, updated_at, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text, audience_mode, import_draft_id, dias_envio")
+          .select("id, nome, descricao, status, session_ids, tags_filtro, mensagens, intervalo_min, intervalo_max, janela_inicio, janela_fim, agendamento, updated_at, created_by, batch_size, batch_pause_seconds, batch_percent, limite_por_hora, dias_permitidos, webchat_enabled, webchat_flow_id, webchat_message, webchat_button_text, audience_mode, import_draft_id, dias_envio, motivo_falha_inicio")
           .eq("account_id", scopedAccountId)
           .order("created_at", { ascending: false });
         if (campaignList) {
@@ -1096,21 +1109,25 @@ export default function CampanhasPage() {
         .order("name", { ascending: true });
       setTeams((teamList ?? []) as Team[]);
 
-      // Load enabled WhatsApp channels (WAHA + Meta)
+      // Canais de WhatsApp (WAHA + Meta). Os desabilitados também vêm, só
+      // para identificar (e deixar desmarcar) um canal desabilitado que já
+      // estava numa campanha em edição — a lista oferece só os habilitados
+      // e selecionar um desabilitado é erro (campaign-validation.ts).
       const { data: configList } = await supabase
         .from("whatsapp_config")
-        .select("id, waha_session, provider, display_phone_number, waba_id, team_id")
-        .eq("habilitado", true);
+        .select("id, waha_session, provider, display_phone_number, waba_id, team_id, habilitado")
+        .eq("account_id", scopedAccountId);
 
       const wahaSessions = (configList ?? []).map((c) => ({
         id: c.id,
-        name: c.provider === "meta"
+        name: (c.provider === "meta"
           ? `WhatsApp Oficial (Meta)${c.display_phone_number ? ` — ${c.display_phone_number}` : ""}`
-          : (c.waha_session || "Sessão WAHA"),
+          : (c.waha_session || "Sessão WAHA")) + (c.habilitado === false ? " (desabilitado)" : ""),
         provider: c.provider,
         display_phone_number: c.display_phone_number,
         waba_id: c.waba_id,
         team_id: c.team_id,
+        habilitado: c.habilitado !== false,
       }));
       setSessions(wahaSessions);
     } catch (err) {
@@ -1178,6 +1195,8 @@ export default function CampanhasPage() {
         loadData();
       } else {
         const err = await res.json().catch(() => ({}));
+        // A campanha voltou para rascunho com o motivo no card (migration 160).
+        loadData();
         throw new Error(err.error || "Erro ao iniciar campanha");
       }
     } catch (err: any) {
@@ -1262,6 +1281,7 @@ export default function CampanhasPage() {
     setNome(campaign.nome);
     setDescricao(campaign.descricao || "");
     setSelectedSessions(campaign.session_ids || []);
+    lastChannelGroupRef.current = null;
     setSelectedTags(campaign.tags_filtro || []);
     setIntervaloMin(campaign.intervalo_min);
     setIntervaloMax(campaign.intervalo_max);
@@ -1441,8 +1461,8 @@ export default function CampanhasPage() {
       toast.error("Insira o nome da campanha.");
       return;
     }
-    if (selectedSessions.length === 0) {
-      toast.error("Selecione pelo menos um canal.");
+    if (!channelValidation.ok) {
+      toast.error(channelValidation.error);
       return;
     }
     if (mensagens.some((m) => m.tipo === "texto" && !m.conteudo.trim())) {
@@ -1502,11 +1522,13 @@ export default function CampanhasPage() {
       );
     }
 
-    // Horário de Brasília — assume o fuso do navegador do usuário
-    // (datetime-local não carrega timezone própria).
-    const agendamentoISO = agendarPara
-      ? new Date(agendarPara).toISOString()
-      : null;
+    // Horário de Brasília com offset -03:00 explícito (datetime-local não
+    // carrega fuso; antes valia o fuso do navegador).
+    const agendamentoISO = agendarPara ? brasiliaLocalToIso(agendarPara) : null;
+    if (agendarPara && !agendamentoISO) {
+      toast.error("Data de agendamento inválida.");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
@@ -1739,6 +1761,7 @@ export default function CampanhasPage() {
     setNome("");
     setDescricao("");
     setSelectedSessions([]);
+    lastChannelGroupRef.current = null;
     setSelectedTags([]);
     setTagSearch("");
     setTeamFilter("");
@@ -1783,6 +1806,112 @@ export default function CampanhasPage() {
   const hasMeta = sessions
     .filter((s) => selectedSessions.includes(s.id))
     .some((s) => s.provider === "meta");
+
+  // Canais como a validação compartilhada (campaign-validation.ts) espera —
+  // mesma regra do PATCH e do startCampaign: só canais habilitados, sem
+  // misturar Meta e WAHA, campanha Meta = uma única WABA.
+  const validationChannels: CampaignChannel[] = useMemo(
+    () =>
+      sessions.map((s) => ({
+        id: s.id,
+        provider: s.provider ?? null,
+        waba_id: s.waba_id ?? null,
+        habilitado: s.habilitado,
+        label: s.name,
+      })),
+    [sessions]
+  );
+  const channelValidation = validateCampaignChannels(selectedSessions, validationChannels);
+  // WABA da campanha Meta (o picker e a validação de template usam só ela).
+  const campaignWabaId =
+    channelValidation.ok && channelValidation.provider === "meta" ? channelValidation.wabaId : undefined;
+
+  // Validação dos templates Meta escolhidos (mesma regra do início da
+  // campanha e do PATCH — template-validation.ts via campaign-validation.ts):
+  // aviso inline logo ao escolher e bloqueio do Avançar/Salvar.
+  const templateNamesKey = useMemo(
+    () =>
+      [...new Set(mensagens.map((m) => m.template_name).filter((n): n is string => !!n))]
+        .sort()
+        .join("|"),
+    [mensagens]
+  );
+  const [templateCatalogRows, setTemplateCatalogRows] = useState<LocalTemplateRow[]>([]);
+  // Para qual (conta#nomes) templateCatalogRows foi carregado — enquanto
+  // não bate, o passo Mensagem espera em vez de acusar "não encontrado".
+  const [templateCatalogKey, setTemplateCatalogKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hasMeta || !accountId || !templateNamesKey) return;
+    let cancelled = false;
+    const key = `${accountId}#${templateNamesKey}`;
+    (async () => {
+      const { data, error } = await createClient()
+        .from("message_templates")
+        .select(TEMPLATE_VALIDATION_COLUMNS)
+        .eq("account_id", accountId)
+        .in("name", templateNamesKey.split("|"));
+      if (cancelled) return;
+      if (error) console.error("Falha ao ler o catálogo de templates:", error.message);
+      setTemplateCatalogRows(error ? [] : ((data ?? []) as LocalTemplateRow[]));
+      setTemplateCatalogKey(key);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasMeta, accountId, templateNamesKey]);
+
+  const templateWarning = (msg: CampaignMessage): string | null => {
+    if (!hasMeta || !msg.template_name || !Array.isArray(msg.template_variable_map)) return null;
+    if (templateCatalogKey !== `${accountId ?? ""}#${templateNamesKey}`) return null;
+    const result = validateCampaignTemplate({
+      templateName: msg.template_name,
+      language: msg.template_language || "pt_BR",
+      mappedVariables: msg.template_variable_map.length,
+      rows: templateCatalogRows,
+      wabaIds: campaignWabaId ? [campaignWabaId] : [],
+    });
+    return result.ok ? null : result.error;
+  };
+
+  // Troca de canais. Mudar o provider (Meta ↔ WAHA) ou a WABA invalida os
+  // templates escolhidos (são da WABA) e o mapa de variáveis: pede
+  // confirmação e limpa template_* de todas as mensagens. Trocar de número
+  // dentro da mesma WABA mantém tudo. lastChannelGroupRef guarda o último
+  // grupo válido, para "desmarca tudo e marca outro número" também contar.
+  const lastChannelGroupRef = useRef<string | null>(null);
+  const [pendingChannelChange, setPendingChannelChange] = useState<string[] | null>(null);
+  const channelChangeNeedsReset = (next: string[]): boolean => {
+    const prevKey =
+      campaignChannelGroupKey(selectedSessions, validationChannels) ?? lastChannelGroupRef.current;
+    const nextKey = campaignChannelGroupKey(next, validationChannels);
+    if (!prevKey || !nextKey || prevKey === nextKey) return false;
+    const nextIsMeta = nextKey.startsWith("meta:");
+    return mensagens.some(
+      (m: CampaignMessage) =>
+        Boolean(m.template_name) ||
+        Array.isArray(m.template_variable_map) ||
+        (nextIsMeta && (m.tipo !== "texto" || Boolean(m.conteudo?.trim())))
+    );
+  };
+  const applyChannelSelection = (next: string[], resetTemplates: boolean) => {
+    const nextKey = campaignChannelGroupKey(next, validationChannels);
+    if (resetTemplates) {
+      const nextIsMeta = Boolean(nextKey?.startsWith("meta:"));
+      setMensagens(
+        mensagens.map((m: CampaignMessage) =>
+          // Meta só envia template: a mensagem volta a ficar vazia,
+          // esperando a escolha de um template da nova WABA.
+          nextIsMeta ? { tipo: "texto", conteudo: "" } : stripMessageTemplate(m)
+        )
+      );
+    }
+    if (nextKey) lastChannelGroupRef.current = nextKey;
+    setSelectedSessions(next);
+  };
+  const changeChannelSelection = (next: string[]) => {
+    if (channelChangeNeedsReset(next)) setPendingChannelChange(next);
+    else applyChannelSelection(next, false);
+  };
 
   // Derivado, recalculado a cada render — barato o suficiente pra não
   // precisar de useMemo. Null quando não há CSV importado nesta sessão
@@ -1834,7 +1963,7 @@ export default function CampanhasPage() {
     const errors: string[] = [];
     if (step === 1) {
       if (!nome.trim()) errors.push("Informe o nome da campanha.");
-      if (selectedSessions.length === 0) errors.push("Selecione pelo menos um canal.");
+      if (!channelValidation.ok) errors.push(channelValidation.error);
       if (importLoading) errors.push("Aguarde a leitura do arquivo terminar.");
       if (importFile) {
         if (!columnMap.phone) errors.push("No mapeamento de colunas, escolha a coluna do telefone.");
@@ -1850,7 +1979,8 @@ export default function CampanhasPage() {
       if (mensagens.length === 0) errors.push("Adicione pelo menos uma mensagem.");
       mensagens.forEach((m: CampaignMessage, i: number) => {
         const rotulo = `${templateMode === "sequencia" ? "Mensagem" : "Template"} #${i + 1}`;
-        if (m.tipo === "texto" && !m.conteudo?.trim()) errors.push(`${rotulo}: escreva o texto.`);
+        // Meta: a falta do template é acusada por validateCampaignMessages abaixo.
+        if (!hasMeta && m.tipo === "texto" && !m.conteudo?.trim()) errors.push(`${rotulo}: escreva o texto.`);
         if (m.tipo === "ia" && !m.prompt?.trim()) errors.push(`${rotulo}: escreva o prompt da IA.`);
         if (MEDIA_MESSAGE_TYPES.includes(m.tipo) && !m.url?.trim()) {
           errors.push(`${rotulo}: informe a URL da mídia (ou use "Upload").`);
@@ -1859,6 +1989,26 @@ export default function CampanhasPage() {
           errors.push(`${rotulo}: ${problem}`);
         }
       });
+      // Regras por provider (campaign-validation.ts, as mesmas do servidor):
+      // Meta = só template aprovado, presente no catálogo da WABA da
+      // campanha e compatível. Erro de template bloqueia o Avançar/Salvar.
+      if (channelValidation.ok && mensagens.length > 0) {
+        if (
+          channelValidation.provider === "meta" &&
+          templateNamesKey &&
+          templateCatalogKey !== `${accountId ?? ""}#${templateNamesKey}`
+        ) {
+          errors.push("Aguarde: conferindo os templates no catálogo do número.");
+        } else {
+          errors.push(
+            ...validateCampaignMessages(mensagens, channelValidation.provider, {
+              wabaId: channelValidation.wabaId,
+              templateRows: templateCatalogRows,
+              rotulo: templateMode === "sequencia" ? "Mensagem" : "Template",
+            })
+          );
+        }
+      }
     }
     if (step === 3) {
       const timeRegex = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
@@ -1872,7 +2022,9 @@ export default function CampanhasPage() {
         errors.push("O intervalo mínimo não pode ser maior que o máximo.");
       }
       if (agendarPara) {
-        const quando = new Date(agendarPara).getTime();
+        // Horário digitado = Brasília (offset -03:00), não o fuso do navegador.
+        const iso = brasiliaLocalToIso(agendarPara);
+        const quando = iso ? new Date(iso).getTime() : NaN;
         if (Number.isNaN(quando)) errors.push("Data de agendamento inválida.");
         else if (quando <= Date.now()) errors.push("O agendamento precisa ser numa data e hora futuras.");
       }
@@ -2240,66 +2392,19 @@ export default function CampanhasPage() {
     return map;
   }, [sessions]);
 
-  // waba_id do canal Meta selecionado (se só um selecionado)
-  const selectedMetaWabaId = useMemo(() => {
-    const metaSessions = sessions.filter(
-      s => selectedSessions.includes(s.id) && s.provider === 'meta'
-    );
-    return metaSessions.length === 1 ? metaSessions[0].waba_id : undefined;
-  }, [sessions, selectedSessions]);
-
-  // Validação dos templates Meta escolhidos (mesma regra do início da
-  // campanha em startCampaign.ts — template-validation.ts): aviso inline
-  // logo ao escolher, em vez de só descobrir no "Iniciar".
-  const selectedMetaWabaIds = useMemo(
-    () =>
-      sessions
-        .filter((s) => selectedSessions.includes(s.id) && s.provider === "meta" && s.waba_id)
-        .map((s) => s.waba_id as string),
-    [sessions, selectedSessions]
-  );
-  const templateNamesKey = useMemo(
-    () =>
-      [...new Set(mensagens.map((m) => m.template_name).filter((n): n is string => !!n))]
-        .sort()
-        .join("|"),
-    [mensagens]
-  );
-  const [templateCatalogRows, setTemplateCatalogRows] = useState<LocalTemplateRow[]>([]);
-  useEffect(() => {
-    if (!hasMeta || !accountId || !templateNamesKey) return;
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await createClient()
-        .from("message_templates")
-        .select(TEMPLATE_VALIDATION_COLUMNS)
-        .eq("account_id", accountId)
-        .in("name", templateNamesKey.split("|"));
-      if (!cancelled && !error) setTemplateCatalogRows((data ?? []) as LocalTemplateRow[]);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [hasMeta, accountId, templateNamesKey]);
-
-  const templateWarning = (msg: CampaignMessage): string | null => {
-    if (!hasMeta || !msg.template_name || !Array.isArray(msg.template_variable_map)) return null;
-    const result = validateCampaignTemplate({
-      templateName: msg.template_name,
-      language: msg.template_language || "pt_BR",
-      mappedVariables: msg.template_variable_map.length,
-      rows: templateCatalogRows,
-      wabaIds: selectedMetaWabaIds,
-    });
-    return result.ok ? null : result.error;
-  };
-
   // Canais filtrados pela equipe selecionada no passo Público (teamFilter="" =
   // Todas as equipes, mostra tudo). Puramente client-side sobre a lista
   // já carregada em loadData() — nenhuma query nova por troca de filtro.
+  // Canal desabilitado só aparece se já estiver selecionado (para poder
+  // ser desmarcado) — nunca é oferecido para uma campanha nova.
   const filteredSessions = useMemo(
-    () => (teamFilter ? sessions.filter((s) => s.team_id === teamFilter) : sessions),
-    [sessions, teamFilter]
+    () =>
+      sessions.filter(
+        (s) =>
+          (s.habilitado !== false || selectedSessions.includes(s.id)) &&
+          (!teamFilter || s.team_id === teamFilter)
+      ),
+    [sessions, teamFilter, selectedSessions]
   );
 
   // Melhor estimativa de total de contatos disponível agora, para a
@@ -2761,6 +2866,19 @@ export default function CampanhasPage() {
 
                 <p className="text-xs text-muted-foreground line-clamp-2 min-h-[32px]">{c.descricao || "Sem descrição fornecida."}</p>
 
+                {/* Migration 160: o início falhou (ex.: agendada com template
+                    inválido) e a campanha voltou para rascunho — nunca em
+                    silêncio. */}
+                {c.status === "rascunho" && c.motivo_falha_inicio && (
+                  <p
+                    role="alert"
+                    className="flex items-start gap-1.5 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] font-medium text-red-600 dark:text-red-400"
+                  >
+                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>{c.motivo_falha_inicio}</span>
+                  </p>
+                )}
+
                 {/* Configurations Overview */}
                 <div className="grid grid-cols-2 gap-2 pt-2 text-[11px] text-muted-foreground border-t border-border/40">
                   <div className="flex items-center gap-1.5 truncate">
@@ -3050,8 +3168,11 @@ export default function CampanhasPage() {
                           type="checkbox"
                           checked={selectedSessions.includes(s.id)}
                           onChange={(e) => {
-                            if (e.target.checked) setSelectedSessions([...selectedSessions, s.id]);
-                            else setSelectedSessions(selectedSessions.filter((id) => id !== s.id));
+                            changeChannelSelection(
+                              e.target.checked
+                                ? [...selectedSessions, s.id]
+                                : selectedSessions.filter((id) => id !== s.id)
+                            );
                           }}
                         />
                         {s.name}
@@ -3059,19 +3180,23 @@ export default function CampanhasPage() {
                     ))
                   )}
                 </div>
+                <p className="flex items-start gap-1 text-[10px] text-muted-foreground">
+                  <Info className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />
+                  Uma campanha usa só números oficiais (Meta) de uma mesma conta WhatsApp Business, ou
+                  só sessões WAHA.
+                </p>
               </div>
 
-              {/* Canais Meta e WAHA juntos: permitido (startCampaign bifurca
-                  por canal de cada contato), só informamos a diferença. */}
-              {hasMeta && hasWaha && (
-                <div className="flex gap-2 rounded-md border border-blue-500/30 bg-blue-500/10 p-3 text-xs text-blue-700 dark:text-blue-300">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>
-                    Você selecionou canais oficiais (Meta) e não oficiais (WAHA). Contatos que caírem
-                    num canal Meta recebem o template aprovado; nos canais WAHA, o mesmo texto é
-                    enviado com as variáveis já preenchidas. Confira as duas versões na Revisão.
-                  </span>
-                </div>
+              {/* Seleção inválida (Meta + WAHA, WABAs diferentes, número
+                  sem WABA, canal desabilitado): bloqueia o Avançar. */}
+              {selectedSessions.length > 0 && !channelValidation.ok && (
+                <p
+                  role="alert"
+                  className="flex items-start gap-1.5 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] font-medium text-red-600 dark:text-red-400"
+                >
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>{channelValidation.error}</span>
+                </p>
               )}
 
               {/* Filtrar por tabulação */}
@@ -3550,6 +3675,15 @@ export default function CampanhasPage() {
                       </p>
                     )}
 
+                    {/* Canal oficial (Meta): só template aprovado — texto
+                        livre, IA, imagem, áudio e ligação são só WAHA
+                        (campaign-validation.ts, mesma regra do servidor). */}
+                    {hasMeta ? (
+                      <p className="text-[11px] text-muted-foreground">
+                        Canal oficial (Meta): a mensagem é um <strong>template aprovado</strong> da conta
+                        WhatsApp Business do número escolhido.
+                      </p>
+                    ) : (
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs" role="group" aria-label="Tipo da mensagem">
                       <button
                         type="button"
@@ -3612,23 +3746,31 @@ export default function CampanhasPage() {
                         Ligação
                       </button>
                     </div>
+                    )}
 
-                    {msg.tipo === "texto" && (
+                    {(msg.tipo === "texto" || hasMeta) && (
                       <div className="space-y-1.5">
+                        {/* Meta: o corpo é o do template aprovado (a Meta
+                            envia o texto aprovado, não o editado) — só leitura. */}
                         <textarea
                           ref={(el) => { varFieldRefs.current[`conteudo-${i}`] = el; }}
-                          value={msg.conteudo}
+                          value={msg.conteudo ?? ""}
+                          readOnly={hasMeta}
                           onChange={(e) => {
+                            if (hasMeta) return;
                             const updated = [...mensagens];
                             updated[i].conteudo = e.target.value;
                             setMensagens(updated);
                           }}
-                          placeholder="Escreva a mensagem..."
+                          placeholder={hasMeta ? "Escolha um template aprovado em \"Carregar de um Template\"." : "Escreva a mensagem..."}
                           aria-label={`Texto da mensagem ${i + 1}`}
-                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none"
+                          className={cn(
+                            "w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none",
+                            hasMeta && "bg-muted/40 text-muted-foreground"
+                          )}
                         />
                         <div className="flex flex-wrap items-center gap-1">
-                          {TEMPLATE_VARS.map((v) => (
+                          {!hasMeta && TEMPLATE_VARS.map((v) => (
                             <button
                               key={v.value}
                               type="button"
@@ -4091,7 +4233,7 @@ export default function CampanhasPage() {
               {/* Campos técnicos — só em modo "Segmentado". batchSize/
                   batchPauseSeconds (o que de fato vai no payload) são
                   derivados de batchPercent/batchPauseMinutes pelo useEffect
-                  logo acima de channelMap/selectedMetaWabaId — a resolução
+                  logo acima de channelMap — a resolução
                   definitiva contra o total real de contatos acontece em
                   startCampaign.ts no momento do início. */}
               {dispatchMode === "segmentado" && (
@@ -4269,14 +4411,7 @@ export default function CampanhasPage() {
                     <span className="text-muted-foreground">Início</span>
                     <span className="text-right font-medium">
                       {agendarPara
-                        ? `Agendado para ${new Date(agendarPara).toLocaleString("pt-BR", {
-                            timeZone: "America/Sao_Paulo",
-                            day: "2-digit",
-                            month: "2-digit",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}`
+                        ? `Agendado para ${formatBrasilia(brasiliaLocalToIso(agendarPara) ?? "")} (Brasília)`
                         : "Ao clicar em \"Iniciar\" na lista de campanhas"}
                     </span>
                   </div>
@@ -4399,7 +4534,7 @@ export default function CampanhasPage() {
       <MessageTemplatePicker
         open={templatePickerIndex !== null}
         hasMeta={hasMeta}
-        wabaId={selectedMetaWabaId}
+        wabaId={campaignWabaId}
         channelMap={channelMap}
         onOpenChange={(next) => {
           if (!next) setTemplatePickerIndex(null);
@@ -4438,6 +4573,8 @@ export default function CampanhasPage() {
 
             updated[templatePickerIndex] = {
               ...updated[templatePickerIndex],
+              // Meta só envia template: a mensagem é sempre do tipo texto.
+              tipo: "texto",
               conteudo: bodyText,
               template_name: template.nome,
               template_language: template.language || "pt_BR",
@@ -4607,6 +4744,36 @@ export default function CampanhasPage() {
               disabled={infoLoading || starting || !audienceInfo || !audienceInfo.ok}
             >
               {starting ? "Iniciando…" : infoLoading ? "Consultando..." : "Iniciar campanha"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Troca de provider (Meta ↔ WAHA) ou de WABA com templates já
+          escolhidos: confirma antes de limpar template/variáveis. */}
+      <AlertDialog
+        open={pendingChannelChange !== null}
+        onOpenChange={(open) => !open && setPendingChannelChange(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Trocar o tipo de canal?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Os templates são da conta WhatsApp Business (WABA) de cada número. Mudar entre Meta e
+              WAHA, ou para um número de outra WABA, apaga os templates e o mapeamento de variáveis
+              já escolhidos nas mensagens desta campanha.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Manter canais</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (pendingChannelChange) applyChannelSelection(pendingChannelChange, true);
+                setPendingChannelChange(null);
+              }}
+            >
+              Trocar e limpar templates
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
