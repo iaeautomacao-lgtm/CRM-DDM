@@ -307,23 +307,10 @@ export default function InboxPage() {
           // back on for the ~100ms it takes for the reset effect's server
           // UPDATE to round-trip. Non-active convs take the value as-is.
           const isActive = activeConversation?.id === conv.id;
+          // Sem toast a cada mudança de sentimento (era ruído em campanha
+          // grande): o dado continua sendo atualizado e aparece na lista
+          // (ponto vermelho se negativo) e no painel do contato.
           setConversations((prev) => {
-            const currentConv = prev.find((c) => c.id === conv.id);
-            if (currentConv && conv.sentiment && conv.sentiment !== currentConv.sentiment) {
-              const contactName = currentConv.contact?.name || "Cliente";
-              if (conv.sentiment === "negative") {
-                toast.error(`Alerta de humor: "${contactName}" está insatisfeito(a) 😡`, {
-                  description: "O sentimento da conversa mudou para Negativo. Atenção recomendada.",
-                  duration: 6000,
-                });
-              } else if (conv.sentiment === "positive") {
-                toast.success(`Ótimo: "${contactName}" está satisfeito(a) 😊`, {
-                  description: "O sentimento da conversa mudou para Positivo.",
-                  duration: 4000,
-                });
-              }
-            }
-
             return prev.map((c) =>
               c.id === conv.id
                 ? {

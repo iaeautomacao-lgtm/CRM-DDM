@@ -581,7 +581,7 @@ export function MessageComposer({
         </div>
       )}
       {sessionExpired && (
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-1 rounded-lg bg-amber-500/10 px-3 py-2" role="status">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 py-1 pl-3 pr-1" role="status">
           {/* amber-400 sobre fundo claro dava ~1,7:1 — no tema claro usa
               amber-700 (≥ 4,5:1); no escuro mantém o tom original. */}
           <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -590,10 +590,10 @@ export function MessageComposer({
           <Button
             variant="ghost"
             size="sm"
-            className="h-9 text-xs text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300 lg:h-7"
+            className="h-8 text-xs text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
             onClick={onOpenTemplates}
           >
-            <LayoutTemplate className="mr-1 h-3 w-3" aria-hidden="true" />
+            <LayoutTemplate className="mr-1 h-4 w-4" aria-hidden="true" />
             Templates
           </Button>
         </div>
@@ -666,7 +666,7 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="relative flex items-end gap-2">
+        <div className="relative flex items-end gap-1">
           {qr && !inputsDisabled && (
             <QuickReplyMenu
               items={qrItems}
@@ -690,7 +690,7 @@ export function MessageComposer({
                     : "Anexar mídia"
               }
               aria-label={busy ? "Enviando anexo…" : "Anexar mídia"}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 lg:h-8 lg:w-8"
             >
               {busy ? (
                 <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -726,7 +726,7 @@ export function MessageComposer({
               gateReason="send messages"
               title={readOnly ? undefined : "Enviar template"}
               aria-label="Enviar template"
-              className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+              className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground lg:h-8 lg:w-8"
               onClick={onOpenTemplates}
             >
               <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
@@ -742,7 +742,7 @@ export function MessageComposer({
             aria-label="Respostas rápidas"
             aria-expanded={Boolean(qr)}
             className={cn(
-              "h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground",
+              "h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground lg:h-8 lg:w-8",
               qr && "text-primary",
             )}
             // Mantém o cursor do campo para inserir no lugar certo.
@@ -776,18 +776,23 @@ export function MessageComposer({
                 ? "Somente leitura — visualizadores podem navegar mas não responder"
                 : sessionExpired
                   ? "Sessão expirada - use um template"
-                  : "Digite uma mensagem… (/ para respostas rápidas, Shift+Enter nova linha)"
+                  : "Digite uma mensagem…"
             }
             disabled={sessionExpired || readOnly}
             rows={1}
             // Textarea keeps its own inline title — the GatedButton
             // wrapping pattern doesn't apply to non-button inputs.
             // The placeholder text also surfaces the read-only state.
-            title={readOnly ? "Somente leitura — seu perfil não pode enviar mensagens" : undefined}
+            // Fora do modo leitura, a dica de atalhos (antes no placeholder) vai no title.
+            title={
+              readOnly
+                ? "Somente leitura — seu perfil não pode enviar mensagens"
+                : "/ para respostas rápidas · Shift+Enter para nova linha"
+            }
             className={cn(
               // min-w-0: sem ele o textarea mantém a largura intrínseca
               // (~20 colunas) e estoura a linha em telas de 320px.
-              "min-w-0 flex-1 resize-none rounded-xl border border-border bg-muted px-3 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/50 sm:px-4",
+              "min-w-0 flex-1 resize-none rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/50 sm:px-4",
               (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
             )}
           />

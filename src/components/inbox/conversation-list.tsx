@@ -8,7 +8,20 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus } from "@/types";
-import { Search, ChevronDown, Plus, Loader2 } from "lucide-react";
+import {
+  Search,
+  ChevronDown,
+  Plus,
+  Loader2,
+  SlidersHorizontal,
+  Inbox,
+  MessageCircle,
+  Globe,
+  Camera,
+  MessagesSquare,
+  type LucideIcon,
+} from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
@@ -68,12 +81,12 @@ const STATUS_OPTIONS: { label: string; value: InboxStatus }[] = [
   { label: CONVERSATION_STATUS_LABELS_PLURAL.closed, value: "closed" },
 ];
 
-const CHANNEL_TABS: { label: string; value: InboxChannel | null }[] = [
-  { label: "Todos", value: null },
-  { label: "WhatsApp", value: "whatsapp" },
-  { label: "Webchat", value: "webchat" },
-  { label: "Instagram", value: "instagram" },
-  { label: "Messenger", value: "messenger" },
+const CHANNEL_TABS: { label: string; value: InboxChannel | null; icon: LucideIcon }[] = [
+  { label: "Todos os canais", value: null, icon: Inbox },
+  { label: "WhatsApp", value: "whatsapp", icon: MessageCircle },
+  { label: "Webchat", value: "webchat", icon: Globe },
+  { label: "Instagram", value: "instagram", icon: Camera },
+  { label: "Messenger", value: "messenger", icon: MessagesSquare },
 ];
 
 export const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
@@ -323,6 +336,14 @@ export function ConversationList({
     [options.lines, filters.canal]
   );
 
+  // Filtros do popover (canal e busca ficam fora, já visíveis na barra).
+  const activeFilterCount =
+    (filters.status !== "active" ? 1 : 0) +
+    [filters.atendente, filters.linha, filters.equipe, filters.cliente, filters.campanha].filter((v) => v !== null)
+      .length;
+  const clearFilters = () =>
+    setFilters({ status: "active", atendente: null, linha: null, equipe: null, cliente: null, campanha: null });
+
   const agentLabel = (() => {
     if (filters.atendente === "me") return "Minhas";
     if (filters.atendente === "unassigned") return isAgent ? "Fila da equipe" : "Sem atendente";
@@ -355,44 +376,143 @@ export function ConversationList({
               aria-label="Buscar conversas por nome ou telefone"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              placeholder="Buscar por nome ou telefone..."
-              className="border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
+              placeholder="Buscar nome ou telefone…"
+              className="h-8 border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
             />
           </div>
+          {/* Os 6 filtros ficam num único popover para a barra caber numa linha. */}
+          <Popover>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={cn("h-8 shrink-0 gap-1 px-2", activeFilterCount > 0 && "border-primary/40 text-primary")}
+                  aria-label={activeFilterCount > 0 ? `Filtros (${activeFilterCount} ativos)` : "Filtros"}
+                />
+              }
+            >
+              <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+              <span className="text-xs">Filtros</span>
+              {activeFilterCount > 0 && (
+                <span className="rounded-full bg-primary px-1.5 text-xs font-medium leading-4 text-primary-foreground" aria-hidden="true">
+                  {activeFilterCount}
+                </span>
+              )}
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-72 gap-2 p-3">
+              <div className="flex h-8 items-center justify-between">
+                <span className="text-sm font-medium text-foreground">Filtros</span>
+                {activeFilterCount > 0 && (
+                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={clearFilters}>
+                    Limpar filtros
+                  </Button>
+                )}
+              </div>
+              <div className="flex flex-col gap-1">
+                <FilterMenu
+                  title="Status"
+                  label={STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? ""}
+                  options={STATUS_OPTIONS.map((o) => ({ id: o.value, name: o.label }))}
+                  value={filters.status}
+                  highlighted={filters.status !== "active"}
+                  onChange={(v) => setFilters({ status: (v ?? "active") as InboxStatus })}
+                />
+                <FilterMenu
+                  title="Atendente"
+                  label={agentLabel}
+                  options={[
+                    { id: "me", name: "Minhas" },
+                    { id: "unassigned", name: isAgent ? "Fila da equipe" : "Sem atendente" },
+                    ...(isAgent ? [] : options.agents),
+                  ]}
+                  value={filters.atendente}
+                  onChange={(v) => setFilters({ atendente: v })}
+                  allLabel="Todos"
+                />
+                {linesForTab.length > 0 && (
+                  <FilterMenu
+                    title="Linha"
+                    label={linesForTab.find((l) => l.id === filters.linha)?.name ?? "Todas"}
+                    options={linesForTab.map((l) => ({ id: l.id, name: l.name }))}
+                    value={filters.linha}
+                    onChange={(v) => setFilters({ linha: v })}
+                    allLabel="Todas as linhas"
+                  />
+                )}
+                {!isAgent && options.teams.length > 0 && (
+                  <FilterMenu
+                    title="Equipe"
+                    label={options.teams.find((t) => t.id === filters.equipe)?.name ?? "Todas"}
+                    options={options.teams}
+                    value={filters.equipe}
+                    onChange={(v) => setFilters({ equipe: v })}
+                    allLabel="Todas as equipes"
+                  />
+                )}
+                {options.clients.length > 0 && (
+                  <FilterMenu
+                    title="Cliente"
+                    label={options.clients.find((c) => c.id === filters.cliente)?.name ?? "Todos"}
+                    options={options.clients}
+                    value={filters.cliente}
+                    onChange={(v) => setFilters({ cliente: v })}
+                    allLabel="Todos os clientes"
+                  />
+                )}
+                {options.campaigns.length > 0 && (
+                  <FilterMenu
+                    title="Campanha"
+                    label={options.campaigns.find((c) => c.id === filters.campanha)?.name ?? "Todas"}
+                    options={options.campaigns}
+                    value={filters.campanha}
+                    onChange={(v) => setFilters({ campanha: v })}
+                    allLabel="Todas as campanhas"
+                  />
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
           {onCreateConversation && accountRole !== "viewer" && (
-            <Button type="button" variant="outline" size="sm" onClick={onCreateConversation} className="h-9 shrink-0 lg:h-7" aria-label="Nova conversa">
-              <Plus className="size-3.5" aria-hidden="true" />
-              Nova
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={onCreateConversation}
+              className="h-8 w-8 shrink-0"
+              aria-label="Nova conversa"
+              title="Nova conversa"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
             </Button>
           )}
         </div>
 
-        {/* Abas de canal com número de conversas não lidas. */}
-        <div className="-mx-1 flex gap-1 overflow-x-auto pb-0.5" role="group" aria-label="Filtrar por canal">
+        {/* Abas de canal como controle segmentado numa linha só: ícone +
+            não lidas; o nome do canal fica no title e no aria-label. */}
+        <div className="flex gap-0.5 overflow-x-auto rounded-md bg-muted p-0.5" role="group" aria-label="Filtrar por canal">
           {CHANNEL_TABS.map((tab) => {
             const count = unread[tab.value ?? "all"] ?? 0;
             const active = filters.canal === tab.value;
+            const Icon = tab.icon;
             return (
               <button
                 key={tab.label}
                 type="button"
                 onClick={() => setFilters({ canal: tab.value, linha: null })}
                 aria-pressed={active}
+                aria-label={count > 0 ? `${tab.label} (${count} não lidas)` : tab.label}
+                title={tab.label}
                 className={cn(
-                  "flex min-h-8 shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors lg:min-h-0",
-                  active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
+                  "flex h-8 min-w-12 flex-1 shrink-0 items-center justify-center gap-1 rounded px-2 text-xs font-medium transition-colors",
+                  active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {tab.label}
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
                 {count > 0 && (
-                  <span
-                    className={cn(
-                      "rounded-full px-1 text-[9px] font-bold",
-                      active ? "bg-primary-foreground/20" : "bg-primary/15 text-primary"
-                    )}
-                  >
+                  <span className={cn("tabular-nums", active && "text-primary")} aria-hidden="true">
                     {count > 99 ? "99+" : count}
-                    <span className="sr-only"> não lidas</span>
                   </span>
                 )}
               </button>
@@ -400,61 +520,6 @@ export function ConversationList({
           })}
         </div>
 
-        <div className="flex flex-wrap gap-1">
-          <FilterMenu
-            label={`Status: ${STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? ""}`}
-            options={STATUS_OPTIONS.map((o) => ({ id: o.value, name: o.label }))}
-            value={filters.status}
-            onChange={(v) => setFilters({ status: (v ?? "active") as InboxStatus })}
-          />
-          <FilterMenu
-            label={`Atendente: ${agentLabel}`}
-            options={[
-              { id: "me", name: "Minhas" },
-              { id: "unassigned", name: isAgent ? "Fila da equipe" : "Sem atendente" },
-              ...(isAgent ? [] : options.agents),
-            ]}
-            value={filters.atendente}
-            onChange={(v) => setFilters({ atendente: v })}
-            allLabel="Todos"
-          />
-          {linesForTab.length > 0 && (
-            <FilterMenu
-              label={`Linha: ${linesForTab.find((l) => l.id === filters.linha)?.name ?? "Todas"}`}
-              options={linesForTab.map((l) => ({ id: l.id, name: l.name }))}
-              value={filters.linha}
-              onChange={(v) => setFilters({ linha: v })}
-              allLabel="Todas as linhas"
-            />
-          )}
-          {!isAgent && options.teams.length > 0 && (
-            <FilterMenu
-              label={`Equipe: ${options.teams.find((t) => t.id === filters.equipe)?.name ?? "Todas"}`}
-              options={options.teams}
-              value={filters.equipe}
-              onChange={(v) => setFilters({ equipe: v })}
-              allLabel="Todas as equipes"
-            />
-          )}
-          {options.clients.length > 0 && (
-            <FilterMenu
-              label={`Cliente: ${options.clients.find((c) => c.id === filters.cliente)?.name ?? "Todos"}`}
-              options={options.clients}
-              value={filters.cliente}
-              onChange={(v) => setFilters({ cliente: v })}
-              allLabel="Todos os clientes"
-            />
-          )}
-          {options.campaigns.length > 0 && (
-            <FilterMenu
-              label={`Campanha: ${options.campaigns.find((c) => c.id === filters.campanha)?.name ?? "Todas"}`}
-              options={options.campaigns}
-              value={filters.campanha}
-              onChange={(v) => setFilters({ campanha: v })}
-              allLabel="Todas as campanhas"
-            />
-          )}
-        </div>
       </div>
 
       {/* `min-h-0` is load-bearing: a flex child defaults to
@@ -517,28 +582,37 @@ export function ConversationList({
 
 /** Menu de filtro com opção "todos" (quando `allLabel` é passado). */
 function FilterMenu({
+  title,
   label,
   options,
   value,
   onChange,
   allLabel,
+  highlighted,
 }: {
+  /** Nome do filtro ("Status", "Linha"…), à esquerda da linha. */
+  title: string;
+  /** Valor atual por extenso. */
   label: string;
   options: NamedOption[];
   value: string | null;
   onChange: (value: string | null) => void;
   allLabel?: string;
+  /** Força o destaque de "filtro ativo" (status fora do padrão). */
+  highlighted?: boolean;
 }) {
+  const active = highlighted ?? Boolean(value && allLabel);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={cn(
-          "inline-flex h-9 max-w-[170px] items-center justify-center gap-1 truncate rounded-md px-2 text-xs hover:bg-muted lg:h-7",
-          value && allLabel ? "text-primary" : "text-muted-foreground hover:text-foreground"
-        )}
+        aria-label={`${title}: ${label}`}
+        className="flex h-8 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm hover:bg-muted"
       >
-        <span className="truncate">{label}</span>
-        <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
+        <span className="shrink-0 text-muted-foreground">{title}</span>
+        <span className={cn("flex min-w-0 items-center gap-1", active ? "font-medium text-primary" : "text-foreground")}>
+          <span className="truncate">{label}</span>
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto border-border bg-popover">
         {allLabel && (
@@ -583,15 +657,13 @@ function SectionHeader({
       className="flex w-full items-center justify-between px-3 py-2 text-left transition-colors hover:bg-muted/40"
       aria-expanded={expanded}
     >
-      <span className="flex items-center gap-1.5 text-[12px] font-medium tracking-wide text-muted-foreground uppercase">
+      <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
         {label}
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
-          ({count})
-        </span>
+        <span className="rounded-full bg-muted px-2 text-xs tabular-nums text-muted-foreground">{count}</span>
       </span>
       <ChevronDown
         aria-hidden="true"
-        className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")}
+        className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")}
       />
     </button>
   );
@@ -643,6 +715,7 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
   const initials = displayName.charAt(0).toUpperCase();
   const channelBadge = CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"];
   const waiting = waitingLabel(conversation);
+  const negative = conversation.sentiment === "negative";
 
   const timeAgo = conversation.last_message_at ? compactTimeAgo(conversation.last_message_at) : "";
   // Tooltip com a forma longa em pt-BR ("há 3 dias").
@@ -656,11 +729,11 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
       onClick={() => onSelect(conversation)}
       aria-current={isActive ? "true" : undefined}
       className={cn(
-        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
-        isActive && "border-l-2 border-primary bg-muted/70"
+        "flex w-full items-center gap-3 border-b border-l-2 border-b-border/50 border-l-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
+        isActive && "border-l-primary bg-primary-soft hover:bg-primary-soft"
       )}
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground" aria-hidden="true">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground" aria-hidden="true">
         {contact?.avatar_url ? (
           <img
             // Proxy por telefone só existe para WhatsApp.
@@ -671,7 +744,7 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
             }
             // Decorativo: o nome do contato já vem logo ao lado.
             alt=""
-            className="h-10 w-10 rounded-full object-cover"
+            className="h-9 w-9 rounded-full object-cover"
           />
         ) : (
           initials
@@ -681,66 +754,54 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
           <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
-          <span className="shrink-0 text-[10px] text-muted-foreground" title={timeAgoTitle}>
-            {timeAgo}
+          {/* O horário vira "aguardando X" (âmbar) quando o cliente espera
+              ≥ 5 min sem atendente — mesmo espaço, sem linha extra. */}
+          <span
+            className={cn("shrink-0 text-xs", waiting ? "font-medium text-amber-600" : "text-muted-foreground")}
+            title={timeAgoTitle}
+          >
+            {waiting ?? timeAgo}
           </span>
         </div>
 
-        {/* Canal (fora do WhatsApp), cliente da linha e sessão WAHA. */}
-        {(channelBadge || client || conversation.waha_session) && (
-          <div className="mt-0.5 flex flex-wrap gap-1">
-            {channelBadge && (
-              <span
-                className={cn(
-                  "inline-block rounded border px-1.5 py-0.5 text-[9px] font-semibold leading-none select-none",
-                  channelBadge.className
-                )}
-              >
-                {channelBadge.label}
-              </span>
-            )}
-            {client && (
-              <span
-                className="inline-block rounded border px-1.5 py-0.5 text-[9px] font-semibold leading-none select-none"
-                style={{ color: client.color, backgroundColor: `${client.color}1a`, borderColor: `${client.color}40` }}
-              >
-                {client.name}
-              </span>
-            )}
-            {conversation.waha_session && (
-              <span className="inline-block rounded border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-primary select-none">
-                {conversation.waha_session}
-              </span>
-            )}
-          </div>
-        )}
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className="truncate text-xs text-muted-foreground">
-            {conversation.last_message_text || "Nenhuma mensagem ainda"}
-          </p>
-          <div className="flex shrink-0 items-center gap-2">
-            {conversation.sentiment && conversation.sentiment !== "unknown" && (
-              <span
-                className={cn("text-xs leading-none select-none", SENTIMENT_ICONS[conversation.sentiment]?.color)}
-                title={SENTIMENT_ICONS[conversation.sentiment]?.label}
-                role="img"
-                aria-label={SENTIMENT_ICONS[conversation.sentiment]?.label}
-              >
-                {SENTIMENT_ICONS[conversation.sentiment]?.emoji}
+          <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+            {/* Cliente da linha: ponto com a cor dele + nome (sem pílula colorida). */}
+            {client && (
+              <span className="flex max-w-[40%] shrink-0 items-center gap-1 text-xs text-foreground/80" title={`Cliente: ${client.name}`}>
+                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: client.color }} aria-hidden="true" />
+                <span className="truncate">{client.name}</span>
+                <span aria-hidden="true" className="text-muted-foreground">·</span>
               </span>
             )}
-            {conversation.unread_count > 0 && (
-              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+            {channelBadge && <span className="sr-only">Canal: {channelBadge.label}.</span>}
+            <span className="truncate">{conversation.last_message_text || "Nenhuma mensagem ainda"}</span>
+          </p>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {negative && (
+              <span
+                className="h-2 w-2 rounded-full bg-destructive"
+                role="img"
+                aria-label={SENTIMENT_ICONS.negative.label}
+                title={SENTIMENT_ICONS.negative.label}
+              />
+            )}
+            {/* Não lidas OU o ponto de status — nunca os dois. */}
+            {conversation.unread_count > 0 ? (
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium text-primary-foreground">
                 {conversation.unread_count}
                 <span className="sr-only"> não lidas</span>
               </span>
+            ) : (
+              <span
+                className={cn("h-2 w-2 rounded-full", STATUS_COLORS[conversation.status])}
+                title={CONVERSATION_STATUS_LABELS[conversation.status]}
+                aria-hidden="true"
+              />
             )}
-            {/* Status só por cor no visual; o texto vai para leitor de tela. */}
-            <span className={cn("h-2 w-2 rounded-full", STATUS_COLORS[conversation.status])} title={CONVERSATION_STATUS_LABELS[conversation.status]} aria-hidden="true" />
             <span className="sr-only">Status: {CONVERSATION_STATUS_LABELS[conversation.status]}</span>
           </div>
         </div>
-        {waiting && <p className="mt-0.5 text-[10px] font-medium text-amber-600">{waiting}</p>}
       </div>
     </button>
   );

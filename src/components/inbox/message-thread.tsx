@@ -35,9 +35,9 @@ import {
   Trash2,
   Loader2,
   ArrowRightLeft,
+  MoreHorizontal,
 } from "lucide-react";
 import { format, isToday, isYesterday, differenceInHours } from "date-fns";
-import { Badge } from "@/components/ui/badge";
 import { useVoipCall } from "@/hooks/use-voip-call";
 import { VoipCallOverlay } from "@/components/inbox/voip-call-overlay";
 import {
@@ -1368,7 +1368,7 @@ export function MessageThread({
           name/avatar/dropdowns stay legible. */}
       {/* flex-wrap: no celular (360px) a barra de ações desce para a linha
           de baixo em vez de espremer o nome do contato até sumir. */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 sm:px-4 sm:py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -1377,9 +1377,9 @@ export function MessageThread({
               type="button"
               onClick={onBack}
               aria-label="Voltar às conversas"
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
+              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
             >
-              <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden" aria-hidden="true">
@@ -1398,141 +1398,57 @@ export function MessageThread({
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-              {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"] && (
-                <span
-                  className={cn(
-                    "hidden shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold leading-none sm:inline-block",
-                    CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"].className
-                  )}
-                >
-                  {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"].label}
-                </span>
-              )}
+              {/* Cliente da linha: ponto colorido + nome (sem pílula). */}
               {clientBadge && (
-                <span
-                  className="hidden shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold leading-none sm:inline-block"
-                  style={{
-                    color: clientBadge.color,
-                    backgroundColor: `${clientBadge.color}1a`,
-                    borderColor: `${clientBadge.color}40`,
-                  }}
-                >
+                <span className="hidden shrink-0 items-center gap-1 text-xs text-muted-foreground sm:inline-flex">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: clientBadge.color }} aria-hidden="true" />
                   {clientBadge.name}
                 </span>
               )}
             </div>
-            <p className="truncate text-xs text-muted-foreground">{contact.phone ?? contact.email ?? ""}</p>
-          </div>
-          {/* Session timer badge — hidden on the narrowest phones so
-              the name + back arrow keep their room. Sem texto (WAHA, sem
-              janela de 24h) não renderiza — evita o relógio vazio. */}
-          {sessionInfo.remaining && (
-            <Badge
-              variant="outline"
-              className={cn(
-                "ml-1 hidden gap-1 border-border text-[10px] sm:inline-flex sm:ml-2",
-                sessionInfo.expired ? "text-red-400" : "text-primary"
+            {/* Uma linha só: contato · canal · sessão/linha · janela 24h. */}
+            <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              <span className="truncate">{contact.phone ?? contact.email ?? ""}</span>
+              {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"] && (
+                <span className="hidden shrink-0 sm:inline">
+                  · {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"].label}
+                </span>
               )}
-            >
-              <Clock className="h-3 w-3" aria-hidden="true" />
-              {sessionInfo.remaining}
-            </Badge>
-          )}
+              {conversation.waha_session && (
+                <span className="hidden max-w-32 truncate sm:inline" title={`Sessão: ${conversation.waha_session}`}>
+                  · {conversation.waha_session}
+                </span>
+              )}
+              {/* Janela de 24h como texto discreto; vermelho só quando expirou.
+                  Sem texto (WAHA, sem janela) não renderiza. */}
+              {sessionInfo.remaining && (
+                <span
+                  className={cn(
+                    "hidden shrink-0 items-center gap-1 sm:inline-flex",
+                    sessionInfo.expired && "font-medium text-destructive"
+                  )}
+                >
+                  · <Clock className="h-3 w-3" aria-hidden="true" />
+                  {sessionInfo.remaining}
+                </span>
+              )}
+            </p>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2" role="toolbar" aria-label="Ações da conversa">
-          {/* Contact-panel toggle — desktop only. The contact sidebar
-              eats a chunk of horizontal width that crowds the thread on
-              smaller laptops; this lets agents reclaim it when they just
-              want to read and reply. Hidden on mobile, where the sidebar
-              never renders as a permanent panel anyway. Issue #258. */}
-          {onToggleContactPanel && (
-            <button
-              type="button"
-              onClick={onToggleContactPanel}
-              aria-label={
-                contactPanelOpen ? "Ocultar painel de contato" : "Exibir painel de contato"
-              }
-              aria-pressed={contactPanelOpen}
-              title={contactPanelOpen ? "Ocultar contato" : "Exibir contato"}
-              className={cn(
-                "hidden h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground lg:inline-flex",
-                contactPanelOpen ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              {contactPanelOpen ? (
-                <PanelRightClose className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
-              )}
-            </button>
-          )}
-
-          {/* Manual refresh — forces a refetch of the messages + the
-              conversation list (the parent bumps its resyncToken). Useful
-              when realtime missed an event or the agent just wants to be
-              sure nothing's stale. Only rendered when the parent wires
-              up `onRefresh`. */}
-          {/* WhatsApp WebRTC VoIP Call Button */}
-          {whatsappProvider === "waha" && contact?.phone && conversation.channel_type !== "webchat" && (
-            <button
-              type="button"
-              onClick={() => contact.phone && startOutboundCall(contact.phone)}
-              aria-label="Iniciar chamada de voz"
-              title="Ligar pelo WhatsApp"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-emerald-400 lg:h-7 lg:w-7"
-            >
-              <Phone className="h-4 w-4" aria-hidden="true" />
-            </button>
-          )}
-
-          {onRefresh && (
-            <button
-              type="button"
-              onClick={handleRefreshClick}
-              disabled={isRefreshing}
-              aria-label="Atualizar conversa"
-              title="Atualizar"
-              className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60 lg:h-7 lg:w-7",
-              )}
-            >
-              <RefreshCw
-                aria-hidden="true"
-                className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
-              />
-            </button>
-          )}
-
-          {onDeleteConversation && conversation && accountRole !== "agent" && (
-            <button
-              type="button"
-              onClick={handleDeleteClick}
-              disabled={isDeleting}
-              aria-label="Excluir conversa"
-              title="Excluir conversa"
-              className={cn(
-                "inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-red-400 disabled:opacity-60 lg:h-7 lg:w-7",
-              )}
-            >
-              {isDeleting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-              )}
-            </button>
-          )}
-
+        <div className="flex flex-wrap items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
+          {/* Visíveis: Status, Atribuir, Transferir, painel do contato.
+              Atualizar, Ligar e Excluir ficam em "Mais ações". */}
           {/* Status dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
                 aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
                 className={cn(
-                  "inline-flex items-center justify-center h-9 gap-1 px-2 text-xs rounded-md hover:bg-muted lg:h-7",
+                  "inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted",
                   currentStatus?.color ?? "text-muted-foreground"
                 )}>
                 {currentStatus?.label ?? "Status"}
-                <ChevronDown className="h-3 w-3" aria-hidden="true" />
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -1551,27 +1467,10 @@ export function MessageThread({
           </DropdownMenu>
 
           {conversation.status === "closed" && conversation.outcome_tag && (
-            <Badge
-              className="border-0 text-[10px]"
-              style={{
-                backgroundColor: `${conversation.outcome_tag.color}26`,
-                color: conversation.outcome_tag.color,
-              }}
-            >
+            <span className="inline-flex h-6 items-center gap-1 rounded-full border border-border px-2 text-xs text-foreground">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: conversation.outcome_tag.color }} aria-hidden="true" />
               {conversation.outcome_tag.name}
-            </Badge>
-          )}
-
-          {accountRole !== "viewer" && (
-            <button
-              type="button"
-              onClick={() => setTransferOpen(true)}
-              aria-label="Transferir conversa"
-              title="Transferir (atendente/equipe, com motivo)"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:h-7 lg:w-7"
-            >
-              <ArrowRightLeft className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            </span>
           )}
 
           {/* Assign dropdown */}
@@ -1581,13 +1480,13 @@ export function MessageThread({
               // continua dizendo a quem a conversa está atribuída.
               aria-label={assignedAgentId ? `Atribuída a ${assignLabel}` : "Atribuir conversa"}
               className={cn(
-                "inline-flex items-center justify-center h-9 gap-1 px-2 text-xs rounded-md hover:bg-muted lg:h-7",
+                "inline-flex h-8 max-w-40 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs hover:bg-muted",
                 assignedAgentId ? "text-primary" : "text-muted-foreground"
               )}
             >
-              <UserPlus className="h-3 w-3" aria-hidden="true" />
-              <span className="hidden sm:inline">{assignLabel}</span>
-              <ChevronDown className="h-3 w-3" aria-hidden="true" />
+              <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="hidden truncate sm:inline">{assignLabel}</span>
+              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -1646,6 +1545,100 @@ export function MessageThread({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+
+          {accountRole !== "viewer" && (
+            <button
+              type="button"
+              onClick={() => setTransferOpen(true)}
+              aria-label="Transferir conversa"
+              title="Transferir (atendente/equipe, com motivo)"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+
+          {/* Contact-panel toggle — desktop only. The contact sidebar
+              eats a chunk of horizontal width that crowds the thread on
+              smaller laptops; this lets agents reclaim it when they just
+              want to read and reply. Hidden on mobile, where the sidebar
+              never renders as a permanent panel anyway. Issue #258. */}
+          {onToggleContactPanel && (
+            <button
+              type="button"
+              onClick={onToggleContactPanel}
+              aria-label={
+                contactPanelOpen ? "Ocultar painel de contato" : "Exibir painel de contato"
+              }
+              aria-pressed={contactPanelOpen}
+              title={contactPanelOpen ? "Ocultar contato" : "Exibir contato"}
+              className={cn(
+                "hidden h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground lg:inline-flex",
+                contactPanelOpen ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              {contactPanelOpen ? (
+                <PanelRightClose className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          )}
+
+          {/* Mais ações: Atualizar (refetch manual quando o realtime perde
+              um evento), Ligar (VoIP WAHA) e Excluir (com confirmação). */}
+          {(() => {
+            const canCall =
+              whatsappProvider === "waha" && !!contact?.phone && conversation.channel_type !== "webchat";
+            const canDelete = !!onDeleteConversation && accountRole !== "agent";
+            if (!onRefresh && !canCall && !canDelete) return null;
+            return (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label="Mais ações"
+                  title="Mais ações"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  {isRefreshing || isDeleting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                  )}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48 border-border bg-popover">
+                  {onRefresh && (
+                    <DropdownMenuItem onClick={handleRefreshClick} disabled={isRefreshing} className="text-sm">
+                      <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} aria-hidden="true" />
+                      Atualizar conversa
+                    </DropdownMenuItem>
+                  )}
+                  {canCall && (
+                    <DropdownMenuItem
+                      onClick={() => contact.phone && startOutboundCall(contact.phone)}
+                      className="text-sm"
+                    >
+                      <Phone className="h-4 w-4" aria-hidden="true" />
+                      Ligar pelo WhatsApp
+                    </DropdownMenuItem>
+                  )}
+                  {canDelete && (
+                    <>
+                      <DropdownMenuSeparator className="bg-border" />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={handleDeleteClick}
+                        disabled={isDeleting}
+                        className="text-sm"
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                        Excluir conversa
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            );
+          })()}
         </div>
       </div>
 
@@ -1680,7 +1673,7 @@ export function MessageThread({
                 <div key={group.date}>
                   {/* Date separator */}
                   <div className="mb-4 flex items-center justify-center">
-                    <span className="rounded-full bg-muted px-3 py-1 text-[10px] font-medium text-muted-foreground">
+                    <span className="rounded-full border border-border bg-card/90 px-3 py-0.5 text-xs font-medium text-muted-foreground shadow-sm">
                       {formatDateSeparator(group.date)}
                     </span>
                   </div>

@@ -139,14 +139,14 @@ export function OutcomeTagPicker({
                 className="w-full text-left rounded-lg border border-primary/40 bg-primary/5 px-3 py-2.5 hover:bg-primary/10 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-semibold text-primary uppercase tracking-wide">
+                  <span className="text-xs font-semibold text-primary uppercase tracking-wide">
                     ✨ Sugestão da IA
                   </span>
                 </div>
                 <p className="text-sm font-medium text-foreground">
                   {aiSuggestion.tag_name}
                 </p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   {aiSuggestion.motivo}
                 </p>
               </button>

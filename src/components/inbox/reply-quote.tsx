@@ -42,7 +42,7 @@ export function ReplyQuote({
       <div className="min-w-0 flex-1 overflow-hidden">
         <div
           className={cn(
-            "truncate text-[11px] font-medium",
+            "truncate text-xs font-medium",
             onPrimary ? "text-primary-foreground" : "text-primary",
           )}
         >

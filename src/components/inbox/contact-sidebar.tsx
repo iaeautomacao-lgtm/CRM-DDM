@@ -3,7 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 import { ConversationOriginCard } from "@/components/inbox/conversation-origin";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -23,6 +23,8 @@ import {
   RefreshCw,
   History,
   Loader2,
+  ChevronRight,
+  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -76,6 +78,7 @@ export function ContactSidebar({
   const [analyzing, setAnalyzing] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editName, setEditName] = useState("");
+  const { sections, toggleSection } = useSidebarSections();
   const [history, setHistory] = useState<TimelineConversation[]>([]);
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -434,38 +437,10 @@ export function ContactSidebar({
             />
           </div>
 
-          {/* Quem iniciou a conversa e o que foi enviado (PRD-02). */}
+          {/* Sentimento (IA): linha compacta sempre visível; a orientação
+              longa fica atrás de "Ver orientação". */}
           {conversation && (
             <div className="mt-4">
-              <ConversationOriginCard key={conversation.id} conversationId={conversation.id} />
-            </div>
-          )}
-
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
-
-          {/* Sentiment Analysis Card */}
-          {conversation && (
-            <div className="rounded-xl border border-border bg-card/50 p-3.5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  <Brain className="h-3.5 w-3.5 text-primary" />
-                  Análise de Sentimento (IA)
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 rounded-full text-muted-foreground hover:text-foreground"
-                  disabled={analyzing}
-                  onClick={handleAnalyzeSentiment}
-                  title="Reanalisar conversa com IA"
-                  aria-label="Reanalisar sentimento da conversa com IA"
-                >
-                  <RefreshCw aria-hidden="true" className={cn("h-3 w-3", analyzing && "animate-spin")} />
-                </Button>
-              </div>
-
-              {/* Sentiment Display */}
               {(() => {
                 const SENTIMENT_CONFIG: Record<
                   string,
@@ -514,82 +489,105 @@ export function ContactSidebar({
                 };
                 const currentSentiment = conversation.sentiment ?? "unknown";
                 const config = SENTIMENT_CONFIG[currentSentiment] ?? SENTIMENT_CONFIG.unknown;
-                if (analyzing && currentSentiment === "unknown") {
-                  return (
-                    <p className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                      <RefreshCw className="h-3 w-3 animate-spin" />
-                      Analisando a conversa…
-                    </p>
-                  );
-                }
+                const showSpinner = analyzing && currentSentiment === "unknown";
                 return (
-                  <div className="mt-3">
-                    <div className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium", config.bg, config.border, config.color)}>
-                      <span className="text-lg leading-none select-none">{config.emoji}</span>
-                      <span className="flex-1">{config.label}</span>
+                  <div className="rounded-lg bg-muted/50 px-2 py-1">
+                    <div className="flex h-8 items-center gap-2 text-sm">
+                      <Brain className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      {showSpinner ? (
+                        <span className="flex-1 text-xs text-muted-foreground">Analisando a conversa…</span>
+                      ) : (
+                        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                          <span className="leading-none select-none" aria-hidden="true">{config.emoji}</span>
+                          <span className={cn("truncate font-medium", config.color)}>
+                            <span className="sr-only">Sentimento: </span>
+                            {config.label}
+                          </span>
+                        </span>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                        disabled={analyzing}
+                        onClick={handleAnalyzeSentiment}
+                        title="Reanalisar conversa com IA"
+                        aria-label="Reanalisar sentimento da conversa com IA"
+                      >
+                        <RefreshCw aria-hidden="true" className={cn("h-4 w-4", analyzing && "animate-spin")} />
+                      </Button>
                     </div>
-                    <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
-                      {config.desc}
-                    </p>
+                    {!showSpinner && (
+                      <details className="group pb-1">
+                        <summary className="cursor-pointer list-none text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary">
+                          <span className="group-open:hidden">Ver orientação</span>
+                          <span className="hidden group-open:inline">Ocultar orientação</span>
+                        </summary>
+                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{config.desc}</p>
+                      </details>
+                    )}
                   </div>
                 );
               })()}
             </div>
           )}
 
+          {/* Quem iniciou a conversa e o que foi enviado (PRD-02). */}
+          {conversation && (
+            <SidebarSection id="origem" title="Origem" sections={sections} onToggle={toggleSection}>
+              <ConversationOriginCard key={conversation.id} conversationId={conversation.id} />
+            </SidebarSection>
+          )}
+
           {/* Flow — keyed by conversation so switching conversations
               remounts the card instead of briefly showing the previous
               conversation's runs. */}
           {conversation && canViewFlows && (
-            <>
-              <div className="my-4 border-t border-border" />
+            <SidebarSection id="fluxo" title="Fluxo" sections={sections} onToggle={toggleSection}>
               <ConversationFlowCard
                 key={conversation.id}
                 conversationId={conversation.id}
                 canOpenEditor={canOpenFlowEditor}
               />
-            </>
+            </SidebarSection>
           )}
 
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
-
           {/* Tags */}
-          <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <TagIcon className="h-3 w-3" />
-              Etiquetas
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1">
+          <SidebarSection
+            id="etiquetas"
+            title="Etiquetas"
+            icon={TagIcon}
+            count={tags.length}
+            sections={sections}
+            onToggle={toggleSection}
+          >
+            <div className="flex flex-wrap gap-1">
               {tags.length === 0 ? (
                 <p className="px-1 text-xs text-muted-foreground">Sem etiquetas</p>
               ) : (
                 tags.map((tag) => (
                   <span
                     key={tag.contact_tag_id}
-                    className="rounded-full px-2 py-0.5 text-[10px] font-medium"
-                    style={{
-                      backgroundColor: `${tag.color}20`,
-                      color: tag.color,
-                    }}
+                    className="inline-flex items-center gap-1 rounded-full border border-border px-2 text-xs text-foreground"
                   >
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
                     {tag.name}
                   </span>
                 ))
               )}
             </div>
-          </div>
-
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
+          </SidebarSection>
 
           {/* Active Deals */}
-          <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <DollarSign className="h-3 w-3" />
-              Negócios Ativos
-            </div>
-            <div className="mt-2 space-y-2">
+          <SidebarSection
+            id="negocios"
+            title="Negócios ativos"
+            icon={DollarSign}
+            count={deals.length}
+            sections={sections}
+            onToggle={toggleSection}
+          >
+            <div className="space-y-2">
               {deals.length === 0 ? (
                 <p className="px-1 text-xs text-muted-foreground">Sem negócios</p>
               ) : (
@@ -604,13 +602,8 @@ export function ContactSidebar({
                     <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
                       <span>{formatCurrency(deal.value, deal.currency)}</span>
                       {deal.stage && (
-                        <span
-                          className="rounded-full px-1.5 py-0.5 text-[10px]"
-                          style={{
-                            backgroundColor: `${deal.stage.color}20`,
-                            color: deal.stage.color,
-                          }}
-                        >
+                        <span className="inline-flex items-center gap-1 text-xs text-foreground">
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: deal.stage.color }} aria-hidden="true" />
                           {deal.stage.name}
                         </span>
                       )}
@@ -619,18 +612,18 @@ export function ContactSidebar({
                 ))
               )}
             </div>
-          </div>
-
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
+          </SidebarSection>
 
           {/* Notes */}
-          <div>
-            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              <StickyNote className="h-3 w-3" />
-              Notas
-            </div>
-            <div className="mt-2">
+          <SidebarSection
+            id="notas"
+            title="Notas"
+            icon={StickyNote}
+            count={notes.length}
+            sections={sections}
+            onToggle={toggleSection}
+          >
+            <div>
               <div className="flex gap-2">
                 <textarea
                   value={newNote}
@@ -660,37 +653,33 @@ export function ContactSidebar({
                     <p className="whitespace-pre-wrap text-xs text-muted-foreground">
                       {note.note_text}
                     </p>
-                    <p className="mt-1 text-[10px] text-muted-foreground">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       {format(new Date(note.created_at), "dd/MM/yyyy HH:mm")}
                     </p>
                   </div>
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* Divider */}
-          <div className="my-4 border-t border-border" />
+          </SidebarSection>
 
           {/* History — reuses loadContactConversations/ConversationCard
               from the /historico feature as-is, just capped to 5 and
               excluding the currently-open conversation. */}
-          <div>
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                <History className="h-3 w-3" />
-                Histórico
-              </div>
-              {historyHasMore && (
-                <Link
-                  href="/historico"
-                  className="text-xs font-medium text-primary hover:underline"
-                >
+          <SidebarSection
+            id="historico"
+            title="Histórico"
+            icon={History}
+            sections={sections}
+            onToggle={toggleSection}
+            action={
+              historyHasMore ? (
+                <Link href="/historico" className="text-xs font-medium text-primary hover:underline">
                   Ver todos
                 </Link>
-              )}
-            </div>
-            <div className="mt-2 space-y-2">
+              ) : null
+            }
+          >
+            <div className="space-y-2">
               {historyLoading ? (
                 <div className="flex items-center justify-center py-4">
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -709,9 +698,104 @@ export function ContactSidebar({
                 ))
               )}
             </div>
-          </div>
+          </SidebarSection>
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+// ── Seções recolhíveis do painel ─────────────────────────────────────
+// Aberto/fechado por seção fica no localStorage (por navegador). Padrão:
+// Notas aberta; Origem, Fluxo, Etiquetas, Negócios e Histórico fechadas.
+const SIDEBAR_SECTIONS_KEY = "wacrm:inbox:sidebar-sections";
+type SidebarSectionId = "origem" | "fluxo" | "etiquetas" | "negocios" | "notas" | "historico";
+type SectionsState = Record<SidebarSectionId, boolean>;
+const DEFAULT_SECTIONS: SectionsState = {
+  origem: false,
+  fluxo: false,
+  etiquetas: false,
+  negocios: false,
+  notas: true,
+  historico: false,
+};
+
+function useSidebarSections() {
+  const [sections, setSections] = useState<SectionsState>(DEFAULT_SECTIONS);
+  // Lê no mount (não no initializer) para não divergir da renderização do servidor.
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SIDEBAR_SECTIONS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<SectionsState>;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- hidrata preferência local uma vez
+      setSections((prev) => ({ ...prev, ...parsed }));
+    } catch {
+      // Preferência é opcional; ignora storage indisponível/corrompido.
+    }
+  }, []);
+  const toggleSection = useCallback((id: SidebarSectionId) => {
+    setSections((prev) => {
+      const next = { ...prev, [id]: !prev[id] };
+      try {
+        window.localStorage.setItem(SIDEBAR_SECTIONS_KEY, JSON.stringify(next));
+      } catch {
+        // best-effort
+      }
+      return next;
+    });
+  }, []);
+  return { sections, toggleSection };
+}
+
+function SidebarSection({
+  id,
+  title,
+  icon: Icon,
+  count,
+  action,
+  sections,
+  onToggle,
+  children,
+}: {
+  id: SidebarSectionId;
+  title: string;
+  icon?: LucideIcon;
+  count?: number;
+  action?: ReactNode;
+  sections: SectionsState;
+  onToggle: (id: SidebarSectionId) => void;
+  children: ReactNode;
+}) {
+  const open = sections[id];
+  const contentId = `sidebar-section-${id}`;
+  return (
+    <section className="mt-4">
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => onToggle(id)}
+          aria-expanded={open}
+          aria-controls={contentId}
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left text-sm font-medium text-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+        >
+          <ChevronRight
+            aria-hidden="true"
+            className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+          />
+          {Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+          <span className="truncate">{title}</span>
+          {count !== undefined && count > 0 && (
+            <span className="rounded-full bg-muted px-2 text-xs tabular-nums text-muted-foreground">{count}</span>
+          )}
+        </button>
+        {action}
+      </div>
+      {open && (
+        <div id={contentId} className="mt-2 px-1">
+          {children}
+        </div>
+      )}
+    </section>
   );
 }
