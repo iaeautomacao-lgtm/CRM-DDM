@@ -29,6 +29,18 @@ export interface AiModelDefinition {
 export const AI_MODELS: Record<AiProvider, readonly AiModelDefinition[]> = {
   openai: [
     {
+      id: "gpt-6-astra",
+      label: "GPT-6 Astra",
+      description: "Modelo de maior capacidade para tarefas complexas.",
+      openai_chat: { reasoning_effort: "none" },
+    },
+    {
+      id: "gpt-6-sol",
+      label: "GPT-6 Sol",
+      description: "Modelo de alta capacidade com equilíbrio entre custo e desempenho.",
+      openai_chat: { reasoning_effort: "none" },
+    },
+    {
       id: "gpt-6-luna",
       label: "GPT-6 Luna",
       description: "Modelo eficiente para alto volume.",
