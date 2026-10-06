@@ -376,22 +376,30 @@ export default function InboxPage() {
   }, [isConnected]);
 
   /**
-   * Refetch when the tab regains focus. Background tabs may have their
-   * WS throttled by the browser even without a full disconnect, so a
-   * visibilitychange → visible is a reliable signal that we may have
-   * missed events. Cheap to fire; the children dedupe on their own.
+   * Realtime is RLS-scoped. When another agent closes/claims a queue row,
+   * that row can stop satisfying this agent's SELECT policy before the
+   * UPDATE is delivered, so the browser may never receive the event that
+   * should remove it from the queue. Resync on focus and periodically while
+   * visible to converge the list with the server even when no realtime event
+   * is legally visible to this session.
    */
-  // useEffect(() => {
-  //   const onVisibility = () => {
-  //     if (document.visibilityState === "visible") {
-  //       setResyncToken((n) => n + 1);
-  //     }
-  //   };
-  //   document.addEventListener("visibilitychange", onVisibility);
-  //   return () => {
-  //     document.removeEventListener("visibilitychange", onVisibility);
-  //   };
-  // }, []);
+  useEffect(() => {
+    const resyncIfVisible = () => {
+      if (document.visibilityState === "visible") {
+        setResyncToken((n) => n + 1);
+      }
+    };
+
+    document.addEventListener("visibilitychange", resyncIfVisible);
+    window.addEventListener("focus", resyncIfVisible);
+    const timer = window.setInterval(resyncIfVisible, 30_000);
+
+    return () => {
+      document.removeEventListener("visibilitychange", resyncIfVisible);
+      window.removeEventListener("focus", resyncIfVisible);
+      window.clearInterval(timer);
+    };
+  }, []);
 
   /**
    * Manual refresh trigger for the thread-header refresh button.
