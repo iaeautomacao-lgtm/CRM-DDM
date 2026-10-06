@@ -19,6 +19,8 @@ import { writeLog } from "@/lib/logger";
 type Db = SupabaseClient<any, any, any>;
 
 export const AI_STALL_REASON = "ai_response_stalled";
+/** handoff_reason gravado em ai_decisions para a transferência do vigia. */
+export const AI_STALL_HANDOFF_REASON = "IA_TRAVADA";
 
 function envInt(name: string, fallback: number): number {
   const v = Number.parseInt(process.env[name] ?? "", 10);
@@ -119,6 +121,29 @@ export async function sweepStalledAiConversations(db: Db, now: Date = new Date()
         node_key: run.current_node_key,
         payload: { reason: AI_STALL_REASON, waited_seconds: waitedSeconds },
       });
+      // Telemetria do handoff (uma linha por transferência). Best-effort:
+      // falha aqui não desfaz a transferência.
+      try {
+        const { error: decisionErr } = await db.from("ai_decisions").insert({
+          account_id: conv.account_id,
+          conversation_id: conv.id,
+          flow_run_id: run.id,
+          flow_id: run.flow_id,
+          node_key: run.current_node_key,
+          decision_type: "handoff",
+          decision: { waited_seconds: waitedSeconds, end_reason: AI_STALL_REASON },
+          reason: AI_STALL_REASON,
+          needs_human: true,
+          handoff_reason: AI_STALL_HANDOFF_REASON,
+          handoff_subreason: "WATCHDOG_SEM_RESPOSTA",
+          ai_node: run.current_node_key,
+        });
+        if (decisionErr) {
+          console.error("[ai-watchdog] falha ao gravar ai_decisions:", decisionErr.message);
+        }
+      } catch (err) {
+        console.error("[ai-watchdog] falha ao gravar ai_decisions:", err);
+      }
       void writeLog({
         account_id: conv.account_id,
         level: "warn",

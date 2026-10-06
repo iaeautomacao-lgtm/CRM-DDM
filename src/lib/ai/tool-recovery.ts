@@ -7,7 +7,12 @@ export type ToolFailureCode =
   | "TOOL_NETWORK_ERROR"
   | "TOOL_SCHEMA_ERROR"
   | "TOOL_INVALID_CLIENT"
-  | "TOOL_PROVIDER_ERROR";
+  | "TOOL_PROVIDER_ERROR"
+  // Resposta de NEGÓCIO da integração (HTTP 404, {"error":"CPF não
+  // encontrado"}, "sem débito"…): a API está no ar e respondeu. Não é
+  // instabilidade — o resultado vai ao modelo, que decide (ex.: pedir o
+  // CPF de novo). Ver isIntegrationOutage.
+  | "TOOL_BUSINESS_ERROR";
 
 export interface ToolFailure {
   code: ToolFailureCode;
@@ -97,8 +102,50 @@ export function prepareToolArgs(
   return { args: normalized };
 }
 
-export function classifyHttpFailure(status: number): ToolFailure | null {
+// Mensagens de erro que são resultado de negócio, não falha da integração.
+// Lista inicial — validar com a API DDM (PRD 01, Fase 1 item 3).
+const BUSINESS_ERROR_PATTERNS: RegExp[] = [
+  /\bnao (?:foi )?(?:encontrad|localizad)/,
+  /\bnot found\b/,
+  /\bsem (?:debito|pendencia|divida|registro|cadastro)/,
+  /\bnenhuma? (?:registro|debito|pendencia|divida|resultado|cadastro|acordo|devedor|dado|calculo)/,
+  /\binexistente\b/,
+  /\bno (?:records?|data|results?)\b/,
+];
+
+/** Erro textual da integração que é resultado de negócio ("CPF não encontrado"). */
+export function isBusinessErrorMessage(text: string): boolean {
+  const normalized = text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase();
+  return BUSINESS_ERROR_PATTERNS.some((re) => re.test(normalized));
+}
+
+/** Trecho do corpo para o modelo (sem HTML de página de erro). */
+function bodySnippet(body: string | undefined): string {
+  const text = (body ?? "").trim();
+  if (!text || /^<(!doctype html|html)\b/i.test(text)) return "";
+  return text.length > 300 ? `${text.slice(0, 300)}…` : text;
+}
+
+export function classifyHttpFailure(
+  status: number,
+  body?: string,
+): ToolFailure | null {
   if (status >= 200 && status < 300) return null;
+
+  // 404 = registro não encontrado (ex.: devedor inexistente). A API está
+  // no ar: o modelo recebe o resultado e decide.
+  if (status === 404) {
+    const snippet = bodySnippet(body);
+    return {
+      code: "TOOL_BUSINESS_ERROR",
+      message: `A integração respondeu que o registro não foi encontrado (HTTP 404)${snippet ? `: ${snippet}` : "."}`,
+      retryable: false,
+      httpStatus: status,
+    };
+  }
 
   if (status === 408 || status === 504) {
     return {
@@ -215,6 +262,14 @@ export function classifyToolBodyFailure(body: string): ToolFailure | null {
     };
   }
 
+  if (isBusinessErrorMessage(rawError)) {
+    return {
+      code: "TOOL_BUSINESS_ERROR",
+      message: `A integração respondeu: ${rawError}`,
+      retryable: false,
+    };
+  }
+
   return {
     code: "TOOL_PROVIDER_ERROR",
     message: `A integração rejeitou a operação: ${rawError}`,
@@ -270,8 +325,9 @@ export function retryDelayMs(attempt: number): number {
 /**
  * Falha de INTEGRAÇÃO (fora do controle do cliente) — depois das
  * tentativas, a conversa não pode ficar parada esperando o modelo decidir:
- * ver forceInstabilityExit em responder.ts. CPF inválido e parâmetro
- * ausente não entram (o modelo resolve pedindo o dado de novo).
+ * ver forceInstabilityExit em responder.ts. CPF inválido, parâmetro
+ * ausente e resposta de negócio (TOOL_BUSINESS_ERROR: 404, "CPF não
+ * encontrado") não entram — o modelo resolve com o resultado.
  */
 export function isIntegrationOutage(code: ToolFailureCode | undefined | null): boolean {
   return (
@@ -283,6 +339,49 @@ export function isIntegrationOutage(code: ToolFailureCode | undefined | null): b
     code === "TOOL_INVALID_CLIENT" ||
     code === "TOOL_PROVIDER_ERROR"
   );
+}
+
+/** Contagem por tool das chamadas de UMA resposta da IA. */
+export interface ToolRoundTally {
+  calls: number;
+  outages: number;
+  lastOutageCode: ToolFailureCode | null;
+}
+
+/**
+ * Registra o resultado final (pós-tentativas) de UMA chamada de tool.
+ * Conta por chamada, não por nome: 1 de 3 registros de consultar_debitos
+ * falhando não derruba a resposta montada com os outros 2.
+ */
+export function tallyToolResult(
+  tally: Map<string, ToolRoundTally>,
+  toolName: string,
+  failureCode: ToolFailureCode | undefined | null,
+): void {
+  const entry = tally.get(toolName) ?? { calls: 0, outages: 0, lastOutageCode: null };
+  entry.calls += 1;
+  if (failureCode && isIntegrationOutage(failureCode)) {
+    entry.outages += 1;
+    entry.lastOutageCode = failureCode;
+  }
+  tally.set(toolName, entry);
+}
+
+/**
+ * Tools com TODAS as chamadas da rodada fora do ar — só então a resposta
+ * é trocada por #INSTABILIDADE. Qualquer sucesso (ou resposta de negócio)
+ * de qualquer registro da mesma tool tira a tool daqui.
+ */
+export function fullyFailedIntegrations(
+  tally: Map<string, ToolRoundTally>,
+): Record<string, ToolFailureCode> {
+  const failed: Record<string, ToolFailureCode> = {};
+  for (const [toolName, entry] of tally) {
+    if (entry.calls > 0 && entry.outages === entry.calls && entry.lastOutageCode) {
+      failed[toolName] = entry.lastOutageCode;
+    }
+  }
+  return failed;
 }
 
 export function serializeToolFailure(
