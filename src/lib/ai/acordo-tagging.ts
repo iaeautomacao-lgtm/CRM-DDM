@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { auditFetch } from '@/lib/audit/context'
 import { resolveActiveApiKey, fetchRecentHistoryText, callLlmForAnalysis, stripJsonFences } from "./llm-shared";
+import { latestMessageKey, type LlmCaller } from "./tabulacao-suggest";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -19,6 +20,13 @@ const supabaseAdmin = () => createClient(supabaseUrl, supabaseServiceKey, {
 /** codigo_tabulacao of the "Acordo Realizado" outcome tag, seeded per
  *  account by wacrm.seed_tabulacao_tags() (migration 041). */
 export const ACORDO_REALIZADO_CODIGO = 142;
+
+/** Confiança gravada na sugestão: o classificador é conservador por
+ *  construção (só diz "true" com confirmação explícita). */
+export const ACORDO_SUGGESTION_CONFIDENCE = 0.9;
+
+export const ACORDO_SUGGESTION_REASON =
+  "Acordo de pagamento formalizado detectado pela IA na conversa";
 
 export function buildAcordoPrompt(historyText: string): string {
   return `Você é um analista de cobrança para WhatsApp. Analise o histórico da conversa abaixo e responda apenas UMA pergunta: esta conversa resultou em um acordo de pagamento FORMALIZADO e FECHADO com o cliente?
@@ -78,57 +86,92 @@ export async function classifyAcordoFormalizado(
   }
 }
 
-/**
- * Fire-and-forget entry point, called from the WhatsApp webhooks on every
- * inbound message — same shape as analyzeConversationSentimentAndTags.
- *
- * Silently tags the conversation with the account's "Acordo Realizado"
- * outcome tag when the AI is confident a payment agreement was closed.
- * Never closes the conversation (a human does that) and never throws.
- */
-export async function autoTagAcordoRealizado(
-  accountId: string,
-  contactId: string,
-  conversationId: string,
-) {
-  try {
-    const db = supabaseAdmin();
+export type AcordoSuggestionResult =
+  | "skipped"
+  | "flow_in_charge"
+  | "already_analyzed"
+  | "no_ai"
+  | "not_formalized"
+  | "no_tag"
+  | "suggested";
 
-    // Cost guard: a conversation only ever gets classified once. Once
-    // outcome_tag_id is set (by this, by a human, or by an automation),
-    // never reprocess it.
+interface AcordoConversationRow {
+  id: string;
+  status: string;
+  outcome_tag_id: string | null;
+  outcome_suggestion_source: string | null;
+  outcome_suggestion_key: string | null;
+}
+
+/**
+ * Classificador "Acordo Realizado" para conversas FORA de fluxo (as
+ * conduzidas por fluxo sugerem pela tag de saída da IA — ver
+ * outcome-suggestion.ts). Chamado com debounce pelos webhooks
+ * (acordo-trigger.ts), não a cada mensagem.
+ *
+ * Antes gravava outcome_tag_id em silêncio; agora grava uma SUGESTÃO
+ * (suggested_outcome_tag_id, source 'llm') que o atendente confirma no
+ * picker. Usa o provider + modelo + chave da conta. Cache por última
+ * mensagem (outcome_suggestion_key): a mesma mensagem nunca é analisada
+ * duas vezes. Nunca lança.
+ */
+export async function suggestAcordoRealizado(
+  accountId: string,
+  conversationId: string,
+  deps: { db?: SupabaseClient; callLlm?: LlmCaller } = {},
+): Promise<AcordoSuggestionResult> {
+  try {
+    const db = deps.db ?? supabaseAdmin();
+
     const { data: conversation, error: convError } = await db
       .from("conversations")
-      .select("outcome_tag_id")
+      .select("id, status, outcome_tag_id, outcome_suggestion_source, outcome_suggestion_key")
       .eq("id", conversationId)
+      .eq("account_id", accountId)
       .maybeSingle();
+    const conv = conversation as AcordoConversationRow | null;
 
-    if (convError || !conversation || conversation.outcome_tag_id) {
-      return;
+    // Já tabulada/fechada: nada a sugerir.
+    if (convError || !conv || conv.status === "closed" || conv.outcome_tag_id) {
+      return "skipped";
     }
+    // Fluxo no comando: a sugestão vem da tag de saída da IA.
+    if (conv.outcome_suggestion_source === "exit_tag") return "flow_in_charge";
+    const { data: activeRuns } = await db
+      .from("flow_runs")
+      .select("id")
+      .eq("conversation_id", conversationId)
+      .eq("status", "active")
+      .limit(1);
+    if (activeRuns && activeRuns.length > 0) return "flow_in_charge";
+
+    const key = await latestMessageKey(db, conversationId);
+    if (!key) return "skipped";
+    if (conv.outcome_suggestion_key === key) return "already_analyzed";
 
     const activeConfig = await resolveActiveApiKey(db, accountId);
-    if (!activeConfig) return;
+    if (!activeConfig) return "no_ai";
     const { provider, apiKey, model } = activeConfig;
 
     const historyText = await fetchRecentHistoryText(db, conversationId);
-    if (!historyText) return;
+    if (!historyText) return "skipped";
 
+    const callLlm = deps.callLlm ?? callLlmForAnalysis;
     const isFormalized = await classifyAcordoFormalizado(historyText, (prompt) =>
-      callLlmForAnalysis(provider, apiKey, prompt),
+      callLlm(provider, apiKey, prompt, model),
     );
-    if (!isFormalized) return;
+    if (!isFormalized) return "not_formalized";
 
     // Multi-tenant: resolve "Acordo Realizado" for THIS account, never a
-    // fixed id — mirrors the fallback-tag lookup in
-    // src/lib/automations/engine.ts (close_conversation step).
-    const { data: tag, error: tagError } = await db
+    // fixed id.
+    const { data: tags, error: tagError } = await db
       .from("tags")
       .select("id")
       .eq("account_id", accountId)
       .eq("kind", "outcome")
       .eq("codigo_tabulacao", ACORDO_REALIZADO_CODIGO)
-      .maybeSingle();
+      .limit(1);
+    const tag = (tags as { id: string }[] | null)?.[0];
 
     if (tagError || !tag) {
       console.error(
@@ -136,18 +179,34 @@ export async function autoTagAcordoRealizado(
         accountId,
         tagError,
       );
-      return;
+      return "no_tag";
     }
 
-    // `outcome_tag_id IS NULL` on the write itself (not just the read
-    // above) closes the race between two near-simultaneous inbound
-    // messages both passing the guard read before either writes.
-    await db
+    // Guardas na própria escrita (não só na leitura acima): conversa
+    // fechada/tabulada ou sugestão do fluxo entre a leitura e a escrita
+    // não são tocadas.
+    const { error: updateError } = await db
       .from("conversations")
-      .update({ outcome_tag_id: tag.id })
+      .update({
+        suggested_outcome_tag_id: tag.id,
+        outcome_suggestion_source: "llm",
+        outcome_suggestion_confidence: ACORDO_SUGGESTION_CONFIDENCE,
+        outcome_suggestion_reason: ACORDO_SUGGESTION_REASON,
+        outcome_suggested_at: new Date().toISOString(),
+        outcome_suggestion_key: key,
+      })
       .eq("id", conversationId)
-      .is("outcome_tag_id", null);
+      .eq("account_id", accountId)
+      .neq("status", "closed")
+      .is("outcome_tag_id", null)
+      .or("outcome_suggestion_source.is.null,outcome_suggestion_source.neq.exit_tag");
+    if (updateError) {
+      console.error("[Acordo Tagging] suggestion write failed:", updateError.message);
+      return "skipped";
+    }
+    return "suggested";
   } catch (err) {
     console.error("[Acordo Tagging] Error:", err);
+    return "skipped";
   }
 }

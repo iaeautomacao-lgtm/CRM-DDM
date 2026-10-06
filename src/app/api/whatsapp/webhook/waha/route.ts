@@ -830,9 +830,10 @@ export async function POST(request: Request) {
         }
 
         if (direction === 'inbound' && contactId && conversationId) {
-          // Auto-tag "Acordo Realizado" when the AI detects a formalized agreement
-          const { autoTagAcordoRealizado } = await import('@/lib/ai/acordo-tagging')
-          void autoTagAcordoRealizado(accountId, contactId, conversationId)
+          // Sugestão "Acordo Realizado" (fora de fluxo): com debounce, gravada
+          // como sugestão para o atendente confirmar — ver acordo-tagging.ts.
+          const { scheduleAcordoSuggestion } = await import('@/lib/ai/acordo-trigger')
+          scheduleAcordoSuggestion(accountId, conversationId)
         }
       }
 
