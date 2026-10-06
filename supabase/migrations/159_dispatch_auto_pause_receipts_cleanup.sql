@@ -48,8 +48,9 @@ CREATE INDEX IF NOT EXISTS idx_dmq_auto_pause_attempts
   WHERE tentativas > 0
     AND status IN ('enviado', 'entregue', 'lido', 'erro', 'bloqueado')
     AND (status <> 'erro' OR erro_permanente = true);
-CREATE INDEX IF NOT EXISTS idx_dispatch_receipts_created_at
-  ON wacrm.dispatch_status_receipts (created_at);
+-- Índice de dispatch_status_receipts(created_at) para a limpeza: criado sem
+-- travar a tabela pela migration 168 (idx_dispatch_status_receipts_created_at,
+-- CONCURRENTLY). Sem ele a limpeza só fica mais lenta, não quebra.
 
 CREATE OR REPLACE FUNCTION wacrm.cleanup_orphan_dispatch_receipts(
   p_limit integer DEFAULT 5000
