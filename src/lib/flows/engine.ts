@@ -39,6 +39,13 @@ import {
   type AiGuardDetail,
 } from "@/lib/ai/responder";
 import { normalizeExitTag } from "@/lib/ai/exit-tags";
+import {
+  isTurnFreeInbound,
+  nextAiTurnCount,
+  parkBeforeAiAgent,
+  readTurnVar,
+  type AdvanceWalkContext,
+} from "./ai-turns";
 import { supabaseAdmin } from "./admin-client";
 import { writeLog } from "@/lib/logger";
 import {
@@ -2188,6 +2195,12 @@ async function runAiAgentCore(
       responseReason: string | null;
       /** Detalhe da trava anti-abuso/anti-loop, quando ela tirou a conversa da IA. */
       guard: AiGuardDetail | null;
+      /**
+       * Mensagem do cliente que disparou o turno é mídia sem texto ou
+       * confirmação pura ("ok", "👍") — não consome turno de max_turns
+       * (ver ai-turns.ts).
+       */
+      inboundTurnFree: boolean;
       baseOutput: Record<string, unknown>;
     }
   | {
@@ -2217,6 +2230,7 @@ async function runAiAgentCore(
   let exitCodeFound: string | null = null;
   let modelUsed: string | null = null;
   let aiConfigUsable = false;
+  let inboundTurnFree = false;
   try {
     // Best-effort — mirrors ai_config.api_provider to the model
     // string handleAiAutoResponse actually calls (see
@@ -2280,6 +2294,12 @@ async function runAiAgentCore(
       } | null;
       incomingText = incomingMsg?.content_text ?? "";
     }
+
+    // Antes do placeholder abaixo: decide com o conteúdo real da mensagem.
+    inboundTurnFree = isTurnFreeInbound(
+      incomingTextOverride ?? incomingMsg?.content_text ?? null,
+      incomingMsg?.content_type ?? null,
+    );
 
     // Mensagem de mídia sem texto (sticker, áudio ainda não transcrito
     // neste ponto, vídeo, documento) vira um placeholder descritivo em
@@ -2614,6 +2634,7 @@ async function runAiAgentCore(
       responseOutcome: aiResponse.outcome,
       responseReason,
       guard: aiResponse.outcome === "skipped" ? (aiResponse.guard ?? null) : null,
+      inboundTurnFree,
       baseOutput,
     };
   } catch (err) {
@@ -2647,7 +2668,15 @@ export async function advanceFromNodeKey(
   startNodeKey: string,
   nodes: Map<string, FlowNodeRow>,
   triggerMessage?: ParsedInbound,
+  // Estado do walk disparado pela mensagem do cliente — ver
+  // parkBeforeAiAgent (ai-turns.ts). handleReplyForActiveRun passa
+  // inboundAnsweredByAi quando o ai_agent estacionado acabou de sair
+  // (tag/max_turns) já tendo respondido a essa mensagem.
+  walkCtx: AdvanceWalkContext = {},
 ): Promise<{ outcome: "advanced" | "completed" | "handed_off" | "transferred" }> {
+  // Cópia local: o walk marca inboundAnsweredByAi quando um ai_agent em
+  // loop sai respondendo ao cliente (ver o ramo "loop" abaixo).
+  const walk: AdvanceWalkContext = { ...walkCtx };
   let currentKey: string | null = startNodeKey;
   // Defensive cap — if a flow has a cycle (which the validator
   // SHOULD catch but doesn't yet in v1), we bail rather than loop.
@@ -3485,6 +3514,32 @@ export async function advanceFromNodeKey(
       await updateRunVars(db, run, { ai_exit_code: null });
       run.vars = { ...run.vars, ai_exit_code: null };
 
+      // Outro ai_agent já respondeu à mensagem que disparou este walk e o
+      // caminho (switch/condição/…) chegou aqui: não roda este nó com a
+      // MESMA mensagem — estaciona e deixa a próxima mensagem do cliente
+      // dispará-lo (handleReplyForActiveRun). Generaliza o guard "próximo
+      // nó é ai_agent" do ramo loop abaixo para caminhos com nós
+      // intermediários (agente_ddm → switch_resultado → recovery_recusa).
+      if (parkBeforeAiAgent(cfg, walk)) {
+        const advanced = await advanceCurrentNodeKey(
+          db,
+          run.id,
+          run.current_node_key,
+          node.node_key,
+        );
+        if (!advanced) {
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "lost_race_during_advance",
+          });
+        }
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          turns_used: 0,
+          exit_reason: "awaiting_reply",
+          parked_reason: "inbound_already_answered_by_ai",
+        });
+        return { outcome: "advanced" };
+      }
+
       const core = await runAiAgentCore(
         db,
         run,
@@ -3616,11 +3671,13 @@ export async function advanceFromNodeKey(
 
       if (cfg.mode === "loop") {
         const maxTurns = cfg.max_turns ?? 20;
-        const priorTurns =
-          typeof run.vars.__ai_turns__ === "number"
-            ? (run.vars.__ai_turns__ as number)
-            : 0;
-        const turns = priorTurns + 1;
+        // Mídia sem texto / "ok" não gasta turno (ver ai-turns.ts).
+        const turnCount = nextAiTurnCount(
+          readTurnVar(run.vars, "__ai_turns__"),
+          readTurnVar(run.vars, "__ai_free_turns__"),
+          core.inboundTurnFree,
+        );
+        const turns = turnCount.turns;
         if (exitCodeFound || turns >= maxTurns) {
           // Cap hit OR the agent's reply just carried a #TAG exit code
           // (ai_exit_code was set above) — either way the loop is done:
@@ -3633,7 +3690,11 @@ export async function advanceFromNodeKey(
           const exitReason = exitCodeFound ? "exit_code_detected" : "max_turns";
           // __ai_exit_reason__: telemetria do handoff (max_turns sem tag
           // que cai no default do switch) — ver recordHandoffDecision.
-          await updateRunVars(db, run, { __ai_turns__: 0, __ai_exit_reason__: exitReason });
+          await updateRunVars(db, run, {
+            __ai_turns__: 0,
+            __ai_free_turns__: 0,
+            __ai_exit_reason__: exitReason,
+          });
           await logEvent(db, run.id, "node_entered", node.node_key, {
             turns_used: turns,
             exit_reason: exitCodeFound ? "exit_code_matched" : "limit_reached",
@@ -3667,10 +3728,16 @@ export async function advanceFromNodeKey(
             return { outcome: "advanced" };
           }
 
+          // Respondeu ao cliente nesta mensagem: um ai_agent mais adiante
+          // neste mesmo walk espera a próxima (parkBeforeAiAgent).
+          if (core.messageSent) walk.inboundAnsweredByAi = true;
           currentKey = nextKey;
           continue;
         }
-        await updateRunVars(db, run, { __ai_turns__: turns });
+        await updateRunVars(db, run, {
+          __ai_turns__: turns,
+          __ai_free_turns__: turnCount.freeTurns,
+        });
         const advanced = await advanceCurrentNodeKey(
           db,
           run.id,
@@ -4302,11 +4369,13 @@ async function handleReplyForActiveRun(
       });
 
     const maxTurns = cfg.max_turns ?? 20;
-    const priorTurns =
-      typeof run.vars.__ai_turns__ === "number"
-        ? (run.vars.__ai_turns__ as number)
-        : 0;
-    const turns = priorTurns + 1;
+    // Mídia sem texto / "ok" não gasta turno (ver ai-turns.ts).
+    const turnCount = nextAiTurnCount(
+      readTurnVar(run.vars, "__ai_turns__"),
+      readTurnVar(run.vars, "__ai_free_turns__"),
+      core.inboundTurnFree,
+    );
+    const turns = turnCount.turns;
 
     if (exitCodeFound || turns >= maxTurns) {
       // Same exit condition as the initial-entry branch in
@@ -4317,7 +4386,11 @@ async function handleReplyForActiveRun(
       // first (unlike the entry case, which transitions from a prior
       // node via `continue` in that function's own loop).
       const exitReason = exitCodeFound ? "exit_code_detected" : "max_turns";
-      await updateRunVars(db, run, { __ai_turns__: 0, __ai_exit_reason__: exitReason });
+      await updateRunVars(db, run, {
+        __ai_turns__: 0,
+        __ai_free_turns__: 0,
+        __ai_exit_reason__: exitReason,
+      });
       await logEvent(db, run.id, "node_entered", currentNode.node_key, {
         turns_used: turns,
         exit_reason: exitCodeFound ? "exit_code_matched" : "limit_reached",
@@ -4360,7 +4433,12 @@ async function handleReplyForActiveRun(
         return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
       }
 
-      const outcome = await advanceFromNodeKey(db, run, nextKey, nodes);
+      // Se a IA já respondeu a esta mensagem, um ai_agent alcançado mais
+      // adiante (depois de switch/condição) espera a próxima mensagem do
+      // cliente em vez de rodar agora — ver parkBeforeAiAgent.
+      const outcome = await advanceFromNodeKey(db, run, nextKey, nodes, undefined, {
+        inboundAnsweredByAi: core.messageSent,
+      });
       return {
         consumed: true,
         flow_run_id: run.id,
@@ -4372,7 +4450,10 @@ async function handleReplyForActiveRun(
     // awaiting the next reply. current_node_key already equals this
     // node's key (that's how we got here), so no advanceCurrentNodeKey
     // call is needed, unlike the initial-entry branch.
-    await updateRunVars(db, run, { __ai_turns__: turns });
+    await updateRunVars(db, run, {
+      __ai_turns__: turns,
+      __ai_free_turns__: turnCount.freeTurns,
+    });
     await logEvent(db, run.id, "node_entered", currentNode.node_key, {
       turns_used: turns,
       exit_reason: "awaiting_reply",

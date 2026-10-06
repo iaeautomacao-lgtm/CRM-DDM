@@ -23,6 +23,9 @@ import {
   type ToolRoundTally,
 } from "@/lib/ai/tool-recovery";
 import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
+import { createAiHeartbeat, type AiHeartbeat } from "@/lib/ai/heartbeat";
+import { BOT_LOOP_MIN_MESSAGES, BOT_LOOP_WINDOW_SECONDS, detectBotLoop } from "@/lib/ai/loop-guard";
+import { handOffToTeamQueue } from "@/lib/ai/team-handoff";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
 import { sendTextMessage, sendMediaMessage } from "@/lib/whatsapp/meta-api";
 import {
@@ -281,6 +284,23 @@ export interface ForcedAiExit {
   tools: Record<string, string>;
 }
 
+/**
+ * Decide se a resposta do modelo é trocada por #INSTABILIDADE: só quando
+ * alguma tool teve TODAS as chamadas da rodada fora do ar (tally, ver
+ * tool-recovery.ts) e o modelo não encerrou com uma tag. null = mantém a
+ * resposta do modelo.
+ */
+export function decideForcedInstability(
+  toolTally: Map<string, ToolRoundTally>,
+  generatedText: string,
+  flowExitTags?: string[],
+): ForcedAiExit | null {
+  const downIntegrations = fullyFailedIntegrations(toolTally);
+  if (Object.keys(downIntegrations).length === 0) return null;
+  if (extractAiExitTag(generatedText, flowExitTags)) return null;
+  return { tag: "#INSTABILIDADE", tools: downIntegrations };
+}
+
 /** Trava que tirou a conversa da IA antes do modelo (anti-abuso/anti-loop). */
 export interface AiGuardDetail {
   subreason: string;
@@ -329,6 +349,8 @@ interface AiAttemptTracker {
   externalEffect: boolean;
   /** Última etapa alcançada (ver attempt-telemetry.ts). */
   trace: AiAttemptTrace;
+  /** Marca "IA trabalhando" para o vigia de IA travada (heartbeat.ts). */
+  heartbeat?: AiHeartbeat;
 }
 
 /**
@@ -406,7 +428,27 @@ interface AttemptOutcome {
 
 /** Uma tentativa; `retryable` = falhou sem efeito externo e a reserva foi liberada. */
 async function runAiAttempt(args: AttemptArgs): Promise<AttemptOutcome> {
-  const tracker: AiAttemptTracker = { claim: null, externalEffect: false, trace: newAttemptTrace() };
+  const [, , conversationId] = args;
+  const heartbeat = createAiHeartbeat(supabaseAdmin(), conversationId);
+  const tracker: AiAttemptTracker = {
+    claim: null,
+    externalEffect: false,
+    trace: newAttemptTrace(),
+    heartbeat,
+  };
+  try {
+    return await runAiAttemptTracked(args, tracker);
+  } finally {
+    // Tentativa terminou (enviada, pulada, falha ou exceção): a IA não está
+    // mais trabalhando nesta mensagem.
+    await heartbeat.clear();
+  }
+}
+
+async function runAiAttemptTracked(
+  args: AttemptArgs,
+  tracker: AiAttemptTracker,
+): Promise<AttemptOutcome> {
   const trace = tracker.trace;
   const releaseIfSafe = async (): Promise<boolean> => {
     if (!tracker.claim || tracker.externalEffect) return false;
@@ -612,6 +654,9 @@ async function handleAiAutoResponseAttempt(
   if (tracker) {
     tracker.claim = { account: accountId, conversation: conversationId, message: inbound.id, node: nodeKey ?? '' };
     tracker.trace.phase = "claimed";
+    // "IA trabalhando": o vigia de IA travada não transfere enquanto a
+    // marca for recente (heartbeat.ts). Limpa em runAiAttempt.
+    await tracker.heartbeat?.beat(true);
   }
   // Se o processo cair depois daqui, a intenção continua registrada e a IA
   // não responde de novo a essa mensagem: preferimos revisão manual a
@@ -691,42 +736,13 @@ async function handleAiAutoResponseAttempt(
   if (abuse) {
     console.warn(`[AI Agent] Anti-scam (${abuse.kind}: "${abuse.term}") na conversa ${conversationId}. Transferindo para a fila humana.`);
 
-    const { data: convRows } = await db
-      .from("conversations")
-      .select("team_id")
-      .eq("id", conversationId)
-      .limit(1);
-    const teamId = (convRows?.[0] as { team_id?: string | null } | undefined)?.team_id ?? null;
-
-    // Import dinâmico: engine.ts importa este arquivo (evita ciclo no load).
-    const { selectAgentForTeam, selectAnyAgentForAccount } = await import("@/lib/flows/engine");
-    const engineDb = db as unknown as Parameters<typeof selectAgentForTeam>[0];
-    let selectedAgent: string | null = null;
-    try {
-      selectedAgent = teamId
-        ? await selectAgentForTeam(engineDb, teamId, accountId)
-        : await selectAnyAgentForAccount(engineDb, accountId);
-    } catch (err) {
-      // Sem atendente escolhido a conversa fica na fila (pending, sem dono).
-      console.error("[AI Agent] Anti-scam: falha ao escolher atendente:", err);
-    }
-
-    // Só declara handoff depois que a persistência for confirmada. Sem isso
-    // o Flow Engine pode encerrar o run como handed_off enquanto a conversa
-    // continua sem ir para a fila.
-    const { error: assignmentError } = await db
-      .from("conversations")
-      .update({
-        status: "pending",
-        assigned_agent_id: selectedAgent,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", conversationId);
-
-    if (assignmentError) {
+    // Só declara handoff depois que a persistência for confirmada (ver
+    // team-handoff.ts).
+    const handoff = await handOffToTeamQueue(db, accountId, conversationId, "[AI Agent] Anti-scam");
+    if (!handoff.ok) {
       return {
         outcome: "failed",
-        reason: `handoff_anti_scam_assignment_failed:${assignmentError.message}`,
+        reason: `handoff_anti_scam_assignment_failed:${handoff.error}`,
         detectedTag: null,
         modelUsed: responseModel,
       };
@@ -740,62 +756,43 @@ async function handleAiAutoResponseAttempt(
       guard: {
         subreason: abuse.kind === "jailbreak" ? "JAILBREAK" : "OFENSA",
         term: abuse.term,
-        team_id: teamId,
-        assigned_to: selectedAgent,
+        team_id: handoff.teamId,
+        assigned_to: handoff.assignedTo,
       },
     }; // Interrompe a geração da IA imediatamente sem gastar tokens
   }
 
   // --- ANTI-LOOP GUARD ---
-  // Se as últimas 6 mensagens ocorreram em um intervalo menor que 12 segundos,
-  // assumimos que é um loop de bots conversando. Silenciamos o bot e atribuímos ao humano.
-  if (!priorityIntent && messages && messages.length >= 6) {
-    const recentMsgs = messages.slice(0, 6);
-    const newestTime = new Date(recentMsgs[0].created_at).getTime();
-    const oldestTime = new Date(recentMsgs[5].created_at).getTime();
-    const diffSeconds = (newestTime - oldestTime) / 1000;
+  // Nosso bot em loop (respondendo a outro robô): conta só mensagens do
+  // BOT na janela, pelo relógio do servidor (received_at) — ver
+  // loop-guard.ts. Cliente mandando várias fotos/mensagens seguidas não
+  // dispara. Transfere para a fila da equipe, como a trava anti-abuso.
+  if (!priorityIntent) {
+    const { data: botRows, error: botRowsError } = await db
+      .from("messages")
+      .select("received_at")
+      .eq("conversation_id", conversationId)
+      .eq("sender_type", "bot")
+      .gte("received_at", new Date(Date.now() - BOT_LOOP_WINDOW_SECONDS * 1000).toISOString())
+      .order("received_at", { ascending: false })
+      .limit(BOT_LOOP_MIN_MESSAGES);
+    if (botRowsError) {
+      // Leitura falhou: segue sem a trava (não bloqueia a resposta).
+      console.error("[AI Agent] Anti-loop: falha ao ler mensagens do bot:", botRowsError.message);
+    }
+    const loop = detectBotLoop(
+      ((botRows ?? []) as Array<{ received_at: string | null }>).map((r) => r.received_at),
+    );
 
-    if (diffSeconds > 0 && diffSeconds < 12) {
-      console.warn(`[AI Agent] Bot loop detected on conversation ${conversationId}. Time diff for last 6 messages: ${diffSeconds}s. Transferring to human.`);
-      
-      const { data: convData } = await db
-        .from("conversations")
-        .select("user_id")
-        .eq("id", conversationId)
-        .single();
-
-      // Fallback: se a conversa não tiver user_id (contato novo), busca o user_id configurador do whatsapp
-      let targetUserId = convData?.user_id;
-      if (!targetUserId) {
-        const { data: configData } = await db
-          .from("whatsapp_config")
-          .select("user_id")
-          .eq("account_id", accountId)
-          .maybeSingle();
-        targetUserId = configData?.user_id;
-      }
-
-      if (!targetUserId) {
+    if (loop) {
+      console.warn(
+        `[AI Agent] Bot em loop na conversa ${conversationId}: ${loop.botMessages} mensagens do bot em ${loop.windowSeconds}s. Transferindo para a fila humana.`,
+      );
+      const handoff = await handOffToTeamQueue(db, accountId, conversationId, "[AI Agent] Anti-loop");
+      if (!handoff.ok) {
         return {
           outcome: "failed",
-          reason: "handoff_anti_loop_target_missing",
-          detectedTag: null,
-          modelUsed: responseModel,
-        };
-      }
-
-      const { error: assignmentError } = await db
-        .from("conversations")
-        .update({
-          assigned_agent_id: targetUserId,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", conversationId);
-
-      if (assignmentError) {
-        return {
-          outcome: "failed",
-          reason: `handoff_anti_loop_assignment_failed:${assignmentError.message}`,
+          reason: `handoff_anti_loop_assignment_failed:${handoff.error}`,
           detectedTag: null,
           modelUsed: responseModel,
         };
@@ -807,9 +804,11 @@ async function handleAiAutoResponseAttempt(
         detectedTag: null,
         modelUsed: responseModel,
         guard: {
-          subreason: "MENSAGENS_RAPIDAS",
-          window_seconds: diffSeconds,
-          assigned_to: targetUserId,
+          subreason: "BOT_EM_LOOP",
+          bot_messages: loop.botMessages,
+          window_seconds: loop.windowSeconds,
+          team_id: handoff.teamId,
+          assigned_to: handoff.assignedTo,
         },
       }; // Interrompe a resposta automática da IA
     }
@@ -1407,7 +1406,10 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   ) => {
     tallyToolResult(toolTally, toolName, meta?.failureCode);
     // Tool terminou: o modelo volta a trabalhar com o resultado.
-    if (tracker) tracker.trace.phase = "llm";
+    if (tracker) {
+      tracker.trace.phase = "llm";
+      await tracker.heartbeat?.beat();
+    }
     if (onToolResult) await onToolResult(toolName, result, durationMs, meta);
   };
 
@@ -1428,6 +1430,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
             tracker.externalEffect = true;
             tracker.trace.phase = "tool";
             tracker.trace.tools.push(toolName);
+            await tracker.heartbeat?.beat();
           }
           if (onToolCall) await onToolCall(toolName, toolArgs);
         },
@@ -1484,15 +1487,10 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   // tool → #INSTABILIDADE" não pode depender só do prompt — senão a
   // conversa fica parada no nó de IA. Força a mensagem de instabilidade com
   // a tag, que leva o fluxo ao caminho de transferência.
-  const downIntegrations = fullyFailedIntegrations(toolTally);
-  let forcedExit: ForcedAiExit | null = null;
-  if (
-    Object.keys(downIntegrations).length > 0 &&
-    !extractAiExitTag(generatedText, flowExitTags)
-  ) {
-    console.warn("[AI Agent] Integração indisponível sem tag de saída — forçando #INSTABILIDADE:", downIntegrations);
+  const forcedExit = decideForcedInstability(toolTally, generatedText, flowExitTags);
+  if (forcedExit) {
+    console.warn("[AI Agent] Integração indisponível sem tag de saída — forçando #INSTABILIDADE:", forcedExit.tools);
     generatedText = `${AI_INSTABILITY_TEXT} #INSTABILIDADE`;
-    forcedExit = { tag: "#INSTABILIDADE", tools: downIntegrations };
   }
 
   // Mesmo depois do retry acima, o modelo não produziu nenhum texto —
@@ -1855,6 +1853,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   if (tracker) {
     tracker.externalEffect = true;
     tracker.trace.phase = "send";
+    await tracker.heartbeat?.beat();
   }
 
   // 8. Send message via WAHA or Meta
@@ -2092,7 +2091,8 @@ async function generateGeminiResponse(
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
-async function generateOpenAiResponse(
+// Exportada para os testes de ponta a ponta das tools (responder-tools.test.ts).
+export async function generateOpenAiResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
