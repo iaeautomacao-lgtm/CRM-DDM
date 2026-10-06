@@ -31,7 +31,7 @@ export async function processWithConcurrency<T>(
 }
 
 
-export const DEFAULT_DISPATCH_PROCESS_CONCURRENCY = 8;
+export const DEFAULT_DISPATCH_PROCESS_CONCURRENCY = 4;
 export const MAX_DISPATCH_PROCESS_CONCURRENCY = 50;
 
 /**

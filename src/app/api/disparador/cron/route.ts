@@ -178,7 +178,7 @@ export async function POST(request: Request) {
       }
 
       // This is a candidate-fetch limit, not provider concurrency. The
-      // process pool defaults to 8 while the database remains the final
+      // process pool defaults to 4 while the database remains the final
       // per-channel safety barrier through max_in_flight. A logical segmented
       // batch such as 614 contacts can therefore be selected without becoming
       // 614 simultaneous sends. The 40s tick deadline may leave
@@ -219,7 +219,7 @@ export async function POST(request: Request) {
         sent: 0,
         pending_confirmation: 0,
       };
-      // Pool do processo: default 8, configurável por
+      // Pool do processo: default 4, configurável por
       // DISPATCH_PROCESS_CONCURRENCY. O SELECT acima não reserva nada: cada
       // item ainda passa pelo claim atômico dentro de processQueueItem
       // (claim_dispatch_item), que aplica o max_in_flight por canal.
