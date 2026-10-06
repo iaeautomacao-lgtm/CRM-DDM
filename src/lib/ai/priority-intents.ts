@@ -28,8 +28,18 @@ const OPT_OUT_PATTERNS = [
   /\bnao entre mais em contato\b/,
 ];
 
+// "não sou …" só conta como pessoa errada com artigo/demonstrativo + nome
+// ou "pessoa": "não sou capaz de pagar", "não sou obrigado", "não sou de
+// fugir" e "não sou o tipo de…" seguem para a IA (antes viravam
+// #CONTATO_DIVERGENTE e iam para humano).
+const NOT_A_NAME_AFTER_ARTICLE =
+  "(?:tipo|unic[oa]|culpad[oa]|mesm[oa]|melhor|pior|primeir[oa]|ultim[oa]|responsavel|devedor|devedora|caloteir[oa]|obrigad[oa])";
+
 const WRONG_PERSON_PATTERNS = [
-  /\bnao sou (?:a|o|essa|esse|esta|este)?\s*[a-z]/,
+  /\bnao sou (?:essa|esse|esta|este) (?:pessoa|cliente|senhor|senhora|moca|moco|rapaz|mulher|homem)\b/,
+  /\bnao sou (?:a|o) (?:pessoa|cliente|titular|dono|dona)\b/,
+  new RegExp(`\\bnao sou (?:a|o) (?!${NOT_A_NAME_AFTER_ARTICLE}\\b)[a-z]{3,}\\b`),
+  /\bnao sou (?:ele|ela)\b/,
   /\bnao me chamo\b/,
   /\bnumero errado\b/,
   /\besse numero nao e (?:meu|dela|dele)\b/,
@@ -47,10 +57,15 @@ const CONTESTATION_PATTERNS = [
   /\bja (?:paguei|pagamos|foi pag[oa]|esta pag[oa]|ta pag[oa]|quitei|quitamos|resolvi|resolvemos|negociei|negociamos|acertei|acertamos)\b/,
   /\b(?:paguei|pagamos|quitei|quitamos) (?:hoje|ontem|essa|esta)\b/,
   /\bnao reconheco (?:a |essa |esta )?(?:divida|pendencia|cobranca)\b/,
-  /\bnao devo\b/,
+  // "não devo" só como negação da dívida ("não devo nada", "eu não devo
+  // isso", "não devo!") — "não devo conseguir pagar este mês" segue para a IA.
+  /\bnao devo (?:nada|isso|isto|esse|essa|este|esta|nenhum|nenhuma|mais nada|a voces|pra voces|para voces)\b/,
+  /\bnao devo\s*(?:[.!?,;]|$)/,
   /\bdebito indevido\b/,
   /\b(?:valor|cobranca|divida|debito) (?:esta|ta) errado\b/,
-  /\btranquei (?:o curso |a matricula )?(?:antes|faz tempo)?\b/,
+  // Trancamento só conta como contestação com indicação de que foi antes
+  // da cobrança — "tranquei a matrícula mas quero negociar" segue para a IA.
+  /\btranquei (?:o curso |a matricula |a faculdade )?(?:antes|faz (?:muito )?tempo|ha (?:muito )?tempo|ha \d+ anos?|em \d{4})\b/,
   /\bcancelei (?:o curso|a matricula)\b/,
 ];
 
