@@ -34,6 +34,10 @@ import { resolveProviderMedia } from '@/lib/storage/provider-media';
  */
 
 import { handleAiAutoResponse, AI_EMPTY_REPLY_FALLBACK_TEXT } from "@/lib/ai/responder";
+import {
+  isModelCompatibleWithProvider,
+  resolveAiModel,
+} from "@/lib/ai/models";
 import { supabaseAdmin } from "./admin-client";
 import { writeLog } from "@/lib/logger";
 import {
@@ -640,21 +644,6 @@ function buildErrorPayload(
     node_type,
   };
 }
-
-/**
- * api_provider → the hardcoded model string `handleAiAutoResponse`
- * (src/lib/ai/responder.ts) actually calls for that provider. Kept
- * here (not imported) because responder.ts doesn't return which model
- * it used — this is a best-effort mirror for the debug timeline, not
- * a guarantee; if responder.ts's model strings change this drifts
- * stale until updated to match.
- */
-const MODEL_BY_PROVIDER: Record<string, string> = {
-  gemini: "gemini-1.5-flash",
-  openai: "gpt-4o-mini",
-  claude: "claude-3-5-sonnet-20241022",
-  hermes: "nousresearch/hermes-3-llama-3.1-405b",
-};
 
 /**
  * Idempotency check — has a `reply_received` event with this Meta
@@ -1977,6 +1966,7 @@ async function runAiAgentCore(
   // flow_run_events, ver os callbacks onToolResult abaixo) no system
   // prompt deste nó, antes de chamar handleAiAutoResponse.
   herdarContextoAnterior?: boolean,
+  modelOverride?: string | null,
 ): Promise<
   | {
       ok: true;
@@ -2015,23 +2005,42 @@ async function runAiAgentCore(
   let modelUsed: string | null = null;
   let aiConfigUsable = false;
   try {
-    // Best-effort — mirrors ai_config.api_provider to the model
-    // string handleAiAutoResponse actually calls (see
-    // MODEL_BY_PROVIDER's own comment on the duplication risk).
-    // Also doubles as the "is there even a usable config" check
-    // for the output.error_reason below — same row, no extra query.
+    // Resolve o modelo antes da chamada para que tool_result e demais
+    // decisões já registrem exatamente o modelo que será enviado ao
+    // provider. ai_config.api_model é opcional/forward-compatible:
+    // ambientes sem essa coluna continuam usando o default do provider.
     const { data: aiConfigRow } = await db
       .from("ai_config")
-      .select("api_provider, enabled")
+      .select("*")
       .eq("account_id", run.account_id)
       .maybeSingle();
     const configRow = aiConfigRow as
-      | { api_provider: string; enabled: boolean }
+      | {
+          api_provider: string;
+          enabled: boolean;
+          api_model?: string | null;
+        }
       | null;
     aiConfigUsable = !!configRow?.enabled;
-    modelUsed = configRow?.api_provider
-      ? (MODEL_BY_PROVIDER[configRow.api_provider] ?? configRow.api_provider)
+
+    if (
+      modelOverride?.trim() &&
+      configRow?.api_provider &&
+      !isModelCompatibleWithProvider(modelOverride, configRow.api_provider)
+    ) {
+      throw new Error(
+        `ai_model_provider_mismatch:${modelOverride} is not compatible with ${configRow.api_provider}`,
+      );
+    }
+
+    const resolvedModel = configRow?.api_provider
+      ? resolveAiModel({
+          provider: configRow.api_provider,
+          nodeModel: modelOverride,
+          accountModel: configRow.api_model,
+        })
       : null;
+    modelUsed = resolvedModel?.model ?? null;
 
     // Last customer message is the AI's input — same "what does the
     // customer want answered" the standalone auto-responder uses.
@@ -2264,6 +2273,7 @@ async function runAiAgentCore(
       },
       currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
       run.config_id ?? undefined,
+      modelOverride,
     );
 
     // The responder returns the exact persisted message it created.
@@ -3268,6 +3278,7 @@ export async function advanceFromNodeKey(
         // anterior. node.node_key é o valor correto para este turno.
         node.node_key,
         cfg.herdar_contexto_anterior,
+        cfg.model,
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
@@ -3972,6 +3983,7 @@ async function handleReplyForActiveRun(
       cfg.tools,
       undefined,       // currentNodeKeyOverride — run.current_node_key já é o nó certo aqui
       cfg.herdar_contexto_anterior,
+      cfg.model,
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
