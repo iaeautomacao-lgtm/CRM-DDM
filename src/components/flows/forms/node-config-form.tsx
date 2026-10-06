@@ -2725,6 +2725,13 @@ function AiAgentForm({
       <p className="-mt-2 text-[10px] text-muted-foreground">
         Deixe vazio para usar o prompt da configuração de IA
       </p>
+      {!cfg.system_prompt_override?.trim() && (
+        <p className="-mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">
+          Sem instruções aqui, a IA usa o prompt da conta (Configurações → IA)
+          e, nas contas DDM, também blocos fixos do sistema (Sabrina/Aleh) que
+          não aparecem neste editor e só mudam com atualização do sistema.
+        </p>
+      )}
 
       {mode === "loop" && (
         <div>
