@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, expect, it } from 'vitest';
 
-// Migrations 155 (índice) e 156 (colunas de pausa automática + limpeza de
+// Migrations 158 (índice) e 159 (colunas de pausa automática + limpeza de
 // recibos órfãos) num Postgres embutido.
 let db: PGlite;
 
@@ -20,10 +20,10 @@ beforeAll(async () => {
       PRIMARY KEY (message_id, status)
     );
   `);
-  await db.exec(readFileSync(resolve('supabase/migrations/155_dmq_waha_message_id_index.sql'), 'utf8'));
-  const migration156 = readFileSync(resolve('supabase/migrations/156_dispatch_auto_pause_receipts_cleanup.sql'), 'utf8');
-  await db.exec(migration156);
-  await db.exec(migration156); // idempotente
+  await db.exec(readFileSync(resolve('supabase/migrations/158_dmq_waha_message_id_index.sql'), 'utf8'));
+  const migration159 = readFileSync(resolve('supabase/migrations/159_dispatch_auto_pause_receipts_cleanup.sql'), 'utf8');
+  await db.exec(migration159);
+  await db.exec(migration159); // idempotente
 }, 30_000);
 
 afterAll(async () => {
@@ -34,7 +34,7 @@ beforeEach(async () => {
   await db.exec('TRUNCATE wacrm.dispatch_status_receipts, wacrm.disp_message_queue');
 });
 
-it('155 cria o índice parcial por waha_message_id', async () => {
+it('158 cria o índice parcial por waha_message_id', async () => {
   const { rows } = await db.query<{ indexdef: string }>(
     "SELECT indexdef FROM pg_indexes WHERE schemaname='wacrm' AND indexname='idx_dmq_waha_message_id'"
   );
@@ -42,7 +42,7 @@ it('155 cria o índice parcial por waha_message_id', async () => {
   expect(rows[0].indexdef).toMatch(/WHERE \(waha_message_id IS NOT NULL\)/);
 });
 
-it('156 adiciona as colunas de pausa automática', async () => {
+it('159 adiciona as colunas de pausa automática', async () => {
   const { rows } = await db.query<{ column_name: string }>(
     "SELECT column_name FROM information_schema.columns WHERE table_schema='wacrm' AND table_name='campaigns' ORDER BY column_name"
   );

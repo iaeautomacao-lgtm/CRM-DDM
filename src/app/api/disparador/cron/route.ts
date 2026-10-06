@@ -223,7 +223,7 @@ export async function POST(request: Request) {
     // Sobrou tempo? Entrega mais callbacks (inclusive de campanhas
     // encerradas neste tick).
     if (!lostLease && Date.now() < deadline - 10_000) await drainCallbackOutbox();
-    // Limpeza de recibos de status órfãos (migration 156): recibos de
+    // Limpeza de recibos de status órfãos (migration 159): recibos de
     // mensagens que não são do disparador nunca casam com a fila e ficavam
     // para sempre. Lote limitado (5000), só com tempo sobrando e só a cada
     // 10 minutos. Sem a migration a RPC não existe — só loga.

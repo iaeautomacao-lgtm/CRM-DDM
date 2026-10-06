@@ -134,7 +134,7 @@ export async function checkCampaignAutoPause(
 ): Promise<boolean> {
   if (!config.enabled || !campaign.account_id) return false;
   try {
-    // select("*"): auto_pausa_avaliar_desde só existe com a migration 156 —
+    // select("*"): auto_pausa_avaliar_desde só existe com a migration 159 —
     // sem ela a coluna vem undefined e a janela não tem corte.
     const { data: campRows } = await db.from("campaigns").select("*").eq("id", campaign.id).limit(1);
     const since: string | null = campRows?.[0]?.auto_pausa_avaliar_desde ?? null;
@@ -175,7 +175,7 @@ export async function checkCampaignAutoPause(
       .update({ pausa_automatica_motivo: decision.reason })
       .eq("id", campaign.id);
     if (noteError) {
-      // Migration 156 não aplicada: a pausa já valeu; o motivo fica só no log.
+      // migration 159 não aplicada: a pausa já valeu; o motivo fica só no log.
       console.error("[AutoPause] Falha ao gravar motivo:", campaign.id, noteError.message);
     }
 

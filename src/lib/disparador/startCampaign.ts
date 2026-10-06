@@ -174,7 +174,7 @@ export async function startCampaign(
       // Retomada: some o aviso de pausa automática e a avaliação de taxa de
       // erro (auto-pause.ts) recomeça só com as tentativas daqui pra frente
       // — senão a mesma janela de erros pausaria de novo no próximo tick.
-      // Colunas da migration 156; sem ela, só loga.
+      // Colunas da migration 159; sem ela, só loga.
       const { error: resetError } = await supabaseAdmin()
         .from("campaigns")
         .update({ pausa_automatica_motivo: null, auto_pausa_avaliar_desde: new Date().toISOString() })

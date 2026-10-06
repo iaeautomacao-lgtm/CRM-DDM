@@ -1,8 +1,8 @@
 -- ============================================================
--- 156_dispatch_auto_pause_receipts_cleanup.sql — pausa automática de
+-- 159_dispatch_auto_pause_receipts_cleanup.sql — pausa automática de
 -- segurança do disparador + limpeza de recibos de status órfãos.
 --
--- Aplicar no Supabase SQL Editor DEPOIS da 155 (a limpeza usa o índice
+-- Aplicar no Supabase SQL Editor DEPOIS da 158 (a limpeza usa o índice
 -- idx_dmq_waha_message_id). Pode ser antes ou depois do deploy: o código
 -- tolera a ausência das colunas e da função (só loga e segue).
 -- Conferir o schema live antes (CLAUDE.md): wacrm.campaigns e

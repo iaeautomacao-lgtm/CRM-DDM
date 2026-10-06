@@ -256,7 +256,7 @@ export default function DisparadorMonitorPage() {
         .limit(1000);
       if (!stuckError) setStuckSending(summarizeStuckSending((stuckRows ?? []) as unknown as StuckSendingRow[]));
 
-      // select("*"): pausa_automatica_motivo é da migration 156 — sem ela a
+      // select("*"): pausa_automatica_motivo é da migration 159 — sem ela a
       // coluna simplesmente não vem e nenhum aviso aparece.
       const { data: pausedRows, error: pausedError } = await supabase
         .from("campaigns")
