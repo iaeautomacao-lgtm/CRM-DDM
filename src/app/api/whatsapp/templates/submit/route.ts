@@ -32,9 +32,8 @@ function buildUpsertRow(
     // of migration 017. Without this an INSERT throws on the
     // not-null constraint.
     account_id: accountId,
-    // Original author — kept as audit only. The unique index is
-    // still on (user_id, name, language) — see the upsert helper
-    // for the cross-teammate dedup follow-up.
+    // Original author — kept as audit only. A chave única é
+    // (account_id, waba_id, name, language) — migration 160.
     user_id: userId,
     name: payload.name,
     category: payload.category,
@@ -64,23 +63,38 @@ async function upsertTemplateRow(
   supabase: SupabaseClient,
   row: ReturnType<typeof buildUpsertRow>,
 ) {
-  // TODO(account-sharing): conflict target is still scoped to
-  // user_id. Once a follow-up migration drops the legacy unique
-  // index on (user_id, name, language) and adds (account_id,
-  // name, language), switch `onConflict` here so two teammates
-  // can't shadow each other's same-named template.
-  return supabase
+  // Chave do catálogo: (account_id, waba_id, name, language) — migration
+  // 160. O mesmo nome/idioma em duas WABAs são duas linhas (antes a chave
+  // (user_id, name, language) fazia o último submit/sync sobrescrever o
+  // waba_id do outro número). Busca + update/insert em vez de
+  // upsert(onConflict) para funcionar antes e depois da migration.
+  let lookup = supabase
     .from('message_templates')
-    .upsert(row, { onConflict: 'user_id,name,language' })
-    .select()
-    .single()
+    .select('id')
+    .eq('account_id', row.account_id)
+    .eq('name', row.name)
+    .eq('language', row.language)
+  lookup = row.waba_id ? lookup.eq('waba_id', row.waba_id) : lookup.is('waba_id', null)
+  const { data: existing, error: lookupErr } = await lookup.limit(1)
+  if (lookupErr) return { data: null, error: lookupErr }
+
+  const existingId = existing?.[0]?.id as string | undefined
+  if (existingId) {
+    return supabase
+      .from('message_templates')
+      .update(row)
+      .eq('id', existingId)
+      .select()
+      .single()
+  }
+  return supabase.from('message_templates').insert(row).select().single()
 }
 
 /**
  * Submit a template to Meta for approval AND persist it locally.
  *
  * Auth → fetch whatsapp_config → validate → (DRY_RUN short-circuit) →
- * POST to Meta → upsert local row by (user_id, name, language) with
+ * POST to Meta → upsert local row by (account_id, waba_id, name, language) with
  * status, meta_template_id, sample_values, last_submitted_at.
  *
  * When WHATSAPP_TEMPLATES_DRY_RUN=true, we skip the network call and

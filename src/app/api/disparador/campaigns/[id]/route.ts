@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
+import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 
 const EDITABLE_FIELDS = [
   "nome",
@@ -121,6 +122,34 @@ export async function PATCH(
       }
     }
 
+    // Canais + mensagens (campaign-validation.ts — mesma regra do
+    // startCampaign e do assistente): canais da conta e habilitados, sem
+    // misturar Meta e WAHA, Meta = uma WABA e só templates aprovados do
+    // catálogo dessa WABA. Validado sobre o estado final (o que veio no
+    // corpo + o que já está salvo).
+    if ("session_ids" in updates || "mensagens" in updates) {
+      const { data: currentRows, error: currentError } = await supabaseAdmin()
+        .from("campaigns")
+        .select("session_ids, mensagens")
+        .eq("id", campaignId)
+        .limit(1);
+      if (currentError) {
+        return NextResponse.json({ error: currentError.message }, { status: 500 });
+      }
+      const current = currentRows?.[0] ?? {};
+      const sessionIds = "session_ids" in updates ? updates.session_ids : current.session_ids;
+      const mensagens = "mensagens" in updates ? updates.mensagens : current.mensagens;
+      const check = await checkCampaignConfig(
+        supabaseAdmin(),
+        accountId,
+        Array.isArray(sessionIds) ? sessionIds : [],
+        Array.isArray(mensagens) ? mensagens : []
+      );
+      if (!check.ok) {
+        return NextResponse.json({ error: check.error }, { status: check.status });
+      }
+    }
+
     const { error: updateError } = await supabaseAdmin()
       .from("campaigns")
       .update(updates)
@@ -129,6 +158,15 @@ export async function PATCH(
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
+
+    // Campanha editada: o motivo da última falha de início (migration 160)
+    // deixa de valer. UPDATE separado e tolerante à coluna ausente.
+    const { error: motivoError } = await supabaseAdmin()
+      .from("campaigns")
+      .update({ motivo_falha_inicio: null })
+      .eq("id", campaignId)
+      .not("motivo_falha_inicio", "is", null);
+    if (motivoError) console.error("[Campaign Update] motivo_falha_inicio:", motivoError.message);
 
     return NextResponse.json({ success: true });
   } catch (err: unknown) {

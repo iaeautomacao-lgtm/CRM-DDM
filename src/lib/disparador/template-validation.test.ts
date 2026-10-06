@@ -53,12 +53,14 @@ describe("templateComponentProblem", () => {
 
 describe("validateCampaignTemplate", () => {
   it("template aprovado e compatível passa", () => {
-    expect(input([base])).toEqual({ ok: true, checked: true });
+    expect(input([base])).toEqual({ ok: true });
   });
 
-  it("fora do catálogo local: não bloqueia, mas avisa que não validou", () => {
-    expect(input([])).toEqual({ ok: true, checked: false });
-    expect(input([{ ...base, language: "en_US" }])).toEqual({ ok: true, checked: false });
+  it("fora do catálogo local: bloqueia pedindo sincronização", () => {
+    for (const r of [input([]), input([{ ...base, language: "en_US" }])]) {
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/não encontrado no catálogo deste número — sincronize os templates/);
+    }
   });
 
   it("não aprovado falha com o status em pt-BR", () => {
@@ -88,10 +90,12 @@ describe("validateCampaignTemplate", () => {
   });
 
   it("linha sem waba_id (antes da 073) vale para qualquer WABA", () => {
-    expect(input([{ ...base, waba_id: null }], { wabaIds: ["waba-x"] })).toEqual({ ok: true, checked: true });
+    expect(input([{ ...base, waba_id: null }], { wabaIds: ["waba-x"] })).toEqual({ ok: true });
   });
 
-  it("WABA sem linha local não é validada (não bloqueia)", () => {
-    expect(input([base], { wabaIds: ["waba-z"] })).toEqual({ ok: true, checked: false });
+  it("WABA sem linha local bloqueia (template de outro número)", () => {
+    const r = input([base], { wabaIds: ["waba-z"] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/sincronize os templates/);
   });
 });
