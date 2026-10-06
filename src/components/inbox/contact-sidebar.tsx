@@ -8,7 +8,6 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import { formatCurrency } from "@/lib/currency";
 import {
   Phone,
   Mail,
@@ -16,7 +15,6 @@ import {
   Check,
   User,
   Tag as TagIcon,
-  DollarSign,
   StickyNote,
   Plus,
   Brain,
@@ -28,7 +26,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import type { Contact, Deal, ContactNote, Tag, Conversation } from "@/types";
+import type { Contact, ContactNote, Tag, Conversation } from "@/types";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import {
@@ -70,7 +68,6 @@ export function ContactSidebar({
   const canViewFlows = useCan("view-conversation-flows");
   const canOpenFlowEditor = !!accountRole && canAccessRoute(accountRole, "/flows");
   const [copied, setCopied] = useState(false);
-  const [deals, setDeals] = useState<Deal[]>([]);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
   const [newNote, setNewNote] = useState("");
@@ -166,13 +163,8 @@ export function ContactSidebar({
 
     const supabase = createClient();
 
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
-      supabase
-        .from("deals")
-        .select("*, stage:pipeline_stages(*)")
-        .eq("contact_id", contact.id)
-        .order("created_at", { ascending: false }),
+    // Fetch notes and tags in parallel
+    const [notesRes, tagsRes] = await Promise.all([
       supabase
         .from("contact_notes")
         .select("*")
@@ -189,12 +181,6 @@ export function ContactSidebar({
     // different conversation, or closed the panel — so nothing below
     // should touch state if that happened.
     if (isCancelled()) return;
-
-    if (dealsRes.error) {
-      console.error("[ContactSidebar] failed to load deals:", dealsRes.error);
-    } else if (dealsRes.data) {
-      setDeals(dealsRes.data);
-    }
 
     if (notesRes.error) {
       console.error("[ContactSidebar] failed to load contact notes:", notesRes.error);
@@ -322,7 +308,7 @@ export function ContactSidebar({
     <div className="flex h-full w-70 flex-col border-l border-border bg-card">
       {/* `min-h-0` is load-bearing: a flex child defaults to
           min-height:auto, so without it this ScrollArea grows to fit
-          all sections (Sentimento/Etiquetas/Negócios/Notas) instead of
+          all sections (Sentimento/Etiquetas/Notas) instead of
           shrinking to the remaining column space — the panel then
           overflows and gets clipped by the parent's overflow-hidden
           with no scrollbar, hiding whatever's below the fold. Same
@@ -578,42 +564,6 @@ export function ContactSidebar({
             </div>
           </SidebarSection>
 
-          {/* Active Deals */}
-          <SidebarSection
-            id="negocios"
-            title="Negócios ativos"
-            icon={DollarSign}
-            count={deals.length}
-            sections={sections}
-            onToggle={toggleSection}
-          >
-            <div className="space-y-2">
-              {deals.length === 0 ? (
-                <p className="px-1 text-xs text-muted-foreground">Sem negócios</p>
-              ) : (
-                deals.map((deal) => (
-                  <div
-                    key={deal.id}
-                    className="rounded-lg bg-muted px-3 py-2"
-                  >
-                    <p className="text-sm font-medium text-foreground">
-                      {deal.title}
-                    </p>
-                    <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{formatCurrency(deal.value, deal.currency)}</span>
-                      {deal.stage && (
-                        <span className="inline-flex items-center gap-1 text-xs text-foreground">
-                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: deal.stage.color }} aria-hidden="true" />
-                          {deal.stage.name}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </SidebarSection>
-
           {/* Notes */}
           <SidebarSection
             id="notas"
@@ -707,15 +657,14 @@ export function ContactSidebar({
 
 // ── Seções recolhíveis do painel ─────────────────────────────────────
 // Aberto/fechado por seção fica no localStorage (por navegador). Padrão:
-// Notas aberta; Origem, Fluxo, Etiquetas, Negócios e Histórico fechadas.
+// Notas aberta; Origem, Fluxo, Etiquetas e Histórico fechadas.
 const SIDEBAR_SECTIONS_KEY = "wacrm:inbox:sidebar-sections";
-type SidebarSectionId = "origem" | "fluxo" | "etiquetas" | "negocios" | "notas" | "historico";
+type SidebarSectionId = "origem" | "fluxo" | "etiquetas" | "notas" | "historico";
 type SectionsState = Record<SidebarSectionId, boolean>;
 const DEFAULT_SECTIONS: SectionsState = {
   origem: false,
   fluxo: false,
   etiquetas: false,
-  negocios: false,
   notas: true,
   historico: false,
 };
@@ -727,9 +676,15 @@ function useSidebarSections() {
     try {
       const raw = window.localStorage.getItem(SIDEBAR_SECTIONS_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<SectionsState>;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const valid: Partial<SectionsState> = {};
+      (Object.keys(DEFAULT_SECTIONS) as SidebarSectionId[]).forEach((key) => {
+        if (typeof parsed[key] === "boolean") {
+          valid[key] = parsed[key];
+        }
+      });
       // eslint-disable-next-line react-hooks/set-state-in-effect -- hidrata preferência local uma vez
-      setSections((prev) => ({ ...prev, ...parsed }));
+      setSections((prev) => ({ ...prev, ...valid }));
     } catch {
       // Preferência é opcional; ignora storage indisponível/corrompido.
     }
