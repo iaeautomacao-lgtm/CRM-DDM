@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
+import {
+  pickCatalogRowId,
+  removeSupersededLegacyTemplates,
+  templateKey,
+} from '@/lib/whatsapp/template-catalog'
 import type { TemplateButton, TemplateSampleValues } from '@/types'
 
 /**
@@ -196,6 +201,7 @@ export async function POST() {
     let truncated = false
     let wabaFailures = 0
     const errors: { name: string; language: string; message: string }[] = []
+    const syncedKeys = new Set<string>()
 
     for (const [wabaId, config] of configByWaba) {
       const fetched = await fetchWabaTemplates(wabaId, decrypt(config.access_token))
@@ -208,6 +214,7 @@ export async function POST() {
       total += fetched.templates.length
 
       for (const t of fetched.templates) {
+        syncedKeys.add(templateKey(t.name, t.language))
         const result = await upsertSyncedTemplate(supabase, accountId, user.id, wabaId, t)
         if (result === 'inserted') inserted++
         else if (result === 'updated') updated++
@@ -221,7 +228,20 @@ export async function POST() {
       return NextResponse.json({ error: errors[0]?.message ?? 'Meta API error' }, { status: 502 })
     }
 
+    // Linhas antigas (sem waba_id) que ficaram ao lado da linha da WABA
+    // para o mesmo nome/idioma são removidas (template-catalog.ts). Só com
+    // o sync completo: se uma WABA falhou ou a lista veio truncada, a
+    // antiga pode ser o único registro de um número e fica.
+    let legacyRemoved = 0
+    if (wabaFailures === 0 && !truncated) {
+      const cleanup = await removeSupersededLegacyTemplates(supabase, accountId, syncedKeys)
+      legacyRemoved = cleanup.removed
+      for (const message of cleanup.errors)
+        errors.push({ name: 'Linhas antigas sem WABA', language: '-', message })
+    }
+
     return NextResponse.json({
+      legacy_removed: legacyRemoved,
       success: errors.length === 0,
       total,
       inserted,
@@ -354,14 +374,16 @@ async function upsertSyncedTemplate(
     .or(`waba_id.eq.${wabaId},waba_id.is.null`)
   if (lookupErr) return { error: lookupErr.message }
 
-  const rows = (candidates ?? []) as Array<{ id: string; waba_id: string | null }>
-  const existing = rows.find((c) => c.waba_id === wabaId) ?? rows.find((c) => !c.waba_id)
+  const existingId = pickCatalogRowId(
+    (candidates ?? []) as Array<{ id: string; waba_id: string | null }>,
+    wabaId,
+  )
 
-  if (existing?.id) {
+  if (existingId) {
     const { error: updErr } = await supabase
       .from('message_templates')
       .update(row)
-      .eq('id', existing.id)
+      .eq('id', existingId)
     return updErr ? { error: updErr.message } : 'updated'
   }
   const { error: insErr } = await supabase.from('message_templates').insert(row)

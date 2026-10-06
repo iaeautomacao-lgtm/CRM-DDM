@@ -10,6 +10,7 @@ import {
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
+import { pickCatalogRowId } from '@/lib/whatsapp/template-catalog'
 
 /**
  * Shared upsert payload builder — both the Meta-failure path and the
@@ -68,17 +69,28 @@ async function upsertTemplateRow(
   // (user_id, name, language) fazia o último submit/sync sobrescrever o
   // waba_id do outro número). Busca + update/insert em vez de
   // upsert(onConflict) para funcionar antes e depois da migration.
-  let lookup = supabase
+  //
+  // Prioridade: linha desta WABA → linha antiga sem waba_id (adotada: o
+  // update grava o waba_id nela) → insert. Antes o submit inseria a linha
+  // da WABA ao lado da antiga, e as duas passavam a coexistir (a antiga
+  // aprovada mascarava a nova rejeitada na validação da campanha).
+  // waba_id vem de whatsapp_config (só dígitos) — seguro no filtro .or().
+  const lookup = supabase
     .from('message_templates')
-    .select('id')
+    .select('id, waba_id')
     .eq('account_id', row.account_id)
     .eq('name', row.name)
     .eq('language', row.language)
-  lookup = row.waba_id ? lookup.eq('waba_id', row.waba_id) : lookup.is('waba_id', null)
-  const { data: existing, error: lookupErr } = await lookup.limit(1)
+  const { data: candidates, error: lookupErr } = await (row.waba_id
+    ? lookup.or(`waba_id.eq.${row.waba_id},waba_id.is.null`)
+    : lookup.is('waba_id', null)
+  ).limit(20)
   if (lookupErr) return { data: null, error: lookupErr }
 
-  const existingId = existing?.[0]?.id as string | undefined
+  const existingId = pickCatalogRowId(
+    (candidates ?? []) as Array<{ id: string; waba_id: string | null }>,
+    row.waba_id,
+  )
   if (existingId) {
     return supabase
       .from('message_templates')

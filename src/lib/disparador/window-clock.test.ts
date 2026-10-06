@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   addOpenWindowTime,
-  deferredSlot,
+  isScheduledInClosedWindow,
   lastWindowClose,
   scheduleRounds,
-  windowClockTime,
 } from "./window-clock";
 
 // Horário de Brasília → instante UTC (BR = UTC-3). Outubro/2026:
@@ -105,33 +104,22 @@ describe("lastWindowClose", () => {
   });
 });
 
-describe("windowClockTime (itens que venceram com a janela fechada)", () => {
-  it("horário aberto fica como está (inclui o último minuto aceito pelo envio)", () => {
-    expect(windowClockTime(br(15, 10), comercial).toISOString()).toBe(br(15, 10).toISOString());
-    expect(windowClockTime(br(15, 18, 0, 30), comercial).toISOString()).toBe(br(15, 18, 0, 30).toISOString());
+describe("isScheduledInClosedWindow (detector do reflow da fila)", () => {
+  const tol = 10 * MIN;
+  it("horário aberto ou último minuto aceito pelo envio: consistente", () => {
+    expect(isScheduledInClosedWindow(br(15, 10), comercial, tol)).toBe(false);
+    expect(isScheduledInClosedWindow(br(15, 18, 0, 30), comercial, tol)).toBe(false);
   });
-  it("depois do fechamento: abertura + atraso desde o fechamento", () => {
-    expect(windowClockTime(br(15, 18, 15), comercial).toISOString()).toBe(br(16, 8, 15).toISOString());
-    expect(windowClockTime(br(15, 18, 45), comercial).toISOString()).toBe(br(16, 8, 45).toISOString());
+  it("transbordo de rodada até a tolerância: consistente", () => {
+    expect(isScheduledInClosedWindow(br(15, 18, 5), comercial, tol)).toBe(false);
+    expect(isScheduledInClosedWindow(br(15, 18, 15), comercial, tol)).toBe(true);
   });
-  it("fim de semana: sábado 10:00 (16h depois do fechamento de sexta) → terça 14:00", () => {
-    // segunda 08–18 consome 10h, faltam 6h → terça 14:00
-    expect(windowClockTime(br(17, 10), diasUteis).toISOString()).toBe(br(20, 14).toISOString());
+  it("noite, madrugada antes da abertura e fim de semana: inconsistente", () => {
+    expect(isScheduledInClosedWindow(br(15, 22), comercial, tol)).toBe(true);
+    expect(isScheduledInClosedWindow(br(19, 7, 45), diasUteis, tol)).toBe(true);
+    expect(isScheduledInClosedWindow(br(17, 10), diasUteis, tol)).toBe(true);
   });
-});
-
-describe("deferredSlot", () => {
-  it("fechado: nunca antes da próxima abertura; espaçamento preservado", () => {
-    const now = br(15, 20);
-    expect(deferredSlot(br(15, 18, 15), now, comercial, false)?.toISOString()).toBe(br(16, 8, 15).toISOString());
-    expect(deferredSlot(br(15, 17, 59), now, comercial, false)?.toISOString()).toBe(br(16, 8).toISOString());
-    expect(deferredSlot(null, now, comercial, false)?.toISOString()).toBe(br(16, 8).toISOString());
-  });
-  it("aberto: só adia se o horário efetivo estiver à frente", () => {
-    const now = br(16, 8, 0, 30);
-    expect(deferredSlot(br(15, 18, 45), now, comercial, true)?.toISOString()).toBe(br(16, 8, 45).toISOString());
-    expect(deferredSlot(br(15, 18, 0, 30), now, comercial, true)).toBeNull();
-    expect(deferredSlot(br(16, 8), now, comercial, true)).toBeNull();
-    expect(deferredSlot(null, now, comercial, true)).toBeNull();
+  it("sem janela configurada: nunca inconsistente", () => {
+    expect(isScheduledInClosedWindow(br(17, 3), {}, tol)).toBe(false);
   });
 });

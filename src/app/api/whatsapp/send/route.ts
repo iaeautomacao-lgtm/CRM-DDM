@@ -31,6 +31,7 @@ import {
 } from '@/lib/rate-limit'
 import type { MessageTemplate } from '@/types'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
+import { templateRowsForWaba } from '@/lib/disparador/template-validation'
 
 export async function POST(request: Request) {
   try {
@@ -465,11 +466,17 @@ export async function POST(request: Request) {
           .eq('name', template_name)
           .eq('language', template_language || 'en_US')
           .limit(20)
-        const rows = (candidates ?? []) as Array<Record<string, unknown> & { waba_id?: string | null }>
+        const rows = (candidates ?? []) as Array<
+          Record<string, unknown> & { name: string; language?: string | null; waba_id?: string | null }
+        >
+        // Linha da WABA do canal decide; a antiga sem waba_id só se a WABA
+        // não tiver linha própria. Linha de outra WABA não vale (componentes
+        // podem ser outros) — sem nenhuma, segue o caminho só-corpo.
+        const decided = templateRowsForWaba(rows, config.waba_id ?? null)
         const data =
-          rows.find((t) => config.waba_id && t.waba_id === config.waba_id) ??
-          rows.find((t) => !t.waba_id) ??
-          rows[0] ??
+          decided.find((t) => config.waba_id && t.waba_id === config.waba_id) ??
+          decided.find((t) => !t.waba_id) ??
+          decided[0] ??
           null
         if (data && !isMessageTemplate(data)) {
           return NextResponse.json(
