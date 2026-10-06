@@ -21,6 +21,12 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
 import {
+  cacheStoredAppSecret,
+  getCachedStoredAppSecret,
+  invalidateAppSecret,
+  processStatusesIndependently,
+} from '@/lib/whatsapp/webhook-fast-path'
+import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
@@ -225,43 +231,87 @@ export async function POST(request: Request) {
   const phoneNumberId =
     body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
 
-  let channelAppSecret: string | null = null
-  let channelSecretIsLegacyPlaintext = false
-  if (phoneNumberId) {
-    const { data: config } = await supabaseAdmin()
-      .from('whatsapp_config')
-      .select('app_secret')
-      .eq('phone_number_id', phoneNumberId)
-      .eq('provider', 'meta')
-      .limit(1)
-      .single()
-    if (config?.app_secret) {
-      channelSecretIsLegacyPlaintext =
-        !isEncryptedSecret(config.app_secret) &&
-        !isLegacyCbcSecret(config.app_secret)
-      try {
-        // decryptStoredSecret aceita texto puro legado (gravado direto no
-        // banco antes da correção) até o script de migração rodar — antes,
-        // o decrypt() lançava e o webhook caía calado no META_APP_SECRET.
-        channelAppSecret = decryptStoredSecret(
-          config.app_secret,
-          'whatsapp_config.app_secret',
-        )
-      } catch (err) {
-        console.error(
-          '[webhook] failed to decrypt app_secret for phone_number_id:',
-          phoneNumberId,
-          err
+  // O app_secret fica em cache (TTL curto) por phone_number_id: evita 1 ida ao
+  // banco antes do 200 em todo POST. Se a assinatura não conferir com o
+  // segredo vindo do cache (ex.: secret rotacionado há <60s), relê do banco
+  // uma vez antes de rejeitar.
+  const verifyWithChannelSecret = async (useCache: boolean) => {
+    let channelAppSecret: string | null = null
+    let channelSecretIsLegacyPlaintext = false
+    let fromCache = false
+    if (phoneNumberId) {
+      let storedSecret: string | null | undefined = useCache
+        ? getCachedStoredAppSecret(phoneNumberId)
+        : undefined
+      if (storedSecret !== undefined) {
+        fromCache = true
+      } else {
+        const { data: config } = await supabaseAdmin()
+          .from('whatsapp_config')
+          .select('app_secret')
+          .eq('phone_number_id', phoneNumberId)
+          .eq('provider', 'meta')
+          .limit(1)
+          .single()
+        storedSecret = config?.app_secret ?? null
+        if (storedSecret) cacheStoredAppSecret(phoneNumberId, storedSecret)
+      }
+      if (storedSecret) {
+        channelSecretIsLegacyPlaintext =
+          !isEncryptedSecret(storedSecret) && !isLegacyCbcSecret(storedSecret)
+        try {
+          // decryptStoredSecret aceita texto puro legado (gravado direto no
+          // banco antes da correção) até o script de migração rodar — antes,
+          // o decrypt() lançava e o webhook caía calado no META_APP_SECRET.
+          channelAppSecret = decryptStoredSecret(
+            storedSecret,
+            'whatsapp_config.app_secret',
+          )
+        } catch (err) {
+          console.error(
+            '[webhook] failed to decrypt app_secret for phone_number_id:',
+            phoneNumberId,
+            err
+          )
+        }
+      }
+    }
+
+    // Fall back to the global env var for channels saved before app_secret
+    // was captured per-config.
+    const secret = channelAppSecret ?? process.env.META_APP_SECRET ?? null
+    if (!secret) return { secret: null, signatureOk: false, fromCache }
+
+    let signatureOk = verifyMetaWebhookSignature(rawBody, signature, secret)
+    // Transição: antes, um app_secret em texto puro fazia o decrypt() lançar
+    // e o webhook validava com o META_APP_SECRET global. Para não derrubar
+    // um canal cujo valor legado esteja desatualizado, mantém esse fallback
+    // SÓ para app_secret legado em texto puro, até o script de migração rodar.
+    const globalAppSecret = process.env.META_APP_SECRET
+    if (
+      !signatureOk &&
+      channelSecretIsLegacyPlaintext &&
+      globalAppSecret &&
+      globalAppSecret !== secret
+    ) {
+      signatureOk = verifyMetaWebhookSignature(rawBody, signature, globalAppSecret)
+      if (signatureOk) {
+        console.warn(
+          '[webhook] app_secret legado em texto puro não confere; assinatura validada pelo META_APP_SECRET global. phone_number_id:',
+          phoneNumberId
         )
       }
     }
+    return { secret, signatureOk, fromCache }
   }
 
-  // Fall back to the global env var for channels saved before app_secret
-  // was captured per-config.
-  const secret = channelAppSecret ?? process.env.META_APP_SECRET ?? null
+  let verification = await verifyWithChannelSecret(true)
+  if (!verification.signatureOk && verification.fromCache && phoneNumberId) {
+    invalidateAppSecret(phoneNumberId)
+    verification = await verifyWithChannelSecret(false)
+  }
 
-  if (!secret) {
+  if (!verification.secret) {
     console.error(
       '[webhook] no App Secret configured for phone_number_id:',
       phoneNumberId
@@ -272,28 +322,7 @@ export async function POST(request: Request) {
     )
   }
 
-  let signatureOk = verifyMetaWebhookSignature(rawBody, signature, secret)
-  // Transição: antes, um app_secret em texto puro fazia o decrypt() lançar
-  // e o webhook validava com o META_APP_SECRET global. Para não derrubar
-  // um canal cujo valor legado esteja desatualizado, mantém esse fallback
-  // SÓ para app_secret legado em texto puro, até o script de migração rodar.
-  const globalAppSecret = process.env.META_APP_SECRET
-  if (
-    !signatureOk &&
-    channelSecretIsLegacyPlaintext &&
-    globalAppSecret &&
-    globalAppSecret !== secret
-  ) {
-    signatureOk = verifyMetaWebhookSignature(rawBody, signature, globalAppSecret)
-    if (signatureOk) {
-      console.warn(
-        '[webhook] app_secret legado em texto puro não confere; assinatura validada pelo META_APP_SECRET global. phone_number_id:',
-        phoneNumberId
-      )
-    }
-  }
-
-  if (!signatureOk) {
+  if (!verification.signatureOk) {
     // 401 (not 200) — we want Meta's delivery dashboard to show failures
     // loudly if a misconfiguration causes signatures to stop matching,
     // rather than silently eating events.
@@ -359,9 +388,26 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       // Handle status updates
       if (value.statuses) {
-        for (const status of value.statuses) {
-          await handleStatusUpdate(status)
-        }
+        // Um status que falha não descarta os demais do mesmo POST (a Meta
+        // não reenvia: já recebeu 200). 'sent' é ignorado — não agrega.
+        await processStatusesIndependently(
+          value.statuses,
+          handleStatusUpdate,
+          (status, error) => {
+            console.error('[webhook] falha ao processar status:', status.id, status.status, error)
+            void writeLog({
+              level: 'error',
+              source: 'webhook_meta',
+              event: 'status_update_failed',
+              message: 'Falha ao processar status de mensagem da Meta',
+              payload: {
+                message_id: status.id,
+                status: status.status,
+                erro: error instanceof Error ? error.message : String(error),
+              },
+            })
+          },
+        )
       }
 
       // Handle incoming messages

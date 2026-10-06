@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { encrypt } from '@/lib/whatsapp/encryption'
+import { clearAppSecretCache } from '@/lib/whatsapp/webhook-fast-path'
 
 // ---------------------------------------------------------------------------
 // Verificação de assinatura do webhook Meta com app_secret por canal:
@@ -10,6 +11,7 @@ import { encrypt } from '@/lib/whatsapp/encryption'
 // ---------------------------------------------------------------------------
 
 let storedAppSecret: string | null = null
+let selectCalls = 0
 const updates: Array<Record<string, unknown>> = []
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -19,7 +21,7 @@ vi.mock('@supabase/supabase-js', () => ({
       for (const m of ['select', 'eq', 'limit', 'neq', 'in', 'order']) {
         b[m] = () => b
       }
-      b.single = async () => ({
+      b.single = async () => (selectCalls++, {
         data: storedAppSecret === null ? null : { app_secret: storedAppSecret },
         error: null,
       })
@@ -73,6 +75,8 @@ describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
   beforeEach(() => {
     storedAppSecret = null
     updates.length = 0
+    selectCalls = 0
+    clearAppSecretCache()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
@@ -105,5 +109,22 @@ describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
   it('canal sem app_secret: usa META_APP_SECRET', async () => {
     storedAppSecret = null
     expect((await POST(req(sign(GLOBAL_SECRET)))).status).toBe(200)
+  })
+
+  it('cache: segundo POST do mesmo canal não vai ao banco', async () => {
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    expect((await POST(req(sign(CHANNEL_SECRET)))).status).toBe(200)
+    expect((await POST(req(sign(CHANNEL_SECRET)))).status).toBe(200)
+    expect(selectCalls).toBe(1)
+  })
+
+  it('cache: assinatura inválida com segredo em cache relê o banco uma vez (rotação)', async () => {
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    expect((await POST(req(sign(CHANNEL_SECRET)))).status).toBe(200)
+    const ROTATED = 'segredo-rotacionado-0123456789abcdef'
+    storedAppSecret = encrypt(ROTATED)
+    expect((await POST(req(sign(ROTATED)))).status).toBe(200)
+    expect(selectCalls).toBe(2)
+    expect((await POST(req(sign('outro-segredo')))).status).toBe(401)
   })
 })
