@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { flowExitTagsFromNodes } from "./exit-tag-routing";
 import {
-  flowExitTagsFromNodes,
   pickRoundToolFailure,
   switchDefaultSubreason,
   type HandoffContextEvent,

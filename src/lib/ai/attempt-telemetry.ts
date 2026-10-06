@@ -1,3 +1,5 @@
+import { promptVersionOf } from "@/lib/ai/prompt-versions";
+
 // Etapas de uma tentativa de resposta da IA (handleAiAutoResponse).
 //
 // Antes, quando a IA não respondia, os logs só diziam "não respondeu" — sem
@@ -48,4 +50,18 @@ export function describeAttemptStop(
     case "persisted":
       return "Enviado e gravado, mas o resultado final não foi \"enviado\"";
   }
+}
+
+/**
+ * Versão do prompt que o responder usa quando NÃO há override de nó:
+ * hash curto do prompt da conta, ou "default" (prompt interno). Com
+ * override devolve null — o texto chega com variáveis já substituídas e o
+ * hash correto é o do texto cru, que só quem chama (engine) conhece.
+ */
+export function effectivePromptVersion(input: {
+  hasOverride: boolean;
+  accountPrompt: string | null | undefined;
+}): string | null {
+  if (input.hasOverride) return null;
+  return promptVersionOf(input.accountPrompt) ?? "default";
 }

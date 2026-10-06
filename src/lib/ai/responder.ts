@@ -9,7 +9,7 @@ import {
   isModelCompatibleWithProvider,
   resolveAiModel,
 } from "@/lib/ai/models";
-import { describeAttemptStop, newAttemptTrace, type AiAttemptTrace } from '@/lib/ai/attempt-telemetry';
+import { describeAttemptStop, effectivePromptVersion, newAttemptTrace, type AiAttemptTrace } from '@/lib/ai/attempt-telemetry';
 import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { createClient } from "@supabase/supabase-js";
@@ -321,6 +321,12 @@ export type AiAutoResponseResult =
       detectedTag: string | null;
       modelUsed: string | null;
       forcedExit?: ForcedAiExit | null;
+      /**
+       * Versão (hash curto) do prompt da CONTA, ou "default" quando o
+       * responder usou o prompt interno. Null com override de nó: o texto
+       * chega com variáveis já substituídas — quem chama conhece o cru.
+       */
+      promptVersion?: string | null;
     }
   | {
       outcome: "skipped";
@@ -329,6 +335,12 @@ export type AiAutoResponseResult =
       modelUsed: string | null;
       forcedExit?: ForcedAiExit | null;
       guard?: AiGuardDetail;
+      /**
+       * Versão (hash curto) do prompt da CONTA, ou "default" quando o
+       * responder usou o prompt interno. Null com override de nó: o texto
+       * chega com variáveis já substituídas — quem chama conhece o cru.
+       */
+      promptVersion?: string | null;
     }
   | {
       outcome: "failed";
@@ -343,6 +355,12 @@ export type AiAutoResponseResult =
        * formalizar acordo duas vezes.
        */
       retryable?: boolean;
+      /**
+       * Versão (hash curto) do prompt da CONTA, ou "default" quando o
+       * responder usou o prompt interno. Null com override de nó: o texto
+       * chega com variáveis já substituídas — quem chama conhece o cru.
+       */
+      promptVersion?: string | null;
     };
 
 /**
@@ -356,6 +374,8 @@ interface AiAttemptTracker {
   trace: AiAttemptTrace;
   /** Marca "IA trabalhando" para o vigia de IA travada (heartbeat.ts). */
   heartbeat?: AiHeartbeat;
+  /** Versão do prompt efetivo (ver AiAutoResponseResult.promptVersion). */
+  promptVersion?: string | null;
 }
 
 /**
@@ -411,6 +431,7 @@ function logAttempt(
       reason: attempt.reason,
       phase: attempt.trace.phase,
       tools: attempt.trace.tools,
+      prompt_version: attempt.promptVersion ?? null,
       duration_ms: Date.now() - attempt.trace.startedAt,
     },
   });
@@ -428,6 +449,7 @@ interface AttemptOutcome {
   /** "error" = exceção relançada (efeito externo já iniciado). */
   outcome: AiAutoResponseResult["outcome"] | "error";
   trace: AiAttemptTrace;
+  promptVersion?: string | null;
   finish: () => AiAutoResponseResult;
 }
 
@@ -467,13 +489,17 @@ async function runAiAttemptTracked(
     return !error;
   };
   try {
-    const result = await handleAiAutoResponseAttempt(...args, tracker);
+    const handled = await handleAiAutoResponseAttempt(...args, tracker);
+    const result =
+      tracker.promptVersion !== undefined
+        ? { ...handled, promptVersion: tracker.promptVersion }
+        : handled;
     const reason = result.outcome === "sent" ? null : result.reason;
     if (result.outcome === "failed" && (await releaseIfSafe())) {
       const failed = { ...result, retryable: true };
-      return { retryable: true, reason, outcome: "failed", trace, finish: () => failed };
+      return { retryable: true, reason, outcome: "failed", trace, promptVersion: tracker.promptVersion, finish: () => failed };
     }
-    return { retryable: false, reason, outcome: result.outcome, trace, finish: () => result };
+    return { retryable: false, reason, outcome: result.outcome, trace, promptVersion: tracker.promptVersion, finish: () => result };
   } catch (err) {
     // Exceção (ex.: provedor do modelo fora do ar): mesma regra — sem
     // efeito externo, libera e devolve "failed" retentável; com efeito,
@@ -1048,6 +1074,10 @@ async function handleAiAutoResponseAttempt(
   let systemPromptWithKb = hasOverride
     ? systemPromptOverride!
     : aiConfig.system_prompt || 'Você é um assistente virtual. Aguarde um momento.';
+  // Versão do prompt efetivo para a telemetria (texto cru, antes de KB/dados).
+  if (tracker) {
+    tracker.promptVersion = effectivePromptVersion({ hasOverride, accountPrompt: aiConfig.system_prompt });
+  }
   if (kbFiles && kbFiles.length > 0) {
     const kbContext = kbFiles
       .map((file) => `[ARQUIVO: ${file.name}]\n${file.content}\n---`)

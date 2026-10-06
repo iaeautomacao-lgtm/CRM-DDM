@@ -42,7 +42,9 @@ import {
   isModelCompatibleWithProvider,
   resolveAiModel,
 } from "@/lib/ai/models";
-import { normalizeExitTag } from "@/lib/ai/exit-tags";
+import { effectivePromptVersion } from "@/lib/ai/attempt-telemetry";
+import { promptVersionOf } from "@/lib/ai/prompt-versions";
+import { flowExitTagsFromNodes } from "./exit-tag-routing";
 import {
   isTurnFreeInbound,
   nextAiTurnCount,
@@ -745,6 +747,7 @@ async function recordDirectHandoffDecision(
     decision?: Record<string, unknown>;
     aiNode?: string | null;
     model?: string | null;
+    promptVersion?: string | null;
   },
 ): Promise<void> {
   await logAiDecision(db, {
@@ -761,6 +764,7 @@ async function recordDirectHandoffDecision(
     handoff_subreason: input.reasonSubcode,
     ai_node: input.aiNode ?? null,
     model: input.model ?? null,
+    prompt_version: input.promptVersion ?? null,
   });
 }
 
@@ -781,6 +785,7 @@ async function recordGuardHandoffDecision(
   responseReason: string,
   guard: AiGuardDetail | null,
   model: string | null,
+  promptVersion: string | null = null,
 ): Promise<void> {
   await recordDirectHandoffDecision(db, run, {
     nodeKey,
@@ -790,35 +795,8 @@ async function recordGuardHandoffDecision(
     decision: { ...(guard ?? {}) },
     aiNode: nodeKey,
     model,
+    promptVersion,
   });
-}
-
-/**
- * Tags de saída que o fluxo trata nos ramos de switch/condição
- * (subject_key "ai_exit_code"). A IA aceita essas além das conhecidas
- * (exit-tags.ts) — fluxos podem ter tags próprias.
- */
-export function flowExitTagsFromNodes(
-  nodes: Iterable<Pick<FlowNodeRow, "node_type" | "config">>,
-): string[] {
-  const tags = new Set<string>();
-  const collect = (cond: { subject_key?: unknown; value?: unknown }) => {
-    if (cond.subject_key !== "ai_exit_code") return;
-    const tag = normalizeExitTag(cond.value);
-    if (tag) tags.add(tag);
-  };
-  for (const node of nodes) {
-    const cfg = (node.config ?? {}) as Record<string, unknown>;
-    if (node.node_type === "switch" && Array.isArray(cfg.branches)) {
-      for (const branch of cfg.branches as Array<{ conditions?: unknown }>) {
-        if (!Array.isArray(branch?.conditions)) continue;
-        for (const cond of branch.conditions) collect(cond ?? {});
-      }
-    } else if (node.node_type === "condition") {
-      collect(cfg);
-    }
-  }
-  return [...tags];
 }
 
 /**
@@ -2172,12 +2150,17 @@ async function runAiAgentCore(
   // aceitas pela IA além das tags conhecidas (exit-tags.ts).
   flowExitTags?: string[],
   modelOverride?: string | null,
+  // Versão (promptVersionOf) do texto CRU de cfg.system_prompt_override —
+  // systemPromptOverride chega com variáveis já substituídas.
+  nodePromptVersion?: string | null,
 ): Promise<
   | {
       ok: true;
       lastReply: string;
       exitCodeFound: string | null;
       modelUsed: string | null;
+      /** Versão do prompt efetivo (override do nó ou prompt da conta). */
+      promptVersion: string | null;
       aiConfigUsable: boolean;
       messageSent: boolean;
       messageId: string | null;
@@ -2219,6 +2202,7 @@ async function runAiAgentCore(
   let lastReply = "";
   let exitCodeFound: string | null = null;
   let modelUsed: string | null = null;
+  let promptVersion: string | null = nodePromptVersion ?? null;
   let modelSource: "node" | "account" | "provider_default" | null = null;
   let providerUsed: string | null = null;
   let aiConfigUsable = false;
@@ -2236,10 +2220,18 @@ async function runAiAgentCore(
           api_provider: string;
           enabled: boolean;
           api_model?: string | null;
+          system_prompt?: string | null;
         }
       | null;
     aiConfigUsable = !!configRow?.enabled;
     providerUsed = configRow?.api_provider ?? null;
+    // Override do nó (hash do texto cru, vindo do chamador) ou prompt da conta.
+    promptVersion =
+      nodePromptVersion ??
+      effectivePromptVersion({
+        hasOverride: !!systemPromptOverride && systemPromptOverride.trim() !== "",
+        accountPrompt: configRow?.system_prompt,
+      });
 
     if (
       modelOverride?.trim() &&
@@ -2488,6 +2480,7 @@ async function runAiAgentCore(
           reason: toolFailure,
           needs_human: false,
           tool_name: toolName,
+          prompt_version: promptVersion,
           tool_status: toolFailure
             ? "error"
             : meta?.recovered
@@ -2612,6 +2605,7 @@ async function runAiAgentCore(
         ai_exit_code: exitCodeFound,
         ai_node: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
         model: modelUsed,
+        prompt_version: aiResponse.promptVersion ?? promptVersion,
       });
     }
 
@@ -2646,6 +2640,7 @@ async function runAiAgentCore(
       lastReply,
       exitCodeFound,
       modelUsed: aiResponse.modelUsed ?? modelUsed,
+      promptVersion: aiResponse.promptVersion ?? promptVersion,
       aiConfigUsable,
       messageSent: aiResponse.outcome === "sent",
       messageId: aiMessageId,
@@ -3576,6 +3571,7 @@ export async function advanceFromNodeKey(
         cfg.herdar_contexto_anterior,
         flowExitTagsFromNodes(nodes.values()),
         cfg.model,
+        promptVersionOf(cfg.system_prompt_override),
       );
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
@@ -3654,6 +3650,7 @@ export async function advanceFromNodeKey(
           core.responseReason,
           core.guard,
           core.modelUsed,
+          core.promptVersion,
         );
         await logEvent(db, run.id, "handoff", node.node_key, {
           reason: core.responseReason,
@@ -4303,6 +4300,7 @@ async function handleReplyForActiveRun(
       cfg.herdar_contexto_anterior,
       flowExitTagsFromNodes(nodes.values()),
       cfg.model,
+      promptVersionOf(cfg.system_prompt_override),
     );
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
@@ -4344,6 +4342,7 @@ async function handleReplyForActiveRun(
         core.responseReason,
         core.guard,
         core.modelUsed,
+        core.promptVersion,
       );
       await logEvent(db, run.id, "handoff", currentNode.node_key, {
         reason: core.responseReason,

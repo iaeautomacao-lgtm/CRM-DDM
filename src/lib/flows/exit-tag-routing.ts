@@ -3,9 +3,8 @@
  * grafo do fluxo — lógica PURA, sem imports de servidor, usada pelo
  * validador do editor (validate.ts roda no cliente e no servidor).
  *
- * `flowExitTagsFromNodes` é uma cópia de flows/engine.ts (o engine é
- * server-side e não pode entrar no bundle do editor). Follow-up: fazer o
- * engine importar daqui para eliminar a duplicação.
+ * `flowExitTagsFromNodes` vive aqui (o engine é server-side e não pode
+ * entrar no bundle do editor) e o engine importa daqui.
  */
 
 import { KNOWN_AI_EXIT_TAGS, normalizeExitTag } from "@/lib/ai/exit-tags";
@@ -25,7 +24,7 @@ interface RawCondition {
 
 const AI_EXIT_SUBJECT = "ai_exit_code";
 
-/** Tags de saída usadas nos ramos do fluxo (cópia de engine.ts). */
+/** Tags de saída usadas nos ramos do fluxo (switch/condição em ai_exit_code). */
 export function flowExitTagsFromNodes(
   nodes: Iterable<Pick<RoutingNode, "node_type" | "config">>,
 ): string[] {
