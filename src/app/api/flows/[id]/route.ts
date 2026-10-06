@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
+import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
 
 /**
  * GET   /api/flows/[id]  — fetch one flow with its nodes.
@@ -245,6 +246,8 @@ export async function PUT(
     return NextResponse.json({ error: updErr.message }, { status: 500 })
   }
 
+  // Nós antes desta gravação — também usados para o histórico de prompts.
+  let previousNodesForHistory: Array<Record<string, unknown>> | null = null
   if (body.nodes !== undefined) {
     // Delete-then-insert (sem transação no PostgREST). Guarda os nós
     // atuais antes: se o insert falhar, eles voltam — antes o fluxo
@@ -258,6 +261,7 @@ export async function PUT(
     if (prevErr) {
       return NextResponse.json({ error: prevErr.message }, { status: 500 })
     }
+    previousNodesForHistory = previousNodes ?? []
     const { error: delErr } = await admin
       .from('flow_nodes')
       .delete()
@@ -303,6 +307,21 @@ export async function PUT(
       .eq('flow_id', id)
       .order('created_at', { ascending: true }),
   ])
+
+  // Histórico de prompts (migration 148): só quando a gravação PUBLICA
+  // (fluxo ativo). Rascunho tem autosave a cada 2s e geraria uma versão
+  // por pausa na digitação; ao ativar, /activate grava o que entrou no ar.
+  // Best-effort — nunca bloqueia o salvar.
+  if (previousNodesForHistory && flow?.status === 'active' && flow.account_id) {
+    await recordFlowNodePromptVersions(admin, {
+      accountId: flow.account_id as string,
+      flowId: id,
+      nodes: nodes ?? [],
+      onlyChangedFrom: previousNodesForHistory,
+      userId: guard.userId,
+    })
+  }
+
   return NextResponse.json({ flow, nodes: nodes ?? [] })
 }
 

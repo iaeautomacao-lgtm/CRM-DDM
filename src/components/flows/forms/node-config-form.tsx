@@ -55,6 +55,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
+import { useFlowEditor } from "../flow-editor-state";
+import { PromptHistoryButton } from "@/components/ai/prompt-history-button";
 import {
   WEBCHAT_BUTTON_TEXT_MAX,
   type AiAgentTool,
@@ -2673,6 +2675,7 @@ function AiAgentForm({
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
   const mode = cfg.mode ?? "once";
+  const { flow } = useFlowEditor();
 
   return (
     <>
@@ -2705,6 +2708,14 @@ function AiAgentForm({
         </p>
       </div>
 
+      <div className="-mb-2 flex justify-end">
+        <PromptHistoryButton
+          target={{ scope: "flow_node", flowId: flow.id, nodeKey: currentKey }}
+          currentContent={cfg.system_prompt_override ?? ""}
+          onRestore={(content) => onUpdateConfig({ system_prompt_override: content })}
+          description="Versões publicadas das instruções deste nó, da mais recente para a mais antiga. Restaurar coloca o texto de volta no campo; ele só entra no ar depois de publicar o fluxo."
+        />
+      </div>
       <TextRow
         label="Instruções da IA para este nó (opcional, substituem as gerais)"
         value={cfg.system_prompt_override ?? ""}
