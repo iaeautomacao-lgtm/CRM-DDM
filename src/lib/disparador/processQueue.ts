@@ -215,9 +215,9 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131021]);
 // 132001: Template name/language does not exist — parâmetros do
 // template incompatíveis com o que está aprovado na Meta; retry não
 // corrige.
-// 131026: Meta aceitou a requisição mas declarou o destino inacessível. O
-// próprio CRM coloca esse número na blacklist automática, portanto não faz
-// sentido tratá-lo como transitório nem reenfileirá-lo depois.
+// 131026: a ocorrência é permanente para ESTA campanha, mas o número só
+// entra na blacklist global depois de falhar em 3 campanhas distintas.
+// Repetir automaticamente dentro da mesma campanha não cria evidência nova.
 // 131047: mensagem fora da janela de 24h — retentar texto livre não muda
 // nada; precisa de template.
 const META_PERMANENT_CODES = new Set([131026, 131031, 131047, 131051, 368, 190, 131008, 131009, 132000, 132001]);
@@ -742,15 +742,40 @@ export async function processQueueItem(
         `[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`
       );
 
-      // 131026 é terminal para este telefone: a mesma ocorrência já alimenta
-      // a blacklist automática, então reenfileirar o item criaria um estado
-      // contraditório ("bloqueado" e "a enviar" ao mesmo tempo). Espera a
-      // blacklist best-effort e encerra a linha como bloqueada, sem passar
-      // pelo retry_transient_queue_errors.
+      // 131026 encerra esta tentativa sem retry automático, mas só vira
+      // blacklist definitiva quando ocorrer em 3 CAMPANHAS DISTINTAS.
       if (sendErr.metaCode === 131026) {
         const novasTentativas = tentativasAtuais + 1;
         const message = sendErr?.message || String(sendErr);
-        await autoBlacklistOn131026(phone, item.campaign_id ?? null);
+        const strike = await autoBlacklistOn131026(
+          phone,
+          item.campaign_id ?? null,
+        );
+
+        if (!strike.blacklisted) {
+          await markQueueError(
+            item.id,
+            message,
+            true,
+            item.campaign_id,
+            novasTentativas,
+          );
+          void writeLog({
+            level: "warn",
+            source: "disparador",
+            event: "message_meta_131026_strike",
+            message: "Meta 131026 registrado; número ainda não entrou na blacklist definitiva",
+            payload: {
+              campaign_id: item.campaign_id,
+              contact_id: item.contact_id,
+              phone: maskPhone(normalizedPhone),
+              metaCode: 131026,
+              campaign_count: strike.campaignCount,
+              threshold: 3,
+            },
+          });
+          return { outcome: "error", error: message };
+        }
 
         const { error: blockError } = await supabaseAdmin()
           .from("disp_message_queue")
@@ -763,14 +788,12 @@ export async function processQueueItem(
           .eq("id", item.id);
 
         if (blockError) {
-          // Se a atualização final falhar, ainda marca como erro permanente:
-          // nunca devolve 131026 para o funil automático de retry.
           await markQueueError(
             item.id,
             message,
             true,
             item.campaign_id,
-            novasTentativas
+            novasTentativas,
           );
           return { outcome: "error", error: message };
         }
@@ -780,12 +803,12 @@ export async function processQueueItem(
           {
             p_campaign_id: item.campaign_id,
             p_field: "total_blacklist",
-          }
+          },
         );
         if (metricError) {
           console.error(
             "[Disparador] Falha ao incrementar total_blacklist após 131026:",
-            metricError.message
+            metricError.message,
           );
         }
 
@@ -793,16 +816,17 @@ export async function processQueueItem(
           level: "warn",
           source: "disparador",
           event: "message_blocked_meta_131026",
-          message: "Destino bloqueado após erro Meta 131026; item não será reenfileirado",
+          message: "Destino bloqueado definitivamente após 131026 em 3 campanhas distintas",
           payload: {
             campaign_id: item.campaign_id,
             contact_id: item.contact_id,
             phone: maskPhone(normalizedPhone),
             metaCode: 131026,
+            campaign_count: strike.campaignCount,
           },
         });
 
-        return { outcome: "blocked", reason: "meta_131026" };
+        return { outcome: "blocked", reason: "meta_131026_threshold" };
       }
     }
 

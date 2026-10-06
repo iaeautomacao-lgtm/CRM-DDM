@@ -22,6 +22,8 @@ export interface ImportController {
   columnMap: ImportColumnMap;
   setColumnMap: (map: ImportColumnMap) => void;
   summary: ImportSummary | null;
+  /** Válidos/únicos antes de aplicar a blacklist. */
+  validBeforeBlacklist: number;
   /** Conferência da blacklist no servidor em andamento / falhou. */
   blacklistStatus: "idle" | "checking" | "ok" | "error";
   onFile: (file: File) => void;
@@ -336,6 +338,19 @@ export function StepOrigem({
               {importCtl.blacklistStatus === "error" &&
                 " Não foi possível conferir a blacklist agora — ela continua sendo aplicada no envio."}
             </p>
+            {importCtl.blacklistStatus === "ok" && summary.blacklist > 0 && (
+              <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>
+                  De <strong>{importCtl.validBeforeBlacklist.toLocaleString("pt-BR")}</strong> contatos válidos,{" "}
+                  <strong>{summary.blacklist.toLocaleString("pt-BR")}</strong>{" "}
+                  {summary.blacklist === 1 ? "está" : "estão"} na Blacklist e{" "}
+                  {summary.blacklist === 1 ? "será removido" : "serão removidos"} automaticamente.
+                  O disparo seguirá com <strong>{summary.validos.toLocaleString("pt-BR")}</strong>{" "}
+                  {summary.validos === 1 ? "contato elegível" : "contatos elegíveis"}.
+                </span>
+              </p>
+            )}
             {summary.rows.length > 0 && (
               <div className="overflow-x-auto rounded-md border border-border">
                 <table className="w-full min-w-max text-xs">
@@ -450,16 +465,30 @@ export function StepOrigem({
         {!hasFile && !keepsExistingAudience && (
           <>
             {audiencePreview && (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
-                <Users className="h-3.5 w-3.5" aria-hidden="true" />
-                {audiencePreview.loading
-                  ? "Calculando o público…"
-                  : audiencePreview.error
-                    ? audiencePreview.error
-                    : `Público: ${(audiencePreview.total ?? 0).toLocaleString("pt-BR")} contatos${
-                        audiencePreview.blacklisted ? ` (${audiencePreview.blacklisted.toLocaleString("pt-BR")} na blacklist serão pulados)` : ""
-                      }.`}
-              </p>
+              audiencePreview.loading || audiencePreview.error ? (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                  <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                  {audiencePreview.loading ? "Calculando o público…" : audiencePreview.error}
+                </p>
+              ) : (audiencePreview.blacklisted ?? 0) > 0 ? (
+                <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300" aria-live="polite">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    De <strong>{(audiencePreview.total ?? 0).toLocaleString("pt-BR")}</strong> contatos válidos,{" "}
+                    <strong>{(audiencePreview.blacklisted ?? 0).toLocaleString("pt-BR")}</strong>{" "}
+                    {(audiencePreview.blacklisted ?? 0) === 1 ? "está" : "estão"} na Blacklist e{" "}
+                    {(audiencePreview.blacklisted ?? 0) === 1 ? "será removido" : "serão removidos"} automaticamente.
+                    O disparo seguirá com{" "}
+                    <strong>{Math.max(0, (audiencePreview.total ?? 0) - (audiencePreview.blacklisted ?? 0)).toLocaleString("pt-BR")}</strong>{" "}
+                    contatos elegíveis.
+                  </span>
+                </p>
+              ) : (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground" aria-live="polite">
+                  <Users className="h-3.5 w-3.5" aria-hidden="true" />
+                  Público: {(audiencePreview.total ?? 0).toLocaleString("pt-BR")} contatos. Nenhum está na Blacklist.
+                </p>
+              )
             )}
             {form.tags.length === 0 && (
               <label className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">

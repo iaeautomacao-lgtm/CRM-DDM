@@ -1,104 +1,86 @@
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { writeLog, maskPhone } from "@/lib/logger";
-
-// Formato canônico +55DDDNÚMERO (phone-key.ts); a comparação no envio usa
-// variações do número, então formatos antigos também bloqueiam.
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 
-const ERROR_131026_MOTIVO =
-  "Meta: Número inacessível (131026) — adicionado automaticamente";
+export const META_131026_CAMPAIGN_THRESHOLD = 3;
 
-// Blacklist automática pro código Meta 131026 (janela de 24h encerrada /
-// mensagem recorrentemente não entregável) — chamada tanto pelo caminho
-// síncrono (processQueue.ts, erro imediato do POST /messages) quanto pelo
-// assíncrono (webhook/route.ts, status de entrega "failed" reportado
-// depois do envio ter sido aceito). Idempotente: se o número já está
-// bloqueado, não insere de novo nem loga de novo — nunca lança, é
-// fire-and-forget nos dois call sites (blacklist automática não pode
-// derrubar o fluxo de envio/webhook que a disparou).
+export interface Meta131026FailureResult {
+  campaignCount: number;
+  blacklisted: boolean;
+}
+
+/**
+ * Registra uma ocorrência Meta 131026 para um telefone/campanha.
+ *
+ * A blacklist definitiva só é criada quando o mesmo número acumula
+ * 131026 em 3 campanhas DISTINTAS. Repetições/retries dentro da mesma
+ * campanha não aumentam o contador: a RPC usa UNIQUE por
+ * (account_id, telefone, campaign_id).
+ */
 export async function autoBlacklistOn131026(
   rawPhone: string,
-  campaignId: string | null
-): Promise<void> {
+  campaignId: string | null,
+): Promise<Meta131026FailureResult> {
   const telefone = formatBrazilianPhone(rawPhone);
-  if (!telefone) return;
+  if (!telefone || !campaignId) {
+    return { campaignCount: 0, blacklisted: false };
+  }
 
   try {
     const db = supabaseAdmin();
-    if (!campaignId) {
-      console.warn("[Disparador] autoBlacklistOn131026: campanha ausente; blacklist não inserida");
-      return;
-    }
-
     const { data: campaign, error: campaignError } = await db
       .from("campaigns")
       .select("account_id")
       .eq("id", campaignId)
       .maybeSingle();
-    if (campaignError) {
-      console.error("[Disparador] autoBlacklistOn131026: falha ao resolver account_id da campanha:", campaignError);
-      return;
-    }
-    if (!campaign?.account_id) {
-      console.warn("[Disparador] autoBlacklistOn131026: campanha sem account_id; blacklist não inserida", campaignId);
-      return;
+
+    if (campaignError || !campaign?.account_id) {
+      console.error(
+        "[Disparador] autoBlacklistOn131026: falha ao resolver account_id da campanha:",
+        campaignError,
+      );
+      return { campaignCount: 0, blacklisted: false };
     }
 
-    const accountId = campaign.account_id;
-    const { data: existing, error: existingError } = await db
-      .from("blacklist")
-      .select("id, account_id, campaign_id")
-      .eq("telefone", telefone)
-      .maybeSingle();
-    if (existingError) {
-      console.error("[Disparador] autoBlacklistOn131026: falha ao consultar blacklist:", existingError);
-      return;
-    }
-    if (existing && !existing.account_id && existing.campaign_id === campaignId) {
-      const { error: repairError } = await db
-        .from("blacklist")
-        .update({ account_id: accountId })
-        .eq("id", existing.id)
-        .is("account_id", null);
-      if (repairError) {
-        console.error("[Disparador] autoBlacklistOn131026: falha ao reparar account_id órfão:", repairError);
-      }
-      return;
-    }
-    if (existing) return;
-
-    const { error } = await db.from("blacklist").insert({
-      telefone,
-      account_id: accountId,
-      motivo: ERROR_131026_MOTIVO,
-      campaign_id: campaignId,
-      bloqueado_por: "sistema",
-      data_bloqueio: new Date().toISOString(),
+    const { data, error } = await db.rpc("record_meta_131026_failure", {
+      p_account_id: campaign.account_id,
+      p_telefone: telefone,
+      p_campaign_id: campaignId,
     });
 
     if (error) {
-      // 23505 = corrida com outra chamada concorrente que já inseriu
-      // esse telefone entre o select e o insert acima — já é o estado
-      // desejado (bloqueado), não é uma falha de verdade.
-      if (error.code !== "23505") {
-        console.error("[Disparador] autoBlacklistOn131026: falha ao inserir na blacklist:", error);
-      }
-      return;
+      console.error(
+        "[Disparador] autoBlacklistOn131026: falha ao registrar ocorrência:",
+        error,
+      );
+      return { campaignCount: 0, blacklisted: false };
     }
 
+    const row = Array.isArray(data) ? data[0] : data;
+    const campaignCount = Number(row?.campaign_count ?? 0);
+    const blacklisted = row?.blacklisted === true;
+
     void writeLog({
-      account_id: accountId,
-      level: "info",
+      account_id: campaign.account_id,
+      level: blacklisted ? "warn" : "info",
       source: "disparador",
-      event: "blacklist_auto",
-      message: `Número ${maskPhone(telefone)} adicionado automaticamente à blacklist (erro 131026, campanha ${campaignId ?? "desconhecida"}).`,
+      event: blacklisted ? "blacklist_auto" : "meta_131026_strike",
+      message: blacklisted
+        ? `Número ${maskPhone(telefone)} adicionado definitivamente à blacklist após 131026 em ${campaignCount} campanhas distintas.`
+        : `Número ${maskPhone(telefone)} registrou 131026 em ${campaignCount}/${META_131026_CAMPAIGN_THRESHOLD} campanhas distintas.`,
       payload: {
         campaign_id: campaignId,
         telefone_mascarado: maskPhone(telefone),
         code: 131026,
+        campaign_count: campaignCount,
+        threshold: META_131026_CAMPAIGN_THRESHOLD,
+        blacklisted,
       },
     });
+
+    return { campaignCount, blacklisted };
   } catch (err) {
     console.error("[Disparador] autoBlacklistOn131026: exceção inesperada:", err);
+    return { campaignCount: 0, blacklisted: false };
   }
 }

@@ -819,6 +819,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
                 columnMap,
                 setColumnMap,
                 summary,
+                validBeforeBlacklist: baseSummary?.validos ?? 0,
                 blacklistStatus,
                 onFile: (f) => void onFile(f),
                 clear: clearImport,

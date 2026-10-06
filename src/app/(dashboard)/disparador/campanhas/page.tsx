@@ -357,7 +357,7 @@ export default function CampanhasPage() {
   // Público real da campanha no modal de início (PRD-01) — mesma resolução
   // do startCampaign (GET .../audience).
   const [audienceInfo, setAudienceInfo] = useState<
-    | { ok: true; total: number; source: string; source_label: string; tags: string[]; already_sent: number }
+    | { ok: true; total: number; blacklisted: number; eligible: number; source: string; source_label: string; tags: string[]; already_sent: number }
     | { ok: false; error: string }
     | null
   >(null);
@@ -561,7 +561,7 @@ export default function CampanhasPage() {
     // a fila existente) — só campanhas que ainda vão montar a fila.
     const isResume = campaigns.find((c) => c.id === id)?.status === "pausada";
     if (isResume) {
-      setAudienceInfo({ ok: true, total: -1, source: "resume", source_label: "", tags: [], already_sent: 0 });
+      setAudienceInfo({ ok: true, total: -1, blacklisted: 0, eligible: -1, source: "resume", source_label: "", tags: [], already_sent: 0 });
     } else {
       apiFetch(`/api/disparador/campaigns/${id}/audience`)
         .then((r) => r.json())
@@ -1223,12 +1223,28 @@ export default function CampanhasPage() {
                       {audienceInfo.source_label}
                       {audienceInfo.tags.length > 0 && <> ({audienceInfo.tags.join(", ")})</>}.
                     </p>
-                    {audienceInfo.already_sent > 0 && (
+                    {audienceInfo.blacklisted > 0 ? (
+                      <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>
+                          De <strong>{audienceInfo.total.toLocaleString("pt-BR")}</strong> contatos válidos,{" "}
+                          <strong>{audienceInfo.blacklisted.toLocaleString("pt-BR")}</strong>{" "}
+                          {audienceInfo.blacklisted === 1 ? "está" : "estão"} na Blacklist e{" "}
+                          {audienceInfo.blacklisted === 1 ? "será removido" : "serão removidos"} automaticamente.
+                          A campanha seguirá com <strong>{audienceInfo.eligible.toLocaleString("pt-BR")}</strong>{" "}
+                          {audienceInfo.eligible === 1 ? "contato elegível" : "contatos elegíveis"}.
+                        </span>
+                      </div>
+                    ) : (
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {audienceInfo.already_sent.toLocaleString("pt-BR")} já receberam nesta campanha e serão pulados.
+                        Nenhum contato deste público está na Blacklist.
                       </p>
                     )}
-                    <p className="mt-1 text-xs text-muted-foreground">Contatos na blacklist são pulados no envio.</p>
+                    {audienceInfo.already_sent > 0 && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {audienceInfo.already_sent.toLocaleString("pt-BR")} já receberam nesta campanha e também serão pulados.
+                      </p>
+                    )}
                     {audienceInfo.source === "account" && (
                       <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
