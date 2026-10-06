@@ -77,7 +77,7 @@ describe('RPC report_tabulacoes em PostgreSQL', () => {
       )
     );
     const migration = readFileSync(
-      resolve('supabase/migrations/161_report_tabulacoes.sql'),
+      resolve('supabase/migrations/165_report_tabulacoes.sql'),
       'utf8'
     );
     await db.exec(migration);
