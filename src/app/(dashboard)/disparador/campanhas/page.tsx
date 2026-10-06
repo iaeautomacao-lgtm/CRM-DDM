@@ -457,7 +457,7 @@ interface CampaignMetrics {
 // os status aceitos por /api/disparador/campaigns/[id]/queue-details
 // (ver STATUS_FILTERS naquela rota). "respondido" = enviados com
 // replied_at (migration 126), a mesma contagem do card "Respostas".
-type QueueDetailStatusKey = "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado" | "respondido";
+type QueueDetailStatusKey = "total" | "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado" | "respondido";
 
 interface QueueDetailRow {
   id: string;
@@ -4817,11 +4817,11 @@ export default function CampanhasPage() {
               {!metricsLoading && metricsData && (
                 <div className="space-y-4">
                   {/* Grid de KPIs — métricas com `status` abrem o drilldown por
-                      contato (ver queueDetailModal); as demais (Total de
-                      Contatos, Respostas, Tempo Médio) ficam só informativas. */}
+                      contato (ver queueDetailModal). Total de Contatos usa o
+                      status lógico `total`, que lista toda a fila da campanha. */}
                   <div className="grid grid-cols-2 gap-3">
                     {[
-                      { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground", status: null },
+                      { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground", status: "total" as const },
                       { label: "A enviar", value: agendadosCount ?? 0, color: "text-cyan-500", status: "agendado" as const },
                       { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500", status: "enviado" as const },
                       { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500", status: "entregue" as const },

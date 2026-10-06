@@ -77,6 +77,55 @@ function toDetailRow(row: QueueRow): QueueDetailRow {
 }
 
 /**
+ * Imports antigos podem ter o nome apenas em VAR1, mesmo com contacts.name
+ * vazio. O importador atual também trata VAR1 como fallback de nome quando
+ * não há uma coluna de nome explícita, então fazemos a mesma recuperação
+ * no drilldown para campanhas CSV legadas.
+ */
+async function attachLegacyCsvNames(
+  rows: QueueDetailRow[],
+  campaignId: string,
+  draftId: string | null,
+): Promise<QueueDetailRow[]> {
+  const missingIds = [
+    ...new Set(
+      rows
+        .filter((r) => !r.contact_name?.trim() && r.contact_id)
+        .map((r) => r.contact_id as string),
+    ),
+  ];
+  if (missingIds.length === 0) return rows;
+
+  const byContact = new Map<string, string>();
+  const load = async (column: "campaign_id" | "draft_id", value: string) => {
+    const { data, error } = await supabaseAdmin()
+      .from("contact_import_variables")
+      .select("contact_id, value")
+      .eq(column, value)
+      .eq("var_index", 0)
+      .in("contact_id", missingIds);
+    if (error) throw new Error(`Falha ao recuperar nomes do CSV: ${error.message}`);
+    for (const item of data ?? []) {
+      if (item.contact_id && item.value?.trim() && !byContact.has(item.contact_id)) {
+        byContact.set(item.contact_id, item.value.trim());
+      }
+    }
+  };
+
+  await load("campaign_id", campaignId);
+  if (draftId && byContact.size < missingIds.length) {
+    await load("draft_id", draftId);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    contact_name:
+      row.contact_name?.trim() ||
+      (row.contact_id ? byContact.get(row.contact_id) ?? null : null),
+  }));
+}
+
+/**
  * Conversa de cada contato para o link do detalhamento: a que veio desta
  * campanha (origin_campaign_id) ou, sem ela, a mais recente do contato.
  */
@@ -125,8 +174,9 @@ export async function GET(
       Math.max(1, parseInt(searchParams.get("pageSize") ?? "", 10) || DEFAULT_PAGE_SIZE)
     );
 
-    const statuses = STATUS_FILTERS[statusKey];
-    if (!statuses) {
+    const isTotal = statusKey === "total";
+    const statuses = isTotal ? null : STATUS_FILTERS[statusKey];
+    if (!isTotal && !statuses) {
       return NextResponse.json(
         { error: `status inválido: ${statusKey}` },
         { status: 400 }
@@ -139,7 +189,7 @@ export async function GET(
     // pertencer à mesma conta do chamador.
     const { data: campaign } = await supabaseAdmin()
       .from("campaigns")
-      .select("id, account_id")
+      .select("id, account_id, import_draft_id")
       .eq("id", campaignId)
       .maybeSingle();
 
@@ -169,7 +219,30 @@ export async function GET(
         throw new Error(`Falha ao buscar contatos: ${contactSearchError.message}`);
       }
 
-      contactIdFilter = (matchedContacts ?? []).map((c) => c.id);
+      const matchedIds = new Set((matchedContacts ?? []).map((c) => c.id));
+
+      // Para imports legados, contacts.name pode estar vazio e o nome ter
+      // ficado apenas em VAR1. Inclui esses contatos na busca pelo nome.
+      const loadLegacyNameMatches = async (
+        column: "campaign_id" | "draft_id",
+        value: string,
+      ) => {
+        const { data, error } = await supabaseAdmin()
+          .from("contact_import_variables")
+          .select("contact_id")
+          .eq(column, value)
+          .eq("var_index", 0)
+          .ilike("value", `%${safeSearch}%`);
+        if (error) throw new Error(`Falha ao buscar nomes do CSV: ${error.message}`);
+        for (const item of data ?? []) if (item.contact_id) matchedIds.add(item.contact_id);
+      };
+
+      await loadLegacyNameMatches("campaign_id", campaignId);
+      if (campaign.import_draft_id) {
+        await loadLegacyNameMatches("draft_id", campaign.import_draft_id);
+      }
+
+      contactIdFilter = [...matchedIds];
       if (contactIdFilter.length === 0) {
         return exportFormat === "xlsx"
           ? buildXlsxResponse([], statusKey)
@@ -182,8 +255,8 @@ export async function GET(
       let query = supabaseAdmin()
         .from("disp_message_queue")
         .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS)
-        .eq("campaign_id", campaignId)
-        .in("status", statuses);
+        .eq("campaign_id", campaignId);
+      if (statuses) query = query.in("status", statuses);
       query = replied
         ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
         : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false });
@@ -193,7 +266,11 @@ export async function GET(
       const { data, error } = await query;
       if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
 
-      const rows = (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow));
+      const rows = await attachLegacyCsvNames(
+        (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow)),
+        campaignId,
+        campaign.import_draft_id ?? null,
+      );
       await logAuditEvent({
         accountId: ctx.accountId,
         eventType: "action",
@@ -213,8 +290,8 @@ export async function GET(
     let query = supabaseAdmin()
       .from("disp_message_queue")
       .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS, { count: "exact" })
-      .eq("campaign_id", campaignId)
-      .in("status", statuses);
+      .eq("campaign_id", campaignId);
+    if (statuses) query = query.in("status", statuses);
     query = (
       replied
         ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
@@ -232,8 +309,13 @@ export async function GET(
     }
     if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
 
-    const rows = await attachConversations(
+    const namedRows = await attachLegacyCsvNames(
       (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow)),
+      campaignId,
+      campaign.import_draft_id ?? null,
+    );
+    const rows = await attachConversations(
+      namedRows,
       ctx.accountId,
       campaignId,
     );
@@ -244,6 +326,7 @@ export async function GET(
 }
 
 const STATUS_FILE_LABELS: Record<string, string> = {
+  total: "total-contatos",
   agendado: "a-enviar",
   enviado: "enviados",
   entregue: "entregues",
