@@ -91,9 +91,9 @@ describe("conversationMatchesFilters", () => {
     const waiting = { ...DEFAULT_INBOX_FILTERS, status: "pending" as const };
 
     expect(conversationMatchesFilters(conv({ status: "pending", assigned_agent_id: "agent-1" }), attending, ctx)).toBe(true);
-    expect(conversationMatchesFilters(conv({ status: "open", assigned_agent_id: null }), attending, ctx)).toBe(false);
+    expect(conversationMatchesFilters(conv({ status: "open", assigned_agent_id: undefined }), attending, ctx)).toBe(false);
 
-    expect(conversationMatchesFilters(conv({ status: "open", assigned_agent_id: null }), waiting, ctx)).toBe(true);
+    expect(conversationMatchesFilters(conv({ status: "open", assigned_agent_id: undefined }), waiting, ctx)).toBe(true);
     expect(conversationMatchesFilters(conv({ status: "pending", assigned_agent_id: "agent-1" }), waiting, ctx)).toBe(false);
   });
 

@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
-import { CONVERSATION_STATUS_LABELS, CONVERSATION_STATUS_LABELS_PLURAL } from "./status-labels";
+import { CONVERSATION_STATUS_LABELS_PLURAL } from "./status-labels";
 import {
   DropdownMenu,
   DropdownMenuContent,

@@ -22,6 +22,7 @@ import { TemplatePicker, type TemplateSendValues } from "@/components/inbox/temp
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isStaleConversationUpdateAfterClose } from "@/lib/inbox/realtime-guard";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -310,8 +311,7 @@ export default function InboxPage() {
       if (event.eventType === "UPDATE") {
         const locallyClosedAt = locallyClosedAtRef.current.get(conv.id);
         if (locallyClosedAt && conv.status !== "closed") {
-          const incomingUpdatedAt = Date.parse(conv.updated_at);
-          if (!Number.isFinite(incomingUpdatedAt) || incomingUpdatedAt <= locallyClosedAt) {
+          if (isStaleConversationUpdateAfterClose(locallyClosedAt, conv)) {
             // Evento atrasado de uma escrita iniciada antes do encerramento.
             // Não deixa o status antigo ressuscitar a conversa no cliente.
             return;
