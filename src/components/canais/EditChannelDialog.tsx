@@ -424,7 +424,12 @@ export function EditChannelDialog({
                 type="password"
                 value={appSecret}
                 onChange={(e) => setAppSecret(e.target.value)}
-                placeholder="(deixe em branco para manter o atual)"
+                autoComplete="new-password"
+                placeholder={
+                  config.has_app_secret === false
+                    ? "Não configurado — cole o App Secret"
+                    : "Configurado — deixe em branco para manter o atual"
+                }
                 disabled={saving}
               />
             </div>

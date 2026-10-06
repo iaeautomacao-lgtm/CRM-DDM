@@ -2,7 +2,13 @@ import { chatMediaReference } from '@/lib/storage/chat-media';
 import { auditFetch, registerAuditActor } from '@/lib/audit/context'
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
+import {
+  decrypt,
+  decryptStoredSecret,
+  encrypt,
+  isEncryptedSecret,
+  isLegacyCbcSecret,
+} from '@/lib/whatsapp/encryption'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
@@ -143,7 +149,10 @@ export async function GET(request: Request) {
     for (const config of configs) {
       if (!config.verify_token) continue
       try {
-        if (decrypt(config.verify_token) === verifyToken) {
+        if (
+          decryptStoredSecret(config.verify_token, 'whatsapp_config.verify_token') ===
+          verifyToken
+        ) {
           matchedConfig = config
           break
         }
@@ -155,7 +164,8 @@ export async function GET(request: Request) {
     if (matchedConfig) {
       // Fire-and-forget GCM upgrade. Safe to run on every subscribe
       // since it's a no-op once the column is already GCM.
-      if (isLegacyFormat(matchedConfig.verify_token)) {
+      // Também cobre texto puro legado — qualquer coisa fora do formato GCM.
+      if (!isEncryptedSecret(matchedConfig.verify_token)) {
         void supabaseAdmin()
           .from('whatsapp_config')
           .update({ verify_token: encrypt(verifyToken) })
@@ -215,6 +225,7 @@ export async function POST(request: Request) {
     body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
 
   let channelAppSecret: string | null = null
+  let channelSecretIsLegacyPlaintext = false
   if (phoneNumberId) {
     const { data: config } = await supabaseAdmin()
       .from('whatsapp_config')
@@ -224,8 +235,17 @@ export async function POST(request: Request) {
       .limit(1)
       .single()
     if (config?.app_secret) {
+      channelSecretIsLegacyPlaintext =
+        !isEncryptedSecret(config.app_secret) &&
+        !isLegacyCbcSecret(config.app_secret)
       try {
-        channelAppSecret = decrypt(config.app_secret)
+        // decryptStoredSecret aceita texto puro legado (gravado direto no
+        // banco antes da correção) até o script de migração rodar — antes,
+        // o decrypt() lançava e o webhook caía calado no META_APP_SECRET.
+        channelAppSecret = decryptStoredSecret(
+          config.app_secret,
+          'whatsapp_config.app_secret',
+        )
       } catch (err) {
         console.error(
           '[webhook] failed to decrypt app_secret for phone_number_id:',
@@ -251,7 +271,28 @@ export async function POST(request: Request) {
     )
   }
 
-  if (!verifyMetaWebhookSignature(rawBody, signature, secret)) {
+  let signatureOk = verifyMetaWebhookSignature(rawBody, signature, secret)
+  // Transição: antes, um app_secret em texto puro fazia o decrypt() lançar
+  // e o webhook validava com o META_APP_SECRET global. Para não derrubar
+  // um canal cujo valor legado esteja desatualizado, mantém esse fallback
+  // SÓ para app_secret legado em texto puro, até o script de migração rodar.
+  const globalAppSecret = process.env.META_APP_SECRET
+  if (
+    !signatureOk &&
+    channelSecretIsLegacyPlaintext &&
+    globalAppSecret &&
+    globalAppSecret !== secret
+  ) {
+    signatureOk = verifyMetaWebhookSignature(rawBody, signature, globalAppSecret)
+    if (signatureOk) {
+      console.warn(
+        '[webhook] app_secret legado em texto puro não confere; assinatura validada pelo META_APP_SECRET global. phone_number_id:',
+        phoneNumberId
+      )
+    }
+  }
+
+  if (!signatureOk) {
     // 401 (not 200) — we want Meta's delivery dashboard to show failures
     // loudly if a misconfiguration causes signatures to stop matching,
     // rather than silently eating events.

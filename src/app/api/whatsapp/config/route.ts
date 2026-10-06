@@ -7,7 +7,12 @@ import {
   subscribeWabaToApp,
   verifyPhoneNumber,
 } from '@/lib/whatsapp/meta-api'
-import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
+import {
+  encrypt,
+  decryptStoredSecret,
+  ensureEncryptedSecret,
+} from '@/lib/whatsapp/encryption'
+import { resolveSecretForWrite } from '@/lib/whatsapp/secret-write'
 import {
   getWahaSessionStatus,
   getWahaSessionInfo,
@@ -148,7 +153,9 @@ export async function GET() {
           const wahaConfig = {
             waha_url: config.waha_url,
             waha_session: config.waha_session,
-            waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
+            waha_api_key: config.waha_api_key
+              ? decryptStoredSecret(config.waha_api_key, 'whatsapp_config.waha_api_key')
+              : null,
           }
           try {
             const wahaSession = await getWahaSessionInfo(wahaConfig)
@@ -230,7 +237,7 @@ export async function GET() {
           // Meta provider
           let accessToken: string
           try {
-            accessToken = decrypt(config.access_token)
+            accessToken = decryptStoredSecret(config.access_token, 'whatsapp_config.access_token')
           } catch (err) {
             return {
               id: config.id,
@@ -241,6 +248,7 @@ export async function GET() {
               receptivo: config.receptivo,
               habilitado: config.habilitado,
               team_id: config.team_id,
+              has_app_secret: !!config.app_secret,
               reason: 'token_corrupted',
               needs_reset: true,
               message: 'The stored access token cannot be decrypted.'
@@ -270,6 +278,8 @@ export async function GET() {
               habilitado: config.habilitado,
               team_id: config.team_id,
               client_id: config.client_id ?? null,
+              // Só o indicador — o segredo (nem cifrado) nunca vai pro cliente.
+              has_app_secret: !!config.app_secret,
               phone_info: phoneInfo
             }
           } catch (err) {
@@ -284,6 +294,7 @@ export async function GET() {
               habilitado: config.habilitado,
               team_id: config.team_id,
               client_id: config.client_id ?? null,
+              has_app_secret: !!config.app_secret,
               reason: 'meta_api_error',
               message: `Meta API rejected credentials: ${message}`
             }
@@ -465,7 +476,10 @@ export async function POST(request: Request) {
 
       if (existing) {
         if (waha_api_key === MASKED_TOKEN) {
+          // Mantém a chave atual — cifrando-a se ainda estiver em texto puro legado.
           wahaConfigObj.waha_api_key = existing.waha_api_key
+            ? ensureEncryptedSecret(existing.waha_api_key)
+            : existing.waha_api_key
         } else {
           wahaConfigObj.waha_api_key = encryptedApiKey
         }
@@ -496,7 +510,7 @@ export async function POST(request: Request) {
         // the webhook config — see startWahaSession).
         try {
           const rawApiKey = waha_api_key === MASKED_TOKEN && existing
-            ? (existing.waha_api_key ? decrypt(existing.waha_api_key) : null)
+            ? (existing.waha_api_key ? decryptStoredSecret(existing.waha_api_key, 'whatsapp_config.waha_api_key') : null)
             : waha_api_key
 
           const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
@@ -516,7 +530,7 @@ export async function POST(request: Request) {
         // se ela não estiver WORKING no servidor WAHA.
         try {
           const rawApiKey = waha_api_key === MASKED_TOKEN && existing
-            ? (existing.waha_api_key ? decrypt(existing.waha_api_key) : null)
+            ? (existing.waha_api_key ? decryptStoredSecret(existing.waha_api_key, 'whatsapp_config.waha_api_key') : null)
             : waha_api_key
 
           const sessionInfo = await getWahaSessionInfo({
@@ -616,7 +630,9 @@ export async function POST(request: Request) {
     let encryptedAccessToken: string
     if ((!access_token || access_token === MASKED_TOKEN) && existing?.access_token) {
       try {
-        effectiveAccessToken = decrypt(existing.access_token)
+        effectiveAccessToken = decryptStoredSecret(existing.access_token, 'whatsapp_config.access_token')
+        // Texto puro legado é cifrado aqui mesmo, no save.
+        encryptedAccessToken = ensureEncryptedSecret(existing.access_token)
       } catch (err) {
         console.error('Failed to decrypt existing access_token:', err)
         return NextResponse.json(
@@ -624,7 +640,6 @@ export async function POST(request: Request) {
           { status: 500 }
         )
       }
-      encryptedAccessToken = existing.access_token
     } else if (access_token && access_token !== MASKED_TOKEN) {
       effectiveAccessToken = access_token
       try {
@@ -648,36 +663,40 @@ export async function POST(request: Request) {
     }
 
     // app_secret — used by the webhook to HMAC-verify inbound payloads
-    // per channel. Same "keep existing on blank" pattern as access_token
-    // above, but with no MASKED_TOKEN sentinel: the client just omits
-    // the field (or sends '') when it wants to keep the stored value.
+    // per channel. O GET nunca devolve o segredo (só `has_app_secret`),
+    // então campo omitido/vazio — ou a máscara de bolinhas — significa
+    // "manter o atual". Valor novo é SEMPRE cifrado aqui no servidor, e
+    // um valor atual ainda em texto puro legado é cifrado no próprio
+    // save (ver resolveSecretForWrite).
     // Required on first save — a Meta channel with no app_secret and no
     // process.env.META_APP_SECRET fallback can never pass the webhook's
     // signature check, so failing here beats a silently broken channel.
     let encryptedAppSecret: string | null
-    if (app_secret && app_secret.trim()) {
-      try {
-        encryptedAppSecret = encrypt(app_secret.trim())
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown encryption error'
-        console.error('Encryption failed:', message)
+    try {
+      const resolved = resolveSecretForWrite(app_secret, existing?.app_secret)
+      if (!resolved.ok) {
         return NextResponse.json(
-          {
-            error:
-              'Failed to encrypt App Secret. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
-          },
-          { status: 500 }
+          { error: 'app_secret must be a string' },
+          { status: 400 }
         )
       }
-    } else if (existing?.app_secret) {
-      encryptedAppSecret = existing.app_secret
-    } else if (!existing) {
+      encryptedAppSecret = resolved.value
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown encryption error'
+      console.error('Encryption failed:', message)
+      return NextResponse.json(
+        {
+          error:
+            'Failed to encrypt App Secret. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+        },
+        { status: 500 }
+      )
+    }
+    if (!encryptedAppSecret && !existing) {
       return NextResponse.json(
         { error: 'app_secret is required' },
         { status: 400 }
       )
-    } else {
-      encryptedAppSecret = null
     }
 
     // Verify credentials with Meta BEFORE saving
@@ -702,24 +721,25 @@ export async function POST(request: Request) {
     // EditChannelDialog always starts it blank) silently nulled out an
     // already-configured verify_token.
     let encryptedVerifyToken: string | null
-    if (verify_token && verify_token.trim()) {
-      try {
-        encryptedVerifyToken = encrypt(verify_token.trim())
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown encryption error'
-        console.error('Encryption failed:', message)
+    try {
+      const resolved = resolveSecretForWrite(verify_token, existing?.verify_token)
+      if (!resolved.ok) {
         return NextResponse.json(
-          {
-            error:
-              'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
-          },
-          { status: 500 }
+          { error: 'verify_token must be a string' },
+          { status: 400 }
         )
       }
-    } else if (existing?.verify_token) {
-      encryptedVerifyToken = existing.verify_token
-    } else {
-      encryptedVerifyToken = null
+      encryptedVerifyToken = resolved.value
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown encryption error'
+      console.error('Encryption failed:', message)
+      return NextResponse.json(
+        {
+          error:
+            'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+        },
+        { status: 500 }
+      )
     }
 
     const sameNumber =
