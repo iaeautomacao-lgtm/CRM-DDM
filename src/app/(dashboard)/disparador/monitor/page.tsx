@@ -6,6 +6,13 @@ import { createClient } from "@/lib/supabase/client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { normalizarErroMeta } from "@/lib/disparador/normalize-meta-error";
 import {
+  STUCK_SENDING_MINUTES,
+  stuckSendingCutoff,
+  summarizeStuckSending,
+  type StuckSendingRow,
+  type StuckSendingSummary,
+} from "@/lib/disparador/stuck-sending";
+import {
   Megaphone,
   Clock,
   CheckCircle2,
@@ -96,6 +103,10 @@ export default function DisparadorMonitorPage() {
   });
   const [queueLimit, setQueueLimit] = useState(15);
   const [hasMoreQueue, setHasMoreQueue] = useState(false);
+  // Avisos só de leitura: itens parados em 'enviando' e campanhas pausadas
+  // automaticamente pelo cron (auto-pause.ts).
+  const [stuckSending, setStuckSending] = useState<StuckSendingSummary[]>([]);
+  const [autoPaused, setAutoPaused] = useState<Array<{ id: string; nome: string; motivo: string }>>([]);
 
   // Cached once on mount — account scope doesn't change during the
   // session, so re-deriving it every tick just costs 3 extra queries.
@@ -232,6 +243,37 @@ export default function DisparadorMonitorPage() {
         else if (status === "erro") counts.failed += qty;
       });
       setStats(counts);
+
+      // Itens em 'enviando' há mais de STUCK_SENDING_MINUTES (updated_at é
+      // gravado no claim). Só exibe — o resultado no provedor é
+      // desconhecido, então nada aqui reenvia.
+      const { data: stuckRows, error: stuckError } = await supabase
+        .from("disp_message_queue")
+        .select("campaign_id, campaigns:campaign_id ( nome )")
+        .in("campaign_id", campaignIds)
+        .eq("status", "enviando")
+        .lt("updated_at", stuckSendingCutoff())
+        .limit(1000);
+      if (!stuckError) setStuckSending(summarizeStuckSending((stuckRows ?? []) as unknown as StuckSendingRow[]));
+
+      // select("*"): pausa_automatica_motivo é da migration 156 — sem ela a
+      // coluna simplesmente não vem e nenhum aviso aparece.
+      const { data: pausedRows, error: pausedError } = await supabase
+        .from("campaigns")
+        .select("*")
+        .in("id", campaignIds)
+        .eq("status", "pausada");
+      if (!pausedError) {
+        setAutoPaused(
+          (pausedRows ?? [])
+            .filter((c: { pausa_automatica_motivo?: string | null }) => !!c.pausa_automatica_motivo)
+            .map((c: { id: string; nome?: string | null; pausa_automatica_motivo: string }) => ({
+              id: c.id,
+              nome: c.nome || "Campanha sem nome",
+              motivo: c.pausa_automatica_motivo,
+            }))
+        );
+      }
     } catch (err) {
       console.error("Failed to load queue dashboard stats:", err);
     } finally {
@@ -265,6 +307,49 @@ export default function DisparadorMonitorPage() {
           </p>
         </div>
       </div>
+
+      {autoPaused.length > 0 && (
+        <div role="alert" className="rounded-xl border border-red-500/40 bg-red-500/5 p-4 space-y-2">
+          <p className="flex items-center gap-2 text-sm font-semibold text-red-600 dark:text-red-400">
+            <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Campanha pausada automaticamente por excesso de erros
+          </p>
+          <ul className="space-y-1 text-xs text-foreground">
+            {autoPaused.map((c) => (
+              <li key={c.id}>
+                <span className="font-semibold">{c.nome}:</span> {c.motivo}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">
+            Veja os erros da campanha em Campanhas → Métricas, corrija a causa (template, canal, base) e só
+            então retome.
+          </p>
+        </div>
+      )}
+
+      {stuckSending.length > 0 && (
+        <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-4 space-y-2">
+          <p className="flex items-center gap-2 text-sm font-semibold text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {stuckSending.reduce((sum, s) => sum + s.count, 0)} envio(s) parado(s) em &quot;Enviando&quot; há mais
+            de {STUCK_SENDING_MINUTES} minutos
+          </p>
+          <ul className="space-y-0.5 text-xs text-foreground">
+            {stuckSending.map((s) => (
+              <li key={s.campaignId}>
+                <span className="font-semibold">{s.campaignName}</span>: {s.count}
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-muted-foreground">
+            O sistema não sabe se o WhatsApp recebeu essas mensagens (queda de conexão ou do servidor no meio do
+            envio) e, para não duplicar, não reenvia sozinho. Enquanto ficam assim, ocupam vagas de envio do
+            canal e podem deixar a campanha lenta ou parada. Confira no WhatsApp/Meta se as mensagens chegaram
+            e acione o suporte técnico para reconciliar esses itens — não reinicie a campanha só por isso.
+          </p>
+        </div>
+      )}
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
