@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactElement } from "react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -14,6 +14,8 @@ import {
   Headphones,
   KeyRound,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   User,
   UsersRound,
@@ -45,6 +47,59 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { useIsDesktop, useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
+
+// No modo "rail" (desktop recolhido) o rótulo some, então cada item ganha
+// um tooltip à direita. Fora do rail devolve o elemento intacto. O
+// tooltip é complementar — os itens continuam com aria-label próprio.
+function RailTooltip({
+  enabled,
+  label,
+  children,
+}: {
+  enabled: boolean;
+  label: string;
+  children: ReactElement;
+}) {
+  if (!enabled) return children;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={children} />
+      <TooltipContent side="right" sideOffset={8}>
+        {label}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// Classes-base de um item da navegação nos dois modos (rail = só ícone).
+// Expandido: mais alto no mobile para o dedo acertar a linha (≥44px).
+function navItemClass(rail: boolean, ...extra: Array<string | false | undefined>) {
+  return cn(
+    "flex w-full items-center rounded-lg text-sm font-medium transition-colors",
+    rail ? "relative h-9 justify-center px-0" : "gap-3 px-3 py-2.5 text-left lg:py-2",
+    ...extra,
+  );
+}
+
+const INACTIVE_ITEM = "text-muted-foreground hover:bg-muted hover:text-foreground";
+const ACTIVE_ITEM = "bg-primary/10 text-primary";
+
+// Bolinha de não-lidas sobre o ícone no rail.
+function RailDot() {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute top-1.5 right-3 h-2 w-2 rounded-full bg-primary ring-2 ring-card"
+    />
+  );
+}
 
 // RBAC visibility for a single nav item's href (which may carry a
 // query string, e.g. "/settings?tab=ai"). Items whose path isn't in
@@ -83,6 +138,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [internalChatOpen, setInternalChatOpen] = useState(false);
   const unreadInternalMessages = useUnreadInternalMessages(true);
+  // Desktop: expandido (w-60) ou "rail" só com ícones (w-16). No mobile
+  // a sidebar é sempre o drawer expandido — `rail` nunca vale lá.
+  const { collapsed, setCollapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
+  const isDesktop = useIsDesktop();
+  const rail = collapsed && isDesktop;
+  const internalUnreadLabel = `${unreadInternalMessages} mensagem${unreadInternalMessages === 1 ? "" : "s"} não lida${unreadInternalMessages === 1 ? "" : "s"}`;
 
   // Team name(s) shown under the agent's name in the footer — direct
   // team_members -> teams lookup (no embedded join: team_members.user_id
@@ -191,6 +252,41 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     };
   }, [open, onClose]);
 
+  // Conteúdo dos botões extras injetados por papel (supervisor, mensagens
+  // internas, trocar senha) — mesmo visual dos links, nos dois modos.
+  const renderExtraButton = (
+    key: string,
+    label: string,
+    Icon: typeof Headphones,
+    onClick: () => void,
+    unread = 0,
+  ) => (
+    <li key={key}>
+      <RailTooltip enabled={rail} label={label}>
+        <button
+          type="button"
+          onClick={onClick}
+          aria-label={rail ? (unread > 0 ? `${label} (${internalUnreadLabel})` : label) : undefined}
+          className={navItemClass(rail, INACTIVE_ITEM)}
+        >
+          <Icon className="h-4 w-4 shrink-0" />
+          {!rail && <span className="flex-1">{label}</span>}
+          {unread > 0 &&
+            (rail ? (
+              <RailDot />
+            ) : (
+              <span
+                aria-label={internalUnreadLabel}
+                className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground"
+              >
+                {unread > 99 ? "99+" : unread}
+              </span>
+            ))}
+        </button>
+      </RailTooltip>
+    </li>
+  );
+
   return (
     <>
       {/* Backdrop — only exists on mobile and only when open. Clicking
@@ -215,19 +311,42 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
           // Desktop: static, always visible — reset all the mobile framing.
-          "lg:static lg:z-0 lg:w-60 lg:translate-x-0 lg:transition-none",
+          // A largura alterna entre expandido (w-60) e rail (w-16).
+          "lg:static lg:z-0 lg:translate-x-0 lg:overflow-hidden lg:transition-[width] lg:will-change-auto",
+          rail ? "lg:w-16" : "lg:w-60",
         )}
         aria-label="Navegação principal"
       >
-        {/* Logo row. On mobile we put a close button here; on desktop the
-            close button is hidden since the sidebar is always-visible. */}
-        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
-          <Link href={homeHref} className="flex items-center gap-2">
-            <DdmLogo showBackground />
-            <span className="text-sm font-semibold text-foreground">
-              DDM CRM
-            </span>
-          </Link>
+        {/* Logo row. On mobile we put a close button here; on desktop
+            it holds the collapse/expand toggle instead. */}
+        <div
+          className={cn(
+            "flex h-14 shrink-0 items-center border-b border-border",
+            rail ? "justify-center px-2" : "justify-between gap-2 px-4",
+          )}
+        >
+          {!rail && (
+            <Link href={homeHref} className="flex min-w-0 items-center gap-2">
+              <DdmLogo showBackground />
+              <span className="truncate text-sm font-semibold text-foreground">
+                DDM CRM
+              </span>
+            </Link>
+          )}
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={rail ? "Expandir menu" : "Recolher menu"}
+            aria-expanded={!rail}
+            title={rail ? "Expandir menu (Ctrl+B)" : "Recolher menu (Ctrl+B)"}
+            className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:flex"
+          >
+            {rail ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
           <button
             type="button"
             onClick={onClose}
@@ -239,138 +358,129 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         </div>
 
         {/* Main navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4">
+        <TooltipProvider>
+        <nav className={cn("flex-1 overflow-x-hidden overflow-y-auto py-4", rail ? "px-2" : "px-3")}>
           <ul className="flex flex-col gap-1">
             {visibleNavItems.map((item) => {
               const isActive = item.href === activeNavHref;
 
               const showUnreadDot =
                 item.href === "/inbox" && totalUnread > 0 && !isActive;
+              const unreadLabel = `${totalUnread} conversa${totalUnread === 1 ? "" : "s"} não lida${totalUnread === 1 ? "" : "s"}`;
 
               return (
                 <Fragment key={item.href}>
                   <li>
-                    <Link
-                      href={item.href}
-                      className={cn(
-                        // Taller on mobile so fingers can hit the row reliably (≥44px).
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                        isActive
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      <span className="flex-1">{item.label}</span>
-                      {item.beta && (
-                        <span
-                          aria-label="Recurso Beta"
-                          className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-300"
-                        >
-                          Beta
-                        </span>
-                      )}
-                      {showUnreadDot && (
-                        <span
-                          aria-label={`${totalUnread} conversa${totalUnread === 1 ? "" : "s"} não lida${totalUnread === 1 ? "" : "s"}`}
-                          className="relative flex h-2 w-2"
-                        >
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                        </span>
-                      )}
-                    </Link>
+                    <RailTooltip enabled={rail} label={item.label}>
+                      <Link
+                        href={item.href}
+                        aria-label={
+                          rail
+                            ? showUnreadDot
+                              ? `${item.label} (${unreadLabel})`
+                              : item.label
+                            : undefined
+                        }
+                        aria-current={isActive ? "page" : undefined}
+                        className={navItemClass(
+                          rail,
+                          isActive ? ACTIVE_ITEM : INACTIVE_ITEM,
+                        )}
+                      >
+                        <item.icon className="h-4 w-4 shrink-0" />
+                        {!rail && <span className="flex-1">{item.label}</span>}
+                        {!rail && item.beta && (
+                          <span
+                            aria-label="Recurso Beta"
+                            className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-300"
+                          >
+                            Beta
+                          </span>
+                        )}
+                        {showUnreadDot &&
+                          (rail ? (
+                            <RailDot />
+                          ) : (
+                            <span
+                              aria-label={unreadLabel}
+                              className="relative flex h-2 w-2"
+                            >
+                              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                            </span>
+                          ))}
+                      </Link>
+                    </RailTooltip>
                   </li>
                   {item.href === "/inbox" && accountRole === "agent" && (
                     <>
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => setInternalChatOpen(true)}
-                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:py-2"
-                        >
-                          <Headphones className="h-4 w-4" />
-                          <span className="flex-1">Conversar com supervisor</span>
-                          {unreadInternalMessages > 0 && (
-                            <span
-                              aria-label={`${unreadInternalMessages} mensagem${unreadInternalMessages === 1 ? "" : "s"} não lida${unreadInternalMessages === 1 ? "" : "s"}`}
-                              className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[#FF5706] px-1 text-[10px] font-semibold text-white"
-                            >
-                              {unreadInternalMessages > 99 ? "99+" : unreadInternalMessages}
-                            </span>
-                          )}
-                        </button>
-                      </li>
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => setPasswordDialogOpen(true)}
-                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:py-2"
-                        >
-                          <KeyRound className="h-4 w-4" />
-                          <span className="flex-1">Trocar senha</span>
-                        </button>
-                      </li>
+                      {renderExtraButton(
+                        "supervisor",
+                        "Conversar com supervisor",
+                        Headphones,
+                        () => setInternalChatOpen(true),
+                        unreadInternalMessages,
+                      )}
+                      {renderExtraButton("password-agent", "Trocar senha", KeyRound, () =>
+                        setPasswordDialogOpen(true),
+                      )}
                     </>
                   )}
                   {item.href === "/inbox" &&
-                    (accountRole === "admin" || accountRole === "owner") && (
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => setInternalChatOpen(true)}
-                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:py-2"
-                        >
-                          <Headphones className="h-4 w-4" />
-                          <span className="flex-1">Mensagens internas</span>
-                          {unreadInternalMessages > 0 && (
-                            <span
-                              aria-label={`${unreadInternalMessages} mensagem${unreadInternalMessages === 1 ? "" : "s"} não lida${unreadInternalMessages === 1 ? "" : "s"}`}
-                              className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[#FF5706] px-1 text-[10px] font-semibold text-white"
-                            >
-                              {unreadInternalMessages > 99 ? "99+" : unreadInternalMessages}
-                            </span>
-                          )}
-                        </button>
-                      </li>
+                    (accountRole === "admin" || accountRole === "owner") &&
+                    renderExtraButton(
+                      "internal",
+                      "Mensagens internas",
+                      Headphones,
+                      () => setInternalChatOpen(true),
+                      unreadInternalMessages,
                     )}
-                  {item.href === "/inbox" && accountRole === "admin" && (
-                    <li>
-                      <button
-                        type="button"
-                        onClick={() => setPasswordDialogOpen(true)}
-                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:py-2"
-                      >
-                        <KeyRound className="h-4 w-4" />
-                        <span className="flex-1">Trocar senha</span>
-                      </button>
-                    </li>
-                  )}
+                  {item.href === "/inbox" &&
+                    accountRole === "admin" &&
+                    renderExtraButton("password-admin", "Trocar senha", KeyRound, () =>
+                      setPasswordDialogOpen(true),
+                    )}
                 </Fragment>
               );
             })}
 
             {visibleReportNavItems.length > 0 && (
               <li>
-                <button
-                  type="button"
-                  onClick={() => setReportsOpen((o) => !o)}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                    isReportsActive
-                      ? "text-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  )}
-                >
-                  <BarChart2 className="h-4 w-4" />
-                  <span className="flex-1 text-left">Relatórios</span>
-                  {reportsOpen ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </button>
-                {reportsOpen && (
+                {/* No rail, clicar em Relatórios expande o menu já com o
+                    grupo aberto — mais simples e robusto que um popover. */}
+                <RailTooltip enabled={rail} label="Relatórios">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (rail) {
+                        setCollapsed(false);
+                        setReportsOpen(true);
+                      } else {
+                        setReportsOpen((o) => !o);
+                      }
+                    }}
+                    aria-label={rail ? "Relatórios (expandir menu)" : undefined}
+                    aria-expanded={rail ? undefined : reportsOpen}
+                    className={navItemClass(
+                      rail,
+                      isReportsActive
+                        ? rail
+                          ? ACTIVE_ITEM
+                          : "text-primary"
+                        : INACTIVE_ITEM,
+                    )}
+                  >
+                    <BarChart2 className="h-4 w-4 shrink-0" />
+                    {!rail && <span className="flex-1 text-left">Relatórios</span>}
+                    {!rail &&
+                      (reportsOpen ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      ))}
+                  </button>
+                </RailTooltip>
+                {reportsOpen && !rail && (
                   <ul className="mt-1 flex flex-col gap-1 pl-4">
                     {visibleReportNavItems.map((item) => {
                       const isActive = item.href === activeReportHref;
@@ -378,11 +488,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                         <li key={item.href}>
                           <Link
                             href={item.href}
+                            aria-current={isActive ? "page" : undefined}
                             className={cn(
                               "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                              isActive
-                                ? "bg-primary/10 text-primary"
-                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                              isActive ? ACTIVE_ITEM : INACTIVE_ITEM,
                             )}
                           >
                             <item.icon className="h-4 w-4" />
@@ -409,33 +518,33 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                   : matchesPrefix(pathname, item.href);
               return (
                 <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors lg:py-2",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    )}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
+                  <RailTooltip enabled={rail} label={item.label}>
+                    <Link
+                      href={item.href}
+                      aria-label={rail ? item.label : undefined}
+                      aria-current={isActive ? "page" : undefined}
+                      className={navItemClass(rail, isActive ? ACTIVE_ITEM : INACTIVE_ITEM)}
+                    >
+                      <item.icon className="h-4 w-4 shrink-0" />
+                      {!rail && item.label}
+                    </Link>
+                  </RailTooltip>
                 </li>
               );
             })}
           </ul>
         </nav>
+        </TooltipProvider>
 
         {/* User section */}
-        <div className="shrink-0 border-t border-border p-3">
+        <div className={cn("shrink-0 border-t border-border", rail ? "p-2" : "p-3")}>
           {/* Account name display — surfaced only when the account
               name differs from the user's own name (see
               `showAccountStrip`). For a default solo account the two
               match, so we hide it to avoid duplicating the user name
               below; for renamed or shared accounts it tells the user
-              which account they're acting in. */}
-          {showAccountStrip && account?.name ? (
+              which account they're acting in. Oculto no rail. */}
+          {!rail && showAccountStrip && account?.name ? (
             <div className="mb-2 flex items-center gap-2 px-3 text-xs text-muted-foreground">
               <UsersRound className="size-3.5 shrink-0" />
               {/* `title=` exposes the full name on hover when it
@@ -465,7 +574,14 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             </div>
           ) : null}
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60 focus:bg-muted/60 focus:outline-none data-popup-open:bg-muted/60">
+            <DropdownMenuTrigger
+              aria-label={rail ? `Conta: ${profile?.full_name ?? "Usuário"}` : undefined}
+              title={rail ? (profile?.full_name ?? "Usuário") : undefined}
+              className={cn(
+                "flex w-full items-center rounded-lg text-left transition-colors hover:bg-muted/60 focus:bg-muted/60 focus:outline-none data-popup-open:bg-muted/60",
+                rail ? "justify-center p-1" : "gap-3 px-3 py-2",
+              )}
+            >
               <Avatar className="size-8 shrink-0">
                 {profile?.avatar_url ? (
                   <AvatarImage
@@ -479,22 +595,24 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     "U"}
                 </AvatarFallback>
               </Avatar>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {profile?.full_name ?? "Usuário"}
-                </p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {profile?.email ?? ""}
-                </p>
-                {teamNames.length > 0 && (
-                  <p className="truncate text-[11px] text-muted-foreground">
-                    {teamNames.join(", ")}
+              {!rail && (
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {profile?.full_name ?? "Usuário"}
                   </p>
-                )}
-              </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {profile?.email ?? ""}
+                  </p>
+                  {teamNames.length > 0 && (
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {teamNames.join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              align="end"
+              align={rail ? "start" : "end"}
               side="top"
               sideOffset={6}
               className="min-w-56 bg-popover text-popover-foreground ring-border"
