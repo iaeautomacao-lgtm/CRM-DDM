@@ -22,7 +22,8 @@ function normalize(input: string): string {
 const OPT_OUT_PATTERNS = [
   /\bnao (?:quero|desejo) (?:mais )?(?:receber|mensagens?|contato)\b/,
   /\b(?:pare|para) de (?:me )?(?:mandar|enviar) (?:mensagens?|msg)\b/,
-  /\bnao (?:me )?(?:mande|envie) mais\b/,
+  /\bnao (?:me )?(?:mande|envie|mandar|enviar|receber) mais (?:mensagens?|msg|contato)?\b/,
+  /\bnao (?:me )?(?:mandar|enviar|receber) mais\b/,
   /\b(?:remova|retire) (?:meu )?(?:numero|contato)\b/,
   /\bnao entre mais em contato\b/,
 ];
