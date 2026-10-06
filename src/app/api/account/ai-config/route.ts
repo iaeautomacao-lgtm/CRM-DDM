@@ -3,6 +3,11 @@ import { auditFetch } from '@/lib/audit/context'
 import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { encrypt, tryDecrypt } from '@/lib/whatsapp/encryption'
+import {
+  aiProviderLabel,
+  isAiProvider,
+  isModelCompatibleWithProvider,
+} from '@/lib/ai/models'
 
 // Server-side owner of wacrm.ai_config — the browser client never reads
 // or writes api_key/elevenlabs_api_key directly (that was the finding:
@@ -145,6 +150,65 @@ export async function POST(request: Request) {
     const { accountId } = resolved
 
     const body = await request.json()
+
+    if (!isAiProvider(body.api_provider)) {
+      return NextResponse.json(
+        { error: 'Provider de IA inválido.' },
+        { status: 400 },
+      )
+    }
+
+    // Trocar o provider da conta não pode invalidar silenciosamente um
+    // fluxo ativo que fixou um modelo no nó. Drafts podem permanecer com
+    // config incompleta/incompatível até a próxima ativação.
+    const { data: activeFlows, error: activeFlowsError } = await supabaseAdmin()
+      .from('flows')
+      .select('id, name')
+      .eq('account_id', accountId)
+      .eq('status', 'active')
+
+    if (activeFlowsError) {
+      return NextResponse.json({ error: activeFlowsError.message }, { status: 500 })
+    }
+
+    const activeFlowIds = (activeFlows ?? []).map((flow) => flow.id)
+    if (activeFlowIds.length > 0) {
+      const { data: aiNodes, error: aiNodesError } = await supabaseAdmin()
+        .from('flow_nodes')
+        .select('flow_id, node_key, config')
+        .in('flow_id', activeFlowIds)
+        .eq('node_type', 'ai_agent')
+
+      if (aiNodesError) {
+        return NextResponse.json({ error: aiNodesError.message }, { status: 500 })
+      }
+
+      const incompatible = (aiNodes ?? []).filter((node) => {
+        const model =
+          node.config &&
+          typeof node.config === 'object' &&
+          typeof (node.config as { model?: unknown }).model === 'string'
+            ? (node.config as { model: string }).model.trim()
+            : ''
+        return !!model && !isModelCompatibleWithProvider(model, body.api_provider)
+      })
+
+      if (incompatible.length > 0) {
+        return NextResponse.json(
+          {
+            error:
+              `Não é possível trocar o provider para ${aiProviderLabel(body.api_provider)} enquanto houver nós de IA ativos com modelos incompatíveis.`,
+            code: 'active_flow_model_provider_mismatch',
+            nodes: incompatible.map((node) => ({
+              flow_id: node.flow_id,
+              node_key: node.node_key,
+              model: (node.config as { model: string }).model,
+            })),
+          },
+          { status: 409 },
+        )
+      }
+    }
 
     if (body.enabled && body.api_provider !== 'hermes') {
       const sendingNewKey = typeof body.api_key === 'string' && body.api_key !== MASKED_SENTINEL && !!body.api_key.trim()
