@@ -42,7 +42,12 @@ export async function GET(request: Request) {
           { accountId, userId, line },
           { includeStatus: false }
         )
-        if (error) throw error
+        // Total da seção é complemento: se falhar, devolve null e a UI usa
+        // a contagem carregada — nunca derruba os contadores de não lidas.
+        if (error) {
+          console.error('[inbox/counts] total por status falhou:', error.message)
+          return [status, null] as const
+        }
         return [status, count ?? 0] as const
       })
     )
