@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { KeyboardEvent } from "react";
 import { shouldCloseOnEscape } from "@/lib/a11y/dialog-keys";
+import { findNextFocusable, getFocusableElements } from "@/lib/a11y/focus-trap";
 
 /**
  * Acessibilidade mínima para modais feitos à mão (div fixed + overlay):
@@ -10,6 +11,7 @@ import { shouldCloseOnEscape } from "@/lib/a11y/dialog-keys";
  *   tabIndex={-1}), para leitor de tela e teclado começarem ali;
  * - Esc fecha quando onClose é passado (onKeyDown no container — com modais empilhados, só o que
  *   tem o foco reage);
+ * - Tab / Shift+Tab ciclam apenas entre os elementos focáveis visíveis do modal (focus trap);
  * - ao fechar, devolve o foco para quem abriu o modal.
  *
  * Uso: const dlg = useDialogA11y(open, onClose);
@@ -41,6 +43,33 @@ export function useDialogA11y<T extends HTMLElement = HTMLDivElement>(
   }, [open]);
 
   const onKeyDown = useCallback((e: KeyboardEvent<HTMLElement>) => {
+    if (e.key === "Tab") {
+      if (e.defaultPrevented) return;
+      const node = ref.current;
+      if (!node) return;
+
+      const focusables = getFocusableElements(node);
+      if (focusables.length === 0) {
+        // Sem elementos focáveis: impede que o Tab saia para o fundo da página
+        e.preventDefault();
+        return;
+      }
+
+      const active = document.activeElement as HTMLElement | null;
+      const next = findNextFocusable(
+        focusables,
+        active,
+        e.shiftKey,
+        (el, act) => el === act || el.contains(act)
+      );
+
+      if (next) {
+        e.preventDefault();
+        next.focus();
+      }
+      return;
+    }
+
     const close = onCloseRef.current;
     if (!close || !shouldCloseOnEscape(e.key, e.target as Element, e.defaultPrevented)) return;
     e.preventDefault();

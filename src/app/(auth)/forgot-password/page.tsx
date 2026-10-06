@@ -4,7 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth/auth-errors";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -48,7 +49,7 @@ export default function ForgotPasswordPage() {
         <Card className="w-full max-w-md border-border bg-card">
           <CardHeader className="items-center text-center">
             <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-              <CheckCircle className="h-6 w-6 text-primary" />
+              <CheckCircle className="h-6 w-6 text-primary" aria-hidden="true" />
             </div>
             <CardTitle className="text-xl text-foreground">
               Verifique seu e-mail
@@ -60,13 +61,14 @@ export default function ForgotPasswordPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/login">
-              <Button
-                variant="outline"
-                className="w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                Voltar para o login
-              </Button>
+            <Link
+              href="/login"
+              className={cn(
+                buttonVariants({ variant: "outline" }),
+                "w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+              )}
+            >
+              Voltar para o login
             </Link>
           </CardContent>
         </Card>
@@ -79,32 +81,40 @@ export default function ForgotPasswordPage() {
       <Card className="w-full max-w-md border-border bg-card">
         <CardHeader className="items-center text-center">
           <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <MessageSquare className="h-6 w-6 text-primary" />
+            <MessageSquare className="h-6 w-6 text-primary" aria-hidden="true" />
           </div>
           <CardTitle className="text-xl text-foreground">Redefinir senha</CardTitle>
           <CardDescription className="text-muted-foreground">
-            Digite seu e-mail e enviaremos um link de redefinição
+            Digite seu e-mail e enviaremos um link de redefinição de senha
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleReset} className="flex flex-col gap-4">
             {error && (
-              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive">
+              <div
+                id="forgot-error"
+                role="alert"
+                aria-live="polite"
+                className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive"
+              >
                 {error}
               </div>
             )}
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="email" className="text-muted-foreground">
+              <Label htmlFor="email" className="font-medium text-foreground">
                 E-mail
               </Label>
               <Input
                 id="email"
-                type="email" autoComplete="email"
+                type="email"
+                autoComplete="email"
                 placeholder="seu@exemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? "forgot-error" : undefined}
                 className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
               />
             </div>
@@ -120,9 +130,9 @@ export default function ForgotPasswordPage() {
 
           <Link
             href="/login"
-            className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+            className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             Voltar para o login
           </Link>
         </CardContent>

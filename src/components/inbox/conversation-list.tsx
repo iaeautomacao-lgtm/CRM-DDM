@@ -678,10 +678,10 @@ interface ConversationItemProps {
 }
 
 const SENTIMENT_ICONS: Record<string, { emoji: string; color: string; label: string }> = {
-  positive: { emoji: "😊", color: "text-emerald-500", label: "Sentimento: Positivo" },
-  neutral: { emoji: "😐", color: "text-slate-400", label: "Sentimento: Neutro" },
-  negative: { emoji: "😠", color: "text-rose-500", label: "Sentimento: Negativo" },
-  mixed: { emoji: "🧐", color: "text-amber-500", label: "Sentimento: Misto" },
+  positive: { emoji: "😊", color: "text-emerald-700 dark:text-emerald-400", label: "Sentimento: Positivo" },
+  neutral: { emoji: "😐", color: "text-slate-700 dark:text-slate-300", label: "Sentimento: Neutro" },
+  negative: { emoji: "😠", color: "text-rose-700 dark:text-rose-400", label: "Sentimento: Negativo" },
+  mixed: { emoji: "🧐", color: "text-amber-700 dark:text-amber-400", label: "Sentimento: Misto" },
 };
 
 /** "Aguardando há X" para conversa sem atendente, a partir da última mensagem do cliente. */
@@ -757,7 +757,7 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
           {/* O horário vira "aguardando X" (âmbar) quando o cliente espera
               ≥ 5 min sem atendente — mesmo espaço, sem linha extra. */}
           <span
-            className={cn("shrink-0 text-xs", waiting ? "font-medium text-amber-600" : "text-muted-foreground")}
+            className={cn("shrink-0 text-xs", waiting ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground")}
             title={timeAgoTitle}
           >
             {waiting ?? timeAgo}

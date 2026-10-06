@@ -99,10 +99,11 @@ function LoginPageInner() {
         <CardHeader className="items-center text-center">
           <div className="bg-primary/10 mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
             {inviteToken ? (
-              <UsersRound className="text-primary h-6 w-6" />
+              <UsersRound className="text-primary h-6 w-6" aria-hidden="true" />
             ) : (
               <DdmLogo
                 className="text-primary h-7 w-7"
+                aria-hidden="true"
                 outlineColor="oklch(from var(--primary) l c h / 0.1)"
               />
             )}
@@ -128,7 +129,9 @@ function LoginPageInner() {
             )}
             {error && (
               <div
+                id="login-error"
                 role="alert"
+                aria-live="polite"
                 className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive"
               >
                 {error}
@@ -136,41 +139,47 @@ function LoginPageInner() {
             )}
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="email" className="text-muted-foreground">
+              <Label htmlFor="email" className="font-medium text-foreground">
                 E-mail
               </Label>
               <Input
                 id="email"
-                type="email" autoComplete="email"
+                type="email"
+                autoComplete="email"
                 placeholder="seu@exemplo.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? "login-error" : undefined}
                 className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
               />
             </div>
 
             <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password" className="text-muted-foreground">
-                  Senha
-                </Label>
-                <Link
-                  href="/forgot-password"
-                  className="text-primary hover:text-primary/80 text-sm"
-                >
-                  Esqueceu sua senha?
-                </Link>
-              </div>
+              <Label htmlFor="password" className="font-medium text-foreground">
+                Senha
+              </Label>
               <Input
                 id="password"
-                type="password" autoComplete="current-password"
+                type="password"
+                autoComplete="current-password"
                 placeholder="Digite sua senha"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? "login-error" : undefined}
                 className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
               />
+              <div className="flex justify-end">
+                <Link
+                  href="/forgot-password"
+                  className="text-sm text-primary hover:text-primary/80 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  Esqueceu sua senha?
+                </Link>
+              </div>
             </div>
 
             <Button
