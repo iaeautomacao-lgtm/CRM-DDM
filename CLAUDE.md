@@ -4,7 +4,7 @@
 
 ## Stack
 - Next.js 16 (App Router) + TypeScript
-- Supabase (PostgreSQL, schema `wacrm`, projeto `mkrkkvbseobdqsalrorl`)
+- Supabase (PostgreSQL, schema `wacrm`, produção: projeto `cyftbffhgjmsfogxawrl`)
 - Meta Cloud API + WAHA (api.meuchatia.com.br)
 - OpenAI GPT-4o-mini
 - Phusion Passenger em `grpia@server.ddmsrv.com ~/apps/omnichannel`
