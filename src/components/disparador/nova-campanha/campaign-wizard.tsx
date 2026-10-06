@@ -23,6 +23,7 @@ import { inferTeamFromChannels, keepChannelsInTeam } from "@/lib/disparador/chan
 import { suggestImportColumnMap, type ImportColumnMap } from "@/lib/disparador/import-mapping";
 import { parseImportCsv, summarizeImport, tableFromMatrix, type ParsedImportTable } from "@/lib/disparador/import-parse";
 import { phoneKey } from "@/lib/disparador/phone-key";
+import { resolveProviderThroughput, type RitmoResponse } from "@/lib/disparador/ritmo";
 import { TEMPLATE_VALIDATION_COLUMNS } from "@/lib/disparador/template-validation";
 import { utmCpfKey, utmPhoneKey } from "@/lib/disparador/utm-links";
 import { SAMPLE_PREVIEW_CONTACT } from "./message-preview";
@@ -399,6 +400,22 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
     };
   }, [open, editing, keepsExistingAudience]);
 
+  const [ritmoData, setRitmoData] = useState<RitmoResponse | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    apiFetch("/api/disparador/ritmo")
+      .then((r) => r.json())
+      .then((data: RitmoResponse) => {
+        if (!cancelled && data?.ok) setRitmoData(data);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   const knownContacts: number | null = importFile
     ? (summary?.validos ?? null)
     : keepsExistingAudience
@@ -406,7 +423,16 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
       : audiencePreview && !audiencePreview.loading && audiencePreview.total != null
         ? Math.max(0, audiencePreview.total - (audiencePreview.blacklisted ?? 0))
         : null;
-  const forecast = useMemo(() => forecastForForm(form, knownContacts, now), [form, knownContacts, now]);
+
+  const throughput = useMemo(() => {
+    if (!ritmoData) return undefined;
+    return resolveProviderThroughput(ritmoData, provider);
+  }, [ritmoData, provider]);
+
+  const forecast = useMemo(
+    () => forecastForForm(form, knownContacts, now, throughput),
+    [form, knownContacts, now, throughput]
+  );
   const forecastReason =
     knownContacts == null
       ? "Importe a base (ou escolha o público) no passo Origem para calcular quando o envio termina."

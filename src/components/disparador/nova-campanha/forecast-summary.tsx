@@ -2,8 +2,6 @@
 
 import { AlertTriangle, Clock } from "lucide-react";
 import type { ForecastResult } from "@/lib/disparador/dispatch-forecast";
-import { CRON_SEND_CONCURRENCY } from "@/lib/disparador/dispatch-forecast";
-import { MAX_CRON_BATCH_CANDIDATES } from "@/lib/disparador/cron-batching";
 
 // Previsão de término (passo Configurações e Revisão). Sempre como faixa:
 // o ritmo real depende do provedor e de outras campanhas no mesmo cron.
@@ -73,9 +71,7 @@ export function ForecastSummary({ forecast, unavailableReason, endTarget, compac
             .
           </li>
           <li>
-            Ritmo considerado: {fmtNumber(forecast.conservador.perMinute)} a {fmtNumber(forecast.otimista.perMinute)} mensagens
-            por minuto (o motor roda 1× por minuto, com {CRON_SEND_CONCURRENCY} envios simultâneos e até{" "}
-            {MAX_CRON_BATCH_CANDIDATES} por ciclo). Outras campanhas rodando ao mesmo tempo deixam mais lento.
+            ≈ {fmtNumber(forecast.ratePerMinute ?? forecast.otimista.perMinute)} envios/min neste número (ritmo medido nas últimas 24 h). Outras campanhas no mesmo número dividem o ritmo.
           </li>
           <li>Feriados não entram na conta.</li>
         </ul>
