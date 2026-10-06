@@ -6,6 +6,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth/auth-errors";
 import { safeReturnPath } from "@/lib/auth/return-path";
+import { isPasswordResetSuccess } from "@/lib/auth/recovery-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +44,8 @@ function LoginPageInner() {
   // account. After a successful sign-in we send them to the join
   // page to accept rather than to /dashboard.
   const inviteToken = searchParams.get("invite");
+  // Vindo de /reset-password depois de trocar a senha.
+  const passwordReset = isPasswordResetSuccess(searchParams.get("reset"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -115,6 +118,14 @@ function LoginPageInner() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
+            {passwordReset && !error && (
+              <div
+                role="status"
+                className="rounded-lg border border-emerald-600/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300"
+              >
+                Senha redefinida com sucesso. Entre com a nova senha.
+              </div>
+            )}
             {error && (
               <div
                 role="alert"

@@ -1,10 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE, translateAuthError } from "@/lib/auth/auth-errors";
-import { Button } from "@/components/ui/button";
+import {
+  FORGOT_PASSWORD_PATH,
+  LOGIN_AFTER_RESET_PATH,
+  hasRecoveryLinkError,
+  resolveRecoveryStatus,
+  type RecoveryStatus,
+} from "@/lib/auth/recovery-link";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -14,7 +22,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { KeyRound, CheckCircle, ArrowLeft } from "lucide-react";
+import { KeyRound, ArrowLeft, Loader2, Link2Off } from "lucide-react";
 import Link from "next/link";
 
 export default function ResetPasswordPage() {
@@ -22,10 +30,39 @@ export default function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  // Antes de mostrar o formulário, confere se o link abriu uma sessão de
+  // recuperação (o /auth/callback troca o código; link vencido ou já
+  // usado chega com ?error= / #error=).
+  const [status, setStatus] = useState<RecoveryStatus>("checking");
 
   const router = useRouter();
   const supabase = createClient();
+
+  useEffect(() => {
+    let cancelled = false;
+    const linkError = hasRecoveryLinkError(window.location.search, window.location.hash);
+    // Link no formato antigo (tokens no #): o client processa a URL e
+    // avisa com PASSWORD_RECOVERY.
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!cancelled && !linkError && event === "PASSWORD_RECOVERY" && session) {
+        setStatus("ready");
+      }
+    });
+    void supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (cancelled) return;
+        const next = resolveRecoveryStatus({ linkError, hasSession: !!data.session });
+        setStatus((current) => (current === "ready" && !linkError ? current : next));
+      })
+      .catch(() => {
+        if (!cancelled) setStatus((current) => (current === "ready" ? current : "invalid"));
+      });
+    return () => {
+      cancelled = true;
+      listener.subscription.unsubscribe();
+    };
+  }, [supabase]);
 
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,30 +90,58 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    setSuccess(true);
-    setLoading(false);
-
-    // Redireciona para o login após 3 segundos
-    setTimeout(() => {
-      router.replace("/dashboard");
-    }, 3000);
+    // Encerra a sessão de recuperação (e as outras sessões da conta) e volta
+    // ao login, que mostra o aviso de sucesso. Falha ao sair não impede o
+    // redirecionamento — a senha já foi trocada.
+    await supabase.auth.signOut().catch(() => undefined);
+    router.replace(LOGIN_AFTER_RESET_PATH);
   };
 
-  if (success) {
+  if (status === "checking") {
+    return (
+      <div className="bg-background flex min-h-screen items-center justify-center px-4">
+        <div role="status" className="text-muted-foreground flex items-center gap-2 text-sm">
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          Verificando o link de redefinição...
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "invalid") {
     return (
       <div className="bg-background flex min-h-screen items-center justify-center px-4">
         <Card className="border-border bg-card w-full max-w-md">
           <CardHeader className="items-center text-center">
             <div className="bg-primary/10 mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
-              <CheckCircle className="text-primary h-6 w-6" />
+              <Link2Off className="text-primary h-6 w-6" aria-hidden />
             </div>
-            <CardTitle className="text-foreground text-xl">
-              Senha redefinida com sucesso!
+            <CardTitle className="text-foreground text-xl" role="alert">
+              Este link expirou ou já foi usado
             </CardTitle>
             <CardDescription className="text-muted-foreground">
-              Sua senha foi atualizada. Redirecionando para o painel...
+              Por segurança, cada link de redefinição vale uma vez e por pouco
+              tempo. Peça um novo link para continuar.
             </CardDescription>
           </CardHeader>
+          <CardContent>
+            <Link
+              href={FORGOT_PASSWORD_PATH}
+              className={cn(
+                buttonVariants(),
+                "bg-primary text-primary-foreground hover:bg-primary/90 h-10 w-full",
+              )}
+            >
+              Pedir um novo link
+            </Link>
+            <Link
+              href="/login"
+              className="text-muted-foreground hover:text-foreground mt-6 flex items-center justify-center gap-2 text-sm"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Voltar para o login
+            </Link>
+          </CardContent>
         </Card>
       </div>
     );
