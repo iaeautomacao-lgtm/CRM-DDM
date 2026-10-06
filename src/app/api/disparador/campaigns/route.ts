@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import {
@@ -27,7 +28,8 @@ import { isMissingColumnError, isUuid, pickCampaignFields } from "@/lib/disparad
 
 export async function POST(request: Request) {
   try {
-    const { userId, accountId } = await getCurrentAccount();
+    // Sessão + conta + papel (owner/admin, mesmo da página /disparador).
+    const { userId, accountId } = await requireDisparadorAccess();
     const dryRun = new URL(request.url).searchParams.get("dry_run") === "1";
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body || typeof body !== "object") {

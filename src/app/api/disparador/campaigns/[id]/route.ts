@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
-import { getDisparadorScope } from "@/lib/disparador/scope";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import {
   decideCampaignStatus,
@@ -25,23 +25,19 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Sessão + conta + papel (owner/admin, mesmo da página /disparador).
+  let accountId: string;
   try {
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
-
+    ({ accountId } = await requireDisparadorAccess());
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+  try {
     const { id: campaignId } = await params;
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body || typeof body !== "object") {
       return NextResponse.json({ error: "Corpo da requisição inválido." }, { status: 400 });
     }
-
-    const { accountId } = await getDisparadorScope(supabase);
 
     const { data: rows, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
@@ -157,19 +153,14 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let accountId: string;
   try {
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
-
+    ({ accountId } = await requireDisparadorAccess());
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+  try {
     const { id: campaignId } = await params;
-
-    const { accountId } = await getDisparadorScope(supabase);
 
     const { data: campaign, error: campaignError } = await supabaseAdmin()
       .from("campaigns")

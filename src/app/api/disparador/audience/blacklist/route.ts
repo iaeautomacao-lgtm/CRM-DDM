@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
 import { phoneKey } from "@/lib/disparador/phone-key";
@@ -13,7 +14,7 @@ const MAX_PHONES = 200_000;
 
 export async function POST(request: Request) {
   try {
-    await getCurrentAccount();
+    await requireDisparadorAccess();
     const body = (await request.json().catch(() => null)) as { phones?: unknown } | null;
     const phones = Array.isArray(body?.phones) ? body.phones : null;
     if (!phones) return NextResponse.json({ error: "Envie a lista de telefones." }, { status: 400 });

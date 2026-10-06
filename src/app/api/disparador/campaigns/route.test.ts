@@ -7,11 +7,19 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/account", () => ({
-  getCurrentAccount: mocks.account,
-  toErrorResponse: (err: unknown) =>
-    new Response(JSON.stringify({ error: String(err) }), { status: 401 }),
-}));
+vi.mock("@/lib/auth/account", () => {
+  class ForbiddenError extends Error {
+    readonly status = 403;
+  }
+  return {
+    ForbiddenError,
+    getCurrentAccount: mocks.account,
+    toErrorResponse: (err: unknown) =>
+      new Response(JSON.stringify({ error: String(err) }), {
+        status: (err as { status?: number })?.status ?? 401,
+      }),
+  };
+});
 vi.mock("@/lib/disparador/campaign-config-check", () => ({
   checkCampaignConfig: mocks.check,
 }));
@@ -70,7 +78,7 @@ describe("POST /api/disparador/campaigns", () => {
   afterEach(() => vi.clearAllMocks());
 
   it("cria como rascunho sem agendamento; status/conta decididos no servidor", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     mocks.check.mockResolvedValue({ ok: true, provider: "waha", wabaId: null, channels: [] });
     mocks.insert.mockReturnValue({ data: [{ id: "camp-1" }], error: null });
     mocks.update.mockReturnValue({ error: null });
@@ -101,7 +109,7 @@ describe("POST /api/disparador/campaigns", () => {
   });
 
   it("com agendamento futuro vira 'agendado'", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     mocks.check.mockResolvedValue({ ok: true, provider: "waha", wabaId: null, channels: [] });
     mocks.insert.mockReturnValue({ data: [{ id: "camp-2" }], error: null });
     mocks.update.mockReturnValue({ error: null });
@@ -112,7 +120,7 @@ describe("POST /api/disparador/campaigns", () => {
   });
 
   it("recusa agendamento no passado e janela invertida, sem gravar", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     const res = await post(
       body({ agendamento: new Date(Date.now() - 60_000).toISOString(), janela_inicio: "18:00", janela_fim: "08:00" })
     );
@@ -124,14 +132,14 @@ describe("POST /api/disparador/campaigns", () => {
   });
 
   it("conta inteira exige o aceite explícito", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     const res = await post(body({ audience_mode: "account" }));
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/confirme o envio para todos/);
   });
 
   it("erro do validador de canais/templates volta com o status dele", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     mocks.check.mockResolvedValue({ ok: false, status: 400, error: "Modo Padrão usa exatamente 1 template" });
     const res = await post(body());
     expect(res.status).toBe(400);
@@ -140,7 +148,7 @@ describe("POST /api/disparador/campaigns", () => {
   });
 
   it("aceita import_draft_id (nome do #80) e recusa lote fora da faixa", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     mocks.check.mockResolvedValue({ ok: true, provider: "waha", wabaId: null, channels: [] });
     mocks.insert.mockReturnValue({ data: [{ id: "camp-4" }], error: null });
     mocks.update.mockReturnValue({ error: null });
@@ -152,8 +160,18 @@ describe("POST /api/disparador/campaigns", () => {
     expect(res.status).toBe(400);
   });
 
+  it("viewer, agente e supervisor recebem 403 sem validar nem gravar", async () => {
+    for (const role of ["viewer", "agent", "supervisor"]) {
+      mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role });
+      const res = await post(body());
+      expect(res.status).toBe(403);
+    }
+    expect(mocks.check).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
   it("dry_run só valida e devolve o status", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     mocks.check.mockResolvedValue({ ok: true, provider: "meta", wabaId: "w", channels: [] });
     const res = await post(body(), "?dry_run=1");
     expect(res.status).toBe(200);
@@ -162,7 +180,7 @@ describe("POST /api/disparador/campaigns", () => {
   });
 
   it("migration 162 ausente: grava sem agendamento_fim", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
     mocks.check.mockResolvedValue({ ok: true, provider: "waha", wabaId: null, channels: [] });
     mocks.update.mockReturnValue({ error: null });
     mocks.insert

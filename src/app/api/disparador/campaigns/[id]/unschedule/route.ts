@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 
 // POST /api/disparador/campaigns/[id]/unschedule — "Desagendar": a campanha
@@ -8,7 +9,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 // a prepará-la, nada muda e a resposta é 409.
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { accountId } = await getCurrentAccount();
+    const { accountId } = await requireDisparadorAccess();
     const { id } = await params;
 
     const { data, error } = await supabaseAdmin()

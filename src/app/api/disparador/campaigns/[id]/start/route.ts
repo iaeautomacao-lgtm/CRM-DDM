@@ -3,6 +3,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
 import { startCampaign } from "@/lib/disparador/startCampaign";
+import { canManageCampaigns } from "@/lib/disparador/route-auth";
 
 export async function POST(
   request: Request,
@@ -80,6 +81,14 @@ export async function POST(
         return NextResponse.json(
           { error: "Seu perfil não está vinculado a uma conta." },
           { status: 400 }
+        );
+      }
+      // Iniciar / "Iniciar agora" / retomar: só quem gerencia campanhas
+      // (owner/admin, mesmo papel da página /disparador — route-auth.ts).
+      if (!canManageCampaigns(profile.account_role)) {
+        return NextResponse.json(
+          { error: "Seu papel não permite gerenciar campanhas do disparador." },
+          { status: 403 }
         );
       }
       accountId = profile.account_id;

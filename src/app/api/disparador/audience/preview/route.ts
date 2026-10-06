@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
@@ -15,7 +16,7 @@ import { phoneKey } from "@/lib/disparador/phone-key";
 
 export async function POST(request: Request) {
   try {
-    const { accountId } = await getCurrentAccount();
+    const { accountId } = await requireDisparadorAccess();
     const body = (await request.json().catch(() => null)) as { tags_filtro?: unknown } | null;
     const tags = Array.isArray(body?.tags_filtro)
       ? body.tags_filtro.filter((t): t is string => typeof t === "string" && t.trim() !== "")
