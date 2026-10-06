@@ -135,13 +135,30 @@ export async function POST(request: Request) {
     let templateLanguage = body.template_language ?? "pt_BR";
 
     if (provider === "meta") {
-      const { data: tpl } = await db
+      // Template do catálogo da WABA do canal (chave account_id, waba_id,
+      // name, language — migration 160). Antes .maybeSingle() pelo nome
+      // dava erro com o mesmo template em dois idiomas/WABAs, e um
+      // template de outra WABA passava. Linha sem waba_id (antes da 073)
+      // vale como fallback.
+      const { data: channelRows } = await db
+        .from("whatsapp_config")
+        .select("waba_id")
+        .eq("id", channelId!)
+        .limit(1);
+      const channelWabaId: string | null = channelRows?.[0]?.waba_id ?? null;
+      let tplQuery = db
         .from("message_templates")
-        .select("id, name, language")
+        .select("id, name, language, waba_id")
         .eq("name", body.template_name!)
         .eq("account_id", ctx.accountId)
-        .eq("status", "APPROVED")
-        .maybeSingle();
+        .eq("status", "APPROVED");
+      if (body.template_language) tplQuery = tplQuery.eq("language", body.template_language);
+      const { data: tplRows } = await tplQuery.limit(50);
+      const candidates = (tplRows ?? []).filter(
+        (t) => !t.waba_id || !channelWabaId || t.waba_id === channelWabaId
+      );
+      const tpl =
+        candidates.find((t) => channelWabaId && t.waba_id === channelWabaId) ?? candidates[0] ?? null;
 
       if (!tpl) {
         throw badRequest(

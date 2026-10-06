@@ -445,8 +445,11 @@ export async function POST(request: Request) {
 
       // For template sends, load the row so sendTemplateMessage can
       // build header + button components from the template definition.
-      // Match on (user_id, name, language) — same triple the unique
-      // index enforces — so multi-language templates work correctly.
+      // Match on (name, language) and prefer the row of this channel's
+      // WABA: since migration 160 the same name/language may exist once
+      // per WABA (key account_id, waba_id, name, language), so
+      // .maybeSingle() would error with 2 rows and silently drop to the
+      // body-only path. Rows without waba_id (pre-073) are the fallback.
       // Missing template falls through with `templateRow = null` and
       // the legacy body-only path runs.
       // Load the template row so sendTemplateMessage can build header
@@ -455,13 +458,19 @@ export async function POST(request: Request) {
       // crashing the send-builder later in the stack.
       let templateRow: MessageTemplate | null = null
       if (message_type === 'template' && template_name) {
-        const { data } = await supabase
+        const { data: candidates } = await supabase
           .from('message_templates')
           .select('*')
           .eq('account_id', accountId)
           .eq('name', template_name)
           .eq('language', template_language || 'en_US')
-          .maybeSingle()
+          .limit(20)
+        const rows = (candidates ?? []) as Array<Record<string, unknown> & { waba_id?: string | null }>
+        const data =
+          rows.find((t) => config.waba_id && t.waba_id === config.waba_id) ??
+          rows.find((t) => !t.waba_id) ??
+          rows[0] ??
+          null
         if (data && !isMessageTemplate(data)) {
           return NextResponse.json(
             {
