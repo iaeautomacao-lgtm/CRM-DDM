@@ -10,6 +10,7 @@ import { decrypt } from "@/lib/whatsapp/encryption";
 import { fetchSocialProfile } from "./graph";
 import { socialAttachmentContentType, type SocialInboundEvent } from "./inbound";
 import type { ChannelRow } from "./social";
+import { reopenConversationFields } from "@/lib/conversations/reopen";
 
 // Pipeline de entrada do Instagram/Messenger — mesma sequência dos webhooks
 // de WhatsApp: canal → contato (por identidade do canal) → conversa da
@@ -82,7 +83,7 @@ export async function ingestSocialEvent(ev: SocialInboundEvent): Promise<void> {
     last_message_at: createdAt,
     updated_at: new Date().toISOString(),
   };
-  if (conversation.status === "closed") convUpdates.status = "pending";
+  if (conversation.status === "closed") Object.assign(convUpdates, reopenConversationFields());
   await db.from("conversations").update(convUpdates).eq("id", conversation.id);
   await db.rpc("increment_unread_count", { conversation_id: conversation.id });
 

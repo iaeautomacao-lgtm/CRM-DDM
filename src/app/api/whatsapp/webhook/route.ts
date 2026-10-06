@@ -16,6 +16,7 @@ import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
+import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
@@ -743,7 +744,8 @@ async function processMessage(
     updated_at: new Date().toISOString(),
   }
   if (conversation.status === 'closed') {
-    convUpdates.status = 'pending'
+    // Reabertura = atendimento novo: status pending + tabulação zerada.
+    Object.assign(convUpdates, reopenConversationFields())
   }
   const { error: convError } = await supabaseAdmin()
     .from('conversations')
