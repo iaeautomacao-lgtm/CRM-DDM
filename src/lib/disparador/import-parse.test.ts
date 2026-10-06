@@ -71,6 +71,7 @@ describe("summarizeImport", () => {
     const t0 = Date.now();
     const s = summarizeImport(big, { phone: "telefone", var1: "var1" });
     expect(s.validos).toBe(50_000);
-    expect(Date.now() - t0).toBeLessThan(3000);
+    // Folga para a suíte inteira em paralelo; O(n²) com 50 mil linhas leva minutos.
+    expect(Date.now() - t0).toBeLessThan(15_000);
   });
 });

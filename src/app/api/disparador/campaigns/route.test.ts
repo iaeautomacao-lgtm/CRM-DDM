@@ -139,6 +139,19 @@ describe("POST /api/disparador/campaigns", () => {
     expect(mocks.insert).not.toHaveBeenCalled();
   });
 
+  it("aceita import_draft_id (nome do #80) e recusa lote fora da faixa", async () => {
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
+    mocks.check.mockResolvedValue({ ok: true, provider: "waha", wabaId: null, channels: [] });
+    mocks.insert.mockReturnValue({ data: [{ id: "camp-4" }], error: null });
+    mocks.update.mockReturnValue({ error: null });
+    const { draft_id: _omit, ...semDraft } = body();
+    void _omit;
+    await post({ ...semDraft, import_draft_id: DRAFT });
+    expect(mocks.insert.mock.calls[0][1].import_draft_id).toBe(DRAFT);
+    const res = await post(body({ batch_size: 2_000_000 }));
+    expect(res.status).toBe(400);
+  });
+
   it("dry_run só valida e devolve o status", async () => {
     mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1" });
     mocks.check.mockResolvedValue({ ok: true, provider: "meta", wabaId: "w", channels: [] });
