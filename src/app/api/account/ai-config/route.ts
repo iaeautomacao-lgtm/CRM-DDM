@@ -3,6 +3,7 @@ import { auditFetch } from '@/lib/audit/context'
 import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { encrypt, tryDecrypt } from '@/lib/whatsapp/encryption'
+import { recordPromptVersion } from '@/lib/ai/prompt-versions'
 
 // Server-side owner of wacrm.ai_config — the browser client never reads
 // or writes api_key/elevenlabs_api_key directly (that was the finding:
@@ -46,7 +47,7 @@ function maskSecret(value: string): string {
 }
 
 async function resolveAccountId(): Promise<
-  { accountId: string } | { error: NextResponse }
+  { accountId: string; userId: string } | { error: NextResponse }
 > {
   const supabase = await createServerClient()
   const {
@@ -74,7 +75,7 @@ async function resolveAccountId(): Promise<
     }
   }
 
-  return { accountId }
+  return { accountId, userId: user.id }
 }
 
 const DEFAULT_CONFIG = {
@@ -142,7 +143,7 @@ export async function POST(request: Request) {
   try {
     const resolved = await resolveAccountId()
     if ('error' in resolved) return resolved.error
-    const { accountId } = resolved
+    const { accountId, userId } = resolved
 
     const body = await request.json()
 
@@ -201,12 +202,32 @@ export async function POST(request: Request) {
       payload.elevenlabs_api_key = trimmed ? encrypt(trimmed) : null
     }
 
+    // Prompt anterior: só grava versão (histórico, migration 148) quando
+    // o texto mudou — salvar só a chave/voz não "re-salva" o prompt.
+    const { data: previous } = await supabaseAdmin()
+      .from('ai_config')
+      .select('system_prompt')
+      .eq('account_id', accountId)
+      .maybeSingle()
+
     const { error } = await supabaseAdmin()
       .from('ai_config')
       .upsert(payload, { onConflict: 'account_id' })
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    const newPrompt = payload.system_prompt as string
+    if (newPrompt && newPrompt !== (previous?.system_prompt ?? '')) {
+      // Best-effort: recordPromptVersion nunca lança nem bloqueia o salvar.
+      await recordPromptVersion(supabaseAdmin(), {
+        accountId,
+        target: { scope: 'account' },
+        content: newPrompt,
+        userId,
+        source: 'ui',
+      })
     }
 
     return NextResponse.json({ ok: true })
