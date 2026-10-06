@@ -24,6 +24,11 @@
  */
 
 import { findInlineSecrets } from "@/lib/ai/tool-secrets";
+import {
+  aiProviderLabel,
+  getProviderForModel,
+  isModelCompatibleWithProvider,
+} from "@/lib/ai/models";
 import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
 import { WEBCHAT_BUTTON_TEXT_MAX } from "@/lib/flows/types";
 
@@ -53,6 +58,7 @@ interface NodeInput {
 export function validateFlowForActivation(
   flow: FlowInput,
   nodes: NodeInput[],
+  context: { aiProvider?: string | null } = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -1078,6 +1084,7 @@ function validateNode(
     case "ai_agent": {
       const cfg = node.config as {
         mode?: "once" | "loop" | "takeover";
+        model?: string | null;
         next_node_key?: string;
         max_turns?: number;
       };
@@ -1089,6 +1096,29 @@ function validateNode(
           field: "mode",
           message: "O agente de IA precisa de um modo (responder uma vez, loop ou assumir conversa).",
         });
+      }
+      if (cfg.model?.trim()) {
+        const modelProvider = getProviderForModel(cfg.model);
+        if (!modelProvider) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "model",
+            message: `O modelo "${cfg.model}" não está no registry de modelos suportados.`,
+          });
+        } else if (
+          context.aiProvider &&
+          !isModelCompatibleWithProvider(cfg.model, context.aiProvider)
+        ) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "model",
+            message: `O modelo "${cfg.model}" pertence a ${aiProviderLabel(modelProvider)}, mas a conta está configurada com ${aiProviderLabel(context.aiProvider)}.`,
+          });
+        }
       }
       if (cfg.mode === "once" || cfg.mode === "loop") {
         issues.push(
