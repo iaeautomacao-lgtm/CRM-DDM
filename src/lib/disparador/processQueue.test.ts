@@ -255,3 +255,60 @@ describe('janela de envio: sem rajada na reabertura (relógio de janela)', () =>
     expect(res).toMatchObject({ outcome: 'sent' });
   });
 });
+
+describe('opções do agendador do cron', () => {
+  const campaign = { id: 'campaign', status: 'em_execucao' };
+  beforeEach(() => {
+    mocks.updates.length = 0;
+    mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
+    mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
+      data: name.startsWith('claim_dispatch_item') ? true : null,
+      error: null,
+    }));
+  });
+
+  it('sem opções (ou padrão 4) usa o claim_dispatch_item de sempre', async () => {
+    await processQueueItem(item, campaign);
+    await processQueueItem(item, campaign, { defaultMaxInFlight: 4 });
+    const claims = mocks.rpc.mock.calls.filter(([name]) => String(name).startsWith('claim'));
+    expect(claims.map(([name]) => name)).toEqual(['claim_dispatch_item', 'claim_dispatch_item']);
+  });
+
+  it('padrão por número diferente de 4 usa o claim com teto do app', async () => {
+    await processQueueItem(item, campaign, { defaultMaxInFlight: 8 });
+    expect(mocks.rpc).toHaveBeenCalledWith('claim_dispatch_item_capped', {
+      p_item_id: 'item',
+      p_default_max_in_flight: 8,
+    });
+    expect(mocks.rpc).not.toHaveBeenCalledWith('claim_dispatch_item', expect.anything());
+  });
+
+  it('observa latência e sinal do provedor sem mudar o resultado', async () => {
+    const observations: unknown[] = [];
+    const ok = await processQueueItem(item, campaign, { onProviderCall: (o) => observations.push(o) });
+    expect(ok).toMatchObject({ outcome: 'sent' });
+    mocks.send.mockRejectedValueOnce(new MetaApiError('pair rate limit', 131056, 400));
+    const limited = await processQueueItem(item, campaign, {
+      onProviderCall: (o) => {
+        observations.push(o);
+        throw new Error('observador quebrado não afeta o envio');
+      },
+    });
+    expect(limited).toMatchObject({ outcome: 'error' });
+    expect(observations).toEqual([
+      expect.objectContaining({ provider: 'meta', ok: true, signal: null, code: null }),
+      expect.objectContaining({ provider: 'meta', ok: false, signal: 'rate_limit', code: 'meta:131056' }),
+    ]);
+  });
+
+  // Por último: o fallback desliga o claim _capped no processo.
+  it('sem a migration 164, cai no claim_dispatch_item', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'claim_dispatch_item_capped')
+        return { data: null, error: { code: 'PGRST202', message: 'not found' } };
+      return { data: name === 'claim_dispatch_item' ? true : null, error: null };
+    });
+    expect(await processQueueItem(item, campaign, { defaultMaxInFlight: 8 })).toMatchObject({ outcome: 'sent' });
+    expect(mocks.rpc).toHaveBeenCalledWith('claim_dispatch_item', { p_item_id: 'item' });
+  });
+});

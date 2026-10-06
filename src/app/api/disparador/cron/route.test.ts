@@ -24,7 +24,151 @@ vi.mock('@/lib/disparador/queue-reflow', async (importOriginal) => ({
 }));
 vi.mock('@/lib/disparador/callback-outbox', () => ({ drainCallbackOutbox: vi.fn() }));
 vi.mock('@/lib/audit/context', () => ({ registerAuditActor: vi.fn() }));
+const logMocks = vi.hoisted(() => ({ writeLog: vi.fn() }));
+vi.mock('@/lib/logger', () => ({ writeLog: logMocks.writeLog }));
 import { GET, POST } from './route';
+import { clearMemoryCooldowns } from '@/lib/disparador/throughput-config';
+
+describe('cron: agendador por número', () => {
+  const campaignBase = {
+    account_id: 'acc',
+    status: 'em_execucao',
+    janela_inicio: '00:00',
+    janela_fim: '23:59',
+    dias_envio: [],
+    batch_size: 50,
+    batch_pause_seconds: 60,
+  };
+  const campaigns = [
+    { ...campaignBase, id: 'big' },
+    { ...campaignBase, id: 'small' },
+  ];
+  const queue: Record<string, Array<Record<string, unknown>>> = {
+    big: Array.from({ length: 6 }, (_, i) => ({ id: `big${i}`, campaign_id: 'big', session_id: 'ch-meta', tentativas: 0 })),
+    small: [
+      { id: 'small0', campaign_id: 'small', session_id: 'ch-meta', tentativas: 0 },
+      { id: 'small1', campaign_id: 'small', session_id: 'ch-waha', tentativas: 0 },
+    ],
+  };
+  const upserts: unknown[] = [];
+  function setup(limits: Array<Record<string, unknown>> = []) {
+    vi.stubEnv('CRON_SECRET', 'test-secret');
+    mocks.rpc.mockResolvedValue({ data: true, error: null });
+    mocks.from.mockImplementation((table: string) => {
+      let result: { data: unknown; error: unknown } = { data: [], error: null };
+      const builder: Record<string, unknown> = {};
+      for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'update', 'in'])
+        builder[m] = () => builder;
+      builder.eq = (column: string, value: unknown) => {
+        if (table === 'campaigns' && value === 'em_execucao') result = { data: campaigns, error: null };
+        if (table === 'disp_message_queue' && column === 'campaign_id')
+          result = { data: queue[value as string] ?? [], error: null };
+        return builder;
+      };
+      builder.select = () => {
+        if (table === 'whatsapp_config')
+          result = { data: [{ id: 'ch-meta', provider: 'meta' }, { id: 'ch-waha', provider: 'waha' }], error: null };
+        if (table === 'dispatch_channel_limits') result = { data: limits, error: null };
+        return builder;
+      };
+      builder.upsert = (row: unknown) => {
+        upserts.push(row);
+        return builder;
+      };
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve);
+      return builder;
+    });
+  }
+  const post = () =>
+    POST(new Request('https://crm.test/api/disparador/cron', { method: 'POST', headers: { 'x-cron-secret': 'test-secret' } }));
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    clearMemoryCooldowns();
+    upserts.length = 0;
+  });
+
+  it('alterna campanhas no mesmo número, roda números em paralelo e grava UM cron_tick', async () => {
+    setup();
+    vi.stubEnv('DISPATCH_PROCESS_CONCURRENCY', '1');
+    const started: string[] = [];
+    mocks.process.mockImplementation(async (item: { id: string }) => {
+      started.push(item.id);
+      return { outcome: 'sent', messageId: item.id };
+    });
+    const response = await post();
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    // Global 1: vagas alternam entre números; no número Meta, alternam campanhas.
+    expect(started.slice(0, 4)).toEqual(['big0', 'small1', 'small0', 'big1']);
+    expect(started).toHaveLength(8);
+    expect(body.results).toEqual([
+      { campaign_id: 'big', sent: 6, pending_confirmation: 0 },
+      { campaign_id: 'small', sent: 2, pending_confirmation: 0 },
+    ]);
+    expect(body.process_concurrency).toBe(1);
+    // Padrão 4 por número = padrão do banco → claim normal (sem _capped).
+    expect(mocks.process.mock.calls[0][2]).toMatchObject({ defaultMaxInFlight: 4 });
+    const ticks = logMocks.writeLog.mock.calls.filter(([entry]) => entry.event === 'cron_tick');
+    expect(ticks).toHaveLength(1);
+    expect(ticks[0][0]).toMatchObject({
+      source: 'disparador',
+      level: 'info',
+      payload: {
+        status: 'processed',
+        campaigns: 2,
+        totals: { sent: 8 },
+        channels: { 'ch-meta': { provider: 'meta', sent: 7 }, 'ch-waha': { provider: 'waha', sent: 1 } },
+      },
+    });
+  });
+
+  it('linha de dispatch_channel_limits define o teto do número; 131056 dispara backoff e cooldown', async () => {
+    setup([{ session_id: 'ch-meta', max_in_flight: 8, hourly_limit: null }]);
+    vi.stubEnv('DISPATCH_PROCESS_CONCURRENCY', '16');
+    mocks.process.mockImplementation(
+      async (item: { id: string }, _campaign: unknown, options: { onProviderCall?: (o: unknown) => void }) => {
+        const limited = item.id === 'big0';
+        options.onProviderCall?.({
+          provider: 'meta',
+          latencyMs: 120,
+          ok: !limited,
+          signal: limited ? 'rate_limit' : null,
+          code: limited ? 'meta:131056' : null,
+        });
+        return limited ? { outcome: 'error', error: 'pair rate limit' } : { outcome: 'sent', messageId: item.id };
+      }
+    );
+    expect((await post()).status).toBe(200);
+    const metaCall = mocks.process.mock.calls.find(([item]) => item.session_id === 'ch-meta');
+    // Com linha no banco, o claim usa a linha (sem padrão do app).
+    expect(metaCall?.[2].defaultMaxInFlight).toBeUndefined();
+    const tick = logMocks.writeLog.mock.calls.find(([entry]) => entry.event === 'cron_tick')?.[0];
+    expect(tick.level).toBe('warn');
+    expect(tick.payload.channels['ch-meta']).toMatchObject({ concurrency_start: 8, concurrency_end: 4 });
+    expect(tick.payload.provider_errors).toEqual({ 'meta:131056': 1 });
+    expect(tick.payload.backoff_events[0]).toMatchObject({ scope: 'channel', session_id: 'ch-meta', reason: 'rate_limit' });
+    expect(upserts).toEqual([expect.objectContaining({ session_id: 'ch-meta', reason: 'rate_limit' })]);
+  });
+
+  it('orçamento esgotado no meio do tick: nenhum envio novo começa depois', async () => {
+    setup();
+    vi.stubEnv('DISPATCH_PROCESS_CONCURRENCY', '1');
+    vi.stubEnv('DISPARADOR_TICK_BUDGET_MS', '5000');
+    const start = Date.now();
+    let late = false;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => (late ? start + 60_000 : start));
+    mocks.process.mockImplementation(async () => {
+      late = true; // o primeiro envio "demora" além do orçamento
+      return { outcome: 'sent', messageId: 'x' };
+    });
+    await post();
+    nowSpy.mockRestore();
+    expect(mocks.process).toHaveBeenCalledTimes(1);
+    const tick = logMocks.writeLog.mock.calls.find(([entry]) => entry.event === 'cron_tick')?.[0];
+    expect(tick.payload).toMatchObject({ budget_ms: 5000, stopped_early: true, totals: { sent: 1, not_started: 7 } });
+  });
+});
 
 describe('cron: reflow da fila de campanha em lote', () => {
   // 19/10/2026 = segunda; janela 08–18 seg–sex.

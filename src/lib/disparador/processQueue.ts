@@ -26,6 +26,8 @@ import OpenAI from "openai";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/queue-markers";
 import { phoneVariants } from "@/lib/disparador/phone-key";
 import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/send-window";
+import { classifyProviderError, type BackoffReason } from "@/lib/disparador/provider-signals";
+import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -103,12 +105,66 @@ const MAX_TENTATIVAS = 5;
 // Sem a migration 118 a RPC não existe e o erro é propagado de propósito:
 // o fallback antigo (UPDATE simples) não respeitava quota nem concorrência
 // por canal e podia gerar envio duplicado.
-async function claimItemAtomically(itemId: string): Promise<boolean> {
+//
+// defaultMaxInFlight (agendador do cron): teto por número para canais SEM
+// linha em dispatch_channel_limits. Diferente de 4 usa
+// claim_dispatch_item_capped (migration 164), que só troca esse padrão;
+// sem a migration, cai no claim_dispatch_item (teto 4 no banco).
+let cappedClaimUnavailable = false;
+
+function isMissingFunction(error: { code?: string } | null): boolean {
+  return error?.code === "PGRST202" || error?.code === "42883";
+}
+
+async function claimItemAtomically(itemId: string, defaultMaxInFlight?: number): Promise<boolean> {
+  if (
+    defaultMaxInFlight !== undefined &&
+    defaultMaxInFlight !== DB_DEFAULT_MAX_IN_FLIGHT &&
+    !cappedClaimUnavailable
+  ) {
+    const { data, error } = await supabaseAdmin().rpc("claim_dispatch_item_capped", {
+      p_item_id: itemId,
+      p_default_max_in_flight: defaultMaxInFlight,
+    });
+    if (!error) return data === true;
+    if (!isMissingFunction(error)) throw error;
+    cappedClaimUnavailable = true;
+    console.warn(
+      "[Disparador] claim_dispatch_item_capped indisponível (migration 164 não aplicada); usando o teto padrão do banco (4 por número)."
+    );
+  }
   const { data, error } = await supabaseAdmin().rpc("claim_dispatch_item", {
     p_item_id: itemId,
   });
   if (error) throw error;
   return data === true;
+}
+
+/** Observação de uma chamada ao provedor (telemetria/backoff do cron). */
+export interface ProviderCallObservation {
+  provider: "meta" | "waha";
+  latencyMs: number;
+  ok: boolean;
+  /** Sinal para desacelerar o número (limite/5xx/timeout/rede). */
+  signal: BackoffReason | null;
+  /** Ex.: "meta:131056", "waha:503", "timeout"; null quando ok. */
+  code: string | null;
+}
+
+export interface ProcessQueueItemOptions {
+  /** Teto por número quando o canal não tem linha em dispatch_channel_limits. */
+  defaultMaxInFlight?: number;
+  /** Só observa: nunca altera o destino do item. */
+  onProviderCall?: (observation: ProviderCallObservation) => void;
+}
+
+function observe(options: ProcessQueueItemOptions | undefined, observation: ProviderCallObservation) {
+  if (!options?.onProviderCall) return;
+  try {
+    options.onProviderCall(observation);
+  } catch (error) {
+    console.error("[Disparador] Observador do envio falhou:", error);
+  }
 }
 
 // Busca o próximo item agendado de uma campanha e o reivindica com o mesmo
@@ -443,7 +499,8 @@ export function checkWithinWindow(inicio: string, fim: string): boolean {
 
 export async function processQueueItem(
   item: QueueItem,
-  campaign: Campaign
+  campaign: Campaign,
+  options?: ProcessQueueItemOptions
 ): Promise<ProcessResult> {
   const janela = { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio };
   const withinWindow = canSendNow(janela);
@@ -467,7 +524,7 @@ export async function processQueueItem(
     return { outcome: "deferred", reason: "outside_window" };
   }
 
-  const claimed = await claimItemAtomically(item.id);
+  const claimed = await claimItemAtomically(item.id, options?.defaultMaxInFlight);
   if (!claimed) {
     // Outro consumidor (worker.ts / cron) já reivindicou este item entre
     // o SELECT do chamador e esta chamada — não reprocessa.
@@ -646,12 +703,20 @@ export async function processQueueItem(
   const normalizedPhone = phone.replace("+", "");
 
   let externalMessageId: string;
+  const providerStartedAt = Date.now();
   try {
     externalMessageId =
       provider === "meta"
         ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
         : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
+    observe(options, { provider, latencyMs: Date.now() - providerStartedAt, ok: true, signal: null, code: null });
   } catch (sendErr: any) {
+    // Falha antes de falar com o provedor não entra na latência nem no
+    // backoff do número.
+    if (!(sendErr instanceof PreSendError)) {
+      const { reason, code } = classifyProviderError(sendErr);
+      observe(options, { provider, latencyMs: Date.now() - providerStartedAt, ok: false, signal: reason, code });
+    }
     // Timeout, erro de rede ou 5xx NÃO provam que o POST foi rejeitado — o
     // provedor pode ter entregue a mensagem. Mantém o item em 'enviando'
     // (reservado) e só anota o motivo: um segundo POST automático poderia
