@@ -1,5 +1,5 @@
 -- ============================================================
--- 155_dmq_waha_message_id_index.sql — índice para recibos de entrega.
+-- 158_dmq_waha_message_id_index.sql — índice para recibos de entrega.
 --
 -- ATENÇÃO — RODAR SOZINHO no Supabase SQL Editor (uma única instrução,
 -- sem nada antes/depois na mesma execução):
@@ -14,7 +14,7 @@
 -- (migrations 119/125/133), e reconcile_dispatch_receipts faz JOIN pela
 -- mesma coluna. Sem índice, cada recibo varre a fila inteira — numa campanha
 -- de milhares de itens são milhares de seq scans por minuto disputando a
--- tabela com o próprio envio. A limpeza de recibos órfãos (migration 156)
+-- tabela com o próprio envio. A limpeza de recibos órfãos (migration 159, V2)
 -- também usa este índice.
 --
 -- CONCURRENTLY: não bloqueia escrita na fila enquanto o índice é criado
