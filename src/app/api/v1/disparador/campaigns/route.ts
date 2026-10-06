@@ -6,6 +6,7 @@ import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
 import { phoneKey } from "@/lib/disparador/phone-key";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
+import { templateRowsForWaba } from "@/lib/disparador/template-validation";
 
 // Payload esperado pelo sistema externo (Planejamento)
 interface ExternalCampaignPayload {
@@ -146,16 +147,19 @@ export async function POST(request: Request) {
         .eq("id", channelId!)
         .limit(1);
       const channelWabaId: string | null = channelRows?.[0]?.waba_id ?? null;
+      // Sem filtrar status na query: a linha da WABA decide (mesmo
+      // REJEITADA); a antiga sem waba_id só vale se a WABA não tiver linha
+      // própria (templateRowsForWaba). Antes o filtro APPROVED descartava a
+      // linha rejeitada da WABA e a antiga aprovada passava.
       let tplQuery = db
         .from("message_templates")
-        .select("id, name, language, waba_id")
+        .select("id, name, language, waba_id, status")
         .eq("name", body.template_name!)
-        .eq("account_id", ctx.accountId)
-        .eq("status", "APPROVED");
+        .eq("account_id", ctx.accountId);
       if (body.template_language) tplQuery = tplQuery.eq("language", body.template_language);
       const { data: tplRows } = await tplQuery.limit(50);
-      const candidates = (tplRows ?? []).filter(
-        (t) => !t.waba_id || !channelWabaId || t.waba_id === channelWabaId
+      const candidates = templateRowsForWaba(tplRows ?? [], channelWabaId).filter(
+        (t) => (t.status ?? "").toUpperCase() === "APPROVED"
       );
       const tpl =
         candidates.find((t) => channelWabaId && t.waba_id === channelWabaId) ?? candidates[0] ?? null;

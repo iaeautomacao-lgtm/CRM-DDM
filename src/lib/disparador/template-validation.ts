@@ -87,6 +87,28 @@ export function templateComponentProblem(row: LocalTemplateRow): string | null {
   return null;
 }
 
+/**
+ * Linhas do catálogo que DECIDEM o template para uma WABA, por
+ * (name, language): se existe linha dessa WABA, só ela vale (status,
+ * componentes); a linha antiga sem waba_id (sincronizada antes da 073) é
+ * fallback apenas quando a WABA não tem linha própria. Linhas de outras
+ * WABAs nunca valem. Sem `wabaId` (canal sem WABA conhecida), devolve as
+ * linhas como vieram.
+ *
+ * Antes bastava QUALQUER linha aprovada: uma linha da WABA REJEITADA + a
+ * linha antiga APROVADA passava, e a campanha começava com um template que
+ * a Meta recusa em todos os envios.
+ */
+export function templateRowsForWaba<T extends { name: string; language?: string | null; waba_id?: string | null }>(
+  rows: readonly T[],
+  wabaId: string | null | undefined
+): T[] {
+  if (!wabaId) return [...rows];
+  const key = (r: T) => `${r.name}\u0000${r.language ?? ""}`;
+  const withSpecific = new Set(rows.filter((r) => r.waba_id === wabaId).map(key));
+  return rows.filter((r) => (r.waba_id ? r.waba_id === wabaId : !withSpecific.has(key(r))));
+}
+
 export interface TemplateValidationInput {
   templateName: string;
   language: string;
@@ -120,14 +142,11 @@ export function validateCampaignTemplate(input: TemplateValidationInput): Templa
   if (sameLanguage.length === 0) return notFound;
 
   const wabaIds = [...new Set((input.wabaIds ?? []).filter(Boolean))];
-  // Linhas sem waba_id (sincronizadas antes da migration 073) valem para
-  // qualquer WABA.
+  // Linha da WABA decide; a sem waba_id (antes da migration 073) só vale
+  // quando a WABA não tem linha própria (templateRowsForWaba).
   const groups: Array<{ wabaId: string | null; rows: LocalTemplateRow[] }> =
     wabaIds.length > 0
-      ? wabaIds.map((wabaId) => ({
-          wabaId,
-          rows: sameLanguage.filter((r) => !r.waba_id || r.waba_id === wabaId),
-        }))
+      ? wabaIds.map((wabaId) => ({ wabaId, rows: templateRowsForWaba(sameLanguage, wabaId) }))
       : [{ wabaId: null, rows: sameLanguage }];
 
   for (const group of groups) {
