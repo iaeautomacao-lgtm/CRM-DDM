@@ -44,8 +44,8 @@ const HUMAN_REQUEST_PATTERNS = [
 ];
 
 const CONTESTATION_PATTERNS = [
-  /\bja (?:paguei|foi pago|quitei|resolvi|negociei|acertei)\b/,
-  /\b(?:paguei|quitei) (?:hoje|ontem|essa|esta)\b/,
+  /\bja (?:paguei|pagamos|foi pag[oa]|esta pag[oa]|ta pag[oa]|quitei|quitamos|resolvi|resolvemos|negociei|negociamos|acertei|acertamos)\b/,
+  /\b(?:paguei|pagamos|quitei|quitamos) (?:hoje|ontem|essa|esta)\b/,
   /\bnao reconheco (?:a |essa |esta )?(?:divida|pendencia|cobranca)\b/,
   /\bnao devo\b/,
   /\bdebito indevido\b/,
