@@ -250,6 +250,7 @@ describe("validateTemplateMode (Padrão / Rotação / Aleatório)", () => {
 describe("validateVariableSources", () => {
   it("valor fixo vazio, campo desconhecido e coluna do CSV sem base", () => {
     const msg = {
+      template_name: "cobranca_1",
       template_variable_map: [
         { type: "static", value: " " },
         { type: "contact_field", field: "email" },
@@ -266,6 +267,20 @@ describe("validateVariableSources", () => {
     // Com base importada (ou campanha antiga sem audience_mode) a coluna vale.
     expect(validateVariableSources([msg], "csv")).toHaveLength(2);
     expect(validateVariableSources([msg], null)).toHaveLength(2);
+  });
+
+  it("texto livre (WAHA): só confere as {{n}} usadas no texto", () => {
+    const msg = {
+      tipo: "texto",
+      conteudo: "Valor {{2}}",
+      template_variable_map: [
+        { type: "csv_var", index: 0 },
+        { type: "csv_var", index: 1 },
+        { type: "static", value: "" },
+      ],
+    };
+    expect(validateVariableSources([msg], "csv")).toEqual([]);
+    expect(validateVariableSources([{ ...msg, conteudo: "Valor {{3}}" }], "csv")[0]).toMatch(/\{\{3\}\} está como valor fixo vazio/);
   });
 });
 

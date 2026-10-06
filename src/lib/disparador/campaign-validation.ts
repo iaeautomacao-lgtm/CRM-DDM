@@ -326,7 +326,12 @@ export function validateVariableSources(
   mensagens.forEach((m, i) => {
     if (!Array.isArray(m?.template_variable_map)) return;
     const prefix = `${rotulo} #${i + 1}`;
+    // Template Meta: todas as entradas vão para a Meta. Texto livre (WAHA):
+    // só as {{n}} que aparecem no texto são usadas no envio.
+    const isTemplate = Boolean(text(m.template_name));
+    const body = typeof m.conteudo === "string" ? m.conteudo : "";
     (m.template_variable_map as unknown[]).forEach((raw, idx) => {
+      if (!isTemplate && !body.includes(`{{${idx + 1}}}`)) return;
       const entry = (raw ?? {}) as { type?: unknown; value?: unknown; field?: unknown; index?: unknown };
       const n = `{{${idx + 1}}}`;
       if (entry.type === "static") {
