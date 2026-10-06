@@ -62,7 +62,7 @@ function StatusIcon({ status }: { status: Message["status"] }) {
       return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-blue-400" />;
     case "failed":
       return (
-        <span className="inline-flex items-center gap-0.5 rounded bg-red-500 px-1 text-[10px] font-medium text-white">
+        <span className="inline-flex items-center gap-0.5 rounded bg-red-500 px-1 text-xs font-medium text-white">
           <XCircle className="h-3 w-3" aria-hidden="true" />
           Falha no envio
         </span>
@@ -222,7 +222,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
     case "template":
       return (
         <div>
-          <span className="mb-1 inline-flex items-center gap-1 rounded bg-primary/20 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+          <span className="mb-1 inline-flex items-center gap-1 rounded bg-primary/20 px-1.5 py-0.5 text-xs font-medium text-primary">
             <LayoutTemplate className="h-3 w-3" />
             {message.template_name ? `Template · ${message.template_name}` : "Template"}
           </span>
@@ -250,7 +250,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
       // tap rather than the customer typing the same words.
       return (
         <div className="flex flex-col gap-0.5">
-          <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             <CornerDownLeft className="h-3 w-3" />
             Resposta de botão
           </span>
@@ -364,7 +364,7 @@ export function MessageBubble({
         )}
       >
         {campaignSend && (
-          <div className="mb-1.5 flex items-center gap-1 border-b border-primary-foreground/20 pb-1 text-[10px] text-primary-foreground/80">
+          <div className="mb-1.5 flex items-center gap-1 border-b border-primary-foreground/20 pb-1 text-xs text-primary-foreground/80">
             <Megaphone className="h-3 w-3 shrink-0" />
             <span>
               Campanha: <CampaignName campaign={campaignSend} />
@@ -388,7 +388,7 @@ export function MessageBubble({
           {/* Bot = IA, fluxo, automação ou disparo — distingue do atendente humano. */}
           {message.sender_type === "bot" && (
             <span
-              className="rounded bg-primary-foreground/15 px-1 text-[9px] font-semibold uppercase tracking-wide text-primary-foreground/80"
+              className="rounded bg-primary-foreground/15 px-1 text-xs font-semibold uppercase tracking-wide text-primary-foreground/80"
               title="Enviada por automação (IA, fluxo ou disparo)"
             >
               Automação
@@ -396,7 +396,7 @@ export function MessageBubble({
           )}
           <span
             className={cn(
-              "text-[10px]",
+              "text-xs",
               // Outbound bubbles sit on the primary fill, so the
               // timestamp must read against that (not the neutral
               // foreground) — otherwise it goes low-contrast in light
@@ -411,7 +411,7 @@ export function MessageBubble({
       </div>
       {campaignReply && (
         <p
-          className="mt-0.5 flex items-center gap-1 px-1 text-[10px] text-muted-foreground"
+          className="mt-0.5 flex items-center gap-1 px-1 text-xs text-muted-foreground"
           title={
             message.attribution_method === "context"
               ? "O cliente respondeu citando a mensagem da campanha"

@@ -47,12 +47,12 @@ export function PendingSendBubble({
             {caption}
           </p>
         )}
-        <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-primary-foreground/70">
+        <div className="mt-1 flex items-center justify-end gap-1 text-xs text-primary-foreground/70">
           <Clock className="h-3 w-3" />
           <span>Enviando em {secondsLeft}s</span>
         </div>
       </div>
-      <div className="mt-1 flex items-center gap-3 text-[11px]">
+      <div className="mt-1 flex items-center gap-3 text-xs">
         <button
           type="button"
           onClick={onEdit}

@@ -53,47 +53,42 @@ export function useConversationOrigin(conversationId: string | null) {
   return state && state.id === conversationId ? state.data : null;
 }
 
-function DirectionChip({ origin }: { origin: ConversationOrigin }) {
+function DirectionChip({ origin, className }: { origin: ConversationOrigin; className?: string }) {
   if (origin.direction === "desconhecido") return null;
   const ativo = origin.direction === "ativo";
   const Icon = origin.initiator === "campaign" ? Megaphone : ativo ? ArrowUpRight : ArrowDownLeft;
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold",
-        ativo
-          ? "bg-blue-500/10 text-blue-700 dark:text-blue-300"
-          : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+        "inline-flex shrink-0 items-center gap-1 rounded-full border border-border px-2 text-xs font-medium text-foreground",
+        className,
       )}
     >
-      <Icon className="h-3 w-3" />
+      <Icon className="h-3 w-3" aria-hidden="true" />
       {ativo ? "Ativo" : "Receptivo"}
     </span>
   );
 }
 
-/** Faixa fina no topo da conversa: de onde ela veio. */
+/** Faixa de uma linha no topo da conversa: de onde ela veio. Neutra (sem
+ *  pílulas coloridas); o cliente já aparece no cabeçalho e o detalhe
+ *  completo fica no card "Origem" do painel do contato. */
 export function ConversationOriginBanner({ conversationId }: { conversationId: string }) {
   const data = useConversationOrigin(conversationId);
   if (!data || data.origin.direction === "desconhecido") return null;
   const { origin } = data;
+  const ativo = origin.direction === "ativo";
+  const Icon = origin.initiator === "campaign" ? Megaphone : ativo ? ArrowUpRight : ArrowDownLeft;
   const detail = origin.headline.replace(/^(Ativo|Receptivo) · /, "");
   return (
-    <div className="flex items-center gap-2 overflow-hidden border-b border-border bg-muted/40 px-4 py-1.5 text-[11px] text-muted-foreground">
-      <DirectionChip origin={origin} />
+    <div className="flex items-center gap-1 overflow-hidden border-b border-border bg-card/80 px-4 py-1 text-xs text-muted-foreground">
+      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
       <span className="truncate" title={origin.headline}>
-        {detail}
+        <span className="font-medium text-foreground/80">{ativo ? "Ativo" : "Receptivo"}</span>
+        {detail && <> · {detail}</>}
         {origin.opened_at && <> · {format(new Date(origin.opened_at), "dd/MM HH:mm")}</>}
         {data.line && <> · {data.channel} {data.line}</>}
       </span>
-      {data.client && (
-        <span
-          className="ml-auto shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold"
-          style={{ color: data.client.color, borderColor: `${data.client.color}40`, backgroundColor: `${data.client.color}1a` }}
-        >
-          {data.client.name}
-        </span>
-      )}
     </div>
   );
 }
@@ -105,11 +100,9 @@ export function ConversationOriginCard({ conversationId }: { conversationId: str
   const { origin } = data;
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2 px-1">
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Origem da conversa</span>
-        <DirectionChip origin={origin} />
-      </div>
-      <div className="space-y-1.5 rounded-lg border border-border bg-card/50 p-2.5 text-xs">
+      {/* O título "Origem" vem da seção recolhível do painel do contato. */}
+      <div className="space-y-1 rounded-lg border border-border bg-card/50 p-2 text-xs">
+        <DirectionChip origin={origin} className="mb-1" />
         <p className="font-medium text-foreground">
           {origin.direction === "receptivo"
             ? "O cliente escreveu primeiro"
@@ -134,7 +127,7 @@ export function ConversationOriginCard({ conversationId }: { conversationId: str
         )}
         {origin.opening_text && (
           <div className="rounded-md bg-muted/60 px-2 py-1.5">
-            <p className="mb-0.5 text-[10px] text-muted-foreground">
+            <p className="mb-0.5 text-xs text-muted-foreground">
               {origin.direction === "receptivo" ? "Primeira mensagem do cliente" : "O que enviamos"}
               {origin.opened_at && ` · ${format(new Date(origin.opened_at), "dd/MM/yyyy HH:mm")}`}
             </p>

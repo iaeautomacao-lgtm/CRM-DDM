@@ -36,7 +36,7 @@ export function QuickReplyMenu({
       // Clique no item não pode tirar o foco do campo antes do onPick.
       onMouseDown={(e) => e.preventDefault()}
     >
-      <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+      <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <Zap className="h-3 w-3 text-primary" />
           Respostas rápidas {query ? <span className="font-mono">/{query}</span> : null}
@@ -79,7 +79,7 @@ export function QuickReplyMenu({
         </ul>
       )}
       {canManage && items.length > 0 && (
-        <div className="border-t border-border px-3 py-1.5 text-right text-[11px]">
+        <div className="border-t border-border px-3 py-1.5 text-right text-xs">
           <Link href="/respostas-rapidas" className="text-muted-foreground hover:text-foreground hover:underline">
             Gerenciar respostas rápidas
           </Link>

@@ -110,9 +110,9 @@ export function ConversationFlowCard({
   return (
     <div>
       <div className="flex items-center justify-between px-1">
-        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <GitFork className="h-3 w-3" />
-          Fluxo
+          Execuções
         </div>
         <Button
           variant="ghost"
@@ -121,6 +121,7 @@ export function ConversationFlowCard({
           disabled={loading}
           onClick={() => load(() => false)}
           title="Atualizar"
+          aria-label="Atualizar execuções do fluxo"
         >
           <RefreshCw className={cn("h-3 w-3", loading && "animate-spin")} />
         </Button>
@@ -139,7 +140,7 @@ export function ConversationFlowCard({
           <>
             <RunRow run={latest} highlight canOpen={canOpenEditor} />
             {data?.matched_by === "contact" && (
-              <p className="px-1 text-[10px] text-muted-foreground">
+              <p className="px-1 text-xs text-muted-foreground">
                 Execuções do contato (sem vínculo direto com esta conversa)
               </p>
             )}
@@ -184,14 +185,14 @@ function RunRow({
           <ExternalLink className="h-3 w-3 shrink-0 text-muted-foreground group-hover:text-primary" />
         )}
       </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <span className={cn("rounded-full px-1.5 py-0.5 font-medium", status.className)}>
           {status.label}
         </span>
         <span>{formatDistanceToNow(new Date(when), { addSuffix: true, locale: ptBR })}</span>
       </div>
       {node && highlight && (
-        <p className="mt-1 truncate text-[11px] text-muted-foreground">
+        <p className="mt-1 truncate text-xs text-muted-foreground">
           {run.ended_at ? "Parou em" : "Nó atual"}: {node}
         </p>
       )}

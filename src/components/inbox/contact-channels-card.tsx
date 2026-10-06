@@ -87,7 +87,7 @@ export function ContactChannelsCard({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-2 px-1 text-sm font-medium text-foreground">
         <Link2 className="h-3 w-3" />
         Canais
       </div>
@@ -106,7 +106,7 @@ export function ContactChannelsCard({
       {/* Só para quem ainda não tem telefone: é aí que mora a duplicata. */}
       {canEdit && !contact.phone && (
         <div className="space-y-1.5 rounded-lg border border-dashed border-border p-2">
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Vincule telefone ou e-mail. Se já existir um contato com ele, os dois viram um só.
           </p>
           <Input
