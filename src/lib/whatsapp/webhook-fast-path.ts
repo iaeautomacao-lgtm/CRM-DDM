@@ -4,46 +4,50 @@
 
 export const APP_SECRET_CACHE_TTL_MS = 60_000
 
+/** Canal Meta resolvido (whatsapp_config) usado para validar e escopar o POST. */
+export interface ChannelRow {
+  id: string
+  account_id: string
+  /** app_secret como gravado no banco (cifrado ou texto puro legado), ou null. */
+  app_secret: string | null
+}
+
 interface CacheEntry {
-  /** app_secret como gravado no banco (cifrado ou texto puro legado). */
-  stored: string
+  row: ChannelRow
   expiresAt: number
 }
 
-const appSecretCache = new Map<string, CacheEntry>()
+const channelCache = new Map<string, CacheEntry>()
 
-/** Valor gravado do app_secret em cache para o canal, ou undefined. */
-export function getCachedStoredAppSecret(
-  phoneNumberId: string,
+/** Chave de cache: 'pn:<phone_number_id>' ou 'waba:<waba_id>'. */
+export function getCachedChannel(
+  key: string,
   now: number = Date.now(),
-): string | undefined {
-  const hit = appSecretCache.get(phoneNumberId)
+): ChannelRow | undefined {
+  const hit = channelCache.get(key)
   if (!hit) return undefined
   if (hit.expiresAt <= now) {
-    appSecretCache.delete(phoneNumberId)
+    channelCache.delete(key)
     return undefined
   }
-  return hit.stored
+  return hit.row
 }
 
-/** Só guarda segredo existente: canal sem app_secret/erro de leitura não entra. */
-export function cacheStoredAppSecret(
-  phoneNumberId: string,
-  stored: string,
+/** Só guarda canal existente: canal desconhecido/erro de leitura não entra. */
+export function cacheChannel(
+  key: string,
+  row: ChannelRow,
   now: number = Date.now(),
 ): void {
-  appSecretCache.set(phoneNumberId, {
-    stored,
-    expiresAt: now + APP_SECRET_CACHE_TTL_MS,
-  })
+  channelCache.set(key, { row, expiresAt: now + APP_SECRET_CACHE_TTL_MS })
 }
 
-export function invalidateAppSecret(phoneNumberId: string): void {
-  appSecretCache.delete(phoneNumberId)
+export function invalidateChannel(key: string): void {
+  channelCache.delete(key)
 }
 
 export function clearAppSecretCache(): void {
-  appSecretCache.clear()
+  channelCache.clear()
 }
 
 /**
@@ -81,4 +85,15 @@ export async function processStatusesIndependently<T extends { status: string }>
     }
   }
   return failures
+}
+
+/** Chave de canal de uma change: template → WABA da entry; demais → phone_number_id. */
+export function channelKeyForChange(
+  entry: { id?: string },
+  change: { field?: string; value?: { metadata?: { phone_number_id?: string } } },
+  isTemplateField: boolean,
+): string | null {
+  if (isTemplateField) return entry?.id ? `waba:${entry.id}` : null
+  const pn = change?.value?.metadata?.phone_number_id
+  return pn ? `pn:${pn}` : null
 }

@@ -1,28 +1,41 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   APP_SECRET_CACHE_TTL_MS,
-  cacheStoredAppSecret,
+  cacheChannel,
+  channelKeyForChange,
   clearAppSecretCache,
-  getCachedStoredAppSecret,
-  invalidateAppSecret,
+  getCachedChannel,
+  invalidateChannel,
   processStatusesIndependently,
   shouldProcessStatus,
 } from './webhook-fast-path'
 
-describe('cache de app_secret', () => {
+const ROW = { id: 'c1', account_id: 'a1', app_secret: 'seg' }
+
+describe('cache de canal', () => {
   beforeEach(() => clearAppSecretCache())
 
   it('devolve o valor dentro do TTL e expira depois', () => {
-    cacheStoredAppSecret('P1', 'seg', 1_000)
-    expect(getCachedStoredAppSecret('P1', 1_000 + APP_SECRET_CACHE_TTL_MS - 1)).toBe('seg')
-    expect(getCachedStoredAppSecret('P1', 1_000 + APP_SECRET_CACHE_TTL_MS)).toBeUndefined()
+    cacheChannel('pn:P1', ROW, 1_000)
+    expect(getCachedChannel('pn:P1', 1_000 + APP_SECRET_CACHE_TTL_MS - 1)).toBe(ROW)
+    expect(getCachedChannel('pn:P1', 1_000 + APP_SECRET_CACHE_TTL_MS)).toBeUndefined()
   })
 
-  it('é por phone_number_id e pode ser invalidado', () => {
-    cacheStoredAppSecret('P1', 'a')
-    expect(getCachedStoredAppSecret('P2')).toBeUndefined()
-    invalidateAppSecret('P1')
-    expect(getCachedStoredAppSecret('P1')).toBeUndefined()
+  it('é por chave e pode ser invalidado', () => {
+    cacheChannel('pn:P1', ROW)
+    expect(getCachedChannel('pn:P2')).toBeUndefined()
+    invalidateChannel('pn:P1')
+    expect(getCachedChannel('pn:P1')).toBeUndefined()
+  })
+})
+
+describe('channelKeyForChange', () => {
+  it('template usa o WABA da entry; demais usam o phone_number_id', () => {
+    expect(channelKeyForChange({ id: 'W1' }, {}, true)).toBe('waba:W1')
+    expect(
+      channelKeyForChange({ id: 'W1' }, { value: { metadata: { phone_number_id: 'P1' } } }, false),
+    ).toBe('pn:P1')
+    expect(channelKeyForChange({ id: 'W1' }, { value: {} }, false)).toBeNull()
   })
 })
 
