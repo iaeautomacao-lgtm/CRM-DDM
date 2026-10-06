@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
+import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
 
 /**
  * POST /api/flows/[id]/activate
@@ -53,6 +54,8 @@ export async function POST(
   }
 
   const admin = supabaseAdmin()
+  // Nós que entram no ar — usados para o histórico de prompts abaixo.
+  let activatedNodes: Array<Record<string, unknown>> | null = null
 
   if (status === 'active') {
     // Re-load with the full payload the validator needs.
@@ -70,6 +73,7 @@ export async function POST(
     if (!flow) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
+    activatedNodes = nodes ?? []
     const { data: aiConfig } = await admin
       .from('ai_config')
       .select('api_provider')
@@ -110,6 +114,16 @@ export async function POST(
     .maybeSingle()
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+  // Histórico de prompts (migration 148): o que entrou no ar ao ativar.
+  // Texto já registrado só atualiza last_saved_at. Best-effort.
+  if (activatedNodes && updated?.account_id) {
+    await recordFlowNodePromptVersions(admin, {
+      accountId: updated.account_id as string,
+      flowId: id,
+      nodes: activatedNodes,
+      userId: user.id,
+    })
   }
   return NextResponse.json({ flow: updated })
 }

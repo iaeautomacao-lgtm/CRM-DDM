@@ -30,7 +30,7 @@ import {
   Send,
   Eye,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -180,10 +180,11 @@ export default function CampanhaContatosPage({
         <p className="text-sm text-muted-foreground">
           Campanha não encontrada ou fora da sua conta.
         </p>
-        <Link href="/disparador/campanhas">
-          <Button variant="outline" size="sm">
-            Voltar para Campanhas
-          </Button>
+        <Link
+          href="/disparador/campanhas"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          Voltar para Campanhas
         </Link>
       </div>
     );
@@ -193,19 +194,20 @@ export default function CampanhaContatosPage({
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <Link
               href="/disparador/campanhas"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
+              aria-label="Voltar para Campanhas"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
               title="Voltar para Campanhas"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             </Link>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
               <ListChecks className="h-5 w-5" />
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl truncate max-w-md">
+            <h1 className="min-w-0 text-xl font-bold tracking-tight text-foreground sm:text-2xl truncate max-w-md">
               {campaignName || "Carregando…"}
             </h1>
           </div>
@@ -215,7 +217,7 @@ export default function CampanhaContatosPage({
         </div>
 
         <Select value={statusFilter} onValueChange={(v) => handleStatusFilterChange(v || "__all__")}>
-          <SelectTrigger className="w-48">
+          <SelectTrigger className="w-full sm:w-48" aria-label="Filtrar por status">
             <SelectValue>
               {(v: string) => (v === "__all__" ? "Todos os status" : STATUS_LABEL[v] ?? v)}
             </SelectValue>
@@ -271,7 +273,7 @@ export default function CampanhaContatosPage({
                           STATUS_BADGE[r.status] || STATUS_BADGE.agendado
                         }`}
                       >
-                        <Icon className={`h-3 w-3 ${r.status === "enviando" ? "animate-spin" : ""}`} />
+                        <Icon aria-hidden="true" className={`h-3 w-3 ${r.status === "enviando" ? "animate-spin" : ""}`} />
                         {STATUS_LABEL[r.status] || r.status}
                       </span>
                     </TableCell>
@@ -280,8 +282,8 @@ export default function CampanhaContatosPage({
                     </TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground">
                       {r.sent_at
-                        ? new Date(r.sent_at).toLocaleString()
-                        : new Date(r.scheduled_at).toLocaleString()}
+                        ? new Date(r.sent_at).toLocaleString("pt-BR")
+                        : new Date(r.scheduled_at).toLocaleString("pt-BR")}
                     </TableCell>
                   </TableRow>
                 );
@@ -293,7 +295,7 @@ export default function CampanhaContatosPage({
 
       {/* Pagination */}
       {(page > 0 || hasMore) && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <nav aria-label="Paginação" className="flex items-center justify-between text-xs text-muted-foreground">
           <Button
             variant="outline"
             size="sm"
@@ -311,7 +313,7 @@ export default function CampanhaContatosPage({
           >
             Próxima
           </Button>
-        </div>
+        </nav>
       )}
     </div>
   );

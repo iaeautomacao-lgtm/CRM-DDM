@@ -24,6 +24,7 @@
 
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   CircleDot,
@@ -56,6 +57,8 @@ export function EditorHeader() {
     activating,
     canActivate,
     save,
+    saveError,
+    confirmLeave,
     setStatus,
     deleteFlow,
     undo,
@@ -64,19 +67,13 @@ export function EditorHeader() {
     canRedo,
   } = useFlowEditor();
 
-  // Best-effort save before leaving the editor via its own nav actions
-  // (back / view runs). Fires and lets the navigation proceed either
-  // way — SPA route changes don't fire beforeunload, so this is the
-  // only chance to persist edits made in the last <2s before the
-  // debounce autosave would have caught them.
+  // Save before leaving the editor via its own nav actions (back / view
+  // runs) — SPA route changes don't fire beforeunload, so this persists
+  // edits made in the last <2s before the debounce autosave.
+  // Fluxo ativo: sair não publica (PRD-01) — confirmLeave pergunta. Se o
+  // salvamento falhar, também pergunta (as edições ficam no rascunho local).
   const navigateAway = async (href: string) => {
-    if (dirty && state.status === "active") {
-      // Fluxo ativo: sair não publica (PRD-01).
-      if (!window.confirm("Este fluxo está ativo e tem alterações não publicadas. Sair sem publicar?")) return;
-      router.push(href);
-      return;
-    }
-    if (dirty && !await save({ silent: true })) return;
+    if (!await confirmLeave()) return;
     router.push(href);
   };
 
@@ -186,22 +183,36 @@ export function EditorHeader() {
               Ativar
             </Button>
           )}
+          {/* Falha ao salvar: anunciada a leitores de tela uma vez. */}
+          {saveError && !saving && (
+            <span role="alert" className="sr-only">
+              Erro ao salvar o fluxo: {saveError}
+            </span>
+          )}
           <Button
             onClick={() => void save()}
             disabled={saving}
             size="sm"
-            variant={dirty ? "default" : "outline"}
+            variant={saveError && !saving ? "destructive" : dirty ? "default" : "outline"}
             className={
-              dirty
-                ? "bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
-                : undefined
+              saveError && !saving
+                ? undefined
+                : dirty
+                  ? "bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
+                  : undefined
             }
+            title={saveError && !saving ? saveError : undefined}
             aria-live="polite"
           >
             {saving ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Salvando...
+              </>
+            ) : saveError ? (
+              <>
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Erro ao salvar — Tentar novamente
               </>
             ) : dirty ? (
               <>

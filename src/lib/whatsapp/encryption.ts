@@ -112,6 +112,65 @@ export function isLegacyFormat(encryptedText: string): boolean {
   return encryptedText.split(':').length === 2
 }
 
+// Formato estrito do encrypt() atual: IV de 12 bytes (24 hex), ciphertext
+// em bytes inteiros (hex par, pode ser vazio) e authTag de 16 bytes
+// (32 hex). Nada de heurística "tem ':'?" — um segredo da Meta em texto
+// puro nunca casa com isso.
+const GCM_SECRET_RE = /^[0-9a-f]{24}:(?:[0-9a-f]{2})*:[0-9a-f]{32}$/i
+// Formato CBC legado: IV de 16 bytes (32 hex) e ciphertext em blocos de
+// 16 bytes (múltiplos de 32 hex).
+const CBC_SECRET_RE = /^[0-9a-f]{32}:(?:[0-9a-f]{32})+$/i
+
+/**
+ * True quando `value` tem exatamente o formato GCM produzido por
+ * `encrypt()` (`iv:ciphertext:authTag` em hex, IV 24 hex, tag 32 hex).
+ * Checagem puramente estrutural — não tenta decifrar.
+ */
+export function isEncryptedSecret(value: unknown): value is string {
+  return typeof value === 'string' && GCM_SECRET_RE.test(value)
+}
+
+/** True quando `value` tem o formato CBC legado (só leitura). */
+export function isLegacyCbcSecret(value: unknown): value is string {
+  return typeof value === 'string' && CBC_SECRET_RE.test(value)
+}
+
+const warnedPlaintextLabels = new Set<string>()
+
+/**
+ * Lê um segredo armazenado (app_secret, verify_token, access_token,
+ * waha_api_key...).
+ *
+ * - Formato GCM/CBC válido → decifra (e lança se a chave/authTag não
+ *   baterem — ciphertext adulterado nunca vira "texto puro").
+ * - Qualquer outra coisa → valor legado gravado em texto puro (ex.:
+ *   workaround antigo de salvar direto no banco). Devolve o valor como
+ *   está para a produção seguir funcionando até o script
+ *   `scripts/encrypt-plaintext-app-secrets.mjs` rodar, e avisa no log uma
+ *   vez por processo/coluna — sem nunca logar o valor.
+ */
+export function decryptStoredSecret(value: string, label: string): string {
+  if (isEncryptedSecret(value) || isLegacyCbcSecret(value)) {
+    return decrypt(value)
+  }
+  if (!warnedPlaintextLabels.has(label)) {
+    warnedPlaintextLabels.add(label)
+    console.warn(
+      `[encryption] ${label} armazenado em texto puro (legado) — rode scripts/encrypt-plaintext-app-secrets.mjs --apply para criptografar.`,
+    )
+  }
+  return value
+}
+
+/**
+ * Garante que um valor já armazenado esteja em formato cifrado antes de
+ * ser regravado: GCM/CBC ficam como estão; texto puro legado é cifrado.
+ */
+export function ensureEncryptedSecret(value: string): string {
+  if (isEncryptedSecret(value) || isLegacyCbcSecret(value)) return value
+  return encrypt(value)
+}
+
 /**
  * Best-effort decrypt for columns being migrated from plaintext to
  * encrypt()'d storage in place (e.g. ai_config.api_key/elevenlabs_api_key

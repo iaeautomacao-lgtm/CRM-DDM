@@ -55,6 +55,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
+import { useFlowEditor } from "../flow-editor-state";
+import { PromptHistoryButton } from "@/components/ai/prompt-history-button";
 import {
   WEBCHAT_BUTTON_TEXT_MAX,
   type AiAgentTool,
@@ -2679,6 +2681,7 @@ function AiAgentForm({
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
   const mode = cfg.mode ?? "once";
+  const { flow } = useFlowEditor();
   const [accountProvider, setAccountProvider] = useState<AiProvider | null>(null);
   const [providerLoading, setProviderLoading] = useState(true);
 
@@ -2750,16 +2753,12 @@ function AiAgentForm({
           <SelectTrigger className="bg-muted">
             <SelectValue
               placeholder={
-                providerLoading
-                  ? "Carregando modelos..."
-                  : "Usar padrão da conta"
+                providerLoading ? "Carregando modelos..." : "Usar padrão da conta"
               }
             />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__account_default__">
-              Usar padrão da conta
-            </SelectItem>
+            <SelectItem value="__account_default__">Usar padrão da conta</SelectItem>
             {availableModels.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {model.label}
@@ -2776,6 +2775,14 @@ function AiAgentForm({
         </p>
       </div>
 
+      <div className="-mb-2 flex justify-end">
+        <PromptHistoryButton
+          target={{ scope: "flow_node", flowId: flow.id, nodeKey: currentKey }}
+          currentContent={cfg.system_prompt_override ?? ""}
+          onRestore={(content) => onUpdateConfig({ system_prompt_override: content })}
+          description="Versões publicadas das instruções deste nó, da mais recente para a mais antiga. Restaurar coloca o texto de volta no campo; ele só entra no ar depois de publicar o fluxo."
+        />
+      </div>
       <TextRow
         label="Instruções da IA para este nó (opcional, substituem as gerais)"
         value={cfg.system_prompt_override ?? ""}
@@ -2785,6 +2792,13 @@ function AiAgentForm({
       <p className="-mt-2 text-[10px] text-muted-foreground">
         Deixe vazio para usar o prompt da configuração de IA
       </p>
+      {!cfg.system_prompt_override?.trim() && (
+        <p className="-mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-300">
+          Sem instruções aqui, a IA usa o prompt da conta (Configurações → IA)
+          e, nas contas DDM, também blocos fixos do sistema (Sabrina/Aleh) que
+          não aparecem neste editor e só mudam com atualização do sistema.
+        </p>
+      )}
 
       {mode === "loop" && (
         <div>

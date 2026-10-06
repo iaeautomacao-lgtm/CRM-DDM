@@ -661,13 +661,15 @@ export default function InboxPage() {
   const hasActiveConv = !!activeConversation;
 
   return (
-    <div className="-m-4 flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden sm:-m-6">
+    // dvh (e não vh): no celular a barra do navegador fica por cima de
+    // 100vh e escondia o composer no rodapé.
+    <div className="-m-4 flex h-[calc(100dvh-3.5rem)] flex-col overflow-hidden sm:-m-6">
       {/* WhatsApp connection banner — in the flex column, not absolute,
           so it pushes the panels down instead of overlapping them. */}
       {whatsappConnected === false && (
-        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2">
-          <WifiOff className="h-4 w-4 text-amber-400" />
-          <p className="text-xs text-amber-400">
+        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2" role="status">
+          <WifiOff className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
+          <p className="text-xs text-amber-700 dark:text-amber-400">
             WhatsApp® não está conectado. Vá em Configurações para conectar sua conta.
           </p>
         </div>

@@ -33,11 +33,23 @@ import { resolveProviderMedia } from '@/lib/storage/provider-media';
  *     INSERT raises 23505 and the runner catches & exits.
  */
 
-import { handleAiAutoResponse, AI_EMPTY_REPLY_FALLBACK_TEXT } from "@/lib/ai/responder";
+import {
+  handleAiAutoResponse,
+  AI_EMPTY_REPLY_FALLBACK_TEXT,
+  type AiGuardDetail,
+} from "@/lib/ai/responder";
 import {
   isModelCompatibleWithProvider,
   resolveAiModel,
 } from "@/lib/ai/models";
+import { normalizeExitTag } from "@/lib/ai/exit-tags";
+import {
+  isTurnFreeInbound,
+  nextAiTurnCount,
+  parkBeforeAiAgent,
+  readTurnVar,
+  type AdvanceWalkContext,
+} from "./ai-turns";
 import { supabaseAdmin } from "./admin-client";
 import { writeLog } from "@/lib/logger";
 import {
@@ -475,7 +487,34 @@ async function logAiDecision(
   db: AdminClient,
   input: AiDecisionInput,
 ): Promise<void> {
-  const { error } = await db.from("ai_decisions").insert({
+  // Telemetria best-effort: nunca derruba o fluxo.
+  let error: { message: string } | null = null;
+  try {
+    ({ error } = await insertAiDecision(db, input));
+  } catch (err) {
+    error = { message: err instanceof Error ? err.message : String(err) };
+  }
+
+  if (error) {
+    console.error("[flows] logAiDecision error:", error.message);
+    void writeLog({
+      account_id: input.account_id,
+      level: "error",
+      source: "flows",
+      event: "ai_decision_log_failed",
+      message: "Falha ao gravar decisão estruturada da IA",
+      payload: {
+        flow_run_id: input.flow_run_id ?? null,
+        decision_type: input.decision_type,
+        node_key: input.node_key ?? null,
+        erro: error.message,
+      },
+    });
+  }
+}
+
+function insertAiDecision(db: AdminClient, input: AiDecisionInput) {
+  return db.from("ai_decisions").insert({
     account_id: input.account_id,
     conversation_id: input.conversation_id ?? null,
     flow_run_id: input.flow_run_id ?? null,
@@ -497,23 +536,6 @@ async function logAiDecision(
     model: input.model ?? null,
     prompt_version: input.prompt_version ?? null,
   });
-
-  if (error) {
-    console.error("[flows] logAiDecision error:", error.message);
-    void writeLog({
-      account_id: input.account_id,
-      level: "error",
-      source: "flows",
-      event: "ai_decision_log_failed",
-      message: "Falha ao gravar decisão estruturada da IA",
-      payload: {
-        flow_run_id: input.flow_run_id ?? null,
-        decision_type: input.decision_type,
-        node_key: input.node_key ?? null,
-        erro: error.message,
-      },
-    });
-  }
 }
 
 function parseToolFailure(result: string): string | null {
@@ -533,53 +555,121 @@ function parseToolFailure(result: string): string | null {
   return null;
 }
 
+export interface HandoffContextEvent {
+  node_key: string | null;
+  node_type: string | null;
+  event_type: string;
+  payload: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+/**
+ * Erro de tool que explica um handoff: só da MESMA rodada da IA (eventos
+ * depois da mensagem do cliente que a disparou — `roundStartedAt`) e só se
+ * nenhuma chamada posterior da mesma tool deu certo. Antes um erro antigo,
+ * já recuperado, era anexado a handoffs sem relação e inflava TOOL_ERROR.
+ * `events` vem do mais novo para o mais antigo.
+ */
+export function pickRoundToolFailure(
+  events: HandoffContextEvent[],
+  roundStartedAt: string | null,
+): { toolError: string | null; toolName: string | null } {
+  const roundStart = roundStartedAt ? Date.parse(roundStartedAt) : Number.NaN;
+  const succeeded = new Set<string>();
+  for (const event of events) {
+    if (event.event_type !== "tool_result" || !event.payload) continue;
+    if (
+      !Number.isNaN(roundStart) &&
+      event.created_at &&
+      Date.parse(event.created_at) < roundStart
+    ) {
+      break;
+    }
+    const toolName =
+      typeof event.payload.tool_name === "string" ? event.payload.tool_name : null;
+    const result =
+      typeof event.payload.result === "string" ? event.payload.result : null;
+    const failure = result ? parseToolFailure(result) : null;
+    if (!failure) {
+      if (toolName) succeeded.add(toolName);
+      continue;
+    }
+    if (toolName && succeeded.has(toolName)) continue;
+    return { toolError: failure, toolName };
+  }
+  return { toolError: null, toolName: null };
+}
+
 async function loadLatestAiHandoffContext(
   db: AdminClient,
-  runId: string,
+  run: FlowRunRow,
 ): Promise<{
   aiNode: string | null;
   toolError: string | null;
   toolName: string | null;
 }> {
-  const { data } = await db
-    .from("flow_run_events")
-    .select("node_key,node_type,event_type,payload,created_at")
-    .eq("flow_run_id", runId)
-    .in("event_type", ["tool_result", "node_completed"])
-    .order("created_at", { ascending: false })
-    .limit(30);
+  try {
+    const { data } = await db
+      .from("flow_run_events")
+      .select("node_key,node_type,event_type,payload,created_at")
+      .eq("flow_run_id", run.id)
+      .in("event_type", ["tool_result", "node_completed"])
+      .order("created_at", { ascending: false })
+      .limit(30);
+    const events = (data ?? []) as HandoffContextEvent[];
 
-  let aiNode: string | null = null;
-  let toolError: string | null = null;
-  let toolName: string | null = null;
+    const aiNode =
+      events.find((event) => event.node_type === "ai_agent" && event.node_key)
+        ?.node_key ?? null;
 
-  for (const row of data ?? []) {
-    const event = row as {
-      node_key: string | null;
-      node_type: string | null;
-      event_type: string;
-      payload: Record<string, unknown> | null;
-    };
-    if (!aiNode && event.node_type === "ai_agent" && event.node_key) {
-      aiNode = event.node_key;
+    // Início da rodada = última mensagem do cliente (é ela que dispara a IA).
+    let roundStartedAt: string | null = null;
+    if (run.conversation_id) {
+      const { data: inbound } = await db
+        .from("messages")
+        .select("received_at")
+        .eq("conversation_id", run.conversation_id)
+        .eq("sender_type", "customer")
+        .order("received_at", { ascending: false })
+        .limit(1);
+      roundStartedAt =
+        (inbound?.[0] as { received_at?: string | null } | undefined)
+          ?.received_at ?? null;
     }
 
-    if (event.event_type === "tool_result" && event.payload) {
-      const result =
-        typeof event.payload.result === "string" ? event.payload.result : null;
-      const failure = result ? parseToolFailure(result) : null;
-      if (failure) {
-        toolError = failure;
-        toolName =
-          typeof event.payload.tool_name === "string"
-            ? event.payload.tool_name
-            : null;
-        break;
-      }
-    }
+    return { aiNode, ...pickRoundToolFailure(events, roundStartedAt) };
+  } catch (err) {
+    console.error("[flows] loadLatestAiHandoffContext error:", err);
+    return { aiNode: null, toolError: null, toolName: null };
   }
+}
 
-  return { aiNode, toolError, toolName };
+/**
+ * Como a execução chegou ao nó de handoff, quando isso muda o motivo:
+ * o switch caiu no default (nenhum ramo casou). Guardado em memória pelo
+ * walk síncrono de advanceFromNodeKey (switch → … → handoff na mesma
+ * chamada) — não vai para run.vars.
+ */
+interface SwitchFallthroughContext {
+  switchNode: string;
+  aiExitCode: string | null;
+  aiExitReason: string | null;
+}
+const switchFallthroughByRun = new WeakMap<FlowRunRow, SwitchFallthroughContext>();
+
+/**
+ * Subreason do handoff que veio do default do switch:
+ *  - IA esgotou max_turns sem tag → SWITCH_DEFAULT_MAX_TURNS;
+ *  - IA mandou tag que nenhum ramo trata → SWITCH_DEFAULT_TAG_NAO_ROTEADA;
+ *  - sem tag nenhuma → SWITCH_DEFAULT_SEM_TAG.
+ */
+export function switchDefaultSubreason(ctx: {
+  aiExitCode: string | null;
+  aiExitReason: string | null;
+}): string {
+  if (ctx.aiExitCode) return "SWITCH_DEFAULT_TAG_NAO_ROTEADA";
+  if (ctx.aiExitReason === "max_turns") return "SWITCH_DEFAULT_MAX_TURNS";
+  return "SWITCH_DEFAULT_SEM_TAG";
 }
 
 async function recordHandoffDecision(
@@ -591,7 +681,16 @@ async function recordHandoffDecision(
   assignedTo: string | null,
   teamId: string | null,
 ): Promise<void> {
-  const ctx = await loadLatestAiHandoffContext(db, run.id);
+  const ctx = await loadLatestAiHandoffContext(db, run);
+  const aiExitCode =
+    typeof run.vars?.ai_exit_code === "string" ? run.vars.ai_exit_code : null;
+  // #INSTABILIDADE imposto pelo código (responder.ts) e não pelo modelo.
+  const forced = aiExitCode !== null && run.vars?.ai_exit_forced === true;
+  const fallthrough = switchFallthroughByRun.get(run) ?? null;
+  switchFallthroughByRun.delete(run);
+  // Motivo do nó mantido (continuidade com o histórico); a subreason diz
+  // POR QUE o fluxo caiu nele quando foi pelo default do switch.
+  const subreason = fallthrough ? switchDefaultSubreason(fallthrough) : reasonSubcode;
 
   await logAiDecision(db, {
     account_id: run.account_id,
@@ -605,18 +704,121 @@ async function recordHandoffDecision(
       team_id: teamId,
       ai_node: ctx.aiNode,
       tool_error: ctx.toolError,
+      forced,
+      ...(forced ? { forced_tools: run.vars?.ai_exit_forced_tools ?? null } : {}),
+      ai_exit_reason:
+        typeof run.vars?.__ai_exit_reason__ === "string"
+          ? run.vars.__ai_exit_reason__
+          : null,
+      ...(fallthrough
+        ? {
+            switch_default: true,
+            switch_node: fallthrough.switchNode,
+            node_reason_subcode: reasonSubcode,
+          }
+        : {}),
     },
     reason: ctx.toolError,
     needs_human: true,
     handoff_reason: reasonCode,
-    handoff_subreason: reasonSubcode,
-    ai_exit_code:
-      typeof run.vars?.ai_exit_code === "string" ? run.vars.ai_exit_code : null,
+    handoff_subreason: subreason,
+    ai_exit_code: aiExitCode,
     tool_name: ctx.toolName,
     tool_status: ctx.toolError ? "error" : null,
     ai_node: ctx.aiNode,
     tool_error: ctx.toolError,
   });
+}
+
+/**
+ * Handoff que não passa por nó de handoff (travas do responder, fallback
+ * de reprompt) — UMA linha em ai_decisions com o motivo. Best-effort.
+ */
+async function recordDirectHandoffDecision(
+  db: AdminClient,
+  run: FlowRunRow,
+  input: {
+    nodeKey: string | null;
+    reasonCode: string;
+    reasonSubcode: string | null;
+    reason: string;
+    decision?: Record<string, unknown>;
+    aiNode?: string | null;
+    model?: string | null;
+  },
+): Promise<void> {
+  await logAiDecision(db, {
+    account_id: run.account_id,
+    conversation_id: run.conversation_id ?? null,
+    flow_run_id: run.id,
+    flow_id: run.flow_id,
+    node_key: input.nodeKey,
+    decision_type: "handoff",
+    decision: input.decision ?? {},
+    reason: input.reason,
+    needs_human: true,
+    handoff_reason: input.reasonCode,
+    handoff_subreason: input.reasonSubcode,
+    ai_node: input.aiNode ?? null,
+    model: input.model ?? null,
+  });
+}
+
+const GUARD_HANDOFF_REASONS: Record<string, string> = {
+  handoff_anti_scam: "ANTI_ABUSO",
+  handoff_anti_loop: "ANTI_LOOP",
+};
+
+function isGuardHandoffReason(reason: string | null): reason is string {
+  return reason !== null && reason in GUARD_HANDOFF_REASONS;
+}
+
+/** Linha de handoff das travas do responder (anti-abuso / anti-loop). */
+async function recordGuardHandoffDecision(
+  db: AdminClient,
+  run: FlowRunRow,
+  nodeKey: string,
+  responseReason: string,
+  guard: AiGuardDetail | null,
+  model: string | null,
+): Promise<void> {
+  await recordDirectHandoffDecision(db, run, {
+    nodeKey,
+    reasonCode: GUARD_HANDOFF_REASONS[responseReason] ?? responseReason,
+    reasonSubcode: guard?.subreason ?? null,
+    reason: responseReason,
+    decision: { ...(guard ?? {}) },
+    aiNode: nodeKey,
+    model,
+  });
+}
+
+/**
+ * Tags de saída que o fluxo trata nos ramos de switch/condição
+ * (subject_key "ai_exit_code"). A IA aceita essas além das conhecidas
+ * (exit-tags.ts) — fluxos podem ter tags próprias.
+ */
+export function flowExitTagsFromNodes(
+  nodes: Iterable<Pick<FlowNodeRow, "node_type" | "config">>,
+): string[] {
+  const tags = new Set<string>();
+  const collect = (cond: { subject_key?: unknown; value?: unknown }) => {
+    if (cond.subject_key !== "ai_exit_code") return;
+    const tag = normalizeExitTag(cond.value);
+    if (tag) tags.add(tag);
+  };
+  for (const node of nodes) {
+    const cfg = (node.config ?? {}) as Record<string, unknown>;
+    if (node.node_type === "switch" && Array.isArray(cfg.branches)) {
+      for (const branch of cfg.branches as Array<{ conditions?: unknown }>) {
+        if (!Array.isArray(branch?.conditions)) continue;
+        for (const cond of branch.conditions) collect(cond ?? {});
+      }
+    } else if (node.node_type === "condition") {
+      collect(cfg);
+    }
+  }
+  return [...tags];
 }
 
 /**
@@ -1966,6 +2168,9 @@ async function runAiAgentCore(
   // flow_run_events, ver os callbacks onToolResult abaixo) no system
   // prompt deste nó, antes de chamar handleAiAutoResponse.
   herdarContextoAnterior?: boolean,
+  // Tags de saída usadas pelos ramos do fluxo (flowExitTagsFromNodes) —
+  // aceitas pela IA além das tags conhecidas (exit-tags.ts).
+  flowExitTags?: string[],
   modelOverride?: string | null,
 ): Promise<
   | {
@@ -1978,6 +2183,14 @@ async function runAiAgentCore(
       messageId: string | null;
       responseOutcome: "sent" | "skipped";
       responseReason: string | null;
+      /** Detalhe da trava anti-abuso/anti-loop, quando ela tirou a conversa da IA. */
+      guard: AiGuardDetail | null;
+      /**
+       * Mensagem do cliente que disparou o turno é mídia sem texto ou
+       * confirmação pura ("ok", "👍") — não consome turno de max_turns
+       * (ver ai-turns.ts).
+       */
+      inboundTurnFree: boolean;
       baseOutput: Record<string, unknown>;
     }
   | {
@@ -1995,10 +2208,13 @@ async function runAiAgentCore(
     }
 > {
   // Garante que exit codes de nós anteriores não vazem para este nó
-  if (run.vars?.ai_exit_code) {
-    await updateRunVars(db, run, { ai_exit_code: null });
-    run.vars = { ...run.vars, ai_exit_code: null };
+  // (nem a telemetria ligada a eles: tag forçada, motivo de saída).
+  if (run.vars?.ai_exit_code || run.vars?.__ai_exit_reason__) {
+    const cleared = { ai_exit_code: null, ai_exit_forced: false, __ai_exit_reason__: null };
+    await updateRunVars(db, run, cleared);
+    run.vars = { ...run.vars, ...cleared };
   }
+  switchFallthroughByRun.delete(run);
 
   let lastReply = "";
   let exitCodeFound: string | null = null;
@@ -2006,11 +2222,10 @@ async function runAiAgentCore(
   let modelSource: "node" | "account" | "provider_default" | null = null;
   let providerUsed: string | null = null;
   let aiConfigUsable = false;
+  let inboundTurnFree = false;
   try {
-    // Resolve o modelo antes da chamada para que tool_result e demais
-    // decisões já registrem exatamente o modelo que será enviado ao
-    // provider. ai_config.api_model é opcional/forward-compatible:
-    // ambientes sem essa coluna continuam usando o default do provider.
+    // Resolve o modelo antes da chamada para que telemetria e tool_result
+    // registrem exatamente o modelo que será enviado ao provider.
     const { data: aiConfigRow } = await db
       .from("ai_config")
       .select("*")
@@ -2090,6 +2305,12 @@ async function runAiAgentCore(
       } | null;
       incomingText = incomingMsg?.content_text ?? "";
     }
+
+    // Antes do placeholder abaixo: decide com o conteúdo real da mensagem.
+    inboundTurnFree = isTurnFreeInbound(
+      incomingTextOverride ?? incomingMsg?.content_text ?? null,
+      incomingMsg?.content_type ?? null,
+    );
 
     // Mensagem de mídia sem texto (sticker, áudio ainda não transcrito
     // neste ponto, vídeo, documento) vira um placeholder descritivo em
@@ -2279,6 +2500,7 @@ async function runAiAgentCore(
       },
       currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
       run.config_id ?? undefined,
+      flowExitTags,
       modelOverride,
     );
 
@@ -2326,9 +2548,18 @@ async function runAiAgentCore(
     // already-stripped copy) would never find any of the built-in tags
     // (#ACORDOFORMALIZADO, #EQUIPEHUMANA, etc.), since those are removed
     // before the message is saved.
+    // ai_exit_forced: a tag foi imposta pelo código (#INSTABILIDADE com a
+    // integração fora do ar), não escolhida pelo modelo — vai para a linha
+    // de handoff em ai_decisions (decision.forced). Gravado junto com a
+    // tag para nunca ficar defasado em relação a ela.
+    const forcedExit = aiResponse.forcedExit ?? null;
     if (detectedTag) {
       exitCodeFound = detectedTag;
-      await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
+      await updateRunVars(db, run, {
+        ai_exit_code: exitCodeFound,
+        ai_exit_forced: forcedExit !== null && forcedExit.tag === detectedTag,
+        ai_exit_forced_tools: forcedExit?.tools ?? null,
+      });
     }
 
     // Auto-exit #NEGOCIACAO: no nó BEN (agente_de_ia), se alguma
@@ -2355,7 +2586,11 @@ async function runAiAgentCore(
       });
       if (hasPositiveNominal) {
         exitCodeFound = "#NEGOCIACAO";
-        await updateRunVars(db, run, { ai_exit_code: exitCodeFound });
+        await updateRunVars(db, run, {
+          ai_exit_code: exitCodeFound,
+          ai_exit_forced: false,
+          ai_exit_forced_tools: null,
+        });
       }
     }
 
@@ -2416,6 +2651,8 @@ async function runAiAgentCore(
       messageId: aiMessageId,
       responseOutcome: aiResponse.outcome,
       responseReason,
+      guard: aiResponse.outcome === "skipped" ? (aiResponse.guard ?? null) : null,
+      inboundTurnFree,
       baseOutput,
     };
   } catch (err) {
@@ -2449,7 +2686,15 @@ export async function advanceFromNodeKey(
   startNodeKey: string,
   nodes: Map<string, FlowNodeRow>,
   triggerMessage?: ParsedInbound,
+  // Estado do walk disparado pela mensagem do cliente — ver
+  // parkBeforeAiAgent (ai-turns.ts). handleReplyForActiveRun passa
+  // inboundAnsweredByAi quando o ai_agent estacionado acabou de sair
+  // (tag/max_turns) já tendo respondido a essa mensagem.
+  walkCtx: AdvanceWalkContext = {},
 ): Promise<{ outcome: "advanced" | "completed" | "handed_off" | "transferred" }> {
+  // Cópia local: o walk marca inboundAnsweredByAi quando um ai_agent em
+  // loop sai respondendo ao cliente (ver o ramo "loop" abaixo).
+  const walk: AdvanceWalkContext = { ...walkCtx };
   let currentKey: string | null = startNodeKey;
   // Defensive cap — if a flow has a cycle (which the validator
   // SHOULD catch but doesn't yet in v1), we bail rather than loop.
@@ -2737,6 +2982,21 @@ export async function advanceFromNodeKey(
         matchedBranchIndex === null
           ? cfg.default_next
           : cfg.branches[matchedBranchIndex].next_node_key;
+      // Telemetria: se o default levar a um handoff, recordHandoffDecision
+      // registra que foi pelo default (e por quê). Ver switchDefaultSubreason.
+      if (matchedBranchIndex === null) {
+        switchFallthroughByRun.set(run, {
+          switchNode: node.node_key,
+          aiExitCode:
+            typeof run.vars?.ai_exit_code === "string" ? run.vars.ai_exit_code : null,
+          aiExitReason:
+            typeof run.vars?.__ai_exit_reason__ === "string"
+              ? run.vars.__ai_exit_reason__
+              : null,
+        });
+      } else {
+        switchFallthroughByRun.delete(run);
+      }
       const chosenBranch =
         matchedBranchIndex === null
           ? "fallback"
@@ -3272,6 +3532,32 @@ export async function advanceFromNodeKey(
       await updateRunVars(db, run, { ai_exit_code: null });
       run.vars = { ...run.vars, ai_exit_code: null };
 
+      // Outro ai_agent já respondeu à mensagem que disparou este walk e o
+      // caminho (switch/condição/…) chegou aqui: não roda este nó com a
+      // MESMA mensagem — estaciona e deixa a próxima mensagem do cliente
+      // dispará-lo (handleReplyForActiveRun). Generaliza o guard "próximo
+      // nó é ai_agent" do ramo loop abaixo para caminhos com nós
+      // intermediários (agente_ddm → switch_resultado → recovery_recusa).
+      if (parkBeforeAiAgent(cfg, walk)) {
+        const advanced = await advanceCurrentNodeKey(
+          db,
+          run.id,
+          run.current_node_key,
+          node.node_key,
+        );
+        if (!advanced) {
+          await logEvent(db, run.id, "error", node.node_key, {
+            reason: "lost_race_during_advance",
+          });
+        }
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          turns_used: 0,
+          exit_reason: "awaiting_reply",
+          parked_reason: "inbound_already_answered_by_ai",
+        });
+        return { outcome: "advanced" };
+      }
+
       const core = await runAiAgentCore(
         db,
         run,
@@ -3288,6 +3574,7 @@ export async function advanceFromNodeKey(
         // anterior. node.node_key é o valor correto para este turno.
         node.node_key,
         cfg.herdar_contexto_anterior,
+        flowExitTagsFromNodes(nodes.values()),
         cfg.model,
       );
       if (!core.ok) {
@@ -3358,9 +3645,16 @@ export async function advanceFromNodeKey(
       // active run that will later be swept as a timeout.
       if (
         core.responseOutcome === "skipped" &&
-        (core.responseReason === "handoff_anti_scam" ||
-          core.responseReason === "handoff_anti_loop")
+        isGuardHandoffReason(core.responseReason)
       ) {
+        await recordGuardHandoffDecision(
+          db,
+          run,
+          node.node_key,
+          core.responseReason,
+          core.guard,
+          core.modelUsed,
+        );
         await logEvent(db, run.id, "handoff", node.node_key, {
           reason: core.responseReason,
           turns_used: 1,
@@ -3396,11 +3690,13 @@ export async function advanceFromNodeKey(
 
       if (cfg.mode === "loop") {
         const maxTurns = cfg.max_turns ?? 20;
-        const priorTurns =
-          typeof run.vars.__ai_turns__ === "number"
-            ? (run.vars.__ai_turns__ as number)
-            : 0;
-        const turns = priorTurns + 1;
+        // Mídia sem texto / "ok" não gasta turno (ver ai-turns.ts).
+        const turnCount = nextAiTurnCount(
+          readTurnVar(run.vars, "__ai_turns__"),
+          readTurnVar(run.vars, "__ai_free_turns__"),
+          core.inboundTurnFree,
+        );
+        const turns = turnCount.turns;
         if (exitCodeFound || turns >= maxTurns) {
           // Cap hit OR the agent's reply just carried a #TAG exit code
           // (ai_exit_code was set above) — either way the loop is done:
@@ -3409,9 +3705,15 @@ export async function advanceFromNodeKey(
           // next_node_key so a downstream Switch can route on
           // ai_exit_code instead of the loop suspending for another
           // customer reply that will never come.
-          await updateRunVars(db, run, { __ai_turns__: 0 });
           const nextKey = cfg.next_node_key ?? null;
           const exitReason = exitCodeFound ? "exit_code_detected" : "max_turns";
+          // __ai_exit_reason__: telemetria do handoff (max_turns sem tag
+          // que cai no default do switch) — ver recordHandoffDecision.
+          await updateRunVars(db, run, {
+            __ai_turns__: 0,
+            __ai_free_turns__: 0,
+            __ai_exit_reason__: exitReason,
+          });
           await logEvent(db, run.id, "node_entered", node.node_key, {
             turns_used: turns,
             exit_reason: exitCodeFound ? "exit_code_matched" : "limit_reached",
@@ -3445,10 +3747,16 @@ export async function advanceFromNodeKey(
             return { outcome: "advanced" };
           }
 
+          // Respondeu ao cliente nesta mensagem: um ai_agent mais adiante
+          // neste mesmo walk espera a próxima (parkBeforeAiAgent).
+          if (core.messageSent) walk.inboundAnsweredByAi = true;
           currentKey = nextKey;
           continue;
         }
-        await updateRunVars(db, run, { __ai_turns__: turns });
+        await updateRunVars(db, run, {
+          __ai_turns__: turns,
+          __ai_free_turns__: turnCount.freeTurns,
+        });
         const advanced = await advanceCurrentNodeKey(
           db,
           run.id,
@@ -3993,6 +4301,7 @@ async function handleReplyForActiveRun(
       cfg.tools,
       undefined,       // currentNodeKeyOverride — run.current_node_key já é o nó certo aqui
       cfg.herdar_contexto_anterior,
+      flowExitTagsFromNodes(nodes.values()),
       cfg.model,
     );
     if (!core.ok) {
@@ -4019,6 +4328,45 @@ async function handleReplyForActiveRun(
     }
 
     const { lastReply, exitCodeFound, baseOutput } = core;
+
+    // Trava do responder (anti-abuso / anti-loop) já passou a conversa
+    // para humano: encerra a execução como handoff (mesma regra do
+    // advanceFromNodeKey) em vez de contar como turno e deixar o run
+    // ativo parado no nó de IA.
+    if (
+      core.responseOutcome === "skipped" &&
+      isGuardHandoffReason(core.responseReason)
+    ) {
+      await recordGuardHandoffDecision(
+        db,
+        run,
+        currentNode.node_key,
+        core.responseReason,
+        core.guard,
+        core.modelUsed,
+      );
+      await logEvent(db, run.id, "handoff", currentNode.node_key, {
+        reason: core.responseReason,
+        exit_reason: "guard_handoff",
+      });
+      await logRunEvent(db, {
+        run_id: run.id,
+        flow_id: run.flow_id,
+        account_id: run.account_id,
+        node_key: currentNode.node_key,
+        node_type: currentNode.node_type,
+        event_type: "node_completed",
+        status: "success",
+        duration_ms: 0,
+        payload: {
+          input: { ...run.vars },
+          output: { ...baseOutput, exit_reason: "guard_handoff" },
+        },
+      });
+      await endRun(db, run, "handed_off", core.responseReason);
+      return { consumed: true, flow_run_id: run.id, outcome: "handed_off" };
+    }
+
     await logEvent(db, run.id, "message_sent", currentNode.node_key, {
       node_type: "ai_agent",
       mode: cfg.mode,
@@ -4041,11 +4389,13 @@ async function handleReplyForActiveRun(
       });
 
     const maxTurns = cfg.max_turns ?? 20;
-    const priorTurns =
-      typeof run.vars.__ai_turns__ === "number"
-        ? (run.vars.__ai_turns__ as number)
-        : 0;
-    const turns = priorTurns + 1;
+    // Mídia sem texto / "ok" não gasta turno (ver ai-turns.ts).
+    const turnCount = nextAiTurnCount(
+      readTurnVar(run.vars, "__ai_turns__"),
+      readTurnVar(run.vars, "__ai_free_turns__"),
+      core.inboundTurnFree,
+    );
+    const turns = turnCount.turns;
 
     if (exitCodeFound || turns >= maxTurns) {
       // Same exit condition as the initial-entry branch in
@@ -4055,8 +4405,12 @@ async function handleReplyForActiveRun(
       // is already this node, so there's nothing to advance INTO
       // first (unlike the entry case, which transitions from a prior
       // node via `continue` in that function's own loop).
-      await updateRunVars(db, run, { __ai_turns__: 0 });
       const exitReason = exitCodeFound ? "exit_code_detected" : "max_turns";
+      await updateRunVars(db, run, {
+        __ai_turns__: 0,
+        __ai_free_turns__: 0,
+        __ai_exit_reason__: exitReason,
+      });
       await logEvent(db, run.id, "node_entered", currentNode.node_key, {
         turns_used: turns,
         exit_reason: exitCodeFound ? "exit_code_matched" : "limit_reached",
@@ -4099,7 +4453,12 @@ async function handleReplyForActiveRun(
         return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
       }
 
-      const outcome = await advanceFromNodeKey(db, run, nextKey, nodes);
+      // Se a IA já respondeu a esta mensagem, um ai_agent alcançado mais
+      // adiante (depois de switch/condição) espera a próxima mensagem do
+      // cliente em vez de rodar agora — ver parkBeforeAiAgent.
+      const outcome = await advanceFromNodeKey(db, run, nextKey, nodes, undefined, {
+        inboundAnsweredByAi: core.messageSent,
+      });
       return {
         consumed: true,
         flow_run_id: run.id,
@@ -4111,7 +4470,10 @@ async function handleReplyForActiveRun(
     // awaiting the next reply. current_node_key already equals this
     // node's key (that's how we got here), so no advanceCurrentNodeKey
     // call is needed, unlike the initial-entry branch.
-    await updateRunVars(db, run, { __ai_turns__: turns });
+    await updateRunVars(db, run, {
+      __ai_turns__: turns,
+      __ai_free_turns__: turnCount.freeTurns,
+    });
     await logEvent(db, run.id, "node_entered", currentNode.node_key, {
       turns_used: turns,
       exit_reason: "awaiting_reply",
@@ -4261,6 +4623,17 @@ async function handleReplyForActiveRun(
         .update({ status: "pending", updated_at: new Date().toISOString() })
         .eq("id", run.conversation_id);
     }
+    await recordDirectHandoffDecision(db, run, {
+      nodeKey: run.current_node_key,
+      reasonCode: "REPROMPT_ESGOTADO",
+      reasonSubcode: currentNode.node_type.toUpperCase(),
+      reason: "fallback_exhausted",
+      decision: {
+        node_type: currentNode.node_type,
+        reprompt_count: newReprompts,
+        message_kind: effectiveMessage.kind,
+      },
+    });
     await logEvent(db, run.id, "handoff", run.current_node_key, {
       reason: "fallback_exhausted",
     });

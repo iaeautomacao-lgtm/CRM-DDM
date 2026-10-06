@@ -3,6 +3,7 @@ import { auditFetch } from '@/lib/audit/context'
 import { createClient as createServerClient } from '@/lib/supabase/server'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { encrypt, tryDecrypt } from '@/lib/whatsapp/encryption'
+import { recordPromptVersion } from '@/lib/ai/prompt-versions'
 import {
   aiProviderLabel,
   isAiProvider,
@@ -51,7 +52,7 @@ function maskSecret(value: string): string {
 }
 
 async function resolveAccountId(): Promise<
-  { accountId: string } | { error: NextResponse }
+  { accountId: string; userId: string } | { error: NextResponse }
 > {
   const supabase = await createServerClient()
   const {
@@ -79,7 +80,7 @@ async function resolveAccountId(): Promise<
     }
   }
 
-  return { accountId }
+  return { accountId, userId: user.id }
 }
 
 const DEFAULT_CONFIG = {
@@ -147,26 +148,19 @@ export async function POST(request: Request) {
   try {
     const resolved = await resolveAccountId()
     if ('error' in resolved) return resolved.error
-    const { accountId } = resolved
+    const { accountId, userId } = resolved
 
     const body = await request.json()
 
     if (!isAiProvider(body.api_provider)) {
-      return NextResponse.json(
-        { error: 'Provider de IA inválido.' },
-        { status: 400 },
-      )
+      return NextResponse.json({ error: 'Provider de IA inválido.' }, { status: 400 })
     }
 
-    // Trocar o provider da conta não pode invalidar silenciosamente um
-    // fluxo ativo que fixou um modelo no nó. Drafts podem permanecer com
-    // config incompleta/incompatível até a próxima ativação.
     const { data: activeFlows, error: activeFlowsError } = await supabaseAdmin()
       .from('flows')
-      .select('id, name')
+      .select('id')
       .eq('account_id', accountId)
       .eq('status', 'active')
-
     if (activeFlowsError) {
       return NextResponse.json({ error: activeFlowsError.message }, { status: 500 })
     }
@@ -178,11 +172,9 @@ export async function POST(request: Request) {
         .select('flow_id, node_key, config')
         .in('flow_id', activeFlowIds)
         .eq('node_type', 'ai_agent')
-
       if (aiNodesError) {
         return NextResponse.json({ error: aiNodesError.message }, { status: 500 })
       }
-
       const incompatible = (aiNodes ?? []).filter((node) => {
         const model =
           node.config &&
@@ -192,12 +184,10 @@ export async function POST(request: Request) {
             : ''
         return !!model && !isModelCompatibleWithProvider(model, body.api_provider)
       })
-
       if (incompatible.length > 0) {
         return NextResponse.json(
           {
-            error:
-              `Não é possível trocar o provider para ${aiProviderLabel(body.api_provider)} enquanto houver nós de IA ativos com modelos incompatíveis.`,
+            error: `Não é possível trocar o provider para ${aiProviderLabel(body.api_provider)} enquanto houver nós de IA ativos com modelos incompatíveis.`,
             code: 'active_flow_model_provider_mismatch',
             nodes: incompatible.map((node) => ({
               flow_id: node.flow_id,
@@ -265,12 +255,32 @@ export async function POST(request: Request) {
       payload.elevenlabs_api_key = trimmed ? encrypt(trimmed) : null
     }
 
+    // Prompt anterior: só grava versão (histórico, migration 148) quando
+    // o texto mudou — salvar só a chave/voz não "re-salva" o prompt.
+    const { data: previous } = await supabaseAdmin()
+      .from('ai_config')
+      .select('system_prompt')
+      .eq('account_id', accountId)
+      .maybeSingle()
+
     const { error } = await supabaseAdmin()
       .from('ai_config')
       .upsert(payload, { onConflict: 'account_id' })
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    const newPrompt = payload.system_prompt as string
+    if (newPrompt && newPrompt !== (previous?.system_prompt ?? '')) {
+      // Best-effort: recordPromptVersion nunca lança nem bloqueia o salvar.
+      await recordPromptVersion(supabaseAdmin(), {
+        accountId,
+        target: { scope: 'account' },
+        content: newPrompt,
+        userId,
+        source: 'ui',
+      })
     }
 
     return NextResponse.json({ ok: true })

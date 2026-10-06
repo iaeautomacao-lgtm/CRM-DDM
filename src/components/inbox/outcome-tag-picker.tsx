@@ -116,6 +116,7 @@ export function OutcomeTagPicker({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar tag..."
+          aria-label="Buscar tag de desfecho"
           className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
           autoFocus
         />

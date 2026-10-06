@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
+import { useDialogA11y } from "@/hooks/use-dialog-a11y";
 
 interface BlacklistEntry {
   id: string;
@@ -112,6 +113,8 @@ export default function BlacklistPage() {
   const [telefone, setTelefone] = useState("");
   const [motivo, setMotivo] = useState("bloqueio_manual");
   const [mensagemDetectada, setMensagemDetectada] = useState("");
+  // Foco no modal ao abrir, Esc fecha e o foco volta ao botão de origem.
+  const modalA11y = useDialogA11y(showModal, () => setShowModal(false));
 
   useEffect(() => {
     loadBlacklist();
@@ -270,13 +273,14 @@ export default function BlacklistPage() {
 
       {/* Search Input */}
       <div className="relative">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
         <input
-          type="text"
+          type="search"
+          aria-label="Buscar na blacklist"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Buscar por telefone ou palavra bloqueada..."
-          className="w-full rounded-md border border-input bg-background pl-9 pr-4 py-2 text-sm focus:outline-none"
+          className="w-full rounded-md border border-input bg-background pl-9 pr-4 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         />
       </div>
 
@@ -292,6 +296,7 @@ export default function BlacklistPage() {
                 size="sm"
                 variant={active ? "secondary" : "outline"}
                 onClick={() => setOriginFilter(filter.key)}
+                aria-pressed={active}
                 className="gap-1.5"
               >
                 {filter.label}
@@ -327,8 +332,9 @@ export default function BlacklistPage() {
             <p className="text-xs max-w-xs mt-1">Nenhum número foi bloqueado ainda. Adicione contatos manualmente se necessário.</p>
           </div>
         ) : (
-          <div className="border border-border rounded-xl bg-card overflow-hidden shadow-sm">
-            <table className="w-full border-collapse text-left text-xs">
+          // Rolagem horizontal só dentro da tabela (celular), nunca na página.
+          <div className="border border-border rounded-xl bg-card overflow-x-auto shadow-sm">
+            <table className="w-full min-w-[640px] border-collapse text-left text-xs">
               <thead className="border-b border-border bg-muted/30 text-muted-foreground font-semibold uppercase tracking-wider">
                 <tr>
                   <th className="px-5 py-3.5">Telefone</th>
@@ -344,7 +350,7 @@ export default function BlacklistPage() {
                     <td className="px-5 py-4 font-mono font-semibold text-foreground">{entry.telefone}</td>
                     <td className="px-5 py-4">
                       <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500 border border-red-500/15">
-                        <AlertOctagon className="h-3 w-3" /> {MOTIVO_LABELS[entry.motivo] || entry.motivo}
+                        <AlertOctagon className="h-3 w-3" aria-hidden="true" /> {MOTIVO_LABELS[entry.motivo] || entry.motivo}
                       </span>
                     </td>
                     <td className="px-5 py-4 max-w-xs">
@@ -371,14 +377,16 @@ export default function BlacklistPage() {
                       })()}
                     </td>
                     <td className="px-5 py-4 text-muted-foreground">
-                      {new Date(entry.data_bloqueio).toLocaleString()}
+                      {new Date(entry.data_bloqueio).toLocaleString("pt-BR")}
                     </td>
                     <td className="px-5 py-4 text-right">
                       <Button
                         size="icon"
                         variant="ghost"
                         onClick={() => handleRemove(entry.id)}
-                        className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
+                        aria-label={`Remover ${entry.telefone} da blacklist`}
+                        title="Remover da blacklist"
+                        className="h-9 w-9 text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -394,33 +402,45 @@ export default function BlacklistPage() {
       {/* Creation Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-card border border-border w-full max-w-md rounded-xl shadow-2xl flex flex-col overflow-hidden">
+          <div
+            ref={modalA11y.ref}
+            tabIndex={-1}
+            onKeyDown={modalA11y.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="blacklist-modal-title"
+            className="bg-card border border-border w-full max-w-md max-h-[calc(100dvh-2rem)] rounded-xl shadow-2xl flex flex-col overflow-y-auto outline-none"
+          >
             <header className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/20">
-              <h3 className="font-bold text-foreground">Adicionar à Blacklist</h3>
-              <Button size="icon" variant="ghost" onClick={() => setShowModal(false)} className="h-8 w-8 text-muted-foreground">
-                <X className="h-5 w-5" />
+              <h3 id="blacklist-modal-title" className="font-bold text-foreground">Adicionar à Blacklist</h3>
+              <Button size="icon" variant="ghost" onClick={() => setShowModal(false)} aria-label="Fechar" className="h-9 w-9 text-muted-foreground">
+                <X className="h-5 w-5" aria-hidden="true" />
               </Button>
             </header>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground font-semibold">Telefone do Contato</label>
+                <label htmlFor="blacklist-telefone" className="text-xs font-medium text-muted-foreground font-semibold">Telefone do Contato</label>
                 <input
-                  type="text"
+                  id="blacklist-telefone"
+                  type="tel"
+                  autoFocus
+                  aria-describedby="blacklist-telefone-hint"
                   value={telefone}
                   onChange={(e) => setTelefone(e.target.value)}
                   placeholder="Ex: 5521999999999"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                 />
-                <p className="text-[10px] text-muted-foreground">Insira o código do país + DDD + Número.</p>
+                <p id="blacklist-telefone-hint" className="text-[10px] text-muted-foreground">Insira o código do país + DDD + Número.</p>
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground font-semibold">Motivo</label>
+                <label htmlFor="blacklist-motivo" className="text-xs font-medium text-muted-foreground font-semibold">Motivo</label>
                 <select
+                  id="blacklist-motivo"
                   value={motivo}
                   onChange={(e) => setMotivo(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                 >
                   {Object.entries(MOTIVO_LABELS).map(([k, label]) => (
                     <option key={k} value={k}>
@@ -431,12 +451,13 @@ export default function BlacklistPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground font-semibold">Mensagem Opcional (Opt-out recebido)</label>
+                <label htmlFor="blacklist-mensagem" className="text-xs font-medium text-muted-foreground font-semibold">Mensagem Opcional (Opt-out recebido)</label>
                 <textarea
+                  id="blacklist-mensagem"
                   value={mensagemDetectada}
                   onChange={(e) => setMensagemDetectada(e.target.value)}
                   placeholder="Ex: 'Não quero mais receber mensagens'"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none resize-none h-16"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none h-16"
                 />
               </div>
 

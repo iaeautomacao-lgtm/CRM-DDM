@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { safeReturnPath } from '@/lib/auth/return-path'
+import { callbackFailurePath } from '@/lib/auth/recovery-link'
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
@@ -40,6 +41,8 @@ export async function GET(request: Request) {
     }
   }
 
-  // Se houver algum erro, redireciona para a página de login
-  return NextResponse.redirect(`${origin}/login?error=auth-callback-failed`)
+  // Se houver algum erro (link vencido, já usado ou sem código):
+  // recuperação de senha volta para /reset-password, que explica e
+  // oferece pedir outro link; o resto vai para o login.
+  return NextResponse.redirect(`${origin}${callbackFailurePath(next)}`)
 }

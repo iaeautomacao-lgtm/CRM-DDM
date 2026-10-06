@@ -1,6 +1,14 @@
 import crypto from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { decrypt, encrypt, isLegacyFormat } from "./encryption";
+import { describe, expect, it, vi } from "vitest";
+import {
+  decrypt,
+  decryptStoredSecret,
+  encrypt,
+  ensureEncryptedSecret,
+  isEncryptedSecret,
+  isLegacyCbcSecret,
+  isLegacyFormat,
+} from "./encryption";
 
 const KEY_HEX = process.env.ENCRYPTION_KEY!;
 
@@ -121,5 +129,85 @@ describe("encryption", () => {
     it("throws on a four-part blob", () => {
       expect(() => decrypt("aa:bb:cc:dd")).toThrow(/unrecognised format/);
     });
+  });
+});
+
+describe("isEncryptedSecret (formato estrito)", () => {
+  it("aceita a saída do encrypt()", () => {
+    expect(isEncryptedSecret(encrypt("abc123"))).toBe(true);
+    expect(isEncryptedSecret(encrypt(""))).toBe(true);
+  });
+
+  it("rejeita um App Secret da Meta em texto puro (32 hex, sem ':')", () => {
+    expect(isEncryptedSecret("0123456789abcdef0123456789abcdef")).toBe(false);
+  });
+
+  it("rejeita qualquer valor só porque tem ':'", () => {
+    expect(isEncryptedSecret("a:b:c")).toBe(false);
+    expect(isEncryptedSecret("segredo:com:dois-pontos")).toBe(false);
+  });
+
+  it("rejeita IV que não tem 24 hex", () => {
+    const [, ct, tag] = encrypt("x").split(":");
+    expect(isEncryptedSecret(`${"00".repeat(16)}:${ct}:${tag}`)).toBe(false);
+  });
+
+  it("rejeita authTag que não tem 32 hex", () => {
+    const [iv, ct] = encrypt("x").split(":");
+    expect(isEncryptedSecret(`${iv}:${ct}:${"00".repeat(8)}`)).toBe(false);
+  });
+
+  it("rejeita ciphertext com hex ímpar ou não-hex", () => {
+    const [iv, , tag] = encrypt("x").split(":");
+    expect(isEncryptedSecret(`${iv}:abc:${tag}`)).toBe(false);
+    expect(isEncryptedSecret(`${iv}:zz:${tag}`)).toBe(false);
+  });
+
+  it("rejeita CBC legado e não-strings", () => {
+    expect(isEncryptedSecret(cbcEncryptLegacy("x"))).toBe(false);
+    expect(isEncryptedSecret(null)).toBe(false);
+    expect(isEncryptedSecret(123)).toBe(false);
+  });
+
+  it("isLegacyCbcSecret reconhece só o CBC legado", () => {
+    expect(isLegacyCbcSecret(cbcEncryptLegacy("x"))).toBe(true);
+    expect(isLegacyCbcSecret(encrypt("x"))).toBe(false);
+    expect(isLegacyCbcSecret("ab:cd")).toBe(false);
+  });
+});
+
+describe("decryptStoredSecret (leitura com legado em texto puro)", () => {
+  it("decifra GCM e CBC", () => {
+    expect(decryptStoredSecret(encrypt("s3cr3t"), "t.gcm")).toBe("s3cr3t");
+    expect(decryptStoredSecret(cbcEncryptLegacy("old"), "t.cbc")).toBe("old");
+  });
+
+  it("devolve texto puro legado como está e avisa uma vez só, sem logar o valor", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const plain = "0123456789abcdef0123456789abcdef";
+    expect(decryptStoredSecret(plain, "t.plain")).toBe(plain);
+    expect(decryptStoredSecret(plain, "t.plain")).toBe(plain);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).not.toContain(plain);
+    warn.mockRestore();
+  });
+
+  it("ciphertext adulterado lança — nunca vira 'texto puro'", () => {
+    const [iv, ct] = encrypt("secret").split(":");
+    expect(() =>
+      decryptStoredSecret(`${iv}:${ct}:${"00".repeat(16)}`, "t.tamper"),
+    ).toThrow();
+  });
+});
+
+describe("ensureEncryptedSecret", () => {
+  it("mantém GCM/CBC e cifra texto puro", () => {
+    const gcm = encrypt("a");
+    const cbc = cbcEncryptLegacy("b");
+    expect(ensureEncryptedSecret(gcm)).toBe(gcm);
+    expect(ensureEncryptedSecret(cbc)).toBe(cbc);
+    const upgraded = ensureEncryptedSecret("plain-secret");
+    expect(isEncryptedSecret(upgraded)).toBe(true);
+    expect(decrypt(upgraded)).toBe("plain-secret");
   });
 });

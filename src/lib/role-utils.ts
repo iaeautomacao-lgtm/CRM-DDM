@@ -16,6 +16,7 @@ import type { AccountRole } from "@/lib/auth/roles";
 //   admin  → /dashboard, /monitoramento, /inbox, /relatorios, /settings,
 //            /equipes, /perfil, /templates, /tabulacoes, /usuarios,
 //            /flows, /disparador
+//   (owner/admin/supervisor também → /inteligencia, o DDM Intelligence)
 //   supervisor → /dashboard, /monitoramento, /inbox e os relatórios de
 //            Atendimentos/Conversas/Agentes (dados só das suas equipes —
 //            RLS da migration 140 e RPCs escopadas na 143)
@@ -60,6 +61,9 @@ export type UserRole = AccountRole;
 export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/dashboard": ["owner", "admin", "supervisor", "viewer"],
   "/monitoramento": ["owner", "admin", "supervisor"],
+  // DDM Intelligence (PRD-04): supervisor vê só as suas equipes — o
+  // escopo é aplicado nas ferramentas (lib/intelligence/scope.ts).
+  "/inteligencia": ["owner", "admin", "supervisor"],
   "/inbox": ["owner", "admin", "supervisor", "agent"],
   // Supervisor: só os relatórios de atendimento, já escopados às equipes
   // dele (migration 143). Precisa vir ANTES de "/relatorios" — a busca usa

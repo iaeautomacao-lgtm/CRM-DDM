@@ -113,6 +113,7 @@ export function ContactChannelsCard({
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             placeholder="Telefone com DDI (5511…)"
+            aria-label="Telefone com DDI"
             inputMode="tel"
             className="h-8 text-xs"
           />
@@ -121,6 +122,7 @@ export function ContactChannelsCard({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="E-mail"
+              aria-label="E-mail"
               type="email"
               className="h-8 text-xs"
             />

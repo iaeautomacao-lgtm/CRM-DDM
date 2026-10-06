@@ -10,7 +10,7 @@ Atualizado em: 2026-10-01
 - max_simultaneous_chats por operador (migration 116)
 
 ## Bugs Conhecidos / Workarounds Ativos
-- `app_secret` salvo via UI chega em plaintext (bypass da criptografia) — workaround: salvar direto no banco
+- `app_secret` em texto puro: corrigido (cifra no servidor). Depois do deploy, rodar `node scripts/encrypt-plaintext-app-secrets.mjs` (dry-run) e `--apply` — não gravar segredos direto no banco
 - `/api/v1/disparador/campaigns` não usa `startCampaign()` — não tem filtro de import_draft_id
 - Race condition BEN→Aleh: `hasRunLeftNodeSnapshot` implementado mas eficácia não 100% confirmada
 

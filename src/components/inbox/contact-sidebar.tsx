@@ -345,6 +345,7 @@ export function ContactSidebar({
               <div className="mt-3 flex items-center gap-1">
                 <input
                   type="text"
+                  aria-label="Nome do contato"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   onKeyDown={async (e) => {
@@ -458,8 +459,9 @@ export function ContactSidebar({
                   disabled={analyzing}
                   onClick={handleAnalyzeSentiment}
                   title="Reanalisar conversa com IA"
+                  aria-label="Reanalisar sentimento da conversa com IA"
                 >
-                  <RefreshCw className={cn("h-3 w-3", analyzing && "animate-spin")} />
+                  <RefreshCw aria-hidden="true" className={cn("h-3 w-3", analyzing && "animate-spin")} />
                 </Button>
               </div>
 
@@ -634,8 +636,9 @@ export function ContactSidebar({
                   value={newNote}
                   onChange={(e) => setNewNote(e.target.value)}
                   placeholder="Adicionar uma nota..."
+                  aria-label="Nova nota"
                   rows={2}
-                  className="flex-1 resize-none rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder-muted-foreground outline-none focus:border-primary/50"
+                  className="flex-1 resize-none rounded-lg border border-border bg-muted px-3 py-2 text-xs text-foreground placeholder-muted-foreground outline-none focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/50"
                 />
                 <Button
                   size="sm"

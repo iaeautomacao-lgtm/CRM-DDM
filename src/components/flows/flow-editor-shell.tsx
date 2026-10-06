@@ -32,6 +32,7 @@ import { FlowBuilder } from "./flow-builder";
 import { FlowCanvas } from "./flow-canvas";
 import { FlowEditorProvider, useFlowEditor } from "./flow-editor-state";
 import { EditorHeader } from "./header";
+import { EditorNotices } from "./editor-notices";
 import { ValidationPanel, ValidationPanelBadge } from "./validation-panel";
 import { NODE_META, nodeColors, type NodeType } from "./shared";
 import { cn } from "@/lib/utils";
@@ -133,6 +134,7 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
         {isDebugMode && debug && <DebugBanner debug={debug} />}
 
         <EditorHeader />
+        <EditorNotices />
 
         {/* ---- mode row: view toggle + node-type legend ----
             Omitted entirely on mobile (canvas is unavailable there and

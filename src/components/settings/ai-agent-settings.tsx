@@ -31,6 +31,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SettingsPanelHead } from "./settings-panel-head";
+import { PromptHistoryButton } from "@/components/ai/prompt-history-button";
 
 // Placeholder shown in api_key/elevenlabs_api_key when the account
 // already has one configured (GET /api/account/ai-config masks the real
@@ -419,7 +420,17 @@ export function AiAgentSettings() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Instruções para o Agente</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-muted-foreground">Instruções para o Agente</Label>
+                {canEditSettings && (
+                  <PromptHistoryButton
+                    target={{ scope: "account" }}
+                    currentContent={systemPrompt.trim()}
+                    onRestore={setSystemPrompt}
+                    disabled={!enabled}
+                  />
+                )}
+              </div>
               <Textarea
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}

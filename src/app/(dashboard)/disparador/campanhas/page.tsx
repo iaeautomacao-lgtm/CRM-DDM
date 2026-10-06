@@ -43,7 +43,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -76,6 +76,7 @@ import { uploadAccountMedia } from "@/lib/storage/upload-media";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { trackAction } from "@/hooks/use-telemetry";
 import { useAuth } from "@/hooks/use-auth";
+import { useDialogA11y } from "@/hooks/use-dialog-a11y";
 import { TEMPLATE_VARS } from "@/lib/disparador/template-vars";
 import { MessageTemplatePicker } from "@/components/disparador/message-template-picker";
 import {
@@ -2616,13 +2617,31 @@ export default function CampanhasPage() {
         : 0,
     }));
 
+  const closeMetricsModal = () => {
+    if (metricsRefreshRef.current) {
+      clearInterval(metricsRefreshRef.current);
+      metricsRefreshRef.current = null;
+    }
+    setMetricsModal(null);
+    setMetricsData(null);
+    setUtmMetrics(null);
+    setQueueDetailModal(null);
+  };
+
+  // Modais feitos à mão: foco entra no modal ao abrir e volta ao botão de
+  // origem ao fechar. O assistente NÃO fecha com Esc (perderia o passo a
+  // passo/importação em andamento); métricas e drilldown fecham.
+  const wizardA11y = useDialogA11y(showModal);
+  const metricsA11y = useDialogA11y(!!metricsModal, closeMetricsModal);
+  const queueDetailA11y = useDialogA11y(!!(queueDetailModal && metricsModal), () => setQueueDetailModal(null));
+
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
         <div>
           <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
               <Megaphone className="h-5 w-5" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
@@ -2633,7 +2652,7 @@ export default function CampanhasPage() {
             Gerencie disparos agendados em lote e acompanhe o processamento no servidor.
           </p>
         </div>
-        <div className="flex gap-2.5 self-start">
+        <div className="flex flex-wrap gap-2 self-start">
           {canManageMembers && (
             <Button
               variant="outline"
@@ -2641,17 +2660,18 @@ export default function CampanhasPage() {
               onClick={handleRecalculateMetrics}
               disabled={recalculatingMetrics}
             >
-              <RefreshCw className={cn("h-4 w-4", recalculatingMetrics && "animate-spin")} />
+              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", recalculatingMetrics && "animate-spin")} />
               Recalcular métricas
             </Button>
           )}
-          <Link href="/disparador/monitor">
-            <Button variant="outline" className="gap-1.5 text-xs h-9">
-              <Activity className="h-4 w-4 text-primary" /> Monitor em tempo real
-            </Button>
+          <Link
+            href="/disparador/monitor"
+            className={cn(buttonVariants({ variant: "outline" }), "gap-1.5 text-xs h-9")}
+          >
+            <Activity className="h-4 w-4 text-primary" aria-hidden="true" /> Monitor em tempo real
           </Link>
           <Button onClick={openCreateModal} className="gap-1.5 h-9 text-xs">
-            <Plus className="h-4 w-4" /> Nova Campanha
+            <Plus className="h-4 w-4" aria-hidden="true" /> Nova Campanha
           </Button>
         </div>
       </div>
@@ -2672,9 +2692,9 @@ export default function CampanhasPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {campaigns.map((c) => (
               <div key={c.id} className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm relative overflow-hidden">
-                <header className="flex justify-between items-start">
-                  <h3 className="font-bold text-foreground truncate max-w-[180px]">{c.nome}</h3>
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[c.status] || STATUS_COLORS.rascunho}`}>
+                <header className="flex justify-between items-start gap-2">
+                  <h3 className="min-w-0 font-bold text-foreground truncate" title={c.nome}>{c.nome}</h3>
+                  <span className={`shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[c.status] || STATUS_COLORS.rascunho}`}>
                     {STATUS_LABELS[c.status] || c.status}
                   </span>
                 </header>
@@ -2769,50 +2789,51 @@ export default function CampanhasPage() {
                 </div>
 
                 {/* Actions row */}
-                <div className="flex justify-between items-center pt-3 border-t border-border/40">
+                <div className="flex flex-wrap justify-between items-center gap-2 pt-3 border-t border-border/40">
                   <div className="flex gap-1.5">
                     {c.status === "em_execucao" ? (
-                      <Button size="sm" variant="outline" onClick={() => handlePause(c.id)} className="h-8 gap-1 text-xs">
-                        <Pause className="h-3.5 w-3.5" /> Pausar
+                      <Button size="sm" variant="outline" onClick={() => handlePause(c.id)} className="h-9 gap-1 text-xs">
+                        <Pause className="h-3.5 w-3.5" aria-hidden="true" /> Pausar
                       </Button>
                     ) : (
-                      <Button size="sm" onClick={() => handleStartClick(c.id)} disabled={c.status === "encerrada" || c.status === "preparando"} className="h-8 gap-1 text-xs">
-                        <Play className="h-3.5 w-3.5" /> Iniciar
+                      <Button size="sm" onClick={() => handleStartClick(c.id)} disabled={c.status === "encerrada" || c.status === "preparando"} className="h-9 gap-1 text-xs">
+                        <Play className="h-3.5 w-3.5" aria-hidden="true" /> Iniciar
                       </Button>
                     )}
                     {c.status === "em_execucao" || c.status === "pausada" ? (
-                      <Button size="sm" variant="outline" onClick={() => setStopConfirm({ id: c.id, nome: c.nome })} className="h-8 text-xs">
+                      <Button size="sm" variant="outline" onClick={() => setStopConfirm({ id: c.id, nome: c.nome })} className="h-9 text-xs">
                         Encerrar
                       </Button>
                     ) : null}
                   </div>
+                  {/* Ações só com ícone: aria-label com o nome da campanha
+                      (leitor de tela) e alvo de 36px (toque no celular). */}
                   <div className="flex gap-1">
-                    <Link href={`/disparador/campanhas/${c.id}`}>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        title="Ver por contato"
-                      >
-                        <ListChecks className="h-4 w-4" />
-                      </Button>
+                    <Link
+                      href={`/disparador/campanhas/${c.id}`}
+                      className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-9 w-9 text-muted-foreground hover:text-foreground")}
+                      title="Ver por contato"
+                      aria-label={`Ver envios por contato — ${c.nome}`}
+                    >
+                      <ListChecks className="h-4 w-4" aria-hidden="true" />
                     </Link>
                     <Button
                       size="icon"
                       variant="ghost"
                       onClick={() => handleMetricsClick(c)}
-                      className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      className="h-9 w-9 text-muted-foreground hover:text-foreground"
                       title="Ver métricas"
+                      aria-label={`Ver métricas — ${c.nome}`}
                     >
-                      <BarChart2 className="h-4 w-4" />
+                      <BarChart2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
                     {c.status === "rascunho" && (
-                      <Button size="icon" variant="ghost" onClick={() => handleEditClick(c)} className="h-8 w-8 text-muted-foreground hover:text-foreground">
-                        <Pencil className="h-4 w-4" />
+                      <Button size="icon" variant="ghost" onClick={() => handleEditClick(c)} title="Editar campanha" aria-label={`Editar campanha — ${c.nome}`} className="h-9 w-9 text-muted-foreground hover:text-foreground">
+                        <Pencil className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     )}
-                    <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} className="h-8 w-8 text-red-500 hover:text-red-600">
-                      <Trash2 className="h-4 w-4" />
+                    <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} title="Excluir campanha" aria-label={`Excluir campanha — ${c.nome}`} className="h-9 w-9 text-red-500 hover:text-red-600">
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </div>
                 </div>
@@ -2825,19 +2846,27 @@ export default function CampanhasPage() {
       {/* Creation Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
-            <header className="px-6 py-4 border-b border-border bg-muted/20">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="font-bold text-foreground">
+          <div
+            ref={wizardA11y.ref}
+            tabIndex={-1}
+            onKeyDown={wizardA11y.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="campaign-wizard-title"
+            className="bg-card border border-border w-full max-w-2xl rounded-xl shadow-2xl flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[85vh] overflow-hidden outline-none"
+          >
+            <header className="px-4 py-3 sm:px-6 sm:py-4 border-b border-border bg-muted/20">
+              <div className="flex justify-between items-center gap-2 mb-3">
+                <h3 id="campaign-wizard-title" className="font-bold text-foreground">
                   {editingId ? "Editar Campanha" : "Nova Campanha de Disparo"}
                 </h3>
-                <Button size="icon" variant="ghost" onClick={closeModal} className="h-8 w-8 text-muted-foreground">
-                  <X className="h-5 w-5" />
+                <Button size="icon" variant="ghost" onClick={closeModal} aria-label="Fechar" className="h-9 w-9 shrink-0 text-muted-foreground">
+                  <X className="h-5 w-5" aria-hidden="true" />
                 </Button>
               </div>
               {/* Indicadores de passo — voltar é livre; avançar passa pela
                   mesma validação do botão "Avançar" (goToWizardStep). */}
-              <div className="flex flex-wrap gap-2">
+              <nav aria-label="Passos do assistente" className="flex flex-wrap gap-2">
                 {WIZARD_STEPS.map(({ step, label }) => (
                   <button
                     key={step}
@@ -2862,17 +2891,17 @@ export default function CampanhasPage() {
                     Passo {step} · {label}
                   </button>
                 ))}
-              </div>
+              </nav>
             </header>
 
             {pendingDraft && !editingId && (
-              <div className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-600 dark:text-amber-400">
+              <div className="mx-4 sm:mx-6 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400">
                 <span>Rascunho anterior encontrado.</span>
                 <div className="flex gap-2 shrink-0">
-                  <Button type="button" size="sm" variant="outline" className="h-7 text-xs" onClick={discardDraft}>
+                  <Button type="button" size="sm" variant="outline" className="h-9 text-xs" onClick={discardDraft}>
                     Descartar
                   </Button>
-                  <Button type="button" size="sm" className="h-7 text-xs" onClick={restoreDraft}>
+                  <Button type="button" size="sm" className="h-9 text-xs" onClick={restoreDraft}>
                     Restaurar
                   </Button>
                 </div>
@@ -2884,10 +2913,10 @@ export default function CampanhasPage() {
             {currentStepErrors.length > 0 && (
               <div
                 role="alert"
-                className="mx-6 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-600 dark:text-red-400"
+                className="mx-4 sm:mx-6 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-600 dark:text-red-400"
               >
                 <p className="mb-1 flex items-center gap-1.5 font-medium">
-                  <AlertTriangle className="h-3.5 w-3.5" /> Corrija antes de avançar:
+                  <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> Corrija antes de avançar:
                 </p>
                 <ul className="list-disc space-y-0.5 pl-5">
                   {currentStepErrors.map((err, i) => (
@@ -2898,25 +2927,27 @@ export default function CampanhasPage() {
             )}
 
             {wizardStep === 1 && (
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Nome da Campanha</label>
+                <label htmlFor="campaign-nome" className="text-xs font-medium text-muted-foreground">Nome da Campanha</label>
                 <input
+                  id="campaign-nome"
                   type="text"
                   value={nome}
                   onChange={(e) => setNome(e.target.value)}
                   placeholder="Ex: Reativação Clientes Inativos"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Descrição</label>
+                <label htmlFor="campaign-descricao" className="text-xs font-medium text-muted-foreground">Descrição</label>
                 <textarea
+                  id="campaign-descricao"
                   value={descricao}
                   onChange={(e) => setDescricao(e.target.value)}
                   placeholder="Descreva brevemente a meta da campanha..."
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none resize-none h-16"
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none h-16"
                 />
               </div>
 
@@ -2924,9 +2955,9 @@ export default function CampanhasPage() {
                   sobre `sessions` já carregado); não é enviado ao servidor,
                   só decide quais checkboxes aparecem. */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Equipe</label>
+                <label id="campaign-equipe-label" className="text-xs font-medium text-muted-foreground">Equipe</label>
                 <Select value={teamFilter || "__all__"} onValueChange={(v) => setTeamFilter(v === "__all__" ? "" : v || "")}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full" aria-labelledby="campaign-equipe-label">
                     <SelectValue>
                       {(v: string) => (v === "__all__" ? "Todas as equipes" : (teams.find((t) => t.id === v)?.name ?? v))}
                     </SelectValue>
@@ -2944,8 +2975,8 @@ export default function CampanhasPage() {
 
               {/* Channels Selector */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Canais de WhatsApp</label>
-                <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-border p-2 rounded-md">
+                <p id="campaign-canais-label" className="text-xs font-medium text-muted-foreground">Canais de WhatsApp</p>
+                <div role="group" aria-labelledby="campaign-canais-label" className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-border p-2 rounded-md">
                   {filteredSessions.length === 0 ? (
                     <span className="text-xs text-muted-foreground">
                       {sessions.length === 0
@@ -2985,7 +3016,7 @@ export default function CampanhasPage() {
 
               {/* Filtrar por tabulação */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Filtrar por tabulação</label>
+                <p id="campaign-tags-label" className="text-xs font-medium text-muted-foreground">Filtrar por tabulação</p>
                 <p className="text-[10px] text-muted-foreground">
                   Sem base importada, envia para os contatos da conta com esta tabulação. Com base
                   importada, envia só para os contatos da base que têm a tabulação.
@@ -2994,7 +3025,8 @@ export default function CampanhasPage() {
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2
                     h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                   <input
-                    type="text"
+                    type="search"
+                    aria-label="Buscar tabulação"
                     placeholder="Buscar tabulação..."
                     value={tagSearch}
                     onChange={(e) => setTagSearch(e.target.value)}
@@ -3003,7 +3035,7 @@ export default function CampanhasPage() {
                       focus:outline-none focus:ring-1 focus:ring-primary"
                   />
                 </div>
-                <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-border p-2 rounded-md">
+                <div role="group" aria-labelledby="campaign-tags-label" className="flex flex-wrap gap-2 max-h-24 overflow-y-auto border border-border p-2 rounded-md">
                   {tags.length === 0 ? (
                     <span className="text-xs text-muted-foreground">Nenhuma tabulação cadastrada.</span>
                   ) : (
@@ -3054,7 +3086,7 @@ export default function CampanhasPage() {
                 )
               ) &&
                 !importFile && (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
                     ⚠ Rascunho restaurado com variáveis de template incompletas.
                     Reimporte o CSV para preencher automaticamente os valores de{" "}
                     {"{{2}}"}, {"{{3}}"}, etc.
@@ -3062,9 +3094,9 @@ export default function CampanhasPage() {
                 )}
 
               {/* Upload area */}
-              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
-                <div className="flex flex-col items-center gap-1">
-                  <Upload className="h-6 w-6 text-muted-foreground" />
+              <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-border rounded-lg cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/50">
+                <div className="flex flex-col items-center gap-1 px-2 text-center">
+                  <Upload className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
                   <span className="text-sm text-muted-foreground">
                     {importFile ? importFile.name : "Clique ou arraste CSV / XLSX"}
                   </span>
@@ -3074,10 +3106,12 @@ export default function CampanhasPage() {
                     </span>
                   )}
                 </div>
+                {/* sr-only (não "hidden"): o input continua alcançável por Tab;
+                    o foco aparece na borda do label (focus-within). */}
                 <input
                   type="file"
                   accept=".csv,.xlsx,.xls,.txt"
-                  className="hidden"
+                  className="sr-only"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) parseImportFile(file);
@@ -3087,10 +3121,12 @@ export default function CampanhasPage() {
 
               {/* Baixar modelo — mesmo arquivo estático usado em
                   /disparador/contatos (não gerado client-side). */}
-              <a href="/modelo_importacao_disparador.csv" download>
-                <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
-                  <Download className="h-3.5 w-3.5" /> Baixar modelo de exemplo
-                </Button>
+              <a
+                href="/modelo_importacao_disparador.csv"
+                download
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5 text-xs h-9")}
+              >
+                <Download className="h-3.5 w-3.5" aria-hidden="true" /> Baixar modelo de exemplo
               </a>
 
               {/* Formato esperado */}
@@ -3145,7 +3181,7 @@ export default function CampanhasPage() {
                 </div>
               )}
               {importStats && importStats.invalid > 0 && (
-                <p className="text-xs text-amber-600">
+                <p className="text-xs text-amber-700 dark:text-amber-500">
                   {importStats.invalid} linha{importStats.invalid > 1 ? "s" : ""} sem contato resolvido foi{importStats.invalid > 1 ? "ram" : ""} excluída{importStats.invalid > 1 ? "s" : ""} da prévia e da importação.
                 </p>
               )}
@@ -3188,7 +3224,7 @@ export default function CampanhasPage() {
                             refreshImportResolution(nextMap);
                           }}
                         >
-                          <SelectTrigger className="h-8 w-full border-border bg-background text-xs">
+                          <SelectTrigger className="h-8 w-full border-border bg-background text-xs" aria-label={`Coluna da planilha para ${field.label}`}>
                             <SelectValue placeholder="Nenhum">
                               {formatColumnLabel(columnMap[field.key])}
                             </SelectValue>
@@ -3318,8 +3354,9 @@ export default function CampanhasPage() {
                   <p className="text-xs font-medium text-muted-foreground">
                     Preview com mapeamento aplicado (primeiros 5 contatos):
                   </p>
-                  <div className="rounded-md border border-border overflow-hidden">
-                    <table className="w-full text-xs">
+                  {/* Rolagem horizontal só dentro da tabela (celular). */}
+                  <div className="rounded-md border border-border overflow-x-auto">
+                    <table className="w-full min-w-max text-xs">
                       <thead className="bg-muted/40">
                         <tr>
                           <th className="px-3 py-2 text-left font-medium">Telefone</th>
@@ -3398,7 +3435,7 @@ export default function CampanhasPage() {
             )}
 
             {wizardStep === 2 && (
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
               {/* Messages bubbles configuration */}
               <div className="space-y-2">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -3438,9 +3475,11 @@ export default function CampanhasPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => setMensagens(mensagens.filter((_, idx) => idx !== i))}
-                          className="h-6 w-6 text-red-500 hover:bg-red-500/10"
+                          aria-label={`Remover ${templateMode !== "sequencia" ? "template" : "mensagem"} ${i + 1}`}
+                          title="Remover"
+                          className="h-8 w-8 text-red-500 hover:bg-red-500/10"
                         >
-                          <X className="h-4 w-4" />
+                          <X className="h-4 w-4" aria-hidden="true" />
                         </Button>
                       )}
                     </div>
@@ -3451,7 +3490,7 @@ export default function CampanhasPage() {
                       </p>
                     )}
 
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs" role="group" aria-label="Tipo da mensagem">
                       <button
                         type="button"
                         onClick={() => {
@@ -3459,6 +3498,7 @@ export default function CampanhasPage() {
                           updated[i].tipo = "texto";
                           setMensagens(updated);
                         }}
+                        aria-pressed={msg.tipo === "texto"}
                         className={`py-1.5 border rounded-md font-medium ${msg.tipo === "texto" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border"}`}
                       >
                         Texto
@@ -3470,6 +3510,7 @@ export default function CampanhasPage() {
                           updated[i].tipo = "ia";
                           setMensagens(updated);
                         }}
+                        aria-pressed={msg.tipo === "ia"}
                         className={`py-1.5 border rounded-md font-medium flex items-center justify-center gap-1 ${msg.tipo === "ia" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border"}`}
                       >
                         <Sparkles className="h-3 w-3" /> IA
@@ -3481,6 +3522,7 @@ export default function CampanhasPage() {
                           updated[i].tipo = "imagem";
                           setMensagens(updated);
                         }}
+                        aria-pressed={msg.tipo === "imagem"}
                         className={`py-1.5 border rounded-md font-medium ${msg.tipo === "imagem" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border"}`}
                       >
                         Imagem
@@ -3492,6 +3534,7 @@ export default function CampanhasPage() {
                           updated[i].tipo = "audio";
                           setMensagens(updated);
                         }}
+                        aria-pressed={msg.tipo === "audio"}
                         className={`py-1.5 border rounded-md font-medium ${msg.tipo === "audio" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border"}`}
                       >
                         Áudio Chat
@@ -3503,6 +3546,7 @@ export default function CampanhasPage() {
                           updated[i].tipo = "ligacao";
                           setMensagens(updated);
                         }}
+                        aria-pressed={msg.tipo === "ligacao"}
                         className={`py-1.5 border rounded-md font-medium ${msg.tipo === "ligacao" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border"}`}
                       >
                         Ligação
@@ -3520,7 +3564,8 @@ export default function CampanhasPage() {
                             setMensagens(updated);
                           }}
                           placeholder="Escreva a mensagem..."
-                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none resize-none"
+                          aria-label={`Texto da mensagem ${i + 1}`}
+                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none"
                         />
                         <div className="flex flex-wrap items-center gap-1">
                           {TEMPLATE_VARS.map((v) => (
@@ -3538,7 +3583,7 @@ export default function CampanhasPage() {
                             onClick={() => setTemplatePickerIndex(i)}
                             className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded-full border border-dashed border-border bg-card text-[10px] font-medium text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                           >
-                            <FileText className="h-3 w-3" />
+                            <FileText className="h-3 w-3" aria-hidden="true" />
                             Carregar de um Template
                           </button>
                         </div>
@@ -3549,7 +3594,7 @@ export default function CampanhasPage() {
                               Variáveis do template &quot;{msg.template_name}&quot; ({msg.template_language})
                             </p>
                             {msg.template_variable_map.map((entry: any, varIdx: number) => (
-                              <div key={varIdx} className="flex items-center gap-2">
+                              <div key={varIdx} className="flex flex-wrap items-center gap-2">
                                 <span className="w-10 shrink-0 font-mono text-[10px] text-muted-foreground">
                                   {`{{${varIdx + 1}}}`}
                                 </span>
@@ -3582,7 +3627,7 @@ export default function CampanhasPage() {
                                     setMensagens(updated);
                                   }}
                                 >
-                                  <SelectTrigger className="h-7 w-40 border-border bg-background text-xs">
+                                  <SelectTrigger className="h-7 w-40 border-border bg-background text-xs" aria-label={`Origem da variável ${varIdx + 1}`}>
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent className="border-border bg-popover">
@@ -3622,8 +3667,9 @@ export default function CampanhasPage() {
                                         ? "Será preenchido pelo CSV..."
                                         : "Valor fixo..."
                                     }
+                                    aria-label={`Valor fixo da variável ${varIdx + 1}`}
                                     className={cn(
-                                      "h-7 flex-1 border-border bg-background text-xs",
+                                      "h-7 min-w-32 flex-1 border-border bg-background text-xs",
                                       importFile && !entry.value
                                         ? "border-amber-500/50 placeholder:text-amber-500/70"
                                         : !entry.value?.trim() && "border-red-500"
@@ -3647,7 +3693,8 @@ export default function CampanhasPage() {
                             setMensagens(updated);
                           }}
                           placeholder="Escreva o prompt da IA... Ex: Peça para comprar o curso X com tom consultivo."
-                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none resize-none"
+                          aria-label={`Prompt da IA da mensagem ${i + 1}`}
+                          className="w-full min-h-[60px] rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none"
                         />
                         <p className="text-[10px] text-muted-foreground">
                           O nome do contato já é enviado automaticamente para a IA — as variáveis
@@ -3668,7 +3715,8 @@ export default function CampanhasPage() {
                               setMensagens(updated);
                             }}
                             placeholder="Link da imagem (URL)..."
-                            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none"
+                            aria-label={`Link da imagem da mensagem ${i + 1}`}
+                            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                           />
                           <Button
                             type="button"
@@ -3712,7 +3760,8 @@ export default function CampanhasPage() {
                             setMensagens(updated);
                           }}
                           placeholder="Legenda da imagem (Opcional)..."
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none"
+                          aria-label={`Legenda da imagem da mensagem ${i + 1}`}
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                         />
                         <div className="flex flex-wrap gap-1">
                           {TEMPLATE_VARS.map((v) => (
@@ -3741,7 +3790,8 @@ export default function CampanhasPage() {
                               setMensagens(updated);
                             }}
                             placeholder={msg.tipo === "ligacao" ? "Link do áudio WAV/MP3 da ligação (16kHz mono)..." : "Link do áudio OGG/MP3 da mensagem..."}
-                            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs focus:outline-none"
+                            aria-label={`Link do áudio da mensagem ${i + 1}`}
+                            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                           />
                           <Button
                             type="button"
@@ -3794,16 +3844,17 @@ export default function CampanhasPage() {
             )}
 
             {wizardStep === 3 && (
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
               {/* Modo de disparo */}
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">Modo de disparo</label>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <p id="campaign-dispatch-label" className="text-xs font-medium text-muted-foreground">Modo de disparo</p>
+                <div role="group" aria-labelledby="campaign-dispatch-label" className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {DISPATCH_MODES.map((m) => (
                     <button
                       key={m.key}
                       type="button"
                       onClick={() => handleDispatchModeChange(m.key)}
+                      aria-pressed={dispatchMode === m.key}
                       className={cn(
                         "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
                         dispatchMode === m.key
@@ -3819,7 +3870,7 @@ export default function CampanhasPage() {
                   ))}
                 </div>
                 {dispatchMode === "imediato" && (
-                  <p className="text-xs text-amber-500">
+                  <p className="text-xs text-amber-700 dark:text-amber-500">
                     ⚠️ Sem proteção anti-spam. Recomendado apenas para listas pequenas ou canais
                     com histórico saudável.
                   </p>
@@ -3829,32 +3880,36 @@ export default function CampanhasPage() {
               {/* Janela de horário — independente do modo de disparo */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Início da janela (HH:MM)</label>
+                  <label htmlFor="campaign-janela-inicio" className="text-xs font-medium text-muted-foreground">Início da janela (HH:MM)</label>
                   <input
+                    id="campaign-janela-inicio"
+                    inputMode="numeric"
                     type="text"
                     value={janelaInicio}
                     onChange={(e) => setJanelaInicio(e.target.value)}
                     placeholder="08:00"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 text-center"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Fim da janela (HH:MM)</label>
+                  <label htmlFor="campaign-janela-fim" className="text-xs font-medium text-muted-foreground">Fim da janela (HH:MM)</label>
                   <input
+                    id="campaign-janela-fim"
+                    inputMode="numeric"
                     type="text"
                     value={janelaFim}
                     onChange={(e) => setJanelaFim(e.target.value)}
                     placeholder="18:00"
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none text-center"
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 text-center"
                   />
                 </div>
               </div>
 
               {/* Dias da semana — vazio = todos */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">
+                <p className="text-xs font-medium text-muted-foreground">
                   Dias de envio <span className="font-normal">(nenhum marcado = todos os dias)</span>
-                </label>
+                </p>
                 <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dias de envio">
                   {WEEKDAY_LABELS.map((label, day) => {
                     const on = diasEnvio.includes(day);
@@ -3869,7 +3924,7 @@ export default function CampanhasPage() {
                           )
                         }
                         className={cn(
-                          "h-8 min-w-11 rounded-md border px-2 text-xs font-medium transition-colors",
+                          "h-9 min-w-11 rounded-md border px-2 text-xs font-medium transition-colors",
                           on
                             ? "border-primary bg-primary/10 text-primary"
                             : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -3882,7 +3937,7 @@ export default function CampanhasPage() {
                   <button
                     type="button"
                     onClick={() => setDiasEnvio([1, 2, 3, 4, 5])}
-                    className="h-8 rounded-md px-2 text-xs text-muted-foreground underline-offset-2 hover:underline"
+                    className="h-9 rounded-md px-2 text-xs text-muted-foreground underline-offset-2 hover:underline"
                   >
                     Seg a Sex
                   </button>
@@ -3894,21 +3949,23 @@ export default function CampanhasPage() {
                 <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Intervalo mín. (s)</label>
+                      <label htmlFor="campaign-intervalo-min" className="text-xs font-medium text-muted-foreground">Intervalo mín. (s)</label>
                       <input
+                        id="campaign-intervalo-min"
                         type="number"
                         value={intervaloMin}
                         onChange={(e) => setIntervaloMin(Number(e.target.value))}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Intervalo máx. (s)</label>
+                      <label htmlFor="campaign-intervalo-max" className="text-xs font-medium text-muted-foreground">Intervalo máx. (s)</label>
                       <input
+                        id="campaign-intervalo-max"
                         type="number"
                         value={intervaloMax}
                         onChange={(e) => setIntervaloMax(Number(e.target.value))}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                       />
                     </div>
                   </div>
@@ -3916,8 +3973,9 @@ export default function CampanhasPage() {
                   {/* Batch dispatch (migration 078) */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Mensagens por lote</label>
+                      <label htmlFor="campaign-batch-size" className="text-xs font-medium text-muted-foreground">Mensagens por lote</label>
                       <input
+                        id="campaign-batch-size"
                         type="number"
                         min={1}
                         max={500}
@@ -3930,7 +3988,7 @@ export default function CampanhasPage() {
                           // insira uma pausa extra no comportamento de item único.
                           if (val <= 1) setBatchPauseSeconds(0);
                         }}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                       />
                       <p className="text-[10px] text-muted-foreground">
                         Quantas mensagens enviar em paralelo por ciclo (default: 1).
@@ -3938,14 +3996,15 @@ export default function CampanhasPage() {
                     </div>
                     {batchSize > 1 && (
                       <div className="space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground">Pausa entre lotes (segundos)</label>
+                        <label htmlFor="campaign-batch-pause" className="text-xs font-medium text-muted-foreground">Pausa entre lotes (segundos)</label>
                         <input
+                          id="campaign-batch-pause"
                           type="number"
                           min={0}
                           max={3600}
                           value={batchPauseSeconds}
                           onChange={(e) => setBatchPauseSeconds(Number(e.target.value))}
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                         />
                         <p className="text-[10px] text-muted-foreground">
                           Tempo de espera entre cada lote (0 = sem pausa extra).
@@ -3966,8 +4025,9 @@ export default function CampanhasPage() {
                 <div className="space-y-4 rounded-md border border-border/60 bg-muted/20 p-3">
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Percentual por rodada</label>
+                      <label htmlFor="campaign-batch-percent" className="text-xs font-medium text-muted-foreground">Percentual por rodada</label>
                       <input
+                        id="campaign-batch-percent"
                         type="number"
                         min={1}
                         max={50}
@@ -3975,13 +4035,14 @@ export default function CampanhasPage() {
                         onChange={(e) =>
                           setBatchPercent(Math.min(50, Math.max(1, Number(e.target.value) || 1)))
                         }
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                       />
                       <p className="text-[10px] text-muted-foreground">De 1% a 50% da lista por rodada.</p>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-muted-foreground">Intervalo entre rodadas (min)</label>
+                      <label htmlFor="campaign-batch-pause-min" className="text-xs font-medium text-muted-foreground">Intervalo entre rodadas (min)</label>
                       <input
+                        id="campaign-batch-pause-min"
                         type="number"
                         min={1}
                         max={1440}
@@ -3989,7 +4050,7 @@ export default function CampanhasPage() {
                         onChange={(e) =>
                           setBatchPauseMinutes(Math.max(1, Number(e.target.value) || 1))
                         }
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                       />
                     </div>
                   </div>
@@ -4004,10 +4065,11 @@ export default function CampanhasPage() {
 
               {/* Agendamento futuro */}
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">
+                <label htmlFor="campaign-agendar-para" className="text-xs font-medium text-muted-foreground">
                   Agendar para (opcional)
                 </label>
                 <input
+                  id="campaign-agendar-para"
                   type="datetime-local"
                   value={agendarPara}
                   onChange={(e) => setAgendarPara(e.target.value)}
@@ -4019,13 +4081,14 @@ export default function CampanhasPage() {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Modo de templates</label>
-                <div className="grid grid-cols-3 gap-2">
+                <p id="campaign-template-mode-label" className="text-xs font-medium text-muted-foreground">Modo de templates</p>
+                <div role="group" aria-labelledby="campaign-template-mode-label" className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {TEMPLATE_MODE_OPTIONS.map((opt) => (
                     <button
                       key={opt.key}
                       type="button"
                       onClick={() => setTemplateMode(opt.key)}
+                      aria-pressed={templateMode === opt.key}
                       className={cn(
                         "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors",
                         templateMode === opt.key
@@ -4039,12 +4102,12 @@ export default function CampanhasPage() {
                   ))}
                 </div>
                 {templateMode !== "sequencia" && (
-                  <p className="text-xs text-amber-500">
+                  <p className="text-xs text-amber-700 dark:text-amber-500">
                     ⚠ Cada contato receberá apenas 1 template.
                   </p>
                 )}
                 {templateMode !== "sequencia" && mensagens.length < 2 && (
-                  <p className="text-xs text-amber-500">
+                  <p className="text-xs text-amber-700 dark:text-amber-500">
                     ⚠️ Adicione pelo menos 2 templates para que a rotação/aleatório funcione.
                     Com apenas 1, todos os contatos receberão o mesmo template.
                   </p>
@@ -4057,7 +4120,7 @@ export default function CampanhasPage() {
             )}
 
             {wizardStep === 4 && (
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
                 <h4 className="font-medium text-foreground">Resumo da Campanha</h4>
 
                 <div className="space-y-3 rounded-lg border border-border p-4 bg-muted/20 text-sm">
@@ -4158,14 +4221,14 @@ export default function CampanhasPage() {
                         <p className="text-xs text-muted-foreground text-right">{estimativa.detalhe}</p>
                       )}
                       {estimativa.aviso && (
-                        <p className="text-xs text-amber-500 text-right">⚠ {estimativa.aviso}</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-500 text-right">⚠ {estimativa.aviso}</p>
                       )}
                     </div>
                   )}
                 </div>
 
                 {hasMeta && !importStats && !keepsExistingAudience && (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
                     ⚠ Canal Meta selecionado sem base importada. Certifique-se de
                     que os contatos já estão no CRM com as tabulações corretas e que
                     o template está configurado nas mensagens.
@@ -4175,7 +4238,7 @@ export default function CampanhasPage() {
                 {/* Público "conta inteira" — o aceite explícito fica no passo
                     Público; aqui só reforça antes de salvar. */}
                 {selectedTags.length === 0 && !importStats && !keepsExistingAudience && (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-600">
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
                     ⚠ Sem base importada e sem tabulação: a campanha será enviada para
                     todos os contatos da conta (confirmado no passo Público).
                   </div>
@@ -4221,7 +4284,7 @@ export default function CampanhasPage() {
               </div>
             )}
 
-            <footer className="px-6 py-4 border-t border-border flex justify-between items-center bg-muted/20">
+            <footer className="px-4 py-3 sm:px-6 sm:py-4 border-t border-border flex flex-wrap justify-between items-center gap-2 bg-muted/20">
               <Button
                 type="button"
                 variant="outline"
@@ -4497,33 +4560,34 @@ export default function CampanhasPage() {
 
       {metricsModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-card border border-border w-full max-w-md rounded-xl shadow-2xl">
-            <header className="px-6 py-4 border-b border-border flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-foreground">Métricas da Campanha</h3>
-                <p className="text-xs text-muted-foreground truncate max-w-[280px]">
+          <div
+            ref={metricsA11y.ref}
+            tabIndex={-1}
+            onKeyDown={metricsA11y.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="campaign-metrics-title"
+            className="bg-card border border-border w-full max-w-md rounded-xl shadow-2xl flex flex-col max-h-[calc(100dvh-2rem)] outline-none"
+          >
+            <header className="px-4 py-3 sm:px-6 sm:py-4 border-b border-border flex justify-between items-center gap-2">
+              <div className="min-w-0">
+                <h3 id="campaign-metrics-title" className="font-bold text-foreground">Métricas da Campanha</h3>
+                <p className="text-xs text-muted-foreground truncate">
                   {metricsModal.nome}
                 </p>
               </div>
               <Button
                 size="icon"
                 variant="ghost"
-                onClick={() => {
-                  if (metricsRefreshRef.current) {
-                    clearInterval(metricsRefreshRef.current);
-                    metricsRefreshRef.current = null;
-                  }
-                  setMetricsModal(null);
-                  setMetricsData(null);
-                  setUtmMetrics(null);
-                  setQueueDetailModal(null);
-                }}
+                aria-label="Fechar"
+                className="h-9 w-9 shrink-0"
+                onClick={closeMetricsModal}
               >
-                <X className="h-5 w-5" />
+                <X className="h-5 w-5" aria-hidden="true" />
               </Button>
             </header>
 
-            <div className="p-6 overflow-y-auto max-h-[70vh]">
+            <div className="p-4 sm:p-6 overflow-y-auto sm:max-h-[70vh]">
               {metricsLoading && (
                 <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -4737,10 +4801,18 @@ export default function CampanhasPage() {
           modal de métricas (z-index maior), ver openQueueDetail. */}
       {queueDetailModal && metricsModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-card border border-border w-full max-w-4xl rounded-xl shadow-2xl flex flex-col max-h-[85vh]">
-            <header className="px-6 py-4 border-b border-border flex justify-between items-center gap-4">
+          <div
+            ref={queueDetailA11y.ref}
+            tabIndex={-1}
+            onKeyDown={queueDetailA11y.onKeyDown}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="campaign-queue-detail-title"
+            className="bg-card border border-border w-full max-w-4xl rounded-xl shadow-2xl flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[85vh] outline-none"
+          >
+            <header className="px-4 py-3 sm:px-6 sm:py-4 border-b border-border flex justify-between items-center gap-4">
               <div className="min-w-0">
-                <h3 className="font-bold text-foreground truncate">
+                <h3 id="campaign-queue-detail-title" className="font-bold text-foreground truncate">
                   {queueDetailModal.label} — {queueDetailTotal.toLocaleString("pt-BR")}{" "}
                   mensagem{queueDetailTotal === 1 ? "" : "s"}
                 </h3>
@@ -4748,15 +4820,17 @@ export default function CampanhasPage() {
                   {metricsModal.nome}
                 </p>
               </div>
-              <Button size="icon" variant="ghost" onClick={() => setQueueDetailModal(null)}>
-                <X className="h-5 w-5" />
+              <Button size="icon" variant="ghost" onClick={() => setQueueDetailModal(null)} aria-label="Fechar" className="h-9 w-9 shrink-0">
+                <X className="h-5 w-5" aria-hidden="true" />
               </Button>
             </header>
 
-            <div className="px-6 py-3 border-b border-border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+            <div className="px-4 sm:px-6 py-3 border-b border-border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
               <div className="relative w-full sm:max-w-xs">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
                 <Input
+                  type="search"
+                  aria-label="Buscar por nome ou telefone"
                   value={queueDetailSearchInput}
                   onChange={(e) => setQueueDetailSearchInput(e.target.value)}
                   placeholder="Buscar por nome ou telefone..."
@@ -4783,7 +4857,7 @@ export default function CampanhasPage() {
               !queueDetailLoading &&
               metricsData &&
               queueDetailTotal < metricsData.total_respostas && (
-                <p className="mx-6 mt-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+                <p className="mx-4 sm:mx-6 mt-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
                   O card conta {metricsData.total_respostas} respostas; {metricsData.total_respostas - queueDetailTotal}{" "}
                   foram registradas antes do rastreio por envio e não aparecem nesta lista.
                 </p>
@@ -4852,8 +4926,8 @@ export default function CampanhasPage() {
             </div>
 
             {queueDetailTotal > QUEUE_DETAIL_PAGE_SIZES[0] && (
-              <footer className="px-6 py-3 border-t border-border flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
+              <footer className="px-4 sm:px-6 py-3 border-t border-border flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <p className="text-xs text-muted-foreground">
                     Página {queueDetailPage} de{" "}
                     {Math.max(1, Math.ceil(queueDetailTotal / queueDetailPageSize))}
@@ -4881,7 +4955,7 @@ export default function CampanhasPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 gap-1 text-xs"
+                    className="h-9 gap-1 text-xs"
                     disabled={queueDetailPage <= 1 || queueDetailLoading}
                     onClick={() => setQueueDetailPage((p) => Math.max(1, p - 1))}
                   >
@@ -4890,7 +4964,7 @@ export default function CampanhasPage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="h-8 gap-1 text-xs"
+                    className="h-9 gap-1 text-xs"
                     disabled={
                       queueDetailPage >= Math.ceil(queueDetailTotal / queueDetailPageSize) ||
                       queueDetailLoading

@@ -90,10 +90,11 @@ export function CampaignWebchatSettings({
       {value.webchat_enabled && (
         <div className="space-y-2 pt-1">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">
+            <label htmlFor="campaign-webchat-flow" className="text-xs font-medium text-muted-foreground">
               Fluxo que atende no Webchat
             </label>
             <select
+              id="campaign-webchat-flow"
               value={value.webchat_flow_id ?? ""}
               onChange={(e) => set({ webchat_flow_id: e.target.value || null })}
               className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -111,10 +112,11 @@ export function CampaignWebchatSettings({
             </p>
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">
+            <label htmlFor="campaign-webchat-message" className="text-xs font-medium text-muted-foreground">
               Mensagem do convite (opcional)
             </label>
             <textarea
+              id="campaign-webchat-message"
               value={value.webchat_message}
               onChange={(e) => set({ webchat_message: e.target.value })}
               rows={2}
@@ -123,10 +125,11 @@ export function CampaignWebchatSettings({
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">
+            <label htmlFor="campaign-webchat-button" className="text-xs font-medium text-muted-foreground">
               Texto do botão ({value.webchat_button_text.length}/{BUTTON_MAX})
             </label>
             <input
+              id="campaign-webchat-button"
               value={value.webchat_button_text}
               maxLength={BUTTON_MAX}
               onChange={(e) => set({ webchat_button_text: e.target.value })}

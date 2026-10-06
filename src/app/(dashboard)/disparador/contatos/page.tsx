@@ -15,7 +15,8 @@ import {
   Users
 } from "lucide-react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 interface ImportResults {
@@ -73,10 +74,13 @@ export default function ImportarContatosPage() {
     <div className="flex h-[calc(100vh-4rem)] flex-col space-y-6 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
-        <Link href="/disparador">
-          <Button variant="ghost" size="icon" className="h-8 w-8">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
+        {/* Link estilizado como botão (antes: <a><button> aninhados, 2 paradas de Tab) */}
+        <Link
+          href="/disparador"
+          aria-label="Voltar ao disparador"
+          className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-10 w-10 self-start sm:self-auto")}
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         </Link>
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
@@ -91,20 +95,22 @@ export default function ImportarContatosPage() {
       <div className="grid md:grid-cols-2 gap-6 items-start overflow-y-auto pr-2">
         {/* Upload Card */}
         <div className="rounded-xl border border-border bg-card p-6 space-y-6 shadow-sm">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <FileSpreadsheet className="h-5 w-5 text-primary" />
+              <FileSpreadsheet className="h-5 w-5 text-primary" aria-hidden="true" />
               <h3 className="font-semibold text-foreground">Planilha de Contatos</h3>
             </div>
-            <a href="/modelo_importacao_disparador.csv" download>
-              <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
-                <Download className="h-3.5 w-3.5" /> Baixar Modelo
-              </Button>
+            <a
+              href="/modelo_importacao_disparador.csv"
+              download
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5 text-xs h-9")}
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" /> Baixar Modelo
             </a>
           </div>
 
-          <div className="border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center justify-center text-center space-y-3 bg-muted/10">
-            <Upload className="h-8 w-8 text-zinc-400" />
+          <div className="border-2 border-dashed border-border rounded-xl p-4 sm:p-8 flex flex-col items-center justify-center text-center space-y-3 bg-muted/10">
+            <Upload className="h-8 w-8 text-zinc-400" aria-hidden="true" />
             <div className="space-y-1">
               <p className="text-sm font-medium text-foreground">
                 Selecione o arquivo de contatos
@@ -113,21 +119,23 @@ export default function ImportarContatosPage() {
                 Formatos aceitos: .csv ou .xlsx (Excel)
               </p>
             </div>
-            <input 
-              type="file" 
+            {/* sr-only (e não "hidden") para o input continuar alcançável pelo
+                teclado; o foco é mostrado no label via peer-focus-visible. */}
+            <input
+              type="file"
               accept=".csv,.xlsx,.xls"
               onChange={handleFileChange}
-              className="hidden" 
+              className="peer sr-only"
               id="file-upload"
             />
-            <label 
-               htmlFor="file-upload" 
-               className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 h-9 px-3 cursor-pointer"
+            <label
+               htmlFor="file-upload"
+               className="inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80 h-10 px-3 cursor-pointer"
              >
                Escolher Arquivo
              </label>
             {file && (
-              <span className="text-xs font-mono bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 rounded text-zinc-600 dark:text-zinc-400">
+              <span className="max-w-full break-all text-xs font-mono bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1 rounded text-zinc-600 dark:text-zinc-400">
                 {file.name}
               </span>
             )}
@@ -153,16 +161,17 @@ export default function ImportarContatosPage() {
         {/* Results Card */}
         {results && (
           <div className="rounded-xl border border-border bg-card p-6 space-y-6 shadow-sm">
-            <div className="flex items-center justify-between gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="font-semibold text-foreground">Resumo da Importação</h3>
-              <Link href="/contacts">
-                <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8">
-                  <Users className="h-3.5 w-3.5" /> Ver Contatos
-                </Button>
+              <Link
+                href="/contacts"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5 text-xs h-9")}
+              >
+                <Users className="h-3.5 w-3.5" aria-hidden="true" /> Ver Contatos
               </Link>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-4" role="status">
               <div className="rounded-lg border border-border p-3.5 space-y-1.5 bg-emerald-500/5">
                 <span className="text-[10px] font-bold text-emerald-500 uppercase">Importados</span>
                 <div className="flex items-baseline justify-between">
