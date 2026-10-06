@@ -4,22 +4,27 @@ import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 import { phoneKey } from "@/lib/disparador/phone-key";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
-import { formatStartFailureReason } from "@/lib/disparador/campaign-validation";
+import { formatStartFailureReason, parseTemplateMode } from "@/lib/disparador/campaign-validation";
 import { scheduleRounds } from "@/lib/disparador/window-clock";
 import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
 import { writeLog } from "@/lib/logger";
 
-type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
-
 // campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
 // lida por este código — reaproveitada para guardar o modo de alternância
 // de templates sem precisar de uma migration nova (ver EDITABLE_FIELDS em
-// api/disparador/campaigns/[id]/route.ts e campanhas/page.tsx). Linhas
-// antigas ainda têm o array-default [1,2,3,4,5,6]; qualquer valor que não
-// seja "rotacao"/"aleatorio" cai em "sequencia" (comportamento original:
-// todas as mensagens enviadas em sequência para cada contato).
-function parseTemplateMode(raw: unknown): TemplateMode {
-  return raw === "rotacao" || raw === "aleatorio" ? raw : "sequencia";
+// api/disparador/campaigns/[id]/route.ts e o assistente). Linhas antigas
+// ainda têm o array-default [1,2,3,4,5,6]; qualquer valor que não seja
+// "rotacao"/"aleatorio" cai em "sequencia" ("Padrão" na tela: todas as
+// mensagens enviadas em sequência para cada contato). parseTemplateMode e a
+// regra de quantidade por modo ficam em campaign-validation.ts.
+
+export interface StartCampaignOptions {
+  /**
+   * "Iniciar agora" numa campanha agendada: a fila começa agora, não no
+   * horário agendado (antes os itens ficavam presos ao agendamento futuro
+   * com a campanha já em execução).
+   */
+  startNow?: boolean;
 }
 
 export type StartCampaignResult =
@@ -39,7 +44,8 @@ export type StartCampaignResult =
 // enfileira, assumindo que accountId já é confiável.
 export async function startCampaign(
   campaignId: string,
-  accountId: string
+  accountId: string,
+  options: StartCampaignOptions = {}
 ): Promise<StartCampaignResult> {
   // preparing: true enquanto esta chamada é dona da preparação (status
   // 'preparando'). Se sair por erro com ela ainda true, a campanha volta a
@@ -49,7 +55,7 @@ export async function startCampaign(
   const state: PrepareState = { preparing: false, agendamento: null };
   let result: StartCampaignResult;
   try {
-    result = await prepareCampaign(campaignId, accountId, state);
+    result = await prepareCampaign(campaignId, accountId, state, options);
   } catch (err: unknown) {
     console.error("[startCampaign] Failed to schedule queue:", err);
     result = { ok: false, status: 500, error: err instanceof Error ? err.message : String(err) };
@@ -118,7 +124,8 @@ async function clearStartFailure(campaignId: string): Promise<void> {
 async function prepareCampaign(
   campaignId: string,
   accountId: string,
-  state: PrepareState
+  state: PrepareState,
+  options: StartCampaignOptions
 ): Promise<StartCampaignResult> {
   // Bloco = antigo corpo do try (indentação preservada para o diff); erro
   // lançado aqui é tratado em startCampaign().
@@ -265,7 +272,10 @@ async function prepareCampaign(
     // aprovado, presente no catálogo dessa WABA e compatível (template não
     // aprovado, com mídia no cabeçalho, URL dinâmica ou mais {{n}} do que
     // variáveis mapeadas faria a Meta recusar TODOS os envios).
-    const configCheck = await checkCampaignConfig(supabaseAdmin(), accountId, sessionIds, mensagens);
+    const configCheck = await checkCampaignConfig(supabaseAdmin(), accountId, sessionIds, mensagens, {
+      templateMode,
+      audienceMode: campaign.audience_mode ?? null,
+    });
     if (!configCheck.ok) {
       void writeLog({
         account_id: accountId,
@@ -576,9 +586,10 @@ async function prepareCampaign(
     // (ex: start manual antecipado de uma campanha "agendado"). Senão usa
     // Date.now() — inclui o caso normal em que o cron só chama start
     // depois que agendamento já passou, onde essa condição é sempre falsa.
+    // "Iniciar agora" (options.startNow) ignora o agendamento futuro.
     const now = new Date().toISOString();
     const baseTime =
-      campaign.agendamento && new Date(campaign.agendamento) > new Date()
+      !options.startNow && campaign.agendamento && new Date(campaign.agendamento) > new Date()
         ? new Date(campaign.agendamento).getTime()
         : Date.now();
 
