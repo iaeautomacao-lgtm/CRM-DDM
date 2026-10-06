@@ -86,6 +86,17 @@ describe("conversationMatchesFilters", () => {
     expect(conversationMatchesFilters(conv({ unread_count: 2, status: "closed" }), unread, ctx)).toBe(false);
   });
 
+  it("filas operacionais usam atribuição, não o status bruto", () => {
+    const attending = { ...DEFAULT_INBOX_FILTERS, status: "open" as const };
+    const waiting = { ...DEFAULT_INBOX_FILTERS, status: "pending" as const };
+
+    expect(conversationMatchesFilters(conv({ status: "pending", assigned_agent_id: "agent-1" }), attending, ctx)).toBe(true);
+    expect(conversationMatchesFilters(conv({ status: "open", assigned_agent_id: null }), attending, ctx)).toBe(false);
+
+    expect(conversationMatchesFilters(conv({ status: "open", assigned_agent_id: null }), waiting, ctx)).toBe(true);
+    expect(conversationMatchesFilters(conv({ status: "pending", assigned_agent_id: "agent-1" }), waiting, ctx)).toBe(false);
+  });
+
   it("cliente e campanha", () => {
     const f = { ...DEFAULT_INBOX_FILTERS, cliente: UUID, campanha: OTHER };
     expect(conversationMatchesFilters(conv({ client_id: UUID, origin_campaign_id: OTHER }), f, ctx)).toBe(true);

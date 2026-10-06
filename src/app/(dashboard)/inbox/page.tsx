@@ -118,6 +118,14 @@ export default function InboxPage() {
    * realtime channel). The ref is kept in sync via the effect below.
    */
   const knownConvIdsRef = useRef<Set<string>>(new Set());
+
+  // Fechamentos locais vencem eventos Realtime antigos. Um UPDATE de
+  // unread_count iniciado antes do fechamento pode chegar depois e carregar
+  // o status antigo no payload. Guardamos o instante do fechamento para
+  // ignorar apenas eventos anteriores; uma reabertura real tem updated_at
+  // posterior e passa normalmente.
+  const locallyClosedAtRef = useRef<Map<string, number>>(new Map());
+
   useEffect(() => {
     const next = new Set<string>();
     for (const c of conversations) next.add(c.id);
@@ -300,6 +308,24 @@ export default function InboxPage() {
       }
 
       if (event.eventType === "UPDATE") {
+        const locallyClosedAt = locallyClosedAtRef.current.get(conv.id);
+        if (locallyClosedAt && conv.status !== "closed") {
+          const incomingUpdatedAt = Date.parse(conv.updated_at);
+          if (!Number.isFinite(incomingUpdatedAt) || incomingUpdatedAt <= locallyClosedAt) {
+            // Evento atrasado de uma escrita iniciada antes do encerramento.
+            // Não deixa o status antigo ressuscitar a conversa no cliente.
+            return;
+          }
+          // updated_at posterior: reabertura real, por exemplo nova mensagem.
+          locallyClosedAtRef.current.delete(conv.id);
+        } else if (conv.status === "closed") {
+          const incomingUpdatedAt = Date.parse(conv.updated_at);
+          locallyClosedAtRef.current.set(
+            conv.id,
+            Number.isFinite(incomingUpdatedAt) ? incomingUpdatedAt : Date.now(),
+          );
+        }
+
         if (knownConvIdsRef.current.has(conv.id)) {
           // If this UPDATE is for the conv the user is currently viewing,
           // suppress the incoming unread_count — the user is reading it
@@ -543,6 +569,15 @@ export default function InboxPage() {
       const outcomeUpdates = outcomeTag
         ? { outcome_tag_id: outcomeTag.id, outcome_tag: outcomeTag }
         : {};
+
+      if (status === "closed") {
+        // Instala a barreira antes do patch otimista para qualquer UPDATE
+        // Realtime atrasado já encontrá-la.
+        locallyClosedAtRef.current.set(conversationId, Date.now());
+      } else {
+        locallyClosedAtRef.current.delete(conversationId);
+      }
+
       setConversations((prev) =>
         prev.map((c) =>
           c.id === conversationId ? { ...c, status, ...outcomeUpdates } : c

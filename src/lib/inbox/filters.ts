@@ -3,6 +3,7 @@
 // que chegam pelo tempo real. Puro — testável e usado no cliente e no servidor.
 
 import type { Conversation } from "@/types";
+import { inboxQueueSection } from "./queue-section";
 
 export const INBOX_CHANNELS = ["whatsapp", "webchat", "instagram", "messenger"] as const;
 export type InboxChannel = (typeof INBOX_CHANNELS)[number];
@@ -118,7 +119,15 @@ export function conversationMatchesFilters(
       return c.status === "open" || c.status === "pending";
     case "unread":
       return c.unread_count > 0 && c.status !== "closed";
-    default:
-      return c.status === f.status;
+    case "open":
+      // Compatibilidade da URL: status=open representa a seção operacional
+      // "Em atendimento", determinada por atribuição humana, não pelo valor
+      // bruto de conversations.status.
+      return inboxQueueSection(c) === "attending";
+    case "pending":
+      // Compatibilidade da URL: status=pending representa "Em espera".
+      return inboxQueueSection(c) === "waiting";
+    case "closed":
+      return c.status === "closed";
   }
 }

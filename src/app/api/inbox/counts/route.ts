@@ -32,23 +32,33 @@ export async function GET(request: Request) {
       })
     )
 
-    // Totais por seção (Em atendimento / Em espera) da lista agrupada, com os
-    // mesmos filtros da lista. Não consideram a busca por texto (?q=).
+    // Totais por fila operacional. A classificação usa atribuição humana:
+    // com assigned_agent_id = Em atendimento; sem atendente = Em espera.
     const statusTotals = await Promise.all(
-      (['open', 'pending'] as const).map(async (status) => {
-        const { count, error } = await applyInboxFilters(
-          supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('status', status),
+      ([
+        ['open', true],
+        ['pending', false],
+      ] as const).map(async ([statusKey, assigned]) => {
+        let query = applyInboxFilters(
+          supabase
+            .from('conversations')
+            .select('id', { count: 'exact', head: true })
+            .in('status', ['open', 'pending']),
           filters,
           { accountId, userId, line },
           { includeStatus: false }
         )
+        query = assigned
+          ? query.not('assigned_agent_id', 'is', null)
+          : query.is('assigned_agent_id', null)
+        const { count, error } = await query
         // Total da seção é complemento: se falhar, devolve null e a UI usa
         // a contagem carregada — nunca derruba os contadores de não lidas.
         if (error) {
-          console.error('[inbox/counts] total por status falhou:', error.message)
-          return [status, null] as const
+          console.error('[inbox/counts] total por fila falhou:', error.message)
+          return [statusKey, null] as const
         }
-        return [status, count ?? 0] as const
+        return [statusKey, count ?? 0] as const
       })
     )
     return NextResponse.json({ unread: Object.fromEntries(counts), status: Object.fromEntries(statusTotals) })
