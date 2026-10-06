@@ -1,0 +1,363 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-react";
+import { apiFetch } from "@/lib/api-fetch";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { AnswerMarkdown } from "@/components/inteligencia/answer-markdown";
+import { SUGGESTED_QUESTIONS, toolLabel, type ChatStreamEvent } from "@/lib/intelligence/chat/labels";
+import { cn } from "@/lib/utils";
+
+// /inteligencia — chat do DDM Intelligence (PRD-04, Fase 2). Owner/admin/
+// supervisor (ROUTE_ALLOWLIST em src/lib/role-utils.ts). As respostas vêm
+// em streaming NDJSON de POST /api/intelligence/chat; o histórico é só do
+// próprio usuário (GET /api/intelligence/chats).
+
+interface ChatSummary {
+  id: string;
+  title: string;
+  updated_at: string;
+}
+
+interface UiMessage {
+  key: string;
+  role: "user" | "assistant";
+  content: string;
+  /** Ferramentas consultadas nesta resposta (rótulos). */
+  tools: string[];
+  pending?: boolean;
+  failed?: boolean;
+}
+
+interface StoredMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  tool_calls: Array<{ name: string }> | null;
+}
+
+const MAX_CHARS = 2_000;
+
+function fmtWhen(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+async function readError(res: Response): Promise<string> {
+  try {
+    const body = (await res.json()) as { error?: string };
+    if (body.error === "Rate limit exceeded") return "Muitas perguntas seguidas. Aguarde um minuto e tente de novo.";
+    return body.error ?? "Não foi possível enviar a pergunta.";
+  } catch {
+    return "Não foi possível enviar a pergunta.";
+  }
+}
+
+export default function InteligenciaPage() {
+  const [chats, setChats] = useState<ChatSummary[]>([]);
+  const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null);
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [toolStatus, setToolStatus] = useState<string | null>(null);
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  const loadChats = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/intelligence/chats");
+      if (!res.ok) {
+        setListError(await readError(res));
+        return;
+      }
+      const body = (await res.json()) as { chats: ChatSummary[]; usage: { used: number; limit: number } };
+      setChats(body.chats);
+      setUsage(body.usage);
+      setListError(null);
+    } catch {
+      setListError("Não foi possível carregar o histórico.");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadChats();
+  }, [loadChats]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, toolStatus]);
+
+  const openChat = useCallback(
+    async (id: string) => {
+      if (streaming) return;
+      setActiveChatId(id);
+      setLoadingChat(true);
+      setMessages([]);
+      try {
+        const res = await apiFetch(`/api/intelligence/chats/${id}`);
+        if (!res.ok) {
+          setMessages([{ key: "err", role: "assistant", content: await readError(res), tools: [], failed: true }]);
+          return;
+        }
+        const body = (await res.json()) as { messages: StoredMessage[] };
+        setMessages(
+          body.messages.map((m) => ({
+            key: m.id,
+            role: m.role,
+            content: m.content,
+            tools: [...new Set((m.tool_calls ?? []).map((t) => toolLabel(t.name)))],
+          })),
+        );
+      } finally {
+        setLoadingChat(false);
+      }
+    },
+    [streaming],
+  );
+
+  const newChat = () => {
+    if (streaming) return;
+    setActiveChatId(null);
+    setMessages([]);
+    setInput("");
+  };
+
+  const updateAssistant = (key: string, fn: (m: UiMessage) => UiMessage) =>
+    setMessages((prev) => prev.map((m) => (m.key === key ? fn(m) : m)));
+
+  const send = async (text: string) => {
+    const question = text.trim();
+    if (!question || streaming) return;
+    const stamp = Date.now();
+    const assistantKey = `a-${stamp}`;
+    setInput("");
+    setStreaming(true);
+    setToolStatus(null);
+    setMessages((prev) => [
+      ...prev,
+      { key: `u-${stamp}`, role: "user", content: question, tools: [] },
+      { key: assistantKey, role: "assistant", content: "", tools: [], pending: true },
+    ]);
+
+    try {
+      const res = await apiFetch("/api/intelligence/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: question, chat_id: activeChatId }),
+      });
+      if (!res.ok || !res.body) {
+        const error = await readError(res);
+        updateAssistant(assistantKey, (m) => ({ ...m, content: error, pending: false, failed: true }));
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const handle = (event: ChatStreamEvent) => {
+        switch (event.type) {
+          case "meta":
+            setActiveChatId(event.chat_id);
+            break;
+          case "tool_start":
+            setToolStatus(toolLabel(event.name));
+            updateAssistant(assistantKey, (m) => {
+              const label = toolLabel(event.name);
+              return m.tools.includes(label) ? m : { ...m, tools: [...m.tools, label] };
+            });
+            break;
+          case "tool_end":
+            setToolStatus(null);
+            break;
+          case "reset":
+            updateAssistant(assistantKey, (m) => ({ ...m, content: "" }));
+            break;
+          case "text":
+            setToolStatus(null);
+            updateAssistant(assistantKey, (m) => ({ ...m, content: m.content + event.delta }));
+            break;
+          case "error":
+            updateAssistant(assistantKey, (m) => ({ ...m, content: event.message, failed: true }));
+            break;
+          case "done":
+            break;
+        }
+      };
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl = buffer.indexOf("\n");
+        while (nl >= 0) {
+          const line = buffer.slice(0, nl).trim();
+          buffer = buffer.slice(nl + 1);
+          if (line) {
+            try {
+              handle(JSON.parse(line) as ChatStreamEvent);
+            } catch {
+              // linha malformada: ignora
+            }
+          }
+          nl = buffer.indexOf("\n");
+        }
+      }
+    } catch {
+      updateAssistant(assistantKey, (m) => ({
+        ...m,
+        content: m.content || "A conexão caiu antes do fim da resposta. Abra a conversa no histórico para ver se ela foi salva.",
+        failed: !m.content,
+      }));
+    } finally {
+      updateAssistant(assistantKey, (m) => ({ ...m, pending: false }));
+      setStreaming(false);
+      setToolStatus(null);
+      void loadChats();
+    }
+  };
+
+  const limitReached = usage !== null && usage.used >= usage.limit;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-4 p-4 lg:flex-row lg:p-6">
+      {/* Histórico */}
+      <aside className="flex w-full shrink-0 flex-col gap-2 lg:w-64">
+        <Button variant="outline" onClick={newChat} disabled={streaming}>
+          <MessageSquarePlus className="size-4" />
+          Nova conversa
+        </Button>
+        <div className="max-h-48 overflow-y-auto rounded-lg border lg:max-h-none lg:flex-1">
+          {listError ? (
+            <p className="p-3 text-xs text-muted-foreground">{listError}</p>
+          ) : chats.length === 0 ? (
+            <p className="p-3 text-xs text-muted-foreground">Nenhuma conversa ainda.</p>
+          ) : (
+            <ul className="divide-y">
+              {chats.map((c) => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => void openChat(c.id)}
+                    disabled={streaming}
+                    className={cn(
+                      "w-full px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-60",
+                      c.id === activeChatId && "bg-muted",
+                    )}
+                  >
+                    <span className="line-clamp-2">{c.title}</span>
+                    <span className="text-xs text-muted-foreground">{fmtWhen(c.updated_at)}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        {usage && (
+          <p className="text-xs text-muted-foreground">
+            Perguntas da conta hoje: {usage.used} de {usage.limit}
+          </p>
+        )}
+      </aside>
+
+      {/* Conversa */}
+      <section className="flex min-h-[60vh] min-w-0 flex-1 flex-col rounded-lg border">
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          {loadingChat ? (
+            <div className="flex justify-center py-10 text-muted-foreground">
+              <Loader2 className="size-5 animate-spin" />
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="mx-auto max-w-xl space-y-4 py-6 text-center">
+              <Sparkles className="mx-auto size-8 text-primary" />
+              <div>
+                <h2 className="text-lg font-semibold">Pergunte sobre o atendimento</h2>
+                <p className="text-sm text-muted-foreground">
+                  As respostas usam só os dados do CRM que você pode ver, sempre com o período e o escopo
+                  consultados.
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {SUGGESTED_QUESTIONS.map((q) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => void send(q)}
+                    disabled={streaming || limitReached}
+                    className="rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-60"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            messages.map((m) =>
+              m.role === "user" ? (
+                <div key={m.key} className="flex justify-end">
+                  <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+                    {m.content}
+                  </div>
+                </div>
+              ) : (
+                <div key={m.key} className="flex justify-start">
+                  <div
+                    className={cn(
+                      "max-w-[90%] rounded-lg bg-muted px-3 py-2",
+                      m.failed && "border border-destructive/40",
+                    )}
+                  >
+                    {m.tools.length > 0 && (
+                      <p className="mb-1 text-xs text-muted-foreground">Consultas: {m.tools.join(" · ")}</p>
+                    )}
+                    {m.content ? (
+                      <AnswerMarkdown text={m.content} />
+                    ) : m.pending ? (
+                      <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin" />
+                        {toolStatus ? `${toolStatus}…` : "Pensando…"}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ),
+            )
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        <form
+          className="flex items-end gap-2 border-t p-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void send(input);
+          }}
+        >
+          <Textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value.slice(0, MAX_CHARS))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send(input);
+              }
+            }}
+            placeholder={
+              limitReached
+                ? "Limite diário de perguntas da conta atingido."
+                : "Ex.: qual instituição converteu melhor esta semana?"
+            }
+            disabled={streaming || limitReached}
+            className="max-h-40 min-h-10"
+            aria-label="Pergunta para o DDM Intelligence"
+          />
+          <Button type="submit" size="icon-lg" disabled={streaming || !input.trim() || limitReached} aria-label="Enviar">
+            {streaming ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+          </Button>
+        </form>
+      </section>
+    </div>
+  );
+}

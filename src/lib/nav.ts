@@ -12,6 +12,7 @@ import {
   Settings,
   Shield,
   ShieldAlert,
+  Sparkles,
   Tags,
   UserCheck,
   Users,
@@ -43,6 +44,7 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/monitoramento", label: "Monitoramento", icon: Activity },
+  { href: "/inteligencia", label: "DDM Intelligence", icon: Sparkles, beta: true },
   { href: "/canais", label: "Canais", icon: Wifi },
   { href: "/inbox", label: "Conversas", icon: MessageSquare },
   { href: "/contacts", label: "Contatos", icon: Users },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAccessRoute, getDefaultRoute } from "./role-utils";
+import { canAccessRoute, getDefaultRoute, isRouteGated } from "./role-utils";
 
 describe("supervisor (migrations 139/140)", () => {
   it("acessa Inbox, Monitoramento e Dashboard", () => {
@@ -17,6 +17,14 @@ describe("supervisor (migrations 139/140)", () => {
       expect(canAccessRoute("supervisor", path)).toBe(true);
     }
     expect(canAccessRoute("agent", "/relatorios/atendimentos")).toBe(false);
+  });
+  it("DDM Intelligence (/inteligencia): supervisor ou acima", () => {
+    for (const role of ["owner", "admin", "supervisor"] as const) {
+      expect(canAccessRoute(role, "/inteligencia")).toBe(true);
+    }
+    expect(canAccessRoute("agent", "/inteligencia")).toBe(false);
+    expect(canAccessRoute("viewer", "/inteligencia")).toBe(false);
+    expect(isRouteGated("/inteligencia")).toBe(true);
   });
   it("cai no Monitoramento depois do login", () => {
     expect(getDefaultRoute("supervisor")).toBe("/monitoramento");
