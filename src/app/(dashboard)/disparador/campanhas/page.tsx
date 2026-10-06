@@ -1649,71 +1649,47 @@ export default function CampanhasPage() {
         // envio, não na criação/edição do formulário).
         trackAction("campaign_updated", { campaign_id: editingId, nome, total_contatos: null });
       } else {
-        const supabase = createClient();
-
-        // created_by is required for the ownership check in the
-        // start/stop routes (campaign.created_by !== user.id) — without
-        // it, every campaign is unowned and that check always rejects.
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const user = session?.user;
-        if (!user) throw new Error("Não autenticado");
-        // accountId resolvido em loadData() via getDisparadorScope (mesmo
-        // padrão já usado pelo resto do arquivo) — necessário pra migration
-        // 040 (RLS do Disparador) poder ser aplicada depois.
         if (!accountId) throw new Error("Conta não resolvida — recarregue a página e tente de novo.");
 
-        // Mesma síntese de template_variable_map para WAHA texto livre do
-        // ramo de edição (PATCH) acima — ver comentário lá.
-        // Regra extraída para synthesizeWahaVariableMap (preview-message.ts),
-        // a mesma usada pela prévia do passo Revisão.
-        const mensagensComMap = mensagens.map((msg: any) => synthesizeWahaVariableMap(msg, columnMap));
+        // A criação é server-authoritative: account_id, created_by e status
+        // são definidos/revalidados na API, não confiados ao navegador.
+        const mensagensComMap = mensagens.map((msg: any) =>
+          synthesizeWahaVariableMap(msg, columnMap)
+        );
 
-        const campaignData = {
-          nome,
-          descricao,
-          session_ids: selectedSessions,
-          tags_filtro: selectedTags,
-          mensagens: mensagensComMap,
-          intervalo_min: intervaloMin,
-          intervalo_max: intervaloMax,
-          janela_inicio: janelaInicio,
-          janela_fim: janelaFim,
-          // Só envia a coluna quando há restrição: sem a 144 aplicada, uma
-          // campanha sem restrição continua salvando normalmente.
-          ...(diasEnvio.length > 0 ? { dias_envio: diasEnvio } : {}),
-          batch_size: batchSize,
-          batch_pause_seconds: batchPauseSeconds,
-          // Migration 114 — modo "Segmentado"; null em qualquer outro modo.
-          batch_percent: dispatchMode === "segmentado" ? batchPercent : null,
-          // Reaproveita a coluna dias_permitidos — ver parseTemplateMode.
-          dias_permitidos: templateMode,
-          agendamento: agendamentoISO,
-          ...campaignWebchatPayload(webchat),
-          status: agendamentoISO ? "agendado" : "rascunho",
-          // Migration 132: com "csv", startCampaign nunca cai para a conta inteira.
-          audience_mode: importAllRows?.length ? "csv" : selectedTags.length > 0 ? "tags" : "account",
-          created_by: user.id,
-          account_id: accountId,
-          // Migration 080 — grava o draftId usado no import (acima)
-          // para que startCampaign.ts consiga relinkar
-          // contact_import_variables de forma determinística no start,
-          // mesmo se o relink abaixo (best-effort, client-side) já tiver
-          // rodado ou tiver falhado silenciosamente.
-          import_draft_id: draftId,
-        };
+        const res = await apiFetch("/api/disparador/campaigns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            nome,
+            descricao,
+            session_ids: selectedSessions,
+            tags_filtro: selectedTags,
+            mensagens: mensagensComMap,
+            intervalo_min: intervaloMin,
+            intervalo_max: intervaloMax,
+            janela_inicio: janelaInicio,
+            janela_fim: janelaFim,
+            ...(diasEnvio.length > 0 ? { dias_envio: diasEnvio } : {}),
+            batch_size: batchSize,
+            batch_pause_seconds: batchPauseSeconds,
+            batch_percent: dispatchMode === "segmentado" ? batchPercent : null,
+            dias_permitidos: templateMode,
+            agendamento: agendamentoISO,
+            ...campaignWebchatPayload(webchat),
+            audience_mode:
+              importAllRows?.length ? "csv" : selectedTags.length > 0 ? "tags" : "account",
+            import_draft_id: draftId,
+          }),
+        });
+        const created = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(created.error || "Erro ao criar campanha");
+        const newCampaign = { id: created.id as string };
 
-        const { data: newCampaign, error } = await supabase
-          .from("campaigns")
-          .insert(campaignData)
-          .select("id")
-          .single();
-        if (error) throw error;
-
-        // Links UTM gerados no passo Público (antes de a campanha existir) foram
-        // salvos sob draftId — agora que o campaign_id real existe,
-        // reatribui essas linhas para que start/route.ts consiga achá-las.
+        // Dados auxiliares do draft ainda têm escrita client-side própria.
+        // O estado crítico da campanha não depende mais disso e já foi
+        // persistido/revalidado pela API acima.
+        const supabase = createClient();
         if (utmGerado) {
           const { error: relinkErr } = await supabase
             .from("disparador_utm_links")
@@ -1725,10 +1701,6 @@ export default function CampanhasPage() {
           }
         }
 
-        // VAR1/VAR2/VAR3 do CSV (passo Público) também foram salvas sob draftId
-        // em wacrm.contact_import_variables (migration 079) quando o
-        // import aconteceu antes de esta campanha existir — mesmo motivo
-        // do relink de UTM acima. Sem custo se nenhum import usou VARn.
         const { error: csvVarRelinkErr } = await supabase
           .from("contact_import_variables")
           .update({ campaign_id: newCampaign.id })
