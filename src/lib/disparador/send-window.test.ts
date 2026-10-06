@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { canSendNow, isAllowedDay, isWithinSendWindow, nextSendSlot, nextWindowStart, parseHHMM } from "./send-window";
+import {
+  brasiliaLocalToIso,
+  canSendNow,
+  formatBrasilia,
+  isAllowedDay,
+  isWithinSendWindow,
+  nextSendSlot,
+  nextWindowStart,
+  parseHHMM,
+} from "./send-window";
+
+describe("agendamento em horário de Brasília", () => {
+  it("datetime-local vira ISO com -03:00, independente do fuso do navegador", () => {
+    expect(brasiliaLocalToIso("2026-10-06T14:30")).toBe("2026-10-06T17:30:00.000Z");
+    expect(brasiliaLocalToIso("2026-10-06T22:15:30")).toBe("2026-10-07T01:15:30.000Z");
+  });
+  it("inválido = null", () => {
+    expect(brasiliaLocalToIso("")).toBeNull();
+    expect(brasiliaLocalToIso("06/10/2026 14:30")).toBeNull();
+    expect(brasiliaLocalToIso(null)).toBeNull();
+  });
+  it("formatBrasilia exibe em BRT", () => {
+    expect(formatBrasilia("2026-10-06T17:30:00.000Z")).toBe("06/10/2026, 14:30");
+    expect(formatBrasilia("lixo")).toBe("");
+  });
+});
 
 // Horário de Brasília → instante UTC (BR = UTC-3).
 const br = (hh: number, mm = 0) => new Date(Date.UTC(2026, 9, 15, hh + 3, mm));

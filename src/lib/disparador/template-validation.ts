@@ -12,8 +12,10 @@
 //   - {{n}} no corpo além das variáveis mapeadas = 132000 em todo envio.
 //
 // A fonte é o catálogo local wacrm.message_templates (sincronizado da Meta e
-// atualizado pelo webhook de status). Template ausente do catálogo local não
-// é bloqueado — não há como validar sem consultar a Meta.
+// atualizado pelo webhook de status). Template ausente do catálogo local da
+// WABA da campanha BLOQUEIA: antes passava sem validar e a Meta recusava
+// todos os envios (ex.: template de outro número que ficou na mensagem
+// depois de trocar o canal).
 
 export interface LocalTemplateButton {
   type: string;
@@ -96,21 +98,26 @@ export interface TemplateValidationInput {
   wabaIds?: readonly string[];
 }
 
-export type TemplateValidationResult =
-  | { ok: true; /** false = template fora do catálogo local, não validado. */ checked: boolean }
-  | { ok: false; error: string };
+export type TemplateValidationResult = { ok: true } | { ok: false; error: string };
+
+export const TEMPLATE_NOT_IN_CATALOG =
+  "Template não encontrado no catálogo deste número — sincronize os templates";
 
 /**
- * Valida um template Meta de uma mensagem da campanha. Com mais de um canal
- * Meta (WABAs diferentes), cada WABA precisa do template aprovado — os
- * contatos são distribuídos entre os canais.
+ * Valida um template Meta de uma mensagem da campanha contra o catálogo da
+ * WABA da campanha (campanha Meta = uma WABA, ver campaign-validation.ts).
+ * Com mais de uma WABA em `wabaIds`, cada uma precisa do template aprovado.
  */
 export function validateCampaignTemplate(input: TemplateValidationInput): TemplateValidationResult {
   const name = label(input.templateName, input.language);
   const sameLanguage = input.rows.filter(
     (r) => r.name === input.templateName && (r.language ?? "pt_BR") === input.language
   );
-  if (sameLanguage.length === 0) return { ok: true, checked: false };
+  const notFound = {
+    ok: false as const,
+    error: `${name}: ${TEMPLATE_NOT_IN_CATALOG} (Configurações → Templates → Sincronizar).`,
+  };
+  if (sameLanguage.length === 0) return notFound;
 
   const wabaIds = [...new Set((input.wabaIds ?? []).filter(Boolean))];
   // Linhas sem waba_id (sincronizadas antes da migration 073) valem para
@@ -123,10 +130,9 @@ export function validateCampaignTemplate(input: TemplateValidationInput): Templa
         }))
       : [{ wabaId: null, rows: sameLanguage }];
 
-  let checked = false;
   for (const group of groups) {
-    if (group.rows.length === 0) continue; // WABA sem a linha local: não dá para validar
-    checked = true;
+    // WABA sem a linha local: o template não existe nesse número.
+    if (group.rows.length === 0) return notFound;
     const approved = group.rows.filter((r) => (r.status ?? "").toUpperCase() === "APPROVED");
     if (approved.length === 0) {
       const status = (group.rows[0].status ?? "").toUpperCase();
@@ -149,5 +155,5 @@ export function validateCampaignTemplate(input: TemplateValidationInput): Templa
       }
     }
   }
-  return { ok: true, checked };
+  return { ok: true };
 }

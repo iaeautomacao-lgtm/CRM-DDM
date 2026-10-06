@@ -3,11 +3,8 @@ import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 import { phoneKey } from "@/lib/disparador/phone-key";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
-import {
-  TEMPLATE_VALIDATION_COLUMNS,
-  validateCampaignTemplate,
-  type LocalTemplateRow,
-} from "@/lib/disparador/template-validation";
+import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
+import { formatStartFailureReason } from "@/lib/disparador/campaign-validation";
 import { writeLog } from "@/lib/logger";
 
 type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
@@ -21,55 +18,6 @@ type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
 // todas as mensagens enviadas em sequência para cada contato).
 function parseTemplateMode(raw: unknown): TemplateMode {
   return raw === "rotacao" || raw === "aleatorio" ? raw : "sequencia";
-}
-
-// Valida os templates Meta das mensagens contra o catálogo local
-// (wacrm.message_templates). Devolve a primeira mensagem de erro, ou null.
-// Erro ao ler o catálogo não bloqueia o início (só loga) — é uma checagem
-// de segurança, não uma dependência do envio.
-interface TemplateMessageFields {
-  template_name?: unknown;
-  template_language?: unknown;
-  template_variable_map?: unknown;
-}
-
-async function validateCampaignTemplates(
-  mensagens: readonly TemplateMessageFields[],
-  accountId: string,
-  wabaIds: string[]
-): Promise<string | null> {
-  const templateMessages = mensagens
-    .filter((m) => m?.template_name && Array.isArray(m.template_variable_map))
-    .map((m) => ({
-      templateName: String(m.template_name),
-      language: typeof m.template_language === "string" && m.template_language ? m.template_language : "pt_BR",
-      mappedVariables: (m.template_variable_map as unknown[]).length,
-    }));
-  if (templateMessages.length === 0) return null;
-  const names = [...new Set(templateMessages.map((m) => m.templateName))];
-  const { data: rows, error } = await supabaseAdmin()
-    .from("message_templates")
-    .select(TEMPLATE_VALIDATION_COLUMNS)
-    .eq("account_id", accountId)
-    .in("name", names);
-  if (error) {
-    console.error("[startCampaign] Falha ao ler message_templates para validação:", error.message);
-    return null;
-  }
-  for (const m of templateMessages) {
-    const result = validateCampaignTemplate({
-      ...m,
-      rows: (rows ?? []) as LocalTemplateRow[],
-      wabaIds,
-    });
-    if (!result.ok) return result.error;
-    if (!result.checked) {
-      console.warn(
-        `[startCampaign] Template "${m.templateName}" (${m.language}) fora do catálogo local — status/componentes não validados.`
-      );
-    }
-  }
-  return null;
 }
 
 export type StartCampaignResult =
@@ -91,11 +39,88 @@ export async function startCampaign(
   campaignId: string,
   accountId: string
 ): Promise<StartCampaignResult> {
-  // true enquanto esta chamada é dona da preparação (status 'preparando').
-  // Se sair por erro com ela ainda true, o finally devolve a campanha a
-  // 'rascunho' para não ficar presa.
-  let preparing = false;
+  // preparing: true enquanto esta chamada é dona da preparação (status
+  // 'preparando'). Se sair por erro com ela ainda true, a campanha volta a
+  // 'rascunho' para não ficar presa — com o motivo gravado e visível no
+  // card (antes uma campanha agendada que falhava voltava a rascunho em
+  // silêncio e o agendamento simplesmente sumia).
+  const state: PrepareState = { preparing: false, agendamento: null };
+  let result: StartCampaignResult;
   try {
+    result = await prepareCampaign(campaignId, accountId, state);
+  } catch (err: unknown) {
+    console.error("[startCampaign] Failed to schedule queue:", err);
+    result = { ok: false, status: 500, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  if (state.preparing) {
+    // Falhou no meio da preparação: volta para 'rascunho'. Os itens
+    // parciais já inseridos não são consumidos (campanha não está em
+    // execução) e o próximo start limpa a fila antes de publicar.
+    // Crash do processo não passa por aqui: o cron devolve a 'rascunho'
+    // o que ficar preso em 'preparando' por mais de 30 min.
+    const { error } = await supabaseAdmin()
+      .from("campaigns")
+      .update({ status: "rascunho" })
+      .eq("id", campaignId)
+      .eq("account_id", accountId)
+      .eq("status", "preparando");
+    if (error) console.error("[startCampaign] Recuperação de preparação pendente:", error.message);
+    if (!result.ok) await recordStartFailure(campaignId, accountId, state.agendamento, result.error);
+  } else if (result.ok) {
+    await clearStartFailure(campaignId);
+  }
+  return result;
+}
+
+interface PrepareState {
+  preparing: boolean;
+  /** campaigns.agendamento lido na preparação (para o motivo da falha). */
+  agendamento: string | null;
+}
+
+// campaigns.motivo_falha_inicio (migration 160). Gravado em UPDATE separado
+// e tolerante: sem a coluna, o início/recuperação continuam funcionando.
+async function recordStartFailure(
+  campaignId: string,
+  accountId: string,
+  agendamento: string | null,
+  error: string
+): Promise<void> {
+  const motivo = formatStartFailureReason(error, agendamento);
+  const { error: updateError } = await supabaseAdmin()
+    .from("campaigns")
+    .update({ motivo_falha_inicio: motivo })
+    .eq("id", campaignId)
+    .eq("account_id", accountId);
+  if (updateError) console.error("[startCampaign] Falha ao gravar motivo_falha_inicio:", updateError.message);
+  void writeLog({
+    account_id: accountId,
+    level: "warn",
+    source: "disparador",
+    event: "campaign_start_failed",
+    message: motivo,
+    payload: { campaign_id: campaignId },
+  });
+}
+
+async function clearStartFailure(campaignId: string): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from("campaigns")
+    .update({ motivo_falha_inicio: null })
+    .eq("id", campaignId)
+    .not("motivo_falha_inicio", "is", null);
+  if (error) console.error("[startCampaign] Falha ao limpar motivo_falha_inicio:", error.message);
+}
+
+async function prepareCampaign(
+  campaignId: string,
+  accountId: string,
+  state: PrepareState
+): Promise<StartCampaignResult> {
+  // Bloco = antigo corpo do try (indentação preservada para o diff); erro
+  // lançado aqui é tratado em startCampaign().
+  {
     // 1. Claim condicional rascunho/agendado -> 'preparando'. Enquanto a
     // fila é montada a campanha NÃO está 'em_execucao', então o cron e o
     // claim_dispatch_item ignoram os itens já inseridos — nenhum consumidor
@@ -115,7 +140,7 @@ export async function startCampaign(
       return { ok: false, status: 500, error: claimError.message };
     }
     const claimedFreshStart = !!claimedRows && claimedRows.length > 0;
-    preparing = claimedFreshStart;
+    state.preparing = claimedFreshStart;
 
     // 2. Fetch campaign configuration — necessário de todo jeito: quando
     // claimedFreshStart, pra ler mensagens/session_ids/etc; quando não,
@@ -131,6 +156,7 @@ export async function startCampaign(
     if (campaignError || !campaign) {
       return { ok: false, status: 404, error: "Campanha não encontrada" };
     }
+    state.agendamento = campaign.agendamento ?? null;
 
     // Not claimed above (não era rascunho/agendado) e não é retomada de
     // pausada — genuinamente não iniciável agora. Enforced aqui, não só
@@ -218,53 +244,32 @@ export async function startCampaign(
       }
     }
 
-    // Buscar provider de cada canal selecionado na campanha
-    // Só canais da própria conta: session_ids vêm do cliente (antes um UUID
-    // de outra conta bastava para disparar por ela).
-    const { data: channelConfigs } = await supabaseAdmin()
-      .from("whatsapp_config")
-      .select("id, provider, phone_number_id, waba_id")
-      .in("id", sessionIds)
-      .eq("account_id", accountId);
-
-    const channelMap = new Map((channelConfigs ?? []).map((c) => [c.id, c]));
-    const validSessionIds = sessionIds.filter((id: string) => channelMap.has(id));
-    if (validSessionIds.length === 0) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Nenhum dos canais selecionados pertence a esta conta.",
-      };
+    // Canais e mensagens, ANTES de mexer na fila (campaign-validation.ts —
+    // mesma regra do PATCH e do assistente): só canais da própria conta
+    // (session_ids vêm do cliente) e habilitados; nunca Meta + WAHA na
+    // mesma campanha; Meta = uma única WABA e toda mensagem é template
+    // aprovado, presente no catálogo dessa WABA e compatível (template não
+    // aprovado, com mídia no cabeçalho, URL dinâmica ou mais {{n}} do que
+    // variáveis mapeadas faria a Meta recusar TODOS os envios).
+    const configCheck = await checkCampaignConfig(supabaseAdmin(), accountId, sessionIds, mensagens);
+    if (!configCheck.ok) {
+      void writeLog({
+        account_id: accountId,
+        level: "warn",
+        source: "disparador",
+        event: "campaign_start_config_invalid",
+        message: configCheck.error,
+        payload: { campaign_id: campaignId },
+      });
+      return { ok: false, status: configCheck.status, error: configCheck.error };
     }
 
-    // IDs dos canais Meta nesta campanha (só os válidos da conta)
-    const metaChannels = (channelConfigs ?? []).filter((c) => c.provider === "meta");
-    const metaSessionIds = metaChannels.map((c) => c.id);
+    const channelMap = new Map(configCheck.channels.map((c) => [c.id, c]));
+    const validSessionIds: string[] = [...new Set(sessionIds as string[])].filter((id) => channelMap.has(id));
 
-    // Fail fast do template Meta, ANTES de mexer na fila: template não
-    // aprovado, com componente que o disparador não preenche (mídia no
-    // cabeçalho, URL dinâmica...) ou com mais {{n}} do que variáveis
-    // mapeadas faria a Meta recusar TODOS os envios — ver
-    // template-validation.ts. Só o caminho Meta usa template; contatos em
-    // canal WAHA recebem o corpo como texto (bifurcação mais abaixo).
-    if (metaSessionIds.length > 0) {
-      const templateProblem = await validateCampaignTemplates(
-        mensagens,
-        accountId,
-        metaChannels.map((c) => c.waba_id).filter((w): w is string => !!w)
-      );
-      if (templateProblem) {
-        void writeLog({
-          account_id: accountId,
-          level: "warn",
-          source: "disparador",
-          event: "campaign_start_template_invalid",
-          message: templateProblem,
-          payload: { campaign_id: campaignId },
-        });
-        return { ok: false, status: 400, error: templateProblem };
-      }
-    }
+    // IDs dos canais Meta nesta campanha (todos, ou nenhum — a validação
+    // acima não deixa misturar providers).
+    const metaSessionIds = configCheck.channels.filter((c) => c.provider === "meta").map((c) => c.id);
 
     // windowMap: contact_id → Date do último inbound via canal Meta
     // Usado para decidir template vs texto livre no loop de enfileiramento
@@ -830,27 +835,8 @@ export async function startCampaign(
     if (activateError || !activated?.length) {
       return { ok: false, status: 500, error: "Falha ao ativar campanha" };
     }
-    preparing = false;
+    state.preparing = false;
 
     return { ok: true, enqueued };
-  } catch (err: any) {
-    console.error("[startCampaign] Failed to schedule queue:", err);
-    return { ok: false, status: 500, error: err.message };
-  } finally {
-    if (preparing) {
-      // Falhou no meio da preparação: volta para 'rascunho'. Os itens
-      // parciais já inseridos não são consumidos (campanha não está em
-      // execução) e o próximo start limpa a fila antes de publicar.
-      // Crash do processo não passa por aqui: campanha presa em
-      // 'preparando' exige revisão manual.
-      const { error } = await supabaseAdmin()
-        .from("campaigns")
-        .update({ status: "rascunho" })
-        .eq("id", campaignId)
-        .eq("account_id", accountId)
-        .eq("status", "preparando");
-      if (error)
-        console.error("[startCampaign] Recuperação de preparação pendente:", error.message);
-    }
   }
 }
