@@ -129,6 +129,7 @@ export function campaignChannelGroupKey(
 /** Campos da mensagem (campaigns.mensagens[i]) usados na validação. */
 export interface CampaignMessageFields {
   tipo?: unknown;
+  conteudo?: unknown;
   template_name?: unknown;
   template_language?: unknown;
   template_variable_map?: unknown;
