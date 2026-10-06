@@ -54,46 +54,21 @@ export const AI_MODELS: Record<AiProvider, readonly AiModelDefinition[]> = {
   ],
   gemini: [
     {
-      id: "gemini-3.8-flash",
-      label: "Gemini 3.8 Flash",
-      description: "Modelo Flash estável mais atual para workloads gerais.",
-    },
-    {
-      id: "gemini-3.7-flash",
-      label: "Gemini 3.7 Flash",
-      description: "Modelo Flash estável de geração anterior.",
-    },
-    {
-      id: "gemini-3.5-flash",
-      label: "Gemini 3.5 Flash",
-      description: "Modelo Flash estável para alto volume.",
-    },
-    {
       id: "gemini-2.5-flash",
       label: "Gemini 2.5 Flash",
-      description: "Modelo compatível para contas legadas.",
+      description: "Modelo Flash para alto volume.",
+    },
+    {
+      id: "gemini-1.5-flash",
+      label: "Gemini 1.5 Flash",
+      description: "Modelo padrão legado do CRM.",
     },
   ],
   claude: [
     {
-      id: "claude-sonnet-5-5",
-      label: "Claude Sonnet 5.5",
-      description: "Equilíbrio entre velocidade e inteligência.",
-    },
-    {
-      id: "claude-opus-5-5",
-      label: "Claude Opus 5.5",
-      description: "Maior capacidade para tarefas complexas.",
-    },
-    {
-      id: "claude-fable-5-1",
-      label: "Claude Fable 5.1",
-      description: "Raciocínio exigente e workflows agentic longos.",
-    },
-    {
-      id: "claude-haiku-4-5",
-      label: "Claude Haiku 4.5",
-      description: "Opção de menor latência.",
+      id: "claude-3-5-sonnet-20241022",
+      label: "Claude 3.5 Sonnet",
+      description: "Modelo padrão legado do CRM.",
     },
   ],
   hermes: [
@@ -108,14 +83,13 @@ export const AI_MODELS: Record<AiProvider, readonly AiModelDefinition[]> = {
 /**
  * Defaults do provider quando nem o nó nem a conta definem modelo.
  *
- * OpenAI mantém gpt-4o-mini por compatibilidade com o comportamento em
- * produção antes desta feature. Os demais providers passam a apontar
- * para modelos atuais porque os defaults antigos já estavam obsoletos.
+ * Mantemos os mesmos defaults que o runtime usava antes desta feature
+ * para que adicionar o seletor não altere silenciosamente a produção.
  */
 export const DEFAULT_MODEL_BY_PROVIDER: Record<AiProvider, string> = {
   openai: "gpt-4o-mini",
-  gemini: "gemini-3.8-flash",
-  claude: "claude-sonnet-5-5",
+  gemini: "gemini-1.5-flash",
+  claude: "claude-3-5-sonnet-20241022",
   hermes: "nousresearch/hermes-3-llama-3.1-405b",
 };
 
