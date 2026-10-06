@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { getWahaProfilePicture } from '@/lib/whatsapp/waha-api'
+import { safeFetch } from '@/lib/security/ssrf-guard'
+import { mediaResponseHeaders, safeInlineContentType } from '@/lib/security/media-proxy'
 
 export async function GET(request: Request) {
   const supabase = await createClient()
@@ -61,19 +63,20 @@ export async function GET(request: Request) {
     }
 
     // Faz proxy da imagem
-    const imageRes = await fetch(avatarUrl)
+    // A URL vem do servidor WAHA do tenant: guard anti-SSRF, só image/*.
+    const imageRes = await safeFetch(avatarUrl, {}, { maxBytes: 2 * 1024 * 1024, timeoutMs: 10_000 })
     if (!imageRes.ok) {
       return new NextResponse(null, { status: 404 })
     }
 
+    const contentType = imageRes.headers.get('content-type')
+    if (!safeInlineContentType(contentType)?.startsWith('image/')) {
+      return new NextResponse(null, { status: 404 })
+    }
     const imageBuffer = await imageRes.arrayBuffer()
-    const contentType = imageRes.headers.get('content-type') || 'image/jpeg'
 
     return new NextResponse(imageBuffer, {
-      headers: {
-        'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600', // cache 1h no browser
-      },
+      headers: mediaResponseHeaders(contentType),
     })
   } catch {
     return new NextResponse(null, { status: 500 })

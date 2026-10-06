@@ -6,6 +6,8 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
+import { safeFetch } from '@/lib/security/ssrf-guard'
+import { sanitizeWahaFilePath } from '@/lib/security/media-proxy'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
 import { reopenConversationFields } from '@/lib/conversations/reopen'
@@ -471,8 +473,10 @@ export async function POST(request: Request) {
             }
 
             const baseUrl = config.waha_url.replace(/\/$/, '')
-            const fileUrl = `${baseUrl}/api/files/${fileKey}`
-            const fileRes = await fetch(fileUrl, { headers })
+            const safeFileKey = sanitizeWahaFilePath(fileKey)
+            if (!safeFileKey) throw new Error('fileKey inválido')
+            const fileUrl = `${baseUrl}/api/files/${safeFileKey}`
+            const fileRes = await safeFetch(fileUrl, { headers }, { maxBytes: 50 * 1024 * 1024, timeoutMs: 30_000 })
             if (fileRes.ok) {
               const buffer = await fileRes.arrayBuffer()
               const contentType =

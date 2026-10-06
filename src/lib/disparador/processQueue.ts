@@ -14,6 +14,7 @@ import {
   MetaApiError,
 } from "@/lib/whatsapp/meta-api";
 import { decrypt } from "@/lib/whatsapp/encryption";
+import { safeFetch } from "@/lib/security/ssrf-guard";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
@@ -1199,15 +1200,18 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
       },
     };
 
-    const response = await fetch(campaign.callback_url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Idempotency-Key": `campaign.completed:${campaignId}`,
+    const response = await safeFetch(
+      campaign.callback_url,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": `campaign.completed:${campaignId}`,
+        },
+        body: JSON.stringify(payload),
       },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10000),
-    });
+      { timeoutMs: 10_000, maxBytes: 256 * 1024 },
+    );
 
     if (!response.ok) throw new Error(`Callback rejeitado: HTTP ${response.status}`);
 

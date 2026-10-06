@@ -3,6 +3,10 @@ import { createClient } from '@/lib/supabase/server'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { assertWahaUrlIsSafe, WahaUrlBlockedError } from '@/lib/whatsapp/waha-api'
+import { safeFetch, SsrfBlockedError } from '@/lib/security/ssrf-guard'
+import { mediaResponseHeaders, sanitizeWahaFilePath } from '@/lib/security/media-proxy'
+
+const WAHA_MEDIA_MAX_BYTES = 50 * 1024 * 1024
 
 export async function GET(
   request: Request,
@@ -52,10 +56,18 @@ export async function GET(
     // WAHA PROXY LOGIC: Stream authenticated files from WAHA server
     if (mediaId === 'waha') {
       const { searchParams } = new URL(request.url)
-      const file = searchParams.get('file')
-      if (!file) {
+      const rawFile = searchParams.get('file')
+      if (!rawFile) {
         return NextResponse.json(
           { error: 'File parameter is required' },
+          { status: 400 }
+        )
+      }
+      // Anti path traversal: só <sessão>/<arquivo> com caracteres seguros.
+      const file = sanitizeWahaFilePath(rawFile)
+      if (!file) {
+        return NextResponse.json(
+          { error: 'Invalid file parameter' },
           { status: 400 }
         )
       }
@@ -94,7 +106,15 @@ export async function GET(
 
       const baseUrl = wahaConfig.waha_url.replace(/\/$/, '')
       const fileUrl = `${baseUrl}/api/files/${file}`
-      const fileRes = await fetch(fileUrl, { headers })
+      let fileRes: Response
+      try {
+        fileRes = await safeFetch(fileUrl, { headers }, { maxBytes: WAHA_MEDIA_MAX_BYTES, timeoutMs: 30_000 })
+      } catch (err) {
+        if (err instanceof SsrfBlockedError) {
+          return NextResponse.json({ error: 'WAHA server URL is not allowed.' }, { status: 400 })
+        }
+        throw err
+      }
       if (!fileRes.ok) {
         return NextResponse.json(
           { error: 'Failed to fetch media from WAHA' },
@@ -103,14 +123,10 @@ export async function GET(
       }
 
       const buffer = await fileRes.arrayBuffer()
-      const contentType = fileRes.headers.get('Content-Type') || 'application/octet-stream'
 
       return new Response(new Uint8Array(buffer), {
         status: 200,
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'public, max-age=86400',
-        },
+        headers: mediaResponseHeaders(fileRes.headers.get('Content-Type')),
       })
     }
 
@@ -141,10 +157,7 @@ export async function GET(
 
     return new Response(new Uint8Array(buffer), {
       status: 200,
-      headers: {
-        'Content-Type': contentType || mediaInfo.mimeType || 'application/octet-stream',
-        'Cache-Control': 'public, max-age=86400',
-      },
+      headers: mediaResponseHeaders(contentType || mediaInfo.mimeType),
     })
   } catch (error) {
     console.error('Error in WhatsApp media GET:', error)
