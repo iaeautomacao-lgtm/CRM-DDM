@@ -3,6 +3,7 @@ import {
   classifyFetchFailure,
   classifyHttpFailure,
   classifyToolBodyFailure,
+  fullyFailedIntegrations,
   isIntegrationOutage,
   isValidCpf,
   normalizeCpf,
@@ -10,6 +11,8 @@ import {
   retryDelayMs,
   serializeToolFailure,
   shouldRetryTool,
+  tallyToolResult,
+  type ToolRoundTally,
 } from "./tool-recovery";
 
 describe("tool recovery — CPF", () => {
@@ -159,5 +162,77 @@ describe("isIntegrationOutage", () => {
     expect(isIntegrationOutage("CPF_INVALIDO")).toBe(false);
     expect(isIntegrationOutage("TOOL_SCHEMA_ERROR")).toBe(false);
     expect(isIntegrationOutage(undefined)).toBe(false);
+  });
+
+  it("resposta de negócio não é instabilidade", () => {
+    expect(isIntegrationOutage("TOOL_BUSINESS_ERROR")).toBe(false);
+    expect(isIntegrationOutage("TOOL_INVALID_CLIENT")).toBe(true);
+  });
+});
+
+describe("resposta de negócio (404 / erro de negócio no JSON)", () => {
+  it("HTTP 404 vira TOOL_BUSINESS_ERROR com o corpo para o modelo", () => {
+    const f = classifyHttpFailure(404, '{"msg":"Devedor não encontrado"}');
+    expect(f?.code).toBe("TOOL_BUSINESS_ERROR");
+    expect(f?.retryable).toBe(false);
+    expect(f?.httpStatus).toBe(404);
+    expect(f?.message).toContain("Devedor não encontrado");
+    expect(classifyHttpFailure(404, "<html><body>Not Found</body></html>")?.message).not.toContain("<html>");
+  });
+
+  it("outros 4xx seguem como TOOL_HTTP_ERROR", () => {
+    expect(classifyHttpFailure(401)?.code).toBe("TOOL_HTTP_ERROR");
+    expect(classifyHttpFailure(403)?.code).toBe("TOOL_HTTP_ERROR");
+  });
+
+  it.each([
+    '{"error":"CPF não encontrado"}',
+    '{"error":"Devedor nao localizado"}',
+    '{"error":"Not found"}',
+    '{"error":"Sem débitos para o CPF informado"}',
+    '{"error":"Nenhum registro encontrado"}',
+  ])("erro de negócio no JSON: %s", (body) => {
+    const f = classifyToolBodyFailure(body);
+    expect(f?.code).toBe("TOOL_BUSINESS_ERROR");
+    expect(f?.retryable).toBe(false);
+    expect(isIntegrationOutage(f?.code)).toBe(false);
+  });
+
+  it("erro técnico no JSON continua como falha da integração", () => {
+    expect(classifyToolBodyFailure('{"error":"invalid_client"}')?.code).toBe("TOOL_INVALID_CLIENT");
+    expect(classifyToolBodyFailure('{"error":"Nenhum token informado"}')?.code).toBe("TOOL_PROVIDER_ERROR");
+    expect(classifyToolBodyFailure('{"error":"database down"}')?.code).toBe("TOOL_PROVIDER_ERROR");
+  });
+});
+
+describe("instabilidade forçada — contagem por chamada", () => {
+  it("1 de 3 registros falhando não força instabilidade", () => {
+    const tally = new Map<string, ToolRoundTally>();
+    tallyToolResult(tally, "consultar_debitos", undefined);
+    tallyToolResult(tally, "consultar_debitos", undefined);
+    tallyToolResult(tally, "consultar_debitos", "TOOL_SERVER_ERROR");
+    expect(fullyFailedIntegrations(tally)).toEqual({});
+  });
+
+  it("sucesso depois da falha também não força", () => {
+    const tally = new Map<string, ToolRoundTally>();
+    tallyToolResult(tally, "localizar_devedor", "TOOL_TIMEOUT");
+    tallyToolResult(tally, "localizar_devedor", undefined);
+    expect(fullyFailedIntegrations(tally)).toEqual({});
+  });
+
+  it("todas as chamadas fora do ar forçam", () => {
+    const tally = new Map<string, ToolRoundTally>();
+    tallyToolResult(tally, "localizar_devedor", undefined);
+    tallyToolResult(tally, "consultar_debitos", "TOOL_TIMEOUT");
+    tallyToolResult(tally, "consultar_debitos", "TOOL_SERVER_ERROR");
+    expect(fullyFailedIntegrations(tally)).toEqual({ consultar_debitos: "TOOL_SERVER_ERROR" });
+  });
+
+  it("resposta de negócio e CPF inválido não forçam", () => {
+    const tally = new Map<string, ToolRoundTally>();
+    tallyToolResult(tally, "localizar_devedor", "TOOL_BUSINESS_ERROR");
+    tallyToolResult(tally, "localizar_devedor", "CPF_INVALIDO");
+    expect(fullyFailedIntegrations(tally)).toEqual({});
   });
 });
