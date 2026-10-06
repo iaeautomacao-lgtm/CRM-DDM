@@ -14,7 +14,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  McpError,
+  ReadResourceRequestSchema,
   type CallToolResult,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
@@ -23,6 +26,7 @@ import { logToolCall, type ToolCallLog } from "../audit";
 import { requireIntelligenceApiKey, type IntelligenceKeyContext } from "../api-key";
 import { createToolExecutor, type ToolExecutorDeps } from "../chat/execute";
 import { maskPersonalData } from "../mask";
+import { METRICS } from "../metrics/registry";
 import { describeScope } from "../scope";
 import { listTools } from "../tools";
 
@@ -58,9 +62,26 @@ export function createIntelligenceMcpServer(ctx: IntelligenceKeyContext, deps: M
     log: (entry) => audit({ ...entry, origin: "mcp", apiKeyId: ctx.keyId }),
   });
 
-  const server = new Server(MCP_SERVER_INFO, { capabilities: { tools: {} }, instructions: INSTRUCTIONS });
+  const server = new Server(MCP_SERVER_INFO, { capabilities: { tools: {}, resources: {} }, instructions: INSTRUCTIONS });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpToolCatalog() }));
+
+  // Definições estáticas do catálogo: sem consultas nem escrita no banco.
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: METRICS.map((metric) => ({
+      uri: `ddm://metrics/${metric.id}`,
+      name: metric.display_name,
+      description: metric.description,
+      mimeType: "application/json",
+    })),
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const { uri } = request.params;
+    const metric = METRICS.find((item) => uri === `ddm://metrics/${item.id}`);
+    if (!metric) throw new McpError(-32002, "Métrica não encontrada", { uri });
+    return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(metric) }] };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     const { name, arguments: args } = request.params;
