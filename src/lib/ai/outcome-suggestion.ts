@@ -127,9 +127,10 @@ export async function applyExitTagOutcomeSuggestion(
 
 /**
  * Gancho do motor de fluxos (logAiDecision): toda decisão com
- * ai_exit_code vira sugestão. Fire-and-forget, nunca lança.
+ * ai_exit_code vira sugestão. Usa o mesmo client do motor (inclusive no
+ * simulador), sem abrir um client administrativo real. Nunca lança.
  */
-export async function suggestOutcomeFromAiDecision(decision: {
+export async function suggestOutcomeFromAiDecision(db: SupabaseClient, decision: {
   account_id: string;
   conversation_id?: string | null;
   ai_exit_code?: string | null;
@@ -137,8 +138,7 @@ export async function suggestOutcomeFromAiDecision(decision: {
 }): Promise<void> {
   if (!decision.ai_exit_code || !decision.conversation_id) return;
   try {
-    const { supabaseAdmin } = await import("@/lib/flows/admin-client");
-    await applyExitTagOutcomeSuggestion(supabaseAdmin(), {
+    await applyExitTagOutcomeSuggestion(db, {
       accountId: decision.account_id,
       conversationId: decision.conversation_id,
       exitTag: decision.ai_exit_code,

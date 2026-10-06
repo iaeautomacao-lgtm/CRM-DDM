@@ -9,6 +9,13 @@
 -- o UPDATE e o fechamento/reabertura falha.
 -- Conferir o schema live antes (CLAUDE.md): wacrm.conversations,
 -- wacrm.tags (kind/codigo_tabulacao, 041) e is_account_member (017/140).
+-- Antes de aplicar, confira os códigos duplicados (não são apagados aqui):
+-- SELECT account_id, codigo_tabulacao, count(*) AS quantidade
+-- FROM wacrm.tags
+-- WHERE kind = 'outcome' AND codigo_tabulacao IS NOT NULL
+-- GROUP BY account_id, codigo_tabulacao HAVING count(*) > 1;
+-- Se houver duplicados, a migration avisa e pula apenas o índice único.
+-- Resolva-os manualmente e reaplique para instalar a proteção no banco.
 --
 -- 1. conversations — sugestão (não é a tabulação; o humano confirma):
 --      suggested_outcome_tag_id      tag sugerida (FK tags, SET NULL)
@@ -43,6 +50,25 @@
 BEGIN;
 
 SET search_path TO wacrm, public, extensions;
+
+-- Não permitir escrita entre a checagem e a criação do índice. A criação
+-- transacional já exige este lock; aplicar fora do pico de atendimento.
+DO $$
+BEGIN
+  LOCK TABLE wacrm.tags IN SHARE MODE;
+  IF EXISTS (
+    SELECT 1 FROM wacrm.tags
+    WHERE kind = 'outcome' AND codigo_tabulacao IS NOT NULL
+    GROUP BY account_id, codigo_tabulacao HAVING count(*) > 1
+  ) THEN
+    RAISE NOTICE 'Códigos de tabulação duplicados: índice tags_outcome_account_codigo_key não criado. Corrija e reaplique a migration 157.';
+  ELSE
+    CREATE UNIQUE INDEX IF NOT EXISTS tags_outcome_account_codigo_key
+      ON wacrm.tags (account_id, codigo_tabulacao)
+      WHERE kind = 'outcome' AND codigo_tabulacao IS NOT NULL;
+  END IF;
+END
+$$;
 
 -- ------------------------------------------------------------
 -- 1. conversations
@@ -186,7 +212,7 @@ CREATE OR REPLACE FUNCTION wacrm.tg_seed_ai_exit_tag_outcome_map()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = wacrm, public
+SET search_path = wacrm, public, pg_temp
 AS $$
 DECLARE
   v_exit_tag text;
