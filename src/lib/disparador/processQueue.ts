@@ -182,6 +182,7 @@ export async function claimQueueItem(campaignId: string): Promise<QueueItem | nu
     .eq("status", "agendado")
     .lte("scheduled_at", now)
     .order("scheduled_at", { ascending: true })
+    .order("id", { ascending: true })
     .limit(1);
 
   const candidate = candidates?.[0];

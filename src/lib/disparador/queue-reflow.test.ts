@@ -151,6 +151,42 @@ describe("planQueueReflow", () => {
       { id: "y", scheduled_at: t(10 * MIN + 100) },
     ]);
   });
+
+  it("rodada grande (Imediato 50 mil): a rodada inteira vence em < 2 s, ordem mantida, sequência a 3 s", () => {
+    // Fila antiga de 50 mil contatos × 2 mensagens com o espalhamento antigo
+    // (100 ms × posição: a última só vencia ~83 min depois do início).
+    const from = br(16, 19);
+    const items: ReflowSourceItem[] = [];
+    for (let n = 0; n < 50_000; n++) {
+      const at = from.getTime() + n * 100;
+      items.push({ id: `m1-${n}`, contact_id: `c-${n}`, scheduled_at: new Date(at).toISOString() });
+      items.push({ id: `m2-${n}`, contact_id: `c-${n}`, scheduled_at: new Date(at + 3000).toISOString() });
+    }
+    items.sort((a, b) => (a.scheduled_at ?? "").localeCompare(b.scheduled_at ?? "") || a.id.localeCompare(b.id));
+    const start = br(19, 8);
+    const plan = planQueueReflow(items, { start, batchSize: 999_999, pauseSeconds: 0, janela: diasUteis });
+    expect(plan).toHaveLength(100_000);
+    const at = new Map(plan.map((a) => [a.id, new Date(a.scheduled_at).getTime()]));
+    let firstMax = 0;
+    let secondMin = Number.POSITIVE_INFINITY;
+    let prev = 0;
+    let outOfOrder = 0;
+    let badGap = 0;
+    for (let n = 0; n < 50_000; n++) {
+      const m1 = at.get(`m1-${n}`)!;
+      const m2 = at.get(`m2-${n}`)!;
+      if (m1 < prev) outOfOrder++; // FIFO entre contatos
+      prev = m1;
+      if (m2 - m1 !== 3000) badGap++;
+      firstMax = Math.max(firstMax, m1);
+      secondMin = Math.min(secondMin, m2);
+    }
+    expect(outOfOrder).toBe(0);
+    expect(badGap).toBe(0);
+    expect(at.get("m1-0")).toBe(start.getTime());
+    expect(firstMax - start.getTime()).toBeLessThan(2000);
+    expect(firstMax).toBeLessThan(secondMin);
+  }, 30_000);
 });
 
 describe("reflowCampaignQueue (gravação)", () => {

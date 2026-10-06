@@ -148,6 +148,56 @@ export function scheduleRounds(
   return rounds;
 }
 
+/** Passo máximo entre itens de uma rodada (rodadas pequenas: igual a antes). */
+export const ROUND_STEP_MS = 100;
+/** Espalhamento máximo de uma rodada inteira, qualquer que seja o tamanho. */
+export const ROUND_MAX_SPREAD_MS = 2000;
+/** Espaço entre mensagens da sequência de um mesmo contato. */
+export const INTRA_CONTACT_MS = 3000;
+
+/**
+ * Deslocamento do item `position` (0-based) numa rodada de `roundSize`
+ * contatos, somado ao horário da rodada.
+ *
+ * Antes era 100 ms × posição: no "Imediato" (rodada única) uma base de 50 mil
+ * só vencia inteira depois de ~83 min, segurando o envio por mais vagas que
+ * o motor tivesse. Agora a rodada inteira vence em no máximo 2 s; o ritmo
+ * vem das vagas do motor (max_in_flight por número, concorrência do
+ * processo, limite_por_hora, rodadas do Segmentado), não do agendamento.
+ *
+ * O pequeno espalhamento (monótono, < 2 s) não é para espaçar envio: mantém
+ * os empates de scheduled_at pequenos (≈ roundSize/2000 itens por
+ * milissegundo), então o ORDER BY (scheduled_at, id) do cron continua barato
+ * no índice (campaign_id, status, scheduled_at), e garante que todas as 1ªs
+ * mensagens da rodada vencem antes de qualquer 2ª mensagem de sequência
+ * (que fica INTRA_CONTACT_MS = 3 s depois da anterior do mesmo contato).
+ */
+export function roundSpreadOffsetMs(position: number, roundSize: number): number {
+  const size = Math.max(1, Math.floor(roundSize));
+  const pos = Math.min(Math.max(0, Math.floor(position)), size - 1);
+  const step = Math.min(ROUND_STEP_MS, ROUND_MAX_SPREAD_MS / size);
+  return Math.min(ROUND_MAX_SPREAD_MS - 1, Math.floor(pos * step));
+}
+
+/**
+ * Horário (ms) da 1ª mensagem do contato `index` (0-based, na ordem da fila)
+ * de uma campanha em lote/"Segmentado"/"Imediato" com `total` contatos:
+ * horário da rodada Math.floor(index / batchSize) + roundSpreadOffsetMs.
+ * Mensagens seguintes da sequência do contato: + j × INTRA_CONTACT_MS.
+ * Usado pelo startCampaign e pelo reflow (mesma regra nos dois).
+ */
+export function roundContactTimeMs(
+  roundTimes: readonly Date[],
+  index: number,
+  batchSize: number,
+  total: number
+): number {
+  const size = Math.max(1, Math.floor(batchSize));
+  const round = Math.floor(index / size);
+  const roundSize = Math.min(size, Math.max(1, total - round * size));
+  return roundTimes[round].getTime() + roundSpreadOffsetMs(index % size, roundSize);
+}
+
 /**
  * O item foi agendado num período FECHADO da janela (fila montada antes do
  * relógio de janela — ex.: uma rodada a cada 30 min atravessando a noite e
@@ -165,9 +215,10 @@ export function scheduleRounds(
  * - horário aberto, ou aceito pela regra de envio (canSendNow, fim
  *   inclusivo até HH:MM:59);
  * - "transbordo" de uma rodada iniciada antes do fechamento: os itens da
- *   rodada saem em início + 100 ms·posição + 3 s·mensagem (startCampaign),
- *   então uma rodada às 17:59 pode ter itens um pouco depois das 18:00.
- *   `spillToleranceMs` cobre esse espalhamento.
+ *   rodada saem em início + espalhamento (< 2 s; filas antigas: 100 ms ×
+ *   posição) + 3 s·mensagem (startCampaign), então uma rodada às 17:59 pode
+ *   ter itens um pouco depois das 18:00. `spillToleranceMs` cobre esse
+ *   espalhamento.
  */
 export function isScheduledInClosedWindow(
   scheduledAt: Date,
