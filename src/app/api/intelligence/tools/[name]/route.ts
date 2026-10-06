@@ -4,14 +4,14 @@ import { BadRequestError } from '@/lib/intelligence/errors'
 import { currentIntelligenceScope, intelligenceErrorResponse } from '@/lib/intelligence/http'
 import { describeScope } from '@/lib/intelligence/scope'
 import { executeTool, getTool } from '@/lib/intelligence/tools'
-import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit'
+import { checkIntelligenceToolRate } from '@/lib/intelligence/rate'
+import { rateLimitResponse } from '@/lib/rate-limit'
 
 // POST /api/intelligence/tools/[name] — executa uma ferramenta do DDM
 // Intelligence (Fase 1, validação sem chat). Corpo = input da ferramenta.
 // O escopo (conta/equipes) vem da sessão, nunca do corpo. Toda chamada
 // que passa da autenticação é auditada (intelligence_tool_calls, 141).
-
-const RATE = { limit: 60, windowMs: 60_000 }
+// O limite por usuário (rate.ts) é o mesmo balde usado pelo chat.
 
 export async function POST(
   request: Request,
@@ -23,7 +23,7 @@ export async function POST(
     const tool = getTool(name)
     if (!tool) return NextResponse.json({ error: `Ferramenta desconhecida: ${name}` }, { status: 404 })
 
-    const limit = checkRateLimit(`intelligence:${scope.userId}`, RATE)
+    const limit = checkIntelligenceToolRate(scope.userId)
     if (!limit.success) return rateLimitResponse(limit)
 
     let body: unknown = {}
