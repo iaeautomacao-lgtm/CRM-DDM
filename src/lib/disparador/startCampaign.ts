@@ -3,6 +3,12 @@ import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 import { phoneKey } from "@/lib/disparador/phone-key";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
+import {
+  TEMPLATE_VALIDATION_COLUMNS,
+  validateCampaignTemplate,
+  type LocalTemplateRow,
+} from "@/lib/disparador/template-validation";
+import { writeLog } from "@/lib/logger";
 
 type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
 
@@ -15,6 +21,55 @@ type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
 // todas as mensagens enviadas em sequência para cada contato).
 function parseTemplateMode(raw: unknown): TemplateMode {
   return raw === "rotacao" || raw === "aleatorio" ? raw : "sequencia";
+}
+
+// Valida os templates Meta das mensagens contra o catálogo local
+// (wacrm.message_templates). Devolve a primeira mensagem de erro, ou null.
+// Erro ao ler o catálogo não bloqueia o início (só loga) — é uma checagem
+// de segurança, não uma dependência do envio.
+interface TemplateMessageFields {
+  template_name?: unknown;
+  template_language?: unknown;
+  template_variable_map?: unknown;
+}
+
+async function validateCampaignTemplates(
+  mensagens: readonly TemplateMessageFields[],
+  accountId: string,
+  wabaIds: string[]
+): Promise<string | null> {
+  const templateMessages = mensagens
+    .filter((m) => m?.template_name && Array.isArray(m.template_variable_map))
+    .map((m) => ({
+      templateName: String(m.template_name),
+      language: typeof m.template_language === "string" && m.template_language ? m.template_language : "pt_BR",
+      mappedVariables: (m.template_variable_map as unknown[]).length,
+    }));
+  if (templateMessages.length === 0) return null;
+  const names = [...new Set(templateMessages.map((m) => m.templateName))];
+  const { data: rows, error } = await supabaseAdmin()
+    .from("message_templates")
+    .select(TEMPLATE_VALIDATION_COLUMNS)
+    .eq("account_id", accountId)
+    .in("name", names);
+  if (error) {
+    console.error("[startCampaign] Falha ao ler message_templates para validação:", error.message);
+    return null;
+  }
+  for (const m of templateMessages) {
+    const result = validateCampaignTemplate({
+      ...m,
+      rows: (rows ?? []) as LocalTemplateRow[],
+      wabaIds,
+    });
+    if (!result.ok) return result.error;
+    if (!result.checked) {
+      console.warn(
+        `[startCampaign] Template "${m.templateName}" (${m.language}) fora do catálogo local — status/componentes não validados.`
+      );
+    }
+  }
+  return null;
 }
 
 export type StartCampaignResult =
@@ -168,7 +223,7 @@ export async function startCampaign(
     // de outra conta bastava para disparar por ela).
     const { data: channelConfigs } = await supabaseAdmin()
       .from("whatsapp_config")
-      .select("id, provider, phone_number_id")
+      .select("id, provider, phone_number_id, waba_id")
       .in("id", sessionIds)
       .eq("account_id", accountId);
 
@@ -182,10 +237,34 @@ export async function startCampaign(
       };
     }
 
-    // IDs dos canais Meta nesta campanha
-    const metaSessionIds = (channelConfigs ?? [])
-      .filter((c) => c.provider === "meta")
-      .map((c) => c.id);
+    // IDs dos canais Meta nesta campanha (só os válidos da conta)
+    const metaChannels = (channelConfigs ?? []).filter((c) => c.provider === "meta");
+    const metaSessionIds = metaChannels.map((c) => c.id);
+
+    // Fail fast do template Meta, ANTES de mexer na fila: template não
+    // aprovado, com componente que o disparador não preenche (mídia no
+    // cabeçalho, URL dinâmica...) ou com mais {{n}} do que variáveis
+    // mapeadas faria a Meta recusar TODOS os envios — ver
+    // template-validation.ts. Só o caminho Meta usa template; contatos em
+    // canal WAHA recebem o corpo como texto (bifurcação mais abaixo).
+    if (metaSessionIds.length > 0) {
+      const templateProblem = await validateCampaignTemplates(
+        mensagens,
+        accountId,
+        metaChannels.map((c) => c.waba_id).filter((w): w is string => !!w)
+      );
+      if (templateProblem) {
+        void writeLog({
+          account_id: accountId,
+          level: "warn",
+          source: "disparador",
+          event: "campaign_start_template_invalid",
+          message: templateProblem,
+          payload: { campaign_id: campaignId },
+        });
+        return { ok: false, status: 400, error: templateProblem };
+      }
+    }
 
     // windowMap: contact_id → Date do último inbound via canal Meta
     // Usado para decidir template vs texto livre no loop de enfileiramento
