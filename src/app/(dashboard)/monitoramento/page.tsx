@@ -914,6 +914,7 @@ export default function MonitoramentoPage() {
           if (!open) setFinalizeTarget(null);
         }}
         onSelect={handleOutcomeTagSelect}
+        conversationId={finalizeTarget?.id}
       />
 
       {timelineModal && (
