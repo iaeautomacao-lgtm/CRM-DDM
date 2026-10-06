@@ -150,7 +150,7 @@ export async function PUT(
   ) {
     const { data: current } = await admin
       .from('flows')
-      .select('status, name, trigger_type, trigger_config, entry_node_id')
+      .select('account_id, status, name, trigger_type, trigger_config, entry_node_id')
       .eq('id', id)
       .maybeSingle()
     if (current?.status === 'active') {
@@ -162,6 +162,12 @@ export async function PUT(
           .eq('flow_id', id)
         nodes = (existing ?? []) as NonNullable<PutBody['nodes']>
       }
+      const { data: aiConfig } = await admin
+        .from('ai_config')
+        .select('api_provider')
+        .eq('account_id', current.account_id)
+        .maybeSingle()
+
       const blockers = validateFlowForActivation(
         {
           name: body.name ?? current.name,
@@ -170,6 +176,7 @@ export async function PUT(
           entry_node_id: body.entry_node_id !== undefined ? body.entry_node_id : current.entry_node_id,
         },
         nodes,
+        { aiProvider: aiConfig?.api_provider ?? null },
       ).filter((i) => i.severity === 'error')
       if (blockers.length > 0) {
         return NextResponse.json(
