@@ -5,6 +5,7 @@ import { phoneKey } from "@/lib/disparador/phone-key";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import { formatStartFailureReason } from "@/lib/disparador/campaign-validation";
+import { scheduleRounds } from "@/lib/disparador/window-clock";
 import { writeLog } from "@/lib/logger";
 
 type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
@@ -558,8 +559,6 @@ async function prepareCampaign(
         );
       }
     }
-    const batchPauseMs = (campaign.batch_pause_seconds ?? 0) * 1000;
-
     // Se a campanha tem agendamento futuro, usa como base do scheduled_at
     // (ex: start manual antecipado de uma campanha "agendado"). Senão usa
     // Date.now() — inclui o caso normal em que o cron só chama start
@@ -569,6 +568,22 @@ async function prepareCampaign(
       campaign.agendamento && new Date(campaign.agendamento) > new Date()
         ? new Date(campaign.agendamento).getTime()
         : Date.now();
+
+    // Lote/"Segmentado": horário de cada rodada no relógio de janela
+    // (window-clock.ts) — a pausa entre rodadas só conta tempo com a janela
+    // aberta e em dia permitido. Antes era base + k·pausa no relógio comum:
+    // as rodadas que caíam à noite/no fim de semana venciam todas juntas e
+    // saíam numa rajada na abertura seguinte. Ritmo e tamanho do lote não
+    // mudam. Índice da rodada = Math.floor(i / batchSize), igual a antes.
+    const roundTimes =
+      batchSize > 1
+        ? scheduleRounds(
+            new Date(baseTime),
+            Math.ceil(contacts.length / batchSize),
+            campaign.batch_pause_seconds ?? 0,
+            { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio }
+          )
+        : [];
 
     let contactDelay = 0;
     let enqueued = 0;
@@ -596,14 +611,14 @@ async function prepareCampaign(
         // desempate estável no ORDER BY scheduled_at do cron, não pra
         // espaçar o envio de verdade (o cron já processa o lote inteiro em
         // paralelo). O próximo lote só fica agendado batch_pause_seconds
-        // depois. Pausas anti-spam fixas (1h/100, 10min/20) NÃO se
+        // de janela aberta depois (roundTimes). Pausas anti-spam fixas (1h/100, 10min/20) NÃO se
         // aplicam aqui — o usuário já configurou o ritmo manualmente via
         // batch_size/batch_pause_seconds (mesma regra já usada na
         // estimativa de tempo em campanhas/page.tsx: estimarDisparo
         // suprime essas pausas quando batchSizeEfetivo > 1).
         const loteIndex = Math.floor(i / batchSize);
         const jitter = (i % batchSize) * 100;
-        contactBaseDelay = loteIndex * batchPauseMs + jitter;
+        contactBaseDelay = roundTimes[loteIndex].getTime() - baseTime + jitter;
       } else {
         // Comportamento original: pacing sequencial por contato via
         // intervalo_min/max, com pausas anti-spam fixas.

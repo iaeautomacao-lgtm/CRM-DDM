@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   claimed: true,
@@ -193,5 +193,65 @@ describe('janela de 24h (131047)', () => {
     expect(res).toMatchObject({ outcome: 'error' });
     expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true)).toBe(true);
     expect(mocks.updates.some((u) => u.status === 'invalido')).toBe(false);
+  });
+});
+
+describe('janela de envio: sem rajada na reabertura (relógio de janela)', () => {
+  // Horário de Brasília → instante UTC. 15/10/2026 = quinta.
+  const br = (day: number, hh: number, mm = 0, ss = 0) => new Date(Date.UTC(2026, 9, day, hh + 3, mm, ss));
+  const batched = {
+    id: 'campaign',
+    status: 'em_execucao',
+    janela_inicio: '08:00',
+    janela_fim: '18:00',
+    batch_size: 50,
+  };
+  beforeEach(() => {
+    mocks.updates.length = 0;
+    mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
+    mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
+      data: name === 'claim_dispatch_item' ? true : null,
+      error: null,
+    }));
+    vi.useFakeTimers({ toFake: ['Date'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('fora da janela: rodadas vencidas mantêm o espaçamento (não vão todas para 08:00)', async () => {
+    vi.setSystemTime(br(15, 20));
+    for (const scheduled of [br(15, 18, 15), br(15, 18, 45)]) {
+      const res = await processQueueItem({ ...item, scheduled_at: scheduled.toISOString() }, batched);
+      expect(res).toEqual({ outcome: 'deferred', reason: 'outside_window' });
+    }
+    expect(mocks.updates.map((u) => u.scheduled_at)).toEqual([
+      br(16, 8, 15).toISOString(),
+      br(16, 8, 45).toISOString(),
+    ]);
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('janela aberta: item que venceu à noite espera o seu horário no relógio de janela', async () => {
+    vi.setSystemTime(br(16, 8, 0, 30));
+    const res = await processQueueItem({ ...item, scheduled_at: br(15, 18, 45).toISOString() }, batched);
+    expect(res).toEqual({ outcome: 'deferred', reason: 'window_clock' });
+    expect(mocks.updates).toEqual([{ status: 'agendado', scheduled_at: br(16, 8, 45).toISOString() }]);
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+
+  it('janela aberta: item agendado em horário aberto sai normalmente', async () => {
+    vi.setSystemTime(br(16, 9));
+    const res = await processQueueItem({ ...item, scheduled_at: br(16, 8, 45).toISOString() }, batched);
+    expect(res).toMatchObject({ outcome: 'sent' });
+  });
+
+  it('modo sequencial (batch_size 1) não muda: envia o item vencido à noite', async () => {
+    vi.setSystemTime(br(16, 8, 0, 30));
+    const res = await processQueueItem(
+      { ...item, scheduled_at: br(15, 18, 45).toISOString() },
+      { ...batched, batch_size: 1 }
+    );
+    expect(res).toMatchObject({ outcome: 'sent' });
   });
 });
