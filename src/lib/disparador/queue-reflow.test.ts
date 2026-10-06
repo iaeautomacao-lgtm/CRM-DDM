@@ -43,6 +43,7 @@ import {
   needsQueueReflow,
   planQueueReflow,
   reflowCampaignQueue,
+  resumeBatchedCampaign,
   REFLOW_CHUNK_SIZE,
   type ReflowSourceItem,
 } from "./queue-reflow";
@@ -195,10 +196,103 @@ describe("reflowCampaignQueue (gravação)", () => {
     }
   });
 
+  it("o reflow do cron só mexe em itens 'agendado'", async () => {
+    mocks.rows = mocks.rows.slice(0, 4);
+    mocks.rpc.mockResolvedValue({ data: 4, error: null });
+    await reflowCampaignQueue(campaign, br(19, 8));
+    expect(mocks.rpc.mock.calls[0][1]).toMatchObject({ p_status: "agendado" });
+  });
+
   it("erro do banco na RPC: não grava nada item a item e devolve falha (o cron não envia neste tick)", async () => {
     mocks.rpc.mockResolvedValue({ data: null, error: { code: "57014", message: "statement timeout" } });
     const res = await reflowCampaignQueue(campaign, br(19, 8));
     expect(res).toEqual({ ok: false, error: "statement timeout" });
     expect(mocks.updates).toHaveLength(0);
+  });
+});
+
+describe("resumeBatchedCampaign (retomada de campanha em lote pausada)", () => {
+  const campaign = {
+    id: "camp",
+    janela_inicio: "08:00",
+    janela_fim: "18:00",
+    dias_envio: [1, 2, 3, 4, 5],
+    batch_size: 2,
+    batch_pause_seconds: 1800,
+  };
+  type Call = [string, Record<string, unknown>];
+  const calls = () => mocks.rpc.mock.calls as Call[];
+  beforeEach(() => {
+    // Itens pausados no ritmo original (sexta à tarde); retomada na segunda.
+    mocks.rows = legacyQueue(br(16, 15), 3, 2);
+    mocks.updates.length = 0;
+    mocks.rpc.mockReset();
+  });
+
+  it("grava o ritmo nos itens 'pausado' e retoma sem pôr scheduled_at = agora", async () => {
+    mocks.rpc.mockImplementation(async (name: string, args: { p_items?: unknown[] }) => ({
+      data: name === "reflow_campaign_queue" ? args.p_items?.length : 6,
+      error: null,
+    }));
+    const res = await resumeBatchedCampaign(campaign, "acc", br(19, 10));
+    expect(res).toEqual({ ok: true, resumed: 6 });
+    expect(calls().map(([name]) => name)).toEqual(["reflow_campaign_queue", "resume_dispatch_campaign_keep_schedule"]);
+    const [, reflowArgs] = calls()[0];
+    expect(reflowArgs.p_status).toBe("pausado");
+    const items = reflowArgs.p_items as Array<{ id: string; scheduled_at: string }>;
+    // Ordem mantida; 3 rodadas de 2 a cada 30 min a partir de agora — não a
+    // fila inteira vencida junto.
+    expect(items.map((i) => i.id)).toEqual(mocks.rows.map((r) => r.id));
+    expect(items.map((i) => i.scheduled_at)).toEqual([
+      br(19, 10).toISOString(),
+      new Date(br(19, 10).getTime() + 100).toISOString(),
+      br(19, 10, 30).toISOString(),
+      new Date(br(19, 10, 30).getTime() + 100).toISOString(),
+      br(19, 11).toISOString(),
+      new Date(br(19, 11).getTime() + 100).toISOString(),
+    ]);
+    expect(calls()[1][1]).toEqual({ p_campaign_id: "camp", p_account_id: "acc" });
+  });
+
+  it("retomada fora da janela: 1ª rodada na próxima abertura", async () => {
+    mocks.rpc.mockImplementation(async (name: string, args: { p_items?: unknown[] }) => ({
+      data: name === "reflow_campaign_queue" ? args.p_items?.length : 6,
+      error: null,
+    }));
+    await resumeBatchedCampaign(campaign, "acc", br(17, 10)); // sábado
+    const items = calls()[0][1].p_items as Array<{ scheduled_at: string }>;
+    expect(items[0].scheduled_at).toBe(br(19, 8).toISOString());
+  });
+
+  it("falha ao gravar o ritmo: não retoma (campanha continua pausada)", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: "57014", message: "timeout" } });
+    const res = await resumeBatchedCampaign(campaign, "acc", br(19, 10));
+    expect(res).toMatchObject({ ok: false, reason: "error" });
+    expect(calls().some(([name]) => name.startsWith("resume_dispatch_campaign"))).toBe(false);
+  });
+
+  it("estado mudou (não está mais pausada): 409", async () => {
+    mocks.rpc.mockImplementation(async (name: string, args: { p_items?: unknown[] }) => ({
+      data: name === "reflow_campaign_queue" ? args.p_items?.length : null,
+      error: null,
+    }));
+    expect(await resumeBatchedCampaign(campaign, "acc", br(19, 10))).toMatchObject({ ok: false, reason: "state_changed" });
+  });
+
+  it("sem a migration 163: retoma pela RPC antiga e regrava o mesmo plano nos itens 'agendado'", async () => {
+    const missing = { data: null, error: { code: "PGRST202", message: "not found" } };
+    mocks.rpc.mockImplementation(async (name: string) =>
+      name === "resume_dispatch_campaign" ? { data: 6, error: null } : missing
+    );
+    const res = await resumeBatchedCampaign(campaign, "acc", br(19, 10));
+    expect(res).toEqual({ ok: true, resumed: 6 });
+    // 6 updates em 'pausado' antes, 6 em 'agendado' depois da retomada.
+    const byStatus = (s: string) =>
+      mocks.updates.filter((u) => u.filters.some(([c, v]) => c === "status" && v === s));
+    expect(byStatus("pausado")).toHaveLength(6);
+    expect(byStatus("agendado")).toHaveLength(6);
+    expect(byStatus("agendado").map((u) => u.value.scheduled_at)).toEqual(
+      byStatus("pausado").map((u) => u.value.scheduled_at)
+    );
   });
 });

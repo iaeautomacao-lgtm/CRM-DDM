@@ -6,6 +6,7 @@ import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/d
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import { formatStartFailureReason } from "@/lib/disparador/campaign-validation";
 import { scheduleRounds } from "@/lib/disparador/window-clock";
+import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
 import { writeLog } from "@/lib/logger";
 
 type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
@@ -183,6 +184,18 @@ async function prepareCampaign(
     // de onde parou. Reativa os itens pausados in-place e retorna sem
     // tocar em mensagens/contatos/fila nova.
     if (campaign.status === "pausada") {
+      // Lote/"Segmentado": a retomada simples poria a fila inteira vencida
+      // ao mesmo tempo (rajada). Redistribui no ritmo da campanha antes de
+      // reativar (queue-reflow.ts). A validação de template/canal do início
+      // não roda na retomada: os itens já estão montados.
+      if ((campaign.batch_size ?? 1) > 1) {
+        const resumed = await resumeBatchedCampaign(campaign, accountId);
+        if (resumed.ok) return { ok: true, enqueued: resumed.resumed };
+        if (resumed.reason === "state_changed")
+          return { ok: false, status: 409, error: "Estado da campanha mudou; atualize antes de retomar" };
+        console.error("[startCampaign] Falha ao retomar campanha em lote:", resumed.error);
+        return { ok: false, status: 500, error: "Falha ao retomar campanha" };
+      }
       // RPC (migration 118) faz tudo numa transação com lock da campanha:
       // confirma 'pausada', volta itens 'pausado' -> 'agendado' e põe a
       // campanha em 'em_execucao'. Retorna NULL se o status mudou nesse
