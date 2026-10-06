@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { auditFetch } from '@/lib/audit/context'
 import { createClient } from '@/lib/supabase/server'
+import { hasMinRole, isAccountRole } from '@/lib/auth/roles'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import {
   registerPhoneNumber,
@@ -352,6 +353,24 @@ export async function POST(request: Request) {
       )
     }
 
+    // Gravação dos segredos do canal passa pelo service role (a migration
+    // 153 tira INSERT/UPDATE dessas colunas do papel authenticated) — então
+    // o "só admin" que antes vinha da RLS (whatsapp_config_insert/update,
+    // is_account_member(account_id, 'admin')) é checado aqui.
+    const { data: roleRow } = await supabase
+      .from('profiles')
+      .select('account_role')
+      .eq('user_id', user.id)
+      .maybeSingle()
+    const callerRole = (roleRow as { account_role?: string } | null)?.account_role
+    if (!callerRole || !isAccountRole(callerRole) || !hasMinRole(callerRole, 'admin')) {
+      return NextResponse.json(
+        { error: 'Only account admins can change channel settings.' },
+        { status: 403 },
+      )
+    }
+    const writer = supabaseAdmin()
+
     const body = await request.json()
     const { id: configId, provider = 'meta', waha_url, waha_session, waha_api_key, phone_number_id, waba_id, access_token, app_secret, verify_token, pin, team_id } = body
     const useExistingSession = body.use_existing_session === true
@@ -484,10 +503,11 @@ export async function POST(request: Request) {
           wahaConfigObj.waha_api_key = encryptedApiKey
         }
 
-        const { error: updateError } = await supabase
+        const { error: updateError } = await writer
           .from('whatsapp_config')
           .update(wahaConfigObj)
           .eq('id', existing.id)
+          .eq('account_id', accountId)
 
         if (updateError) {
           console.error('Error updating config:', updateError)
@@ -495,7 +515,7 @@ export async function POST(request: Request) {
         }
       } else {
         wahaConfigObj.waha_api_key = encryptedApiKey
-        const { error: insertError } = await supabase
+        const { error: insertError } = await writer
           .from('whatsapp_config')
           .insert(wahaConfigObj)
 
@@ -835,10 +855,11 @@ export async function POST(request: Request) {
     }
 
     if (existing) {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await writer
         .from('whatsapp_config')
         .update(baseRow)
         .eq('id', existing.id)
+        .eq('account_id', accountId)
 
       if (updateError) {
         console.error('Error updating whatsapp_config:', updateError)
@@ -852,7 +873,7 @@ export async function POST(request: Request) {
       // (NOT NULL post-017, UNIQUE so duplicates trip the constraint
       // up-front), `user_id` is the audit column identifying which
       // member of the account saved the config.
-      const { error: insertError } = await supabase
+      const { error: insertError } = await writer
         .from('whatsapp_config')
         .insert({
           account_id: accountId,
