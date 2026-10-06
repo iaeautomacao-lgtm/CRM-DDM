@@ -253,4 +253,13 @@ html[data-theme="red"] {
   html {
     @apply font-sans;
   }
+  /* Foco visível padrão (WCAG 2.4.7) para controles nativos sem estilo
+   * próprio — botões/links "crus" do Inbox e do disparador dependiam do
+   * anel padrão do navegador, quase invisível no tema escuro. Fica na
+   * camada base: componentes shadcn que usam `outline-none` + `ring`
+   * (camada utilities) continuam com o anel deles. */
+  :where(a[href], button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }

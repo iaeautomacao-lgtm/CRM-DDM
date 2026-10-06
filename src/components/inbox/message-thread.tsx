@@ -1366,8 +1366,10 @@ export function MessageThread({
     <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
       {/* Header — solid card surface sits on top of the doodle so the
           name/avatar/dropdowns stay legible. */}
-      <div className="flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-3 sm:px-4">
-        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+      {/* flex-wrap: no celular (360px) a barra de ações desce para a linha
+          de baixo em vez de espremer o nome do contato até sumir. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 sm:px-4 sm:py-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
           {onBack && (
@@ -1377,16 +1379,16 @@ export function MessageThread({
               aria-label="Voltar às conversas"
               className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
             >
-              <ArrowLeft className="h-5 w-5" />
+              <ArrowLeft className="h-5 w-5" aria-hidden="true" />
             </button>
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden">
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden" aria-hidden="true">
             {contact.avatar_url ? (
               <img
                 // Proxy por telefone só existe para WhatsApp; contato de
                 // Instagram/Messenger (sem telefone) usa a foto do perfil.
                 src={contact.phone && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
-                alt={displayName}
+                alt=""
                 className="h-9 w-9 rounded-full object-cover"
               />
             ) : (
@@ -1432,13 +1434,13 @@ export function MessageThread({
                 sessionInfo.expired ? "text-red-400" : "text-primary"
               )}
             >
-              <Clock className="h-3 w-3" />
+              <Clock className="h-3 w-3" aria-hidden="true" />
               {sessionInfo.remaining}
             </Badge>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1 sm:gap-2" role="toolbar" aria-label="Ações da conversa">
           {/* Contact-panel toggle — desktop only. The contact sidebar
               eats a chunk of horizontal width that crowds the thread on
               smaller laptops; this lets agents reclaim it when they just
@@ -1459,9 +1461,9 @@ export function MessageThread({
               )}
             >
               {contactPanelOpen ? (
-                <PanelRightClose className="h-4 w-4" />
+                <PanelRightClose className="h-4 w-4" aria-hidden="true" />
               ) : (
-                <PanelRightOpen className="h-4 w-4" />
+                <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
               )}
             </button>
           )}
@@ -1478,9 +1480,9 @@ export function MessageThread({
               onClick={() => contact.phone && startOutboundCall(contact.phone)}
               aria-label="Iniciar chamada de voz"
               title="Ligar pelo WhatsApp"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-emerald-400"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-emerald-400 lg:h-7 lg:w-7"
             >
-              <Phone className="h-4 w-4" />
+              <Phone className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
 
@@ -1492,10 +1494,11 @@ export function MessageThread({
               aria-label="Atualizar conversa"
               title="Atualizar"
               className={cn(
-                "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60",
+                "inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-60 lg:h-7 lg:w-7",
               )}
             >
               <RefreshCw
+                aria-hidden="true"
                 className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")}
               />
             </button>
@@ -1506,28 +1509,30 @@ export function MessageThread({
               type="button"
               onClick={handleDeleteClick}
               disabled={isDeleting}
-              aria-label="Deletar conversa"
-              title="Deletar Conversa"
+              aria-label="Excluir conversa"
+              title="Excluir conversa"
               className={cn(
-                "inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-red-400 disabled:opacity-60",
+                "inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-red-400 disabled:opacity-60 lg:h-7 lg:w-7",
               )}
             >
               {isDeleting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
               ) : (
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               )}
             </button>
           )}
 
           {/* Status dropdown */}
           <DropdownMenu>
-            <DropdownMenuTrigger className={cn(
-                  "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+            <DropdownMenuTrigger
+                aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
+                className={cn(
+                  "inline-flex items-center justify-center h-9 gap-1 px-2 text-xs rounded-md hover:bg-muted lg:h-7",
                   currentStatus?.color ?? "text-muted-foreground"
                 )}>
                 {currentStatus?.label ?? "Status"}
-                <ChevronDown className="h-3 w-3" />
+                <ChevronDown className="h-3 w-3" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -1563,23 +1568,26 @@ export function MessageThread({
               onClick={() => setTransferOpen(true)}
               aria-label="Transferir conversa"
               title="Transferir (atendente/equipe, com motivo)"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:h-7 lg:w-7"
             >
-              <ArrowRightLeft className="h-3.5 w-3.5" />
+              <ArrowRightLeft className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           )}
 
           {/* Assign dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
+              // No celular o rótulo some (só o ícone) — o nome acessível
+              // continua dizendo a quem a conversa está atribuída.
+              aria-label={assignedAgentId ? `Atribuída a ${assignLabel}` : "Atribuir conversa"}
               className={cn(
-                "inline-flex items-center justify-center h-7 gap-1 px-2 text-xs rounded-md hover:bg-muted",
+                "inline-flex items-center justify-center h-9 gap-1 px-2 text-xs rounded-md hover:bg-muted lg:h-7",
                 assignedAgentId ? "text-primary" : "text-muted-foreground"
               )}
             >
-              <UserPlus className="h-3 w-3" />
+              <UserPlus className="h-3 w-3" aria-hidden="true" />
               <span className="hidden sm:inline">{assignLabel}</span>
-              <ChevronDown className="h-3 w-3" />
+              <ChevronDown className="h-3 w-3" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
@@ -1615,7 +1623,12 @@ export function MessageThread({
                         {p.full_name}
                         {p.user_id === user?.id ? " (eu)" : ""}
                       </span>
-                      {isSelected && <Check className="ml-2 h-3 w-3" />}
+                      {isSelected && (
+                        <>
+                          <Check className="ml-2 h-3 w-3" aria-hidden="true" />
+                          <span className="sr-only">(atual)</span>
+                        </>
+                      )}
                     </DropdownMenuItem>
                   );
                 })
@@ -1648,10 +1661,11 @@ export function MessageThread({
 
       {/* Messages Area */}
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-4 py-4">
+        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-4 sm:px-4">
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            <div className="flex items-center justify-center py-12" role="status">
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+              <span className="sr-only">Carregando mensagens…</span>
             </div>
           ) : messages.length === 0 && pendingSends.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12">

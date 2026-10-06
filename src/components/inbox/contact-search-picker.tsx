@@ -110,9 +110,11 @@ export function ContactSearchPicker({
 
         <div className="px-4 pb-4">
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
               autoFocus
+              type="search"
+              aria-label="Buscar contato por nome ou telefone"
               value={query}
               onChange={(e) => handleQueryChange(e.target.value)}
               placeholder="Buscar por nome ou telefone..."

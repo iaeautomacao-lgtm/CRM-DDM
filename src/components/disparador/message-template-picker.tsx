@@ -305,6 +305,8 @@ export function MessageTemplatePicker({
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <Input
+                type="search"
+                aria-label="Buscar template"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Buscar template..."
@@ -392,23 +394,27 @@ export function MessageTemplatePicker({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                          className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
                           onClick={() => handleEditClick(t)}
+                          aria-label={`Editar template ${t.nome}`}
+                          title="Editar template"
                         >
-                          <Pencil className="h-3.5 w-3.5" />
+                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
                         </Button>
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 shrink-0 text-red-500 hover:bg-red-500/10"
+                          className="h-9 w-9 shrink-0 text-red-500 hover:bg-red-500/10"
                           onClick={() => handleDelete(t)}
+                          aria-label={`Excluir template ${t.nome}`}
+                          title="Excluir template"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                         </Button>
                       </>
                     )}
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   </div>
                 ))
               )}
@@ -430,6 +436,7 @@ export function MessageTemplatePicker({
               value={nome}
               onChange={(e) => setNome(e.target.value)}
               placeholder="Nome do template"
+              aria-label="Nome do template"
               className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
             />
 
@@ -439,7 +446,8 @@ export function MessageTemplatePicker({
                 value={conteudo}
                 onChange={(e) => setConteudo(e.target.value)}
                 placeholder="Escreva a mensagem..."
-                className="w-full min-h-[140px] rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none resize-none"
+                aria-label="Texto do template"
+                className="w-full min-h-[140px] rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none"
               />
               <div className="flex flex-wrap gap-1">
                 {TEMPLATE_VARS.map((v) => (

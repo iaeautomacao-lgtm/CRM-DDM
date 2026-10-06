@@ -95,7 +95,9 @@ export function MessageActions({
       <div
         data-touch-open={touchOpen || pickerOpen ? "true" : undefined}
         className={cn(
-          "absolute -top-3 z-10 flex h-7 items-center gap-0.5 rounded-full border border-border bg-popover/95 px-1 shadow-md backdrop-blur-sm transition-opacity",
+          // No celular (toque longo) os botões ficam com 28px; no desktop
+          // mantêm o tamanho compacto de antes.
+          "absolute -top-4 z-10 flex h-9 items-center gap-0.5 lg:-top-3 lg:h-7 rounded-full border border-border bg-popover/95 px-1 shadow-md backdrop-blur-sm transition-opacity",
           "opacity-0 group-hover/actions:opacity-100 group-focus-within/actions:opacity-100",
           "data-[touch-open=true]:opacity-100",
           isAgent ? "right-3" : "left-3",
@@ -103,10 +105,10 @@ export function MessageActions({
       >
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger
-            className="flex h-5 w-5 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-5 lg:w-5"
             aria-label="Reagir"
           >
-            <SmilePlus className="h-3.5 w-3.5" />
+            <SmilePlus className="h-3.5 w-3.5" aria-hidden="true" />
           </PopoverTrigger>
           <PopoverContent
             className="flex w-auto flex-row gap-1 p-1.5"
@@ -128,18 +130,18 @@ export function MessageActions({
         <button
           type="button"
           onClick={handleReply}
-          className="flex h-5 w-5 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-5 lg:w-5"
           aria-label="Responder"
         >
-          <CornerUpLeft className="h-3.5 w-3.5" />
+          <CornerUpLeft className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
         <button
           type="button"
           onClick={handleCopy}
-          className="flex h-5 w-5 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-5 lg:w-5"
           aria-label="Copiar"
         >
-          <Copy className="h-3.5 w-3.5" />
+          <Copy className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>
       </div>
