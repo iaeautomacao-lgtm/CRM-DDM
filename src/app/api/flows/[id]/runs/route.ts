@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 /**
@@ -47,20 +47,15 @@ export async function GET(
   const dateFrom = params.get('date_from')
   const dateTo = params.get('date_to')
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  // Confirm flow exists + caller owns it (RLS does this) before doing
-  // the run query — gives us a clean 404 instead of empty array.
+  // Owner/admin + fluxo da conta (outra conta → 404) antes da consulta de runs.
+  const guard = await guardFlow(id)
+  if (!guard.ok) return guard.response
+  const { supabase, accountId } = guard.ctx
   const { data: flow } = await supabase
     .from('flows')
     .select('id, name')
     .eq('id', id)
+    .eq('account_id', accountId)
     .maybeSingle()
   if (!flow) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -172,26 +167,9 @@ export async function DELETE(
 ) {
   const { id } = await context.params
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  const accountId = profile?.account_id as string | undefined
-  if (!accountId) {
-    return NextResponse.json(
-      { error: 'Your profile is not linked to an account.' },
-      { status: 403 },
-    )
-  }
+  const guard = await guardFlow(id)
+  if (!guard.ok) return guard.response
+  const { accountId } = guard.ctx
 
   let ids: string[] = []
   try {
@@ -204,18 +182,6 @@ export async function DELETE(
   }
   if (ids.length === 0) {
     return NextResponse.json({ error: 'ids is required' }, { status: 400 })
-  }
-
-  // Confirm the flow itself is visible to the caller's account (RLS on
-  // `flows` scopes by account membership) before touching flow_runs —
-  // gives a clean 404 instead of a silent no-op delete.
-  const { data: flow } = await supabase
-    .from('flows')
-    .select('id')
-    .eq('id', id)
-    .maybeSingle()
-  if (!flow) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
   // Re-scope the caller-supplied ids to this flow_id + account_id via
