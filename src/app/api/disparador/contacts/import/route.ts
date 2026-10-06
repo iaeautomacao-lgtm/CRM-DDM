@@ -10,6 +10,14 @@ import {
   type ContactTagAssignment,
 } from "@/lib/contacts/resolve-import-tags";
 import { formatBrazilianPhone, phoneKey } from "@/lib/disparador/phone-key";
+import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
+import {
+  dedupeAltPhoneAssignments,
+  dedupeImportVariables,
+  importPhoneKey,
+  writeInBatches,
+} from "@/lib/disparador/import-dedupe";
+import { writeLog } from "@/lib/logger";
 
 // Looks up a value in `row` by trying each of `keys` against the row's
 // keys lowercased/trimmed, so CSV/XLSX headers can vary in case, spacing,
@@ -239,13 +247,23 @@ export async function POST(request: Request) {
     }
 
     // 3. Process imported rows
-    const results = { importados: 0, duplicados: 0, invalidos: 0, blacklisted: 0, erros: [] as string[] };
+    // variaveis_falhas: linhas de VAR1/VAR2/VAR3 que NÃO foram gravadas
+    // (lote com erro no banco). > 0 significa que a campanha sairia com
+    // variável vazia para esses contatos — o wizard avisa para reimportar.
+    const results = {
+      importados: 0,
+      duplicados: 0,
+      invalidos: 0,
+      blacklisted: 0,
+      variaveis_falhas: 0,
+      erros: [] as string[],
+    };
 
     // Blacklist has no account_id column in the disparador schema — it's a
     // single shared list across every account on this instance, not scoped
     // per-tenant. Left unfiltered here; scoping it requires a migration.
-    const { data: blacklist } = await supabaseAdmin().from("blacklist").select("telefone");
-    const blacklistSet = new Set((blacklist ?? []).map((b) => phoneKey(b.telefone)));
+    // Paginada (loadBlacklistKeySet) — antes parava em 1000 linhas.
+    const blacklistSet = await loadBlacklistKeySet(supabaseAdmin());
 
     // Existing contacts for this account, keyed by normalized phone. Used
     // instead of a DB-level upsert because the real unique constraint,
@@ -273,19 +291,32 @@ export async function POST(request: Request) {
         from += pageSize;
       }
     }
-    const existingContactsByKey = new Map<
-      string,
-      { id: string; name: string | null; cpf: string | null; phone_normalized: string | null }
-    >();
+    type ExistingByPhone = {
+      id: string;
+      name: string | null;
+      cpf: string | null;
+      phone_normalized: string | null;
+    };
+    // Duas chaves: a exata (dígitos, igual ao índice único do banco) tem
+    // prioridade; a de phoneKey (com/sem 55 e com/sem o 9º dígito — mesma
+    // regra da blacklist) cobre o mesmo celular gravado no formato antigo,
+    // que antes virava um contato novo duplicado.
+    const existingContactsByKey = new Map<string, ExistingByPhone>();
+    const existingContactsByPhoneKey = new Map<string, ExistingByPhone>();
     for (const r of existingRows ?? []) {
       const key = normalizeKey(r.phone_normalized ?? "");
       if (key) {
-        existingContactsByKey.set(key, {
+        const entry: ExistingByPhone = {
           id: r.id,
           name: r.name,
           cpf: r.cpf ?? null,
           phone_normalized: r.phone_normalized ?? null,
-        });
+        };
+        existingContactsByKey.set(key, entry);
+        const looseKey = importPhoneKey(key);
+        if (looseKey && !existingContactsByPhoneKey.has(looseKey)) {
+          existingContactsByPhoneKey.set(looseKey, entry);
+        }
       }
     }
 
@@ -326,8 +357,14 @@ export async function POST(request: Request) {
     // com a campanha (disp_import_contacts, migration 132). Independe de o
     // CSV ter VARn: sem ele a campanha não sabe quem é "do CSV".
     const importedContactIds = new Set<string>();
+    // Dedup dentro do arquivo: a PRIMEIRA linha de cada pessoa vale e as
+    // repetições contam como "duplicados" (mesma regra para contato novo e
+    // já existente). seenInFile usa phoneKey (com/sem 9º dígito = mesmo
+    // número); seenContactIds pega duas linhas que caem no mesmo contato
+    // existente por caminhos diferentes (ex.: telefone numa, CPF na outra).
     const seenInFile = new Set<string>();
     const seenCpfInFile = new Set<string>();
+    const seenContactIds = new Set<string>();
 
     for (const row of rows) {
       // t2/t3 (telefones alternativos) não fazem parte dos campos do
@@ -367,7 +404,8 @@ export async function POST(request: Request) {
         resolveField(row, columnMap.var3, ["var3"]),
       ];
 
-      const key = normalizeKey(normalized);
+      const exactKey = normalizeKey(normalized);
+      const key = importPhoneKey(normalized);
       const isDuplicateInFile =
         seenInFile.has(key) || (cpfNormalized !== null && seenCpfInFile.has(cpfNormalized));
       if (isDuplicateInFile) {
@@ -395,7 +433,7 @@ export async function POST(request: Request) {
         : undefined;
       const existingByPhone = existingContact
         ? undefined
-        : existingContactsByKey.get(key);
+        : (existingContactsByKey.get(exactKey) ?? existingContactsByPhoneKey.get(key));
       const matched = existingContact
         ? {
             id: existingContact.id,
@@ -413,6 +451,18 @@ export async function POST(request: Request) {
           : null;
 
       if (matched) {
+        // Mesmo contato existente já veio numa linha anterior do arquivo
+        // (outro formato de telefone, ou CPF numa linha e telefone na
+        // outra): não reprocessa. Sem isso as VARs dele entravam duas vezes
+        // no upsert em lote e derrubavam o lote inteiro (import-dedupe.ts).
+        if (seenContactIds.has(matched.id)) {
+          results.duplicados++;
+          continue;
+        }
+        seenContactIds.add(matched.id);
+        seenInFile.add(key);
+        if (cpfNormalized) seenCpfInFile.add(cpfNormalized);
+
         // Contato já existe — preenche o name se estiver vazio, ou se o
         // valor atual parece ser o telefone (import antigo com o alias
         // CONTATO lido como nome, antes de virar TELEFONE1_KEYS — ver
@@ -590,28 +640,42 @@ export async function POST(request: Request) {
     // fundação da escada de números (ver processQueue.ts: tryNextPhone).
     // Best-effort: falha aqui não deve mascarar um import de contatos
     // bem-sucedido, e a tabela pode ainda não existir se a migration 077
-    // não tiver sido aplicada.
+    // não tiver sido aplicada. Deduplicado por (contact_id, ordem) — duas
+    // linhas iguais no mesmo lote derrubariam o upsert inteiro — e um lote
+    // com erro não pula os seguintes (writeInBatches).
     if (altPhoneAssignments.length > 0) {
-      try {
-        const altChunkSize = 100;
-        for (let i = 0; i < altPhoneAssignments.length; i += altChunkSize) {
-          const chunk = altPhoneAssignments.slice(i, i + altChunkSize);
+      const altSummary = await writeInBatches(
+        dedupeAltPhoneAssignments(altPhoneAssignments),
+        100,
+        async (chunk) => {
           const { error: altErr } = await supabaseAdmin()
             .from("contact_phones")
             .upsert(chunk, { onConflict: "contact_id,ordem" });
-          if (altErr) throw altErr;
+          return altErr;
         }
-      } catch (err) {
-        console.error("[Contacts Import] Failed to save alternate phones:", err);
+      );
+      if (altSummary.failedBatches > 0) {
+        console.error("[Contacts Import] Failed to save alternate phones:", altSummary.firstError);
+        results.erros.push(
+          `Telefones alternativos: ${altSummary.failedRows} não foram salvos (${altSummary.firstError})`
+        );
       }
     }
 
     // 8. Save VAR1/VAR2/VAR3 into wacrm.contact_import_variables —
     // permite que template_variable_map resolva `{ type: "csv_var" }` por
-    // contato em startCampaign.ts (migration 079). Best-effort, mesmo
-    // padrão do passo anterior — falha aqui não derruba o import.
+    // contato em startCampaign.ts (migration 079). Não derruba o import,
+    // mas também não falha mais em silêncio: linhas deduplicadas pela chave
+    // de conflito (o mesmo contato duas vezes no lote fazia o upsert falhar
+    // com "ON CONFLICT DO UPDATE command cannot affect row a second time" e
+    // o try/catch pulava TODOS os lotes seguintes), cada lote é gravado
+    // independente e as falhas voltam em results.variaveis_falhas/erros e
+    // em system_logs.
     if (csvVarAssignments.length > 0) {
       const varChunkSize = 100;
+      const varRows = dedupeImportVariables(csvVarAssignments);
+      let varFailedRows = 0;
+      let varFirstError: string | null = null;
       if (!campaignIdRaw && !draftIdRaw) {
         // Import standalone (disparador/contatos, sem wizard de campanha)
         // — grava com campaign_id/draft_id NULL em vez de descartar, pra
@@ -624,53 +688,82 @@ export async function POST(request: Request) {
         // uma linha nova a cada reimport do mesmo contato. Substitui
         // explicitamente (delete das linhas NULL/NULL existentes desses
         // contatos + insert) pra manter só a versão mais recente.
-        try {
-          const affectedContactIds = Array.from(new Set(csvVarAssignments.map((v) => v.contact_id)));
+        const affectedContactIds = Array.from(new Set(varRows.map((v) => v.contact_id)));
+        let deleteErrMessage: string | null = null;
+        for (let i = 0; i < affectedContactIds.length && !deleteErrMessage; i += 500) {
           const { error: deleteErr } = await supabaseAdmin()
             .from("contact_import_variables")
             .delete()
-            .in("contact_id", affectedContactIds)
+            .in("contact_id", affectedContactIds.slice(i, i + 500))
             .is("campaign_id", null)
             .is("draft_id", null);
-          if (deleteErr) throw deleteErr;
-
-          for (let i = 0; i < csvVarAssignments.length; i += varChunkSize) {
-            const chunk = csvVarAssignments.slice(i, i + varChunkSize).map((v) => ({
-              contact_id: v.contact_id,
-              campaign_id: null,
-              draft_id: null,
-              var_index: v.var_index,
-              value: v.value,
-            }));
+          if (deleteErr) deleteErrMessage = deleteErr.message;
+        }
+        if (deleteErrMessage) {
+          // Sem a limpeza, inserir acumularia versões antigas e novas.
+          varFailedRows = varRows.length;
+          varFirstError = deleteErrMessage;
+        } else {
+          const summary = await writeInBatches(varRows, varChunkSize, async (chunk) => {
             const { error: insertErr } = await supabaseAdmin()
               .from("contact_import_variables")
-              .insert(chunk);
-            if (insertErr) throw insertErr;
-          }
-        } catch (err) {
-          console.error("[Contacts Import] Failed to save csv import variables (sem campaign/draft):", err);
+              .insert(
+                chunk.map((v) => ({
+                  contact_id: v.contact_id,
+                  campaign_id: null,
+                  draft_id: null,
+                  var_index: v.var_index,
+                  value: v.value,
+                }))
+              );
+            return insertErr;
+          });
+          varFailedRows = summary.failedRows;
+          varFirstError = summary.firstError;
         }
       } else {
-        try {
-          const onConflict = campaignIdRaw
-            ? "contact_id,campaign_id,var_index"
-            : "contact_id,draft_id,var_index";
-          for (let i = 0; i < csvVarAssignments.length; i += varChunkSize) {
-            const chunk = csvVarAssignments.slice(i, i + varChunkSize).map((v) => ({
-              contact_id: v.contact_id,
-              campaign_id: campaignIdRaw,
-              draft_id: campaignIdRaw ? null : draftIdRaw,
-              var_index: v.var_index,
-              value: v.value,
-            }));
-            const { error: varErr } = await supabaseAdmin()
-              .from("contact_import_variables")
-              .upsert(chunk, { onConflict });
-            if (varErr) throw varErr;
-          }
-        } catch (err) {
-          console.error("[Contacts Import] Failed to save csv import variables:", err);
-        }
+        const onConflict = campaignIdRaw
+          ? "contact_id,campaign_id,var_index"
+          : "contact_id,draft_id,var_index";
+        const summary = await writeInBatches(varRows, varChunkSize, async (chunk) => {
+          const { error: varErr } = await supabaseAdmin()
+            .from("contact_import_variables")
+            .upsert(
+              chunk.map((v) => ({
+                contact_id: v.contact_id,
+                campaign_id: campaignIdRaw,
+                draft_id: campaignIdRaw ? null : draftIdRaw,
+                var_index: v.var_index,
+                value: v.value,
+              })),
+              { onConflict }
+            );
+          return varErr;
+        });
+        varFailedRows = summary.failedRows;
+        varFirstError = summary.firstError;
+      }
+
+      if (varFailedRows > 0) {
+        results.variaveis_falhas = varFailedRows;
+        results.erros.push(
+          `Variáveis VAR1–VAR3: ${varFailedRows} de ${varRows.length} valores não foram salvos — reimporte o arquivo antes de iniciar a campanha (${varFirstError})`
+        );
+        console.error("[Contacts Import] Failed to save csv import variables:", varFirstError);
+        await writeLog({
+          account_id: accountId,
+          level: "error",
+          source: "import",
+          event: "import_variables_failed",
+          message: `${varFailedRows} de ${varRows.length} variáveis do CSV não foram gravadas`,
+          payload: {
+            campaign_id: campaignIdRaw,
+            draft_id: draftIdRaw,
+            failed_rows: varFailedRows,
+            total_rows: varRows.length,
+            error: varFirstError,
+          },
+        });
       }
     }
 
