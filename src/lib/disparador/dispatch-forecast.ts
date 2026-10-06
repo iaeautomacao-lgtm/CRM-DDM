@@ -1,0 +1,236 @@
+// Previsão de término de uma campanha do disparador — função pura usada
+// pelo assistente "Nova campanha" (passo Configurações e Revisão) e pelos
+// cards da lista. Não muda nada no motor: só simula o que ele faz.
+//
+// O que o motor faz (cron/route.ts + startCampaign.ts + window-clock.ts):
+//   - O cron roda 1× por minuto. Por campanha, busca até
+//     min(batch_size, MAX_CRON_BATCH_CANDIDATES) itens vencidos e envia com
+//     até 4 envios simultâneos, dentro de ~35 s de orçamento por tick
+//     (deadline de 40 s menos 5 s de folga).
+//   - Fora da janela/dia permitido o cron pula a campanha: o tempo da fila
+//     só anda com a janela aberta (relógio de janela).
+//   - "Imediato" = um lote só (batch_size enorme, sem pausa): tudo vence no
+//     início e sai no ritmo do cron.
+//   - "Segmentado" = rodadas de ceil(base × %) contatos, espaçadas por
+//     `pausa` de tempo ABERTO (scheduleRounds). Uma rodada maior do que o
+//     cron consegue mandar num minuto continua nos ticks seguintes; se ela
+//     demorar mais que a pausa, a próxima rodada fica na fila atrás dela.
+//
+// O ritmo real depende do tempo de resposta do provedor (Meta/WAHA) e de
+// quantas campanhas rodam ao mesmo tempo (o tick é compartilhado). Por isso
+// a previsão é uma FAIXA: otimista (0,5 s por envio) e conservadora (2 s por
+// envio), considerando só esta campanha. Feriados não são considerados.
+
+import { MAX_CRON_BATCH_CANDIDATES } from "@/lib/disparador/cron-batching";
+import { addOpenWindowTime, scheduleRounds, type SendWindowConfig } from "@/lib/disparador/window-clock";
+
+/** Intervalo do cron externo (crontab, 1×/min). */
+export const CRON_TICK_MS = 60_000;
+/** Orçamento de envio por tick: deadline de 40 s menos 5 s de folga (cron/route.ts). */
+export const CRON_SEND_BUDGET_SECONDS = 35;
+/** Envios simultâneos por campanha no tick (processWithConcurrency(…, 4) no cron). */
+export const CRON_SEND_CONCURRENCY = 4;
+/** Segundos por envio (provedor + claim/updates no banco): otimista e conservador. */
+export const SEND_SECONDS_PER_ITEM = { otimista: 0.5, conservador: 2 } as const;
+/** batch_size gravado no modo Imediato (um lote só; o cron limita a 700 por tick). */
+export const IMEDIATO_BATCH_SIZE = 999_999;
+
+/**
+ * Itens por minuto que o cron consegue enviar para UMA campanha, dado o
+ * limite de candidatos por tick e o tempo médio por envio. Fracionário
+ * quando há limite_por_hora baixo (ex.: 30/h = 0,5/min).
+ */
+export function cronItemsPerMinute(
+  candidateLimit: number,
+  secondsPerItem: number,
+  hourlyLimit?: number | null
+): number {
+  const byTime = Math.floor((CRON_SEND_CONCURRENCY * CRON_SEND_BUDGET_SECONDS) / Math.max(0.05, secondsPerItem));
+  let perMinute = Math.max(1, Math.min(Math.max(1, candidateLimit), MAX_CRON_BATCH_CANDIDATES, byTime));
+  if (hourlyLimit != null && hourlyLimit > 0) perMinute = Math.min(perMinute, hourlyLimit / 60);
+  return perMinute;
+}
+
+export type ForecastDispatch =
+  | { mode: "imediato" }
+  | { mode: "segmentado"; percent: number; pauseMinutes: number }
+  /** Lote de tamanho fixo (campanhas antigas "Personalizado"/sequenciais). */
+  | { mode: "lote"; contactsPerRound: number; pauseMinutes: number };
+
+export interface ForecastInput {
+  /** Contatos que vão receber (já sem duplicados/blacklist, quando conhecido). */
+  contacts: number;
+  /** Mensagens por contato (Padrão com sequência = N; Rotação/Aleatório = 1). */
+  messagesPerContact: number;
+  dispatch: ForecastDispatch;
+  /** Agendamento (ou "agora" se a campanha for iniciada manualmente). */
+  start: Date;
+  janela: SendWindowConfig;
+  /** campaigns.limite_por_hora, se configurado (não tem campo no assistente). */
+  hourlyLimit?: number | null;
+}
+
+export interface ForecastScenario {
+  /** Itens por minuto considerados neste cenário. */
+  perMinute: number;
+  /** Fim estimado (último envio). */
+  end: Date;
+}
+
+export interface ForecastResult {
+  /** Itens da fila (contatos × mensagens por contato). */
+  items: number;
+  rounds: number;
+  contactsPerRound: number;
+  itemsPerRound: number;
+  /** Primeiro instante com a janela aberta a partir do início. */
+  firstSendAt: Date;
+  /** Horário (no relógio de janela) da última rodada. */
+  lastRoundAt: Date;
+  otimista: ForecastScenario;
+  conservador: ForecastScenario;
+  /** Minutos para uma rodada cheia sair (otimista–conservador). */
+  roundDrainMinutes: { min: number; max: number };
+  /** Uma rodada demora mais que o intervalo: as rodadas encostam umas nas outras. */
+  roundsOverlap: boolean;
+  /** Rodada de 1 contato: o motor usa o envio sequencial (1 item por intervalo). */
+  sequentialFallback: boolean;
+}
+
+interface Plan {
+  rounds: number;
+  contactsPerRound: number;
+  itemsPerRound: (k: number) => number;
+  pauseSeconds: number;
+  candidateLimit: number;
+  sequentialFallback: boolean;
+}
+
+function plan(input: ForecastInput): Plan {
+  const contacts = Math.max(0, Math.floor(input.contacts));
+  const mpc = Math.max(1, Math.floor(input.messagesPerContact));
+  if (input.dispatch.mode === "imediato") {
+    return {
+      rounds: contacts > 0 ? 1 : 0,
+      contactsPerRound: contacts,
+      itemsPerRound: () => contacts * mpc,
+      pauseSeconds: 0,
+      candidateLimit: IMEDIATO_BATCH_SIZE,
+      sequentialFallback: false,
+    };
+  }
+  const pauseSeconds = Math.max(0, input.dispatch.pauseMinutes) * 60;
+  // Mesma conta do startCampaign: batch_size = ceil(contatos × % / 100).
+  const perRound =
+    input.dispatch.mode === "lote"
+      ? Math.max(1, Math.floor(input.dispatch.contactsPerRound))
+      : Math.max(1, Math.ceil((contacts * Math.min(100, Math.max(1, input.dispatch.percent))) / 100));
+  if (perRound === 1) {
+    // batch_size = 1: caminho sequencial do motor — reserve_campaign_tick
+    // libera 1 item a cada intervalo (no mínimo 1 tick).
+    return {
+      rounds: contacts * mpc,
+      contactsPerRound: 1,
+      itemsPerRound: () => 1,
+      pauseSeconds: Math.max(pauseSeconds, CRON_TICK_MS / 1000),
+      candidateLimit: 1,
+      sequentialFallback: true,
+    };
+  }
+  const rounds = Math.ceil(contacts / perRound);
+  return {
+    rounds,
+    contactsPerRound: perRound,
+    itemsPerRound: (k) => Math.min(perRound, contacts - k * perRound) * mpc,
+    pauseSeconds,
+    candidateLimit: perRound,
+    sequentialFallback: false,
+  };
+}
+
+function simulate(p: Plan, times: Date[], perMinute: number, janela: SendWindowConfig): Date {
+  let finish = times[0]?.getTime() ?? 0;
+  for (let k = 0; k < times.length; k++) {
+    const begin = new Date(Math.max(times[k].getTime(), finish));
+    const minutes = Math.ceil(p.itemsPerRound(k) / perMinute);
+    finish = addOpenWindowTime(begin, minutes * CRON_TICK_MS, janela).getTime();
+  }
+  return new Date(finish);
+}
+
+/** Previsão de término (faixa otimista–conservadora), no relógio de janela. */
+export function forecastCampaign(input: ForecastInput): ForecastResult {
+  const p = plan(input);
+  const mpc = Math.max(1, Math.floor(input.messagesPerContact));
+  const items = p.sequentialFallback ? p.rounds : Math.max(0, Math.floor(input.contacts)) * mpc;
+  const firstSendAt = addOpenWindowTime(input.start, 0, input.janela);
+  const times = scheduleRounds(input.start, p.rounds, p.pauseSeconds, input.janela);
+  const perMinOtimista = cronItemsPerMinute(p.candidateLimit, SEND_SECONDS_PER_ITEM.otimista, input.hourlyLimit);
+  const perMinConservador = cronItemsPerMinute(p.candidateLimit, SEND_SECONDS_PER_ITEM.conservador, input.hourlyLimit);
+  const fullRound = p.itemsPerRound(0);
+  const drainMin = Math.ceil(fullRound / perMinOtimista);
+  const drainMax = Math.ceil(fullRound / perMinConservador);
+  return {
+    items,
+    rounds: p.rounds,
+    contactsPerRound: p.contactsPerRound,
+    itemsPerRound: fullRound,
+    firstSendAt,
+    lastRoundAt: times[times.length - 1] ?? firstSendAt,
+    otimista: {
+      perMinute: perMinOtimista,
+      end: times.length ? simulate(p, times, perMinOtimista, input.janela) : firstSendAt,
+    },
+    conservador: {
+      perMinute: perMinConservador,
+      end: times.length ? simulate(p, times, perMinConservador, input.janela) : firstSendAt,
+    },
+    roundDrainMinutes: { min: drainMin, max: drainMax },
+    roundsOverlap: p.rounds > 1 && p.pauseSeconds > 0 && drainMax * 60 > p.pauseSeconds,
+    sequentialFallback: p.sequentialFallback,
+  };
+}
+
+/**
+ * Previsão a partir das colunas de uma campanha salva (cards da lista).
+ * batch_percent → Segmentado; batch_size > 1 sem pausa → Imediato; demais
+ * ("Personalizado" em lote, Balanceado/Cauteloso com batch_size = 1) → lote
+ * fixo. O sequencial sai ~1 contato por minuto; as pausas anti-spam de
+ * 10 min/1 h desses modos antigos não entram (a previsão fica otimista).
+ */
+export function forecastFromCampaign(
+  campaign: {
+    batch_size?: number | null;
+    batch_pause_seconds?: number | null;
+    batch_percent?: number | null;
+    janela_inicio?: string | null;
+    janela_fim?: string | null;
+    dias_envio?: number[] | null;
+    limite_por_hora?: number | null;
+  },
+  contacts: number,
+  messagesPerContactValue: number,
+  start: Date
+): ForecastResult {
+  const janela = { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio };
+  const pauseMinutes = Math.max(0, campaign.batch_pause_seconds ?? 0) / 60;
+  const batchSize = Math.max(1, campaign.batch_size ?? 1);
+  const dispatch: ForecastDispatch =
+    campaign.batch_percent != null && campaign.batch_percent > 0
+      ? { mode: "segmentado", percent: campaign.batch_percent, pauseMinutes }
+      : batchSize > 1 && pauseMinutes === 0
+        ? { mode: "imediato" }
+        : {
+            mode: "lote",
+            contactsPerRound: batchSize,
+            pauseMinutes: batchSize > 1 ? pauseMinutes : Math.max(1, pauseMinutes),
+          };
+  return forecastCampaign({
+    contacts,
+    messagesPerContact: messagesPerContactValue,
+    dispatch,
+    start,
+    janela,
+    hourlyLimit: campaign.limite_por_hora ?? null,
+  });
+}

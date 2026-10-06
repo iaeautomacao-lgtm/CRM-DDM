@@ -6,6 +6,7 @@ import {
   type CampaignChannel,
   type CampaignConfigResult,
   type CampaignMessageFields,
+  type TemplateMode,
 } from "@/lib/disparador/campaign-validation";
 import {
   TEMPLATE_VALIDATION_COLUMNS,
@@ -26,11 +27,19 @@ export type CampaignConfigCheck =
   | (Extract<CampaignConfigResult, { ok: true }> & { channels: LoadedCampaignChannel[] })
   | { ok: false; status: number; error: string };
 
+export interface CampaignConfigCheckOptions {
+  /** Modo de templates (dias_permitidos) — confere quantos templates/mensagens. */
+  templateMode?: TemplateMode;
+  /** campaigns.audience_mode — coluna do CSV só com base importada. */
+  audienceMode?: string | null;
+}
+
 export async function checkCampaignConfig(
   db: SupabaseClient,
   accountId: string,
   sessionIds: readonly string[],
-  mensagens: readonly CampaignMessageFields[]
+  mensagens: readonly CampaignMessageFields[],
+  options: CampaignConfigCheckOptions = {}
 ): Promise<CampaignConfigCheck> {
   const ids = [...new Set(sessionIds.filter((id): id is string => typeof id === "string" && !!id))];
   let channels: LoadedCampaignChannel[] = [];
@@ -65,7 +74,14 @@ export async function checkCampaignConfig(
     templateRows = (data ?? []) as LocalTemplateRow[];
   }
 
-  const result = validateCampaignConfig({ sessionIds: ids, channels, mensagens, templateRows });
+  const result = validateCampaignConfig({
+    sessionIds: ids,
+    channels,
+    mensagens,
+    templateRows,
+    templateMode: options.templateMode,
+    audienceMode: options.audienceMode,
+  });
   if (!result.ok) return { ok: false, status: 400, error: result.error };
   return { ...result, channels };
 }

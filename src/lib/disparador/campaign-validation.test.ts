@@ -2,11 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   campaignChannelGroupKey,
   campaignTemplateNames,
+  decideCampaignStatus,
   formatStartFailureReason,
+  messagesPerContact,
+  parseTemplateMode,
   stripMessageTemplate,
   validateCampaignChannels,
   validateCampaignConfig,
   validateCampaignMessages,
+  validateCampaignSettings,
+  validateTemplateMode,
+  validateVariableSources,
   type CampaignChannel,
 } from "./campaign-validation";
 import type { LocalTemplateRow } from "./template-validation";
@@ -140,9 +146,29 @@ describe("validateCampaignMessages", () => {
     expect(errors[0]).toMatch(/^Template #1/);
   });
 
-  it("WAHA: texto, IA, mídia e ligação são aceitos", () => {
-    const msgs = ["texto", "ia", "imagem", "audio", "ligacao"].map((tipo) => ({ tipo }));
+  it("WAHA: texto, IA, imagem e áudio com conteúdo são aceitos", () => {
+    const msgs = [
+      { tipo: "texto", conteudo: "Oi {{nome}}" },
+      { tipo: "ia", prompt: "Cobre com educação" },
+      { tipo: "imagem", url: "https://x/img.png" },
+      { tipo: "audio", url: "https://x/a.ogg" },
+    ];
     expect(validateCampaignMessages(msgs, "waha")).toEqual([]);
+  });
+
+  it("WAHA: ligação saiu; conteúdo vazio e template Meta são bloqueados", () => {
+    expect(validateCampaignMessages([{ tipo: "ligacao", url: "https://x/a.wav" }], "waha")[0]).toMatch(
+      /ligação não é mais enviada/
+    );
+    const errors = validateCampaignMessages(
+      [{ tipo: "texto", conteudo: " " }, { tipo: "ia" }, { tipo: "imagem" }, { ...tplMsg }],
+      "waha"
+    );
+    expect(errors).toHaveLength(4);
+    expect(errors[0]).toMatch(/Mensagem #1: escreva o texto/);
+    expect(errors[1]).toMatch(/prompt da IA/);
+    expect(errors[2]).toMatch(/imagem/);
+    expect(errors[3]).toMatch(/não enviam template da Meta/);
   });
 
   it("sem mensagens", () => {
@@ -172,6 +198,160 @@ describe("validateCampaignConfig", () => {
     expect(
       validateCampaignConfig({ sessionIds: ["w1"], channels: all, mensagens: [{ tipo: "texto", conteudo: "Oi" }], templateRows: [] })
     ).toEqual({ ok: true, provider: "waha", wabaId: null });
+  });
+});
+
+describe("validateTemplateMode (Padrão / Rotação / Aleatório)", () => {
+  const tpl2 = { ...tplMsg, template_name: "cobranca_2" };
+  const texto = { tipo: "texto", conteudo: "Oi" };
+
+  it("Padrão: Meta exige exatamente 1 template", () => {
+    expect(validateTemplateMode([tplMsg], "meta", "sequencia")).toEqual([]);
+    expect(validateTemplateMode([tplMsg, tpl2], "meta", "sequencia")[0]).toMatch(/exatamente 1 template/);
+  });
+
+  it("Padrão: WAHA aceita sequência de várias partes", () => {
+    expect(validateTemplateMode([texto, { tipo: "imagem", url: "u" }, texto], "waha", "sequencia")).toEqual([]);
+  });
+
+  it("Rotação/Aleatório exigem 2 ou mais", () => {
+    for (const mode of ["rotacao", "aleatorio"] as const) {
+      expect(validateTemplateMode([tplMsg], "meta", mode)[0]).toMatch(/pelo menos 2 templates/);
+      expect(validateTemplateMode([texto], "waha", mode)[0]).toMatch(/pelo menos 2 mensagens/);
+      expect(validateTemplateMode([tplMsg, tpl2], "meta", mode)).toEqual([]);
+      expect(validateTemplateMode([texto, texto], "waha", mode)).toEqual([]);
+    }
+  });
+
+  it("Rotação Meta: o mesmo template duas vezes é bloqueado", () => {
+    expect(validateTemplateMode([tplMsg, tplMsg], "meta", "rotacao")[0]).toMatch(/mais de uma vez/);
+  });
+
+  it("parseTemplateMode: legado [1..6] = Padrão; messagesPerContact", () => {
+    expect(parseTemplateMode([1, 2, 3, 4, 5, 6])).toBe("sequencia");
+    expect(parseTemplateMode("rotacao")).toBe("rotacao");
+    expect(messagesPerContact("sequencia", 3)).toBe(3);
+    expect(messagesPerContact("aleatorio", 3)).toBe(1);
+  });
+
+  it("validateCampaignConfig aplica o modo quando informado", () => {
+    const r = validateCampaignConfig({
+      sessionIds: ["a1"],
+      channels: all,
+      mensagens: [tplMsg],
+      templateRows: [row],
+      templateMode: "rotacao",
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/Rotação precisa de pelo menos 2/);
+  });
+});
+
+describe("validateVariableSources", () => {
+  it("valor fixo vazio, campo desconhecido e coluna do CSV sem base", () => {
+    const msg = {
+      template_name: "cobranca_1",
+      template_variable_map: [
+        { type: "static", value: " " },
+        { type: "contact_field", field: "email" },
+        { type: "csv_var", index: 0 },
+        { type: "contact_field", field: "cpf" },
+        { type: "utm_link" },
+      ],
+    };
+    const semBase = validateVariableSources([msg], "tags");
+    expect(semBase).toHaveLength(3);
+    expect(semBase[0]).toMatch(/\{\{1\}\} está como valor fixo vazio/);
+    expect(semBase[1]).toMatch(/\{\{2\}\} usa um campo de contato desconhecido/);
+    expect(semBase[2]).toMatch(/\{\{3\}\} usa uma coluna do CSV, mas a campanha não tem base/);
+    // Com base importada (ou campanha antiga sem audience_mode) a coluna vale.
+    expect(validateVariableSources([msg], "csv")).toHaveLength(2);
+    expect(validateVariableSources([msg], null)).toHaveLength(2);
+  });
+
+  it("texto livre (WAHA): só confere as {{n}} usadas no texto", () => {
+    const msg = {
+      tipo: "texto",
+      conteudo: "Valor {{2}}",
+      template_variable_map: [
+        { type: "csv_var", index: 0 },
+        { type: "csv_var", index: 1 },
+        { type: "static", value: "" },
+      ],
+    };
+    expect(validateVariableSources([msg], "csv")).toEqual([]);
+    expect(validateVariableSources([{ ...msg, conteudo: "Valor {{3}}" }], "csv")[0]).toMatch(/\{\{3\}\} está como valor fixo vazio/);
+  });
+});
+
+describe("validateCampaignSettings", () => {
+  const now = new Date("2026-10-06T12:00:00.000Z"); // 09:00 em Brasília
+  const base = {
+    nome: "Cobrança outubro",
+    janela_inicio: "08:00",
+    janela_fim: "18:00",
+    dias_envio: [1, 2, 3, 4, 5],
+    batch_size: 999999,
+    batch_pause_seconds: 0,
+    batch_percent: null,
+    intervalo_min: 0,
+    intervalo_max: 0,
+    audience_mode: "csv",
+    dias_permitidos: "sequencia",
+  };
+
+  it("configuração válida, agendada no futuro", () => {
+    expect(
+      validateCampaignSettings(
+        { ...base, agendamento: "2026-10-07T11:00:00.000Z", agendamento_fim: "2026-10-08T21:00:00.000Z" },
+        { now }
+      )
+    ).toEqual([]);
+  });
+
+  it("janela: formato HH:MM e fim depois do início", () => {
+    expect(validateCampaignSettings({ ...base, janela_inicio: "08:00:00" }, { now })[0]).toMatch(/HH:MM/);
+    expect(validateCampaignSettings({ ...base, janela_inicio: "18:00", janela_fim: "08:00" }, { now })[0]).toMatch(
+      /hora final precisa ser depois/
+    );
+  });
+
+  it("agendamento no passado (ou a menos de 1 min) e final antes do início", () => {
+    expect(validateCampaignSettings({ ...base, agendamento: "2026-10-06T12:00:30.000Z" }, { now })[0]).toMatch(
+      /no futuro/
+    );
+    expect(
+      validateCampaignSettings(
+        { ...base, agendamento: "2026-10-07T11:00:00.000Z", agendamento_fim: "2026-10-07T10:00:00.000Z" },
+        { now }
+      )[0]
+    ).toMatch(/final precisam ser depois/);
+  });
+
+  it("Segmentado: 1–50% e intervalo de pelo menos 1 min", () => {
+    expect(validateCampaignSettings({ ...base, batch_percent: 80, batch_pause_seconds: 600 }, { now })[0]).toMatch(
+      /1% a 50%/
+    );
+    expect(validateCampaignSettings({ ...base, batch_percent: 10, batch_pause_seconds: 30 }, { now })[0]).toMatch(
+      /pelo menos 1 minuto/
+    );
+  });
+
+  it("conta inteira exige aceite; nome obrigatório; modo inválido", () => {
+    expect(
+      validateCampaignSettings({ ...base, audience_mode: "account" }, { now, requireAudience: true })[0]
+    ).toMatch(/confirme o envio para todos/);
+    expect(
+      validateCampaignSettings({ ...base, audience_mode: "account" }, { now, requireAudience: true, confirmAllContacts: true })
+    ).toEqual([]);
+    expect(validateCampaignSettings({ ...base, nome: " " }, { now })[0]).toMatch(/nome da campanha/);
+    expect(validateCampaignSettings({ ...base, dias_permitidos: "sorteio" }, { now })[0]).toMatch(/Modo de templates/);
+  });
+
+  it("decideCampaignStatus", () => {
+    expect(decideCampaignStatus("2026-10-07T11:00:00.000Z")).toBe("agendado");
+    expect(decideCampaignStatus(null)).toBe("rascunho");
+    expect(decideCampaignStatus("")).toBe("rascunho");
   });
 });
 
