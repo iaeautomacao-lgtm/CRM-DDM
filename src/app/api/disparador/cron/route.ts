@@ -10,6 +10,10 @@ import {
 } from "@/lib/disparador/processQueue";
 import { canSendNow } from "@/lib/disparador/send-window";
 import { processWithConcurrency } from "@/lib/disparador/concurrency";
+import {
+  resolveCronBatchCandidateLimit,
+  shouldReserveCampaignCadence,
+} from "@/lib/disparador/cron-batching";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 
@@ -152,18 +156,27 @@ export async function POST(request: Request) {
         !canSendNow({ inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio })
       )
         continue;
-      // Reserva o próximo lote da campanha no banco: grava next_batch_at =
-      // agora + batch_pause_seconds. Se outro tick já reservou dentro da
-      // pausa, retorna false e a campanha é pulada — ticks extras não
-      // furam o intervalo anti-spam.
-      const { data: reserved, error: reservationError } = await db.rpc("reserve_campaign_tick", {
-        p_campaign_id: campaign.id,
-      });
-      if (reservationError) throw reservationError;
-      if (!reserved) continue;
-      // Logical batch size is separate from simultaneous requests. The database
-      // also caps in-flight work shared across campaigns/instances per channel.
-      const batchSize = Math.min(100, Math.max(1, campaign.batch_size ?? 1));
+      // Sequential campaigns (batch_size=1) still use the database cadence
+      // reservation. Batched/segmented campaigns already encode their logical
+      // pause in disp_message_queue.scheduled_at when startCampaign builds the
+      // queue. Reserving batch_pause_seconds again here used to double-apply
+      // the pause: a 614-item logical batch sent only the first 100 candidates
+      // and then waited one full hour before continuing.
+      if (shouldReserveCampaignCadence(campaign.batch_size)) {
+        const { data: reserved, error: reservationError } = await db.rpc("reserve_campaign_tick", {
+          p_campaign_id: campaign.id,
+        });
+        if (reservationError) throw reservationError;
+        if (!reserved) continue;
+      }
+
+      // This is a candidate-fetch limit, not provider concurrency. Keep the
+      // DB/provider in-flight safety at 4, but allow a logical segmented batch
+      // such as 614 contacts to be selected. The 40s tick deadline may leave
+      // part of the batch for the next cron invocation; because batched
+      // campaigns no longer reserve an extra pause, the next tick resumes the
+      // remaining due rows immediately.
+      const batchSize = resolveCronBatchCandidateLimit(campaign.batch_size);
       const { data: items, error: queryError } = await db
         .from("disp_message_queue")
         .select("*, contacts(name, phone, company)")
