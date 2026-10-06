@@ -12,12 +12,12 @@ describe("AI model registry", () => {
     const openai = getAiModelsForProvider("openai").map((m) => m.id);
     expect(openai).toContain("gpt-4o-mini");
     expect(openai).toContain("gpt-6-luna");
-    expect(openai).not.toContain("gemini-2.5-flash");
+    expect(openai).not.toContain("gemini-3.8-flash");
   });
 
   it("identifies the provider for a registered model", () => {
     expect(getProviderForModel("gpt-4.1-mini")).toBe("openai");
-    expect(getProviderForModel("gemini-2.5-flash")).toBe("gemini");
+    expect(getProviderForModel("gemini-3.8-flash")).toBe("gemini");
     expect(getProviderForModel("unknown-model")).toBeNull();
   });
 
@@ -60,7 +60,7 @@ describe("resolveAiModel", () => {
     expect(
       resolveAiModel({
         provider: "openai",
-        accountModel: "gemini-2.5-flash",
+        accountModel: "gemini-3.8-flash",
       }),
     ).toEqual({
       model: DEFAULT_MODEL_BY_PROVIDER.openai,
