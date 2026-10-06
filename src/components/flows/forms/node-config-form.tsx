@@ -60,6 +60,11 @@ import {
   type AiAgentTool,
   type AiAgentToolParameter,
 } from "@/lib/flows/types";
+import {
+  aiProviderLabel,
+  getAiModelsForProvider,
+  type AiProvider,
+} from "@/lib/ai/models";
 
 interface NodeConfigFormProps {
   node: BuilderNode;
@@ -2645,6 +2650,7 @@ function ReceiveAttachmentForm({
 
 interface AiAgentCfg {
   mode?: "once" | "loop" | "takeover";
+  model?: string | null;
   system_prompt_override?: string;
   next_node_key?: string;
   max_turns?: number;
@@ -2673,6 +2679,31 @@ function AiAgentForm({
   onUpdateConfig: (patch: Record<string, unknown>) => void;
 }) {
   const mode = cfg.mode ?? "once";
+  const [accountProvider, setAccountProvider] = useState<AiProvider | null>(null);
+  const [providerLoading, setProviderLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch("/api/account/ai-config");
+        const data = await res.json().catch(() => null);
+        if (!cancelled && res.ok && data?.api_provider) {
+          setAccountProvider(data.api_provider as AiProvider);
+        }
+      } catch (err) {
+        console.error("[AiAgentForm] failed to load account provider:", err);
+      } finally {
+        if (!cancelled) setProviderLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const availableModels = getAiModelsForProvider(accountProvider);
+  const modelValue = cfg.model?.trim() || "__account_default__";
 
   return (
     <>
@@ -2702,6 +2733,46 @@ function AiAgentForm({
             "Chama o agente de IA a cada nova mensagem do cliente, sem sair deste nó, até o limite de turnos."}
           {mode === "takeover" &&
             "Chama o agente de IA uma última vez e encerra o fluxo, transferindo a conversa."}
+        </p>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">Modelo</label>
+        <Select
+          value={modelValue}
+          disabled={providerLoading || !accountProvider}
+          onValueChange={(value) =>
+            onUpdateConfig({
+              model: value === "__account_default__" ? null : value,
+            })
+          }
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue
+              placeholder={
+                providerLoading
+                  ? "Carregando modelos..."
+                  : "Usar padrão da conta"
+              }
+            />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__account_default__">
+              Usar padrão da conta
+            </SelectItem>
+            {availableModels.map((model) => (
+              <SelectItem key={model.id} value={model.id}>
+                {model.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {accountProvider
+            ? `Provider da conta: ${aiProviderLabel(accountProvider)}. O nó só pode escolher modelos desse provider.`
+            : providerLoading
+              ? "Carregando o provider configurado na conta..."
+              : "Configure primeiro o provider do Agente de IA nas configurações da conta."}
         </p>
       </div>
 
