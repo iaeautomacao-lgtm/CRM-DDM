@@ -15,6 +15,11 @@ import { apiFetch } from "@/lib/api-fetch";
 // the server stores just the hash. The UI states this explicitly so
 // the absence of a "copy again" button reads as intentional, not a
 // bug (same lesson as the invite-link flow).
+//
+// `personal` (PRD-04 Fase 3): modo "Minhas chaves de API" usado no
+// /inteligencia — lista só as chaves pessoais do usuário (?mine=1), cria
+// só a chave "Inteligência (leitura)" (MCP) e deixa o dono revogá-las.
+// Supervisor chega aqui; /settings continua owner/admin.
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
@@ -49,6 +54,8 @@ interface ApiKey {
   name: string;
   key_prefix: string;
   scopes: string[];
+  /** Dono da chave pessoal; null = chave da conta. */
+  user_id: string | null;
   last_used_at: string | null;
   expires_at: string | null;
   revoked_at: string | null;
@@ -70,7 +77,9 @@ function keyStatus(k: ApiKey): 'active' | 'revoked' | 'expired' {
   return 'active';
 }
 
-export function ApiKeysSettings() {
+const INTELLIGENCE_SCOPE: ApiScope = 'intelligence:read';
+
+export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
   const { canEditSettings } = useAuth();
 
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -80,7 +89,10 @@ export function ApiKeysSettings() {
 
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch('/api/account/api-keys', { cache: 'no-store' });
+      const res = await apiFetch(
+        personal ? '/api/account/api-keys?mine=1' : '/api/account/api-keys',
+        { cache: 'no-store' }
+      );
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
         toast.error(payload.error || 'Failed to load API keys');
@@ -94,7 +106,7 @@ export function ApiKeysSettings() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [personal]);
 
   useEffect(() => {
     void load();
@@ -137,20 +149,30 @@ export function ApiKeysSettings() {
   return (
     <section className="animate-in fade-in-50 space-y-6 duration-200">
       <SettingsPanelHead
-        title="API keys"
+        title={personal ? 'Minhas chaves de API' : 'API keys'}
         description={
-          <>
-            Keys authenticate the public REST API (
-            <code className="text-xs">/api/v1</code>) so you can build your own
-            automations. Send them as{' '}
-            <code className="text-xs">Authorization: Bearer &lt;key&gt;</code>.
-          </>
+          personal ? (
+            <>
+              Chaves pessoais para conectar assistentes externos (Claude
+              Desktop/Code, n8n) ao DDM Intelligence pelo MCP (
+              <code className="text-xs">/api/mcp</code>). A chave age como
+              você: vê só os dados que você vê no CRM, e deixa de funcionar
+              se for revogada ou se o seu acesso mudar.
+            </>
+          ) : (
+            <>
+              Keys authenticate the public REST API (
+              <code className="text-xs">/api/v1</code>) so you can build your
+              own automations. Send them as{' '}
+              <code className="text-xs">Authorization: Bearer &lt;key&gt;</code>.
+            </>
+          )
         }
         action={
-          <RequireRole min="admin">
+          <RequireRole min={personal ? 'supervisor' : 'admin'}>
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="size-4" />
-              New API key
+              {personal ? 'Nova chave' : 'New API key'}
             </Button>
           </RequireRole>
         }
@@ -161,9 +183,9 @@ export function ApiKeysSettings() {
           <CardContent className="flex flex-col items-center justify-center py-10 text-center">
             <KeyRound className="text-muted-foreground size-6" />
             <p className="text-muted-foreground mt-2 text-sm">
-              No API keys yet.
+              {personal ? 'Você ainda não tem chave pessoal.' : 'No API keys yet.'}
             </p>
-            {canEditSettings ? (
+            {personal ? null : canEditSettings ? (
               <p className="text-muted-foreground mt-1 text-xs">
                 Click <span className="text-foreground">New API key</span> to
                 create one.
@@ -208,6 +230,11 @@ export function ApiKeysSettings() {
                             Expired
                           </Badge>
                         )}
+                        {k.user_id && !personal && (
+                          <Badge className="border-border bg-muted text-muted-foreground text-[10px] tracking-wide uppercase">
+                            Pessoal
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-muted-foreground mt-0.5 font-mono text-xs">
                         {k.key_prefix}…
@@ -241,7 +268,9 @@ export function ApiKeysSettings() {
                     </div>
 
                     {status === 'active' && (
-                      <RequireRole min="admin">
+                      // Modo pessoal: a lista só tem chaves do próprio
+                      // usuário, que pode revogá-las (supervisor incluso).
+                      <RequireRole min={personal ? 'supervisor' : 'admin'}>
                         <Button
                           variant="outline"
                           size="sm"
@@ -267,6 +296,7 @@ export function ApiKeysSettings() {
       )}
 
       <CreateKeyDialog
+        personal={personal}
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={load}
@@ -280,16 +310,23 @@ export function ApiKeysSettings() {
 // ------------------------------------------------------------
 
 function CreateKeyDialog({
+  personal,
   open,
   onOpenChange,
   onCreated,
 }: {
+  personal: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: () => void;
 }) {
   const [name, setName] = useState('');
-  const [scopes, setScopes] = useState<ApiScope[]>([]);
+  const [selectedScopes, setScopes] = useState<ApiScope[]>([]);
+  // Modo pessoal: só existe a chave de Inteligência.
+  const scopes = personal ? [INTELLIGENCE_SCOPE] : selectedScopes;
+  // A chave de Inteligência é pessoal e exclusiva (o servidor recusa
+  // combinar com escopos da conta).
+  const intelligenceOnly = scopes.includes(INTELLIGENCE_SCOPE);
   const [submitting, setSubmitting] = useState(false);
   // Once set, we switch from the form to the reveal view.
   const [createdKey, setCreatedKey] = useState<string | null>(null);
@@ -302,6 +339,10 @@ function CreateKeyDialog({
   }
 
   function toggleScope(scope: ApiScope, checked: boolean) {
+    if (scope === INTELLIGENCE_SCOPE) {
+      setScopes(checked ? [INTELLIGENCE_SCOPE] : []);
+      return;
+    }
     setScopes((prev) =>
       checked ? [...prev, scope] : prev.filter((s) => s !== scope)
     );
@@ -419,38 +460,54 @@ function CreateKeyDialog({
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label className="text-muted-foreground">Scopes</Label>
-                <div className="border-border space-y-2 rounded-md border p-3">
-                  {API_SCOPES.map((scope) => (
-                    <label
-                      key={scope}
-                      className="flex cursor-pointer items-start gap-2.5"
-                    >
-                      <Checkbox
-                        checked={scopes.includes(scope)}
-                        onCheckedChange={(checked) =>
-                          toggleScope(scope, checked === true)
-                        }
-                        className="mt-0.5"
-                      />
-                      <span className="min-w-0">
-                        <span className="text-foreground block font-mono text-xs">
-                          {scope}
-                        </span>
-                        <span className="text-muted-foreground block text-xs">
-                          {SCOPE_DESCRIPTIONS[scope]}
-                        </span>
-                      </span>
-                    </label>
-                  ))}
-                </div>
+              {personal ? (
                 <p className="text-muted-foreground text-xs">
-                  A key with no scopes can still call{' '}
-                  <code className="text-[11px]">GET /api/v1/me</code> to verify
-                  it works.
+                  Escopo: <span className="text-foreground">Inteligência (leitura)</span>.{' '}
+                  {SCOPE_DESCRIPTIONS[INTELLIGENCE_SCOPE]}
                 </p>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label className="text-muted-foreground">Scopes</Label>
+                  <div className="border-border space-y-2 rounded-md border p-3">
+                    {API_SCOPES.map((scope) => (
+                      <label
+                        key={scope}
+                        className="flex cursor-pointer items-start gap-2.5"
+                      >
+                        <Checkbox
+                          checked={scopes.includes(scope)}
+                          disabled={intelligenceOnly && scope !== INTELLIGENCE_SCOPE}
+                          onCheckedChange={(checked) =>
+                            toggleScope(scope, checked === true)
+                          }
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0">
+                          <span className="text-foreground block font-mono text-xs">
+                            {scope === INTELLIGENCE_SCOPE
+                              ? 'Inteligência (leitura)'
+                              : scope}
+                          </span>
+                          <span className="text-muted-foreground block text-xs">
+                            {SCOPE_DESCRIPTIONS[scope]}
+                          </span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-muted-foreground text-xs">
+                    {intelligenceOnly
+                      ? 'Chave pessoal: fica ligada a você, usa o seu papel e as suas equipes, e não pode ser combinada com outros escopos.'
+                      : (
+                        <>
+                          A key with no scopes can still call{' '}
+                          <code className="text-[11px]">GET /api/v1/me</code> to
+                          verify it works.
+                        </>
+                      )}
+                  </p>
+                </div>
+              )}
             </div>
 
             <DialogFooter>

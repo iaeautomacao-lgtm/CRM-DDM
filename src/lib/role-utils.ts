@@ -62,7 +62,8 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/dashboard": ["owner", "admin", "supervisor", "viewer"],
   "/monitoramento": ["owner", "admin", "supervisor"],
   // DDM Intelligence (PRD-04): supervisor vê só as suas equipes — o
-  // escopo é aplicado nas ferramentas (lib/intelligence/scope.ts).
+  // escopo é aplicado nas ferramentas (lib/intelligence/scope.ts). Cobre
+  // também /inteligencia/chaves (chaves pessoais do MCP de cada usuário).
   "/inteligencia": ["owner", "admin", "supervisor"],
   "/inbox": ["owner", "admin", "supervisor", "agent"],
   // Supervisor: só os relatórios de atendimento, já escopados às equipes

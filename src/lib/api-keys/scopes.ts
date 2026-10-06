@@ -21,6 +21,10 @@ export const API_SCOPES = [
   'conversations:read',
   'campaigns:write',
   'campaigns:read',
+  // Chave PESSOAL (exige api_keys.user_id, migration 154): leitura do DDM
+  // Intelligence via MCP (/api/mcp), com o escopo de equipes do dono da
+  // chave recalculado a cada requisição. Regras em ./personal.ts.
+  'intelligence:read',
 ] as const;
 
 export type ApiScope = (typeof API_SCOPES)[number];
@@ -34,6 +38,8 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'conversations:read': 'List and read conversations',
   'campaigns:write': 'Create and enqueue Disparador campaigns',
   'campaigns:read': 'Read Disparador campaign status and metrics',
+  'intelligence:read':
+    'Inteligência (leitura): ferramentas do DDM Intelligence via MCP. Chave pessoal — vê só o que você vê no CRM.',
 };
 
 /** Type-narrow an unknown value into a valid `ApiScope`. */

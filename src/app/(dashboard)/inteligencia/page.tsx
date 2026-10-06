@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { KeyRound, Loader2, MessageSquarePlus, Send, Sparkles } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -260,6 +261,13 @@ export default function InteligenciaPage() {
             Perguntas da conta hoje: {usage.used} de {usage.limit}
           </p>
         )}
+        <Link
+          href="/inteligencia/chaves"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <KeyRound className="size-3.5" />
+          Minhas chaves de API (MCP)
+        </Link>
       </aside>
 
       {/* Conversa */}

@@ -10,11 +10,17 @@
 //
 // Revocation is effective on the next request: once `revoked_at` is
 // set, `findActiveKeyByHash` returns null and the key 401s.
+//
+// Supervisor (PRD-04 Fase 3): revoga SÓ a própria chave pessoal
+// (user_id = ele). Como a RLS de update é admin+, esse caminho usa o
+// service role com conta e dono no filtro.
 // ============================================================
 
 import { NextResponse } from 'next/server';
 
-import { requireRole, toErrorResponse } from '@/lib/auth/account';
+import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
+import { hasMinRole } from '@/lib/auth/roles';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -26,7 +32,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireRole('admin');
+    const ctx = await getCurrentAccount();
+    const isAdmin = hasMinRole(ctx.role, 'admin');
+    if (!isAdmin && ctx.role !== 'supervisor') {
+      return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
+    }
 
     const limit = checkRateLimit(
       `admin:apiKeyRevoke:${ctx.userId}`,
@@ -40,14 +50,15 @@ export async function DELETE(
     // never revoke another account's key by guessing a UUID. (RLS
     // already enforces this; the explicit filter is belt-and-braces
     // and makes the "0 rows updated → 404" path precise.)
-    const { data, error } = await ctx.supabase
+    // Supervisor: só a chave pessoal dele (dono no filtro → 404 nas outras).
+    let query = (isAdmin ? ctx.supabase : supabaseAdmin())
       .from('api_keys')
       .update({ revoked_at: new Date().toISOString() })
       .eq('id', id)
       .eq('account_id', ctx.accountId)
-      .is('revoked_at', null)
-      .select('id')
-      .maybeSingle();
+      .is('revoked_at', null);
+    if (!isAdmin) query = query.eq('user_id', ctx.userId);
+    const { data, error } = await query.select('id').maybeSingle();
 
     if (error) {
       console.error('[DELETE /api/account/api-keys/[id]] error:', error);
