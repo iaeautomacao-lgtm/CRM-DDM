@@ -219,25 +219,25 @@ describe('janela de envio: sem rajada na reabertura (relógio de janela)', () =>
     vi.useRealTimers();
   });
 
-  it('fora da janela: rodadas vencidas mantêm o espaçamento (não vão todas para 08:00)', async () => {
+  it('fora da janela: último recurso adia para a próxima abertura (sem empurrar por dias)', async () => {
     vi.setSystemTime(br(15, 20));
-    for (const scheduled of [br(15, 18, 15), br(15, 18, 45)]) {
-      const res = await processQueueItem({ ...item, scheduled_at: scheduled.toISOString() }, batched);
-      expect(res).toEqual({ outcome: 'deferred', reason: 'outside_window' });
-    }
-    expect(mocks.updates.map((u) => u.scheduled_at)).toEqual([
-      br(16, 8, 15).toISOString(),
-      br(16, 8, 45).toISOString(),
-    ]);
+    const res = await processQueueItem({ ...item, scheduled_at: br(15, 18, 45).toISOString() }, batched);
+    expect(res).toEqual({ outcome: 'deferred', reason: 'outside_window' });
+    expect(mocks.updates).toEqual([{ status: 'agendado', scheduled_at: br(16, 8).toISOString() }]);
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
-  it('janela aberta: item que venceu à noite espera o seu horário no relógio de janela', async () => {
-    vi.setSystemTime(br(16, 8, 0, 30));
-    const res = await processQueueItem({ ...item, scheduled_at: br(15, 18, 45).toISOString() }, batched);
-    expect(res).toEqual({ outcome: 'deferred', reason: 'window_clock' });
-    expect(mocks.updates).toEqual([{ status: 'agendado', scheduled_at: br(16, 8, 45).toISOString() }]);
-    expect(mocks.send).not.toHaveBeenCalled();
+  it('janela aberta: não há mais adiamento item a item (o cron redistribui a fila antes)', async () => {
+    // Antes (#75) um item de segunda 07:45 numa fila antiga ia para a
+    // terça da semana seguinte. A redistribuição agora é do cron
+    // (queue-reflow.ts); aqui o item só é enviado.
+    vi.setSystemTime(br(19, 8, 0, 30));
+    const res = await processQueueItem({ ...item, scheduled_at: br(19, 7, 45).toISOString() }, {
+      ...batched,
+      dias_envio: [1, 2, 3, 4, 5],
+    });
+    expect(res).toMatchObject({ outcome: 'sent' });
+    expect(mocks.updates.some((u) => 'scheduled_at' in u)).toBe(false);
   });
 
   it('janela aberta: item agendado em horário aberto sai normalmente', async () => {

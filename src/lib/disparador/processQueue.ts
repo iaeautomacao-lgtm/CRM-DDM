@@ -26,7 +26,6 @@ import OpenAI from "openai";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/queue-markers";
 import { phoneVariants } from "@/lib/disparador/phone-key";
 import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/send-window";
-import { deferredSlot } from "@/lib/disparador/window-clock";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -449,25 +448,11 @@ export async function processQueueItem(
   const janela = { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio };
   const withinWindow = canSendNow(janela);
 
-  // Campanha em lote/"Segmentado" (batch_size > 1): rede de segurança
-  // contra a rajada — rodadas que venceram com a janela fechada (fila
-  // montada antes do relógio de janela, retomada de pausa…) mantêm o
-  // espaçamento na reabertura em vez de saírem todas juntas
-  // (window-clock.ts: deferredSlot/windowClockTime). O modo sequencial
-  // (batch_size = 1) segue como antes: o cron já o limita a 1 item por tick.
-  if ((campaign.batch_size ?? 1) > 1) {
-    const scheduledAt = item.scheduled_at ? new Date(item.scheduled_at) : null;
-    const slot = deferredSlot(scheduledAt, new Date(), janela, withinWindow);
-    if (slot) {
-      await supabaseAdmin()
-        .from("disp_message_queue")
-        .update({ status: "agendado", scheduled_at: slot.toISOString() })
-        .eq("id", item.id)
-        .eq("status", "agendado");
-      return { outcome: "deferred", reason: withinWindow ? "window_clock" : "outside_window" };
-    }
-  }
-
+  // Campanha em lote/"Segmentado" com rodadas vencidas em período fechado:
+  // o cron redistribui a fila inteira antes de enviar (queue-reflow.ts) —
+  // não há mais adiamento item a item aqui (ele empurrava filas antigas
+  // por dias e invertia a ordem). O adiamento abaixo, para a próxima
+  // abertura, é o último recurso para qualquer modo.
   if (!withinWindow) {
     // Fora da janela ou em dia não permitido: adia para a PRÓXIMA abertura
     // válida (hoje, se ainda não abriu; senão o próximo dia permitido).

@@ -15,6 +15,7 @@ import {
   shouldReserveCampaignCadence,
 } from "@/lib/disparador/cron-batching";
 import { startCampaign } from "@/lib/disparador/startCampaign";
+import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 
 // ============================================================
@@ -203,6 +204,25 @@ export async function POST(request: Request) {
           if (recalcError)
             console.error("[Cron] Falha ao recalcular métricas:", recalcError.message);
         }
+        continue;
+      }
+      // Lote/"Segmentado": fila com rodadas agendadas em período fechado
+      // (montada antes do relógio de janela, retomada…) é redistribuída uma
+      // vez, mantendo ordem e ritmo em tempo aberto (queue-reflow.ts). Este
+      // tick não envia nada da campanha: o próximo já pega a 1ª rodada nova.
+      // Se o reflow falhar, também não envia — melhor esperar um tick do
+      // que soltar a rajada.
+      if (
+        needsQueueReflow(
+          items as QueueItem[],
+          { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio },
+          campaign.batch_size ?? 1
+        )
+      ) {
+        const reflow = await reflowCampaignQueue(campaign);
+        if (reflow.ok)
+          console.log("[Cron] Fila redistribuída na janela:", campaign.id, reflow.items, "itens via", reflow.via);
+        else console.error("[Cron] Falha ao redistribuir a fila na janela:", campaign.id, reflow.error);
         continue;
       }
       const result = {

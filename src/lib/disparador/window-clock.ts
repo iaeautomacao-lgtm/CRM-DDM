@@ -23,7 +23,7 @@
 // itens/rodadas com scheduleRounds a partir do agendamento dá a mesma data
 // que o startCampaign vai gravar.
 
-import { canSendNow, nextSendSlot, parseHHMM } from "@/lib/disparador/send-window";
+import { canSendNow, parseHHMM } from "@/lib/disparador/send-window";
 
 export interface SendWindowConfig {
   inicio?: string | null;
@@ -149,43 +149,34 @@ export function scheduleRounds(
 }
 
 /**
- * Horário efetivo de um item da fila no relógio de janela. Item agendado em
- * tempo aberto: o próprio horário. Item agendado com a janela fechada (fila
- * montada antes desta regra, retomada, retry): vai para a abertura seguinte
- * MAIS o quanto ele estava depois do fechamento — rodadas que estavam a 30
- * min uma da outra continuam a 30 min, em vez de vencerem todas juntas na
- * abertura.
+ * O item foi agendado num período FECHADO da janela (fila montada antes do
+ * relógio de janela — ex.: uma rodada a cada 30 min atravessando a noite e
+ * o fim de semana —, retomada, mudança de janela…)? Usado pelo cron para
+ * decidir se a fila de uma campanha em lote precisa ser redistribuída
+ * (queue-reflow.ts).
+ *
+ * Antes (PR #75) cada item desses era empurrado para "abertura + o quanto
+ * ele estava depois do fechamento", contado no relógio de janela. Numa fila
+ * antiga isso transformava o período fechado inteiro em espera: janela
+ * 08–18 seg–sex, item de segunda 07:45 → terça da semana seguinte, enquanto
+ * o de segunda 08:00 saía na hora (ordem invertida).
+ *
+ * Não conta como inconsistente:
+ * - horário aberto, ou aceito pela regra de envio (canSendNow, fim
+ *   inclusivo até HH:MM:59);
+ * - "transbordo" de uma rodada iniciada antes do fechamento: os itens da
+ *   rodada saem em início + 100 ms·posição + 3 s·mensagem (startCampaign),
+ *   então uma rodada às 17:59 pode ter itens um pouco depois das 18:00.
+ *   `spillToleranceMs` cobre esse espalhamento.
  */
-export function windowClockTime(scheduledAt: Date, janela: SendWindowConfig): Date {
-  // "Aberto" aqui segue a regra de envio (canSendNow, fim inclusivo até
-  // HH:MM:59): item de uma rodada que transbordou segundos além do fim
-  // continua valendo onde está, não pula para o dia seguinte.
-  if (isOpenWindowTime(scheduledAt, janela) || canSendNow(janela, scheduledAt)) return scheduledAt;
-  const opening = addOpenWindowTime(scheduledAt, 0, janela);
-  const closedAt = lastWindowClose(scheduledAt, janela);
-  const lateness = closedAt ? Math.max(0, scheduledAt.getTime() - closedAt.getTime()) : 0;
-  return addOpenWindowTime(opening, lateness, janela);
-}
-
-/**
- * Para onde adiar um item que o consumidor pegou (processQueueItem), ou
- * null se pode enviar agora. Nunca antes da próxima abertura (nextSendSlot)
- * quando a janela está fechada; com a janela aberta, só adia se o horário
- * efetivo do item (windowClockTime) ainda estiver à frente — é o que impede
- * a rajada de itens que venceram durante a noite/fim de semana.
- */
-export function deferredSlot(
-  scheduledAt: Date | null,
-  now: Date,
+export function isScheduledInClosedWindow(
+  scheduledAt: Date,
   janela: SendWindowConfig,
-  canSendNowValue: boolean,
-  toleranceMs = MINUTE_MS
-): Date | null {
-  const effective = scheduledAt && !Number.isNaN(scheduledAt.getTime()) ? windowClockTime(scheduledAt, janela) : null;
-  if (!canSendNowValue) {
-    const next = nextSendSlot(janela, now);
-    return effective && effective.getTime() > next.getTime() ? effective : next;
-  }
-  if (effective && effective.getTime() > now.getTime() + toleranceMs) return effective;
-  return null;
+  spillToleranceMs: number
+): boolean {
+  if (Number.isNaN(scheduledAt.getTime())) return false;
+  if (isOpenWindowTime(scheduledAt, janela) || canSendNow(janela, scheduledAt)) return false;
+  const closedAt = lastWindowClose(scheduledAt, janela);
+  if (closedAt && scheduledAt.getTime() - closedAt.getTime() <= Math.max(0, spillToleranceMs)) return false;
+  return true;
 }
