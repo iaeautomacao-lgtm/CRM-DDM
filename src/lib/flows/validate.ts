@@ -120,7 +120,7 @@ export function validateFlowForActivation(
 
   // Per-node rules (Meta limits + dead-end + edge resolution).
   for (const n of nodes) {
-    issues.push(...validateNode(n, keys));
+    issues.push(...validateNode(n, keys, context));
   }
 
   // Variáveis em textos que chegam ao cliente: só {{vars.nome}} é trocado
@@ -239,6 +239,7 @@ function validateNextNodeKey(
 function validateNode(
   node: NodeInput,
   knownKeys: Set<string>,
+  context: { aiProvider?: string | null },
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
