@@ -255,7 +255,7 @@ describe("findExitTagRouter", () => {
   });
 });
 
-describe("flowExitTagsFromNodes (cópia pura do engine)", () => {
+describe("flowExitTagsFromNodes (usada pelo engine)", () => {
   it("lista as tags dos ramos do fluxo oficial", () => {
     const tags = flowExitTagsFromNodes(officialFlowNodes());
     expect(tags).toEqual(expect.arrayContaining(["#OPT_OUT", "#RECUPERADO", "#CPF_INVALIDO"]));
