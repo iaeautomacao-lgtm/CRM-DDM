@@ -88,6 +88,11 @@ import {
 } from "@/lib/disparador/preview-message";
 import { WEEKDAY_LABELS } from "@/lib/disparador/send-window";
 import {
+  TEMPLATE_VALIDATION_COLUMNS,
+  validateCampaignTemplate,
+  type LocalTemplateRow,
+} from "@/lib/disparador/template-validation";
+import {
   looksLikeImportHeader,
   normalizeImportHeader,
   resolveImportRows,
@@ -2243,6 +2248,52 @@ export default function CampanhasPage() {
     return metaSessions.length === 1 ? metaSessions[0].waba_id : undefined;
   }, [sessions, selectedSessions]);
 
+  // Validação dos templates Meta escolhidos (mesma regra do início da
+  // campanha em startCampaign.ts — template-validation.ts): aviso inline
+  // logo ao escolher, em vez de só descobrir no "Iniciar".
+  const selectedMetaWabaIds = useMemo(
+    () =>
+      sessions
+        .filter((s) => selectedSessions.includes(s.id) && s.provider === "meta" && s.waba_id)
+        .map((s) => s.waba_id as string),
+    [sessions, selectedSessions]
+  );
+  const templateNamesKey = useMemo(
+    () =>
+      [...new Set(mensagens.map((m) => m.template_name).filter((n): n is string => !!n))]
+        .sort()
+        .join("|"),
+    [mensagens]
+  );
+  const [templateCatalogRows, setTemplateCatalogRows] = useState<LocalTemplateRow[]>([]);
+  useEffect(() => {
+    if (!hasMeta || !accountId || !templateNamesKey) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await createClient()
+        .from("message_templates")
+        .select(TEMPLATE_VALIDATION_COLUMNS)
+        .eq("account_id", accountId)
+        .in("name", templateNamesKey.split("|"));
+      if (!cancelled && !error) setTemplateCatalogRows((data ?? []) as LocalTemplateRow[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasMeta, accountId, templateNamesKey]);
+
+  const templateWarning = (msg: CampaignMessage): string | null => {
+    if (!hasMeta || !msg.template_name || !Array.isArray(msg.template_variable_map)) return null;
+    const result = validateCampaignTemplate({
+      templateName: msg.template_name,
+      language: msg.template_language || "pt_BR",
+      mappedVariables: msg.template_variable_map.length,
+      rows: templateCatalogRows,
+      wabaIds: selectedMetaWabaIds,
+    });
+    return result.ok ? null : result.error;
+  };
+
   // Canais filtrados pela equipe selecionada no passo Público (teamFilter="" =
   // Todas as equipes, mostra tudo). Puramente client-side sobre a lista
   // já carregada em loadData() — nenhuma query nova por troca de filtro.
@@ -3596,6 +3647,19 @@ export default function CampanhasPage() {
                             Carregar de um Template
                           </button>
                         </div>
+
+                        {(() => {
+                          const aviso = templateWarning(msg);
+                          return aviso ? (
+                            <p
+                              role="alert"
+                              className="flex items-start gap-1.5 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] font-medium text-red-600 dark:text-red-400"
+                            >
+                              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                              <span>{aviso} A campanha não vai iniciar com este template.</span>
+                            </p>
+                          ) : null;
+                        })()}
 
                         {msg.template_name && msg.template_variable_map && msg.template_variable_map.length > 0 && (
                           <div className="space-y-2 rounded-md border border-border bg-card p-3">
