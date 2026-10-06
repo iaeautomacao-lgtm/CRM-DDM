@@ -11,6 +11,8 @@ describe("AI exit tags", () => {
       "#RECUSA_CONFIRMADA",
     );
     expect(extractAiExitTag("#RECUPERADO")).toBe("#RECUPERADO");
+    expect(extractAiExitTag("ok #OPT_OUT")).toBe("#OPT_OUT");
+    expect(extractAiExitTag("#CONTATO_DIVERGENTE")).toBe("#CONTATO_DIVERGENTE");
   });
 
   it("strips the complete detected tag without leaking suffixes", () => {

@@ -15,6 +15,8 @@ const LEGACY_HUMAN_TRANSFER_TAGS = new Set([
   "#ERRO_EFETIVACAO",
   "#CONTESTACAO_DIVIDA",
   "#FALLBACK_EXAURIDO",
+  "#OPT_OUT",
+  "#CONTATO_DIVERGENTE",
 ]);
 
 export function extractAiExitTag(text: string): string | null {

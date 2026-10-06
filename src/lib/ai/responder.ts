@@ -1,4 +1,6 @@
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
+import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
 import { resolveToolSecrets } from '@/lib/ai/tool-secrets';
@@ -613,6 +615,43 @@ async function handleAiAutoResponseAttempt(
     };
   }
 
+  // High-priority intents must be deterministic. These cases should not
+  // depend on prompt compliance because they change routing/suppression.
+  const priorityIntent = classifyPriorityIntent(incomingText);
+
+  if (priorityIntent?.kind === "opt_out" || priorityIntent?.kind === "wrong_person") {
+    const { data: contactForBlock, error: contactForBlockError } = await db
+      .from("contacts")
+      .select("phone")
+      .eq("id", contactId)
+      .eq("account_id", accountId)
+      .maybeSingle();
+
+    if (contactForBlockError) {
+      console.error("[AI Agent] Failed to load contact for suppression:", contactForBlockError);
+    } else if (contactForBlock?.phone) {
+      const normalizedPhone = formatBrazilianPhone(contactForBlock.phone);
+      if (normalizedPhone) {
+        const { error: blacklistError } = await db
+          .from("blacklist")
+          .upsert(
+            {
+              telefone: normalizedPhone,
+              motivo: priorityIntent.kind === "opt_out" ? "opt_out" : "reclamacao",
+              mensagem_detectada: incomingText,
+              bloqueado_por: "ai_priority_guard",
+              data_bloqueio: new Date().toISOString(),
+              account_id: accountId,
+            },
+            { onConflict: "telefone" },
+          );
+        if (blacklistError) {
+          console.error("[AI Agent] Failed to persist suppression:", blacklistError);
+        }
+      }
+    }
+  }
+
   // --- TRAVA DE MENSAGENS INADEQUADAS OU SACANAGEM (ANTI-SCAM) ---
   // Impede gasto desnecessário de tokens se o cliente estiver xingando, mandando piadas ou tentando "quebrar" o bot.
   const lowerMsg = (incomingText || "").toLowerCase().trim();
@@ -625,7 +664,7 @@ async function handleAiAutoResponseAttempt(
 
   const containsBlacklisted = blacklistedKeywords.some(keyword => lowerMsg.includes(keyword));
 
-  if (containsBlacklisted) {
+  if (!priorityIntent && containsBlacklisted) {
     console.warn(`[AI Agent] Anti-scam triggered on conversation ${conversationId}. Suspicious input: "${incomingText}". Transferring to human.`);
     
     // Busca o agente para transferir
@@ -682,7 +721,7 @@ async function handleAiAutoResponseAttempt(
   // --- ANTI-LOOP GUARD ---
   // Se as últimas 6 mensagens ocorreram em um intervalo menor que 12 segundos,
   // assumimos que é um loop de bots conversando. Silenciamos o bot e atribuímos ao humano.
-  if (messages && messages.length >= 6) {
+  if (!priorityIntent && messages && messages.length >= 6) {
     const recentMsgs = messages.slice(0, 6);
     const newestTime = new Date(recentMsgs[0].created_at).getTime();
     const oldestTime = new Date(recentMsgs[5].created_at).getTime();
@@ -1370,7 +1409,9 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   };
 
   let generatedText = "";
-  if (forceTransferHumanMsg) {
+  if (priorityIntent) {
+    generatedText = `${priorityIntent.reply} ${priorityIntent.tag}`;
+  } else if (forceTransferHumanMsg) {
     generatedText = forceTransferHumanMsg;
   } else {
     try {
