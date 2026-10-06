@@ -31,7 +31,22 @@ export async function GET(request: Request) {
         return [channel ?? 'all', count ?? 0] as const
       })
     )
-    return NextResponse.json({ unread: Object.fromEntries(counts) })
+
+    // Totais por seção (Em atendimento / Em espera) da lista agrupada, com os
+    // mesmos filtros da lista. Não consideram a busca por texto (?q=).
+    const statusTotals = await Promise.all(
+      (['open', 'pending'] as const).map(async (status) => {
+        const { count, error } = await applyInboxFilters(
+          supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('status', status),
+          filters,
+          { accountId, userId, line },
+          { includeStatus: false }
+        )
+        if (error) throw error
+        return [status, count ?? 0] as const
+      })
+    )
+    return NextResponse.json({ unread: Object.fromEntries(counts), status: Object.fromEntries(statusTotals) })
   } catch (err) {
     return toErrorResponse(err)
   }
