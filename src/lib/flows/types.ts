@@ -408,7 +408,7 @@ export interface AiAgentNodeConfig {
    * Optional model override for this node. Must belong to the provider
    * configured in ai_config for the account.
    */
-  model?: string;
+  model?: string | null;
   /** Required for `once` and `loop`; ignored for `takeover`. */
   next_node_key?: string;
   /** Safety cap for `loop` mode. Defaults to 20 when unset. */
