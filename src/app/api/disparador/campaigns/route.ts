@@ -128,26 +128,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Relinks são server-side para não depender de UPDATE direto do browser.
-    if (insert.import_draft_id) {
-      const [utm, csvVars] = await Promise.all([
-        supabaseAdmin()
-          .from("disparador_utm_links")
-          .update({ campaign_id: campaign.id })
-          .eq("account_id", accountId)
-          .eq("draft_id", insert.import_draft_id)
-          .is("campaign_id", null),
-        supabaseAdmin()
-          .from("contact_import_variables")
-          .update({ campaign_id: campaign.id })
-          .eq("account_id", accountId)
-          .eq("draft_id", insert.import_draft_id)
-          .is("campaign_id", null),
-      ]);
-      if (utm.error) console.error("[Campaign Create] UTM relink:", utm.error.message);
-      if (csvVars.error) console.error("[Campaign Create] CSV vars relink:", csvVars.error.message);
-    }
-
     return NextResponse.json({ success: true, id: campaign.id }, { status: 201 });
   } catch (err: unknown) {
     console.error("[Campaign Create] Failed:", err);
