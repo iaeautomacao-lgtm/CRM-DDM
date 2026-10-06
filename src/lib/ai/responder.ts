@@ -2070,7 +2070,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   };
 }
 
-async function generateGeminiResponse(
+export async function generateGeminiResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
@@ -2170,6 +2170,10 @@ export async function generateOpenAiResponse(
   ) => Promise<void>,
   nodeKey?: string,
   model = "gpt-4o-mini",
+  // Simulador de fluxo (PRD 05): executa a chamada HTTP da tool no lugar
+  // do fetch real (mock / leitura real controlada). Ausente — produção —
+  // segue o boundedFetch de sempre.
+  toolFetch?: (toolName: string, url: string, init: RequestInit) => Promise<Response>,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
 
@@ -2378,7 +2382,7 @@ export async function generateOpenAiResponse(
             attempt += 1;
 
             try {
-              const httpRes = await boundedFetch(resolvedUrl, {
+              const httpInit: RequestInit = {
                 method: toolDef.http.method,
                 headers: {
                   "Content-Type": "application/json",
@@ -2386,7 +2390,10 @@ export async function generateOpenAiResponse(
                 },
                 ...(resolvedBody ? { body: resolvedBody } : {}),
                 signal: AbortSignal.timeout(30000),
-              });
+              };
+              const httpRes = toolFetch
+                ? await toolFetch(toolName, resolvedUrl, httpInit)
+                : await boundedFetch(resolvedUrl, httpInit);
 
               const httpText = await httpRes.text();
               const failure =
@@ -2480,7 +2487,7 @@ export async function generateOpenAiResponse(
   return ""; // Fallback if max iterations reached
 }
 
-async function generateClaudeResponse(
+export async function generateClaudeResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
@@ -2524,7 +2531,7 @@ async function generateClaudeResponse(
   return textBlock?.text || "";
 }
 
-async function generateHermesResponse(
+export async function generateHermesResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
