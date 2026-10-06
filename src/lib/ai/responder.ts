@@ -4,6 +4,11 @@ import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
 import { resolveToolSecrets } from '@/lib/ai/tool-secrets';
+import {
+  getAiModelDefinition,
+  isModelCompatibleWithProvider,
+  resolveAiModel,
+} from "@/lib/ai/models";
 import { describeAttemptStop, effectivePromptVersion, newAttemptTrace, type AiAttemptTrace } from '@/lib/ai/attempt-telemetry';
 import { auditFetch } from '@/lib/audit/context'
 import { chatMediaReference } from '@/lib/storage/chat-media';
@@ -555,6 +560,9 @@ async function handleAiAutoResponseAttempt(
   // (subject_key "ai_exit_code") — aceitas além de KNOWN_AI_EXIT_TAGS,
   // para fluxos com tags próprias. Ver exit-tags.ts.
   flowExitTags?: string[],
+  // Override opcional do nó ai_agent. Continua restrito ao provider
+  // configurado na conta; callers fora do Flow Builder deixam undefined.
+  modelOverride?: string | null,
   tracker?: AiAttemptTracker,
 ): Promise<AiAutoResponseResult> {
   const db = supabaseAdmin();
@@ -583,10 +591,35 @@ async function handleAiAutoResponseAttempt(
     };
   }
 
-  const responseModel =
-    (typeof aiConfig.api_model === "string" && aiConfig.api_model.trim()) ||
-    aiConfig.api_provider ||
-    null;
+  if (
+    modelOverride?.trim() &&
+    !isModelCompatibleWithProvider(modelOverride, aiConfig.api_provider)
+  ) {
+    return {
+      outcome: "failed",
+      reason: `ai_model_provider_mismatch:${modelOverride} is not compatible with ${aiConfig.api_provider}`,
+      detectedTag: null,
+      modelUsed: null,
+    };
+  }
+
+  const resolvedModel = resolveAiModel({
+    provider: aiConfig.api_provider,
+    nodeModel: modelOverride,
+    accountModel:
+      typeof (aiConfig as { api_model?: unknown }).api_model === "string"
+        ? (aiConfig as { api_model: string }).api_model
+        : null,
+  });
+  if (!resolvedModel) {
+    return {
+      outcome: "failed",
+      reason: `unsupported_ai_provider:${aiConfig.api_provider}`,
+      detectedTag: null,
+      modelUsed: null,
+    };
+  }
+  const responseModel = resolvedModel.model;
 
   // --- DEBOUNCE E DELAY DE DIGITAÇÃO ---
   // Aguarda 4 segundos antes de prosseguir. Se uma nova mensagem chegar durante esse intervalo,
@@ -1466,13 +1499,14 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         },
         trackedOnToolResult,
         nodeKey,
+        responseModel,
       );
     } else if (aiConfig.api_provider === "claude") {
-      return generateClaudeResponse(activeKey, systemPromptWithKb, history);
+      return generateClaudeResponse(activeKey, systemPromptWithKb, history, responseModel);
     } else if (aiConfig.api_provider === "hermes") {
-      return generateHermesResponse(activeKey, systemPromptWithKb, history);
+      return generateHermesResponse(activeKey, systemPromptWithKb, history, responseModel);
     }
-    return generateGeminiResponse(activeKey, systemPromptWithKb, history);
+    return generateGeminiResponse(activeKey, systemPromptWithKb, history, responseModel);
   };
 
   let generatedText = "";
@@ -2039,9 +2073,9 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
 async function generateGeminiResponse(
   apiKey: string,
   systemPrompt: string,
-  history: any[]
+  history: any[],
+  model: string,
 ): Promise<string> {
-  const model = "gemini-1.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const contents = [];
@@ -2135,6 +2169,7 @@ export async function generateOpenAiResponse(
     meta?: ToolExecutionMeta,
   ) => Promise<void>,
   nodeKey?: string,
+  model = "gpt-4o-mini",
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
 
@@ -2190,12 +2225,18 @@ export async function generateOpenAiResponse(
   const collectedToolResults: { toolName: string; result: string }[] = [];
 
   for (let iteration = 0; iteration < 5; iteration++) {
+    const modelDefinition = getAiModelDefinition("openai", model);
     const body: any = {
-      model: "gpt-4o-mini",
+      model,
       messages,
-      temperature: 0.7,
-      max_tokens: 1000,
     };
+    if (modelDefinition?.openai_chat?.reasoning_effort) {
+      body.reasoning_effort = modelDefinition.openai_chat.reasoning_effort;
+      body.max_completion_tokens = 1000;
+    } else {
+      body.temperature = 0.7;
+      body.max_tokens = 1000;
+    }
     if (openAiTools?.length) {
       body.tools = openAiTools;
       body.tool_choice = "auto";
@@ -2442,7 +2483,8 @@ export async function generateOpenAiResponse(
 async function generateClaudeResponse(
   apiKey: string,
   systemPrompt: string,
-  history: any[]
+  history: any[],
+  model: string,
 ): Promise<string> {
   const url = "https://api.anthropic.com/v1/messages";
   const messages = [];
@@ -2463,7 +2505,7 @@ async function generateClaudeResponse(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
+      model,
       max_tokens: 1000,
       system: systemPrompt,
       messages,
@@ -2476,13 +2518,17 @@ async function generateClaudeResponse(
   }
 
   const data = await response.json();
-  return data?.content?.[0]?.text || "";
+  const textBlock = Array.isArray(data?.content)
+    ? data.content.find((block: { type?: string; text?: string }) => block?.type === "text")
+    : null;
+  return textBlock?.text || "";
 }
 
 async function generateHermesResponse(
   apiKey: string,
   systemPrompt: string,
-  history: any[]
+  history: any[],
+  model: string,
 ): Promise<string> {
   const url = "https://openrouter.ai/api/v1/chat/completions";
   const messages = [];
@@ -2508,7 +2554,7 @@ async function generateHermesResponse(
       "X-Title": "WA CRM",
     },
     body: JSON.stringify({
-      model: "nousresearch/hermes-3-llama-3.1-405b",
+      model,
       messages,
       temperature: 0.7,
       max_tokens: 1000,

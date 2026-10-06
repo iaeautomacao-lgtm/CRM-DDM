@@ -404,6 +404,11 @@ export interface AiAgentNodeConfig {
   mode: "once" | "loop" | "takeover";
   /** Overrides ai_config.system_prompt for this node's call, when set. */
   system_prompt_override?: string;
+  /**
+   * Optional model override for this node. Must belong to the provider
+   * configured in ai_config for the account.
+   */
+  model?: string | null;
   /** Required for `once` and `loop`; ignored for `takeover`. */
   next_node_key?: string;
   /** Safety cap for `loop` mode. Defaults to 20 when unset. */

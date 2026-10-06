@@ -63,7 +63,7 @@ export function parseAcordoResponse(raw: string): boolean {
 /**
  * Classifies a conversation's history as "formalized agreement" or not.
  * `callLlm` is injected so this can be unit-tested without a real LLM call
- * — production callers pass `(prompt) => callLlmForAnalysis(provider, apiKey, prompt)`.
+ * — production callers pass `(prompt) => callLlmForAnalysis(provider, apiKey, prompt, model)`.
  */
 export async function classifyAcordoFormalizado(
   historyText: string,
@@ -109,7 +109,7 @@ export async function autoTagAcordoRealizado(
 
     const activeConfig = await resolveActiveApiKey(db, accountId);
     if (!activeConfig) return;
-    const { provider, apiKey } = activeConfig;
+    const { provider, apiKey, model } = activeConfig;
 
     const historyText = await fetchRecentHistoryText(db, conversationId);
     if (!historyText) return;
