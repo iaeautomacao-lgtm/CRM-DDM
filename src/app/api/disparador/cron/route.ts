@@ -12,6 +12,7 @@ import { canSendNow } from "@/lib/disparador/send-window";
 import { processWithConcurrency } from "@/lib/disparador/concurrency";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -213,10 +214,28 @@ export async function POST(request: Request) {
         }
       });
       results.push(result);
+      // Pausa automática de segurança (auto-pause.ts): taxa de erro
+      // permanente alta nas últimas tentativas → mesma pausa do botão
+      // "Pausar". Só avalia; não muda ritmo, lote nem concorrência. Nunca
+      // lança.
+      if (!lostLease) await checkCampaignAutoPause(db, campaign);
     }
     // Sobrou tempo? Entrega mais callbacks (inclusive de campanhas
     // encerradas neste tick).
     if (!lostLease && Date.now() < deadline - 10_000) await drainCallbackOutbox();
+    // Limpeza de recibos de status órfãos (migration 156): recibos de
+    // mensagens que não são do disparador nunca casam com a fila e ficavam
+    // para sempre. Lote limitado (5000), só com tempo sobrando e só a cada
+    // 10 minutos. Sem a migration a RPC não existe — só loga.
+    if (!lostLease && Date.now() < deadline - 10_000 && new Date().getUTCMinutes() % 10 === 0) {
+      try {
+        const { error: cleanupError } = await db.rpc("cleanup_orphan_dispatch_receipts", { p_limit: 5000 });
+        if (cleanupError)
+          console.error("[Cron] Falha ao limpar recibos órfãos:", cleanupError.message);
+      } catch (error) {
+        console.error("[Cron] Falha ao limpar recibos órfãos:", error);
+      }
+    }
     return NextResponse.json({
       status: results.length ? "processed" : "idle",
       results,
