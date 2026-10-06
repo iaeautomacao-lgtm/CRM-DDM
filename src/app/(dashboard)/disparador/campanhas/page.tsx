@@ -1686,6 +1686,30 @@ export default function CampanhasPage() {
         if (!res.ok) throw new Error(created.error || "Erro ao criar campanha");
         const newCampaign = { id: created.id as string };
 
+        // Dados auxiliares do draft ainda têm escrita client-side própria.
+        // O estado crítico da campanha não depende mais disso e já foi
+        // persistido/revalidado pela API acima.
+        const supabase = createClient();
+        if (utmGerado) {
+          const { error: relinkErr } = await supabase
+            .from("disparador_utm_links")
+            .update({ campaign_id: newCampaign.id })
+            .eq("draft_id", draftId)
+            .is("campaign_id", null);
+          if (relinkErr) {
+            console.error("[UTM] Falha ao vincular links à campanha:", relinkErr);
+          }
+        }
+
+        const { error: csvVarRelinkErr } = await supabase
+          .from("contact_import_variables")
+          .update({ campaign_id: newCampaign.id })
+          .eq("draft_id", draftId)
+          .is("campaign_id", null);
+        if (csvVarRelinkErr) {
+          console.error("[Contacts Import] Falha ao vincular variáveis CSV à campanha:", csvVarRelinkErr);
+        }
+
         if (draftKey) localStorage.removeItem(draftKey);
         toast.success("Campanha criada!");
         // total_contatos não é conhecido aqui — mesma observação do
