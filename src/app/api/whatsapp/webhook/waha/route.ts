@@ -8,6 +8,7 @@ import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { assertWahaUrlIsSafe } from '@/lib/whatsapp/waha-api'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
+import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
@@ -656,7 +657,8 @@ export async function POST(request: Request) {
         // "Todos" view never shows status='closed') instead of leaving it
         // stuck in "Fechados" with an unread message no one is watching.
         if (conversation?.status === 'closed') {
-          updates.status = 'pending'
+          // Reabertura = atendimento novo: status pending + tabulação zerada.
+          Object.assign(updates, reopenConversationFields())
         }
       }
 
