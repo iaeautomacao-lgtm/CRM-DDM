@@ -5,6 +5,7 @@ import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
 import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
 import { phoneKey } from "@/lib/disparador/phone-key";
+import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
 
 // Payload esperado pelo sistema externo (Planejamento)
 interface ExternalCampaignPayload {
@@ -156,11 +157,8 @@ export async function POST(request: Request) {
     const janela_inicio = body.janela_inicio ?? "08:00";
     const janela_fim = body.janela_fim ?? "18:00";
 
-    // Buscar blacklist
-    const { data: blacklist } = await db
-      .from("blacklist")
-      .select("telefone");
-    const blacklistSet = new Set((blacklist ?? []).map((b) => phoneKey(b.telefone)));
+    // Buscar blacklist — paginada (antes parava em 1000 linhas).
+    const blacklistSet = await loadBlacklistKeySet(db);
 
     // Criar campanha
     const { data: campaign, error: campaignError } = await db

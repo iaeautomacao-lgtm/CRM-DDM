@@ -1550,6 +1550,15 @@ export default function CampanhasPage() {
         } else {
           toast.warning(partes.join(" · ") + " — nenhum contato novo foi adicionado");
         }
+        // VAR1–VAR3 que não foram gravadas: a campanha sairia com variável
+        // vazia (contato marcado como erro) — avisa em vez de seguir calado.
+        const variaveisFalhas = Number(importResult.results?.variaveis_falhas ?? 0);
+        if (variaveisFalhas > 0) {
+          toast.error(
+            `${variaveisFalhas} valores de VAR1–VAR3 não foram salvos. Importe o arquivo de novo antes de iniciar a campanha.`,
+            { duration: 15000 }
+          );
+        }
 
         trackAction("csv_imported", {
           total_rows: importados + duplicados + invalidos + erros.length,
