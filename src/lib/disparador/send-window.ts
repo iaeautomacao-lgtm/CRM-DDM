@@ -9,9 +9,13 @@
 
 const BR_OFFSET_HOURS = 3; // America/Sao_Paulo = UTC-3 fixo (sem horário de verão desde 2019)
 
-/** "08:30" → 510; null se vazio/inválido. */
+/**
+ * "08:30" → 510; null se vazio/inválido. Aceita também "08:30:00": coluna
+ * do tipo time no Postgres volta com segundos — antes isso virava null e a
+ * janela era ignorada em silêncio (envio a qualquer hora).
+ */
 export function parseHHMM(value: string | null | undefined): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec((value ?? "").trim());
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec((value ?? "").trim());
   if (!m) return null;
   const h = Number(m[1]);
   const min = Number(m[2]);
