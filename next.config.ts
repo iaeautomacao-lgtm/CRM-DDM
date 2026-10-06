@@ -88,6 +88,13 @@ const nextConfig: NextConfig = {
   // Each service owns its dependencies; parent lockfiles must not change resolution.
   turbopack: { root: __dirname },
   deploymentId: resolveDeploymentId(),
+  // O middleware cobre /api/* e guarda o corpo em memória até este limite
+  // (padrão 10 MB; acima disso o corpo chega truncado e formData() falha).
+  // O import do assistente já vai em blocos pequenos; isto cobre o upload do
+  // arquivo inteiro da tela de contatos do disparador.
+  experimental: {
+    proxyClientMaxBodySize: "50mb",
+  },
   /**
    * Cache-Control policy.
    *
