@@ -2003,6 +2003,8 @@ async function runAiAgentCore(
   let lastReply = "";
   let exitCodeFound: string | null = null;
   let modelUsed: string | null = null;
+  let modelSource: "node" | "account" | "provider_default" | null = null;
+  let providerUsed: string | null = null;
   let aiConfigUsable = false;
   try {
     // Resolve o modelo antes da chamada para que tool_result e demais
@@ -2022,6 +2024,7 @@ async function runAiAgentCore(
         }
       | null;
     aiConfigUsable = !!configRow?.enabled;
+    providerUsed = configRow?.api_provider ?? null;
 
     if (
       modelOverride?.trim() &&
@@ -2041,6 +2044,7 @@ async function runAiAgentCore(
         })
       : null;
     modelUsed = resolvedModel?.model ?? null;
+    modelSource = resolvedModel?.source ?? null;
 
     // Last customer message is the AI's input — same "what does the
     // customer want answered" the standalone auto-responder uses.
@@ -2252,6 +2256,8 @@ async function runAiAgentCore(
           node_key: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia",
           decision_type: "tool_result",
           decision: {
+            provider: providerUsed,
+            model_source: modelSource,
             duration_ms: durationMs,
             attempts: meta?.attempts ?? 1,
             recovered: meta?.recovered ?? false,
@@ -2363,6 +2369,8 @@ async function runAiAgentCore(
         decision_type: "ai_exit",
         decision: {
           exit_code: exitCodeFound,
+          provider: providerUsed,
+          model_source: modelSource,
         },
         reason: "ai_exit_code",
         needs_human: false,
@@ -2375,7 +2383,9 @@ async function runAiAgentCore(
     const baseOutput = {
       last_reply: lastReply.slice(-300),
       ai_exit_code: exitCodeFound,
+      provider_used: providerUsed,
       model_used: aiResponse.modelUsed ?? modelUsed,
+      model_source: modelSource,
       ai_message_id: aiMessageId,
       response_outcome: aiResponse.outcome,
       ...(responseReason ? { response_reason: responseReason } : {}),
