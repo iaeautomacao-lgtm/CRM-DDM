@@ -2,6 +2,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 import { phoneKey } from "@/lib/disparador/phone-key";
+import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import { formatStartFailureReason, parseTemplateMode } from "@/lib/disparador/campaign-validation";
@@ -390,32 +391,9 @@ async function prepareCampaign(
     // antes da limpeza da fila, ver audience acima.
     const contacts = audience.contacts;
 
-    // Fetch Blacklist to skip — paginado via .range(), mesmo padrão de
-    // allContacts/contact_import_variables acima: sem filtro nenhum (a
-    // blacklist não tem account_id, ver import/route.ts) e sem
-    // paginação, uma blacklist com mais de 1000 números batia no cap de
-    // resposta do PostgREST e truncava silenciosamente — números fora do
-    // corte paravam de ser excluídos, sem erro nenhum.
-    const blacklist: Array<{ telefone: string }> = [];
-    {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await supabaseAdmin()
-          .from("blacklist")
-          .select("telefone")
-          .range(from, from + pageSize - 1);
-        if (pageError) {
-          throw new Error(`Erro ao carregar blacklist: ${pageError.message}`);
-        }
-        blacklist.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-    }
-    // Comparação por chave (DDD + 8 últimos dígitos): entradas antigas sem
-    // 55 ou sem o 9º dígito também bloqueiam — ver phone-key.ts.
-    const blacklistSet = new Set(blacklist.map((b) => phoneKey(b.telefone)));
+    // Mesma fonte paginada usada pela prévia/importação. Assim, o número
+    // exibido como "na Blacklist" é exatamente o que é removido da fila.
+    const blacklistSet = await loadBlacklistKeySet(supabaseAdmin());
 
     // Contatos que já receberam com sucesso numa tentativa anterior desta
     // campanha (ex: a campanha falhou no meio — chunk de insert quebrou,

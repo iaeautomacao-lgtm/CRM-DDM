@@ -75,7 +75,9 @@ describe('queue provider outcomes', () => {
     mocks.confirmationError = null;
     mocks.updates.length = 0;
     mocks.send.mockReset().mockResolvedValue({ messageId: 'wamid.test' });
-    mocks.autoBlacklist.mockReset().mockResolvedValue(undefined);
+    mocks.autoBlacklist
+      .mockReset()
+      .mockResolvedValue({ campaignCount: 1, blacklisted: false });
     mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
       data: name === 'claim_dispatch_item' ? mocks.claimed : null,
       error: name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
@@ -94,16 +96,45 @@ describe('queue provider outcomes', () => {
     ).toEqual({ outcome: 'sent', messageId: 'wamid.test' });
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
-  it('blocks Meta 131026 permanently instead of scheduling a retry', async () => {
+  it('keeps the 1st/2nd Meta 131026 out of the definitive blacklist', async () => {
     mocks.send.mockRejectedValue(
       new MetaApiError('Meta: Message undeliverable (code 131026)', 131026, 400)
     );
+    mocks.autoBlacklist.mockResolvedValue({ campaignCount: 2, blacklisted: false });
 
     expect(
       await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
-    ).toEqual({ outcome: 'blocked', reason: 'meta_131026' });
+    ).toMatchObject({ outcome: 'error' });
 
     expect(mocks.autoBlacklist).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.updates.some(
+        (update) =>
+          update.status === 'erro' &&
+          update.erro_permanente === true &&
+          update.tentativas === 1
+      )
+    ).toBe(true);
+    expect(mocks.updates.some((update) => update.status === 'bloqueado')).toBe(false);
+    expect(
+      mocks.rpc.mock.calls.some(
+        ([name, args]) =>
+          name === 'increment_campaign_metric' &&
+          args?.p_field === 'total_blacklist'
+      )
+    ).toBe(false);
+  });
+
+  it('blacklists Meta 131026 only on the 3rd distinct campaign', async () => {
+    mocks.send.mockRejectedValue(
+      new MetaApiError('Meta: Message undeliverable (code 131026)', 131026, 400)
+    );
+    mocks.autoBlacklist.mockResolvedValue({ campaignCount: 3, blacklisted: true });
+
+    expect(
+      await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
+    ).toEqual({ outcome: 'blocked', reason: 'meta_131026_threshold' });
+
     expect(
       mocks.updates.some(
         (update) =>
@@ -112,11 +143,6 @@ describe('queue provider outcomes', () => {
           update.tentativas === 1
       )
     ).toBe(true);
-    expect(
-      mocks.updates.some(
-        (update) => update.status === 'agendado' || update.erro_permanente === false
-      )
-    ).toBe(false);
     expect(
       mocks.rpc.mock.calls.some(
         ([name, args]) =>

@@ -59,8 +59,8 @@ function classifyBlacklistEntry(entry: BlacklistEntry): BlacklistClassification 
     return {
       type: "meta_131026",
       label: "Automático — Meta 131026",
-      severity: "Preventivo",
-      description: "Falha de entrega pela Meta neste envio",
+      severity: "Forte",
+      description: "131026 confirmado em 3 campanhas diferentes",
     };
   }
 
@@ -128,14 +128,21 @@ export default function BlacklistPage() {
       const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
       setAccountId(scopedAccountId);
 
-      const { data, error } = await supabase
-        .from("blacklist")
-        .select("*")
-        .order("data_bloqueio", { ascending: false });
-
-      if (error) throw error;
-      setBlacklist(data ?? []);
-      setFilteredList(data ?? []);
+      const pageSize = 1000;
+      const allRows: BlacklistEntry[] = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase
+          .from("blacklist")
+          .select("*")
+          .eq("account_id", scopedAccountId)
+          .order("data_bloqueio", { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        allRows.push(...((data ?? []) as BlacklistEntry[]));
+        if (!data || data.length < pageSize) break;
+      }
+      setBlacklist(allRows);
+      setFilteredList(allRows);
     } catch (err) {
       console.error("Failed to load blacklist:", err);
       setLoadError("Não foi possível carregar a blacklist. Tente novamente.");
@@ -306,7 +313,7 @@ export default function BlacklistPage() {
           })}
         </div>
         <p className="text-xs text-muted-foreground">
-          Bloqueios por opt-out e manuais são fortes. Falhas Meta 131026 são preventivas e indicam que a Meta não conseguiu entregar naquele envio.
+          Opt-out e bloqueios manuais são imediatos. Meta 131026 só entra definitivamente na blacklist após ocorrer em 3 campanhas diferentes para o mesmo número.
         </p>
       </div>
 
