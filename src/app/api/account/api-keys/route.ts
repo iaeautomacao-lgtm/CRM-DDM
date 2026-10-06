@@ -15,17 +15,22 @@
 // response. We persist only its SHA-256 hash, so neither GET nor any
 // future endpoint can resurface it — same one-time-reveal contract
 // as invite links. If the admin loses it, they revoke and re-issue.
+//
+// Chaves pessoais (intelligence:read, MCP — PRD-04 Fase 3, migration
+// 154): ligadas ao criador (user_id). Owner/admin criam qualquer chave;
+// supervisor cria SÓ a chave pessoal dele (regras em
+// src/lib/api-keys/personal.ts). Como a RLS de escrita de api_keys é
+// admin+, o insert do supervisor usa o service role com dono, conta e
+// escopo fixados aqui no servidor. `GET ?mine=1` lista só as chaves
+// pessoais do usuário (seção "Minhas chaves de API" do /inteligencia).
 // ============================================================
 
 import { NextResponse } from 'next/server';
 
-import {
-  getCurrentAccount,
-  requireRole,
-  toErrorResponse,
-} from '@/lib/auth/account';
+import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
 import { generateApiKey } from '@/lib/api-keys/keys';
-import { normalizeScopes } from '@/lib/api-keys/scopes';
+import { planKeyCreation } from '@/lib/api-keys/personal';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -40,19 +45,23 @@ const MAX_EXPIRY_DAYS = 365;
 // Columns safe to expose. `key_hash` is deliberately excluded — it
 // never leaves the server.
 const SAFE_COLUMNS =
-  'id, name, key_prefix, scopes, last_used_at, expires_at, revoked_at, created_at';
+  'id, name, key_prefix, scopes, user_id, last_used_at, expires_at, revoked_at, created_at';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     // Any member can view the roster (RLS allows it); we just need a
     // resolved account context.
     const ctx = await getCurrentAccount();
+    const mine = new URL(request.url).searchParams.get('mine') === '1';
 
-    const { data, error } = await ctx.supabase
+    let query = ctx.supabase
       .from('api_keys')
       .select(SAFE_COLUMNS)
-      .eq('account_id', ctx.accountId)
-      .order('created_at', { ascending: false });
+      .eq('account_id', ctx.accountId);
+    if (mine) query = query.eq('user_id', ctx.userId);
+    const { data, error } = await query.order('created_at', {
+      ascending: false,
+    });
 
     if (error) {
       console.error('[GET /api/account/api-keys] fetch error:', error);
@@ -70,7 +79,16 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole('admin');
+    const ctx = await getCurrentAccount();
+    // Pré-checagem de papel antes do rate limit/corpo; o detalhe (o que
+    // cada papel pode criar) fica em planKeyCreation abaixo.
+    if (
+      ctx.role !== 'owner' &&
+      ctx.role !== 'admin' &&
+      ctx.role !== 'supervisor'
+    ) {
+      return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
+    }
 
     const limit = checkRateLimit(
       `admin:apiKeyCreate:${ctx.userId}`,
@@ -100,12 +118,9 @@ export async function POST(request: Request) {
 
     // Scopes default to none if omitted — that yields a key that can
     // only call the scope-free endpoints (e.g. GET /api/v1/me).
-    const scopes = normalizeScopes(body?.scopes ?? []);
-    if (scopes === null) {
-      return NextResponse.json(
-        { error: "'scopes' must be an array of known scope strings" },
-        { status: 400 }
-      );
+    const plan = planKeyCreation(ctx.role, ctx.userId, body?.scopes ?? []);
+    if (!plan.ok) {
+      return NextResponse.json({ error: plan.error }, { status: plan.status });
     }
 
     let expiresAt: string | null = null;
@@ -123,15 +138,21 @@ export async function POST(request: Request) {
 
     const { plaintext, hash, prefix } = generateApiKey();
 
-    const { data, error } = await ctx.supabase
+    // Supervisor não passa na RLS de insert (admin+): usa o service role,
+    // com conta, dono e escopo já fixados pelo servidor (planKeyCreation
+    // só deixa o supervisor criar a chave pessoal dele).
+    const writer = ctx.role === 'supervisor' ? supabaseAdmin() : ctx.supabase;
+    const { data, error } = await writer
       .from('api_keys')
       .insert({
         account_id: ctx.accountId,
         created_by: ctx.userId,
+        // Omitido na chave da conta: o insert funciona igual a antes.
+        ...(plan.userId ? { user_id: plan.userId } : {}),
         name: rawName,
         key_prefix: prefix,
         key_hash: hash,
-        scopes,
+        scopes: plan.scopes,
         expires_at: expiresAt,
       })
       .select(SAFE_COLUMNS)

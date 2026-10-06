@@ -49,6 +49,9 @@ export interface ApiKeyContext {
   scopes: string[];
   /** Who minted the key (null if that user was later removed). */
   createdBy: string | null;
+  /** Dono da chave pessoal (intelligence:read, migration 154); null =
+   *  chave da conta. Quem usa deve recalcular o papel desse usuário. */
+  userId: string | null;
 }
 
 /**
@@ -123,5 +126,6 @@ export async function requireApiKey(
     keyId: row.id,
     scopes: row.scopes,
     createdBy: row.created_by,
+    userId: row.user_id ?? null,
   };
 }

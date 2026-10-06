@@ -67,7 +67,9 @@ const probes = [
   { table: "disp_import_contacts", columns: "id" },
   // Chave da tabela é account_id (133_webchat_settings) — não há coluna id.
   { table: "webchat_settings", columns: "account_id" },
-  { table: "intelligence_tool_calls", columns: "id" },
+  // origin/api_key_id e api_keys.user_id: migration 154 (MCP do Intelligence).
+  { table: "intelligence_tool_calls", columns: "id,origin,api_key_id" },
+  { table: "api_keys", columns: "id,user_id" },
   { table: "quick_replies", columns: "id" },
 ];
 

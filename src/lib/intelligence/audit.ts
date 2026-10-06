@@ -17,7 +17,13 @@ export interface ToolCallLog {
   /** Tamanho do JSON do resultado, em caracteres. */
   resultSize: number | null;
   error?: string | null;
+  /** De onde veio a chamada (migration 154). Omitido = coluna fica NULL. */
+  origin?: ToolCallOrigin;
+  /** Chave de API usada (origem 'mcp'). */
+  apiKeyId?: string | null;
 }
+
+export type ToolCallOrigin = "api" | "chat" | "mcp";
 
 function safeArgs(args: unknown): unknown {
   try {
@@ -41,6 +47,10 @@ export async function logToolCall(entry: ToolCallLog, db?: SupabaseClient): Prom
       success: entry.success,
       result_size: entry.resultSize,
       error: entry.error ? entry.error.slice(0, MAX_ERROR_CHARS) : null,
+      // Só envia as colunas da 154 quando informadas: os caminhos antigos
+      // (rota de ferramentas e chat) gravam exatamente como antes.
+      ...(entry.origin ? { origin: entry.origin } : {}),
+      ...(entry.apiKeyId ? { api_key_id: entry.apiKeyId } : {}),
     });
     if (error) console.error("[intelligence] logToolCall:", error.message);
   } catch (err) {

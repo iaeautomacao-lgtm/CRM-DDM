@@ -50,6 +50,7 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `campaigns:write`    | Create and enqueue Disparador campaigns  |
 | `campaigns:read`     | Read Disparador campaign status and metrics |
+| `intelligence:read`  | Chave **pessoal** do MCP do DDM Intelligence (ver [MCP](#mcp-ddm-intelligence)) |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -318,6 +319,61 @@ curl https://your-crm.example.com/api/v1/disparador/campaigns/f68ec309-5022-484e
 `metrics.pending` mirrors `queue.agendado` — how many contacts are
 still waiting to be sent. Errors: `not_found` (404) if the campaign
 doesn't exist or belongs to another account.
+
+## MCP (DDM Intelligence)
+
+Servidor MCP remoto (Streamable HTTP, sem estado, somente leitura) que
+expõe as ferramentas de análise do DDM Intelligence — as mesmas do chat
+do `/inteligencia` — para assistentes externos (Claude Desktop, Claude
+Code, n8n).
+
+- **URL:** `https://<seu-host>/api/mcp` (só `POST`).
+- **Autenticação:** `Authorization: Bearer wacrm_live_…` de uma chave
+  **pessoal** com o escopo `intelligence:read`.
+
+### Chave pessoal
+
+Crie em **Inteligência → Minhas chaves de API (MCP)**
+(`/inteligencia/chaves`) — owner, admin e supervisor; cada um cria e
+revoga só as próprias. Owner/admin também podem marcar
+"Inteligência (leitura)" em **Configurações → API keys**.
+
+A chave age como você: o escopo é recalculado a cada requisição
+(owner/admin → conta toda; supervisor → só as equipes dele). Se o seu
+papel mudar ou você sair da conta, o acesso muda/para na hora; chave
+revogada para na hora. Ela não pode ser combinada com outros escopos.
+
+Toda chamada de ferramenta é auditada (origem `mcp`) e conta no mesmo
+limite por usuário do Intelligence (60/min). CPF, CNPJ e telefones
+saem mascarados (ex.: `***.***.***-12`, `+55 11 9****-1234`).
+
+### Conectar
+
+Claude Code:
+
+```bash
+claude mcp add --transport http ddm https://<seu-host>/api/mcp \
+  --header "Authorization: Bearer <sua-chave>"
+```
+
+Claude Desktop (`claude_desktop_config.json`, via `mcp-remote`):
+
+```json
+{
+  "mcpServers": {
+    "ddm": {
+      "command": "npx",
+      "args": [
+        "mcp-remote", "https://<seu-host>/api/mcp",
+        "--header", "Authorization:Bearer ${DDM_MCP_KEY}"
+      ],
+      "env": { "DDM_MCP_KEY": "<sua-chave>" }
+    }
+  }
+}
+```
+
+Nunca coloque a chave em repositório ou em arquivo compartilhado.
 
 ## Roadmap
 
