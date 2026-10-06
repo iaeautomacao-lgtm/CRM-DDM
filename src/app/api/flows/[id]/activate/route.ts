@@ -59,7 +59,7 @@ export async function POST(
     const [{ data: flow }, { data: nodes }] = await Promise.all([
       admin
         .from('flows')
-        .select('name, trigger_type, trigger_config, entry_node_id')
+        .select('account_id, name, trigger_type, trigger_config, entry_node_id')
         .eq('id', id)
         .maybeSingle(),
       admin
@@ -70,6 +70,12 @@ export async function POST(
     if (!flow) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 })
     }
+    const { data: aiConfig } = await admin
+      .from('ai_config')
+      .select('api_provider')
+      .eq('account_id', flow.account_id)
+      .maybeSingle()
+
     const issues = validateFlowForActivation(
       flow as {
         name: string
@@ -82,6 +88,7 @@ export async function POST(
         node_type: string
         config: Record<string, unknown>
       }>,
+      { aiProvider: aiConfig?.api_provider ?? null },
     )
     const blockers = issues.filter((i) => i.severity === 'error')
     if (blockers.length > 0) {
