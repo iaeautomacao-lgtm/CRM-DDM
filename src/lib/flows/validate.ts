@@ -26,6 +26,15 @@
 import { findInlineSecrets } from "@/lib/ai/tool-secrets";
 import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
 import { WEBCHAT_BUTTON_TEXT_MAX } from "@/lib/flows/types";
+import {
+  extractPromptExitTags,
+  findExitTagRouter,
+  flowExitTagsFromNodes,
+  LEGACY_EXIT_TAG_HINTS,
+  routerHandlesTag,
+  type ExitTagRouter,
+} from "@/lib/flows/exit-tag-routing";
+import { KNOWN_AI_EXIT_TAGS } from "@/lib/ai/exit-tags";
 
 export interface ValidationIssue {
   severity: "error" | "warning";
@@ -122,6 +131,9 @@ export function validateFlowForActivation(
   for (const n of nodes) {
     issues.push(...validateVariableTokens(n));
   }
+
+  // Tags que o prompt da IA manda emitir × ramos do switch seguinte.
+  issues.push(...validateAiExitTagRouting(nodes));
 
   // Reachability — every non-orphan node must be reachable from the
   // entry. Done after per-node validation so we don't double-report
@@ -1288,4 +1300,103 @@ export function validateVariableTokens(node: NodeInput): ValidationIssue[] {
       message: `Variável fora do padrão em "${node.node_key}": ${[...bad].join(", ")} vai literal ao cliente — use {{vars.nome}} (ex.: a variável gravada por "Coletar resposta").`,
     },
   ];
+}
+
+// ============================================================
+// Tags de saída da IA × ramos do switch seguinte
+// ============================================================
+
+function routerLabel(router: ExitTagRouter): string {
+  return router.kind === "switch"
+    ? `o switch "${router.node_key}"`
+    : `a condição "${router.node_key}"`;
+}
+
+/**
+ * Avisos (nunca erros) quando o prompt de um nó de IA cita uma #TAG sem
+ * ramo no switch seguinte — a tag cai no padrão, que costuma ser humano —
+ * e o inverso: ramo para tag que nenhum prompt cita. Nós de IA sem
+ * instruções próprias ficam de fora: o prompt vem da configuração da
+ * conta e não é visível aqui.
+ */
+export function validateAiExitTagRouting(nodes: NodeInput[]): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const byKey = new Map(nodes.map((n) => [n.node_key, n]));
+  const flowTags = new Set(flowExitTagsFromNodes(nodes));
+  const knownTags = new Set(KNOWN_AI_EXIT_TAGS);
+  // Por roteador: tags citadas pelos nós de IA que chegam nele.
+  const feeders = new Map<
+    string,
+    { router: ExitTagRouter; mentioned: Set<string>; blind: boolean; aiKeys: string[] }
+  >();
+
+  for (const n of nodes) {
+    if (n.node_type !== "ai_agent") continue;
+    const cfg = n.config as { mode?: string; system_prompt_override?: unknown };
+    const prompt =
+      typeof cfg.system_prompt_override === "string"
+        ? cfg.system_prompt_override.trim()
+        : "";
+    // "Assumir conversa" encerra o fluxo: a tag não passa por switch.
+    const router = cfg.mode === "takeover" ? null : findExitTagRouter(n, byKey);
+    const mentions = prompt ? extractPromptExitTags(prompt) : null;
+
+    if (router) {
+      const entry = feeders.get(router.node_key) ?? {
+        router,
+        mentioned: new Set<string>(),
+        blind: false,
+        aiKeys: [],
+      };
+      entry.aiKeys.push(n.node_key);
+      if (!mentions) entry.blind = true;
+      else for (const t of mentions.mentioned) entry.mentioned.add(t);
+      feeders.set(router.node_key, entry);
+    }
+    if (!mentions) continue;
+
+    for (const tag of mentions.emitted) {
+      if (tag in LEGACY_EXIT_TAG_HINTS) {
+        const hint = LEGACY_EXIT_TAG_HINTS[tag];
+        issues.push({
+          severity: "warning",
+          scope: "node",
+          node_key: n.node_key,
+          field: "system_prompt_override",
+          message: hint
+            ? `Sugestão: as instruções de "${n.node_key}" usam a tag legada ${tag}. Prefira ${hint}.`
+            : `Sugestão: as instruções de "${n.node_key}" usam a tag legada ${tag}. Confira se ainda faz sentido ou se há uma tag mais específica.`,
+        });
+      }
+      if (!router || routerHandlesTag(router, tag)) continue;
+      const literal = !knownTags.has(tag) && !flowTags.has(tag);
+      issues.push({
+        severity: "warning",
+        scope: "node",
+        node_key: n.node_key,
+        field: "system_prompt_override",
+        message: literal
+          ? `A IA pode emitir ${tag}, mas essa tag não é conhecida nem tem ramo em nenhum switch do fluxo — ela iria como texto para o cliente e a conversa não sairia do nó.`
+          : `A IA pode emitir ${tag}, mas ${routerLabel(router)} não tem ramo para essa tag — cai no padrão (${router.default_next ?? "nenhum nó configurado"}).`,
+      });
+    }
+  }
+
+  // Inverso (mais brando): ramo para tag que nenhum prompt cita. Pode ser
+  // legítimo — o código força algumas tags (travas automáticas).
+  for (const { router, mentioned, blind, aiKeys } of feeders.values()) {
+    if (blind) continue;
+    const label = routerLabel(router);
+    for (const tag of router.equalsTags) {
+      if (mentioned.has(tag)) continue;
+      issues.push({
+        severity: "warning",
+        scope: "node",
+        node_key: router.node_key,
+        message: `Sugestão: ${label} tem ramo para ${tag}, mas as instruções de ${aiKeys.map((k) => `"${k}"`).join(", ")} não citam essa tag. O ramo só será usado se o sistema forçar a tag — confira se não falta a instrução no prompt.`,
+      });
+    }
+  }
+
+  return issues;
 }
