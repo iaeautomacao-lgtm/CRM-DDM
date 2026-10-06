@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { processWithConcurrency } from './concurrency';
+import {
+  DEFAULT_DISPATCH_PROCESS_CONCURRENCY,
+  processWithConcurrency,
+  resolveDispatchProcessConcurrency,
+} from './concurrency';
 
 describe('bounded queue processing', () => {
   it('processes every item once and caps concurrent work', async () => {
@@ -25,5 +29,24 @@ describe('bounded queue processing', () => {
     await expect(
       processWithConcurrency([1], 0, async () => {})
     ).rejects.toThrow('Invalid concurrency');
+  });
+});
+
+
+describe('dispatch process concurrency config', () => {
+  it('defaults to 8 when unset', () => {
+    expect(resolveDispatchProcessConcurrency(undefined)).toBe(8);
+    expect(DEFAULT_DISPATCH_PROCESS_CONCURRENCY).toBe(8);
+  });
+
+  it('accepts an explicit safe integer', () => {
+    expect(resolveDispatchProcessConcurrency('10')).toBe(10);
+  });
+
+  it('falls back to 8 for invalid or unsafe values', () => {
+    expect(resolveDispatchProcessConcurrency('0')).toBe(8);
+    expect(resolveDispatchProcessConcurrency('51')).toBe(8);
+    expect(resolveDispatchProcessConcurrency('abc')).toBe(8);
+    expect(resolveDispatchProcessConcurrency('2.5')).toBe(8);
   });
 });

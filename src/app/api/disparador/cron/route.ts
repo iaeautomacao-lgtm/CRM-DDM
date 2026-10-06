@@ -9,7 +9,10 @@ import {
   type Campaign,
 } from "@/lib/disparador/processQueue";
 import { canSendNow } from "@/lib/disparador/send-window";
-import { processWithConcurrency } from "@/lib/disparador/concurrency";
+import {
+  processWithConcurrency,
+  resolveDispatchProcessConcurrency,
+} from "@/lib/disparador/concurrency";
 import {
   resolveCronBatchCandidateLimit,
   shouldReserveCampaignCadence,
@@ -50,7 +53,10 @@ export async function GET(request: Request) {
   if (rejection) return rejection;
   const { error } = await supabaseAdmin().from("campaigns").select("id").limit(1);
   return NextResponse.json(
-    { status: error ? "unavailable" : "healthy" },
+    {
+      status: error ? "unavailable" : "healthy",
+      process_concurrency: resolveDispatchProcessConcurrency(),
+    },
     { status: error ? 503 : 200 }
   );
 }
@@ -71,6 +77,7 @@ export async function POST(request: Request) {
   // Orçamento de tempo do tick. Nenhum trabalho novo começa nos últimos 5s,
   // para a requisição terminar antes do timeout do agendador/proxy.
   const deadline = Date.now() + 40_000;
+  const processConcurrency = resolveDispatchProcessConcurrency();
   try {
     const db = supabaseAdmin();
     // Só um tick por vez em todo o cluster. TTL de 600s cobre crash do
@@ -170,9 +177,11 @@ export async function POST(request: Request) {
         if (!reserved) continue;
       }
 
-      // This is a candidate-fetch limit, not provider concurrency. Keep the
-      // DB/provider in-flight safety at 4, but allow a logical segmented batch
-      // such as 614 contacts to be selected. The 40s tick deadline may leave
+      // This is a candidate-fetch limit, not provider concurrency. The
+      // process pool defaults to 8 while the database remains the final
+      // per-channel safety barrier through max_in_flight. A logical segmented
+      // batch such as 614 contacts can therefore be selected without becoming
+      // 614 simultaneous sends. The 40s tick deadline may leave
       // part of the batch for the next cron invocation; because batched
       // campaigns no longer reserve an extra pause, the next tick resumes the
       // remaining due rows immediately.
@@ -210,10 +219,11 @@ export async function POST(request: Request) {
         sent: 0,
         pending_confirmation: 0,
       };
-      // Até 4 envios simultâneos por processo. O SELECT acima não reserva
-      // nada: cada item ainda passa pelo claim atômico dentro de
-      // processQueueItem (claim_dispatch_item), que pode recusá-lo.
-      await processWithConcurrency(items as QueueItem[], 4, async (item) => {
+      // Pool do processo: default 8, configurável por
+      // DISPATCH_PROCESS_CONCURRENCY. O SELECT acima não reserva nada: cada
+      // item ainda passa pelo claim atômico dentro de processQueueItem
+      // (claim_dispatch_item), que aplica o max_in_flight por canal.
+      await processWithConcurrency(items as QueueItem[], processConcurrency, async (item) => {
         if (lostLease || Date.now() > deadline - 5_000) return;
         try {
           const outcome = await processQueueItem(item, campaign);
@@ -232,6 +242,7 @@ export async function POST(request: Request) {
     if (!lostLease && Date.now() < deadline - 10_000) await drainCallbackOutbox();
     return NextResponse.json({
       status: results.length ? "processed" : "idle",
+      process_concurrency: processConcurrency,
       results,
     });
   } catch (error) {
