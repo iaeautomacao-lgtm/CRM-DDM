@@ -44,6 +44,15 @@ interface QueueLog {
   _displayPhone?: string;
 }
 
+// Rótulo legível (pt-BR) do status da fila — antes o valor cru do banco
+// aparecia direto no selo.
+const QUEUE_STATUS_LABELS: Record<string, string> = {
+  agendado: "Agendado",
+  enviando: "Enviando",
+  enviado: "Enviado",
+  erro: "Erro",
+};
+
 // Contagem de itens por (campaign_id, status). Usa a RPC wacrm.get_campaign_stats
 // (migration 075 — agregação no servidor) quando disponível; sem a migration
 // aplicada, cai para buscar as linhas cruas e agregar no cliente (comportamento
@@ -238,12 +247,13 @@ export default function DisparadorMonitorPage() {
           <div className="flex items-center gap-2">
             <Link
               href="/disparador/campanhas"
-              className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
               title="Voltar para Campanhas"
+              aria-label="Voltar para Campanhas"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             </Link>
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
               <Megaphone className="h-5 w-5" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
@@ -257,7 +267,7 @@ export default function DisparadorMonitorPage() {
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
         <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
           <span className="text-[10px] font-bold text-muted-foreground uppercase">Agendados na Fila</span>
           <div className="flex items-baseline justify-between">
@@ -293,14 +303,14 @@ export default function DisparadorMonitorPage() {
 
       {/* Main Content (Log monitor) */}
       <div className="flex-1 flex flex-col rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <header className="border-b border-border px-5 py-4 flex items-center justify-between bg-muted/20">
+        <header className="border-b border-border px-4 py-3 sm:px-5 sm:py-4 flex items-center justify-between bg-muted/20">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Monitor da Fila em Tempo Real</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">Atualização automática a cada 30 segundos</p>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-5">
           {loading ? (
             <div className="flex h-32 items-center justify-center text-muted-foreground">
               Carregando fila de transmissão...
@@ -319,7 +329,7 @@ export default function DisparadorMonitorPage() {
                   className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border/30 pb-3 last:border-0 last:pb-0 gap-2"
                 >
                   <div className="flex items-start gap-2.5 truncate max-w-xl">
-                    <div className="mt-0.5">
+                    <div className="mt-0.5" aria-hidden="true">
                       {item.status === "agendado" && <span className="h-2 w-2 rounded-full bg-zinc-400 block" />}
                       {item.status === "enviando" && <Loader2 className="h-3 w-3 text-primary animate-spin" />}
                       {item.status === "enviado" && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
@@ -355,14 +365,14 @@ export default function DisparadorMonitorPage() {
                     <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
                       item.status === "enviado" ? "text-emerald-500 bg-emerald-500/10" :
                       item.status === "erro" ? "text-red-500 bg-red-500/10" :
-                      item.status === "enviando" ? "text-primary bg-primary/10" : "text-zinc-500 bg-zinc-100"
+                      item.status === "enviando" ? "text-primary bg-primary/10" : "text-zinc-500 bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400"
                     }`}>
-                      {item.status === "agendado" ? "Agendado" : item.status}
+                      {QUEUE_STATUS_LABELS[item.status] ?? item.status}
                     </span>
                     <span className="block text-[9px] text-muted-foreground mt-1">
                       {item.status === "enviado" && item.sent_at
-                        ? new Date(item.sent_at).toLocaleTimeString()
-                        : new Date(item.scheduled_at).toLocaleTimeString()
+                        ? new Date(item.sent_at).toLocaleTimeString("pt-BR")
+                        : new Date(item.scheduled_at).toLocaleTimeString("pt-BR")
                       }
                     </span>
                   </div>
@@ -371,7 +381,8 @@ export default function DisparadorMonitorPage() {
               {hasMoreQueue && (
                 <button
                   onClick={() => setQueueLimit(prev => prev + 15)}
-                  className="w-full py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border-t border-border/30 mt-2"
+                  type="button"
+                  className="w-full min-h-10 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors border-t border-border/30 mt-2"
                 >
                   Carregar mais...
                 </button>

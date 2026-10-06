@@ -48,21 +48,22 @@ function CampaignName({ campaign }: { campaign: { name: string; href: string | n
 }
 
 // Só aparece em bolhas de saída (fundo primary): os ícones usam a cor do
-// texto sobre primary; azul fica reservado para "lida".
+// texto sobre primary; azul fica reservado para "lida". Como "entregue" e
+// "lida" diferem só pela cor, cada ícone leva rótulo para leitor de tela.
 function StatusIcon({ status }: { status: Message["status"] }) {
   switch (status) {
     case "sending":
-      return <Clock className="h-3 w-3 text-primary-foreground/70" />;
+      return <Clock role="img" aria-label="Enviando" className="h-3 w-3 text-primary-foreground/70" />;
     case "sent":
-      return <Check className="h-3 w-3 text-primary-foreground/70" />;
+      return <Check role="img" aria-label="Enviada" className="h-3 w-3 text-primary-foreground/70" />;
     case "delivered":
-      return <CheckCheck className="h-3 w-3 text-primary-foreground/70" />;
+      return <CheckCheck role="img" aria-label="Entregue" className="h-3 w-3 text-primary-foreground/70" />;
     case "read":
-      return <CheckCheck className="h-3 w-3 text-blue-400" />;
+      return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-blue-400" />;
     case "failed":
       return (
         <span className="inline-flex items-center gap-0.5 rounded bg-red-500 px-1 text-[10px] font-medium text-white">
-          <XCircle className="h-3 w-3" />
+          <XCircle className="h-3 w-3" aria-hidden="true" />
           Falha no envio
         </span>
       );

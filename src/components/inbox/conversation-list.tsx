@@ -349,8 +349,10 @@ export function ConversationList({
       <div className="space-y-2 border-b border-border p-3">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
+              type="search"
+              aria-label="Buscar conversas por nome ou telefone"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
               placeholder="Buscar por nome ou telefone..."
@@ -358,15 +360,15 @@ export function ConversationList({
             />
           </div>
           {onCreateConversation && accountRole !== "viewer" && (
-            <Button type="button" variant="outline" size="sm" onClick={onCreateConversation} className="shrink-0">
-              <Plus className="size-3.5" />
+            <Button type="button" variant="outline" size="sm" onClick={onCreateConversation} className="h-9 shrink-0 lg:h-7" aria-label="Nova conversa">
+              <Plus className="size-3.5" aria-hidden="true" />
               Nova
             </Button>
           )}
         </div>
 
         {/* Abas de canal com número de conversas não lidas. */}
-        <div className="-mx-1 flex gap-1 overflow-x-auto pb-0.5">
+        <div className="-mx-1 flex gap-1 overflow-x-auto pb-0.5" role="group" aria-label="Filtrar por canal">
           {CHANNEL_TABS.map((tab) => {
             const count = unread[tab.value ?? "all"] ?? 0;
             const active = filters.canal === tab.value;
@@ -375,8 +377,9 @@ export function ConversationList({
                 key={tab.label}
                 type="button"
                 onClick={() => setFilters({ canal: tab.value, linha: null })}
+                aria-pressed={active}
                 className={cn(
-                  "flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  "flex min-h-8 shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors lg:min-h-0",
                   active ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
                 )}
               >
@@ -389,6 +392,7 @@ export function ConversationList({
                     )}
                   >
                     {count > 99 ? "99+" : count}
+                    <span className="sr-only"> não lidas</span>
                   </span>
                 )}
               </button>
@@ -459,8 +463,9 @@ export function ConversationList({
           space (issue #229). */}
       <ScrollArea className="min-h-0 flex-1">
         {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <div className="flex items-center justify-center py-12" role="status">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+            <span className="sr-only">Carregando conversas…</span>
           </div>
         ) : visible.length === 0 ? (
           <div className="px-4 py-12 text-center">
@@ -528,12 +533,12 @@ function FilterMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         className={cn(
-          "inline-flex h-7 max-w-[170px] items-center justify-center gap-1 truncate rounded-md px-2 text-xs hover:bg-muted",
+          "inline-flex h-9 max-w-[170px] items-center justify-center gap-1 truncate rounded-md px-2 text-xs hover:bg-muted lg:h-7",
           value && allLabel ? "text-primary" : "text-muted-foreground hover:text-foreground"
         )}
       >
         <span className="truncate">{label}</span>
-        <ChevronDown className="h-3 w-3 shrink-0" />
+        <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto border-border bg-popover">
         {allLabel && (
@@ -585,6 +590,7 @@ function SectionHeader({
         </span>
       </span>
       <ChevronDown
+        aria-hidden="true"
         className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")}
       />
     </button>
@@ -646,13 +652,15 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
 
   return (
     <button
+      type="button"
       onClick={() => onSelect(conversation)}
+      aria-current={isActive ? "true" : undefined}
       className={cn(
         "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
         isActive && "border-l-2 border-primary bg-muted/70"
       )}
     >
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground" aria-hidden="true">
         {contact?.avatar_url ? (
           <img
             // Proxy por telefone só existe para WhatsApp.
@@ -661,7 +669,8 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
                 ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}`
                 : contact.avatar_url
             }
-            alt={displayName}
+            // Decorativo: o nome do contato já vem logo ao lado.
+            alt=""
             className="h-10 w-10 rounded-full object-cover"
           />
         ) : (
@@ -714,6 +723,8 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
               <span
                 className={cn("text-xs leading-none select-none", SENTIMENT_ICONS[conversation.sentiment]?.color)}
                 title={SENTIMENT_ICONS[conversation.sentiment]?.label}
+                role="img"
+                aria-label={SENTIMENT_ICONS[conversation.sentiment]?.label}
               >
                 {SENTIMENT_ICONS[conversation.sentiment]?.emoji}
               </span>
@@ -721,9 +732,12 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
             {conversation.unread_count > 0 && (
               <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
                 {conversation.unread_count}
+                <span className="sr-only"> não lidas</span>
               </span>
             )}
-            <span className={cn("h-2 w-2 rounded-full", STATUS_COLORS[conversation.status])} title={CONVERSATION_STATUS_LABELS[conversation.status]} />
+            {/* Status só por cor no visual; o texto vai para leitor de tela. */}
+            <span className={cn("h-2 w-2 rounded-full", STATUS_COLORS[conversation.status])} title={CONVERSATION_STATUS_LABELS[conversation.status]} aria-hidden="true" />
+            <span className="sr-only">Status: {CONVERSATION_STATUS_LABELS[conversation.status]}</span>
           </div>
         </div>
         {waiting && <p className="mt-0.5 text-[10px] font-medium text-amber-600">{waiting}</p>}

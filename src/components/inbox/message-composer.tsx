@@ -581,17 +581,19 @@ export function MessageComposer({
         </div>
       )}
       {sessionExpired && (
-        <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
-          <p className="text-xs text-amber-400">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-1 rounded-lg bg-amber-500/10 px-3 py-2" role="status">
+          {/* amber-400 sobre fundo claro dava ~1,7:1 — no tema claro usa
+              amber-700 (≥ 4,5:1); no escuro mantém o tom original. */}
+          <p className="text-xs text-amber-700 dark:text-amber-400">
             Sessão de 24 horas expirada. Use um template para reengajar.
           </p>
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 text-xs text-amber-400 hover:text-amber-300"
+            className="h-9 text-xs text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300 lg:h-7"
             onClick={onOpenTemplates}
           >
-            <LayoutTemplate className="mr-1 h-3 w-3" />
+            <LayoutTemplate className="mr-1 h-3 w-3" aria-hidden="true" />
             Templates
           </Button>
         </div>
@@ -641,7 +643,7 @@ export function MessageComposer({
       ) : recording ? (
         // Recording bar — replaces the composer while the mic is live.
         <div className="flex items-center gap-3 rounded-xl border border-border bg-muted px-4 py-2.5">
-          <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+          <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" aria-hidden="true" />
           <span className="flex-1 text-sm text-foreground">
             Gravando… {formatDuration(recordSeconds)} /{" "}
             {formatDuration(MAX_RECORDING_SECONDS)}
@@ -649,7 +651,7 @@ export function MessageComposer({
           <button
             type="button"
             onClick={cancelRecording}
-            className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-card hover:text-foreground"
+            className="min-h-9 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-card hover:text-foreground"
           >
             Cancelar
           </button>
@@ -658,8 +660,9 @@ export function MessageComposer({
             onClick={stopRecording}
             className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90"
             title="Parar e anexar"
+            aria-label="Parar gravação e anexar"
           >
-            <Square className="h-4 w-4" />
+            <Square className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
       ) : (
@@ -686,12 +689,13 @@ export function MessageComposer({
                     ? undefined
                     : "Anexar mídia"
               }
+              aria-label={busy ? "Enviando anexo…" : "Anexar mídia"}
               className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
             >
               {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
               ) : (
-                <Paperclip className="h-4 w-4" />
+                <Paperclip className="h-4 w-4" aria-hidden="true" />
               )}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="border-border bg-popover">
@@ -725,7 +729,7 @@ export function MessageComposer({
               className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground"
               onClick={onOpenTemplates}
             >
-              <LayoutTemplate className="h-4 w-4" />
+              <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
             </GatedButton>
           )}
 
@@ -752,7 +756,7 @@ export function MessageComposer({
               }
             }}
           >
-            <Zap className="h-4 w-4" />
+            <Zap className="h-4 w-4" aria-hidden="true" />
           </Button>
 
           <textarea
@@ -781,7 +785,9 @@ export function MessageComposer({
             // The placeholder text also surfaces the read-only state.
             title={readOnly ? "Somente leitura — seu perfil não pode enviar mensagens" : undefined}
             className={cn(
-              "flex-1 resize-none rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50",
+              // min-w-0: sem ele o textarea mantém a largura intrínseca
+              // (~20 colunas) e estoura a linha em telas de 320px.
+              "min-w-0 flex-1 resize-none rounded-xl border border-border bg-muted px-3 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/50 sm:px-4",
               (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
             )}
           />
@@ -795,7 +801,7 @@ export function MessageComposer({
             onClick={handleSend}
             className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
           >
-            <Send className="h-4 w-4" />
+            <Send className="h-4 w-4" aria-hidden="true" />
           </GatedButton>
         </div>
       )}
@@ -853,9 +859,9 @@ function MediaDraftPreview({
           type="button"
           onClick={onDiscard}
           aria-label="Remover anexo"
-          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <X className="h-4 w-4" />
+          <X className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
 
@@ -872,7 +878,8 @@ function MediaDraftPreview({
               }
             }}
             placeholder="Adicionar legenda…"
-            className="flex-1 rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50"
+            aria-label="Legenda do anexo"
+            className="min-w-0 flex-1 rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         )}
         <GatedButton
@@ -887,7 +894,7 @@ function MediaDraftPreview({
             draft.kind === "audio" && "ml-auto",
           )}
         >
-          <Send className="h-4 w-4" />
+          <Send className="h-4 w-4" aria-hidden="true" />
         </GatedButton>
       </div>
     </div>
