@@ -72,7 +72,7 @@ describe('migration 167/168 — claim O(1), retry indexado, recibos sem órfãos
       $$;
       INSERT INTO wacrm.whatsapp_config VALUES ('${channel}');
     `);
-    for (const file of ['118_dispatch_safety.sql', '125_pending_dispatch_receipts.sql', '164_dispatch_throughput.sql']) {
+    for (const file of ['118_dispatch_safety.sql', '125_pending_dispatch_receipts.sql', '159_dispatch_auto_pause_receipts_cleanup.sql', '164_dispatch_throughput.sql']) {
       await db.exec(migration(file).replace(/NOTIFY pgrst[^;]*;/g, ''));
     }
     const sql = migration('167_dispatch_claim_o1_retry_receipts.sql').replace(/NOTIFY pgrst[^;]*;/g, '');
@@ -321,6 +321,18 @@ describe('migration 167/168 — claim O(1), retry indexado, recibos sem órfãos
         `SELECT status, erro_permanente FROM wacrm.disp_message_queue WHERE id='${id(1)}'`
       );
       expect(row.rows[0]).toEqual({ status: 'erro', erro_permanente: true });
+    });
+
+    it('limpeza da 159 continua coerente: apaga só recibo velho sem item; o de item enviando fica', async () => {
+      await db.exec(`UPDATE wacrm.disp_message_queue SET status='enviando', waha_message_id='wamid.pend' WHERE id='${id(1)}'`);
+      await status('wamid.pend', 'delivered');
+      await status('wamid.semitem', 'delivered');
+      await status('wamid.recente', 'read');
+      await db.exec(`UPDATE wacrm.dispatch_status_receipts SET created_at = now() - interval '8 days' WHERE message_id <> 'wamid.recente'`);
+      const deleted = await db.query<{ n: number }>('SELECT wacrm.cleanup_orphan_dispatch_receipts(5000) AS n');
+      expect(deleted.rows[0].n).toBe(1);
+      const left = await db.query<{ message_id: string }>('SELECT message_id FROM wacrm.dispatch_status_receipts ORDER BY 1');
+      expect(left.rows.map((r) => r.message_id)).toEqual(['wamid.pend', 'wamid.recente']);
     });
 
     it('confirmação recusa identidade errada e não marca nada', async () => {
