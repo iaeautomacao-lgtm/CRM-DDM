@@ -25,7 +25,7 @@ const CONTENT_TYPES: Record<string, string> = {
   csv: "text/csv",
 };
 
-const EXPORT_TYPES = ["conversas", "envio-em-lote", "atendimentos"] as const;
+const EXPORT_TYPES = ["conversas", "envio-em-lote", "atendimentos", "tabulacoes"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
 interface ExportUploadBody {
