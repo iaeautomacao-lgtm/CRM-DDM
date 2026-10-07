@@ -339,6 +339,7 @@ describe('cron: agendador por número', () => {
   });
 
   describe('claim e confirmação em lote (P1-3b)', () => {
+    beforeEach(() => { vi.stubEnv('DISPARADOR_BATCH_CLAIM', '1'); });
     const rpcNames = () => mocks.rpc.mock.calls.map(([name]) => name as string);
     function batchRpc(counts: Record<string, number>, claimOverride?: (campaign: string, n: number) => Array<Record<string, unknown>>) {
       mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {

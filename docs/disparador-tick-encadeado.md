@@ -40,7 +40,7 @@ O corte das vagas por lag/RSS agora exige **3 janelas seguidas** acima do limite
 ## 6. Claim e confirmação em lote (P1-3b, migration 188)
 
 Antes: 1 RPC por item para reivindicar (`claim_dispatch_item_capped`) + 1 para confirmar, e candidatos por SELECT paginado com OFFSET (F9/F10).
-Agora (padrão; `DISPARADOR_BATCH_CLAIM=0` volta ao caminho por item):
+Agora (**desligado por padrão**; `DISPARADOR_BATCH_CLAIM=1` liga — só depois de validar na bancada #132 num Postgres real):
 
 - **Planejamento por fichas:** `count_due_dispatch_items` conta os itens vencidos por campanha×número (sem OFFSET); cada ficha ocupa uma vaga no agendador. Uma amostra pequena (200 mais antigos) alimenta o detector de reflow.
 - **Claim em lote** (`claim_dispatch_batch(p_session_id, p_n, p_campaign_ids, p_default_max_in_flight)`): reivindica até N itens vencidos numa chamada, `FOR UPDATE SKIP LOCKED`, **um advisory lock por lote**, `max_in_flight`, `hourly_limit` do canal e `limite_por_hora` da campanha checados 1× (regra do `limite_por_hora` **idêntica** à do claim por item). O lote nunca passa das vagas livres do número (`slotsFree` do agendador), então tudo que foi reivindicado começa a enviar na hora; a sobra no fim do tick volta a `agendado` (`unclaim_dispatch_items`).

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   autoBlacklist: vi.fn(),
   ai: vi.fn(),
+  log: vi.fn(),
 }));
 vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
@@ -53,7 +54,7 @@ vi.mock('@/lib/whatsapp/encryption', () => ({
     value === 'legacy-plaintext-token' ? value : 'test-token',
 }));
 vi.mock('@/lib/logger', () => ({
-  writeLog: vi.fn(),
+  writeLog: mocks.log,
   maskPhone: () => 'masked',
 }));
 vi.mock('@/lib/disparador/auto-blacklist', () => ({
@@ -67,6 +68,7 @@ vi.mock('@/lib/disparador/dispatch-ai', () => ({ generateDispatchAiText: mocks.a
 import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
 import { UNCERTAIN_OUTCOME_ERROR } from './provider-outcome';
+import { resetUnknownMetaCodes } from './meta-error-catalog';
 
 const item: QueueItem = {
   id: 'item',
@@ -149,6 +151,37 @@ describe('queue provider outcomes', () => {
     const iaItem: QueueItem = { ...item, tipo: 'ia', mensagem_final: 'PROMPT: gere uma cobrança' };
     expect(await processQueueItem(iaItem, { id: 'campaign', status: 'em_execucao' })).toMatchObject({ outcome: 'sent' });
     expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ text: 'Olá! Seu débito vence hoje.' }));
+  });
+  it('erro permanente de envio: o log traz queue_id (para abrir o item na tela de erros)', async () => {
+    mocks.log.mockClear();
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('Meta: Template (code 132001)', 132001, 400));
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    const entry = mocks.log.mock.calls.map(([c]) => c).find((c) => c.event === 'message_permanent_error');
+    expect(entry.payload).toMatchObject({ campaign_id: 'campaign', queue_id: 'item', metaCode: 132001 });
+  });
+  it('131026: os logs de strike e de bloqueio também trazem queue_id', async () => {
+    mocks.log.mockClear();
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('Meta: undeliverable (code 131026)', 131026, 400));
+    mocks.autoBlacklist.mockResolvedValue({ campaignCount: 1, blacklisted: false });
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    mocks.autoBlacklist.mockResolvedValue({ campaignCount: 3, blacklisted: true });
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    const events = mocks.log.mock.calls.map(([c]) => c);
+    expect(events.find((c) => c.event === 'message_meta_131026_strike').payload.queue_id).toBe('item');
+    expect(events.find((c) => c.event === 'message_blocked_meta_131026').payload.queue_id).toBe('item');
+  });
+  it('código da Meta fora do catálogo: comportamento atual (retenta) + log "código novo" 1× por código', async () => {
+    mocks.log.mockClear();
+    resetUnknownMetaCodes();
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('Meta: novo (code 139999)', 139999, 400));
+    const first = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    expect(first).toMatchObject({ outcome: 'error' });
+    // Não é permanente: continua retentável como antes (sem flags de catálogo).
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false)).toBe(true);
+    const unknown = mocks.log.mock.calls.map(([c]) => c).filter((c) => c.event === 'meta_error_code_unknown');
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0].payload).toMatchObject({ metaCode: 139999, queue_id: 'item', campaign_id: 'campaign' });
   });
   it('never calls the provider after losing the guarded claim', async () => {
     mocks.claimed = false;

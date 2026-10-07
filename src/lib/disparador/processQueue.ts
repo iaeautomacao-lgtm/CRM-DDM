@@ -33,6 +33,7 @@ import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/ti
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
 import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
 import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
+import { metaCodesWhere, reportUnknownMetaCode } from "@/lib/disparador/meta-error-catalog";
 import { loadCampaignStatusCounts, summarizeStatusCounts } from "@/lib/disparador/campaign-status-counts";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
@@ -222,7 +223,7 @@ export async function claimQueueItem(campaignId: string): Promise<QueueItem | nu
 // 131047 (janela de 24h fechada) NÃO é número inválido: o telefone é bom,
 // só não aceita texto livre agora — ver META_PERMANENT_CODES. Antes ele
 // marcava contact_phones como 'invalido' e pulava para TELEFONE2/3.
-const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131021]);
+const META_INVALID_PHONE_CODES = metaCodesWhere((e) => e.numeroInvalido === true);
 
 // Códigos Meta que são permanentes mas NÃO são "número inválido" (ex:
 // conta suspensa, parâmetro inválido, token expirado/inválido) — sem
@@ -243,7 +244,14 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131021]);
 // Repetir automaticamente dentro da mesma campanha não cria evidência nova.
 // 131047: mensagem fora da janela de 24h — retentar texto livre não muda
 // nada; precisa de template.
-const META_PERMANENT_CODES = new Set([131026, 131031, 131047, 131051, 368, 190, 131008, 131009, 132000, 132001]);
+// Derivado do catálogo único (meta-error-catalog.ts): flag `permanente`.
+const META_PERMANENT_CODES = metaCodesWhere((e) => e.permanente === true);
+
+/** Limites de taxa da Meta que reagendam sem gastar tentativa (F8). */
+export const META_RATE_LIMIT_NO_ATTEMPT_CODES: ReadonlySet<number> = new Set([130429, 131048, 131056]);
+export function isMetaRateLimitNoAttempt(err: unknown): boolean {
+  return err instanceof MetaApiError && err.metaCode !== null && META_RATE_LIMIT_NO_ATTEMPT_CODES.has(err.metaCode);
+}
 
 /** Limites de taxa da Meta que reagendam sem gastar tentativa (F8). */
 export const META_RATE_LIMIT_NO_ATTEMPT_CODES: ReadonlySet<number> = new Set([130429, 131048, 131056]);
@@ -775,6 +783,16 @@ export async function processQueueItem(
       console.error(
         `[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`
       );
+      // Código fora do catálogo: comportamento atual + aviso "código novo" (1× por processo e por código).
+      reportUnknownMetaCode(sendErr.metaCode, (code) => {
+        void writeLog({
+          level: "warn",
+          source: "disparador",
+          event: "meta_error_code_unknown",
+          message: `Código novo da Meta fora do catálogo de erros: ${code}`,
+          payload: { campaign_id: item.campaign_id, queue_id: item.id, metaCode: code },
+        });
+      });
 
       // 131026 encerra esta tentativa sem retry automático, mas só vira
       // blacklist definitiva quando ocorrer em 3 CAMPANHAS DISTINTAS.
@@ -801,6 +819,7 @@ export async function processQueueItem(
             message: "Meta 131026 registrado; número ainda não entrou na blacklist definitiva",
             payload: {
               campaign_id: item.campaign_id,
+              queue_id: item.id,
               contact_id: item.contact_id,
               phone: maskPhone(normalizedPhone),
               metaCode: 131026,
@@ -853,6 +872,7 @@ export async function processQueueItem(
           message: "Destino bloqueado definitivamente após 131026 em 3 campanhas distintas",
           payload: {
             campaign_id: item.campaign_id,
+            queue_id: item.id,
             contact_id: item.contact_id,
             phone: maskPhone(normalizedPhone),
             metaCode: 131026,
@@ -894,6 +914,7 @@ export async function processQueueItem(
         message: "Item da fila marcado como erro permanente — código Meta não retenta",
         payload: {
           campaign_id: item.campaign_id,
+          queue_id: item.id,
           contact_id: item.contact_id,
           phone: maskPhone(normalizedPhone),
           metaCode: sendErr instanceof MetaApiError ? sendErr.metaCode : null,

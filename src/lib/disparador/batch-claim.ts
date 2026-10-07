@@ -6,7 +6,7 @@
 // Segurança do reservado: o lote pedido nunca passa das vagas livres do número (o agendador passa `free`), então tudo que foi reivindicado
 // começa a enviar na hora. O que sobrar no buffer no fim do tick (orçamento esgotado) volta a 'agendado' (unclaim_dispatch_items).
 //
-// DISPARADOR_BATCH_CLAIM=0 volta ao caminho por item; sem as RPCs da 188 o cron cai sozinho no caminho por item.
+// DISPARADOR_BATCH_CLAIM=1 liga (padrão: desligado, caminho por item); sem as RPCs da 188 o cron cai sozinho no caminho por item.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { QueueItem } from "@/lib/disparador/processQueue";
@@ -20,7 +20,9 @@ export const BATCH_CLAIM_MAX = 50;
 
 export function isBatchClaimEnabled(env: Env = process.env): boolean {
   const raw = (env.DISPARADOR_BATCH_CLAIM ?? "").trim().toLowerCase();
-  return !(raw === "0" || raw === "false" || raw === "off");
+  // DESLIGADO por padrão: só liga com DISPARADOR_BATCH_CLAIM=1 depois de validado na bancada (#132)
+  // num Postgres real — a exclusão entre claims concorrentes não é provada no PGlite (1 conexão).
+  return raw === "1" || raw === "true" || raw === "on";
 }
 
 export function isMissingRpc(error: { code?: string } | null | undefined): boolean {

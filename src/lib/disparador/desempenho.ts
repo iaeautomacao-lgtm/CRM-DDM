@@ -1,3 +1,5 @@
+import { metaCodesWhere } from "./meta-error-catalog";
+
 // ============================================================
 // Métricas, limiares e agregação de telemetria do disparador
 // (Painel "Desempenho do disparador", cron_tick em system_logs).
@@ -19,7 +21,24 @@ export const WINDOW_MS: Record<DesempenhoWindow, number> = {
   "24h": 24 * 60 * 60 * 1000,
 };
 
-export const RATE_LIMIT_ERROR_CODES = ["429", "131048", "131056"] as const;
+// Derivado do catálogo único: HTTP 429 + todo código Meta com flag `freio` (os mesmos que aciona o
+// freio/cooldown do número). Antes só 429/131048/131056: 130429/80007/4 freavam o número mas nunca
+// apareciam no alerta do painel.
+export const RATE_LIMIT_ERROR_CODES: readonly string[] = [
+  "429",
+  ...[...metaCodesWhere((e) => e.freio === true)].sort((a, b) => a - b).map(String),
+];
+
+// A telemetria do tick grava o código como "meta:131056", "meta:http_429" ou "waha:429"; o painel
+// também aceita a chave pura ("131056"). Soma todas as formas do mesmo código.
+function rateLimitAliases(code: string): string[] {
+  return code === "429" ? ["429", "meta:http_429", "waha:429"] : [code, `meta:${code}`];
+}
+
+export function rateLimitErrorCount(providerErrors: Record<string, number> | undefined | null, code: string): number {
+  if (!providerErrors) return 0;
+  return rateLimitAliases(code).reduce((sum, key) => sum + (providerErrors[key] ?? 0), 0);
+}
 
 export interface TickPayloadTotals {
   sent: number;
@@ -240,7 +259,7 @@ export function detectRateLimitErrors(
   if (!providerErrors) return [];
   const found: string[] = [];
   for (const code of RATE_LIMIT_ERROR_CODES) {
-    if ((providerErrors[code] ?? 0) > 0) {
+    if (rateLimitErrorCount(providerErrors, code) > 0) {
       found.push(code);
     }
   }
@@ -324,8 +343,9 @@ export function formatTickRow(log: RawSystemLogTick): FormattedTickRow {
   const rateErrors: Record<string, number> = {};
   if (p?.provider_errors) {
     for (const code of RATE_LIMIT_ERROR_CODES) {
-      if ((p.provider_errors[code] ?? 0) > 0) {
-        rateErrors[code] = p.provider_errors[code]!;
+      const count = rateLimitErrorCount(p.provider_errors, code);
+      if (count > 0) {
+        rateErrors[code] = count;
       }
     }
   }
@@ -423,7 +443,7 @@ export function computeWindowMetrics(
 
     if (p.provider_errors) {
       for (const code of RATE_LIMIT_ERROR_CODES) {
-        const count = p.provider_errors[code] ?? 0;
+        const count = rateLimitErrorCount(p.provider_errors, code);
         if (count > 0) {
           rateErrorsBreakdown[code] = (rateErrorsBreakdown[code] ?? 0) + count;
           rateLimitTotal += count;

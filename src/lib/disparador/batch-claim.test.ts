@@ -5,8 +5,9 @@ import { ChannelClaimer, isBatchClaimEnabled, isClaimToken, makeClaimToken, plan
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe('flag e fichas', () => {
-  it('ligado por padrão; DISPARADOR_BATCH_CLAIM=0/false/off volta ao claim por item', () => {
-    expect(isBatchClaimEnabled({})).toBe(true);
+  it('DESLIGADO por padrão; só DISPARADOR_BATCH_CLAIM=1/true/on liga o claim em lote', () => {
+    expect(isBatchClaimEnabled({})).toBe(false);
+    for (const v of ['1', 'true', 'ON', ' on ']) expect(isBatchClaimEnabled({ DISPARADOR_BATCH_CLAIM: v })).toBe(true);
     for (const v of ['0', 'false', 'OFF', ' off ']) expect(isBatchClaimEnabled({ DISPARADOR_BATCH_CLAIM: v })).toBe(false);
     expect(isBatchClaimEnabled({ DISPARADOR_BATCH_CLAIM: '1' })).toBe(true);
   });
