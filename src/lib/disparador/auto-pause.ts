@@ -98,16 +98,20 @@ export type AutoPauseDecision =
 // 190/368: token/política; 131005/131031/131042: acesso/conta/pagamento;
 // 131008/131009/131047/131051: parâmetros/janela/tipo de mensagem;
 // 132000/132001/132005/132007/132012/132015/132016: template;
-// 133010: remetente não registrado. Só contam quando erro_permanente=true.
+// 133010: remetente não registrado. Contam MESMO sem erro_permanente (REVISAO F3): vários destes
+// códigos não são "permanentes" no envio e o item seria reenviado 5× antes de a pausa disparar.
 export const AUTO_PAUSE_META_CODES = new Set([
   190, 368, 131005, 131031, 131042, 131008, 131009, 131047, 131051,
   132000, 132001, 132005, 132007, 132012, 132015, 132016, 133010,
 ]);
 
 export function isCampaignPermanentError(r: AttemptRow): boolean {
-  if ((r.status !== "erro" && r.status !== "bloqueado") || r.erro_permanente !== true) return false;
+  if (r.status !== "erro" && r.status !== "bloqueado") return false;
   const code = extrairCodigoMetaErro(r.erro);
-  if (code !== null) return AUTO_PAUSE_META_CODES.has(code);
+  // Código de nível campanha/canal/template: conta mesmo que o item ainda vá ser retentado.
+  if (code !== null && AUTO_PAUSE_META_CODES.has(code)) return r.status === "erro" || r.erro_permanente === true;
+  if (r.erro_permanente !== true) return false;
+  if (code !== null) return false;
   // Erros locais inequívocos; não classificamos qualquer 400 da WAHA como
   // problema do canal, pois também pode ser um destinatário inválido.
   return /^(Canal não encontrado para esta conta|Canal Meta sem (token de acesso|phone_number_id) configurado|Não foi possível ler a .+ do canal|Ligação não é suportada em canais Meta|Item .+ do tipo .+ não tem mídia|Variável \{\{\d+\}\} sem valor mapeado)/.test(r.erro ?? "");
@@ -117,7 +121,8 @@ export function isCampaignPermanentError(r: AttemptRow): boolean {
  * Decide se pausa. `rows` = tentativas mais recentes primeiro (no máximo
  * config.window são consideradas). Erro NÃO permanente ('erro' que ainda
  * vai ser retentado) não conta — nem como tentativa nem como falha — porque
- * o resultado dele ainda não é final.
+ * o resultado dele ainda não é final; exceção: código de nível campanha
+ * (AUTO_PAUSE_META_CODES) conta como tentativa e como falha.
  */
 export function decideAutoPause(
   rows: readonly AttemptRow[],
@@ -125,7 +130,7 @@ export function decideAutoPause(
 ): AutoPauseDecision {
   const window = rows
     .filter((r) => (ATTEMPT_FINAL_STATUSES as readonly string[]).includes(r.status))
-    .filter((r) => r.status !== "erro" || r.erro_permanente === true)
+    .filter((r) => r.status !== "erro" || r.erro_permanente === true || isCampaignPermanentError(r))
     .slice(0, config.window);
   // Erros de destinatário continuam no denominador (tentativas finais),
   // mas nunca no numerador: base com 131026 não deve disparar a proteção.
@@ -179,7 +184,8 @@ export async function checkCampaignAutoPause(
       .eq("campaign_id", campaign.id)
       .in("status", [...ATTEMPT_FINAL_STATUSES])
       .gt("tentativas", 0)
-      .or("status.neq.erro,erro_permanente.eq.true");
+      // Erro não permanente só entra quando o código é de nível campanha (AUTO_PAUSE_META_CODES).
+      .or(["status.neq.erro", "erro_permanente.eq.true", ...[...AUTO_PAUSE_META_CODES].map((c) => `erro.ilike.*${c}*`)].join(","));
     // Duas buscas limitadas, depois mescladas: sucesso/recibo usa sent_at
     // imutável; rejeição antes de enviar usa updated_at. Não ordenamos por
     // scheduled_at (retry/reflow) nem por entrega/leitura tardia.

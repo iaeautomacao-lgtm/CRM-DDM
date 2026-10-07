@@ -22,7 +22,7 @@ describe("decisão de pausa", () => {
   });
   it("usa só as últimas 100 e ignora tentativas transitórias", () => {
     expect(decideAutoPause([...rows(0, 100), ...rows(100, 100)]).pause).toBe(false);
-    expect(decideAutoPause(Array.from({ length: 100 }, () => ({ ...failure(132001), erro_permanente: false }))).attempts).toBe(0);
+    expect(decideAutoPause(Array.from({ length: 100 }, () => ({ ...failure(130429), erro_permanente: false }))).attempts).toBe(0);
   });
   it("131026 em erro ou bloqueado não entra no numerador nem causa pausa", () => {
     for (const status of ["erro", "bloqueado"]) {
@@ -30,6 +30,13 @@ describe("decisão de pausa", () => {
       expect(decideAutoPause(invalid)).toEqual({ pause: false, attempts: 100, errors: 0 });
     }
     expect(decideAutoPause([...rows(29, 29), ...Array.from({ length: 71 }, () => failure(131026))]).pause).toBe(false);
+  });
+  it("template pausado (132015) em erro NÃO permanente já conta e pausa, sem esperar a 5ª tentativa (F3)", () => {
+    const retryable = (code: number): AttemptRow => ({ status: "erro", erro_permanente: false, erro: `(#${code}) template pausado` });
+    const sixtySeven = [...Array.from({ length: 50 }, () => retryable(132015)), ...Array.from({ length: 20 }, () => success)];
+    expect(decideAutoPause(sixtySeven)).toMatchObject({ pause: true, attempts: 70, errors: 50, topCode: 132015 });
+    // 130429 (limite) não permanente continua fora de tentativas e de erros.
+    expect(decideAutoPause(Array.from({ length: 100 }, () => retryable(130429)))).toEqual({ pause: false, attempts: 0, errors: 0 });
   });
   it("env off desliga e parâmetros inválidos usam os padrões", () => {
     const config = autoPauseConfigFromEnv({ DISPARADOR_AUTO_PAUSE: "OFF" });
@@ -40,8 +47,12 @@ describe("decisão de pausa", () => {
   it("lista fechada de erros de template/canal, sempre permanentes", () => {
     for (const code of AUTO_PAUSE_META_CODES) {
       expect(isCampaignPermanentError(failure(code))).toBe(true);
-      expect(isCampaignPermanentError({ ...failure(code), erro_permanente: false })).toBe(false);
+      // REVISAO F3: código de nível campanha conta mesmo sem erro_permanente (item ainda será retentado).
+      expect(isCampaignPermanentError({ ...failure(code), erro_permanente: false })).toBe(true);
     }
+    // Sem código de campanha, erro não permanente continua sem contar.
+    expect(isCampaignPermanentError({ ...failure(130429), erro_permanente: false })).toBe(false);
+    expect(isCampaignPermanentError({ ...failure(0), erro: "Canal não encontrado para esta conta", erro_permanente: false })).toBe(false);
     for (const code of [131026, 131030, 131045, 131021, 131049, 131056, 130429, 131000, 999999])
       expect(isCampaignPermanentError(failure(code))).toBe(false);
     for (const erro of ["Chamada não atendida", "WAHA sendText failed (400): destinatário inválido", "timeout", "Variável {{1}} vazia para este contato — não enviado"])
@@ -81,6 +92,8 @@ describe("pausa pelo mesmo contrato da pausa manual", () => {
     expect(await checkCampaignAutoPause(db, { id: "camp", account_id: "acc" })).toBe(true);
     expect(rpc).toHaveBeenCalledWith("stop_dispatch_campaign", { p_campaign_id: "camp", p_account_id: "acc", p_action: "pause" });
     expect(calls).toContainEqual(["gte", "sent_at", "2026-10-06T12:00:00Z"]);
+    // A consulta inclui erros não permanentes de código de campanha (F3).
+    expect(calls.some(([m, f]) => m === "or" && String(f).includes("erro.ilike.*132015*"))).toBe(true);
     expect(calls).toContainEqual(["gte", "updated_at", "2026-10-06T12:00:00Z"]);
     expect(calls).toContainEqual(["order", "updated_at", { ascending: false }]);
     expect(calls).toContainEqual(["update", { pausa_automatica_motivo: expect.stringContaining("30%") }]);
