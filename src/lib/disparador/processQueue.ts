@@ -32,6 +32,7 @@ import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/ti
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
 import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
 import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
+import { loadCampaignStatusCounts, summarizeStatusCounts } from "@/lib/disparador/campaign-status-counts";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -1179,40 +1180,11 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
       .eq("campaign_id", campaignId)
       .maybeSingle();
 
-    // Buscar resumo dos itens da fila — paginado via .range(), mesmo
-    // padrão de startCampaign.ts (allContacts/contact_import_variables):
-    // sem paginação, uma campanha com mais de 1000 itens batia no cap de
-    // resposta do PostgREST e o resumo abaixo (enviados/erros/bloqueados/
-    // cancelados) vinha truncado e incorreto no payload do callback.
-    const queueSummary: Array<{ status: string }> = [];
-    {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await db
-          .from("disp_message_queue")
-          .select("status")
-          .eq("campaign_id", campaignId)
-          .range(from, from + pageSize - 1);
-        if (pageError) {
-          console.error(
-            `[Callback] Campanha ${campaignId} — falha ao paginar disp_message_queue:`,
-            pageError.message
-          );
-          return false;
-        }
-        queueSummary.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-    }
-
-    const enviados = queueSummary.filter(
-      (i) => i.status === "enviado" || i.status === "entregue" || i.status === "lido"
-    ).length;
-    const erros = queueSummary.filter((i) => i.status === "erro").length;
-    const bloqueados = queueSummary.filter((i) => i.status === "bloqueado").length;
-    const cancelados = queueSummary.filter((i) => i.status === "cancelado").length;
+    // Resumo da fila por status numa agregação só (get_campaign_stats), em vez de paginar a fila
+    // inteira por OFFSET sem ORDER BY (REVISAO F6b/F19). Falha ⇒ a outbox tenta de novo depois.
+    const statusCounts = await loadCampaignStatusCounts(db, campaignId);
+    if (!statusCounts) return false;
+    const { total_enfileirados, enviados, erros, bloqueados, cancelados } = summarizeStatusCounts(statusCounts);
 
     // Nota: só roda quando a campanha tem callback_url configurado (early
     // return na linha acima) — campanhas sem callback externo não geram
@@ -1231,7 +1203,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
       campaign_name: campaign.nome,
       completed_at: campaign.updated_at,
       summary: {
-        total_enfileirados: queueSummary.length,
+        total_enfileirados,
         enviados,
         entregues: metrics?.total_entregues ?? 0,
         lidos: metrics?.total_lidos ?? 0,

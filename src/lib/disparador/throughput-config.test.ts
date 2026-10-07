@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearMemoryCooldowns,
   isInCooldown,
@@ -21,7 +21,9 @@ describe('resolveThroughputConfig', () => {
 
   it('reaproveita DISPATCH_PROCESS_CONCURRENCY como teto global (produção = 8)', () => {
     expect(resolveThroughputConfig({ DISPATCH_PROCESS_CONCURRENCY: '8' }).globalConcurrency).toBe(8);
-    expect(resolveThroughputConfig({ DISPATCH_PROCESS_CONCURRENCY: '999' }).globalConcurrency).toBe(4);
+    // Fora da faixa: clamp em 50 (antes voltava para 4 em silêncio — REVISAO F15).
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveThroughputConfig({ DISPATCH_PROCESS_CONCURRENCY: '999' }).globalConcurrency).toBe(50);
   });
 
   it('WAHA não herda aumento do genérico; só com a variável própria', () => {
