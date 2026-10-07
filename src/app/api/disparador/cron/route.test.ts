@@ -109,6 +109,32 @@ describe('cron: agendador por número', () => {
     pauseMocks.check.mockResolvedValue(false);
   });
 
+  it('rede de segurança do webhook (migration 185): aplica o inbox de status em lotes enquanto vier lote cheio', async () => {
+    setup();
+    let batches = 0;
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'apply_dispatch_statuses') {
+        batches++;
+        return { data: { claimed: batches < 3 ? 1000 : 120, fast: 0, slow: 0, failed: 0 }, error: null };
+      }
+      return name === 'blacklisted_phone_keys' ? { data: [], error: null } : { data: true, error: null };
+    });
+    expect((await post()).status).toBe(200);
+    expect(batches).toBe(3);
+    expect(mocks.rpc.mock.calls.filter(([n]) => n === 'apply_dispatch_statuses').every(([, a]) => a.p_limit === 1000)).toBe(true);
+  });
+
+  it('sem a migration 185 o tick segue normal (drenagem é no-op)', async () => {
+    setup();
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'apply_dispatch_statuses') return { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } };
+      return name === 'blacklisted_phone_keys' ? { data: [], error: null } : { data: true, error: null };
+    });
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(mocks.rpc.mock.calls.filter(([n]) => n === 'apply_dispatch_statuses')).toHaveLength(1);
+  });
+
   it('B9: por padrão o tick ainda prepara as campanhas agendadas vencidas (fallback)', async () => {
     setup();
     dueScheduled = [{ id: 'sch', account_id: 'acc' }];
