@@ -14,7 +14,6 @@ import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
 import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
-import { templateRowsForWaba } from "@/lib/disparador/template-validation";
 import {
   INVALID_SAMPLE_LIMIT,
   MAX_BODY_BYTES,
@@ -282,37 +281,34 @@ export async function POST(request: Request) {
     let templateLanguage = body.template_language ?? "pt_BR";
 
     if (provider === "meta") {
-      // Template do catálogo da WABA do canal (chave account_id, waba_id,
-      // name, language — migration 160). Antes .maybeSingle() pelo nome
-      // dava erro com o mesmo template em dois idiomas/WABAs, e um
-      // template de outra WABA passava. Linha sem waba_id (antes da 073)
-      // vale como fallback.
+      // O canal define a WABA. A API pública segue a mesma regra do wizard:
+      // somente template APPROVED explicitamente vinculado à WABA do canal.
+      // Linhas legadas sem waba_id nunca autorizam um envio novo.
       const { data: channelRows } = await db
         .from("whatsapp_config")
         .select("waba_id")
         .eq("id", channelId!)
+        .eq("account_id", ctx.accountId)
         .limit(1);
       const channelWabaId: string | null = channelRows?.[0]?.waba_id ?? null;
-      // Sem filtrar status na query: a linha da WABA decide (mesmo
-      // REJEITADA); a antiga sem waba_id só vale se a WABA não tiver linha
-      // própria (templateRowsForWaba). Antes o filtro APPROVED descartava a
-      // linha rejeitada da WABA e a antiga aprovada passava.
+      if (!channelWabaId) {
+        throw badRequest("Canal Meta sem WABA configurada; reconecte o canal antes de criar campanhas");
+      }
+
       let tplQuery = db
         .from("message_templates")
         .select("id, name, language, waba_id, status")
         .eq("name", body.template_name!)
-        .eq("account_id", ctx.accountId);
+        .eq("account_id", ctx.accountId)
+        .eq("waba_id", channelWabaId)
+        .eq("status", "APPROVED");
       if (body.template_language) tplQuery = tplQuery.eq("language", body.template_language);
       const { data: tplRows } = await tplQuery.limit(50);
-      const candidates = templateRowsForWaba(tplRows ?? [], channelWabaId).filter(
-        (t) => (t.status ?? "").toUpperCase() === "APPROVED"
-      );
-      const tpl =
-        candidates.find((t) => channelWabaId && t.waba_id === channelWabaId) ?? candidates[0] ?? null;
+      const tpl = tplRows?.[0] ?? null;
 
       if (!tpl) {
         throw badRequest(
-          `Template '${body.template_name}' não encontrado ou não aprovado pela Meta`
+          `Template '${body.template_name}' não encontrado ou não aprovado na WABA do canal selecionado`
         );
       }
       templateLanguage = body.template_language ?? tpl.language ?? "pt_BR";

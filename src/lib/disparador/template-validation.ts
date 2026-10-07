@@ -142,11 +142,15 @@ export function validateCampaignTemplate(input: TemplateValidationInput): Templa
   if (sameLanguage.length === 0) return notFound;
 
   const wabaIds = [...new Set((input.wabaIds ?? []).filter(Boolean))];
-  // Linha da WABA decide; a sem waba_id (antes da migration 073) só vale
-  // quando a WABA não tem linha própria (templateRowsForWaba).
+  // Campanha Meta com WABA conhecida exige associação explícita àquela
+  // WABA. Linhas legadas sem waba_id não podem autorizar uma campanha nova:
+  // o canal já é conhecido e o catálogo precisa ser o catálogo daquele canal.
   const groups: Array<{ wabaId: string | null; rows: LocalTemplateRow[] }> =
     wabaIds.length > 0
-      ? wabaIds.map((wabaId) => ({ wabaId, rows: templateRowsForWaba(sameLanguage, wabaId) }))
+      ? wabaIds.map((wabaId) => ({
+          wabaId,
+          rows: sameLanguage.filter((r) => r.waba_id === wabaId),
+        }))
       : [{ wabaId: null, rows: sameLanguage }];
 
   for (const group of groups) {
