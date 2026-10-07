@@ -98,6 +98,7 @@ describe('migration 185 — webhook de status em lote', () => {
         message_id text UNIQUE, status text
       );
       CREATE TABLE wacrm.whatsapp_test_sends (message_id text, status text, erro text);
+      CREATE TABLE wacrm.cron_locks (name text PRIMARY KEY, owner_id text, acquired_at timestamptz, expires_at timestamptz);
       CREATE TABLE wacrm.contact_import_variables (id serial PRIMARY KEY, campaign_id uuid, draft_id uuid);
       CREATE TABLE wacrm.message_logs (
         queue_id uuid, campaign_id uuid, contact_id uuid, session_id uuid,
@@ -170,6 +171,16 @@ describe('migration 185 — webhook de status em lote', () => {
     }
     const def = (await db.query<{ d: string }>("SELECT pg_get_functiondef('wacrm.apply_dispatch_statuses(integer)'::regprocedure) AS d")).rows[0].d;
     expect(def).toContain('FOR UPDATE SKIP LOCKED');
+  });
+
+  describe('vez de drenar (~1×/s no cluster)', () => {
+    it('só um ganha a vez por intervalo; depois de expirar, outro ganha', async () => {
+      const claim = async () => (await db.query<{ ok: boolean }>('SELECT wacrm.try_claim_status_drain(1000) AS ok')).rows[0].ok;
+      expect(await claim()).toBe(true);
+      expect(await claim()).toBe(false);
+      await db.exec("UPDATE wacrm.cron_locks SET expires_at = now() - interval '1 second' WHERE name = 'webhook_status_drain'");
+      expect(await claim()).toBe(true);
+    });
   });
 
   describe('ingestão', () => {

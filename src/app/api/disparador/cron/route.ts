@@ -34,6 +34,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
+import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -300,6 +301,15 @@ export async function POST(request: Request) {
     // primeiro para não ficar sempre sem tempo quando a fila está cheia.
     const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 100 });
     if (receiptsError) throw receiptsError;
+    // Rede de segurança do webhook de status em lote (migration 185): aplica o que o after() do webhook
+    // não conseguiu (processo caiu entre o 200 e o apply, ele não ganhou a vez…). Só com sobra de tempo e
+    // limitado (no máx. ~8 s do orçamento), para nunca atrasar os envios; sem a migration, é no-op.
+    const drainDeadline = tickStartedAt + Math.min(8_000, Math.floor(config.tickBudgetMs / 4));
+    await drainStatusInbox(db, {
+      limit: 1000,
+      maxBatches: 5,
+      shouldStop: () => outOfTime() || Date.now() > drainDeadline,
+    });
     await drainCallbackOutbox(1);
     // Watchdog anti-deadlock. É manutenção best-effort: falha aqui nunca
     // derruba o tick nem impede novos envios.

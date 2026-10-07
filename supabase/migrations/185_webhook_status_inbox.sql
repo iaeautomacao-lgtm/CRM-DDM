@@ -27,7 +27,10 @@
 --     Tudo confere a CONTA do canal que validou o HMAC (W1): wamid de item de outra conta é ignorado.
 --  4) wacrm.apply_dispatch_status_scoped(conta, wamid, status, erro) — wrapper que confere a conta
 --     antes de chamar apply_dispatch_status (a função de 3 argumentos continua igual, para o replay).
---  5) wacrm.confirm_pending_meta_131026 — mesma regra da 172, agora travando a LINHA DO ITEM antes do
+--  5) wacrm.try_claim_status_drain(p_interval_ms) — "vez" de drenar o inbox no máximo ~1×/s em todo o
+--     cluster (linha em cron_locks com validade curta; o lock do cron tem TTL mínimo de 30 s). O webhook
+--     (after()) chama; quem não ganha a vez não faz nada — o cron de 1/min é a rede de segurança.
+--  6) wacrm.confirm_pending_meta_131026 — mesma regra da 172, agora travando a LINHA DO ITEM antes do
 --     advisory do telefone (mesma ordem de apply_dispatch_status): sem deadlock (W3).
 --
 -- COMPATIBILIDADE: o app detecta a ausência destas funções (PGRST202/42883) e cai no caminho antigo
@@ -50,7 +53,8 @@ BEGIN
   IF to_regprocedure('wacrm.apply_dispatch_status(text,text,text)') IS NULL
      OR to_regclass('wacrm.dispatch_status_receipts') IS NULL
      OR to_regclass('wacrm.disp_message_queue') IS NULL
-     OR to_regclass('wacrm.dispatch_meta_131026_failures') IS NULL THEN
+     OR to_regclass('wacrm.dispatch_meta_131026_failures') IS NULL
+     OR to_regclass('wacrm.cron_locks') IS NULL THEN
     RAISE EXCEPTION '185: aplique a 172 (apply_dispatch_status, recibos e 131026) antes';
   END IF;
   IF to_regclass('wacrm.campaign_metric_deltas') IS NULL THEN
@@ -330,6 +334,31 @@ BEGIN
 END;
 $$;
 
+-- ---------- 5b) vez de drenar (~1×/s no cluster) ----------
+CREATE OR REPLACE FUNCTION wacrm.try_claim_status_drain(p_interval_ms integer DEFAULT 1000)
+RETURNS boolean
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_claimed boolean;
+BEGIN
+  INSERT INTO wacrm.cron_locks (name, owner_id, acquired_at, expires_at)
+  VALUES (
+    'webhook_status_drain', 'drain', clock_timestamp(),
+    clock_timestamp() + pg_catalog.make_interval(secs => GREATEST(COALESCE(p_interval_ms, 1000), 100) / 1000.0)
+  )
+  ON CONFLICT (name) DO UPDATE
+  SET owner_id = 'drain',
+      acquired_at = EXCLUDED.acquired_at,
+      expires_at = EXCLUDED.expires_at
+  WHERE wacrm.cron_locks.expires_at <= clock_timestamp()
+  RETURNING true INTO v_claimed;
+  RETURN COALESCE(v_claimed, false);
+END;
+$$;
+
 -- ---------- 6) W3: ordem de locks consistente em confirm_pending_meta_131026 ----------
 -- Mesma regra da 172; a única diferença é travar a LINHA DO ITEM antes do advisory do telefone
 -- (apply_dispatch_status faz item → advisory; antes esta função fazia advisory → item).
@@ -406,6 +435,8 @@ REVOKE ALL ON FUNCTION wacrm.apply_dispatch_status_scoped(uuid, text, text, text
 GRANT EXECUTE ON FUNCTION wacrm.apply_dispatch_status_scoped(uuid, text, text, text) TO service_role;
 REVOKE ALL ON FUNCTION wacrm.apply_dispatch_statuses(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION wacrm.apply_dispatch_statuses(integer) TO service_role;
+REVOKE ALL ON FUNCTION wacrm.try_claim_status_drain(integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION wacrm.try_claim_status_drain(integer) TO service_role;
 REVOKE ALL ON FUNCTION wacrm.confirm_pending_meta_131026(integer, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION wacrm.confirm_pending_meta_131026(integer, integer) TO service_role;
 

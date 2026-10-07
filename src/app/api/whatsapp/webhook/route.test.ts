@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { encrypt } from '@/lib/whatsapp/encryption'
 import { clearAppSecretCache } from '@/lib/whatsapp/webhook-fast-path'
+import { resetStatusInboxState } from '@/lib/whatsapp/status-inbox'
 
 // ---------------------------------------------------------------------------
 // Verificação de assinatura do webhook Meta com app_secret por canal:
@@ -23,6 +24,12 @@ const updates: Array<Record<string, unknown>> = []
 const ops: Array<{ table: string; op: string; filters: Array<[string, unknown]> }> = []
 const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = []
 const afterCallbacks: Array<() => Promise<void>> = []
+// Migration 185 (inbox de status): por padrão "não aplicada" — os testes legados exercitam o caminho
+// antigo; o bloco "inbox durável" liga ingestAvailable.
+let ingestAvailable = false
+let ingestError: { code?: string; message: string } | null = null
+let drainTurn = true
+let drainClaimed = 0
 // Linha simulada de whatsapp_test_sends (aplica os filtros do update de verdade).
 // Linha simulada de messages (status do Inbox/API).
 let messageRow: { id: string; status: string } | null = null
@@ -40,6 +47,13 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     rpc: async (fn: string, args: Record<string, unknown>) => {
       rpcCalls.push({ fn, args })
+      if (fn === 'ingest_status_events') {
+        if (!ingestAvailable) return { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }
+        if (ingestError) return { data: null, error: ingestError }
+        return { data: (args.p_events as unknown[]).length, error: null }
+      }
+      if (fn === 'try_claim_status_drain') return { data: drainTurn, error: null }
+      if (fn === 'apply_dispatch_statuses') return { data: { claimed: drainClaimed, fast: drainClaimed, slow: 0, failed: 0 }, error: null }
       return { data: true, error: null }
     },
     from: (table: string) => {
@@ -133,6 +147,15 @@ function req(signature: string): Request {
   })
 }
 
+// Estado do inbox de status volta ao padrão ("migration 185 ausente") antes de cada teste.
+beforeEach(() => {
+  ingestAvailable = false
+  ingestError = null
+  drainTurn = true
+  drainClaimed = 0
+  resetStatusInboxState()
+})
+
 describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
   beforeEach(() => {
     storedAppSecret = null
@@ -142,6 +165,9 @@ describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
     rpcCalls.length = 0
     afterCallbacks.length = 0
     testSendRow = null
+    ingestAvailable = false
+    ingestError = null
+    resetStatusInboxState()
     for (const k of Object.keys(extraChannels)) delete extraChannels[k]
     clearAppSecretCache()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -238,7 +264,7 @@ describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
     expect(res.status).toBe(200) // A validou; B é descartado
     await runAfter()
 
-    expect(rpcCalls.map((c) => c.args.p_message_id)).toEqual(['wamid-A'])
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_status').map((c) => c.args.p_message_id)).toEqual(['wamid-A'])
     const touchedAccounts = ops
       .flatMap((o) => o.filters)
       .filter(([c]) => c === 'conversations.account_id')
@@ -265,7 +291,7 @@ describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
     const res = await POST(postRaw(crossBody(), SECRET_B))
     expect(res.status).toBe(200)
     await runAfter()
-    expect(rpcCalls.map((c) => c.args.p_message_id)).toEqual(['wamid-B'])
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_status').map((c) => c.args.p_message_id)).toEqual(['wamid-B'])
     expect(JSON.stringify(ops)).not.toContain('ACC-1')
   })
 })
@@ -431,5 +457,133 @@ describe('POST /api/whatsapp/webhook — precedência de status em messages (Inb
     await send('delivered')
     await send('failed', failed131026)
     expect(messageRow?.status).toBe('delivered')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// P1-2: inbox durável de status (migration 185). O evento é gravado ANTES do 200; falha ⇒ 500 (a Meta
+// reenvia); o apply é em lote (after() + cron) e nada se perde se o processo cair entre o 200 e o apply.
+// ---------------------------------------------------------------------------
+describe('POST /api/whatsapp/webhook — inbox durável de status (migration 185)', () => {
+  function statusPost(statuses: unknown[], secret = CHANNEL_SECRET, pn = 'PNID-1'): Request {
+    const raw = JSON.stringify({
+      entry: [{ id: 'WABA-A', changes: [{ field: 'messages', value: { metadata: { phone_number_id: pn }, statuses } }] }],
+    })
+    const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex')
+    return new Request('http://localhost/api/whatsapp/webhook', { method: 'POST', body: raw, headers: { 'x-hub-signature-256': sig } })
+  }
+  const st = (id: string, status: string, extra: Record<string, unknown> = {}) => ({ id, status, timestamp: '1760000000', recipient_id: '5511', ...extra })
+
+  beforeEach(() => {
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    ops.length = 0
+    rpcCalls.length = 0
+    afterCallbacks.length = 0
+    for (const k of Object.keys(extraChannels)) delete extraChannels[k]
+    clearAppSecretCache()
+    testSendRow = null
+    messageRow = null
+    ingestAvailable = true
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it('grava o lote do POST numa única chamada ANTES do 200 — e nada é aplicado por evento no webhook', async () => {
+    const res = await POST(
+      statusPost([
+        st('w1', 'delivered'),
+        st('w2', 'read'),
+        st('w3', 'failed', { errors: [{ code: 131026, title: 'Message undeliverable' }] }),
+        st('w4', 'sent'), // 'sent' não agrega
+      ]),
+    )
+    expect(res.status).toBe(200)
+    const ingests = rpcCalls.filter((c) => c.fn === 'ingest_status_events')
+    expect(ingests).toHaveLength(1) // ANTES do after(): ninguém rodou o after ainda
+    expect(afterCallbacks).toHaveLength(1)
+    const events = ingests[0].args.p_events as Array<Record<string, unknown>>
+    expect(events.map((e) => [e.message_id, e.status])).toEqual([['w1', 'delivered'], ['w2', 'read'], ['w3', 'failed']])
+    // Conta/canal vêm do canal VERIFICADO, nunca do corpo.
+    expect(events.every((e) => e.account_id === 'ACC-1' && e.channel_id === 'CFG-1')).toBe(true)
+    expect(events[2].error_text).toBe('Meta: Message undeliverable (code 131026)')
+
+    for (const cb of afterCallbacks.splice(0)) await cb()
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_status')).toHaveLength(0)
+    expect(ops.filter((o) => o.table === 'whatsapp_test_sends' || o.table === 'messages')).toHaveLength(0)
+    expect(rpcCalls.filter((c) => c.fn === 'try_claim_status_drain')).toHaveLength(1)
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_statuses')).toHaveLength(1)
+  })
+
+  it('falha ao gravar no inbox ⇒ 500 (a Meta reenvia) e nada é processado em paralelo', async () => {
+    ingestError = { code: '57014', message: 'statement timeout' }
+    const res = await POST(statusPost([st('w1', 'delivered')]))
+    expect(res.status).toBe(500)
+    expect(afterCallbacks).toHaveLength(0)
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_status')).toHaveLength(0)
+  })
+
+  it('migration 185 ausente: cai no caminho antigo (apply por evento depois do 200), sem 500', async () => {
+    ingestAvailable = false
+    const res = await POST(statusPost([st('w1', 'delivered'), st('w2', 'read')]))
+    expect(res.status).toBe(200)
+    for (const cb of afterCallbacks.splice(0)) await cb()
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_status').map((c) => c.args.p_message_id)).toEqual(['w1', 'w2'])
+    // Não insiste a cada POST: o segundo nem tenta o ingest de novo (recheca só depois de 60 s).
+    rpcCalls.length = 0
+    await POST(statusPost([st('w3', 'delivered')]))
+    expect(rpcCalls.filter((c) => c.fn === 'ingest_status_events')).toHaveLength(0)
+  })
+
+  it('só drena se ganhar a vez (~1×/s no cluster); sem a vez, nada é aplicado agora (o cron aplica)', async () => {
+    drainTurn = false
+    expect((await POST(statusPost([st('w1', 'delivered')]))).status).toBe(200)
+    for (const cb of afterCallbacks.splice(0)) await cb()
+    expect(rpcCalls.filter((c) => c.fn === 'try_claim_status_drain')).toHaveLength(1)
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_statuses')).toHaveLength(0)
+  })
+
+  it('lote de 500 no mesmo POST: uma gravação só; drena em lotes enquanto vier lote cheio', async () => {
+    drainClaimed = 500
+    const statuses = Array.from({ length: 500 }, (_, i) => st('w' + i, i % 2 ? 'read' : 'delivered'))
+    expect((await POST(statusPost(statuses))).status).toBe(200)
+    const ingests = rpcCalls.filter((c) => c.fn === 'ingest_status_events')
+    expect(ingests).toHaveLength(1)
+    expect((ingests[0].args.p_events as unknown[]).length).toBe(500)
+    for (const cb of afterCallbacks.splice(0)) await cb()
+    expect(rpcCalls.filter((c) => c.fn === 'apply_dispatch_statuses').length).toBeGreaterThan(1)
+  })
+
+  it('POST assinado pelo app A com número da conta B: nenhum evento da conta B entra no inbox', async () => {
+    extraChannels['PNID-B'] = { id: 'CFG-B', account_id: 'ACC-B', app_secret: encrypt('app-secret-da-conta-B-0123456789abcdef') }
+    const raw = JSON.stringify({
+      entry: [
+        { id: 'WABA-A', changes: [{ field: 'messages', value: { metadata: { phone_number_id: 'PNID-1' }, statuses: [st('wamid-A', 'read')] } }] },
+        { id: 'WABA-B', changes: [{ field: 'messages', value: { metadata: { phone_number_id: 'PNID-B' }, statuses: [st('wamid-B', 'read')] } }] },
+      ],
+    })
+    const sig = 'sha256=' + crypto.createHmac('sha256', CHANNEL_SECRET).update(raw).digest('hex')
+    const res = await POST(new Request('http://localhost/api/whatsapp/webhook', { method: 'POST', body: raw, headers: { 'x-hub-signature-256': sig } }))
+    expect(res.status).toBe(200)
+    const events = rpcCalls.find((c) => c.fn === 'ingest_status_events')!.args.p_events as Array<Record<string, unknown>>
+    expect(events.map((e) => e.message_id)).toEqual(['wamid-A'])
+    expect(JSON.stringify(events)).not.toContain('ACC-B')
+  })
+
+  it('corpo acima de ~1 MB: 413 antes de parsear', async () => {
+    const big = JSON.stringify({ entry: [], pad: 'x'.repeat(1_100_000) })
+    const res = await POST(new Request('http://localhost/api/whatsapp/webhook', { method: 'POST', body: big, headers: { 'x-hub-signature-256': 'sha256=00' } }))
+    expect(res.status).toBe(413)
+    const declared = await POST(new Request('http://localhost/api/whatsapp/webhook', { method: 'POST', body: '{}', headers: { 'content-length': '2000000' } }))
+    expect(declared.status).toBe(413)
+  })
+
+  it('W4: rajada de assinaturas inválidas relê o canal no máximo 1× por janela', async () => {
+    expect((await POST(statusPost([st('w1', 'read')]))).status).toBe(200) // canal entra no cache
+    afterCallbacks.length = 0
+    const before = selectCalls
+    for (let i = 0; i < 20; i++) {
+      expect((await POST(statusPost([st('x' + i, 'read')], 'segredo-do-atacante'))).status).toBe(401)
+    }
+    expect(selectCalls - before).toBeLessThanOrEqual(1)
   })
 })
