@@ -522,7 +522,7 @@ export default function CampanhasPage() {
       const campaignIds = (campaignList ?? []).map((c) => c.id);
       if (campaignIds.length > 0) {
         let { data: metricsList } = await supabase
-          .from("campaign_metrics")
+          .from("campaign_metrics_live")
           .select("*")
           .in("campaign_id", campaignIds);
 
@@ -540,7 +540,7 @@ export default function CampanhasPage() {
             });
             if (planned.ok) {
               const refreshed = await supabase
-                .from("campaign_metrics")
+                .from("campaign_metrics_live")
                 .select("*")
                 .in("campaign_id", campaignIds);
               metricsList = refreshed.data ?? metricsList;
@@ -822,7 +822,7 @@ export default function CampanhasPage() {
     try {
       const supabase = createClient();
       const { data } = await supabase
-        .from("campaign_metrics")
+        .from("campaign_metrics_live")
         .select("*")
         .eq("campaign_id", campaignId)
         .maybeSingle();
