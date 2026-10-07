@@ -32,6 +32,7 @@ import { channelConfigFor, preloadBlacklist, queueItemPrimaryPhone } from "@/lib
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
+import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 
@@ -156,6 +157,10 @@ const META_131026_CONFIRM_LOCK_TTL_SECONDS = 270;
 // Consolidação dos deltas de métricas (migration 183): lock próprio, só com sobra de tempo.
 const METRICS_CONSOLIDATE_LOCK_TTL_SECONDS = 30;
 const METRICS_CONSOLIDATE_BATCH = 20_000;
+// Lock do tick: curto; renovado a cada 20 s pelo heartbeat (renew_cron_lock, TTL padrão 90 s após a migration 184).
+const CRON_LOCK_TTL_SECONDS = 90;
+// Movimentação de itens de campanhas pausadas/encerradas/retomadas (migration 184): tempo máximo por tick.
+const QUEUE_MOVES_BUDGET_MS = 8_000;
 const METRICS_CONSOLIDATE_MAX_ROUNDS = 5;
 
 /** Janela (min) sem delivered/read para um failed 131026 (aparelho offline também gera) virar erro definitivo. */
@@ -275,10 +280,10 @@ export async function POST(request: Request) {
   let tickStatus = "error";
   try {
     const db = supabaseAdmin();
-    // Só um tick por vez em todo o cluster. TTL de 600s cobre crash do
-    // processo: o lock expira sozinho e o próximo tick consegue entrar.
+    // Só um tick por vez em todo o cluster. TTL curto (90 s, migration 184): o heartbeat de 20 s renova
+    // durante o tick; se o processo morrer (deploy/crash) o lock expira em ~1,5 min e o próximo tick entra.
     const { data: acquired, error: lockError } = await db.rpc('try_acquire_cron_lock', {
-      p_name: 'disparador_cron', p_owner_id: owner, p_ttl_seconds: 600,
+      p_name: 'disparador_cron', p_owner_id: owner, p_ttl_seconds: CRON_LOCK_TTL_SECONDS,
     });
     if (lockError) throw lockError;
     if (!acquired) return NextResponse.json({ status: 'already_running' });
@@ -402,6 +407,12 @@ export async function POST(request: Request) {
         const { error: releaseError } = await db.rpc("release_cron_lock", { p_name: "disparador_metrics", p_owner_id: owner });
         if (releaseError) console.error("[Cron] Falha ao liberar o lock de métricas:", releaseError.message);
       }
+    }
+    // 2d) Itens de campanhas pausadas/encerradas/retomadas: a RPC de stop/resume só trocou o status; os itens
+    //     movem em lotes aqui (e pela rota). Só com sobra de tempo; falha/RPC ausente não derruba o tick.
+    if (!outOfTime()) {
+      const moved = await drainDispatchMoves(db, null, { budgetMs: QUEUE_MOVES_BUDGET_MS });
+      if (moved.moved > 0) console.log("[Cron] Itens movidos após pausa/encerramento/retomada:", moved.moved, moved.partial ? "(parcial)" : "");
     }
     // 3) Campanhas em execução, mais "atrasadas" primeiro (fairness entre
     //    campanhas quando o tick não dá conta de todas).

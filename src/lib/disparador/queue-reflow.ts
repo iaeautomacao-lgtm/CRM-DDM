@@ -27,6 +27,7 @@
 
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { processWithConcurrency } from "@/lib/disparador/concurrency";
+import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import {
   INTRA_CONTACT_MS,
   isScheduledInClosedWindow,
@@ -276,6 +277,9 @@ export async function resumeBatchedCampaign(
   now: Date = new Date()
 ): Promise<ResumeResult> {
   const db = supabaseAdmin();
+  // Migration 184: a pausa só troca o status; os itens vão para 'pausado' em lotes. Termina esse movimento antes de
+  // planejar (senão sobrariam itens 'agendado' fora do plano de redistribuição).
+  await drainDispatchMoves(db, campaign.id, { budgetMs: 15_000 });
   const loaded = await loadReflowItems(campaign.id, "pausado");
   if (!loaded.ok) return { ok: false, reason: "error", error: loaded.error };
   const plan = planFor(campaign, loaded.items, now);
@@ -288,6 +292,8 @@ export async function resumeBatchedCampaign(
   const keep = await db.rpc("resume_dispatch_campaign_keep_schedule", args);
   if (!keep.error) {
     if (keep.data === null) return { ok: false, reason: "state_changed", error: "Estado da campanha mudou" };
+    // Reativa os itens em lotes (o status da campanha já mudou; o cron termina o que sobrar).
+    await drainDispatchMoves(db, campaign.id, { budgetMs: 15_000 });
     return { ok: true, resumed: Number(keep.data) };
   }
   if (!isMissingRpc(keep.error, "resume_dispatch_campaign_keep_schedule"))

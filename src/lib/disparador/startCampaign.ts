@@ -10,6 +10,7 @@ import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import { formatStartFailureReason, parseTemplateMode } from "@/lib/disparador/campaign-validation";
 import { INTRA_CONTACT_MS, roundContactTimeMs, scheduleRounds } from "@/lib/disparador/window-clock";
 import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
+import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { writeLog } from "@/lib/logger";
 
 // campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
@@ -247,6 +248,8 @@ async function prepareCampaign(
           status: 409,
           error: "Estado da campanha mudou; atualize antes de retomar",
         };
+      // Migration 184: a RPC só trocou o status; os itens voltam a 'agendado' em lotes (o cron termina o que sobrar).
+      await drainDispatchMoves(supabaseAdmin(), campaignId, { budgetMs: 15_000 });
       return { ok: true, enqueued: count };
     }
 

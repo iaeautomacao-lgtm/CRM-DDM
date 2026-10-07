@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   rows: [] as Array<{ id: string; contact_id: string | null; scheduled_at: string | null }>,
   rpc: vi.fn(),
+  drain: vi.fn(async () => ({ ok: true, moved: 0, partial: false })),
   updates: [] as Array<{ value: Record<string, unknown>; filters: Array<[string, unknown]> }>,
 }));
+vi.mock("@/lib/disparador/queue-moves", () => ({ drainDispatchMoves: mocks.drain }));
 vi.mock("@/lib/disparador/admin-client", () => ({
   supabaseAdmin: () => ({
     rpc: mocks.rpc,
@@ -263,6 +265,17 @@ describe("resumeBatchedCampaign (retomada de campanha em lote pausada)", () => {
     mocks.rows = legacyQueue(br(16, 15), 3, 2);
     mocks.updates.length = 0;
     mocks.rpc.mockReset();
+    mocks.drain.mockClear();
+  });
+
+  it("termina a movimentação em lotes da pausa antes de planejar e a da retomada depois (migration 184)", async () => {
+    mocks.rpc.mockImplementation(async (name: string, args: { p_items?: unknown[] }) => ({
+      data: name === "reflow_campaign_queue" ? args.p_items?.length : 6,
+      error: null,
+    }));
+    await resumeBatchedCampaign(campaign, "acc", br(19, 10));
+    expect(mocks.drain).toHaveBeenCalledTimes(2);
+    expect(mocks.drain.mock.calls.every((c) => c[1] === "camp")).toBe(true);
   });
 
   it("grava o ritmo nos itens 'pausado' e retoma sem pôr scheduled_at = agora", async () => {
