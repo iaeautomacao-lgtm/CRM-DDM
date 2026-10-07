@@ -23,6 +23,7 @@ import { apiFetch } from "@/lib/api-fetch";
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { Copy, KeyRound, Loader2, Plus, Trash2 } from 'lucide-react';
 
@@ -175,7 +176,10 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
               As chaves autenticam a REST API pública (
               <code className="text-xs">/api/v1</code>) para que você possa criar suas
               próprias automações. Envie-as no cabeçalho como{' '}
-              <code className="text-xs">Authorization: Bearer &lt;chave&gt;</code>.
+              <code className="text-xs">Authorization: Bearer &lt;chave&gt;</code>.{' '}
+              <Link href="/settings/api-docs" className="underline">
+                Ver documentação da API
+              </Link>
             </>
           )
         }
