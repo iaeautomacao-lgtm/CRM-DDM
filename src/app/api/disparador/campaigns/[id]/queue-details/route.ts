@@ -211,14 +211,21 @@ export async function GET(
       // filtro do PostgREST e um nome/telefone de busca contendo um
       // deles quebraria o parse (400), não um risco de injeção de SQL
       // (a gramática do PostgREST não executa SQL arbitrário).
-      // % e _ também saem: são curingas do ILIKE e deixariam a busca
-      // devolver (ou exportar) contatos que o termo não nomeia.
-      const safeSearch = search.replace(/[,()%_]/g, " ").trim();
+      // % e _ são escapados para não ampliar a busca com curingas.
+      const safeSearch = search.replace(/[,()"\\*]/g, " ").trim().replace(/[%_]/g, "\\$&");
+      if (!safeSearch) {
+        return exportFormat === "xlsx"
+          ? buildXlsxResponse([], statusKey)
+          : NextResponse.json({ rows: [], total: 0, page, pageSize: PAGE_SIZE });
+      }
+      // Aspas protegem a gramática do .or(); a barra chega ao ILIKE para
+      // buscar % e _ literalmente, sem transformar o termo em curinga.
+      const pattern = JSON.stringify(`%${safeSearch}%`);
       const { data: matchedContacts, error: contactSearchError } = await supabaseAdmin()
         .from("contacts")
         .select("id")
         .eq("account_id", ctx.accountId)
-        .or(`name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%`);
+        .or(`name.ilike.${pattern},phone.ilike.${pattern}`);
 
       if (contactSearchError) {
         throw new Error(`Falha ao buscar contatos: ${contactSearchError.message}`);

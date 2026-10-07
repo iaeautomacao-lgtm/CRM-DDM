@@ -21,6 +21,86 @@ function errorExample(code: string, message: string): Json {
 
 const SECURITY = [{ bearerAuth: [] }];
 
+
+const reportErrors = {
+  '400': {
+    description:
+      'Filtro inválido: `team_id`/`agent_id` fora do formato UUID, `from`/`to` ausentes ou fora de YYYY-MM-DD, `to` anterior a `from`, período acima de 366 dias, ou volume acima do limite (divida em períodos menores).',
+    content: {
+      'application/json': {
+        schema: ref('ErrorEnvelope'),
+        examples: {
+          periodo: { value: errorExample('bad_request', "Historical reports require 'from' and 'to' in YYYY-MM-DD format") },
+          limite: { value: errorExample('bad_request', 'Report range is limited to 366 days; split larger exports into multiple requests') },
+        },
+      },
+    },
+  },
+  '401': resp('Unauthorized'),
+  '403': resp('Forbidden'),
+  '429': resp('RateLimited'),
+  '500': resp('InternalError'),
+} as const;
+
+const fromParam = {
+  name: 'from',
+  in: 'query',
+  required: true,
+  description: 'Primeiro dia do período (inclusivo), YYYY-MM-DD, calendário de Brasília.',
+  schema: { type: 'string', format: 'date' },
+  example: '2026-10-01',
+} as const;
+const toParam = {
+  name: 'to',
+  in: 'query',
+  required: true,
+  description: 'Último dia do período (inclusivo), YYYY-MM-DD. No máximo 366 dias a partir de `from`.',
+  schema: { type: 'string', format: 'date' },
+  example: '2026-10-07',
+} as const;
+const teamParam = {
+  name: 'team_id',
+  in: 'query',
+  required: false,
+  description: 'Filtra por equipe (UUID).',
+  schema: { type: 'string', format: 'uuid' },
+} as const;
+const agentParam = {
+  name: 'agent_id',
+  in: 'query',
+  required: false,
+  description: 'Filtra por operador (UUID).',
+  schema: { type: 'string', format: 'uuid' },
+} as const;
+
+const reportOk = (description: string, data: Json, example: Json) => ({
+  description,
+  content: {
+    'application/json': {
+      schema: { type: 'object', required: ['data'], properties: { data } },
+      example: { data: example },
+    },
+  },
+});
+
+const periodExample = { from: '2026-10-01', to: '2026-10-07', timezone: 'America/Sao_Paulo' };
+const periodMetricsExample = {
+  received: 1240,
+  attended: 1180,
+  closed: 1105,
+  tabulated: 1062,
+  without_tabulation: 43,
+  distinct_tabulations: 18,
+  unique_operators: 21,
+  avg_first_response_seconds: 94,
+  avg_resolution_seconds: 5320,
+  avg_service_seconds: 4210,
+};
+const currentExample = {
+  conversations: { total_active: 184, navigating: 72, waiting: 31, attending: 81 },
+  operators: { total: 48, online: 24, away: 6, offline: 18, serving: 19 },
+};
+
 export const openApiSpec = {
   openapi: '3.1.0',
   info: {
@@ -39,6 +119,7 @@ export const openApiSpec = {
       '- `messages:send` — `POST /whatsapp/send`',
       '- `campaigns:write` — `POST /disparador/campaigns` (também lê campanhas)',
       '- `campaigns:read` — `GET /disparador/campaigns/{id}`',
+      '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
       '- `GET /me` não exige escopo.',
       '',
       '## Envelope de resposta',
@@ -53,6 +134,9 @@ export const openApiSpec = {
       '',
       '## Fuso e janela de envio',
       'Horários de janela (`janela_inicio`/`janela_fim`) são de **Brasília** (UTC-3).',
+      '',
+      '## Relatórios (`/reports/*`)',
+      'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
     ].join('\n'),
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
@@ -60,6 +144,7 @@ export const openApiSpec = {
     { name: 'Conta', description: 'Identidade da chave.' },
     { name: 'Mensagens', description: 'Envio avulso de mensagens WhatsApp.' },
     { name: 'Disparador', description: 'Campanhas em massa (Meta com template, WAHA com texto livre).' },
+    { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
   ],
   security: SECURITY,
   paths: {
@@ -381,7 +466,7 @@ export const openApiSpec = {
           },
           '400': {
             description:
-              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, template ausente/não aprovado (Meta), `message` ausente (WAHA), janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
+              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
             content: {
               'application/json': {
                 schema: ref('ErrorEnvelope'),
@@ -496,6 +581,155 @@ export const openApiSpec = {
         },
       },
     },
+
+    '/reports/operations/current': {
+      get: {
+        tags: ['Relatórios'],
+        operationId: 'getReportOperationsCurrent',
+        summary: 'Snapshot operacional agora',
+        description: [
+          'Foto do atendimento neste instante (sem período): conversas ativas por fase e operadores por presença, com o detalhe por equipe. Exige `reports:read`.',
+          '',
+          '- **Navegando**: conversa aberta sem operador atribuído.',
+          '- **Em espera**: conversa pendente sem operador atribuído.',
+          '- **Em atendimento**: conversa ativa com operador atribuído (a atribuição vence o status bruto).',
+          '- **Online / Ausente / Offline**: presença derivada do heartbeat do CRM. **Serving**: operador com ao menos uma conversa ativa atribuída.',
+        ].join('\n'),
+        parameters: [teamParam, agentParam],
+        responses: {
+          '200': reportOk('Snapshot atual.', ref('OperationsCurrent'), {
+            generated_at: '2026-10-07T14:00:00.000Z',
+            ...currentExample,
+            teams: [
+              {
+                team_id: '5b0e5a64-0000-4000-8000-000000000031',
+                team_name: 'Cobrança Graduação',
+                conversations: { total_active: 60, navigating: 20, waiting: 10, attending: 30 },
+                operators: { total: 15, online: 9, away: 2, offline: 4, serving: 8 },
+              },
+            ],
+          }),
+          ...reportErrors,
+        },
+      },
+    },
+
+    '/reports/operations/summary': {
+      get: {
+        tags: ['Relatórios'],
+        operationId: 'getReportOperationsSummary',
+        summary: 'Resumo de um período + snapshot atual',
+        description: [
+          'Indicadores de atendimento de um período (`attendances`) e o estado atual (`current`). Exige `reports:read`.',
+          '',
+          'Tempos (em segundos; `null` quando não há amostra válida):',
+          '- `avg_first_response_seconds`: criação → primeira resposta humana, nas conversas cuja primeira resposta ocorreu no período.',
+          '- `avg_resolution_seconds`: criação → encerramento, nas conversas finalizadas no período.',
+          '- `avg_service_seconds`: primeira resposta humana → encerramento, nas finalizadas no período com primeira resposta registrada.',
+          '',
+          'Respostas automáticas (bot) não contam como atendimento. **Tabulada** = finalizada no período com tabulação de encerramento.',
+        ].join('\n'),
+        parameters: [fromParam, toParam, teamParam, agentParam],
+        responses: {
+          '200': reportOk('Resumo do período.', ref('OperationsSummary'), {
+            generated_at: '2026-10-07T14:00:00.000Z',
+            period: periodExample,
+            attendances: periodMetricsExample,
+            current: currentExample,
+          }),
+          ...reportErrors,
+        },
+      },
+    },
+
+    '/reports/teams': {
+      get: {
+        tags: ['Relatórios'],
+        operationId: 'getReportTeams',
+        summary: 'Métricas por equipe',
+        description:
+          'Para cada equipe: `period` (atendimentos, tabulações e tempos do período) e `current` (fila atual e operadores por presença). Conversas sem equipe aparecem como "Sem equipe" (`team_id: null`). Exige `reports:read`.',
+        parameters: [fromParam, toParam, teamParam, agentParam],
+        responses: {
+          '200': reportOk('Equipes com métricas do período e do momento.', ref('TeamsReport'), {
+            generated_at: '2026-10-07T14:00:00.000Z',
+            period: periodExample,
+            teams: [
+              {
+                team_id: '5b0e5a64-0000-4000-8000-000000000031',
+                team_name: 'Cobrança Graduação',
+                period: periodMetricsExample,
+                current: {
+                  team_id: '5b0e5a64-0000-4000-8000-000000000031',
+                  team_name: 'Cobrança Graduação',
+                  conversations: { total_active: 60, navigating: 20, waiting: 10, attending: 30 },
+                  operators: { total: 15, online: 9, away: 2, offline: 4, serving: 8 },
+                },
+              },
+            ],
+          }),
+          ...reportErrors,
+        },
+      },
+    },
+
+    '/reports/agents': {
+      get: {
+        tags: ['Relatórios'],
+        operationId: 'getReportAgents',
+        summary: 'Métricas por operador',
+        description: [
+          'Para cada operador: presença atual, equipes, `period` (atendimentos do período) e `current` (conversas em atendimento agora). Exige `reports:read`.',
+          '',
+          'A atribuição histórica usa o responsável **final** registrado na conversa: se ela foi transferida, vale o último operador; o histórico de transferências não é redistribuído.',
+        ].join('\n'),
+        parameters: [fromParam, toParam, teamParam, agentParam],
+        responses: {
+          '200': reportOk('Operadores com métricas.', ref('AgentsReport'), {
+            generated_at: '2026-10-07T14:00:00.000Z',
+            period: periodExample,
+            agents: [
+              {
+                agent_id: '9a1b2c3d-0000-4000-8000-000000000041',
+                agent_name: 'Ana Souza',
+                role: 'agent',
+                presence: 'online',
+                teams: [{ team_id: '5b0e5a64-0000-4000-8000-000000000031', team_name: 'Cobrança Graduação' }],
+                period: periodMetricsExample,
+                current: { attending: 4, serving: true },
+              },
+            ],
+          }),
+          ...reportErrors,
+        },
+      },
+    },
+
+    '/reports/tabulations': {
+      get: {
+        tags: ['Relatórios'],
+        operationId: 'getReportTabulations',
+        summary: 'Distribuição de tabulações de encerramento',
+        description:
+          'Tabulações das conversas finalizadas no período, da mais usada para a menos usada. `percentage` é calculado sobre o total de conversas **tabuladas** (não sobre todas as finalizadas). Exige `reports:read`.',
+        parameters: [fromParam, toParam, teamParam, agentParam],
+        responses: {
+          '200': reportOk('Distribuição de tabulações.', ref('TabulationsReport'), {
+            generated_at: '2026-10-07T14:00:00.000Z',
+            period: periodExample,
+            total_closed: 8421,
+            total_tabulated: 8102,
+            without_tabulation: 319,
+            distinct_used: 22,
+            items: [
+              { tabulation_id: '3f6c1c1e-0000-4000-8000-000000000051', code: 142, name: 'Acordo Realizado', count: 1864, percentage: 23.01 },
+              { tabulation_id: '3f6c1c1e-0000-4000-8000-000000000052', code: 160, name: 'Pagará no portal do aluno', count: 1210, percentage: 14.93 },
+            ],
+          }),
+          ...reportErrors,
+        },
+      },
+    },
   },
 
   components: {
@@ -568,6 +802,7 @@ export const openApiSpec = {
           'conversations:read',
           'campaigns:write',
           'campaigns:read',
+          'reports:read',
           'intelligence:read',
         ],
         description: '`intelligence:read` é de chave **pessoal** (MCP do DDM Intelligence) e não se combina com os demais.',
@@ -725,6 +960,157 @@ export const openApiSpec = {
           slot_size: { type: 'integer' },
           slot_interval_minutes: { type: 'number' },
           estimated_completion_minutes: { type: 'number', description: 'Tempo de janela aberta até o último slot começar.' },
+        },
+      },
+
+      ReportPeriod: {
+        type: 'object',
+        properties: {
+          from: { type: 'string', format: 'date' },
+          to: { type: 'string', format: 'date' },
+          timezone: { type: 'string', const: 'America/Sao_Paulo' },
+        },
+      },
+      ReportPeriodMetrics: {
+        type: 'object',
+        description: 'Indicadores de atendimento do período.',
+        properties: {
+          received: { type: 'integer', description: 'Conversas criadas no período.' },
+          attended: { type: 'integer', description: 'Com primeira resposta humana no período.' },
+          closed: { type: 'integer', description: 'Finalizadas no período.' },
+          tabulated: { type: 'integer', description: 'Finalizadas no período com tabulação de encerramento.' },
+          without_tabulation: { type: 'integer' },
+          distinct_tabulations: { type: 'integer' },
+          unique_operators: { type: 'integer' },
+          avg_first_response_seconds: { type: ['integer', 'null'] },
+          avg_resolution_seconds: { type: ['integer', 'null'] },
+          avg_service_seconds: { type: ['integer', 'null'] },
+        },
+      },
+      ReportConversationsNow: {
+        type: 'object',
+        properties: {
+          total_active: { type: 'integer' },
+          navigating: { type: 'integer', description: 'Abertas sem operador.' },
+          waiting: { type: 'integer', description: 'Pendentes sem operador.' },
+          attending: { type: 'integer', description: 'Com operador atribuído.' },
+        },
+      },
+      ReportOperatorsNow: {
+        type: 'object',
+        properties: {
+          total: { type: 'integer' },
+          online: { type: 'integer' },
+          away: { type: 'integer' },
+          offline: { type: 'integer' },
+          serving: { type: 'integer', description: 'Com ao menos uma conversa ativa atribuída.' },
+        },
+      },
+      ReportCurrentTeam: {
+        type: 'object',
+        properties: {
+          team_id: { type: ['string', 'null'], format: 'uuid' },
+          team_name: { type: 'string' },
+          conversations: ref('ReportConversationsNow'),
+          operators: ref('ReportOperatorsNow'),
+        },
+      },
+      OperationsCurrent: {
+        type: 'object',
+        properties: {
+          generated_at: { type: 'string', format: 'date-time' },
+          conversations: ref('ReportConversationsNow'),
+          operators: ref('ReportOperatorsNow'),
+          teams: { type: 'array', items: ref('ReportCurrentTeam') },
+        },
+      },
+      OperationsSummary: {
+        type: 'object',
+        properties: {
+          generated_at: { type: 'string', format: 'date-time' },
+          period: ref('ReportPeriod'),
+          attendances: ref('ReportPeriodMetrics'),
+          current: {
+            type: 'object',
+            properties: { conversations: ref('ReportConversationsNow'), operators: ref('ReportOperatorsNow') },
+          },
+        },
+      },
+      TeamsReport: {
+        type: 'object',
+        properties: {
+          generated_at: { type: 'string', format: 'date-time' },
+          period: ref('ReportPeriod'),
+          teams: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                team_id: { type: ['string', 'null'], format: 'uuid' },
+                team_name: { type: 'string' },
+                period: ref('ReportPeriodMetrics'),
+                current: ref('ReportCurrentTeam'),
+              },
+            },
+          },
+        },
+      },
+      AgentsReport: {
+        type: 'object',
+        properties: {
+          generated_at: { type: 'string', format: 'date-time' },
+          period: ref('ReportPeriod'),
+          agents: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                agent_id: { type: 'string', format: 'uuid' },
+                agent_name: { type: 'string' },
+                role: { type: ['string', 'null'] },
+                presence: { type: 'string', enum: ['online', 'away', 'offline'] },
+                teams: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: { team_id: { type: 'string', format: 'uuid' }, team_name: { type: 'string' } },
+                  },
+                },
+                period: ref('ReportPeriodMetrics'),
+                current: {
+                  type: 'object',
+                  properties: {
+                    attending: { type: 'integer', description: 'Conversas em atendimento agora.' },
+                    serving: { type: 'boolean' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      TabulationsReport: {
+        type: 'object',
+        properties: {
+          generated_at: { type: 'string', format: 'date-time' },
+          period: ref('ReportPeriod'),
+          total_closed: { type: 'integer' },
+          total_tabulated: { type: 'integer' },
+          without_tabulation: { type: 'integer' },
+          distinct_used: { type: 'integer' },
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                tabulation_id: { type: 'string', format: 'uuid' },
+                code: { type: ['integer', 'null'] },
+                name: { type: 'string' },
+                count: { type: 'integer' },
+                percentage: { type: 'number', description: 'Sobre o total de tabuladas.' },
+              },
+            },
+          },
         },
       },
       Campaign: {

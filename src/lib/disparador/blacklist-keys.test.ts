@@ -3,39 +3,65 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadBlacklistKeySet } from "./blacklist-keys";
 import { phoneKey } from "./phone-key";
 
-// Fake mínimo do query builder: devolve fatias de `rows` conforme .range().
-function fakeDb(rows: Array<{ telefone: string }>, error: { message: string } | null = null) {
-  const ranges: Array<[number, number]> = [];
+// Fake do query builder com semântica de keyset: respeita .gt("id", cursor),
+// .order("id") e .limit(n) sobre as linhas (ids crescentes, com buracos).
+function fakeDb(rows: Array<{ id: number; telefone: string }>, error: { message: string } | null = null) {
+  const calls: Array<{ after: number | null; limit: number }> = [];
   const db = {
     from: () => {
+      let after: number | null = null;
+      let limit = Infinity;
       const builder = {
         select: () => builder,
         order: () => builder,
-        range: async (from: number, to: number) => {
-          ranges.push([from, to]);
-          return error ? { data: null, error } : { data: rows.slice(from, to + 1), error: null };
+        gt: (_col: string, value: number) => ((after = value), builder),
+        limit: (n: number) => ((limit = n), builder),
+        then: (resolve: (value: unknown) => unknown) => {
+          calls.push({ after, limit });
+          const result = error
+            ? { data: null, error }
+            : {
+                data: rows
+                  .filter((r) => after === null || r.id > after)
+                  .sort((a, b) => a.id - b.id)
+                  .slice(0, limit),
+                error: null,
+              };
+          return Promise.resolve(result).then(resolve);
         },
       };
       return builder;
     },
   };
-  return { db: db as unknown as SupabaseClient, ranges };
+  return { db: db as unknown as SupabaseClient, calls };
 }
 
 describe("loadBlacklistKeySet", () => {
-  it("pagina além de 1000 linhas", async () => {
+  it("pagina por keyset além de 1000 linhas, sem pular nem repetir", async () => {
+    // ids com buracos (linhas apagadas) e telefones únicos.
     const rows = Array.from({ length: 2500 }, (_, i) => ({
+      id: (i + 1) * 3,
       telefone: `+55119${String(10000000 + i)}`,
     }));
-    const { db, ranges } = fakeDb(rows);
+    const { db, calls } = fakeDb(rows);
     const keys = await loadBlacklistKeySet(db);
-    expect(ranges).toEqual([
-      [0, 999],
-      [1000, 1999],
-      [2000, 2999],
+    expect(calls).toEqual([
+      { after: null, limit: 1000 },
+      { after: 3000, limit: 1000 },
+      { after: 6000, limit: 1000 },
     ]);
+    expect(keys.has(phoneKey(rows[0].telefone))).toBe(true);
+    expect(keys.has(phoneKey(rows[999].telefone))).toBe(true); // fronteira da 1ª página
+    expect(keys.has(phoneKey(rows[1000].telefone))).toBe(true); // 1ª da 2ª página
     expect(keys.has(phoneKey(rows[2499].telefone))).toBe(true);
     expect(keys.size).toBe(2500);
+  });
+
+  it("página cheia exata (1000) ainda consulta a seguinte e termina vazia", async () => {
+    const rows = Array.from({ length: 1000 }, (_, i) => ({ id: i + 1, telefone: `+55119${String(20000000 + i)}` }));
+    const { db, calls } = fakeDb(rows);
+    expect((await loadBlacklistKeySet(db)).size).toBe(1000);
+    expect(calls).toHaveLength(2);
   });
 
   it("erro de leitura lança em vez de seguir sem blacklist", async () => {

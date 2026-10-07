@@ -595,8 +595,12 @@ async function handleStatusUpdate(
   // dos estados listados, então um 'sent' atrasado nunca rebaixa 'read'.
   const allowedPrevious: Record<string, string[]> = {
     sent: ['pending', 'sending'],
-    delivered: ['pending', 'sending', 'sent'],
-    read: ['pending', 'sending', 'sent', 'delivered'],
+    // 'failed' → delivered/read: a Meta pode mandar failed (131026, aparelho
+    // offline) e depois delivered/read para o mesmo wamid. 'failed' nunca
+    // rebaixa delivered/read (ver `failed` abaixo). A tabela messages não tem
+    // coluna de erro, então só o status muda.
+    delivered: ['pending', 'sending', 'sent', 'failed'],
+    read: ['pending', 'sending', 'sent', 'delivered', 'failed'],
     failed: ['pending', 'sending', 'sent'],
   }
   if (!allowedPrevious[status.status]) return

@@ -27,8 +27,8 @@ import {
   resolveCronCandidateCap,
   shouldReserveCampaignCadence,
 } from "@/lib/disparador/cron-batching";
+import { isPrepareInTickEnabled, prepareDueCampaigns, recoverStuckPreparing } from "@/lib/disparador/prepare-campaigns";
 import { channelConfigFor, preloadBlacklist, queueItemPrimaryPhone } from "@/lib/disparador/tick-preload";
-import { startCampaign } from "@/lib/disparador/startCampaign";
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
@@ -187,8 +187,10 @@ async function fetchDueCandidates(db: AdminDb, campaignId: string, limit: number
   return items;
 }
 
-// Cooldown do número após backoff: vale neste processo (memória) e, com a
-// migration 164, entre processos/restarts. Falha só é logada.
+// Cooldown persistente é reservado a RATE LIMIT explícito. Erro transitório
+// (5xx/timeout/rede) pode reduzir o número no tick atual quando recorrente,
+// mas não deve impor 5 minutos de lentidão depois que o provedor recuperou.
+// Com migration 164 o cooldown de rate limit vale entre processos/restarts.
 async function persistCooldown(
   db: AdminDb,
   sessionId: string,
@@ -302,33 +304,17 @@ export async function POST(request: Request) {
       tickStatus = "migration_required";
       return NextResponse.json({ error: "Dispatch safety migration required" }, { status: 503 });
     }
-    // 0) Campanha presa em 'preparando' (o processo caiu no meio do
-    //    startCampaign — o finally não roda num crash): depois de 30 min
-    //    volta para 'rascunho' para poder ser iniciada de novo. Os itens
-    //    parciais não são consumidos (campanha fora de execução) e o
-    //    próximo start limpa a fila antes de publicar.
-    const stuckBefore = new Date(Date.now() - 30 * 60_000).toISOString();
-    const { error: stuckError } = await db
-      .from("campaigns")
-      .update({ status: "rascunho", updated_at: new Date().toISOString() })
-      .eq("status", "preparando")
-      .lt("updated_at", stuckBefore);
-    if (stuckError) console.error("[Cron] Falha ao liberar campanhas presas em preparação:", stuckError.message);
-
-    const { data: scheduled, error: scheduledError } = await db
-      .from("campaigns")
-      .select("id, account_id")
-      .eq("status", "agendado")
-      .lte("agendamento", new Date().toISOString()).limit(20);
-    if (scheduledError) throw scheduledError;
-    // 1) Campanhas agendadas cujo horário chegou: monta a fila
-    //    (startCampaign deixa a campanha em 'preparando' até terminar).
-    for (const campaign of scheduled ?? []) {
-      if (outOfTime()) break;
-      if (!campaign.account_id) continue;
-      const result = await startCampaign(campaign.id, campaign.account_id);
-      if (!result.ok)
-        console.error("[Cron] Falha ao preparar campanha:", campaign.id, result.error);
+    // 0/1) Preparação de campanhas agendadas. B9: o caminho normal é a rota
+    //    própria /api/disparador/prepare/cron (lock disparador_prepare), para
+    //    uma campanha de 100k (2–6 min) não parar o envio de todas as outras.
+    //    Fallback: enquanto DISPARADOR_PREPARE_IN_TICK não for "false" (padrão
+    //    true, até o agendador chamar a rota nova), o tick ainda prepara —
+    //    antes de tudo, recuperando o que ficou preso em 'preparando' (30 min
+    //    sem updated_at: volta a 'agendado' se tiver agendamento, senão a
+    //    'rascunho') e preparando as vencidas, uma por vez, dentro do orçamento.
+    if (isPrepareInTickEnabled()) {
+      await recoverStuckPreparing(db);
+      await prepareDueCampaigns(db, { outOfTime });
     }
     // 2) Devolve para 'agendado' apenas erros transitórios já classificados
     //    (nunca itens 'enviando' — esses podem ter sido aceitos pelo provedor).
@@ -489,7 +475,12 @@ export async function POST(request: Request) {
       maxRssMb: config.maxRssMb,
       onBackoff: (event) => {
         console.warn("[Cron] Backoff adaptativo:", event);
-        if (event.scope !== "channel" || !event.channelId || config.cooldownSeconds <= 0) return;
+        if (
+          event.scope !== "channel" ||
+          !event.channelId ||
+          event.reason !== "rate_limit" ||
+          config.cooldownSeconds <= 0
+        ) return;
         if (cooledDown.has(event.channelId)) return;
         cooledDown.add(event.channelId);
         cooldownWrites.push(persistCooldown(db, event.channelId, event.reason, config.cooldownSeconds));
