@@ -22,10 +22,10 @@ export async function POST(request: Request) {
     // (mesmo papel das páginas /templates e /canais).
     const auth = await guardRole('admin')
     if (!auth.ok) return auth.response
-    const { supabase, accountId, userId } = auth.ctx
+    const { supabase, accountId } = auth.ctx
 
-    // Envia a qualquer número com o canal da conta: teto por usuário.
-    const limit = checkRateLimit(`channel-test:${userId}`, { limit: 10, windowMs: 60_000 })
+    // O orçamento é compartilhado por todos os administradores da conta.
+    const limit = checkRateLimit(`channel-test:${accountId}`, { limit: 10, windowMs: 60_000 })
     if (!limit.success) return rateLimitResponse(limit)
 
     const body = await request.json().catch(() => ({}))

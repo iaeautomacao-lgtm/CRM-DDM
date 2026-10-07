@@ -234,6 +234,24 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
       }
     }
+    // Rascunhos novos ainda não têm campanha. Aceitar UUID não utilizado,
+    // mas impedir reaproveitar o de outra conta antes de qualquer escrita.
+    if (draftIdRaw) {
+      const db = supabaseAdmin();
+      const checks = await Promise.all([
+        db.from("campaigns").select("id").eq("import_draft_id", draftIdRaw).neq("account_id", accountId).limit(1),
+        db.from("disp_import_contacts").select("id").eq("draft_id", draftIdRaw).neq("account_id", accountId).limit(1),
+        db.from("disparador_utm_links").select("id").eq("draft_id", draftIdRaw).neq("account_id", accountId).limit(1),
+        db.from("contact_import_variables").select("id, contacts!inner(account_id)").eq("draft_id", draftIdRaw).neq("contacts.account_id", accountId).limit(1),
+      ]);
+      if (checks.some((check) => check.error)) {
+        console.error("[Contacts Import] Falha ao verificar rascunho:", checks.map((check) => check.error));
+        return NextResponse.json({ error: "Falha ao verificar o rascunho." }, { status: 500 });
+      }
+      if (checks.some((check) => (check.data?.length ?? 0) > 0)) {
+        return NextResponse.json({ error: "Rascunho não encontrado" }, { status: 404 });
+      }
+    }
 
     // column_map (Correção 3) — JSON opcional { name, phone, cpf, var1,
     // var2, var3 } vindo do sub-step de mapeamento do wizard. JSON
@@ -724,7 +742,8 @@ export async function POST(request: Request) {
             if (existing?.[0]?.id) importedContactIds.add(existing[0].id);
           }
         } else {
-          results.erros.push(`${source.phone}: ${singleErr?.message}`);
+          console.error("[Contacts Import] Falha ao salvar contato:", singleErr);
+          results.erros.push(`${source.phone}: não foi possível salvar o contato.`);
         }
       }
     };
@@ -787,7 +806,7 @@ export async function POST(request: Request) {
       if (altSummary.failedBatches > 0) {
         console.error("[Contacts Import] Failed to save alternate phones:", altSummary.firstError);
         results.erros.push(
-          `Telefones alternativos: ${altSummary.failedRows} não foram salvos (${altSummary.firstError})`
+          `Telefones alternativos: ${altSummary.failedRows} não foram salvos. Tente importar de novo.`
         );
       }
     }
@@ -877,7 +896,7 @@ export async function POST(request: Request) {
       if (varFailedRows > 0) {
         results.variaveis_falhas = varFailedRows;
         results.erros.push(
-          `Variáveis VAR1–VAR3: ${varFailedRows} de ${varRows.length} valores não foram salvos — reimporte o arquivo antes de iniciar a campanha (${varFirstError})`
+          `Variáveis VAR1–VAR3: ${varFailedRows} de ${varRows.length} valores não foram salvos — reimporte o arquivo antes de iniciar a campanha.`
         );
         console.error("[Contacts Import] Failed to save csv import variables:", varFirstError);
         await writeLog({
