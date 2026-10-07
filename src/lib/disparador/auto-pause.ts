@@ -20,6 +20,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { extrairCodigoMetaErro } from "./normalize-meta-error";
 import { writeLog } from "@/lib/logger";
 import { AI_UNAVAILABLE_ERROR, UNCERTAIN_OUTCOME_ERROR } from "./provider-outcome";
+import { metaCodesWhere } from "./meta-error-catalog";
 
 export interface AutoPauseConfig {
   enabled: boolean;
@@ -115,10 +116,8 @@ export type AutoPauseDecision =
 // 132000/132001/132005/132007/132012/132015/132016: template;
 // 133010: remetente não registrado. Contam MESMO sem erro_permanente (REVISAO F3): vários destes
 // códigos não são "permanentes" no envio e o item seria reenviado 5× antes de a pausa disparar.
-export const AUTO_PAUSE_META_CODES = new Set([
-  190, 368, 131005, 131031, 131042, 131008, 131009, 131047, 131051,
-  132000, 132001, 132005, 132007, 132012, 132015, 132016, 133010,
-]);
+// Derivado do catálogo único (meta-error-catalog.ts): flag `pausaAutomatica`.
+export const AUTO_PAUSE_META_CODES = metaCodesWhere((e) => e.pausaAutomatica === true);
 
 export function isCampaignPermanentError(r: AttemptRow): boolean {
   if (r.status !== "erro" && r.status !== "bloqueado") return false;
