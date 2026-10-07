@@ -19,6 +19,7 @@ import {
   getWahaSessionInfo,
   startWahaSession,
 } from '@/lib/whatsapp/waha-api'
+import { wahaWebhookFor } from '@/lib/whatsapp/waha-webhook-auth'
 
 // Migration 113 — a WAHA session with no message activity for longer
 // than this is flagged 'warning' rather than plain 'connected', even
@@ -493,6 +494,9 @@ export async function POST(request: Request) {
         existing = data
       }
 
+      // id do canal salvo — define a URL e o segredo do webhook WAHA.
+      let savedConfigId: string | null = existing?.id ?? null
+
       if (existing) {
         if (waha_api_key === MASKED_TOKEN) {
           // Mantém a chave atual — cifrando-a se ainda estiver em texto puro legado.
@@ -515,9 +519,12 @@ export async function POST(request: Request) {
         }
       } else {
         wahaConfigObj.waha_api_key = encryptedApiKey
-        const { error: insertError } = await writer
+        const { data: inserted, error: insertError } = await writer
           .from('whatsapp_config')
           .insert(wahaConfigObj)
+          .select('id')
+          .limit(1)
+        savedConfigId = (inserted?.[0]?.id as string | undefined) ?? null
 
         if (insertError) {
           console.error('Error inserting config:', insertError)
@@ -533,15 +540,15 @@ export async function POST(request: Request) {
             ? (existing.waha_api_key ? decryptStoredSecret(existing.waha_api_key, 'whatsapp_config.waha_api_key') : null)
             : waha_api_key
 
-          const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
-          const protocol = request.headers.get('x-forwarded-proto') || 'https'
-          const webhookUrl = `${protocol}://${host}/api/whatsapp/webhook/waha`
+          if (!savedConfigId) throw new Error('Saved WAHA config id not found')
 
+          // URL a partir de env confiável (nunca de Host/X-Forwarded-Host) e
+          // segredo derivado por canal — o segredo global não vai para o WAHA.
           await startWahaSession({
             waha_url,
             waha_session,
             waha_api_key: rawApiKey && rawApiKey !== MASKED_TOKEN ? rawApiKey : null
-          }, webhookUrl)
+          }, wahaWebhookFor(savedConfigId))
         } catch (err) {
           console.warn('Could not auto-start WAHA session:', err)
         }

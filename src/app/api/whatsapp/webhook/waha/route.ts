@@ -1,7 +1,12 @@
 import { chatMediaReference } from '@/lib/storage/chat-media';
 import { registerAuditActor } from '@/lib/audit/context'
 import { NextResponse } from 'next/server'
-import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
+import {
+  WAHA_WEBHOOK_CHANNEL_PARAM,
+  isWahaChannelId,
+  matchesLegacyWahaSecret,
+  matchesWahaChannelSecret,
+} from '@/lib/whatsapp/waha-webhook-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
@@ -22,18 +27,25 @@ export async function POST(request: Request) {
   // Auditoria: escritas desta requisição saem como "webhook" (webhook_waha).
   await registerAuditActor({ actorType: 'webhook', source: 'webhook_waha' })
   // Autenticação do webhook: o WAHA envia `x-webhook-secret` (configurado
-  // via customHeaders em startWahaSession). Sem o segredo, qualquer um
-  // poderia injetar mensagens/status falsos em qualquer sessão.
+  // via customHeaders em startWahaSession). O segredo é por canal:
+  // HMAC(WAHA_WEBHOOK_SECRET, id do canal), com o id em `?channel=` — validado
+  // sem tocar no banco. Assim o servidor WAHA de um tenant não conhece o
+  // segredo global nem consegue postar eventos para canais de outra conta.
   // Fail-closed: sem WAHA_WEBHOOK_SECRET no .env a rota fica indisponível.
   if (!process.env.WAHA_WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 })
   }
-  if (
-    !matchesOperationalSecret(
-      process.env.WAHA_WEBHOOK_SECRET,
-      request.headers.get('x-webhook-secret')
-    )
-  ) {
+  const suppliedSecret = request.headers.get('x-webhook-secret')
+  const channelParam = new URL(request.url).searchParams.get(WAHA_WEBHOOK_CHANNEL_PARAM)
+  let channelId: string | null = null
+  if (channelParam !== null) {
+    if (!isWahaChannelId(channelParam) || !matchesWahaChannelSecret(channelParam, suppliedSecret)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    channelId = channelParam
+  } else if (!matchesLegacyWahaSecret(suppliedSecret)) {
+    // Sessões antigas (sem ?channel=, segredo global) só passam durante a
+    // transição, com WAHA_WEBHOOK_ACCEPT_LEGACY_SECRET=true.
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   try {
@@ -49,12 +61,22 @@ export async function POST(request: Request) {
 
     const db = supabaseAdmin()
 
-    // Resolve the account config based on the WAHA session name
-    const { data: config, error: configError } = await db
+    // Canal autenticado: carrega pelo id e exige que a `session` do corpo
+    // seja a sessão desse canal. Legado: resolve só pela sessão (único).
+    let configQuery = db
       .from('whatsapp_config')
       .select('*')
       .eq('waha_session', session)
-      .maybeSingle()
+      .eq('provider', 'waha')
+    if (channelId) {
+      configQuery = configQuery.eq('id', channelId)
+    } else {
+      console.warn(
+        `[waha/webhook] Segredo global legado aceito para a sessão "${session}" — reinicie a sessão pelo CRM para usar o segredo por canal`
+      )
+    }
+    const { data: configs, error: configError } = await configQuery.limit(2)
+    const config = configs?.length === 1 ? configs[0] : null
 
     if (configError || !config) {
       console.error(`[waha/webhook] Config not found for session "${session}":`, configError)
@@ -135,6 +157,8 @@ export async function POST(request: Request) {
         .from('messages')
         .select('id, conversation_id')
         .eq('message_id', originalMessageId)
+        // Escopo por conta: uma sessão não reage a mensagens de outra conta.
+        .eq('account_id', accountId)
         .maybeSingle()
 
       if (!dbMsg) {

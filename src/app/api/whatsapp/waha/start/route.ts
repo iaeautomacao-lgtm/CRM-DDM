@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { startWahaSession } from '@/lib/whatsapp/waha-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
+import { wahaWebhookFor } from '@/lib/whatsapp/waha-webhook-auth'
 
 export async function POST(request: Request) {
   try {
@@ -54,11 +55,9 @@ export async function POST(request: Request) {
       waha_api_key: config.waha_api_key ? decrypt(config.waha_api_key) : null,
     }
 
-    const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000'
-    const protocol = request.headers.get('x-forwarded-proto') || 'https'
-    const webhookUrl = `${protocol}://${host}/api/whatsapp/webhook/waha`
-
-    await startWahaSession(wahaConfig, webhookUrl)
+    // URL do webhook a partir de env confiável (nunca de Host/X-Forwarded-Host)
+    // e segredo derivado por canal — o segredo global não vai para o WAHA.
+    await startWahaSession(wahaConfig, wahaWebhookFor(config.id))
     return NextResponse.json({ success: true, message: 'WAHA session start requested.' })
   } catch (err: any) {
     console.error('[waha/start] error:', err)
