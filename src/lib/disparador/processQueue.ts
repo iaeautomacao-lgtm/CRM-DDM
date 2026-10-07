@@ -359,7 +359,7 @@ export async function markQueueError(
   campaignId: string,
   tentativas?: number
 ): Promise<void> {
-  const baseUpdate: Record<string, unknown> = { status: "erro", erro: message };
+  const baseUpdate: Record<string, unknown> = { status: "erro", erro: message, updated_at: new Date().toISOString() };
   if (tentativas !== undefined) baseUpdate.tentativas = tentativas;
 
   const { error } = await supabaseAdmin()
