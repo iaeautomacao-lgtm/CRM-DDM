@@ -1,4 +1,4 @@
--- 174 — Corrige rastreamento da primeira resposta humana no WhatsApp.
+-- 178 — Corrige rastreamento da primeira resposta humana no WhatsApp.
 --
 -- O envio pelo Inbox passa a persistir messages.sender_id. No WAHA, porém,
 -- o eco fromMe pode chegar antes e inserir a mensagem como agent com

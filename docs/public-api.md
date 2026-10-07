@@ -119,7 +119,7 @@ curl https://your-crm.example.com/api/v1/me \
 
 ### `POST /api/v1/whatsapp/send`
 
-Sends a WhatsApp text and/or media message. Requires `messages:send`.
+Sends a WhatsApp text and/or media message. Requires `messages:send` and the `Idempotency-Key` header.
 Finds or creates the target contact and conversation on your active
 channel (WAHA or Meta, whichever this account has configured) before
 sending.
@@ -127,6 +127,7 @@ sending.
 ```bash
 curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
   -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Idempotency-Key: cobranca-2026-10-07-8841" \
   -H "Content-Type: application/json" \
   -d '{
     "phone": "+5527999991212",
@@ -151,10 +152,19 @@ message can be sent with no separate text, just a caption.
 }
 ```
 
-Errors: `bad_request` (400) for a missing `phone`/`text` (when no
-media is present), an invalid phone format, or no WhatsApp channel
-configured for the account; `internal` (500/502) if the send or the
-database write fails after the message was accepted by the provider.
+Sends require the **`Idempotency-Key`** header (8–128 chars: letters, digits, `.`, `_`, `:`, `-`): one key per send intent, repeated unchanged when you resend the same request. The key is scoped to your account and tied to the exact path and body. Repeating it after the send completed returns the stored result (no new send).
+
+Errors:
+
+| Status | `code` | When |
+| --- | --- | --- |
+| 400 | `bad_request` | Missing `phone`/`text` (no media), invalid phone, invalid JSON body, missing/malformed `Idempotency-Key`, no WhatsApp channel configured. **A 400 does not consume the `Idempotency-Key`** — fix the request and resend with the same key. |
+| 409 | `conflict` | Key already used with a different body, or a previous send with this key is in progress / has an unknown outcome (`provider_outcome_unknown: true`) — do **not** resend with another key; wait for reconciliation. |
+| 422 | `recipient_blocked` | The recipient is on the blocklist / opted out. Nothing is sent. |
+| 503 | `unavailable` | The idempotency control or the blocklist check is unavailable (nothing was sent). Retry with the same key. |
+| 500/502 | `internal` | The provider rejected/failed the send, or an internal error. After a provider call the key stays reserved. |
+
+A `202` with `reconciliation_required: true` means the provider accepted the message but the local save failed — **do not resend**.
 
 #### Media
 
@@ -177,6 +187,7 @@ Accepted `media_type` values: `image/jpeg`, `image/png`,
 # By URL
 curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
   -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Idempotency-Key: cobranca-2026-10-07-8841" \
   -H "Content-Type: application/json" \
   -d '{
     "phone": "+5527999991212",
@@ -190,6 +201,7 @@ curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
 # By base64
 curl -X POST https://your-crm.example.com/api/v1/whatsapp/send \
   -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Idempotency-Key: cobranca-2026-10-07-8841" \
   -H "Content-Type: application/json" \
   -d '{
     "phone": "+5527999991212",
@@ -406,12 +418,6 @@ Planned endpoints, shipping one per release (tracked in
 - `GET /api/v1/conversations` (`conversations:read`)
 - Outbound event webhooks (so automations can react to inbound
   messages)
-
-
-### Idempotência de envio (alteração de contrato)
-
-POST /api/v1/whatsapp/send exige o cabeçalho Idempotency-Key, com 8 a 128 caracteres de letras, números, ponto, hífen, dois-pontos ou sublinhado. Gere uma chave por intenção e preserve-a ao repetir a mesma requisição. A chave é isolada por conta e vinculada ao caminho e corpo exatos. Repetir após conclusão retorna o resultado persistido; reutilizar com outro conteúdo retorna 409. Operação em andamento/resultado desconhecido retorna 409 com provider_outcome_unknown: true e exige reconciliação, sem novo POST com uma chave diferente. Ausência de cabeçalho retorna 400; falha da coordenação retorna 503. Aceitação remota com falha local pode retornar 202 e reconciliation_required: true: não reenviar.
-
 
 ## Reporting API
 

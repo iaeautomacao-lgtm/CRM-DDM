@@ -57,6 +57,8 @@ describe('cron: agendador por número', () => {
     ],
   };
   const upserts: unknown[] = [];
+  // Campanhas 'agendado' vencidas devolvidas pelo banco falso (B9).
+  let dueScheduled: Array<Record<string, unknown>> = [];
   function setup(limits: Array<Record<string, unknown>> = []) {
     vi.stubEnv('CRON_SECRET', 'test-secret');
     mocks.rpc.mockImplementation(async (name: string) =>
@@ -65,10 +67,11 @@ describe('cron: agendador por número', () => {
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: unknown } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in'])
+      for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in', 'not', 'is'])
         builder[m] = () => builder;
       builder.eq = (column: string, value: unknown) => {
         if (table === 'campaigns' && value === 'em_execucao') result = { data: campaigns, error: null };
+        if (table === 'campaigns' && value === 'agendado') result = { data: dueScheduled, error: null };
         if (table === 'disp_message_queue' && column === 'campaign_id')
           result = { data: queue[value as string] ?? [], error: null };
         return builder;
@@ -94,7 +97,28 @@ describe('cron: agendador por número', () => {
     vi.clearAllMocks();
     clearMemoryCooldowns();
     upserts.length = 0;
+    dueScheduled = [];
     pauseMocks.check.mockResolvedValue(false);
+  });
+
+  it('B9: por padrão o tick ainda prepara as campanhas agendadas vencidas (fallback)', async () => {
+    setup();
+    dueScheduled = [{ id: 'sch', account_id: 'acc' }];
+    mocks.start.mockResolvedValue({ ok: true, enqueued: 1 });
+    mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+    expect((await post()).status).toBe(200);
+    expect(mocks.start).toHaveBeenCalledWith('sch', 'acc');
+  });
+
+  it('B9: com DISPARADOR_PREPARE_IN_TICK=false o tick NÃO prepara (só a rota nova) e continua enviando', async () => {
+    setup();
+    vi.stubEnv('DISPARADOR_PREPARE_IN_TICK', 'false');
+    dueScheduled = [{ id: 'sch', account_id: 'acc' }];
+    mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+    const response = await post();
+    expect(response.status).toBe(200);
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.process).toHaveBeenCalled();
   });
 
   it('alterna campanhas no mesmo número, roda números em paralelo e grava UM cron_tick', async () => {
@@ -290,7 +314,7 @@ describe('cron: candidatos por campanha', () => {
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: null } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['lte', 'lt', 'order', 'limit', 'update', 'in', 'select']) builder[m] = () => builder;
+      for (const m of ['lte', 'lt', 'order', 'limit', 'update', 'in', 'select', 'not', 'is']) builder[m] = () => builder;
       builder.eq = (_column: string, value: unknown) => {
         if (table === 'campaigns' && value === 'em_execucao') result = { data: [campaign], error: null };
         return builder;
@@ -340,7 +364,7 @@ describe('cron: reflow da fila de campanha em lote', () => {
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: null } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['eq', 'lte', 'lt', 'order', 'limit', 'range', 'update'])
+      for (const m of ['eq', 'lte', 'lt', 'order', 'limit', 'range', 'update', 'not', 'is'])
         builder[m] = (...args: unknown[]) => {
           if (table === 'campaigns' && m === 'eq' && args[1] === 'em_execucao') result = { data: [campaign], error: null };
           return builder;
