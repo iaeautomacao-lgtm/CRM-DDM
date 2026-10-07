@@ -50,7 +50,7 @@ type Input = {
   name?: string;
   config: AgentConfig;
   prompt_content: string;
-  composition: 'sections_v1';
+  composition: AgentComposition;
   rules: RuleInput[];
   tool_ids: string[];
   knowledge: Knowledge;
@@ -103,8 +103,11 @@ function parseInput(body: unknown, creating: boolean, preview = false): Input {
     )
   )
     fail('Modelo incompatível com o provedor.');
-  if (body.composition !== 'sections_v1')
-    fail('Edições devem usar composição sections_v1.');
+  if (body.composition !== 'sections_v1' && body.composition !== 'legacy_v1')
+    fail('Composição inválida.');
+  // legacy_v1 só existe como NOVA versão de um agente que já é legacy_v1 (conferido em publishAgent e na RPC).
+  if (body.composition === 'legacy_v1' && creating)
+    fail('A composição legacy_v1 só vale para nova versão de agente legacy_v1.');
   if (
     typeof body.prompt_content !== 'string' ||
     body.prompt_content.length > 200000
@@ -112,6 +115,8 @@ function parseInput(body: unknown, creating: boolean, preview = false): Input {
     fail('Prompt inválido ou muito grande.');
   if (!Array.isArray(body.rules) || body.rules.length > 200)
     fail('Lista de regras inválida.');
+  if (body.composition === 'legacy_v1' && body.rules.length)
+    fail('legacy_v1 não aceita regras separadas; converta para prompt em seções.');
   const rules = body.rules.map((r) => {
     if (
       !object(r) ||
@@ -171,7 +176,7 @@ function parseInput(body: unknown, creating: boolean, preview = false): Input {
     ...(creating ? { name: name(body.name) } : {}),
     config: result.data,
     prompt_content: body.prompt_content,
-    composition: 'sections_v1',
+    composition: body.composition,
     rules,
     tool_ids: preview ? [] : ids(body.tool_ids),
     knowledge: {
@@ -431,7 +436,37 @@ async function filesFor(
     (id) => byId.get(id) ?? fail('Arquivo inexistente ou fora da conta.')
   );
 }
-async function prepare(accountId: string, input: Input) {
+/**
+ * Ferramentas da nova versão: as entradas inline (`definition`, vindas da conversão do fluxo) da
+ * versão publicada anterior são PRESERVADAS — definição sempre a anterior (o cliente só controla o
+ * `enabled`, casando por nome) e na mesma ordem relativa; só as entradas de catálogo (`tool_id`)
+ * são substituídas por `tool_ids`. Inline desconhecida (não existia antes) é ignorada.
+ */
+function mergeTools(
+  incoming: AgentConfig['tools'],
+  catalog: AgentConfig['tools'],
+  previous: AgentConfig['tools'] | undefined
+): AgentConfig['tools'] {
+  const inlineEnabled = new Map(
+    incoming.filter((t) => t.definition).map((t) => [t.definition!.name, t.enabled])
+  );
+  const out: AgentConfig['tools'] = [];
+  const pending = [...catalog];
+  for (const entry of previous ?? []) {
+    if (entry.definition)
+      out.push({
+        ...entry,
+        enabled: inlineEnabled.get(entry.definition.name) ?? entry.enabled,
+      });
+    else if (pending.length) out.push(pending.shift()!);
+  }
+  return [...out, ...pending];
+}
+async function prepare(
+  accountId: string,
+  input: Input,
+  previous?: VersionRow
+) {
   const [files, catalog] = await Promise.all([
     filesFor(accountId, input.knowledge),
     all<{ id: string }>('ai_tools', 'id', accountId),
@@ -467,10 +502,14 @@ async function prepare(accountId: string, input: Input) {
       .filter((t) => t.tool_id)
       .map((t) => [t.tool_id!.toLowerCase(), t.enabled])
   );
-  config.tools = input.tool_ids.map((tool_id) => ({
-    tool_id,
-    enabled: toggles.get(tool_id) ?? true,
-  }));
+  config.tools = mergeTools(
+    input.config.tools,
+    input.tool_ids.map((tool_id) => ({
+      tool_id,
+      enabled: toggles.get(tool_id) ?? true,
+    })),
+    previous?.config.tools
+  );
   const rules = input.rules.map((r, position) => ({
     ...r,
     rule_id: randomUUID(),
@@ -491,9 +530,19 @@ export async function publishAgent(
   body: unknown,
   agentId?: string
 ) {
-  if (agentId) await own(accountId, agentId);
+  const agent = agentId ? await own(accountId, agentId) : null;
   const input = parseInput(body, !agentId);
-  const { config, rules } = await prepare(accountId, input);
+  const previous = agent?.published_version_id
+    ? (
+        await all<VersionRow>('ai_agent_versions', '*', accountId, {
+          agent_id: agent.id,
+          id: agent.published_version_id,
+        })
+      )[0]
+    : undefined;
+  if (input.composition === 'legacy_v1' && previous?.composition !== 'legacy_v1')
+    fail('A composição legacy_v1 só vale para nova versão de agente legacy_v1.');
+  const { config, rules } = await prepare(accountId, input, previous);
   const { data, error } = await supabaseAdmin().rpc('publish_ai_agent', {
     p_account_id: accountId,
     p_created_by: userId,

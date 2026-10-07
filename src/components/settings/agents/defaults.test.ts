@@ -135,3 +135,30 @@ describe('editar um agente existente preserva o que o formulário não edita', (
     expect(next.legacy.account_id).toBe('11111111-1111-4111-8111-111111111111');
   });
 });
+
+describe('agente legacy_v1 (convertido do fluxo)', () => {
+  it('mantém a composição e reenvia as ferramentas inline com o liga/desliga do formulário', () => {
+    const base = formDataToAgentConfig(createInitialAgentFormData());
+    base.tools = [
+      { enabled: true, definition: { name: 'consulta_a', description: 'a', parameters: { type: 'object', properties: {}, required: [] }, http: { url: 'https://x.com/a', method: 'GET' } } },
+    ];
+    const form = formDataFromPublished(
+      { id: 'a', name: 'A', enabled: true },
+      {
+        version_id: 'v', version: 1, config: base, prompt_content: 'PROMPT ORIGINAL', composition: 'legacy_v1',
+        rules: [], tools: [], knowledge: { selection_mode: 'legacy_account_all' },
+      },
+    );
+    expect(form.composition).toBe('legacy_v1');
+    expect(form.legacyTools).toMatchObject([{ name: 'consulta_a', enabled: true }]);
+    form.legacyTools[0].enabled = false;
+    form.tools = [{ tool_id: '11111111-1111-4111-8111-111111111111', enabled: true }];
+
+    const payload = formDataToSavePayload(form, base);
+    expect(payload.composition).toBe('legacy_v1');
+    expect(payload.rules).toEqual([]);
+    expect(payload.prompt_content).toBe('PROMPT ORIGINAL');
+    expect(payload.config.tools.map((t) => t.definition?.name ?? t.tool_id)).toEqual(['consulta_a', '11111111-1111-4111-8111-111111111111']);
+    expect(payload.config.tools[0].enabled).toBe(false);
+  });
+});

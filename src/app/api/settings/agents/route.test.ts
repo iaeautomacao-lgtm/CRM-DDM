@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { hasMinRole, type AccountRole } from '@/lib/auth/roles';
-import { convertGlobalResponder } from '@/lib/ai/agents/convert';
+import { convertAiAgentNode, convertGlobalResponder } from '@/lib/ai/agents/convert';
+import { composeAgentPrompt } from '@/lib/ai/agents/compose';
 
 const A = '00000000-0000-0000-0000-00000000000a';
 const B = '00000000-0000-0000-0000-00000000000b';
@@ -190,6 +191,7 @@ describe('API perfis e RPC 180 — integração PGlite', () => {
       '177_ai_agent_profiles.sql',
       '180_ai_agent_api.sql',
       '180_ai_agent_api.sql',
+      '182_ai_agent_publish_legacy.sql',
     ])
       await state.db.exec(
         readFileSync('supabase/migrations/' + file, 'utf8').replace(
@@ -398,6 +400,87 @@ describe('API perfis e RPC 180 — integração PGlite', () => {
     const results = await Promise.all(responses.map((r) => r.json()));
     expect(results.map((r) => r.version).sort()).toEqual([2, 3]);
     expect(new Set(results.map((r) => r.version_id)).size).toBe(2);
+  });
+  describe('agente convertido (legacy_v1 + ferramentas inline)', () => {
+    const tool = (name: string) => ({
+      name,
+      description: 'inline ' + name,
+      parameters: { type: 'object', properties: {}, required: [] },
+      http: { url: 'https://api.exemplo.com/' + name, method: 'GET', headers: {}, body: '' },
+    });
+    async function seedLegacy(): Promise<string> {
+      const converted = convertAiAgentNode(
+        { mode: 'loop', system_prompt_override: 'PROMPT ORIGINAL DO FLUXO', tools: [tool('consulta_a'), tool('consulta_b')] } as never,
+        { account_id: A, api_provider: 'openai', api_model: 'gpt-4o-mini', enabled: true, system_prompt: 'prompt da conta' },
+        { node_key: 'ia' }
+      );
+      const row = await state.db!.query<{ id: string }>(
+        "INSERT INTO wacrm.ai_agents(account_id,name) VALUES($1,$2) RETURNING id", [A, 'Convertido ' + Math.random()]
+      );
+      const id = row.rows[0].id;
+      const v = await state.db!.query<{ id: string }>(
+        "INSERT INTO wacrm.ai_agent_versions(account_id,agent_id,version,config,prompt_content,composition,config_hash) VALUES($1,$2,1,$3,$4,'legacy_v1',$5) RETURNING id",
+        [A, id, JSON.stringify(converted.config), converted.prompt_content, converted.hash]
+      );
+      await state.db!.query('UPDATE wacrm.ai_agents SET published_version_id=$1 WHERE id=$2', [v.rows[0].id, id]);
+      return id;
+    }
+    const bodyFrom = (detail: { published: { config: ReturnType<typeof input>['config']; prompt_content: string; composition: string } }) => ({
+      config: structuredClone(detail.published.config),
+      prompt_content: detail.published.prompt_content,
+      composition: detail.published.composition,
+      rules: [],
+      tool_ids: [TOOL],
+      knowledge: { selection_mode: 'legacy_account_all' },
+    });
+    it('salvar preserva as inline (ordem) e adiciona só a do catálogo', async () => {
+      const id = await seedLegacy();
+      const detail = await (await DETAIL(req(undefined, 'GET'), ctx(id))).json();
+      const body = bodyFrom(detail);
+      body.config.tools[1].enabled = false; // liga/desliga da inline é editável
+      body.config.tools[0].definition!.description = 'tentativa de editar a definição';
+      const response = await PUBLISH(req(body), ctx(id));
+      expect(response.status).toBe(200);
+      const next = await (await DETAIL(req(undefined, 'GET'), ctx(id))).json();
+      const tools = next.published.config.tools;
+      expect(tools.map((t: { definition?: { name: string }; tool_id?: string }) => t.definition?.name ?? t.tool_id)).toEqual([
+        'consulta_a',
+        'consulta_b',
+        TOOL,
+      ]);
+      expect(tools[1].enabled).toBe(false);
+      expect(tools[0].definition.description).toBe('inline consulta_a'); // a definição vem da versão anterior
+      expect(next.published.tools.map((t: { id: string }) => t.id)).toEqual([TOOL]);
+    });
+    it('nova versão de agente legacy_v1 continua legacy_v1 com o MESMO prompt composto', async () => {
+      const id = await seedLegacy();
+      const detail = await (await DETAIL(req(undefined, 'GET'), ctx(id))).json();
+      const body = bodyFrom(detail);
+      body.config.llm.temperature = 0.3;
+      expect((await PUBLISH(req(body), ctx(id))).status).toBe(200);
+      const next = await (await DETAIL(req(undefined, 'GET'), ctx(id))).json();
+      expect(next.published.version).toBe(2);
+      expect(next.published.composition).toBe('legacy_v1');
+      expect(next.published.config.llm.temperature).toBe(0.3);
+      const compose = (p: typeof detail.published) =>
+        composeAgentPrompt({ config: p.config, prompt_content: p.prompt_content, composition: p.composition }, { today_utc: '2026-01-01', current_date: '01/01/2026' });
+      expect(compose(next.published)).toBe(compose(detail.published));
+      expect(compose(next.published)).toContain('PROMPT ORIGINAL DO FLUXO');
+    });
+    it('legacy_v1 não vale para agente novo, agente sections_v1 nem com regras; converter para sections_v1 é permitido', async () => {
+      expect((await CREATE(req({ ...input('x-legacy'), composition: 'legacy_v1' }))).status).toBe(400);
+      const sections = await (await CREATE(req(input('so-sections')))).json();
+      expect((await PUBLISH(req({ ...versionBody(), composition: 'legacy_v1' }), ctx(sections.agent_id))).status).toBe(400);
+      const id = await seedLegacy();
+      const detail = await (await DETAIL(req(undefined, 'GET'), ctx(id))).json();
+      const withRules = { ...bodyFrom(detail), rules: [{ content: 'r', enabled: true }] };
+      expect((await PUBLISH(req(withRules), ctx(id))).status).toBe(400);
+      const converted = { ...bodyFrom(detail), composition: 'sections_v1', rules: [{ content: 'Regra nova', enabled: true }] };
+      expect((await PUBLISH(req(converted), ctx(id))).status).toBe(200);
+      const next = await (await DETAIL(req(undefined, 'GET'), ctx(id))).json();
+      expect(next.published.composition).toBe('sections_v1');
+      expect(next.published.config.tools.filter((t: { definition?: unknown }) => t.definition)).toHaveLength(2);
+    });
   });
   it('agente de outra conta não pode ser lido, alterado, versionado ou apagado', async () => {
     const body = versionBody();

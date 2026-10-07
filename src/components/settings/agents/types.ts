@@ -141,6 +141,14 @@ export interface AgentFormData {
     tool_id: string;
     enabled: boolean;
   }>;
+  /** Ferramentas inline (legado, vindas do fluxo): só leitura; o servidor as preserva. Só o liga/desliga é editável. */
+  legacyTools: Array<{
+    name: string;
+    description: string;
+    method: string;
+    url: string;
+    enabled: boolean;
+  }>;
   llm: {
     provider: 'openai' | 'gemini' | 'claude' | 'hermes';
     model: string;

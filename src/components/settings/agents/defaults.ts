@@ -29,6 +29,7 @@ export function createInitialAgentFormData(): AgentFormData {
       },
     },
     tools: [],
+    legacyTools: [],
     llm: {
       provider: 'openai',
       model: DEFAULT_MODEL_BY_PROVIDER.openai,
@@ -132,6 +133,15 @@ export function formDataFromPublished(
       },
     },
     tools: mappedTools,
+    legacyTools: (config.tools ?? [])
+      .filter((t) => t.definition)
+      .map((t) => ({
+        name: t.definition!.name,
+        description: t.definition!.description ?? '',
+        method: t.definition!.http?.method ?? 'GET',
+        url: t.definition!.http?.url ?? '',
+        enabled: t.enabled !== false,
+      })),
     llm: {
       provider,
       model: cfgLlm.model || DEFAULT_MODEL_BY_PROVIDER[provider as AiProvider],
@@ -223,7 +233,15 @@ export function formDataToAgentConfig(
   if (!fresh.knowledge.rag_external.url) delete knowledge.rag_external.url;
   if (!fresh.knowledge.rag_external.credential) delete knowledge.rag_external.credential;
   merged.knowledge = knowledge;
-  merged.tools = fresh.tools;
+  // Inline (legado): reenvia as da versão atual com o liga/desliga do formulário; o servidor mantém a
+  // definição da versão anterior e a ordem. Entradas de catálogo vêm do formulário.
+  const inline = (existingConfig.tools ?? [])
+    .filter((t) => t.definition)
+    .map((t) => ({
+      ...structuredClone(t),
+      enabled: formData.legacyTools.find((l) => l.name === t.definition!.name)?.enabled ?? t.enabled,
+    }));
+  merged.tools = [...inline, ...fresh.tools];
   merged.execution = { ...merged.execution, llm_timeout_ms: fresh.execution.llm_timeout_ms };
   return merged;
 }
@@ -426,7 +444,7 @@ export function formDataToSavePayload(
     name: formData.name.trim(),
     config,
     prompt_content: formData.prompt_content,
-    composition: 'sections_v1',
+    composition: formData.composition,
     rules,
     tool_ids,
     knowledge,
@@ -450,7 +468,7 @@ export function formDataToPreviewPayload(
   return {
     config,
     prompt_content: formData.prompt_content,
-    composition: 'sections_v1',
+    composition: formData.composition,
     rules,
     knowledge,
   };

@@ -30,8 +30,42 @@ export function ToolsTab({ data, onChange, catalog, readOnly }: ToolsTabProps) {
     onChange({ tools: data.tools.map((t) => (t.tool_id === toolId ? { ...t, enabled } : t)) });
   }
 
+  function toggleLegacy(name: string, enabled: boolean) {
+    onChange({ legacyTools: data.legacyTools.map((t) => (t.name === name ? { ...t, enabled } : t)) });
+  }
+
   return (
     <div className="space-y-6">
+      {data.legacyTools.length > 0 && (
+        <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-4">
+          <h3 className="text-sm font-medium text-foreground">Ferramentas legadas deste agente (vindas do fluxo)</h3>
+          <p className="text-xs text-muted-foreground">
+            Estas ferramentas vieram da configuração do nó e são preservadas a cada versão. Só dá para ligar ou desligar;
+            para editar, cadastre a ferramenta no catálogo.
+          </p>
+          <div className="space-y-2">
+            {data.legacyTools.map((tool) => (
+              <div key={tool.name} className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="text-sm font-medium">{tool.name}</code>
+                    <Badge variant="secondary">{tool.method}</Badge>
+                    <Badge variant="outline">Legada</Badge>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">{tool.description}</p>
+                </div>
+                <Switch
+                  checked={tool.enabled}
+                  onCheckedChange={(v) => toggleLegacy(tool.name, v)}
+                  disabled={readOnly}
+                  aria-label={`${tool.enabled ? 'Desligar' : 'Ligar'} ${tool.name}`}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">Ferramentas do agente</h3>

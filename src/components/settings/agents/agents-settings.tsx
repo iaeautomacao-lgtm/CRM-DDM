@@ -15,7 +15,16 @@ import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { LEGACY_AGENT_DEFAULTS } from '@/lib/ai/agents/schema';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SettingsPanelHead } from '../settings-panel-head';
 import {
@@ -248,6 +257,8 @@ function AgentEditor({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState<string>('general');
+  const [convertPreview, setConvertPreview] = useState<{ before: string; after: string; form: AgentFormData } | null>(null);
+  const [converting, setConverting] = useState(false);
   const [catalog, setCatalog] = useState<ToolCatalogItem[]>([]);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [kbFiles, setKbFiles] = useState<KnowledgeBaseFileItem[]>([]);
@@ -343,6 +354,45 @@ function AgentEditor({
     }
   }
 
+  /** Legacy → seções: mostra a Prévia antes/depois e só publica após a confirmação. */
+  async function startConvert() {
+    if (!agentId || !existingConfig) return;
+    setConverting(true);
+    try {
+      const prompt = existingConfig.prompt;
+      const base = prompt.legacy_override_present
+        ? form.prompt_content
+        : prompt.account_content || LEGACY_AGENT_DEFAULTS.fallback_prompt;
+      const converted: AgentFormData = { ...form, composition: 'sections_v1', prompt_content: base, rules: [] };
+      const [before, after] = await Promise.all([
+        previewAgentPrompt(formDataToPreviewPayload(form, existingConfig)),
+        previewAgentPrompt(formDataToPreviewPayload(converted, existingConfig)),
+      ]);
+      setConvertPreview({ before: before.system_prompt, after: after.system_prompt, form: converted });
+    } catch (err) {
+      toast.error(errorMessage(err, 'Não foi possível gerar a prévia da conversão.'));
+    } finally {
+      setConverting(false);
+    }
+  }
+
+  async function confirmConvert() {
+    if (!agentId || !convertPreview) return;
+    setSaving(true);
+    try {
+      const { name: _name, ...versionPayload } = formDataToSavePayload(convertPreview.form, existingConfig);
+      void _name;
+      const version = await createAgentVersion(agentId, versionPayload);
+      toast.success(`Convertido para prompt em seções (v${version.version}). Conversas em andamento continuam na versão anterior.`);
+      setConvertPreview(null);
+      await reload(agentId);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Não foi possível converter o agente.'));
+    } finally {
+      if (mounted.current) setSaving(false);
+    }
+  }
+
   async function remove() {
     if (!agentId || !detail) return;
     if (!window.confirm(`Excluir o agente "${detail.agent.name}"? Não dá para desfazer.`)) return;
@@ -425,7 +475,7 @@ function AgentEditor({
           <PromptTab data={form} onChange={patch} readOnly={readOnly} />
         </TabsContent>
         <TabsContent value="rules" className="pt-4">
-          <RulesTab data={form} onChange={patch} readOnly={readOnly} />
+          <RulesTab data={form} onChange={patch} readOnly={readOnly || converting} onConvert={() => void startConvert()} />
         </TabsContent>
         <TabsContent value="knowledge" className="pt-4">
           <KnowledgeTab data={form} onChange={patch} kbFiles={kbFiles} secrets={secrets} readOnly={readOnly} />
@@ -455,6 +505,37 @@ function AgentEditor({
           <PreviewTab onPreview={preview} readOnly={readOnly} />
         </TabsContent>
       </Tabs>
+
+      <Dialog open={convertPreview !== null} onOpenChange={(open) => !open && setConvertPreview(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Converter para prompt em seções</DialogTitle>
+            <DialogDescription>
+              Publica uma nova versão em seções (permite regras separadas). As instruções automáticas por instituição/CPF do
+              prompt original deixam de ser acrescentadas. Conversas em andamento continuam na versão anterior.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="text-muted-foreground mb-1 text-xs font-semibold uppercase">Antes (original)</div>
+              <pre className="bg-muted/40 max-h-80 overflow-auto rounded-md border p-3 text-xs whitespace-pre-wrap">{convertPreview?.before}</pre>
+            </div>
+            <div>
+              <div className="text-muted-foreground mb-1 text-xs font-semibold uppercase">Depois (em seções)</div>
+              <pre className="bg-muted/40 max-h-80 overflow-auto rounded-md border p-3 text-xs whitespace-pre-wrap">{convertPreview?.after}</pre>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConvertPreview(null)} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void confirmConvert()} disabled={saving}>
+              {saving ? <Loader2 className="size-4 animate-spin" /> : null}
+              Converter e publicar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </section>
   );
 }

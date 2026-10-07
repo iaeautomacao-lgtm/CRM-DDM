@@ -9,9 +9,11 @@ interface RulesTabProps {
   data: AgentFormData;
   onChange: (patch: Partial<AgentFormData>) => void;
   readOnly?: boolean;
+  /** Agente legacy_v1: regras separadas só valem depois de converter para prompt em seções. */
+  onConvert?: () => void;
 }
 
-export function RulesTab({ data, onChange, readOnly }: RulesTabProps) {
+export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps) {
   const rules = data.rules;
 
   function handleAddRule() {
@@ -47,6 +49,22 @@ export function RulesTab({ data, onChange, readOnly }: RulesTabProps) {
     copy[index] = copy[targetIndex];
     copy[targetIndex] = temp;
     onChange({ rules: copy });
+  }
+
+  if (data.composition === 'legacy_v1') {
+    return (
+      <div className="space-y-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-5">
+        <h3 className="text-sm font-medium text-foreground">Regras separadas indisponíveis</h3>
+        <p className="text-sm text-muted-foreground">
+          Este agente usa o prompt original do fluxo; regras separadas só valem depois de converter.
+        </p>
+        {!readOnly && onConvert && (
+          <Button type="button" variant="outline" size="sm" onClick={onConvert}>
+            Converter para prompt em seções
+          </Button>
+        )}
+      </div>
+    );
   }
 
   return (
