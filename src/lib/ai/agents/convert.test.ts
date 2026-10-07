@@ -59,6 +59,13 @@ describe("conversão e hash de perfis", () => {
     };
     expect(deduplicateAgents([a, changes[field]()]).profiles).toHaveLength(2);
   });
+  it("tool inline com timeout_ms converte e o timeout entra no hash", () => {
+    const withTimeout = { ...TOOL, timeout_ms: 15000 };
+    const converted = convert({ ...node, tools: [withTimeout] });
+    expect(validateAgentConfig(converted.config).success).toBe(true);
+    expect(converted.hash).not.toBe(convert().hash);
+  });
+
   it("ordem das mesmas tools muda hash; ordem das chaves não", () => {
     const other = { ...TOOL, name: "localizar_devedor" };
     expect(convert({ ...node, tools: [TOOL, other] }).hash).not.toBe(convert({ ...node, tools: [other, TOOL] }).hash);

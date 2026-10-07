@@ -48,6 +48,7 @@ const toolDefinition = { type: "object", properties: {
     url: { type: "string" }, method: { type: "string", values: ["GET", "POST", "PUT", "PATCH", "DELETE"] },
     headers: { type: "object", additional: { type: "string" }, optional: true }, body: text,
   } },
+  timeout_ms: { type: "number", integer: true, min: 1000, max: 60000, optional: true },
 } } as const;
 
 export const AGENT_CONFIG_SPEC = { type: "object", properties: {
