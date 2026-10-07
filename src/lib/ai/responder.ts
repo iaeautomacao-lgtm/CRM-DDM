@@ -29,6 +29,8 @@ import {
 } from "@/lib/ai/tool-recovery";
 import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
 import { createAiHeartbeat, type AiHeartbeat } from "@/lib/ai/heartbeat";
+import { gatedFetch } from "@/lib/ai/llm-gate";
+import { buildKnowledgeBaseContext } from "@/lib/ai/kb-context";
 import { BOT_LOOP_MIN_MESSAGES, BOT_LOOP_WINDOW_SECONDS, detectBotLoop } from "@/lib/ai/loop-guard";
 import { handOffToTeamQueue } from "@/lib/ai/team-handoff";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
@@ -1079,10 +1081,16 @@ async function handleAiAutoResponseAttempt(
     tracker.promptVersion = effectivePromptVersion({ hasOverride, accountPrompt: aiConfig.system_prompt });
   }
   if (kbFiles && kbFiles.length > 0) {
-    const kbContext = kbFiles
-      .map((file) => `[ARQUIVO: ${file.name}]\n${file.content}\n---`)
-      .join("\n\n");
-    
+    // Dieta de tokens: com teto de tamanho (kb-context.ts); abaixo do teto o
+    // texto é idêntico ao de antes, acima entram os arquivos mais relevantes
+    // para o que o cliente acabou de dizer.
+    const recentCustomerText = history
+      .filter((m: any) => m.sender_type === "customer")
+      .slice(-3)
+      .map((m: any) => m.content_text || "")
+      .join("\n");
+    const kbContext = buildKnowledgeBaseContext(kbFiles, recentCustomerText);
+
     systemPromptWithKb = `${systemPromptWithKb}
 
 === BASE DE CONHECIMENTO DISPONÍVEL ===
@@ -1500,6 +1508,8 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         trackedOnToolResult,
         nodeKey,
         responseModel,
+        // Esperando vaga/429 conta como "IA trabalhando" para o vigia.
+        () => tracker?.heartbeat?.beat() ?? Promise.resolve(),
       );
     } else if (aiConfig.api_provider === "claude") {
       return generateClaudeResponse(activeKey, systemPromptWithKb, history, responseModel);
@@ -2170,6 +2180,7 @@ export async function generateOpenAiResponse(
   ) => Promise<void>,
   nodeKey?: string,
   model = "gpt-4o-mini",
+  onWaiting?: () => void | Promise<void>,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
 
@@ -2242,11 +2253,17 @@ export async function generateOpenAiResponse(
       body.tool_choice = "auto";
     }
 
-    const response = await boundedFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(body),
-    });
+    // Semáforo por processo + espera/nova tentativa em 429 (llm-gate.ts). O
+    // timeout de 15s do boundedFetch só começa depois de obter a vaga.
+    const response = await gatedFetch(
+      () =>
+        boundedFetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body),
+        }),
+      { onWaiting },
+    );
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
