@@ -145,7 +145,6 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
 
   // Catálogo de templates da WABA
   const [catalogRows, setCatalogRows] = useState<CatalogTemplate[]>([]);
-  const [allowedIds, setAllowedIds] = useState<Set<string> | null>(null);
   const [catalogKey, setCatalogKey] = useState<string | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
 
@@ -322,7 +321,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
   const ctx: WizardContext = useMemo(() => {
     const provider = selectedProvider(form, { channels });
     const names = new Set(form.mensagens.map((m) => m.template_name).filter(Boolean));
-    const key = provider === "meta" ? `${campaignWabaId(form, { channels })}#${form.teamId}` : null;
+    const key = provider === "meta" ? campaignWabaId(form, { channels }) : null;
     return {
       channels,
       importState: {
@@ -343,11 +342,11 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
   const provider = selectedProvider(form, ctx);
   const wabaId = campaignWabaId(form, ctx);
 
-  // ---- Catálogo de templates (Meta): WABA da campanha + equipe ----
+  // ---- Catálogo de templates (Meta): WABA do canal selecionado ----
   useEffect(() => {
     if (!open || provider !== "meta" || !wabaId || !accountId) return;
     let cancelled = false;
-    const key = `${wabaId}#${form.teamId}`;
+    const key = wabaId;
     setCatalogError(null);
     (async () => {
       const supabase = createClient();
@@ -359,11 +358,6 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
         // sem WABA nem templates sincronizados para outro canal.
         .eq("waba_id", wabaId)
         .order("name", { ascending: true });
-      let allowed: Set<string> | null = null;
-      if (form.teamId) {
-        const { data: rows } = await supabase.from("team_allowed_templates").select("template_id").eq("team_id", form.teamId);
-        allowed = new Set((rows ?? []).map((r: { template_id: string }) => r.template_id));
-      }
       if (cancelled) return;
       if (error) {
         setCatalogError("Não foi possível carregar os templates do número.");
@@ -371,24 +365,25 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
       } else {
         setCatalogRows((data ?? []) as unknown as CatalogTemplate[]);
       }
-      setAllowedIds(allowed);
       setCatalogKey(key);
     })();
     return () => {
       cancelled = true;
     };
-  }, [open, provider, wabaId, form.teamId, accountId]);
+  }, [open, provider, wabaId, accountId]);
 
   const catalogState: TemplateCatalogState = useMemo(() => {
     const approved = catalogRows.filter((r) => (r.status ?? "").toUpperCase() === "APPROVED");
-    const restricted = Boolean(allowedIds && allowedIds.size > 0);
     return {
-      loading: provider === "meta" && catalogKey !== `${wabaId}#${form.teamId}`,
+      loading: provider === "meta" && catalogKey !== wabaId,
       error: catalogError,
-      available: restricted ? approved.filter((r) => allowedIds!.has(r.id)) : approved,
-      teamRestricted: restricted,
+      // Campanha é restringida pelo canal/WABA. A allowlist de equipe é
+      // destinada ao uso de templates por operadores no Inbox e não reduz
+      // o catálogo de campanhas administrativas.
+      available: approved,
+      teamRestricted: false,
     };
-  }, [catalogRows, allowedIds, provider, catalogKey, wabaId, form.teamId, catalogError]);
+  }, [catalogRows, provider, catalogKey, wabaId, catalogError]);
 
   // ---- Público sem arquivo (tabulação/conta inteira) ----
   const needsAudiencePreview = open && !importFile && !keepsExistingAudience && (form.tags.length > 0 || form.confirmAllContacts);
