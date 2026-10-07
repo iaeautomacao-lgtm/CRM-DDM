@@ -209,20 +209,7 @@ export function computeEtaMinutes(remaining: number, ratePerMin: number): number
   return remaining / ratePerMin;
 }
 
-/** "agora", "35 min", "2 h 10 min", "1 d 3 h" — texto curto em português. */
-export function formatEtaPt(minutes: number | null): string {
-  if (minutes === null) return "sem ritmo";
-  if (minutes <= 0) return "concluído";
-  if (minutes < 1) return "menos de 1 min";
-  const total = Math.round(minutes);
-  if (total < 60) return `${total} min`;
-  const hours = Math.floor(total / 60);
-  const mins = total % 60;
-  if (hours < 24) return mins ? `${hours} h ${mins} min` : `${hours} h`;
-  const days = Math.floor(hours / 24);
-  const remH = hours % 24;
-  return remH ? `${days} d ${remH} h` : `${days} d`;
-}
+export { formatEtaPt } from "./monitor-format";
 
 const REASON_LABELS: Record<string, string> = {
   rate_limit: "limite de taxa da Meta",
