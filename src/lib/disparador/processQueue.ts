@@ -30,6 +30,7 @@ import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/s
 import { classifyProviderError, type BackoffReason } from "@/lib/disparador/provider-signals";
 import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
+import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -572,10 +573,16 @@ export async function processQueueItem(
       .eq("contact_id", item.contact_id)
       .eq("ordem", item.phone_attempt_order ?? 1)
       .maybeSingle();
-    phone = altPhone?.phone || item.contacts?.phone || item.mensagem_final;
+    // Contato do CRM: mensagem_final é texto, nunca telefone.
+    phone = altPhone?.phone || item.contacts?.phone || "";
   } else {
     // Mesma regra que o cron usa para pré-carregar a blacklist.
-    phone = queueItemPrimaryPhone(item) ?? item.mensagem_final;
+    // Só itens externos (contact_id nulo, API v1) guardam o número em mensagem_final.
+    phone = queueItemPrimaryPhone(item) ?? (item.contact_id ? "" : item.mensagem_final);
+  }
+  if (item.contact_id && !hasDialablePhone(phone)) {
+    await markQueueError(item.id, NO_VALID_PHONE_ERROR, true, item.campaign_id, tentativasAtuais + 1);
+    return { outcome: "error", error: NO_VALID_PHONE_ERROR };
   }
 
   // Revalidação do tick (cron): mesma chave do startCampaign, que também

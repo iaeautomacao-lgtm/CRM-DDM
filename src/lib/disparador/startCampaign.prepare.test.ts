@@ -163,6 +163,23 @@ describe("startCampaign — preparação (B9)", () => {
     expect(state.queuePayloads.every((r) => typeof r.erro_permanente === "boolean")).toBe(true);
   });
 
+  it("contato sem telefone válido vira UM erro permanente explicado e nunca um envio (REVISAO A1)", async () => {
+    setCampaign({ mensagens: [templateMsg, { ...templateMsg, template_name: "t2" }] });
+    audienceMock.contacts = [
+      { id: "c0", name: "Ana", phone: "+5511910000000", cpf: null },
+      { id: "c1", name: "Sem", phone: "", cpf: null },
+      { id: "c2", name: "Curto", phone: "12345", cpf: null },
+    ];
+    const result = await startCampaign("camp-1", "acc");
+    expect(result.ok).toBe(true);
+    const bad = state.queuePayloads.filter((r) => r.contact_id !== "c0");
+    expect(bad).toHaveLength(2); // um por contato inválido, mesmo com 2 mensagens
+    for (const row of bad) {
+      expect(row).toMatchObject({ status: "erro", erro_permanente: true, erro: "Contato sem telefone válido" });
+    }
+    expect(state.queuePayloads.filter((r) => r.contact_id === "c0")).toHaveLength(2);
+  });
+
   it("texto livre em canal Meta: consulta só inbound dos últimos 24h (received_at > agora-24h)", async () => {
     setCampaign({ mensagens: [freeTextMsg] });
     state.messagesRows = [

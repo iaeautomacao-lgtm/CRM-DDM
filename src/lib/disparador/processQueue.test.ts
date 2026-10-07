@@ -88,6 +88,23 @@ describe('queue provider outcomes', () => {
       error: name === 'confirm_dispatch_item_sent' || name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
     }));
   });
+  it('contato do CRM sem telefone NUNCA usa o texto da mensagem como número (REVISAO A1)', async () => {
+    const contactItem: QueueItem = {
+      ...item,
+      contact_id: 'contact',
+      mensagem_final: 'Seu debito de R$ 1.234,56 vence 10/10',
+      contacts: { phone: '' },
+    };
+    const result = await processQueueItem(contactItem, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'error', error: 'Contato sem telefone válido' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true)).toBe(true);
+  });
+  it('item externo (API v1, contact_id nulo) continua usando mensagem_final como telefone', async () => {
+    const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ to: '5511999999999' }));
+  });
   it('never calls the provider after losing the guarded claim', async () => {
     mocks.claimed = false;
     expect(
