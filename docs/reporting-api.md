@@ -41,7 +41,8 @@ As métricas usam as mesmas regras do Monitoramento:
 - **Em atendimento**: conversa ativa com `assigned_agent_id`; a atribuição
   vence o status bruto.
 - **Atendida**: primeira resposta humana (`first_response_at`) ocorreu no
-  período.
+  período. O timestamp é alimentado pelo trigger de SLA quando uma mensagem
+  de operador possui `sender_id`; respostas automáticas (`bot`) não contam.
 - **Finalizada**: `closed_at` ocorreu no período.
 - **Tabulada**: conversa finalizada no período com `outcome_tag_id`.
 - **Online / Ausente / Offline**: derivados do heartbeat já usado pelo CRM.
@@ -101,7 +102,16 @@ GET /api/v1/reports/operations/summary?from=2026-10-01&to=2026-10-07
 - `distinct_tabulations`
 - `unique_operators`
 - `avg_first_response_seconds`
+- `avg_resolution_seconds`
 - `avg_service_seconds`
+
+Definição dos tempos:
+
+- `avg_first_response_seconds`: `created_at → first_response_at` nas conversas cuja primeira resposta ocorreu no período.
+- `avg_resolution_seconds`: `created_at → closed_at` nas conversas finalizadas no período.
+- `avg_service_seconds`: `first_response_at → closed_at` nas conversas finalizadas no período que possuem primeira resposta humana registrada.
+
+Os três indicadores são deliberadamente separados: tempo total de resolução não é tratado como tempo de atendimento humano. Quando não há amostra válida, a média é `null`.
 
 ## GET /teams
 

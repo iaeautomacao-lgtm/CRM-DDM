@@ -642,6 +642,7 @@ export async function POST(request: Request) {
       const persisted = await persistOutboundMessage(supabase, {
         conversation_id,
         sender_type: 'agent',
+        sender_id: user.id,
         content_type: message_type,
         content_text: content_text || null,
         media_url: originalMediaUrl || null,

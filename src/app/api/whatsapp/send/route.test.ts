@@ -234,6 +234,7 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
       content_type: 'template',
       template_name: 'order_update',
       sender_type: 'agent',
+      sender_id: 'user-1',
     })
   })
 

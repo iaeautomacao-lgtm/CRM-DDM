@@ -86,6 +86,7 @@ export interface PeriodMetrics {
   distinct_tabulations: number;
   unique_operators: number;
   avg_first_response_seconds: number | null;
+  avg_resolution_seconds: number | null;
   avg_service_seconds: number | null;
 }
 
@@ -508,9 +509,12 @@ export function aggregatePeriodMetrics(
   const responseSeconds = attended
     .filter((row) => row.first_response_at)
     .map((row) => secondsBetween(row.created_at, row.first_response_at as string));
-  const serviceSeconds = closed
+  const resolutionSeconds = closed
     .filter((row) => row.closed_at)
     .map((row) => secondsBetween(row.created_at, row.closed_at as string));
+  const serviceSeconds = closed
+    .filter((row) => row.closed_at && row.first_response_at)
+    .map((row) => secondsBetween(row.first_response_at as string, row.closed_at as string));
 
   return {
     received: received.length,
@@ -521,6 +525,7 @@ export function aggregatePeriodMetrics(
     distinct_tabulations: tabulationIds.size,
     unique_operators: operators.size,
     avg_first_response_seconds: avg(responseSeconds),
+    avg_resolution_seconds: avg(resolutionSeconds),
     avg_service_seconds: avg(serviceSeconds),
   };
 }

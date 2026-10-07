@@ -80,8 +80,13 @@ describe('current operational snapshot', () => {
         fact({ id: 'nav', status: 'open' }),
         fact({ id: 'wait', status: 'pending' }),
         fact({
-          id: 'att',
+          id: 'att-pending',
           status: 'pending',
+          assigned_agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        }),
+        fact({
+          id: 'att-open',
+          status: 'open',
           assigned_agent_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         }),
       ],
@@ -91,10 +96,10 @@ describe('current operational snapshot', () => {
     );
 
     expect(snapshot.conversations).toEqual({
-      total_active: 3,
+      total_active: 4,
       navigating: 1,
       waiting: 1,
-      attending: 1,
+      attending: 2,
     });
     expect(snapshot.operators.online).toBe(1);
     expect(snapshot.operators.serving).toBe(1);
@@ -128,7 +133,30 @@ describe('historical reporting', () => {
     expect(metrics.tabulated).toBe(1);
     expect(metrics.unique_operators).toBe(1);
     expect(metrics.avg_first_response_seconds).toBe(60);
-    expect(metrics.avg_service_seconds).toBe(600);
+    expect(metrics.avg_resolution_seconds).toBe(600);
+    expect(metrics.avg_service_seconds).toBe(540);
+  });
+
+  it('counts events independently when a conversation started before the period', () => {
+    const metrics = aggregatePeriodMetrics(
+      [
+        fact({
+          id: 'cross-boundary',
+          created_at: '2026-09-30T23:00:00.000Z',
+          first_response_at: '2026-10-01T13:00:00.000Z',
+          closed_at: '2026-10-01T14:00:00.000Z',
+          status: 'closed',
+        }),
+      ],
+      range,
+    );
+
+    expect(metrics.received).toBe(0);
+    expect(metrics.attended).toBe(1);
+    expect(metrics.closed).toBe(1);
+    expect(metrics.avg_first_response_seconds).toBe(50_400);
+    expect(metrics.avg_resolution_seconds).toBe(54_000);
+    expect(metrics.avg_service_seconds).toBe(3_600);
   });
 
   it('groups outcome tags and reports percentage of tabulated closures', () => {
