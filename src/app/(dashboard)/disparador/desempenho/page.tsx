@@ -74,6 +74,17 @@ const PALETTE = [
   "#64748b", // Ardósia
 ];
 
+interface LivePerformanceSnapshot {
+  sampledAt: string;
+  activeCampaigns: number;
+  queued: number;
+  sending: number;
+  errors: number;
+  blocked: number;
+  remaining: number;
+  sentLast60s: number;
+}
+
 export default function DisparadorDesempenhoPage() {
   const [janela, setJanela] = useState<DesempenhoWindow>("1h");
   const [loading, setLoading] = useState(true);
@@ -85,11 +96,14 @@ export default function DisparadorDesempenhoPage() {
   const [throughputSeries, setThroughputSeries] = useState<ThroughputDataPoint[]>([]);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+  const [live, setLive] = useState<LivePerformanceSnapshot | null>(null);
+  const [lastLiveAt, setLastLiveAt] = useState<Date | null>(null);
 
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState(30);
 
   const isMountedRef = useRef(true);
+  const liveRequestInFlightRef = useRef(false);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -142,11 +156,41 @@ export default function DisparadorDesempenhoPage() {
     [janela]
   );
 
+  const fetchLiveData = useCallback(async () => {
+    if (liveRequestInFlightRef.current) return;
+    liveRequestInFlightRef.current = true;
+    try {
+      const res = await apiFetch("/api/disparador/desempenho/live");
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!isMountedRef.current || !data.ok || !data.live) return;
+      setLive(data.live as LivePerformanceSnapshot);
+      setLastLiveAt(new Date(data.live.sampledAt));
+    } catch (err) {
+      // O snapshot ao vivo é complementar. Se ele falhar, a telemetria
+      // histórica de 30s continua funcional e a tela não entra em erro.
+      console.warn("[Desempenho] Snapshot ao vivo indisponível:", err);
+    } finally {
+      liveRequestInFlightRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     void fetchData(false);
-  }, [fetchData]);
+    void fetchLiveData();
+  }, [fetchData, fetchLiveData]);
 
-  // Temporizador para auto-refresh a cada 30 segundos
+  // Snapshot operacional: curto e barato. Pausa quando a aba fica oculta
+  // para não gerar carga sem benefício visual.
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") void fetchLiveData();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, fetchLiveData]);
+
+  // Telemetria histórica continua a cada 30 segundos
   useEffect(() => {
     if (!autoRefresh) return;
 
@@ -205,7 +249,7 @@ export default function DisparadorDesempenhoPage() {
             </h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Telemetria em tempo real por tick (1 min) e vazão por número para calibrar a velocidade com segurança.
+            Estado operacional atualizado a cada ~3s; saúde do processo e histórico consolidados por tick.
           </p>
         </div>
 
@@ -238,14 +282,14 @@ export default function DisparadorDesempenhoPage() {
               checked={autoRefresh}
               onCheckedChange={setAutoRefresh}
               className="scale-90"
-              aria-label="Atualização automática a cada 30 segundos"
+              aria-label="Estado operacional a cada 3 segundos e histórico a cada 30 segundos"
             />
             <Label
               htmlFor="switch-auto-refresh"
               className="cursor-pointer text-xs flex items-center gap-1.5 font-normal"
             >
               <Radio className={cn("size-3.5", autoRefresh ? "text-emerald-500 animate-pulse" : "text-muted-foreground")} />
-              <span>Auto 30s {autoRefresh ? `(${secondsUntilRefresh}s)` : "(pausado)"}</span>
+              <span>Live 3s · histórico {autoRefresh ? `(${secondsUntilRefresh}s)` : "(pausado)"}</span>
             </Label>
           </div>
 
@@ -253,7 +297,10 @@ export default function DisparadorDesempenhoPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void fetchData(true)}
+            onClick={() => {
+              void fetchData(true);
+              void fetchLiveData();
+            }}
             disabled={refreshing || loading}
             className="gap-1.5 text-xs h-9"
           >
@@ -272,17 +319,40 @@ export default function DisparadorDesempenhoPage() {
         </div>
       </div>
 
-      {/* Timestamp da última atualização */}
-      {lastRefreshedAt && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground -mt-3">
+      {/* Atualização: snapshot operacional curto + histórico pesado separado */}
+      {(lastRefreshedAt || lastLiveAt) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground -mt-3">
           <span>
-            Última atualização: {lastRefreshedAt.toLocaleTimeString("pt-BR")}
+            Ao vivo: {lastLiveAt ? lastLiveAt.toLocaleTimeString("pt-BR") : "—"}
+            {" · "}
+            Histórico: {lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString("pt-BR") : "—"}
           </span>
           {metrics && (
             <span>
               {metrics.totalTicks} {metrics.totalTicks === 1 ? "minuto registrado" : "minutos registrados"} na janela de {janela}
             </span>
           )}
+        </div>
+      )}
+
+      {live && (
+        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 -mt-2" aria-label="Estado operacional ao vivo">
+          <div className="rounded-lg border border-border bg-card px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Campanhas ativas</p>
+            <p className="mt-0.5 text-lg font-bold text-foreground">{live.activeCampaigns.toLocaleString("pt-BR")}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">A enviar</p>
+            <p className="mt-0.5 text-lg font-bold text-foreground">{live.remaining.toLocaleString("pt-BR")}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Processando agora</p>
+            <p className="mt-0.5 text-lg font-bold text-primary">{live.sending.toLocaleString("pt-BR")}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card px-3 py-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Falhas na campanha ativa</p>
+            <p className="mt-0.5 text-lg font-bold text-foreground">{(live.errors + live.blocked).toLocaleString("pt-BR")}</p>
+          </div>
         </div>
       )}
 
@@ -305,7 +375,7 @@ export default function DisparadorDesempenhoPage() {
             </Button>
           </CardContent>
         </Card>
-      ) : ticks.length === 0 ? (
+      ) : ticks.length === 0 && !(live && (live.activeCampaigns > 0 || live.sentLast60s > 0)) ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
             <Megaphone className="h-10 w-10 text-muted-foreground/40" />
@@ -338,8 +408,8 @@ export default function DisparadorDesempenhoPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold tracking-tight text-foreground">
-                  {metrics?.nowSent.toLocaleString("pt-BR") ?? 0}
-                  <span className="text-xs font-normal text-muted-foreground ml-1">agora</span>
+                  {(live?.sentLast60s ?? metrics?.nowSent ?? 0).toLocaleString("pt-BR")}
+                  <span className="text-xs font-normal text-muted-foreground ml-1">últimos 60s</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
                   Média: <strong className="text-foreground">{metrics?.avgSentPerMinute ?? 0}</strong>/min · Total: {metrics?.totalSent.toLocaleString("pt-BR")}
