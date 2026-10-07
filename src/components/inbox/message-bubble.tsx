@@ -109,7 +109,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
         // autenticado para a signed URL de curta duração.
         if (url.startsWith("/api/whatsapp/media/")) {
           const res = await fetch(url, { credentials: "include" });
-          if (!res.ok) throw new Error("Failed to load media");
+          if (!res.ok) throw new Error("Falha ao carregar mídia");
           const blob = await res.blob();
           objectUrl = URL.createObjectURL(blob);
           if (!cancelled) setSrc(objectUrl);
@@ -139,7 +139,7 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
     setDownloading(true);
     try {
       const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error("download failed");
+      if (!res.ok) throw new Error("Falha no download");
       const blob = await res.blob();
       const objectUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -326,7 +326,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
 
     case "document":
       if (!message.media_url) {
-        return <MediaUnavailable label={message.content_text || "Document"} />;
+        return <MediaUnavailable label={message.content_text || "Documento"} />;
       }
       return (
         <a

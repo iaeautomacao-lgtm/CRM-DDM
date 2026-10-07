@@ -154,19 +154,19 @@ export function TeamFormDialog({
           setAllAccountMembers(data.members ?? []);
           setAgents((data.members ?? []).filter((m) => m.role === 'agent'));
         } else {
-          toast.error('Failed to load agents');
+          toast.error('Erro ao carregar atendentes');
         }
 
         if (teamMembersRes.ok) {
           const data = (await teamMembersRes.json()) as { userIds?: string[] };
           setMemberUserIds(new Set(data.userIds ?? []));
         } else {
-          toast.error('Failed to load team members');
+          toast.error('Erro ao carregar membros da equipe');
         }
       } catch (err) {
         if (!cancelled) {
           console.error('[TeamFormDialog] members fetch error:', err);
-          toast.error('Could not reach the server');
+          toast.error('Não foi possível conectar ao servidor');
         }
       } finally {
         if (!cancelled) setMembersLoading(false);
@@ -209,7 +209,7 @@ export function TeamFormDialog({
       });
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        throw new Error(payload.error || 'Failed to update team membership');
+        throw new Error(payload.error || 'Erro ao atualizar membros da equipe');
       }
     } catch (err) {
       setMemberUserIds((prev) => {
@@ -219,7 +219,7 @@ export function TeamFormDialog({
         return next;
       });
       console.error('[TeamFormDialog] toggle member error:', err);
-      toast.error(err instanceof Error ? err.message : 'Failed to update team membership');
+      toast.error(err instanceof Error ? err.message : 'Erro ao atualizar membros da equipe');
     } finally {
       setPendingMemberId(null);
     }
@@ -228,7 +228,7 @@ export function TeamFormDialog({
   async function handleSave() {
     const trimmedName = form.name.trim();
     if (!trimmedName) {
-      toast.error('Team name is required');
+      toast.error('O nome da equipe é obrigatório');
       return;
     }
 
@@ -236,7 +236,7 @@ export function TeamFormDialog({
     if (form.sessionTimeoutMinutes.trim()) {
       const parsed = Number(form.sessionTimeoutMinutes);
       if (!Number.isFinite(parsed) || parsed <= 0) {
-        toast.error('Session timeout must be a positive number of minutes');
+        toast.error('O tempo limite da sessão deve ser um número positivo em minutos');
         return;
       }
       sessionTimeoutMinutes = Math.floor(parsed);
@@ -256,7 +256,7 @@ export function TeamFormDialog({
           })
           .eq('id', team.id);
         if (error) throw error;
-        toast.success('Team updated');
+        toast.success('Equipe atualizada');
         await onSaved();
         onOpenChange(false);
       } else {
@@ -282,7 +282,7 @@ export function TeamFormDialog({
       }
     } catch (err) {
       console.error('[TeamFormDialog] save error:', err);
-      const msg = err instanceof Error ? err.message : 'Failed to save team';
+      const msg = err instanceof Error ? err.message : 'Erro ao salvar equipe';
       toast.error(msg);
     } finally {
       setSaving(false);
