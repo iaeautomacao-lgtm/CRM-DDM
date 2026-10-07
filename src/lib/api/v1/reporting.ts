@@ -392,7 +392,7 @@ function filterOperatorIds(
   }
 
   if (filters.agentId) {
-    ids = ids.has(filters.agentId) || !filters.teamId ? new Set([filters.agentId]) : new Set();
+    ids = ids.has(filters.agentId) ? new Set([filters.agentId]) : new Set();
   }
   return ids;
 }
@@ -415,7 +415,9 @@ export function buildCurrentSnapshot(
 
   const operatorIds = filterOperatorIds(roster, active, filters);
   const operatorPresence = countPresence(operatorIds, presence);
-  const globalServing = [...serving].filter((id) => operatorIds.has(id)).length;
+  // active já chega escopado pelos filtros; serving deve refletir as
+  // atribuições atuais mesmo se houver uma associação de equipe desatualizada.
+  const globalServing = serving.size;
 
   const teamMembers = new Map<string, string[]>();
   for (const row of roster.teamMembers) {
@@ -425,9 +427,18 @@ export function buildCurrentSnapshot(
   }
 
   const teamById = new Map(roster.teams.map((team) => [team.id, team.name]));
+  const agentTeamIds = filters.agentId
+    ? new Set(
+        roster.teamMembers
+          .filter((membership) => membership.user_id === filters.agentId)
+          .map((membership) => membership.team_id),
+      )
+    : null;
   const teamKeys = new Set<string>();
   for (const team of roster.teams) {
-    if (!filters.teamId || team.id === filters.teamId) teamKeys.add(team.id);
+    if (filters.teamId && team.id !== filters.teamId) continue;
+    if (agentTeamIds && !agentTeamIds.has(team.id)) continue;
+    teamKeys.add(team.id);
   }
   for (const conversation of active) {
     if (conversation.team_id) teamKeys.add(conversation.team_id);
@@ -539,10 +550,25 @@ export function buildTeamsReport(
   range: ReportRange,
   current: CurrentSnapshot,
   roster: ReportingRoster,
+  filters: ReportFilters = {},
 ) {
   const keys = new Set<string>();
-  for (const team of roster.teams) keys.add(team.id);
-  for (const row of rows) keys.add(row.team_id ?? '__none__');
+  const agentTeamIds = filters.agentId
+    ? new Set(
+        roster.teamMembers
+          .filter((membership) => membership.user_id === filters.agentId)
+          .map((membership) => membership.team_id),
+      )
+    : null;
+  for (const team of roster.teams) {
+    if (filters.teamId && team.id !== filters.teamId) continue;
+    if (agentTeamIds && !agentTeamIds.has(team.id)) continue;
+    keys.add(team.id);
+  }
+  for (const row of rows) {
+    if (filters.teamId && row.team_id !== filters.teamId) continue;
+    keys.add(row.team_id ?? '__none__');
+  }
   for (const team of current.teams) keys.add(team.team_id ?? '__none__');
 
   const names = new Map(roster.teams.map((team) => [team.id, team.name]));
@@ -599,7 +625,6 @@ export function buildAgentsReport(
   }
   if (filters.agentId) {
     for (const id of [...ids]) if (id !== filters.agentId) ids.delete(id);
-    ids.add(filters.agentId);
   }
 
   return [...ids]
