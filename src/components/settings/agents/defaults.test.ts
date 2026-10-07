@@ -4,7 +4,6 @@ import {
   createInitialAgentFormData,
   formDataFromPublished,
   formDataToAgentConfig,
-  formDataToPreviewPayload,
   formDataToSavePayload,
 } from './defaults';
 
@@ -98,5 +97,41 @@ describe('agents defaults and config conversion', () => {
     expect(reconstructed.tools).toHaveLength(1);
     expect(reconstructed.llm.temperatureUseDefault).toBe(false);
     expect(reconstructed.llm.temperature).toBe(0.5);
+  });
+});
+
+describe('editar um agente existente preserva o que o formulário não edita', () => {
+  it('mantém exit_tags, mídia, conexões e parâmetros de proteção; sobrescreve só os campos do formulário', () => {
+    const base = formDataToAgentConfig(createInitialAgentFormData());
+    base.behavior.exit_tags = [...(base.behavior.exit_tags ?? []), 'TAG_DO_FLUXO'];
+    base.media.multimodal_enabled = true;
+    base.protections.anti_loop.min_messages = 7;
+    base.legacy.account_id = '11111111-1111-4111-8111-111111111111';
+
+    const form = formDataFromPublished(
+      { id: 'a', name: 'A', enabled: true },
+      {
+        version_id: 'v',
+        version: 1,
+        config: base,
+        prompt_content: 'p',
+        composition: 'sections_v1',
+        rules: [{ rule_version_id: 'rv-1', content: 'r', enabled: true, position: 0 }],
+        tools: [],
+        knowledge: { selection_mode: 'legacy_account_all' },
+      },
+    );
+    expect(form.rules[0].id).toBe('rv-1');
+    form.protections.anti_loop = false;
+    form.behavior.max_turns = 3;
+
+    const next = formDataToAgentConfig(form, base);
+    expect(validateAgentConfig(next).success).toBe(true);
+    expect(next.behavior.exit_tags).toContain('TAG_DO_FLUXO');
+    expect(next.media.multimodal_enabled).toBe(true);
+    expect(next.protections.anti_loop.min_messages).toBe(7);
+    expect(next.protections.anti_loop.enabled).toBe(false);
+    expect(next.behavior.max_turns).toBe(3);
+    expect(next.legacy.account_id).toBe('11111111-1111-4111-8111-111111111111');
   });
 });

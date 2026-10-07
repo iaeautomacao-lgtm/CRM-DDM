@@ -28,6 +28,7 @@ export interface AgentUsageItem {
 
 export interface AgentRuleItem {
   id?: string;
+  rule_version_id?: string;
   content: string;
   enabled: boolean;
   position?: number;
@@ -37,6 +38,8 @@ export interface AgentToolItem {
   id: string;
   name: string;
   enabled: boolean;
+  /** Ligada no catálogo de ferramentas (desligada lá = o agente não a usa). */
+  catalog_enabled?: boolean;
 }
 
 export interface AgentKnowledgeItem {

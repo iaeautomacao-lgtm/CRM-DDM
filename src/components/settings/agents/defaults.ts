@@ -1,4 +1,5 @@
 import { LEGACY_AGENT_DEFAULTS, type AgentConfig } from '@/lib/ai/agents/schema';
+import { DEFAULT_MODEL_BY_PROVIDER, type AiProvider } from '@/lib/ai/models';
 import { KNOWN_AI_EXIT_TAGS } from '@/lib/ai/exit-tags';
 import type {
   AgentDetailResponse,
@@ -30,7 +31,7 @@ export function createInitialAgentFormData(): AgentFormData {
     tools: [],
     llm: {
       provider: 'openai',
-      model: 'gpt-4.1',
+      model: DEFAULT_MODEL_BY_PROVIDER.openai,
       temperatureUseDefault: true,
       temperature: defaults.llm.temperature,
       maxTokensUseDefault: true,
@@ -98,7 +99,7 @@ export function formDataFromPublished(
         .slice()
         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
         .map((r, idx) => ({
-          id: r.id || `rule-${idx}-${Date.now()}`,
+          id: r.rule_version_id || r.id || `rule-${idx}-${Date.now()}`,
           content: r.content,
           enabled: r.enabled !== false,
         }))
@@ -133,7 +134,7 @@ export function formDataFromPublished(
     tools: mappedTools,
     llm: {
       provider,
-      model: cfgLlm.model || (provider === 'openai' ? 'gpt-4.1' : provider === 'claude' ? 'claude-3-7-sonnet' : provider === 'gemini' ? 'gemini-2.5-flash' : 'hermes-3-llama-3.1-70b'),
+      model: cfgLlm.model || DEFAULT_MODEL_BY_PROVIDER[provider as AiProvider],
       temperatureUseDefault: cfgLlm.temperature === undefined,
       temperature: cfgLlm.temperature ?? initial.llm.temperature,
       maxTokensUseDefault: cfgLlm.max_tokens === undefined && cfgLlm.max_output_tokens === undefined,
@@ -174,7 +175,60 @@ export function formDataFromPublished(
   };
 }
 
+/**
+ * Config a enviar à API. Com `existingConfig` (editando um agente), parte DELE e só sobrescreve o que
+ * o formulário edita — o resto (tags de saída, mídia, conexões, flags legadas…) é preservado, para
+ * que salvar pela tela não apague configuração vinda da conversão ou de outras versões.
+ */
 export function formDataToAgentConfig(
+  formData: AgentFormData,
+  existingConfig?: AgentConfig | null,
+): AgentConfig {
+  const fresh = buildFreshConfig(formData, existingConfig);
+  if (!existingConfig) return fresh;
+  const merged = structuredClone(existingConfig);
+  const editableLlm = [
+    'temperature', 'max_tokens', 'max_output_tokens', 'top_p', 'frequency_penalty',
+    'presence_penalty', 'reasoning_effort', 'response_format', 'model',
+  ] as const;
+  const llm = { ...merged.llm } as Record<string, unknown>;
+  for (const key of editableLlm) delete llm[key];
+  merged.llm = { ...llm, ...fresh.llm } as AgentConfig['llm'];
+  merged.behavior = {
+    ...merged.behavior,
+    mode: fresh.behavior.mode,
+    max_turns: fresh.behavior.max_turns,
+    herdar_contexto: fresh.behavior.herdar_contexto,
+    debounce_ms: fresh.behavior.debounce_ms,
+    stall_seconds: fresh.behavior.stall_seconds,
+  };
+  merged.recovery = {
+    ...merged.recovery,
+    attempt_retries: fresh.recovery.attempt_retries,
+    empty_reply_text: fresh.recovery.empty_reply_text,
+    integration_failure_text: fresh.recovery.integration_failure_text,
+    integration_failure_tag: fresh.recovery.integration_failure_tag,
+  };
+  merged.protections = {
+    ...merged.protections,
+    anti_xingamento: { ...merged.protections.anti_xingamento, enabled: fresh.protections.anti_xingamento.enabled },
+    anti_loop: { ...merged.protections.anti_loop, enabled: fresh.protections.anti_loop.enabled },
+    pedido_humano_contestacao: { ...merged.protections.pedido_humano_contestacao, enabled: fresh.protections.pedido_humano_contestacao.enabled },
+    pessoa_errada: { ...merged.protections.pessoa_errada, enabled: fresh.protections.pessoa_errada.enabled },
+  };
+  const knowledge = { ...merged.knowledge, selection_mode: fresh.knowledge.selection_mode } as AgentConfig['knowledge'];
+  if (fresh.knowledge.file_ids) knowledge.file_ids = fresh.knowledge.file_ids;
+  else delete knowledge.file_ids;
+  knowledge.rag_external = { ...merged.knowledge.rag_external, ...fresh.knowledge.rag_external };
+  if (!fresh.knowledge.rag_external.url) delete knowledge.rag_external.url;
+  if (!fresh.knowledge.rag_external.credential) delete knowledge.rag_external.credential;
+  merged.knowledge = knowledge;
+  merged.tools = fresh.tools;
+  merged.execution = { ...merged.execution, llm_timeout_ms: fresh.execution.llm_timeout_ms };
+  return merged;
+}
+
+function buildFreshConfig(
   formData: AgentFormData,
   existingConfig?: AgentConfig | null,
 ): AgentConfig {
