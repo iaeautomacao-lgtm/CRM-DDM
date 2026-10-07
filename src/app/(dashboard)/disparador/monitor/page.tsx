@@ -42,6 +42,7 @@ interface QueueLog {
   scheduled_at: string;
   sent_at?: string;
   erro?: string;
+  entrega_pendente_131026?: boolean | null;
   phone_attempt_order?: number;
   contacts?: { nome: string; phone: string };
   campaigns?: { nome: string };
@@ -179,6 +180,7 @@ export default function DisparadorMonitorPage() {
           scheduled_at,
           sent_at,
           erro,
+          entrega_pendente_131026,
           phone_attempt_order,
           contacts:contact_id ( name, phone ),
           campaigns:campaign_id ( nome )
@@ -198,6 +200,7 @@ export default function DisparadorMonitorPage() {
           scheduled_at: d.scheduled_at,
           sent_at: d.sent_at,
           erro: d.erro,
+          entrega_pendente_131026: d.entrega_pendente_131026,
           phone_attempt_order: d.phone_attempt_order,
           contacts: d.contacts ? { nome: d.contacts.name, phone: d.contacts.phone } : undefined,
           campaigns: d.campaigns ? { nome: d.campaigns.nome } : undefined,
@@ -398,10 +401,16 @@ export default function DisparadorMonitorPage() {
                 >
                   <div className="flex items-start gap-2.5 truncate max-w-xl">
                     <div className="mt-0.5" aria-hidden="true">
-                      {item.status === "agendado" && <span className="h-2 w-2 rounded-full bg-zinc-400 block" />}
-                      {item.status === "enviando" && <Loader2 className="h-3 w-3 text-primary animate-spin" />}
-                      {item.status === "enviado" && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
-                      {item.status === "erro" && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
+                      {item.entrega_pendente_131026 === true ? (
+                        <Clock className="h-3.5 w-3.5 text-amber-500" />
+                      ) : (
+                        <>
+                          {item.status === "agendado" && <span className="h-2 w-2 rounded-full bg-zinc-400 block" />}
+                          {item.status === "enviando" && <Loader2 className="h-3 w-3 text-primary animate-spin" />}
+                          {item.status === "enviado" && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
+                          {item.status === "erro" && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
+                        </>
+                      )}
                     </div>
                     <div className="truncate">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -430,12 +439,22 @@ export default function DisparadorMonitorPage() {
                   </div>
 
                   <div className="text-right shrink-0">
-                    <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
-                      item.status === "enviado" ? "text-emerald-500 bg-emerald-500/10" :
-                      item.status === "erro" ? "text-red-500 bg-red-500/10" :
-                      item.status === "enviando" ? "text-primary bg-primary/10" : "text-zinc-500 bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400"
-                    }`}>
-                      {QUEUE_STATUS_LABELS[item.status] ?? item.status}
+                    <span
+                      title={
+                        item.entrega_pendente_131026 === true
+                          ? "A Meta informou 131026; pode ser aparelho offline. Confirmamos em até 24h."
+                          : undefined
+                      }
+                      className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
+                        item.entrega_pendente_131026 === true ? "text-amber-600 bg-amber-500/10" :
+                        item.status === "enviado" ? "text-emerald-500 bg-emerald-500/10" :
+                        item.status === "erro" ? "text-red-500 bg-red-500/10" :
+                        item.status === "enviando" ? "text-primary bg-primary/10" : "text-zinc-500 bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400"
+                      }`}
+                    >
+                      {item.entrega_pendente_131026 === true
+                        ? "Aguardando confirmação"
+                        : (QUEUE_STATUS_LABELS[item.status] ?? item.status)}
                     </span>
                     <span className="block text-[9px] text-muted-foreground mt-1">
                       {item.status === "enviado" && item.sent_at

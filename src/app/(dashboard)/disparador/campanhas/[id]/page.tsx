@@ -53,6 +53,7 @@ interface QueueRow {
   erro: string | null;
   scheduled_at: string;
   sent_at: string | null;
+  entrega_pendente_131026?: boolean | null;
   contacts?: { name: string | null; phone: string | null } | null;
 }
 
@@ -140,7 +141,7 @@ export default function CampanhaContatosPage({
 
       let query = supabase
         .from("disp_message_queue")
-        .select("id, status, erro, scheduled_at, sent_at, contacts:contact_id ( name, phone )", {
+        .select("id, status, erro, scheduled_at, sent_at, entrega_pendente_131026, contacts:contact_id ( name, phone )", {
           count: "exact",
         })
         .eq("campaign_id", campaignId)
@@ -262,19 +263,28 @@ export default function CampanhaContatosPage({
             </TableHeader>
             <TableBody>
               {rows.map((r) => {
-                const Icon = STATUS_ICON[r.status] ?? Clock;
+                const isPending131026 = r.entrega_pendente_131026 === true;
+                const Icon = isPending131026 ? Clock : (STATUS_ICON[r.status] ?? Clock);
+                const badgeClass = isPending131026
+                  ? "bg-amber-500/10 text-amber-600"
+                  : (STATUS_BADGE[r.status] || STATUS_BADGE.agendado);
+                const badgeLabel = isPending131026
+                  ? "Aguardando confirmação"
+                  : (STATUS_LABEL[r.status] || r.status);
+                const badgeTitle = isPending131026
+                  ? "A Meta informou 131026; pode ser aparelho offline. Confirmamos em até 24h."
+                  : undefined;
                 return (
                   <TableRow key={r.id}>
                     <TableCell>{r.contacts?.phone || "—"}</TableCell>
                     <TableCell>{r.contacts?.name || "—"}</TableCell>
                     <TableCell>
                       <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                          STATUS_BADGE[r.status] || STATUS_BADGE.agendado
-                        }`}
+                        title={badgeTitle}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass}`}
                       >
-                        <Icon aria-hidden="true" className={`h-3 w-3 ${r.status === "enviando" ? "animate-spin" : ""}`} />
-                        {STATUS_LABEL[r.status] || r.status}
+                        <Icon aria-hidden="true" className={`h-3 w-3 ${!isPending131026 && r.status === "enviando" ? "animate-spin" : ""}`} />
+                        {badgeLabel}
                       </span>
                     </TableCell>
                     <TableCell className="max-w-[280px] truncate text-xs text-red-500">
