@@ -237,6 +237,12 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131021]);
 // nada; precisa de template.
 const META_PERMANENT_CODES = new Set([131026, 131031, 131047, 131051, 368, 190, 131008, 131009, 132000, 132001]);
 
+/** Limites de taxa da Meta que reagendam sem gastar tentativa (F8). */
+export const META_RATE_LIMIT_NO_ATTEMPT_CODES: ReadonlySet<number> = new Set([130429, 131048, 131056]);
+export function isMetaRateLimitNoAttempt(err: unknown): boolean {
+  return err instanceof MetaApiError && err.metaCode !== null && META_RATE_LIMIT_NO_ATTEMPT_CODES.has(err.metaCode);
+}
+
 // Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
 // permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
 // funciona para erros da WAHA (`WAHA sendText failed (404): ...`), mas
@@ -864,8 +870,12 @@ export async function processQueueItem(
       // também cobre os mesmos códigos de META_INVALID_PHONE_CODES).
     }
 
-    const novasTentativas = tentativasAtuais + 1;
-    const permanent = isPermanentSendError(sendErr) || novasTentativas >= MAX_TENTATIVAS;
+    // F8: limite de taxa da Meta (130429 throughput, 131048 spam, 131056 par) NÃO é falha do item — é o número saturado.
+    // Reagenda (retry com backoff) SEM consumir tentativa: senão uma rajada de 429 transforma itens bons em erro
+    // permanente depois de MAX_TENTATIVAS, só porque o ritmo passou do limite. O freio do número (cooldown/backoff) é quem desacelera.
+    const rateLimited = isMetaRateLimitNoAttempt(sendErr);
+    const novasTentativas = rateLimited ? tentativasAtuais : tentativasAtuais + 1;
+    const permanent = isPermanentSendError(sendErr) || (!rateLimited && novasTentativas >= MAX_TENTATIVAS);
     const message = sendErr?.message || String(sendErr);
     if (isPermanentSendError(sendErr)) {
       void writeLog({

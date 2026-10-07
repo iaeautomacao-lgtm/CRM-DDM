@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { registerAuditActor } from '@/lib/audit/context'
 import { randomUUID } from 'node:crypto';
 import { drainCallbackOutbox } from '@/lib/disparador/callback-outbox';
@@ -32,6 +32,14 @@ import { channelConfigFor, preloadBlacklist, queueItemPrimaryPhone } from "@/lib
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
+import {
+  fireNextHop,
+  isMaintenanceHop,
+  readChainContext,
+  resolveTickChainConfig,
+  shouldChainNext,
+  type ChainContext,
+} from "@/lib/disparador/tick-chain";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 
@@ -245,7 +253,9 @@ export async function GET(request: Request) {
   );
 }
 
-export async function POST(request: Request) {
+// Um tick. `chain` diz em que hop da cadeia estamos (hop 0 = cron externo): a manutenção pesada só roda a cada N hops.
+async function runTick(request: Request, chain: ChainContext) {
+  const maintenanceHop = isMaintenanceHop(chain.hop, resolveTickChainConfig().maintenanceEvery);
   // Auditoria: escritas desta requisição saem como "system" (cron_disparador).
   await registerAuditActor({ actorType: 'system', source: 'cron_disparador' })
   const rejection = authorize(request);
@@ -295,6 +305,7 @@ export async function POST(request: Request) {
         } catch { lostLease = true; }
       })();
     }, 20_000);
+    if (maintenanceHop) {
     // Reaplica recibos de status (delivered/read/failed) que chegaram antes
     // da confirmação local do envio e entrega um callback pendente. Vem
     // primeiro para não ficar sempre sem tempo quando a fila está cheia.
@@ -324,6 +335,7 @@ export async function POST(request: Request) {
     } catch (watchdogError) {
       console.error("[Cron] Watchdog falhou; envio continua:", watchdogError);
     }
+    } // fim da manutenção (hop 0 e a cada N hops encadeados)
     // Preflight de deploy: se a coluna next_batch_at (migration 118) não
     // existir, o código novo subiu sem as migrations. Para aqui, antes de
     // qualquer preparação de campanha ou envio externo.
@@ -340,7 +352,7 @@ export async function POST(request: Request) {
     //    antes de tudo, recuperando o que ficou preso em 'preparando' (30 min
     //    sem updated_at: volta a 'agendado' se tiver agendamento, senão a
     //    'rascunho') e preparando as vencidas, uma por vez, dentro do orçamento.
-    if (isPrepareInTickEnabled()) {
+    if (maintenanceHop && isPrepareInTickEnabled()) {
       await recoverStuckPreparing(db);
       await prepareDueCampaigns(db, { outOfTime });
     }
@@ -592,8 +604,8 @@ export async function POST(request: Request) {
     const results = planned.map((entry) => entry.result);
     // Sobrou tempo? Entrega mais callbacks (inclusive de campanhas
     // encerradas neste tick).
-    if (!lostLease && Date.now() < stopAt - 5_000) await drainCallbackOutbox();
-    await cleanupOrphanReceipts(db, stopAt, () => lostLease);
+    if (maintenanceHop && !lostLease && Date.now() < stopAt - 5_000) await drainCallbackOutbox();
+    if (maintenanceHop) await cleanupOrphanReceipts(db, stopAt, () => lostLease);
     tickStatus = results.length ? "processed" : "idle";
     return NextResponse.json({
       status: tickStatus,
@@ -635,4 +647,40 @@ export async function POST(request: Request) {
       } catch (error) { console.error('[Cron] Falha ao liberar lock:', error); }
     }
   }
+}
+
+// Tick encadeado (tick-chain.ts): ao terminar um tick que PROCESSOU trabalho (lock já liberado no finally de runTick), dispara o
+// próximo hop via after() — sem esperar. O hop encadeado (header x-cron-hop) responde 202 na hora e roda o tick em after(), então
+// nenhuma requisição fica presa ao proxy; o cron externo (hop 0) continua síncrono e é o ressuscitador da cadeia.
+export async function POST(request: Request) {
+  const chainConfig = resolveTickChainConfig();
+  const ctx = readChainContext(request.headers);
+  const secret = process.env.CRON_SECRET ?? "";
+
+  const chainAfter = (response: NextResponse, status: string) => {
+    const decision = shouldChainNext({ config: chainConfig, ctx, tickStatus: status });
+    if (decision.chain) {
+      after(async () => {
+        await fireNextHop({ config: chainConfig, ctx, secret });
+      });
+    }
+    return response;
+  };
+
+  if (chainConfig.enabled && ctx.chained) {
+    const rejection = authorize(request);
+    if (rejection) return rejection;
+    after(async () => {
+      const response = await runTick(request, ctx);
+      const status = await response.clone().json().then((body) => String(body?.status ?? ""), () => "");
+      const decision = shouldChainNext({ config: chainConfig, ctx, tickStatus: status });
+      if (decision.chain) await fireNextHop({ config: chainConfig, ctx, secret });
+    });
+    return NextResponse.json({ status: "chained", hop: ctx.hop }, { status: 202 });
+  }
+
+  const response = await runTick(request, ctx);
+  if (!chainConfig.enabled) return response;
+  const status = await response.clone().json().then((body) => String(body?.status ?? ""), () => "");
+  return chainAfter(response, status);
 }

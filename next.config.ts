@@ -94,6 +94,8 @@ const nextConfig: NextConfig = {
   // (padrão 10 MB; acima disso o corpo chega truncado e formData() falha).
   // O import do assistente já vai em blocos pequenos; isto cobre o upload do
   // arquivo inteiro da tela de contatos do disparador.
+  // undici (Agent da Meta) usa módulos nativos do Node: não empacotar.
+  serverExternalPackages: ["undici"],
   experimental: {
     proxyClientMaxBodySize: "50mb",
   },
