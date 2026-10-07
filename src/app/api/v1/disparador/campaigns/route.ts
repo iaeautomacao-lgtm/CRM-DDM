@@ -67,6 +67,8 @@ async function rollbackCampaign(db: Db, campaignId: string, accountId: string): 
   const steps: Array<[string, PromiseLike<{ error: { message: string } | null }>]> = [
     ["fila", db.from("disp_message_queue").delete().eq("campaign_id", campaignId).eq("account_id", accountId)],
     ["métricas", db.from("campaign_metrics").delete().eq("campaign_id", campaignId)],
+    // Deltas pendentes (migration 183): sem isto a consolidação recriaria a linha de métricas.
+    ["deltas de métricas", db.from("campaign_metric_deltas").delete().eq("campaign_id", campaignId)],
     [
       "campanha",
       db
@@ -207,49 +209,103 @@ export async function POST(request: Request) {
       if (replay) return replay;
     }
 
-    // Resolver canal por UUID ou número de telefone
+    // Resolver canal por UUID, waha_session estável ou número Meta.
     let channelId: string | null = null;
     let provider: "meta" | "waha" = "meta";
     if (body.channel) {
-      // Tenta como UUID primeiro
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
       if (uuidPattern.test(body.channel)) {
-        const { data: ch } = await db
+        let { data: ch } = await db
           .from("whatsapp_config")
-          .select("id, provider")
+          .select("id, provider, created_at")
           .eq("id", body.channel)
           .eq("account_id", ctx.accountId)
           .eq("habilitado", true)
           .maybeSingle();
+
+        // Compatibilidade para integrações que guardaram o UUID de um
+        // canal WAHA e depois o operador removeu/reconectou a linha. O
+        // audit_log prova que o UUID antigo pertenceu a esta mesma conta;
+        // só redirecionamos quando há exatamente um WAHA habilitado criado
+        // depois da exclusão. UUID aleatório/da outra conta continua 400.
+        if (!ch) {
+          const { data: deleted } = await db
+            .from("audit_logs")
+            .select("created_at")
+            .eq("account_id", ctx.accountId)
+            .eq("resource_type", "whatsapp_line")
+            .eq("resource_id", body.channel)
+            .eq("action", "whatsapp_line.deleted")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (deleted?.created_at) {
+            const deletedAt = Date.parse(deleted.created_at);
+            const { data: currentWaha } = await db
+              .from("whatsapp_config")
+              .select("id, provider, created_at")
+              .eq("account_id", ctx.accountId)
+              .eq("habilitado", true)
+              .eq("provider", "waha");
+
+            const replacements = (currentWaha ?? []).filter((candidate) => {
+              const createdAt = Date.parse(candidate.created_at ?? "");
+              return Number.isFinite(deletedAt) && Number.isFinite(createdAt) && createdAt > deletedAt;
+            });
+
+            if (replacements.length === 1) {
+              ch = replacements[0];
+              console.warn(
+                `[v1/disparador] canal WAHA antigo ${body.channel} remapeado para ${ch.id} após reconexão`
+              );
+            }
+          }
+        }
+
         if (!["meta", "waha"].includes(ch?.provider ?? "")) {
           throw badRequest("Canal não encontrado, desabilitado ou provider não suportado");
         }
         channelId = ch!.id;
         provider = ch!.provider as "meta" | "waha";
       } else {
-        // Tenta como número de telefone — só se aplica a canais Meta:
-        // display_phone_number é um campo específico da Cloud API (o
-        // formato bruto retornado pela Meta, ex: "+55 21 3030-9159");
-        // sessões WAHA são identificadas por UUID, não por número, então
-        // um canal WAHA precisa ser informado via 'channel' com o UUID.
-        const digitsOnly = sanitizePhoneForMeta(body.channel);
-        const { data: metaChannels } = await db
+        // Primeiro tenta o identificador estável da sessão WAHA. Isso evita
+        // acoplar integrações externas ao UUID da linha, que pode mudar se
+        // a configuração for removida e recriada.
+        const { data: wahaBySession } = await db
           .from("whatsapp_config")
-          .select("id, provider, display_phone_number")
+          .select("id, provider")
           .eq("account_id", ctx.accountId)
           .eq("habilitado", true)
-          .eq("provider", "meta");
+          .eq("provider", "waha")
+          .eq("waha_session", body.channel)
+          .maybeSingle();
 
-        const match = (metaChannels ?? []).find(
-          (c) =>
-            c.display_phone_number &&
-            sanitizePhoneForMeta(c.display_phone_number) === digitsOnly
-        );
-        if (!match) {
-          throw badRequest(`Canal Meta não encontrado para o número: ${body.channel}`);
+        if (wahaBySession) {
+          channelId = wahaBySession.id;
+          provider = "waha";
+        } else {
+          // Número de telefone continua sendo identificador de canal Meta.
+          const digitsOnly = sanitizePhoneForMeta(body.channel);
+          const { data: metaChannels } = await db
+            .from("whatsapp_config")
+            .select("id, provider, display_phone_number")
+            .eq("account_id", ctx.accountId)
+            .eq("habilitado", true)
+            .eq("provider", "meta");
+
+          const match = (metaChannels ?? []).find(
+            (c) =>
+              c.display_phone_number &&
+              sanitizePhoneForMeta(c.display_phone_number) === digitsOnly
+          );
+          if (!match) {
+            throw badRequest(`Canal não encontrado para o identificador: ${body.channel}`);
+          }
+          channelId = match.id;
+          provider = "meta";
         }
-        channelId = match.id;
-        provider = "meta";
       }
     } else {
       // Se não informou canal, usa o único canal habilitado (Meta ou WAHA) da conta
@@ -263,7 +319,7 @@ export async function POST(request: Request) {
         throw badRequest("Nenhum canal habilitado encontrado nesta conta");
       }
       if (channels.length > 1) {
-        throw badRequest("Conta com múltiplos canais habilitados — informe 'channel' (UUID ou número)");
+        throw badRequest("Conta com múltiplos canais habilitados — informe 'channel' (UUID, sessão WAHA ou número Meta)");
       }
       channelId = channels[0].id;
       provider = channels[0].provider as "meta" | "waha";

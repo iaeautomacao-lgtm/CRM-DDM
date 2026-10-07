@@ -42,7 +42,7 @@ export async function GET(
     }
 
     const { data: metrics, error: metricsError } = await db
-      .from("campaign_metrics")
+      .from("campaign_metrics_live")
       .select("total_contatos, total_enviados, total_entregues, total_lidos, total_erros")
       .eq("campaign_id", campaignId)
       .maybeSingle();

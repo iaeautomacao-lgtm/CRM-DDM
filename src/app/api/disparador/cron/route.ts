@@ -33,6 +33,7 @@ import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-re
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
+import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -152,6 +153,10 @@ const CANDIDATE_PAGE_SIZE = 1000;
 const RETRY_LOCK_TTL_SECONDS = 270;
 // Confirmação das ocorrências 131026 pendentes (a cada ~5 ticks, lock próprio).
 const META_131026_CONFIRM_LOCK_TTL_SECONDS = 270;
+// Consolidação dos deltas de métricas (migration 183): lock próprio, só com sobra de tempo.
+const METRICS_CONSOLIDATE_LOCK_TTL_SECONDS = 30;
+const METRICS_CONSOLIDATE_BATCH = 20_000;
+const METRICS_CONSOLIDATE_MAX_ROUNDS = 5;
 
 /** Janela (min) sem delivered/read para um failed 131026 (aparelho offline também gera) virar erro definitivo. */
 function meta131026ConfirmMinutes(): number {
@@ -296,6 +301,29 @@ export async function POST(request: Request) {
     const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 100 });
     if (receiptsError) throw receiptsError;
     await drainCallbackOutbox(1);
+    // Watchdog anti-deadlock. É manutenção best-effort: falha aqui nunca
+    // derruba o tick nem impede novos envios.
+    try {
+      const recovered = await recoverStaleSendingReservations(db);
+      if (recovered.recoveredAccepted > 0 || recovered.finalizedUnknown > 0 || recovered.failed > 0) {
+        for (const campaignId of recovered.campaignIds) {
+          const { error: completeError } = await db.rpc("complete_dispatch_campaign", {
+            p_campaign_id: campaignId,
+          });
+          if (completeError)
+            console.error("[Cron] Watchdog: falha ao tentar finalizar campanha:", campaignId, completeError.message);
+        }
+        await writeLog({
+          level: recovered.failed > 0 ? "warn" : "info",
+          source: "disparador",
+          event: "dispatch_stale_sending_recovered",
+          message: "Watchdog liberou reservas antigas sem reenviar",
+          payload: recovered,
+        });
+      }
+    } catch (watchdogError) {
+      console.error("[Cron] Watchdog falhou; envio continua:", watchdogError);
+    }
     // Preflight de deploy: se a coluna next_batch_at (migration 118) não
     // existir, o código novo subiu sem as migrations. Para aqui, antes de
     // qualquer preparação de campanha ou envio externo.
@@ -348,6 +376,31 @@ export async function POST(request: Request) {
           p_limit: 200,
         });
         if (confirmError) console.error("[Cron] Falha ao confirmar 131026 pendentes:", confirmError.message);
+      }
+    }
+    // 2c) Métricas: soma os deltas pendentes de campaign_metrics (increment_campaign_metric só insere
+    //     deltas — sem linha quente) e apaga os consolidados, em lotes. Só se sobrar tempo; lock próprio.
+    //     Atrasar não perde nada: a leitura (campaign_metrics_live) já soma os deltas pendentes.
+    if (!outOfTime()) {
+      const { data: metricsTurn, error: metricsLockError } = await db.rpc("try_acquire_cron_lock", {
+        p_name: "disparador_metrics",
+        p_owner_id: owner,
+        p_ttl_seconds: METRICS_CONSOLIDATE_LOCK_TTL_SECONDS,
+      });
+      if (metricsLockError) console.error("[Cron] Falha no lock da consolidação de métricas:", metricsLockError.message);
+      if (metricsTurn) {
+        for (let round = 0; round < METRICS_CONSOLIDATE_MAX_ROUNDS && !outOfTime(); round++) {
+          const { data: consolidated, error: consolidateError } = await db.rpc("consolidate_campaign_metrics", {
+            p_limit: METRICS_CONSOLIDATE_BATCH,
+          });
+          if (consolidateError) {
+            console.error("[Cron] Falha ao consolidar métricas:", consolidateError.message);
+            break;
+          }
+          if ((Number(consolidated) || 0) < METRICS_CONSOLIDATE_BATCH) break;
+        }
+        const { error: releaseError } = await db.rpc("release_cron_lock", { p_name: "disparador_metrics", p_owner_id: owner });
+        if (releaseError) console.error("[Cron] Falha ao liberar o lock de métricas:", releaseError.message);
       }
     }
     // 3) Campanhas em execução, mais "atrasadas" primeiro (fairness entre

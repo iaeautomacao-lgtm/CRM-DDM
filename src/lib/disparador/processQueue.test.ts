@@ -47,7 +47,10 @@ vi.mock('@/lib/disparador/admin-client', () => ({
     },
   }),
 }));
-vi.mock('@/lib/whatsapp/encryption', () => ({ decrypt: () => 'test-token' }));
+vi.mock('@/lib/whatsapp/encryption', () => ({
+  decryptStoredSecret: (value: string) =>
+    value === 'legacy-plaintext-token' ? value : 'test-token',
+}));
 vi.mock('@/lib/logger', () => ({
   writeLog: vi.fn(),
   maskPhone: () => 'masked',
@@ -96,6 +99,24 @@ describe('queue provider outcomes', () => {
     expect(
       await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
     ).toEqual({ outcome: 'sent', messageId: 'wamid.test' });
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('aceita segredo legado em texto puro antes de chamar o provedor', async () => {
+    const result = await processQueueItem(
+      item,
+      { id: 'campaign', status: 'em_execucao' },
+      {
+        channelConfig: {
+          provider: 'meta',
+          access_token: 'legacy-plaintext-token',
+          phone_number_id: 'phone-id',
+        },
+        blacklistLookup: () => false,
+      }
+    );
+
+    expect(result).toMatchObject({ outcome: 'sent' });
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
   it('keeps the 1st/2nd Meta 131026 out of the definitive blacklist', async () => {
@@ -169,22 +190,23 @@ describe('queue provider outcomes', () => {
       )
     ).toBe(false);
   });
-  it('quarantines an unknown transport outcome instead of scheduling another POST', async () => {
+  it('terminaliza resultado de transporte desconhecido sem reenviar nem prender a vaga', async () => {
     mocks.send.mockRejectedValue(new TypeError('connection lost after POST'));
     expect(
       await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
     ).toMatchObject({
-      outcome: 'pending_confirmation',
-      reason: 'provider_outcome_unknown',
+      outcome: 'error',
+      error: expect.stringMatching(/sem reenvio/),
     });
     expect(
       mocks.updates.some(
-        (update) => update.status === 'agendado' || update.status === 'erro'
+        (update) => update.status === 'erro' && update.erro_permanente === true
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       mocks.rpc.mock.calls.some(([name]) => name === 'mark_queue_item_sent' || name === 'confirm_dispatch_item_sent')
     ).toBe(false);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 });
 
