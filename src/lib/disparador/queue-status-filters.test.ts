@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   QUEUE_DETAIL_STATUS_FILTERS,
+  PENDING_CONFIRMATION_OR_FILTER,
+  PENDING_CONFIRMATION_QUEUE_DETAIL_KEY,
   REPLIED_QUEUE_DETAIL_KEY,
 } from "./queue-status-filters";
 
@@ -21,5 +23,15 @@ describe("queue detail status filters", () => {
       "lido",
     ]);
     expect(REPLIED_QUEUE_DETAIL_KEY).toBe("respondido");
+  });
+
+  it("separa itens que ainda aguardam confirmação final", () => {
+    expect(PENDING_CONFIRMATION_QUEUE_DETAIL_KEY).toBe("aguardando_confirmacao");
+    expect(QUEUE_DETAIL_STATUS_FILTERS.aguardando_confirmacao).toEqual([
+      "enviando",
+      "enviado",
+    ]);
+    expect(PENDING_CONFIRMATION_OR_FILTER).toContain("waha_message_id");
+    expect(PENDING_CONFIRMATION_OR_FILTER).toContain("entrega_pendente_131026.eq.true");
   });
 });
