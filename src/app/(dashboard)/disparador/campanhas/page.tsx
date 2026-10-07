@@ -297,7 +297,7 @@ interface CampaignMetrics {
 // os status aceitos por /api/disparador/campaigns/[id]/queue-details
 // (ver STATUS_FILTERS naquela rota). "respondido" = enviados com
 // replied_at (migration 126), a mesma contagem do card "Respostas".
-type QueueDetailStatusKey = "total" | "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado" | "respondido";
+type QueueDetailStatusKey = "total" | "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado" | "respondido" | "aguardando_confirmacao";
 
 interface QueueDetailRow {
   id: string;
@@ -407,6 +407,9 @@ export default function CampanhasPage() {
   // queue-details agrega trabalho ainda não concluído:
   // agendado + pendente + pausado + enviando.
   const [agendadosCount, setAgendadosCount] = useState<number | null>(null);
+  // Resultado ainda não definitivo: aceite externo com confirmação local
+  // pendente ou Meta 131026 aguardando delivered/read antes de virar erro.
+  const [aguardandoConfirmacaoCount, setAguardandoConfirmacaoCount] = useState<number | null>(null);
 
   // Drilldown por contato de uma métrica do modal acima (segundo modal,
   // empilhado). `label` é só pro título ("Enviados — 668 mensagens").
@@ -845,19 +848,27 @@ export default function CampanhasPage() {
       setTimingData(null);
     }
 
-    // "A enviar" não vem de campaign_metrics. O status lógico "agendado"
-    // da rota agrega agendado + pendente + pausado + enviando; assim a
-    // contagem não zera só porque a campanha foi pausada.
+    // Contagens operacionais derivadas diretamente da fila. pageSize=1
+    // evita trazer linhas desnecessárias: só usamos o count exato da rota.
     try {
-      const res = await apiFetch(
-        `/api/disparador/campaigns/${campaignId}/queue-details?status=agendado&page=1`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setAgendadosCount(data.total ?? 0);
+      const [scheduledRes, pendingRes] = await Promise.all([
+        apiFetch(
+          `/api/disparador/campaigns/${campaignId}/queue-details?status=agendado&page=1&pageSize=1`
+        ),
+        apiFetch(
+          `/api/disparador/campaigns/${campaignId}/queue-details?status=aguardando_confirmacao&page=1&pageSize=1`
+        ),
+      ]);
+      if (scheduledRes.ok) {
+        const scheduled = await scheduledRes.json();
+        setAgendadosCount(scheduled.total ?? 0);
+      }
+      if (pendingRes.ok) {
+        const pending = await pendingRes.json();
+        setAguardandoConfirmacaoCount(pending.total ?? 0);
       }
     } catch {
-      // silencioso — mesmo padrão do UTM abaixo, não é crítico pro modal
+      // silencioso — mesma política das métricas auxiliares do modal
     }
 
     setUtmMetricsLoading(true);
@@ -885,6 +896,7 @@ export default function CampanhasPage() {
     setMetricsData(null);
     setTimingData(null);
     setAgendadosCount(null);
+    setAguardandoConfirmacaoCount(null);
     setMetricsLoading(true);
     await fetchMetrics(campaign.id, campaign.nome);
     setMetricsLoading(false);
@@ -986,6 +998,7 @@ export default function CampanhasPage() {
     setMetricsData(null);
     setTimingData(null);
     setUtmMetrics(null);
+    setAguardandoConfirmacaoCount(null);
     setQueueDetailModal(null);
   };
 
@@ -1524,6 +1537,12 @@ export default function CampanhasPage() {
                       { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground", status: "total" as const },
                       { label: "A enviar", value: agendadosCount ?? 0, color: "text-cyan-500", status: "agendado" as const },
                       { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500", status: "enviado" as const },
+                      {
+                        label: "Aguardando confirmação",
+                        value: aguardandoConfirmacaoCount ?? 0,
+                        color: "text-amber-500",
+                        status: "aguardando_confirmacao" as const,
+                      },
                       { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500", status: "entregue" as const },
                       { label: "Lidos", value: metricsData.total_lidos, color: "text-purple-500", status: "lido" as const },
                       { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500", status: "respondido" as const },
@@ -1833,6 +1852,7 @@ export default function CampanhasPage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Mensagem Final</TableHead>
                       {queueDetailModal.status === "erro" && <TableHead>Tipo de Erro</TableHead>}
+                      {queueDetailModal.status === "aguardando_confirmacao" && <TableHead>Motivo</TableHead>}
                       <TableHead>Data/Hora</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1862,6 +1882,11 @@ export default function CampanhasPage() {
                         </TableCell>
                         {queueDetailModal.status === "erro" && (
                           <TableCell>{row.tipo_erro || "Outro"}</TableCell>
+                        )}
+                        {queueDetailModal.status === "aguardando_confirmacao" && (
+                          <TableCell className="max-w-xs text-xs text-muted-foreground">
+                            {row.erro || "Aguardando confirmação final"}
+                          </TableCell>
                         )}
                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                           {row.data_hora
