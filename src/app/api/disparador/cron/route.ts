@@ -187,8 +187,10 @@ async function fetchDueCandidates(db: AdminDb, campaignId: string, limit: number
   return items;
 }
 
-// Cooldown do número após backoff: vale neste processo (memória) e, com a
-// migration 164, entre processos/restarts. Falha só é logada.
+// Cooldown persistente é reservado a RATE LIMIT explícito. Erro transitório
+// (5xx/timeout/rede) pode reduzir o número no tick atual quando recorrente,
+// mas não deve impor 5 minutos de lentidão depois que o provedor recuperou.
+// Com migration 164 o cooldown de rate limit vale entre processos/restarts.
 async function persistCooldown(
   db: AdminDb,
   sessionId: string,
@@ -473,7 +475,12 @@ export async function POST(request: Request) {
       maxRssMb: config.maxRssMb,
       onBackoff: (event) => {
         console.warn("[Cron] Backoff adaptativo:", event);
-        if (event.scope !== "channel" || !event.channelId || config.cooldownSeconds <= 0) return;
+        if (
+          event.scope !== "channel" ||
+          !event.channelId ||
+          event.reason !== "rate_limit" ||
+          config.cooldownSeconds <= 0
+        ) return;
         if (cooledDown.has(event.channelId)) return;
         cooledDown.add(event.channelId);
         cooldownWrites.push(persistCooldown(db, event.channelId, event.reason, config.cooldownSeconds));

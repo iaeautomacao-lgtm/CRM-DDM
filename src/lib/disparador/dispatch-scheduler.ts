@@ -13,9 +13,11 @@ import type { BackoffReason } from "@/lib/disparador/provider-signals";
 //   repartindo as vagas entre números também em round-robin;
 // - não começa trabalho novo quando `shouldStop()` (orçamento do tick
 //   esgotado ou lease do lock perdido); o que já começou termina;
-// - backoff adaptativo (só desce): sinal de limite/erro do provedor corta
-//   pela metade a concorrência daquele número pelo resto do tick; event
-//   loop lento ou RSS alto corta pela metade a concorrência global.
+// - backoff adaptativo (só desce):
+//   * rate limit real corta o número imediatamente;
+//   * 5xx/timeout/rede só cortam quando viram um padrão recorrente;
+//   * cada número sofre no máximo 1 redução por tick;
+//   * event loop lento ou RSS alto continuam podendo reduzir o teto global.
 //
 // Não envia nada: `run` é o processQueueItem do cron (claim atômico, quota,
 // blacklist, bifurcação Meta/WAHA continuam lá).
@@ -111,9 +113,20 @@ interface ChannelState<T> {
   started: number;
   cursor: number;
   queues: CampaignQueue<T>[];
+  /** Uma redução por número/tick evita 24→12→6 por dois erros quase simultâneos. */
+  backoffApplied: boolean;
+  /** Janela móvel das conclusões recentes: true = 5xx/timeout/rede. */
+  transientWindow: boolean[];
+  transientCount: number;
 }
 
 const MAX_RECORDED_EVENTS = 50;
+// Erro transitório isolado é ruído do provedor, não sinal de saturação.
+// Só reduzimos se houver um pequeno padrão recorrente na janela recente.
+const TRANSIENT_BACKOFF_WINDOW = 300;
+const TRANSIENT_BACKOFF_MIN_SAMPLES = 20;
+const TRANSIENT_BACKOFF_MIN_SIGNALS = 3;
+const TRANSIENT_BACKOFF_MIN_RATE = 0.01;
 
 function positiveInt(value: number, name: string): number {
   if (!Number.isInteger(value) || value < 1) throw new Error(`Invalid ${name}`);
@@ -149,6 +162,9 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
       peak: 0,
       started: 0,
       cursor: 0,
+      backoffApplied: false,
+      transientWindow: [],
+      transientCount: 0,
       queues: channel.campaigns.map((campaign) => ({
         campaignId: campaign.campaignId,
         items: campaign.items,
@@ -192,6 +208,37 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
       }
     }
     return null;
+  };
+
+  const registerTransientSample = (channel: ChannelState<T>, isTransient: boolean) => {
+    channel.transientWindow.push(isTransient);
+    if (isTransient) channel.transientCount++;
+    if (channel.transientWindow.length > TRANSIENT_BACKOFF_WINDOW) {
+      const removed = channel.transientWindow.shift();
+      if (removed) channel.transientCount--;
+    }
+  };
+
+  const shouldBackoffChannel = (channel: ChannelState<T>, reason: BackoffReason | null): BackoffReason | null => {
+    if (!adaptive || channel.backoffApplied) return null;
+
+    // 429/130429/131048/131056 etc. são sinais explícitos de limite:
+    // reação imediata, mas apenas uma vez neste tick.
+    if (reason === "rate_limit") return reason;
+
+    const isTransient = reason === "server_error" || reason === "timeout" || reason === "network";
+    registerTransientSample(channel, isTransient);
+
+    // Avaliamos apenas quando esta conclusão trouxe um novo sinal transitório.
+    // Assim 2 erros em 1.218 chamadas, como no incidente real, ficam só na
+    // telemetria e não acionam freio/cooldown.
+    if (!isTransient) return null;
+
+    const samples = channel.transientWindow.length;
+    if (samples < TRANSIENT_BACKOFF_MIN_SAMPLES) return null;
+    if (channel.transientCount < TRANSIENT_BACKOFF_MIN_SIGNALS) return null;
+    if (channel.transientCount / samples < TRANSIENT_BACKOFF_MIN_RATE) return null;
+    return reason;
   };
 
   const checkHealth = () => {
@@ -285,11 +332,20 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
           channel.inFlight--;
           globalInFlight--;
           if (outcome?.pauseCampaign) pausedCampaigns.add(campaignId);
-          const reason = outcome ? outcome.backoff : null;
-          if (adaptive && reason) {
+          const reason = outcome ? outcome.backoff ?? null : null;
+          const appliedReason = shouldBackoffChannel(channel, reason);
+          if (appliedReason) {
             const from = channel.cap;
             channel.cap = Math.max(1, Math.floor(channel.cap / 2));
-            record({ scope: "channel", channelId: channel.channelId, reason, atMs: now(), from, to: channel.cap });
+            channel.backoffApplied = true;
+            record({
+              scope: "channel",
+              channelId: channel.channelId,
+              reason: appliedReason,
+              atMs: now(),
+              from,
+              to: channel.cap,
+            });
           }
           checkHealth();
           pump();
