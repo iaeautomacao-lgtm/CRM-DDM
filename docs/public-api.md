@@ -3,8 +3,8 @@
 A API pública permite integrar sistemas e automações ao CRM DDM sem depender da interface do dashboard. Ela expõe operações autenticadas para envio de mensagens, campanhas e consultas de contexto operacional.
 
 > **Status:** authentication, scopes, rate limiting, `GET /api/v1/me`,
-> `POST /api/v1/whatsapp/send`, `POST /api/v1/disparador/campaigns`,
-> and `GET /api/v1/disparador/campaigns/{id}` ship now. The remaining
+> `POST /api/v1/whatsapp/send`, Disparador campaigns, and the
+> `/api/v1/reports/*` Reporting API ship now. The remaining
 > data endpoints (`contacts`, `conversations`, …) land one at a time
 > in follow-up releases — see [Roadmap](#roadmap).
 
@@ -50,6 +50,7 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `campaigns:write`    | Create and enqueue Disparador campaigns  |
 | `campaigns:read`     | Read Disparador campaign status and metrics |
+| `reports:read`       | Read aggregated CRM reports and operational metrics |
 | `intelligence:read`  | Chave **pessoal** do MCP do DDM Intelligence (ver [MCP](#mcp-ddm-intelligence)) |
 
 A key with **no scopes** still authenticates and can call
@@ -417,3 +418,12 @@ Planned endpoints, shipping one per release (tracked in
 - `GET /api/v1/conversations` (`conversations:read`)
 - Outbound event webhooks (so automations can react to inbound
   messages)
+
+## Reporting API
+
+Para Power BI, Metabase, n8n e relatórios externos, use o scope
+`reports:read` e os endpoints agregados em `/api/v1/reports/*`.
+Eles expõem atendimentos, filas atuais, operadores/equipes e tabulações sem
+dar acesso ao banco ou a mensagens brutas.
+
+Documentação completa: [Reporting API](./reporting-api.md).
