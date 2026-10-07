@@ -36,3 +36,14 @@ O corte das vagas por lag/RSS agora exige **3 janelas seguidas** acima do limite
 ## 5. Rate limit não consome tentativa (F8)
 
 `130429`, `131048` e `131056` reagendam o item **sem incrementar `tentativas`** (e não viram erro permanente na última tentativa): o número saturado é desacelerado pelo cooldown/backoff, não punindo o item. Os outros erros transitórios continuam consumindo tentativa.
+
+## 6. Claim e confirmação em lote (P1-3b, migration 188)
+
+Antes: 1 RPC por item para reivindicar (`claim_dispatch_item_capped`) + 1 para confirmar, e candidatos por SELECT paginado com OFFSET (F9/F10).
+Agora (padrão; `DISPARADOR_BATCH_CLAIM=0` volta ao caminho por item):
+
+- **Planejamento por fichas:** `count_due_dispatch_items` conta os itens vencidos por campanha×número (sem OFFSET); cada ficha ocupa uma vaga no agendador. Uma amostra pequena (200 mais antigos) alimenta o detector de reflow.
+- **Claim em lote** (`claim_dispatch_batch(p_session_id, p_n, p_campaign_ids, p_default_max_in_flight)`): reivindica até N itens vencidos numa chamada, `FOR UPDATE SKIP LOCKED`, **um advisory lock por lote**, `max_in_flight`, `hourly_limit` do canal e `limite_por_hora` da campanha checados 1× (regra do `limite_por_hora` **idêntica** à do claim por item). O lote nunca passa das vagas livres do número (`slotsFree` do agendador), então tudo que foi reivindicado começa a enviar na hora; a sobra no fim do tick volta a `agendado` (`unclaim_dispatch_items`).
+- **Confirmação em micro-lote** (`confirm_dispatch_items_sent`): acumula 20 itens ou ~150 ms e chama a RPC uma vez; cada item tem o efeito da confirmação unitária (mark + message_logs + delta de métrica + replay de recibos) em subtransação, então um item inválido não derruba os outros. **Graceful shutdown:** o fim do tick e o SIGTERM drenam o lote pendente.
+- **Janela de perda em crash ≤ ~150–200 ms:** um envio aceito pelo provedor e ainda não confirmado fica `enviando` sem recibo; o watchdog o finaliza como resultado **incerto** — nunca reenvia.
+- **Sem a migration 188** o cron detecta a RPC ausente e volta sozinho ao caminho por item (e a confirmação ao modo unitário).

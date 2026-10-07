@@ -338,6 +338,110 @@ describe('cron: agendador por número', () => {
     expect(mocks.process).toHaveBeenCalled();
   });
 
+  describe('claim e confirmação em lote (P1-3b)', () => {
+    const rpcNames = () => mocks.rpc.mock.calls.map(([name]) => name as string);
+    function batchRpc(counts: Record<string, number>, claimOverride?: (campaign: string, n: number) => Array<Record<string, unknown>>) {
+      mocks.rpc.mockImplementation(async (name: string, args: Record<string, unknown>) => {
+        if (name === 'blacklisted_phone_keys') return { data: [], error: null };
+        if (name === 'count_due_dispatch_items') {
+          const id = (args.p_campaign_ids as string[])[0];
+          return { data: counts[id] ? [{ campaign_id: id, session_id: 'ch-meta', n: counts[id] }] : [], error: null };
+        }
+        if (name === 'claim_dispatch_batch') {
+          const id = (args.p_campaign_ids as string[])[0];
+          const n = args.p_n as number;
+          const rows = claimOverride ? claimOverride(id, n) : (queue[id] ?? []).slice(0, n);
+          return { data: rows.map((item) => ({ item })), error: null };
+        }
+        if (name === 'unclaim_dispatch_items') return { data: (args.p_ids as string[]).length, error: null };
+        return { data: true, error: null };
+      });
+    }
+
+    it('planeja por fichas, reivindica em lote e entrega ao envio itens JÁ reivindicados (sem claim por item)', async () => {
+      setup();
+      batchRpc({ big: 4, small: 0 });
+      const seen: Array<{ id: string; alreadyClaimed: unknown; confirm: unknown }> = [];
+      mocks.process.mockImplementation(async (item: { id: string }, _c: unknown, options: { alreadyClaimed?: boolean; confirmBatcher?: unknown }) => {
+        seen.push({ id: item.id, alreadyClaimed: options.alreadyClaimed, confirm: options.confirmBatcher });
+        return { outcome: 'sent', messageId: item.id };
+      });
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect(rpcNames()).toContain('count_due_dispatch_items');
+      expect(rpcNames()).toContain('claim_dispatch_batch');
+      expect(seen.map((x) => x.id).sort()).toEqual(['big0', 'big1', 'big2', 'big3']); // itens reais, não fichas
+      expect(seen.every((x) => x.alreadyClaimed === true && !!x.confirm)).toBe(true);
+      expect(mocks.rpc.mock.calls.filter(([n]) => n === 'claim_dispatch_item_capped' || n === 'claim_dispatch_item')).toHaveLength(0);
+    });
+
+    it('vários envios seguidos do mesmo número viram POUCOS claims (lote), não um por item', async () => {
+      setup();
+      batchRpc({ big: 6 });
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      await post();
+      const claims = mocks.rpc.mock.calls.filter(([n]) => n === 'claim_dispatch_batch');
+      expect(claims.length).toBeGreaterThan(0);
+      expect(claims.length).toBeLessThan(6);
+    });
+
+    it('fim do tick: o que foi reivindicado e não chegou ao envio volta a agendado (unclaim) e as confirmações pendentes são gravadas', async () => {
+      setup();
+      // 3 fichas, mas o claim devolve 4 itens → 1 sobra no buffer.
+      batchRpc({ big: 3 }, (id, n) => (queue[id] ?? []).slice(0, Math.max(n, 4)));
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      await post();
+      const unclaim = mocks.rpc.mock.calls.find(([n]) => n === 'unclaim_dispatch_items');
+      expect(unclaim).toBeTruthy();
+      expect((unclaim![1] as { p_ids: string[] }).p_ids).toHaveLength(1);
+    });
+
+    it('DISPARADOR_BATCH_CLAIM=0 volta ao caminho por item', async () => {
+      setup();
+      vi.stubEnv('DISPARADOR_BATCH_CLAIM', '0');
+      const seen: unknown[] = [];
+      mocks.process.mockImplementation(async (item: { id: string }, _c: unknown, options: { alreadyClaimed?: boolean }) => {
+        seen.push(options.alreadyClaimed);
+        return { outcome: 'sent', messageId: item.id };
+      });
+      await post();
+      expect(rpcNames()).not.toContain('count_due_dispatch_items');
+      expect(rpcNames()).not.toContain('claim_dispatch_batch');
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((v) => v === false)).toBe(true);
+    });
+
+    it('sem as RPCs da 188 (função inexistente) cai sozinho no claim por item', async () => {
+      setup();
+      mocks.rpc.mockImplementation(async (name: string) =>
+        name === 'count_due_dispatch_items'
+          ? { data: null, error: { code: 'PGRST202', message: 'not found' } }
+          : name === 'blacklisted_phone_keys'
+            ? { data: [], error: null }
+            : { data: true, error: null }
+      );
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const seen: unknown[] = [];
+      mocks.process.mockImplementation(async (item: { id: string }, _c: unknown, options: { alreadyClaimed?: boolean }) => {
+        seen.push(options.alreadyClaimed);
+        return { outcome: 'sent', messageId: item.id };
+      });
+      expect((await post()).status).toBe(200);
+      expect(rpcNames()).not.toContain('claim_dispatch_batch');
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((v) => v === false)).toBe(true);
+    });
+
+    it('claim vazio (cota/limite/nada vencido): as fichas viram no-op e nenhum item é enviado', async () => {
+      setup();
+      batchRpc({ big: 5 }, () => []);
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      await post();
+      expect(mocks.process).not.toHaveBeenCalled();
+      expect(mocks.rpc.mock.calls.filter(([n]) => n === 'claim_dispatch_batch').length).toBeLessThanOrEqual(2);
+    });
+  });
+
   describe('tick encadeado (P1-3a)', () => {
     const chainedPost = (hop: number, startedAt = Date.now()) =>
       POST(

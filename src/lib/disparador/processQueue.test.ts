@@ -395,6 +395,24 @@ describe('opções do agendador do cron', () => {
     expect(mocks.rpc).not.toHaveBeenCalledWith('claim_dispatch_item', expect.anything());
   });
 
+  it('P1-3b: item já reivindicado em lote NÃO passa pelo claim por item e confirma pelo micro-lote', async () => {
+    const submit = vi.fn(async () => ({ error: null, replayed: true }));
+    const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' }, { alreadyClaimed: true, confirmBatcher: { submit } });
+    expect(result).toMatchObject({ outcome: 'sent', messageId: 'wamid.test' });
+    const names = mocks.rpc.mock.calls.map(([name]) => name);
+    expect(names).not.toContain('claim_dispatch_item');
+    expect(names).not.toContain('claim_dispatch_item_capped');
+    expect(names).not.toContain('confirm_dispatch_item_sent'); // a confirmação foi para o lote
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ p_item_id: 'item', p_waha_message_id: 'wamid.test', p_tentativas: 1 }));
+  });
+
+  it('P1-3b: confirmação em lote com erro vira pending_confirmation (envio aceito, nunca reenviado)', async () => {
+    const submit = vi.fn(async () => ({ error: { message: 'lote falhou' }, replayed: false }));
+    const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' }, { alreadyClaimed: true, confirmBatcher: { submit } });
+    expect(result).toMatchObject({ outcome: 'pending_confirmation', messageId: 'wamid.test' });
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
   it('F8: limite de taxa da Meta (130429/131048/131056) reagenda SEM consumir tentativa — nem vira permanente na última', async () => {
     for (const code of [130429, 131048, 131056]) {
       for (const tentativas of [0, 2, 4]) {

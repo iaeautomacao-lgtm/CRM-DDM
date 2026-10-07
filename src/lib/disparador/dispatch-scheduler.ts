@@ -68,7 +68,8 @@ export interface SchedulerOptions<T> {
   channels: ReadonlyArray<ChannelWork<T>>;
   globalConcurrency: number;
   shouldStop: () => boolean;
-  run: (item: T, ctx: { channelId: string; campaignId: string }) => Promise<TaskOutcome | void>;
+  /** `slotsFree`: vagas livres do número/global no momento do início (inclui a desta tarefa) — dimensiona o claim em lote. */
+  run: (item: T, ctx: { channelId: string; campaignId: string; slotsFree: number }) => Promise<TaskOutcome | void>;
   adaptiveBackoff?: boolean;
   /** Lido no máximo a cada `healthCheckIntervalMs`, após um envio terminar. */
   sampleHealth?: () => HealthSample;
@@ -343,9 +344,10 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
       globalInFlight++;
       globalPeak = Math.max(globalPeak, globalInFlight);
       started++;
+      const slotsFree = Math.max(1, Math.min(channel.cap - channel.inFlight + 1, globalCap - globalInFlight + 1));
       let outcome: TaskOutcome | void = undefined;
       Promise.resolve()
-        .then(() => options.run(item, { channelId: channel.channelId, campaignId }))
+        .then(() => options.run(item, { channelId: channel.channelId, campaignId, slotsFree }))
         .then(
           (result) => {
             outcome = result;
