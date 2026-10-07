@@ -50,7 +50,7 @@ function seconds(ms: number): number {
  * em_execucao que NÃO seja uma retomada de pausada.
  *
  * - active_seconds: tempo em em_execucao dentro da janela de envio.
- * - paused_seconds: tempo em pausada que teria sido tempo aberto de envio.
+ * - paused_seconds: tempo corrido em pausada (o que o operador percebe como pausa).
  * - wall_clock_seconds: relógio corrido entre primeiro início e fim/agora.
  *
  * Se o histórico começar já numa retomada (campanha anterior à auditoria),
@@ -102,7 +102,7 @@ export function computeCampaignTiming(input: {
       input.janela
     );
     if (status === "em_execucao") activeMs += openMs;
-    else if (status === "pausada") pausedMs += openMs;
+    else if (status === "pausada") pausedMs += toMs - fromMs;
   };
 
   for (let i = startIndex + 1; i < events.length; i++) {
