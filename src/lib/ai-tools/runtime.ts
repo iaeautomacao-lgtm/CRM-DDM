@@ -8,6 +8,7 @@
 //  - Nome duplicado (catálogo × inline ou dois do catálogo): vale a PRIMEIRA
 //    (catálogo na ordem dos refs, depois inline) e o resto é logado.
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { toAiAgentTool, type ToolRow } from "@/lib/ai-tools/tool-input";
 import type { AiAgentTool } from "@/lib/flows/types";
@@ -52,10 +53,12 @@ export async function resolveEffectiveTools(
   accountId: string,
   inline: AiAgentTool[] | undefined,
   toolRefs: string[] | undefined,
+  /** Cliente de leitura: o simulador passa o banco em memória (sem tocar o banco real). */
+  db?: Pick<SupabaseClient, "from">,
 ): Promise<AiAgentTool[] | undefined> {
   const refs = Array.isArray(toolRefs) ? toolRefs.filter((r) => typeof r === "string") : [];
   if (refs.length === 0) return inline;
-  const { data, error } = await supabaseAdmin()
+  const { data, error } = await (db ?? supabaseAdmin())
     .from("ai_tools")
     .select("id, name, description, parameters, http, timeout_ms, enabled")
     .eq("account_id", accountId)

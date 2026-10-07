@@ -2,7 +2,7 @@
 // ferramenta": mesma ordem do responder (segredos ANTES dos argumentos do
 // modelo; host checado na URL FINAL). Puro.
 
-import { TOOL_SECRETS, hostCheckUrl, resolveToolSecrets, type AccountSecretsContext } from "@/lib/ai/tool-secrets";
+import { collectSecretValues, hostCheckUrl, resolveToolSecrets, type AccountSecretsContext } from "@/lib/ai/tool-secrets";
 import type { AiAgentTool } from "@/lib/flows/types";
 
 export interface BuiltToolRequest {
@@ -43,13 +43,7 @@ export function buildToolRequest(
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(tool.http.headers ?? {})) headers[k] = interpolate(resolve(v, false));
 
-  if (account) {
-    for (const c of account.creds.values()) secretValues.push(c.value);
-  }
-  // Segredos do ambiente que podem ter sido injetados ({{secret.X}} da lista fixa).
-  for (const def of Object.values(TOOL_SECRETS)) {
-    for (const name of def.envNames) if (env[name]) secretValues.push(env[name]!.trim());
-  }
+  secretValues.push(...collectSecretValues(account, env));
 
   return { url, method: tool.http.method, headers, body, missing: [...new Set(missing)], credentialInjected, secretValues };
 }

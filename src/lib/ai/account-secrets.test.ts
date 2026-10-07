@@ -108,6 +108,18 @@ describe("resolveToolSecrets — variáveis e credenciais da conta", () => {
     expect(final.match(/segredo-123/g)).toHaveLength(1); // só o k=, nunca duplicado via argumento
   });
 
+  it("mask: o valor da credencial nunca é lido — vira ***; as regras de host continuam valendo", () => {
+    const account = ctx({}, { API_KEY: { value: "segredo-123", hosts: ["exemplo.com"] } });
+    const ok = "https://api.exemplo.com/x?k={{cred.API_KEY}}";
+    const masked = resolveToolSecrets(ok, ok, {}, { account, mask: true });
+    expect(masked).toEqual({ value: "https://api.exemplo.com/x?k=***", missing: [], usedSecrets: true });
+    const bad = "https://evil.com/x?k={{cred.API_KEY}}";
+    expect(resolveToolSecrets(bad, bad, {}, { account, mask: true })).toMatchObject({ value: "https://evil.com/x?k=", missing: ["cred.API_KEY"] });
+    // secret.DDM_TOKEN do ambiente também fica mascarado.
+    const ddm = "https://www.ddmacordos.com/c?tk={{secret.DDM_TOKEN}}";
+    expect(resolveToolSecrets(ddm, ddm, { DDM_ACORDOS_API_TOKEN: "env-token-123456" }, { mask: true }).value).toBe("https://www.ddmacordos.com/c?tk=***");
+  });
+
   it("valor de variável com marcador não é reexpandido", () => {
     const account = ctx({ A: "{{cred.B}}" }, { B: { value: "s", hosts: ["exemplo.com"] } });
     const url = "https://exemplo.com/{{var.A}}";

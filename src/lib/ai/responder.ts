@@ -4,8 +4,8 @@ import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
-import { hostCheckUrl, resolveToolSecrets } from '@/lib/ai/tool-secrets';
-import { currentAccountSecrets, withAccountSecretsScope } from '@/lib/ai/account-secrets';
+import { collectSecretValues, hostCheckUrl, resolveToolSecrets } from '@/lib/ai/tool-secrets';
+import { currentAccountSecrets, currentRealAccountSecrets, withAccountSecretsScope } from '@/lib/ai/account-secrets';
 import { toolTimeoutMs } from '@/lib/ai-tools/tool-input';
 import {
   getAiModelDefinition,
@@ -2083,7 +2083,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   };
 }
 
-async function generateGeminiResponse(
+export async function generateGeminiResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
@@ -2168,6 +2168,15 @@ async function generateGeminiResponse(
   return data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
+/** Requisição de ferramenta com credenciais resolvidas (só o servidor vê). */
+export interface ToolRealRequest {
+  url: string;
+  init: RequestInit;
+  credentialInjected: boolean;
+  /** Valores secretos usados: removê-los de qualquer resposta devolvida. */
+  secretValues: string[];
+}
+
 // Exportada para os testes de ponta a ponta das tools (responder-tools.test.ts).
 export async function generateOpenAiResponse(
   apiKey: string,
@@ -2184,6 +2193,20 @@ export async function generateOpenAiResponse(
   nodeKey?: string,
   model = "gpt-4o-mini",
   onWaiting?: () => void | Promise<void>,
+  // Simulador de fluxo (PRD 05): executa a chamada HTTP da tool no lugar
+  // do safeFetch real (mock / leitura real controlada). Ausente — produção —
+  // segue o safeFetch (guard anti-SSRF) de sempre.
+  toolFetch?: (
+    toolName: string,
+    url: string,
+    init: RequestInit,
+    /**
+     * Resolução REAL (com credenciais) sob demanda: o simulador só chama isso
+     * para uma tool GET liberada como leitura real. url/init de cima vêm com
+     * "***" no lugar de {{cred}}/{{secret}}.
+     */
+    real?: () => Promise<ToolRealRequest>,
+  ) => Promise<Response>,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
 
@@ -2365,23 +2388,31 @@ export async function generateOpenAiResponse(
           // argumentos do modelo), não o do template: um argumento/variável pode montar
           // o host. Os argumentos continuam sem poder virar {{cred}}/{{var}}.
           const destinationUrl = hostCheckUrl(toolDef.http.url, accountSecrets, interpolate);
-          const missingSecrets: string[] = [];
-          let credentialInjected = false;
-          const withSecrets = (str: string, encode: boolean) => {
-            const r = resolveToolSecrets(str, destinationUrl, process.env, { encode, account: accountSecrets });
-            missingSecrets.push(...r.missing);
-            if (r.usedSecrets) credentialInjected = true;
-            return r.value;
+          // Resolve URL, body e headers. mask=true troca o valor de credencial por "***"
+          // (simulador: o valor real nunca é lido aqui; as regras de host/ausência valem igual).
+          const resolveRequest = (mask: boolean, account = accountSecrets) => {
+            const missing: string[] = [];
+            let injected = false;
+            const withSecrets = (str: string, encode: boolean) => {
+              const r = resolveToolSecrets(str, destinationUrl, process.env, { encode, account, mask });
+              missing.push(...r.missing);
+              if (r.usedSecrets) injected = true;
+              return r.value;
+            };
+            const url = interpolate(withSecrets(toolDef.http.url, true));
+            const body = toolDef.http.body ? interpolate(withSecrets(toolDef.http.body, false)) : undefined;
+            const headers: Record<string, string> = {};
+            for (const [k, v] of Object.entries(toolDef.http.headers || {})) {
+              headers[k] = interpolate(withSecrets(v, false));
+            }
+            return { url, body, headers, missing, injected };
           };
-
-          const resolvedUrl = interpolate(withSecrets(toolDef.http.url, true));
-          const resolvedBody = toolDef.http.body
-            ? interpolate(withSecrets(toolDef.http.body, false))
-            : undefined;
-          const resolvedHeaders: Record<string, string> = {};
-          for (const [k, v] of Object.entries(toolDef.http.headers || {})) {
-            resolvedHeaders[k] = interpolate(withSecrets(v, false));
-          }
+          const primary = resolveRequest(Boolean(toolFetch));
+          const resolvedUrl = primary.url;
+          const resolvedBody = primary.body;
+          const resolvedHeaders = primary.headers;
+          const missingSecrets = primary.missing;
+          const credentialInjected = primary.injected;
 
           // Credencial da integração ausente no servidor: não chama a API
           // sem token (falharia de forma confusa) — vira falha da integração.
@@ -2407,25 +2438,48 @@ export async function generateOpenAiResponse(
             attempt += 1;
 
             try {
-              // URL de tool é configurável por tenant → guard anti-SSRF.
-              const httpRes = await safeFetch(
-                resolvedUrl,
-                {
-                  method: toolDef.http.method,
-                  headers: {
-                    "Content-Type": "application/json",
-                    ...resolvedHeaders,
-                  },
-                  ...(resolvedBody ? { body: resolvedBody } : {}),
+              // URL de tool é configurável por tenant → guard anti-SSRF (produção).
+              // Simulador: toolFetch decide (mock ou leitura real somente-leitura).
+              const httpInit: RequestInit = {
+                method: toolDef.http.method,
+                headers: {
+                  "Content-Type": "application/json",
+                  ...resolvedHeaders,
                 },
-                {
-                  timeoutMs: toolTimeoutMs(toolDef.timeout_ms),
-                  maxBytes: 1024 * 1024,
-                  // Credencial na requisição: redirect para outra origem falha (não vaza
-                  // header custom/query/body para o destino do redirect).
-                  failOnCrossOriginRedirect: credentialInjected,
-                },
-              );
+                ...(resolvedBody ? { body: resolvedBody } : {}),
+              };
+              const httpRes = toolFetch
+                ? await toolFetch(toolName, resolvedUrl, httpInit, async () => {
+                    // Só a leitura REAL liberada do simulador chega aqui: credenciais reais,
+                    // com a mesma regra de host da produção (host não permitido ⇒ missing ⇒ sem valor).
+                    const realAccount = (await currentRealAccountSecrets()) ?? accountSecrets;
+                    const r = resolveRequest(false, realAccount);
+                    return {
+                      url: r.url,
+                      init: {
+                        method: toolDef.http.method,
+                        headers: { "Content-Type": "application/json", ...r.headers },
+                        ...(r.body ? { body: r.body } : {}),
+                      },
+                      credentialInjected: r.injected,
+                      secretValues: collectSecretValues(realAccount),
+                    };
+                  })
+                : await safeFetch(
+                    resolvedUrl,
+                    {
+                      method: toolDef.http.method,
+                      headers: httpInit.headers,
+                      ...(resolvedBody ? { body: resolvedBody } : {}),
+                    },
+                    {
+                      timeoutMs: toolTimeoutMs(toolDef.timeout_ms),
+                      maxBytes: 1024 * 1024,
+                      // Credencial na requisição: redirect para outra origem falha (não vaza
+                      // header custom/query/body para o destino do redirect).
+                      failOnCrossOriginRedirect: credentialInjected,
+                    },
+                  );
 
               const httpText = await httpRes.text();
               const failure =
@@ -2526,7 +2580,7 @@ export async function generateOpenAiResponse(
   return ""; // Fallback if max iterations reached
 }
 
-async function generateClaudeResponse(
+export async function generateClaudeResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
@@ -2570,7 +2624,7 @@ async function generateClaudeResponse(
   return textBlock?.text || "";
 }
 
-async function generateHermesResponse(
+export async function generateHermesResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],

@@ -1,5 +1,3 @@
-import { resolveProviderMedia } from '@/lib/storage/provider-media';
-import { safeFetch } from '@/lib/security/ssrf-guard';
 /**
  * Flow runner.
  *
@@ -35,7 +33,6 @@ import { safeFetch } from '@/lib/security/ssrf-guard';
  */
 
 import {
-  handleAiAutoResponse,
   AI_EMPTY_REPLY_FALLBACK_TEXT,
   type AiGuardDetail,
 } from "@/lib/ai/responder";
@@ -53,37 +50,15 @@ import {
   readTurnVar,
   type AdvanceWalkContext,
 } from "./ai-turns";
-import { supabaseAdmin } from "./admin-client";
-import { writeLog } from "@/lib/logger";
-import { resolveEffectiveTools } from "@/lib/ai-tools/runtime";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { flowEffects, viaFlowEffects } from "./effects";
 import { loadAccountSecrets } from "@/lib/ai/account-secrets";
 import { hostCheckUrl, resolveToolSecrets } from "@/lib/ai/tool-secrets";
-import {
-  engineMetaSendTemplate,
-  engineSendInteractiveButtons,
-  engineSendInteractiveList,
-  engineSendMedia,
-  engineSendText,
-} from "./meta-send";
-import {
-  engineWahaSendButtons,
-  engineWahaSendList,
-  engineWahaSendMedia,
-  engineWahaSendText,
-} from "./waha-send";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
-  getConversationChannel,
   isSocialChannel,
-  sendWebchatMessage,
   type WebchatOutgoingMessage,
 } from "@/lib/webchat/send";
-import { sendSocialMessage } from "@/lib/channels/social";
-import {
-  createWebchatSession,
-  hasActiveWebchatSession,
-  sendWebchatInvite,
-} from "@/lib/webchat/sessions";
 import {
   type AddNoteNodeConfig,
   type AiAgentNodeConfig,
@@ -115,6 +90,33 @@ import {
   type SwitchNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
+
+// ============================================================
+// Efeitos externos (banco, envio Meta/WAHA/canais, IA, logs) — via
+// FlowEffects (effects.ts). Fora do simulador cada atalho chama
+// exatamente a mesma função de antes; os call sites abaixo não mudaram.
+// ============================================================
+const supabaseAdmin = viaFlowEffects("db");
+const engineSendText = viaFlowEffects("engineSendText");
+const engineSendMedia = viaFlowEffects("engineSendMedia");
+const engineSendInteractiveButtons = viaFlowEffects("engineSendInteractiveButtons");
+const engineSendInteractiveList = viaFlowEffects("engineSendInteractiveList");
+const engineMetaSendTemplate = viaFlowEffects("engineMetaSendTemplate");
+const engineWahaSendText = viaFlowEffects("engineWahaSendText");
+const engineWahaSendMedia = viaFlowEffects("engineWahaSendMedia");
+const engineWahaSendButtons = viaFlowEffects("engineWahaSendButtons");
+const engineWahaSendList = viaFlowEffects("engineWahaSendList");
+const sendWebchatMessage = viaFlowEffects("sendWebchatMessage");
+const sendSocialMessage = viaFlowEffects("sendSocialMessage");
+const getConversationChannel = viaFlowEffects("getConversationChannel");
+const createWebchatSession = viaFlowEffects("createWebchatSession");
+const hasActiveWebchatSession = viaFlowEffects("hasActiveWebchatSession");
+const sendWebchatInvite = viaFlowEffects("sendWebchatInvite");
+const resolveProviderMedia = viaFlowEffects("resolveProviderMedia");
+const handleAiAutoResponse = viaFlowEffects("handleAiAutoResponse");
+const writeLog = viaFlowEffects("writeLog");
+// Catálogo de ferramentas (tool_refs): no simulador a lista efetiva é a mesma da produção (leitura real, somente SELECT).
+const resolveEffectiveTools = viaFlowEffects("resolveEffectiveTools");
 
 /** go_to's jump cap — catches cyclical anchor chains without spinning forever. */
 const MAX_HOPS = 50;
@@ -241,7 +243,7 @@ export function evaluateConditionPredicate(args: {
 // readable. Errors surface as thrown — the entry point catches.
 // ============================================================
 
-type AdminClient = ReturnType<typeof supabaseAdmin>;
+type AdminClient = SupabaseClient;
 
 async function loadActiveRunForContact(
   db: AdminClient,
@@ -3158,18 +3160,21 @@ export async function advanceFromNodeKey(
           : interpolateVars(cfg.body_template, run.vars);
       const timeoutMs = (cfg.timeout_seconds ?? 10) * 1000;
       let credentialInjected = false;
+      let logUrl = url;
       try {
         // Variáveis/credenciais da conta ({{var.X}}/{{cred.X}}/{{secret.X}}), só quando o
         // template usa algum marcador (fluxos antigos não consultam o banco). A
         // credencial só vai se o host da URL FINAL estiver nos hosts permitidos dela.
-        if (/{{s*(?:cred|var|secret)./.test(JSON.stringify([cfg.url, cfg.headers, cfg.body_template]))) {
+        // No simulador a credencial NUNCA é resolvida: o valor vira "***" (a chamada é mock).
+        if (/\{\{\s*(?:cred|var|secret)\./.test(JSON.stringify([cfg.url, cfg.headers, cfg.body_template]))) {
           const account = await loadAccountSecrets(run.account_id);
           const destination = hostCheckUrl(cfg.url, account, (t) => interpolateVars(t, run.vars));
+          const simulating = flowEffects().mode === "simulation";
           const missing: string[] = [];
-          const resolveMarkers = (text: string, encode: boolean) => {
-            const r = resolveToolSecrets(text, destination, process.env, { encode, account });
-            missing.push(...r.missing);
-            if (r.usedSecrets) credentialInjected = true;
+          const resolveMarkers = (text: string, encode: boolean, mask = simulating) => {
+            const r = resolveToolSecrets(text, destination, process.env, { encode, account, mask });
+            if (mask === simulating) missing.push(...r.missing);
+            if (r.usedSecrets && mask === simulating) credentialInjected = true;
             return r.value;
           };
           url = interpolateVars(resolveMarkers(cfg.url, true), run.vars);
@@ -3184,9 +3189,14 @@ export async function advanceFromNodeKey(
           if (missing.length > 0) {
             throw new Error(`Variável/credencial não configurada ou sem permissão para este host: ${[...new Set(missing)].join(", ")}`);
           }
+          // Log/eventos: a URL com a credencial NUNCA vai para flow_run_events nem para a simulação.
+          logUrl = interpolateVars(resolveMarkers(cfg.url, true, true), run.vars);
         }
-        // Guard anti-SSRF: DNS validado, redirects revalidados, limite de tamanho.
-        const res = await safeFetch(
+        // Guard anti-SSRF (#98: DNS validado, redirects revalidados, limite de
+        // tamanho) é aplicado por liveFlowEffects.httpFetch; o simulador troca
+        // o conjunto de efeitos e responde com mock, sem rede.
+        const res = await flowEffects().httpFetch(
+          node.node_key,
           url,
           {
             method: cfg.method,
@@ -3219,7 +3229,7 @@ export async function advanceFromNodeKey(
         });
         await nodeCompleted({
           method: cfg.method,
-          url,
+          url: logUrl,
           response_status: res.status,
           response_body,
         });
@@ -3229,7 +3239,7 @@ export async function advanceFromNodeKey(
           reason: "http_fetch_failed",
           detail,
         });
-        await nodeError(detail, err, { method: cfg.method, url });
+        await nodeError(detail, err, { method: cfg.method, url: logUrl });
       }
       currentKey = cfg.next_node_key;
       continue;
@@ -4151,7 +4161,7 @@ async function debounceAiAgentReply(db: AdminClient, runId: string): Promise<boo
     return debounceAiAgentReplyInMemory(runId);
   }
 
-  await new Promise((resolve) => setTimeout(resolve, AI_AGENT_REPLY_DEBOUNCE_MS));
+  await flowEffects().sleep(AI_AGENT_REPLY_DEBOUNCE_MS);
 
   const { data: row } = await db
     .from("flow_runs")

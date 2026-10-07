@@ -93,12 +93,15 @@ export function resolveToolSecrets(
   text: string,
   requestUrl: string,
   env: Record<string, string | undefined> = process.env,
-  opts: { encode?: boolean; account?: AccountSecretsContext | null } = {},
+  opts: { encode?: boolean; account?: AccountSecretsContext | null; mask?: boolean } = {},
 ): SecretResolution {
   const missing: string[] = [];
   let usedSecrets = false;
   const account = opts.account ?? null;
   const out = (v: string) => (opts.encode ? encodeURIComponent(v) : v);
+  // mask: o valor de credencial/segredo NUNCA é lido — vira "***" (simulador e logs).
+  // As regras de host/ausência continuam valendo, então a simulação mostra as mesmas falhas.
+  const secretOut = (v: string) => (opts.mask ? "***" : out(v));
   const hostUrl = account
     ? requestUrl.replace(VAR_MARKER, (_m, n: string) => account.vars.get(n) ?? "")
     : requestUrl;
@@ -119,7 +122,7 @@ export function resolveToolSecrets(
         return "";
       }
       usedSecrets = true;
-      return out(cred.value);
+      return secretOut(cred.value);
     }
     // secret.NOME: credencial da conta com o mesmo nome vence o ambiente.
     const accountCred = account?.creds.get(name);
@@ -129,7 +132,7 @@ export function resolveToolSecrets(
         return "";
       }
       usedSecrets = true;
-      return out(accountCred.value);
+      return secretOut(accountCred.value);
     }
     const def = TOOL_SECRETS[name];
     if (!def || !hostAllowed(hostUrl, def.hosts)) {
@@ -142,9 +145,26 @@ export function resolveToolSecrets(
       return "";
     }
     usedSecrets = true;
-    return out(secret);
+    return secretOut(secret);
   });
   return { value, missing, usedSecrets };
+}
+
+/**
+ * Valores secretos que podem ter sido injetados numa requisição (credenciais da
+ * conta + segredos do ambiente da lista fixa) — usados para REMOVER qualquer eco
+ * deles de respostas devolvidas ao cliente/ao modelo.
+ */
+export function collectSecretValues(
+  account: AccountSecretsContext | null | undefined,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const out: string[] = [];
+  if (account) for (const c of account.creds.values()) out.push(c.value);
+  for (const def of Object.values(TOOL_SECRETS)) {
+    for (const name of def.envNames) if (env[name]?.trim()) out.push(env[name]!.trim());
+  }
+  return out;
 }
 
 /** Nomes referenciados em `{{cred.X}}` / `{{var.X}}` dentro de textos (URL, headers, body). */

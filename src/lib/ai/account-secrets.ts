@@ -9,6 +9,7 @@
 // falha de forma explícita, em vez de enviar lixo.
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { decrypt, isEncryptedSecret } from "@/lib/whatsapp/encryption";
 import type { AccountSecretsContext } from "@/lib/ai/tool-secrets";
@@ -28,7 +29,21 @@ const EMPTY: AccountSecretsContext = { vars: new Map(), creds: new Map() };
  * devolve vazio + log SEM valores: o comportamento cai no do ambiente.
  */
 export async function loadAccountSecrets(accountId: string): Promise<AccountSecretsContext> {
-  const { data, error } = await supabaseAdmin()
+  return loadAccountSecretsFrom(supabaseAdmin(), accountId, { decryptCredentials: true });
+}
+
+/**
+ * Lê as linhas de account_secrets de `db` (cliente real OU o banco em memória
+ * do simulador). `decryptCredentials: false` (simulador): credenciais entram com
+ * valor VAZIO — só nome e hosts —, porque a simulação nunca resolve credencial
+ * (mostra "***"); variáveis são texto comum e vêm com o valor.
+ */
+export async function loadAccountSecretsFrom(
+  db: Pick<SupabaseClient, "from">,
+  accountId: string,
+  options: { decryptCredentials: boolean },
+): Promise<AccountSecretsContext> {
+  const { data, error } = await db
     .from("account_secrets")
     .select("name, kind, value_plain, value_encrypted, allowed_hosts")
     .eq("account_id", accountId);
@@ -43,7 +58,13 @@ export async function loadAccountSecrets(accountId: string): Promise<AccountSecr
       if (row.value_plain !== null) vars.set(row.name, row.value_plain);
       continue;
     }
-    if (!row.value_encrypted || !row.allowed_hosts?.length) continue;
+    if (!row.allowed_hosts?.length) continue;
+    const hosts = row.allowed_hosts.map((h) => h.toLowerCase());
+    if (!options.decryptCredentials) {
+      creds.set(row.name, { value: "", hosts });
+      continue;
+    }
+    if (!row.value_encrypted) continue;
     try {
       // Estrito: a tabela só recebe valores cifrados pelo servidor. Texto fora do
       // formato iv:ciphertext:authTag NÃO é tratado como "legado em texto puro"
@@ -53,7 +74,7 @@ export async function loadAccountSecrets(accountId: string): Promise<AccountSecr
         continue;
       }
       const value = decrypt(row.value_encrypted);
-      if (value) creds.set(row.name, { value, hosts: row.allowed_hosts.map((h) => h.toLowerCase()) });
+      if (value) creds.set(row.name, { value, hosts });
     } catch {
       console.error("[account-secrets] credencial não pôde ser decifrada:", row.name);
     }
@@ -61,11 +82,26 @@ export async function loadAccountSecrets(accountId: string): Promise<AccountSecr
   return { vars, creds };
 }
 
-const scope = new AsyncLocalStorage<string>();
+interface SecretsScope {
+  accountId: string;
+  /** Carga usada pelas ferramentas (produção: real; simulador: memória, sem valores de credencial). */
+  load: (accountId: string) => Promise<AccountSecretsContext>;
+  /** Carga REAL (decifrada), só para a leitura somente-leitura liberada do simulador. */
+  loadReal: (accountId: string) => Promise<AccountSecretsContext>;
+}
 
-/** Roda `fn` com a conta atual disponível para as ferramentas HTTP do agente de IA. */
-export function withAccountSecretsScope<T>(accountId: string, fn: () => Promise<T>): Promise<T> {
-  return scope.run(accountId, fn);
+const scope = new AsyncLocalStorage<SecretsScope>();
+
+/**
+ * Roda `fn` com a conta atual disponível para as ferramentas HTTP do agente de IA.
+ * O simulador passa `loaders` próprios para NÃO ler credenciais do banco real.
+ */
+export function withAccountSecretsScope<T>(
+  accountId: string,
+  fn: () => Promise<T>,
+  loaders: { load?: SecretsScope["load"]; loadReal?: SecretsScope["loadReal"] } = {},
+): Promise<T> {
+  return scope.run({ accountId, load: loaders.load ?? loadAccountSecrets, loadReal: loaders.loadReal ?? loadAccountSecrets }, fn);
 }
 
 /**
@@ -74,8 +110,14 @@ export function withAccountSecretsScope<T>(accountId: string, fn: () => Promise<
  * ambiente resolve {{secret.X}}.
  */
 export async function currentAccountSecrets(): Promise<AccountSecretsContext | null> {
-  const accountId = scope.getStore();
-  return accountId ? loadAccountSecrets(accountId) : null;
+  const current = scope.getStore();
+  return current ? current.load(current.accountId) : null;
+}
+
+/** Idem, com os valores REAIS (decifrados): só para a leitura real liberada no simulador. */
+export async function currentRealAccountSecrets(): Promise<AccountSecretsContext | null> {
+  const current = scope.getStore();
+  return current ? current.loadReal(current.accountId) : null;
 }
 
 /** Nomes cadastrados na conta (para o validador de fluxo). Sem valores. */
