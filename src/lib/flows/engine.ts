@@ -1,4 +1,5 @@
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { safeFetch } from '@/lib/security/ssrf-guard';
 /**
  * Flow runner.
  *
@@ -3149,15 +3150,19 @@ export async function advanceFromNodeKey(
       const url = interpolateVars(cfg.url, run.vars);
       const timeoutMs = (cfg.timeout_seconds ?? 10) * 1000;
       try {
-        const res = await fetch(url, {
-          method: cfg.method,
-          headers: cfg.headers,
-          body:
-            cfg.method === "GET" || !cfg.body_template
-              ? undefined
-              : interpolateVars(cfg.body_template, run.vars),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
+        // Guard anti-SSRF: DNS validado, redirects revalidados, limite de tamanho.
+        const res = await safeFetch(
+          url,
+          {
+            method: cfg.method,
+            headers: cfg.headers,
+            body:
+              cfg.method === "GET" || !cfg.body_template
+                ? undefined
+                : interpolateVars(cfg.body_template, run.vars),
+          },
+          { timeoutMs },
+        );
         let responseBodyText: string;
         if (cfg.response_var) {
           let parsed: unknown;

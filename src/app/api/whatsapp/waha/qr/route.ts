@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { getWahaQrCode } from '@/lib/whatsapp/waha-api'
+import { safeInlineContentType, mediaResponseHeaders } from '@/lib/security/media-proxy'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
 export async function GET(request: Request) {
@@ -55,13 +56,17 @@ export async function GET(request: Request) {
     }
 
     const wahaRes = await getWahaQrCode(wahaConfig)
-    const contentType = wahaRes.headers.get('content-type') || 'image/png'
+    // Nunca repassa Content-Type do servidor WAHA (configurável pelo tenant).
+    const contentType = safeInlineContentType(wahaRes.headers.get('content-type'))
+    if (!contentType?.startsWith('image/')) {
+      return new Response('Invalid QR response', { status: 502 })
+    }
     const body = await wahaRes.arrayBuffer()
 
     return new Response(body, {
       status: 200,
       headers: {
-        'Content-Type': contentType,
+        ...mediaResponseHeaders(contentType),
         'Cache-Control': 'no-store, max-age=0',
       },
     })

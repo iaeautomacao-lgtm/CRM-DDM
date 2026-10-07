@@ -1,4 +1,5 @@
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { safeFetch, SsrfBlockedError } from "@/lib/security/ssrf-guard";
 import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
@@ -2395,15 +2396,19 @@ export async function generateOpenAiResponse(
             attempt += 1;
 
             try {
-              const httpRes = await boundedFetch(resolvedUrl, {
-                method: toolDef.http.method,
-                headers: {
-                  "Content-Type": "application/json",
-                  ...resolvedHeaders,
+              // URL de tool é configurável por tenant → guard anti-SSRF.
+              const httpRes = await safeFetch(
+                resolvedUrl,
+                {
+                  method: toolDef.http.method,
+                  headers: {
+                    "Content-Type": "application/json",
+                    ...resolvedHeaders,
+                  },
+                  ...(resolvedBody ? { body: resolvedBody } : {}),
                 },
-                ...(resolvedBody ? { body: resolvedBody } : {}),
-                signal: AbortSignal.timeout(30000),
-              });
+                { timeoutMs: 30_000, maxBytes: 1024 * 1024 },
+              );
 
               const httpText = await httpRes.text();
               const failure =
@@ -2436,7 +2441,14 @@ export async function generateOpenAiResponse(
 
               break;
             } catch (err) {
-              const failure = classifyFetchFailure(err);
+              const failure =
+                err instanceof SsrfBlockedError && err.reason !== "timeout"
+                  ? {
+                      code: "TOOL_PROVIDER_ERROR" as const,
+                      message: "URL da integração não permitida.",
+                      retryable: false,
+                    }
+                  : classifyFetchFailure(err);
               finalFailure = failure;
               toolResult = serializeToolFailure(failure, attempt);
 
