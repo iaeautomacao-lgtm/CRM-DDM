@@ -53,6 +53,8 @@ import {
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { flowEffects, viaFlowEffects } from "./effects";
 import { loadAccountSecrets } from "@/lib/ai/account-secrets";
+import { withAgentRuntime } from "@/lib/ai/agents/scope";
+import { resolveBoundAiNode, snapshotRunAgentBindings, type ResolvedAiNode } from "./agent-binding";
 import { hostCheckUrl, resolveToolSecrets } from "@/lib/ai/tool-secrets";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
@@ -1315,6 +1317,33 @@ async function executeHandoff(
     },
   });
   await endRun(db, run, "handed_off", "handoff_node");
+}
+
+/**
+ * Agente (perfil) do nó desligado/inexistente/indisponível: o run NUNCA trava. Segue pela saída de
+ * falha configurada no nó (`failure_next_node_key`) ou, sem ela, passa a conversa para a fila humana.
+ * Retorna a chave do próximo nó quando há saída de falha válida; null quando fez o handoff.
+ */
+async function leaveUnavailableAgent(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  resolved: ResolvedAiNode,
+  nodes: Map<string, FlowNodeRow>,
+): Promise<string | null> {
+  const reason = resolved.disabled?.reason ?? "agent_unavailable";
+  await logEvent(db, run.id, "node_entered", node.node_key, {
+    exit_reason: reason,
+    agent_id: resolved.agentId,
+    agent_version_id: resolved.agentVersionId,
+  });
+  const target = resolved.cfg.failure_next_node_key;
+  if (target && nodes.has(target)) return target;
+  await executeHandoff(db, run, {
+    ...node,
+    config: { ...node.config, reason_code: "AGENTE_INDISPONIVEL", reason_subcode: reason },
+  } as FlowNodeRow);
+  return null;
 }
 
 /**
@@ -3559,7 +3588,19 @@ export async function advanceFromNodeKey(
       return { outcome: "advanced" };
     }
     if (node.node_type === "ai_agent") {
-      const cfg = node.config as unknown as AiAgentNodeConfig;
+      // Nó vinculado a um agente (agent_id): config efetiva = versão FIXADA no run. Sem agent_id,
+      // resolved.cfg é o próprio config do nó (inline/legado) — comportamento idêntico ao de antes.
+      const resolved = await resolveBoundAiNode(db, run, node);
+      const cfg = resolved.cfg;
+      if (resolved.disabled) {
+        const failureKey = await leaveUnavailableAgent(db, run, node, resolved, nodes);
+        if (failureKey) {
+          currentKey = failureKey;
+          await nodeCompleted({ agent_unavailable: resolved.disabled.reason, exit_reason: "agent_unavailable" });
+          continue;
+        }
+        return { outcome: "handed_off" };
+      }
 
       // Limpa assigned_agent_id para que replies do cliente cheguem ao agente
       if (run.conversation_id) {
@@ -3600,7 +3641,7 @@ export async function advanceFromNodeKey(
         return { outcome: "advanced" };
       }
 
-      const core = await runAiAgentCore(
+      const core = await withAgentRuntime(resolved.runtime, async () => runAiAgentCore(
         db,
         run,
         cfg.system_prompt_override
@@ -3619,7 +3660,7 @@ export async function advanceFromNodeKey(
         flowExitTagsFromNodes(nodes.values()),
         cfg.model,
         promptVersionOf(cfg.system_prompt_override),
-      );
+      ));
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "ai_agent_failed",
@@ -4310,7 +4351,17 @@ async function handleReplyForActiveRun(
   // with nothing actually sent, eventually handing off after
   // max_reprompts) instead of ever reaching the AI again.
   if (currentNode.node_type === "ai_agent") {
-    const cfg = currentNode.config as unknown as AiAgentNodeConfig;
+    const resolved = await resolveBoundAiNode(db, run, currentNode);
+    const cfg = resolved.cfg;
+    if (resolved.disabled) {
+      // Agente desligado com o run parado nele: segue pela saída de falha ou vai para a fila humana.
+      const failureKey = await leaveUnavailableAgent(db, run, currentNode, resolved, nodes);
+      if (failureKey) {
+        const outcome = await advanceFromNodeKey(db, run, failureKey, nodes);
+        return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+      }
+      return { consumed: true, flow_run_id: run.id, outcome: "handed_off" };
+    }
 
     // Debounce — see debounceAiAgentReply's own comment. If a newer
     // reply for this run supersedes us before the window elapses, bail
@@ -4333,7 +4384,7 @@ async function handleReplyForActiveRun(
       return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
     }
 
-    const core = await runAiAgentCore(
+    const core = await withAgentRuntime(resolved.runtime, async () => runAiAgentCore(
       db,
       run,
       cfg.system_prompt_override
@@ -4348,7 +4399,7 @@ async function handleReplyForActiveRun(
       flowExitTagsFromNodes(nodes.values()),
       cfg.model,
       promptVersionOf(cfg.system_prompt_override),
-    );
+    ));
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
         reason: "ai_agent_failed",
@@ -4749,6 +4800,8 @@ async function startNewRun(
     return { consumed: false, outcome: "no_match" };
   }
   const run = inserted as FlowRunRow;
+  // Fixa a versão publicada dos agentes vinculados aos nós de IA deste fluxo (Fase 4).
+  await snapshotRunAgentBindings(db, run, nodes.values());
 
   if (input.conversationId) {
     await db
@@ -4838,6 +4891,8 @@ async function startTransferredRun(
     return;
   }
   const newRun = inserted as FlowRunRow;
+  // Fixa a versão dos agentes vinculados (runs em andamento continuam nela).
+  await snapshotRunAgentBindings(db, newRun, nodes.values());
   await logEvent(db, newRun.id, "started", targetFlow.entry_node_id, {
     flow_id: targetFlow.id,
     trigger_type: "go_to_flow",

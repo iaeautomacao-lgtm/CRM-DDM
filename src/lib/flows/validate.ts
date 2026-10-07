@@ -73,6 +73,8 @@ export function validateFlowForActivation(
     accountSecrets?: { credentials: string[]; variables: string[] } | null;
     /** Catálogo de ferramentas da conta (id, nome, ligada). Sem isso, tool_refs não são conferidos. */
     aiTools?: Array<{ id: string; name: string; enabled: boolean }> | null;
+    /** Agentes (perfis) da conta. Sem isso, agent_id não é conferido. */
+    agents?: Array<{ id: string; name: string; enabled: boolean }> | null;
   } = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -261,6 +263,7 @@ function validateNode(
     aiProvider?: string | null;
     accountSecrets?: { credentials: string[]; variables: string[] } | null;
     aiTools?: Array<{ id: string; name: string; enabled: boolean }> | null;
+    agents?: Array<{ id: string; name: string; enabled: boolean }> | null;
   },
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -1111,7 +1114,9 @@ function validateNode(
         next_node_key?: string;
         max_turns?: number;
       };
-      if (!cfg.mode || !["once", "loop", "takeover"].includes(cfg.mode)) {
+      // Com agent_id o modo vem do agente (versão fixada no run): o nó não precisa guardá-lo.
+      const boundToAgent = typeof (node.config as { agent_id?: unknown }).agent_id === "string" && Boolean((node.config as { agent_id?: string }).agent_id);
+      if (!boundToAgent && (!cfg.mode || !["once", "loop", "takeover"].includes(cfg.mode))) {
         issues.push({
           severity: "error",
           scope: "node",
@@ -1160,6 +1165,29 @@ function validateNode(
           field: "max_turns",
           message: "O limite de turnos do loop precisa ser um número maior que zero.",
         });
+      }
+      // Agente (perfil): agent_id inexistente/de outra conta é erro; desligado é aviso (o nó segue
+      // pela saída de falha/handoff em vez de responder).
+      const agentId = (node.config as { agent_id?: unknown }).agent_id;
+      if (typeof agentId === "string" && agentId && context.agents) {
+        const agent = context.agents.find((a) => a.id === agentId);
+        if (!agent) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "agent_id",
+            message: "O nó usa um agente que não existe nesta conta (foi apagado ou é de outra conta). Escolha outro agente.",
+          });
+        } else if (!agent.enabled) {
+          issues.push({
+            severity: "warning",
+            scope: "node",
+            node_key: node.node_key,
+            field: "agent_id",
+            message: `O agente "${agent.name}" está desligado: o nó não vai responder e seguirá pela saída de falha (ou irá para a fila humana). Ligue em Configurações → Agentes.`,
+          });
+        }
       }
       // Ferramentas do catálogo (tool_refs): referência inexistente/de outra conta
       // é erro; ferramenta desligada é aviso (não vai ao modelo); nome repetido
