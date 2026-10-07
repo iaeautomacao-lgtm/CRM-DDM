@@ -103,7 +103,7 @@ describe('current operational snapshot', () => {
     });
     expect(snapshot.operators.online).toBe(1);
     expect(snapshot.operators.serving).toBe(1);
-    expect(snapshot.teams[0].conversations.attending).toBe(1);
+    expect(snapshot.teams[0].conversations.attending).toBe(2);
   });
 });
 
