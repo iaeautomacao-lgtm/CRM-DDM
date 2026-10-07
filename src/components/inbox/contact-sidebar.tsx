@@ -448,7 +448,7 @@ export function ContactSidebar({
                 > = {
                   positive: {
                     emoji: "😊",
-                    color: "text-emerald-500",
+                    color: "text-emerald-700 dark:text-emerald-400",
                     bg: "bg-emerald-500/10",
                     border: "border-emerald-500/20",
                     label: "Positivo",
@@ -456,7 +456,7 @@ export function ContactSidebar({
                   },
                   neutral: {
                     emoji: "😐",
-                    color: "text-slate-400",
+                    color: "text-slate-700 dark:text-slate-300",
                     bg: "bg-slate-500/10",
                     border: "border-slate-500/20",
                     label: "Neutro",
@@ -464,7 +464,7 @@ export function ContactSidebar({
                   },
                   negative: {
                     emoji: "😡",
-                    color: "text-rose-500",
+                    color: "text-rose-700 dark:text-rose-400",
                     bg: "bg-rose-500/10",
                     border: "border-rose-500/20",
                     label: "Negativo",
@@ -472,7 +472,7 @@ export function ContactSidebar({
                   },
                   mixed: {
                     emoji: "😕",
-                    color: "text-amber-500",
+                    color: "text-amber-700 dark:text-amber-400",
                     bg: "bg-amber-500/10",
                     border: "border-amber-500/20",
                     label: "Misto",

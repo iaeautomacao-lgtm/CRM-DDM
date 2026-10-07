@@ -357,17 +357,17 @@ export default function DisparadorMonitorPage() {
           </div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
-          <span className="text-[10px] font-bold text-emerald-500 uppercase">Sucesso total</span>
+          <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">Sucesso total</span>
           <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-bold tracking-tight text-emerald-500">{stats.success}</span>
-            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            <span className="text-2xl font-bold tracking-tight text-emerald-700 dark:text-emerald-400">{stats.success}</span>
+            <CheckCircle2 className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />
           </div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4 space-y-1.5 shadow-sm">
-          <span className="text-[10px] font-bold text-red-500 uppercase">Falhas</span>
+          <span className="text-[10px] font-bold text-red-700 dark:text-red-400 uppercase">Falhas</span>
           <div className="flex items-baseline justify-between">
-            <span className="text-2xl font-bold tracking-tight text-red-500">{stats.failed}</span>
-            <AlertCircle className="h-5 w-5 text-red-500" />
+            <span className="text-2xl font-bold tracking-tight text-red-700 dark:text-red-400">{stats.failed}</span>
+            <AlertCircle className="h-5 w-5 text-red-700 dark:text-red-400" />
           </div>
         </div>
       </div>
@@ -402,13 +402,13 @@ export default function DisparadorMonitorPage() {
                   <div className="flex items-start gap-2.5 truncate max-w-xl">
                     <div className="mt-0.5" aria-hidden="true">
                       {item.entrega_pendente_131026 === true ? (
-                        <Clock className="h-3.5 w-3.5 text-amber-500" />
+                        <Clock className="h-3.5 w-3.5 text-amber-700 dark:text-amber-400" />
                       ) : (
                         <>
                           {item.status === "agendado" && <span className="h-2 w-2 rounded-full bg-zinc-400 block" />}
                           {item.status === "enviando" && <Loader2 className="h-3 w-3 text-primary animate-spin" />}
-                          {item.status === "enviado" && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
-                          {item.status === "erro" && <AlertCircle className="h-3.5 w-3.5 text-red-500" />}
+                          {item.status === "enviado" && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />}
+                          {item.status === "erro" && <AlertCircle className="h-3.5 w-3.5 text-red-700 dark:text-red-400" />}
                         </>
                       )}
                     </div>
@@ -420,7 +420,7 @@ export default function DisparadorMonitorPage() {
                         <span className="text-muted-foreground">({item._displayPhone || item.contacts?.phone || "Sem Número"})</span>
                         {(item.phone_attempt_order ?? 1) > 1 && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded border
-                            bg-amber-500/20 text-amber-400 border-amber-500/30 font-medium">
+                            bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30 font-medium">
                             Tentativa {item.phone_attempt_order}/3
                           </span>
                         )}
@@ -430,7 +430,7 @@ export default function DisparadorMonitorPage() {
                       </div>
                       <p className="text-muted-foreground truncate mt-0.5 text-[10px]">{item.mensagem_final}</p>
                       {item.status === "erro" && (
-                        <p className="text-red-500 text-[9px] flex items-center gap-1 mt-0.5">
+                        <p className="text-red-700 dark:text-red-400 text-[9px] flex items-center gap-1 mt-0.5">
                           <AlertTriangle className="h-3 w-3" />
                           {normalizarErroMeta(item.erro)}
                         </p>
@@ -446,9 +446,9 @@ export default function DisparadorMonitorPage() {
                           : undefined
                       }
                       className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${
-                        item.entrega_pendente_131026 === true ? "text-amber-600 bg-amber-500/10" :
-                        item.status === "enviado" ? "text-emerald-500 bg-emerald-500/10" :
-                        item.status === "erro" ? "text-red-500 bg-red-500/10" :
+                        item.entrega_pendente_131026 === true ? "text-amber-700 dark:text-amber-400 bg-amber-500/10" :
+                        item.status === "enviado" ? "text-emerald-700 dark:text-emerald-400 bg-emerald-500/10" :
+                        item.status === "erro" ? "text-red-700 dark:text-red-400 bg-red-500/10" :
                         item.status === "enviando" ? "text-primary bg-primary/10" : "text-zinc-500 bg-zinc-100 dark:bg-zinc-800 dark:text-zinc-400"
                       }`}
                     >
