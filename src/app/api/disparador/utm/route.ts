@@ -5,9 +5,8 @@ import { parseUtmBatchBody } from "@/lib/disparador/utm-body";
 
 export async function POST(request: Request) {
   // Mesmo papel das rotas de campanha (a chave UTM_API_KEY é da instância).
-  let accountId: string;
   try {
-    accountId = (await requireDisparadorAccess()).accountId;
+    await requireDisparadorAccess();
   } catch (err) {
     return toErrorResponse(err);
   }
@@ -25,8 +24,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
         "X-API-Key": process.env.UTM_API_KEY ?? "",
       },
-      // O serviço indexa pelo nome: o prefixo impede colisões entre contas.
-      body: JSON.stringify({ ...body, campanha: `${accountId}:${body.campanha}` }),
+      body: JSON.stringify(body),
     }
   );
 

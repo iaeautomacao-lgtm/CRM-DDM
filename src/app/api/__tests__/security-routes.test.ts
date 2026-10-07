@@ -177,20 +177,20 @@ describe("segurança das rotas: contas, papéis e orçamentos", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("geração e métricas UTM usam account_id, inclusive com nomes iguais", async () => {
+  // O nome da campanha vai sem prefixo ao serviço UTM (é o utm_campaign que
+  // aparece no analytics e indexa o histórico); o isolamento entre contas é a
+  // checagem de que a campanha pertence à conta antes de consultar métricas.
+  it("métricas UTM só para campanha da própria conta; nome enviado sem prefixo", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetch);
     const payload = { canal: "whatsapp", campanha: "Promo", url_destino: "https://example.com", alunos: ["1"] };
     expect((await utm(post(payload))).status).toBe(200);
-    expect(JSON.parse(fetch.mock.calls[0][1]!.body as string).campanha).toBe("account-a:Promo");
+    expect(JSON.parse(fetch.mock.calls[0][1]!.body as string).campanha).toBe("Promo");
     state.rows.campaigns = [{ id: "campaign-1" }];
     expect((await metrics(get("campanha=Promo"))).status).toBe(200);
-    expect(new URL(String(fetch.mock.calls[1][0])).searchParams.get("campanha")).toBe("account-a:Promo");
-    state.accountId = "account-b";
-    expect((await metrics(get("campanha=Promo"))).status).toBe(200);
-    expect(new URL(String(fetch.mock.calls[2][0])).searchParams.get("campanha")).toBe("account-b:Promo");
+    expect(new URL(String(fetch.mock.calls[1][0])).searchParams.get("campanha")).toBe("Promo");
     state.rows.campaigns = [];
     expect((await metrics(get("campanha=Promo"))).status).toBe(404);
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
