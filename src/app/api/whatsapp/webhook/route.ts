@@ -648,7 +648,16 @@ async function handleStatusUpdate(
   // conversation/messages row, so the dialog polls this side table
   // instead. Unconditional update: matches 0 rows (silently, no error)
   // for every non-test-send status event, which is the common case.
+  //
+  // Precedência sent < delivered < read: a Meta pode mandar `failed` (ex.:
+  // 131026) E `read` para o mesmo wamid, em qualquer ordem. `failed` nunca
+  // sobrescreve delivered/read; delivered/read substituem um failed anterior
+  // e limpam o erro. Update condicional no banco (sem read-modify-write).
   const testSendUpdate: Record<string, unknown> = { status: status.status }
+  let testSendQuery = supabaseAdmin()
+    .from('whatsapp_test_sends')
+    .update(testSendUpdate)
+    .eq('message_id', status.id)
   if (status.status === 'failed') {
     const metaErrors = (status as any).errors as
       | Array<{ code: number; title: string }>
@@ -657,11 +666,18 @@ async function handleStatusUpdate(
       metaErrors && metaErrors.length > 0
         ? `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
         : 'Falha na entrega (Meta)'
+    testSendQuery = testSendQuery.not('status', 'in', '(delivered,read)')
+  } else if (status.status === 'delivered') {
+    testSendUpdate.erro = null
+    testSendQuery = testSendQuery.in('status', ['sent', 'failed'])
+  } else if (status.status === 'read') {
+    testSendUpdate.erro = null
+    testSendQuery = testSendQuery.in('status', ['sent', 'delivered', 'failed'])
+  } else {
+    // 'sent' atrasado nunca rebaixa delivered/read/failed.
+    testSendQuery = testSendQuery.eq('status', 'sent')
   }
-  const { error: testSendErr } = await supabaseAdmin()
-    .from('whatsapp_test_sends')
-    .update(testSendUpdate)
-    .eq('message_id', status.id)
+  const { error: testSendErr } = await testSendQuery
   if (testSendErr) {
     console.error('Error updating whatsapp_test_sends status:', testSendErr)
   }

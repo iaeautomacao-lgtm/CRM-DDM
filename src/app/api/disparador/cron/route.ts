@@ -150,6 +150,14 @@ const CANDIDATE_PAGE_SIZE = 1000;
 // O retry de erros transitórios roda no máximo a cada ~5 ticks: o lock
 // expira sozinho (não é liberado) e só o tick que o adquire chama a RPC.
 const RETRY_LOCK_TTL_SECONDS = 270;
+// Confirmação das ocorrências 131026 pendentes (a cada ~5 ticks, lock próprio).
+const META_131026_CONFIRM_LOCK_TTL_SECONDS = 270;
+
+/** Janela (min) sem delivered/read para um failed 131026 (aparelho offline também gera) virar erro definitivo. */
+function meta131026ConfirmMinutes(): number {
+  const parsed = Number(process.env.DISPARADOR_131026_CONFIRM_MINUTES);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 1440;
+}
 
 // Candidatos vencidos de uma campanha, na ordem (scheduled_at, id), em
 // páginas de 1.000 (o PostgREST corta cada resposta no max-rows, 1.000 por
@@ -337,6 +345,24 @@ export async function POST(request: Request) {
     if (retryTurn) {
       const { error: retryError } = await db.rpc("retry_transient_queue_errors");
       if (retryError) console.error("[Cron] Falha no retry de erros transitórios:", retryError.message);
+    }
+    // 2b) 131026 é provisório: confirma as ocorrências pendentes mais velhas
+    //     que a janela (sem delivered/read) e aplica a regra das 3 campanhas.
+    //     Só se sobrar tempo no tick; lock próprio, como o do retry.
+    if (!outOfTime()) {
+      const { data: confirmTurn, error: confirmLockError } = await db.rpc("try_acquire_cron_lock", {
+        p_name: "disparador_131026_confirm",
+        p_owner_id: owner,
+        p_ttl_seconds: META_131026_CONFIRM_LOCK_TTL_SECONDS,
+      });
+      if (confirmLockError) console.error("[Cron] Falha no lock da confirmação 131026:", confirmLockError.message);
+      if (confirmTurn) {
+        const { error: confirmError } = await db.rpc("confirm_pending_meta_131026", {
+          p_window_minutes: meta131026ConfirmMinutes(),
+          p_limit: 200,
+        });
+        if (confirmError) console.error("[Cron] Falha ao confirmar 131026 pendentes:", confirmError.message);
+      }
     }
     // 3) Campanhas em execução, mais "atrasadas" primeiro (fairness entre
     //    campanhas quando o tick não dá conta de todas).
