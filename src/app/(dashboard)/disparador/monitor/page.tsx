@@ -11,6 +11,7 @@ import {
 } from "@/lib/disparador/stuck-sending";
 import {
   Megaphone,
+  Gauge,
   Clock,
   CheckCircle2,
   AlertCircle,
@@ -21,6 +22,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // /disparador/monitor — moved out of /disparador (now a redirect straight
 // to /disparador/campanhas, the new primary screen — see that file's
@@ -292,6 +295,14 @@ export default function DisparadorMonitorPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             Acompanhe o processamento de campanhas e envios em massa na nuvem.
           </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/disparador/desempenho"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5 text-xs h-9")}
+          >
+            <Gauge className="h-4 w-4 text-primary" aria-hidden="true" /> Desempenho
+          </Link>
         </div>
       </div>
 

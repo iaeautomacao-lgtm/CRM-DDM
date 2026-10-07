@@ -11,6 +11,7 @@ import {
   Pause,
   Trash2,
   Megaphone,
+  Gauge,
   Clock,
   Tag,
   Smartphone,
@@ -966,6 +967,12 @@ export default function CampanhasPage() {
             className={cn(buttonVariants({ variant: "outline" }), "gap-1.5 text-xs h-9")}
           >
             <Activity className="h-4 w-4 text-primary" aria-hidden="true" /> Monitor em tempo real
+          </Link>
+          <Link
+            href="/disparador/desempenho"
+            className={cn(buttonVariants({ variant: "outline" }), "gap-1.5 text-xs h-9")}
+          >
+            <Gauge className="h-4 w-4 text-primary" aria-hidden="true" /> Desempenho
           </Link>
           <Button onClick={openCreateModal} className="gap-1.5 h-9 text-xs">
             <Plus className="h-4 w-4" aria-hidden="true" /> Nova Campanha
