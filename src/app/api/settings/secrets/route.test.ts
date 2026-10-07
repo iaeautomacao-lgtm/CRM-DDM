@@ -177,6 +177,30 @@ describe('/api/settings/secrets', () => {
     })
   })
 
+  describe('trocar domínios (REVISAO-113 #2)', () => {
+    it('mudar allowed_hosts sem reenviar o valor → 400 e nada muda', async () => {
+      const { body: created } = await createCredential()
+      const id = created.secret.id
+      const hostsBefore = [...state.rows[0].allowed_hosts]
+      for (const keep of [undefined, '', '••••1234']) {
+        const res = await PATCH(json('PATCH', { allowed_hosts: ['atacante.com'], value: keep }), ctx(id))
+        expect(res.status).toBe(400)
+        expect((await res.json()).error).toMatch(/informe o valor/i)
+      }
+      expect(state.rows[0].allowed_hosts).toEqual(hostsBefore)
+    })
+
+    it('mudar allowed_hosts COM o valor novo → ok; reenviar os mesmos domínios sem valor → ok', async () => {
+      const { body: created } = await createCredential()
+      const id = created.secret.id
+      const same = await PATCH(json('PATCH', { allowed_hosts: ['API.ddmacordos.com'] }), ctx(id))
+      expect(same.status).toBe(200)
+      const res = await PATCH(json('PATCH', { allowed_hosts: ['novo.exemplo.com'], value: 'novo_token_ZZZZ9999_longo' }), ctx(id))
+      expect(res.status).toBe(200)
+      expect(state.rows[0].allowed_hosts).toEqual(['novo.exemplo.com'])
+    })
+  })
+
   describe('validação', () => {
     it('credencial exige hosts; nome em MAIÚSCULAS_COM_SUBLINHADO; valor obrigatório', async () => {
       expect((await createCredential({ allowed_hosts: [] })).res.status).toBe(400)

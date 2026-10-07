@@ -69,6 +69,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (body.allowed_hosts !== undefined) {
       const hosts = normalizeAllowedHosts(body.allowed_hosts)
       if ('error' in hosts) return NextResponse.json({ error: hosts.error }, { status: 400 })
+      // Mudar os domínios sem reenviar o valor permitiria apontar a credencial salva para um
+      // host controlado por terceiros: trocar domínios exige o valor novamente.
+      const current = [...(existing.allowed_hosts ?? [])].sort().join(',')
+      const next = [...hosts.hosts].sort().join(',')
+      if (current !== next && isKeepCredential(body.value)) {
+        return NextResponse.json(
+          { error: 'Para mudar os domínios, informe o valor da credencial novamente.' },
+          { status: 400 },
+        )
+      }
       update.allowed_hosts = hosts.hosts
     }
     // Vazio/máscara = manter; valor novo = substituir e recalcular last4.

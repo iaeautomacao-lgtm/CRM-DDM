@@ -4,12 +4,13 @@
 // argumento do modelo nunca vira {{cred}}/{{var}}; com credencial na
 // requisição o redirect cross-origin é bloqueado.
 
+let nextBody: string | null = null;
 const safeFetchCalls: Array<{ url: string; init: RequestInit; options: Record<string, unknown> }> = [];
 vi.mock("@/lib/security/ssrf-guard", async (orig) => ({
   ...(await orig<typeof import("@/lib/security/ssrf-guard")>()),
   safeFetch: (url: string, init?: RequestInit, options?: Record<string, unknown>) => {
     safeFetchCalls.push({ url, init: init ?? {}, options: options ?? {} });
-    return Promise.resolve(new Response(JSON.stringify({ ok: true, nominal: "10,00" }), { status: 200 }));
+    return Promise.resolve(new Response(nextBody ?? JSON.stringify({ ok: true, nominal: "10,00" }), { status: 200 }));
   },
 }));
 
@@ -71,6 +72,7 @@ async function run(t: AiAgentTool, args: Record<string, string>) {
 describe("ferramentas × credenciais da conta (runtime)", () => {
   beforeEach(() => {
     safeFetchCalls.length = 0;
+    nextBody = null;
     accountState.ctx = account();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -107,6 +109,26 @@ describe("ferramentas × credenciais da conta (runtime)", () => {
     expect(safeFetchCalls).toHaveLength(1);
     expect(safeFetchCalls[0].url).toBe("https://api.exemplo.com/busca?q={{cred.API_KEY}}{{var.BASE}}");
     expect(safeFetchCalls[0].url).not.toContain("SEGREDO-123456");
+  });
+
+  it("eco da credencial na resposta (cru, base64, JSON) não chega ao modelo (REVISAO-113 #3)", async () => {
+    const secret = "SEGREDO-123456";
+    nextBody = JSON.stringify({ eco: secret, b64: Buffer.from(secret).toString("base64"), ok: true });
+    const { toolMessages } = await run(
+      tool({ url: "https://api.exemplo.com/busca", method: "GET", headers: { Authorization: "Bearer {{cred.API_KEY}}" } }),
+      {},
+    );
+    const joined = toolMessages.join(" ");
+    expect(joined).not.toContain(secret);
+    expect(joined).not.toContain(Buffer.from(secret).toString("base64"));
+    expect(joined).toContain("***");
+  });
+
+  it("http:// ou porta fora do padrão: a credencial não sai (REVISAO-113 #4)", async () => {
+    const h = { Authorization: "Bearer {{cred.API_KEY}}" };
+    await run(tool({ url: "http://api.exemplo.com/busca", method: "GET", headers: h }), {});
+    await run(tool({ url: "https://api.exemplo.com:8443/busca", method: "GET", headers: h }), {});
+    expect(safeFetchCalls).toHaveLength(0);
   });
 
   it("sem credencial na requisição (só variável): redirect segue a regra normal", async () => {

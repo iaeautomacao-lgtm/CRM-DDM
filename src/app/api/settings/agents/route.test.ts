@@ -114,7 +114,7 @@ vi.mock('@/lib/flows/admin-client', () => ({
           error: null,
         };
       } catch (err) {
-        return { data: null, error: { code: (err as QueryError).code } };
+        return { data: null, error: { code: (err as QueryError).code, message: (err as Error).message } };
       }
     },
   }),
@@ -295,7 +295,7 @@ describe('API perfis e RPC 180 — integração PGlite', () => {
     ).toBeDefined();
     body.config.connections.llm = {
       headers: { Authorization: 'Bearer segredo-literal' },
-    };
+    } as never;
     expect((await CREATE(req(body))).status).toBe(400);
     expect(
       (await PATCH(req({ enabled: 0 }, 'PATCH'), ctx(agentId))).status
@@ -306,8 +306,12 @@ describe('API perfis e RPC 180 — integração PGlite', () => {
     const unsafe = input('fallback-indevido');
     unsafe.config.connections.llm = {
       platform_env: ['SUPABASE_SERVICE_ROLE_KEY'],
-    };
+    } as never;
     expect((await CREATE(req(unsafe))).status).toBe(400);
+    // REVISAO-113 #6: endpoint de terceiros também é recusado (conexões inertes).
+    const custom = input('endpoint-terceiros');
+    custom.config.connections.llm = { endpoint: 'https://atacante.com/v1' } as never;
+    expect((await CREATE(req(custom))).status).toBe(400);
   });
   it('nova versão e rollback criam versões novas sem alterar v1', async () => {
     const body = versionBody();
@@ -383,6 +387,15 @@ describe('API perfis e RPC 180 — integração PGlite', () => {
     );
     state.failRead = false;
     await state.db!.exec('DELETE FROM wacrm.flow_nodes');
+    // Agente já fixado num run (179): 409 específico, preserva o histórico (REVISAO-113 #7).
+    await state.db!.exec(
+      `CREATE TABLE wacrm.flow_run_agent_bindings(run_id uuid,account_id uuid,agent_id uuid);
+       INSERT INTO wacrm.flow_run_agent_bindings VALUES('${FILE}','${A}','${agentId}');`
+    );
+    const used = await DELETE(req(undefined, 'DELETE'), ctx(agentId));
+    expect(used.status).toBe(409);
+    expect((await used.json()).error).toMatch(/desligue-o em vez de excluir/);
+    await state.db!.exec('DROP TABLE wacrm.flow_run_agent_bindings');
     expect((await DELETE(req(undefined, 'DELETE'), ctx(agentId))).status).toBe(
       200
     );

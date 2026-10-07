@@ -40,11 +40,11 @@ const ctx = (
 ) => ({ vars: new Map(Object.entries(vars)), creds: new Map(Object.entries(creds)) });
 
 describe("resolveToolSecrets — variáveis e credenciais da conta", () => {
-  it("{{var.X}} vem da conta (com encode na URL); ausente vira vazio + missing", () => {
+  it("{{var.X}} vem da conta SEM encode (pode montar a URL base); ausente vira vazio + missing", () => {
     const account = ctx({ BASE_PATH: "a b/c" });
     const url = "https://api.exemplo.com/{{var.BASE_PATH}}?q={{var.NAO_EXISTE}}";
     const r = resolveToolSecrets(url, url, {}, { encode: true, account });
-    expect(r.value).toBe("https://api.exemplo.com/a%20b%2Fc?q=");
+    expect(r.value).toBe("https://api.exemplo.com/a b/c?q=");
     expect(r.missing).toEqual(["var.NAO_EXISTE"]);
   });
 

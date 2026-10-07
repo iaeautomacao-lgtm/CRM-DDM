@@ -55,7 +55,8 @@ import { flowEffects, viaFlowEffects } from "./effects";
 import { loadAccountSecrets } from "@/lib/ai/account-secrets";
 import { withAgentRuntime } from "@/lib/ai/agents/scope";
 import { resolveBoundAiNode, snapshotRunAgentBindings, type ResolvedAiNode } from "./agent-binding";
-import { hostCheckUrl, resolveToolSecrets } from "@/lib/ai/tool-secrets";
+import { collectSecretValues, hostCheckUrl, resolveToolSecrets } from "@/lib/ai/tool-secrets";
+import { redactSecrets } from "@/lib/ai-tools/tool-request";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
   isSocialChannel,
@@ -3189,6 +3190,7 @@ export async function advanceFromNodeKey(
           : interpolateVars(cfg.body_template, run.vars);
       const timeoutMs = (cfg.timeout_seconds ?? 10) * 1000;
       let credentialInjected = false;
+      let secretValues: string[] = [];
       let logUrl = url;
       try {
         // Variáveis/credenciais da conta ({{var.X}}/{{cred.X}}/{{secret.X}}), só quando o
@@ -3197,6 +3199,7 @@ export async function advanceFromNodeKey(
         // No simulador a credencial NUNCA é resolvida: o valor vira "***" (a chamada é mock).
         if (/\{\{\s*(?:cred|var|secret)\./.test(JSON.stringify([cfg.url, cfg.headers, cfg.body_template]))) {
           const account = await loadAccountSecrets(run.account_id);
+          secretValues = collectSecretValues(account);
           const destination = hostCheckUrl(cfg.url, account, (t) => interpolateVars(t, run.vars));
           const simulating = flowEffects().mode === "simulation";
           const missing: string[] = [];
@@ -3235,18 +3238,22 @@ export async function advanceFromNodeKey(
           { timeoutMs, failOnCrossOriginRedirect: credentialInjected },
         );
         let responseBodyText: string;
+        // Eco de credencial: sanitiza ANTES de ir para run.vars e para os eventos do run
+        // (a truncagem abaixo continua igual).
+        const rawResponseText = await res.text();
+        const safeResponseText = credentialInjected ? redactSecrets(rawResponseText, secretValues) : rawResponseText;
         if (cfg.response_var) {
           let parsed: unknown;
           try {
-            parsed = await res.clone().json();
+            parsed = JSON.parse(safeResponseText);
           } catch {
-            parsed = await res.text();
+            parsed = safeResponseText;
           }
           await updateRunVars(db, run, { [cfg.response_var]: parsed });
           responseBodyText =
             typeof parsed === "string" ? parsed : JSON.stringify(parsed);
         } else {
-          responseBodyText = await res.clone().text();
+          responseBodyText = safeResponseText;
         }
         const response_body =
           responseBodyText.length > 2000

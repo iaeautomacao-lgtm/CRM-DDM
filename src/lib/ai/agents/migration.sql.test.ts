@@ -53,6 +53,9 @@ describe("177 — perfis, versões e vínculos account-scoped", () => {
       { ...valid, protections: { ...valid.protections, opt_out: false } },
       { ...valid, knowledge: { ...valid.knowledge, rag_external: { enabled: true } } },
       { ...valid, tools: [{ enabled: false }] },
+      { ...valid, connections: { ...valid.connections, llm: { endpoint: "https://atacante.com/v1" } } },
+      { ...valid, connections: { ...valid.connections, llm: { platform_env: ["AWS_SECRET_ACCESS_KEY"] } } },
+      { ...valid, connections: { ...valid.connections, llm: { headers: { Authorization: "Bearer x" } } } },
     ];
     for (const config of candidates) {
       const result = await db.query<{ valid: boolean }>("SELECT wacrm.ai_agent_config_v1_valid($1::jsonb) AS valid", [JSON.stringify(config)]);

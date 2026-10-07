@@ -24,6 +24,7 @@
  */
 
 import { findAccountSecretRefs, findInlineSecrets, inlineSecretAdvice } from "@/lib/ai/tool-secrets";
+import { findLiteralHeaderCredential } from "@/lib/ai-tools/tool-input";
 import {
   aiProviderLabel,
   getProviderForModel,
@@ -1252,6 +1253,17 @@ function validateNode(
             node_key: node.node_key,
             field: "tools",
             message: inlineSecretAdvice(tool.name ?? "sem nome", inline),
+          });
+        }
+        // Header de credencial (nome com key/token/secret/auth) com valor em texto.
+        const literalHeader = findLiteralHeaderCredential(tool.http?.headers);
+        if (literalHeader) {
+          issues.push({
+            severity: "warning",
+            scope: "node",
+            node_key: node.node_key,
+            field: "tools",
+            message: `A ferramenta "${tool.name ?? "sem nome"}" tem o header ${literalHeader} com um valor em texto. Cadastre em Configurações → Variáveis e credenciais e use {{cred.NOME}}.`,
           });
         }
         // {{cred.X}} / {{var.X}} que não existe na conta: a ferramenta falharia

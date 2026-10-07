@@ -185,8 +185,13 @@ function parseInput(body: unknown, creating: boolean, preview = false): Input {
     },
   };
 }
-function dbError(error: { code?: string } | null): void {
+function dbError(error: { code?: string; message?: string } | null): void {
   if (!error) return;
+  if (error.message?.includes('agent_used_in_runs'))
+    throw new AgentServiceError(
+      'Este agente já foi usado em conversas: desligue-o em vez de excluir.',
+      409
+    );
   if (error.code === '23505')
     throw new AgentServiceError('Já existe um agente com esse nome.', 409);
   if (error.code === 'P0002')

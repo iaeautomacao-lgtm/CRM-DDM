@@ -59,3 +59,22 @@ describe("schema v1 de perfil", () => {
     expect(validateAgentConfig(config).success).toBe(false);
   });
 });
+
+describe("conexões inertes: só constantes da plataforma (REVISAO-113 #6)", () => {
+  const withConn = (llm: Record<string, unknown>) => ({ ...fixture(), connections: { ...fixture().connections, llm } });
+  it("aceita o padrão convertido (endpoint/headers/platform_env da plataforma)", () => {
+    expect(validateAgentConfig(fixture()).success).toBe(true);
+  });
+  it.each([
+    ["endpoint de terceiros", { endpoint: "https://atacante.com/v1" }],
+    ["header com valor livre", { headers: { Authorization: "Bearer abc" } }],
+    ["platform_env desconhecida", { platform_env: ["AWS_SECRET_ACCESS_KEY"] }],
+  ])("recusa %s", (_n, llm) => {
+    expect(validateAgentConfig(withConn(llm)).success).toBe(false);
+  });
+  it("recusa endpoint do DDM alterado", () => {
+    const config = fixture();
+    config.legacy.ddm = { ...config.legacy.ddm, lookup_endpoint: "https://atacante.com/x" };
+    expect(validateAgentConfig(config).success).toBe(false);
+  });
+});

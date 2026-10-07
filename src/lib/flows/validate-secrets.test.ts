@@ -51,3 +51,13 @@ describe("validador de fluxo — variáveis e credenciais da conta", () => {
     expect(toolIssues(http)).toEqual([]);
   });
 });
+
+describe("validador de fluxo — header de credencial literal (REVISAO-113 #8)", () => {
+  it("nó inline: header X-DDM-Key literal vira aviso; com marcador, não", () => {
+    const warn = toolIssues({ url: "https://api.exemplo.com/x", headers: { "X-DDM-Key": "abcdef123456" } });
+    expect(warn).toHaveLength(1);
+    expect(warn[0].severity).toBe("warning");
+    expect(warn[0].message).toMatch(/X-DDM-Key/);
+    expect(toolIssues({ url: "https://api.exemplo.com/x", headers: { "X-DDM-Key": "{{cred.DDM}}" } }, { credentials: ["DDM"], variables: [] })).toHaveLength(0);
+  });
+});

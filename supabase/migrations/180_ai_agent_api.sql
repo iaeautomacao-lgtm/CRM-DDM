@@ -92,9 +92,16 @@ END $$;
 
 CREATE OR REPLACE FUNCTION wacrm.delete_ai_agent(p_account_id uuid,p_agent_id uuid)
 RETURNS void LANGUAGE plpgsql SET search_path=pg_catalog AS $$
+DECLARE used boolean := false;
 BEGIN
   PERFORM 1 FROM wacrm.ai_agents WHERE account_id=p_account_id AND id=p_agent_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Agente não encontrado' USING ERRCODE='P0002'; END IF;
+  -- Agente já fixado em algum run (179): preserva o histórico; a API orienta a desligar em vez de excluir.
+  IF to_regclass('wacrm.flow_run_agent_bindings') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM wacrm.flow_run_agent_bindings WHERE account_id=$1 AND agent_id=$2)'
+      INTO used USING p_account_id,p_agent_id;
+    IF used THEN RAISE EXCEPTION 'agent_used_in_runs' USING ERRCODE='23503'; END IF;
+  END IF;
   IF EXISTS (SELECT 1 FROM wacrm.flow_nodes n JOIN wacrm.flows f ON f.id=n.flow_id
     WHERE f.account_id=p_account_id AND n.node_type='ai_agent' AND n.config->>'agent_id'=p_agent_id::text)
   THEN RAISE EXCEPTION 'Agente em uso: remova dos fluxos antes de excluir' USING ERRCODE='23503'; END IF;

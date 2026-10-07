@@ -134,3 +134,29 @@ describe("buildToolRequest / sanitizeResponseBody", () => {
     expect(exampleArguments({ type: "object", properties: { a: { type: "string", description: "" }, n: { type: "number", description: "" }, b: { type: "boolean", description: "" }, e: { type: "string", description: "", enum: ["x", "y"] } } })).toEqual({ a: "exemplo", n: 1, b: true, e: "x" });
   });
 });
+
+describe("sanitizeResponseBody: variantes (REVISAO-113 #9)", () => {
+  const secret = 'seg"redo/ABC+123=xyz';
+  it("mascara base64, base64 sem padding, URL-safe e JSON-escaped", () => {
+    const b64 = Buffer.from(secret).toString("base64");
+    const urlSafe = b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const text = [b64, b64.replace(/=+$/, ""), urlSafe, JSON.stringify(secret).slice(1, -1), secret, encodeURIComponent(secret)].join(" | ");
+    const out = sanitizeResponseBody(text, [secret]);
+    expect(out).toBe(Array(6).fill("***").join(" | "));
+  });
+});
+
+describe("header de credencial por nome (REVISAO-113 #8)", () => {
+  const bad = (name: string, value = "abcdef123456") =>
+    findLiteralCredential({ url: "https://api.exemplo.com/x", headers: { [name]: value } });
+  it("bloqueia literal em qualquer header com key/token/secret/auth no nome", () => {
+    for (const name of ["X-DDM-Key", "X-Custom-Token", "Client-Secret", "X-Auth", "Proxy-Authorization"]) {
+      expect(bad(name)).toMatch(new RegExp(name));
+    }
+  });
+  it("marcador {{cred.X}} e headers comuns passam", () => {
+    expect(bad("X-DDM-Key", "{{cred.DDM}}")).toBeNull();
+    expect(bad("Accept", "application/json")).toBeNull();
+    expect(bad("Content-Type", "application/json")).toBeNull();
+  });
+});

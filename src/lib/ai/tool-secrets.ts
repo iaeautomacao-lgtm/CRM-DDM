@@ -53,7 +53,10 @@ export function hostAllowedFor(url: string, hosts: readonly string[]): boolean {
 
 function hostAllowed(url: string, hosts: readonly string[]): boolean {
   try {
-    const host = new URL(url).hostname.toLowerCase();
+    const parsed = new URL(url);
+    // Credencial só vai por HTTPS na porta padrão (URL.port é "" para 443).
+    if (parsed.protocol !== "https:" || parsed.port !== "") return false;
+    const host = parsed.hostname.toLowerCase();
     return hosts.some((h) => host === h || host.endsWith(`.${h}`));
   } catch {
     return false;
@@ -118,7 +121,9 @@ export function resolveToolSecrets(
         missing.push(`var.${name}`);
         return "";
       }
-      return out(v);
+      // Variável NÃO é codificada: ela pode montar a URL base ({{var.BASE}}/x) e o host é
+      // checado sobre este mesmo valor. Só os argumentos do modelo são codificados.
+      return v;
     }
     if (kind === "cred") {
       const cred = account?.creds.get(name);

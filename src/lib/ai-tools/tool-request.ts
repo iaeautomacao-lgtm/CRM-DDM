@@ -55,11 +55,29 @@ export function buildToolRequest(
 export function sanitizeResponseBody(text: string, secretValues: readonly string[], max = 2048): string {
   let out = text;
   for (const secret of [...secretValues].sort((a, b) => b.length - a.length)) {
-    if (secret.length >= 6) out = out.split(secret).join("***");
-    const enc = encodeURIComponent(secret);
-    if (enc !== secret && enc.length >= 6) out = out.split(enc).join("***");
+    for (const variant of secretVariants(secret)) out = out.split(variant).join("***");
   }
   return out.length > max ? `${out.slice(0, max)}…[truncado]` : out;
+}
+
+/** Sem truncagem: para sanitizar antes de gravar/enviar (os limites de quem consome continuam valendo). */
+export function redactSecrets(text: string, secretValues: readonly string[]): string {
+  return sanitizeResponseBody(text, secretValues, Number.MAX_SAFE_INTEGER);
+}
+
+/** Formas em que um segredo aparece num eco: cru, URL-encoded, JSON-escaped e base64 (padrão, sem padding, URL-safe). */
+function secretVariants(secret: string): string[] {
+  if (secret.length < 6) return [];
+  const b64 = Buffer.from(secret, "utf8").toString("base64");
+  const forms = new Set<string>([
+    secret,
+    encodeURIComponent(secret),
+    JSON.stringify(secret).slice(1, -1),
+    b64,
+    b64.replace(/=+$/, ""),
+    b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+  ]);
+  return [...forms].filter((f) => f.length >= 6);
 }
 
 /** Argumentos de exemplo pelos tipos dos parâmetros (para testar sem digitar tudo). */

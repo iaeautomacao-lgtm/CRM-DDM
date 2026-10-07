@@ -77,12 +77,21 @@ export function toAiAgentTool(row: Pick<ToolRow, "name" | "description" | "param
 
 // Cabeçalhos que carregam credencial: o valor tem de ser SÓ um marcador
 // (opcionalmente precedido de "Bearer "/"Basic "/"Token ").
-const CREDENTIAL_HEADERS = /^(authorization|proxy-authorization|x-api-key|api-key|apikey|x-auth-token|x-access-token|x-token|cookie)$/i;
+// Qualquer header cujo NOME sugere credencial (key/token/secret/auth) ou cookie.
+const CREDENTIAL_HEADERS = /key|token|secret|auth|^cookie$/i;
 const MARKER_ONLY = /^(?:(?:bearer|basic|token)\s+)?\{\{\s*(?:cred|secret)\.[A-Z0-9_]+\s*\}\}$/i;
 const SENSITIVE_BODY_KEY = /"(?:api_?key|apikey|token|access_token|secret|client_secret|password|senha|authorization)"\s*:\s*"([^"]*)"/gi;
 const HEADER_NAME_RE = /^[A-Za-z0-9-]{1,64}$/;
 
 const LITERAL_HINT = "Use {{cred.NOME}} (cadastre em Configurações → Variáveis e credenciais).";
+
+/** Nome do primeiro header de credencial (nome com key/token/secret/auth) cujo valor não é só um marcador; null se nenhum. */
+export function findLiteralHeaderCredential(headers: Record<string, string> | undefined): string | null {
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (CREDENTIAL_HEADERS.test(name) && !MARKER_ONLY.test(String(value).trim())) return name;
+  }
+  return null;
+}
 
 /** Detecta credencial em texto na URL, nos headers ou no body. Devolve a mensagem de erro ou null. */
 export function findLiteralCredential(http: { url?: string; headers?: Record<string, string>; body?: string }): string | null {
@@ -95,11 +104,8 @@ export function findLiteralCredential(http: { url?: string; headers?: Record<str
   } catch {
     /* URL inválida é tratada por quem chama */
   }
-  for (const [name, value] of Object.entries(http.headers ?? {})) {
-    if (CREDENTIAL_HEADERS.test(name) && !MARKER_ONLY.test(value.trim())) {
-      return `O header ${name} tem um valor em texto. ${LITERAL_HINT}`;
-    }
-  }
+  const header = findLiteralHeaderCredential(http.headers);
+  if (header) return `O header ${header} tem um valor em texto. ${LITERAL_HINT}`;
   for (const m of (http.body ?? "").matchAll(SENSITIVE_BODY_KEY)) {
     const value = m[1];
     // Marcador inteiro ou parâmetro {{param}} do modelo: ok. Valor fixo longo: credencial.

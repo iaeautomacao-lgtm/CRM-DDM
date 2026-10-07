@@ -30,9 +30,30 @@ const nonnegative = { type: "number", min: 0, optional: true } as const;
 const texts = { type: "array", items: { type: "string" }, optional: true } as const;
 const uuid = { type: "string", pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" } as const;
 const credential = { type: "string", pattern: "^\\{\\{cred\\.[A-Z][A-Z0-9_]{1,63}\\}\\}$", optional: true } as const;
+// Conexões são INERTES (nenhum consumidor): só constantes da plataforma são aceitas — endpoint,
+// valores de header e variáveis de ambiente de fallback fora destas listas são rejeitados, para que
+// um perfil nunca aponte uma chave da plataforma/credencial para um host arbitrário (REVISAO-113 #6).
+const PLATFORM_ENDPOINTS = [
+  "https://api.openai.com/v1/chat/completions",
+  "https://generativelanguage.googleapis.com/v1beta/models/:model:generateContent",
+  "https://api.anthropic.com/v1/messages",
+  "https://openrouter.ai/api/v1/chat/completions",
+  "https://api.openai.com/v1/audio/transcriptions",
+  "https://api.elevenlabs.io/v1/text-to-speech/:voice_id",
+  "https://ddmacordos.com",
+] as const;
+const PLATFORM_HEADER_VALUES = ["application/json", "2023-06-01", "https://wacrm.vercel.app", "WA CRM"] as const;
+const PLATFORM_ENV_NAMES = [
+  "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "CLAUDE_API_KEY", "ANTHROPIC_API_KEY",
+  "DDM_ACORDOS_API_TOKEN", "DDM_TOKEN", "DDM_API_KEY",
+] as const;
 const connection = { type: "object", optional: true, properties: {
-  credential, platform_env: texts, endpoint: text, headers: { type: "object", additional: { type: "string" }, optional: true },
+  credential,
+  platform_env: { type: "array", items: { type: "string", values: PLATFORM_ENV_NAMES }, optional: true },
+  endpoint: { type: "string", values: PLATFORM_ENDPOINTS, optional: true },
+  headers: { type: "object", additional: { type: "string", values: PLATFORM_HEADER_VALUES }, optional: true },
 } } as const;
+const ddmEndpoint = (url: string) => ({ type: "string", values: [url], optional: true }) as const;
 const protection = { type: "object", properties: {
   enabled: { type: "boolean" }, patterns: texts, reply: text, tag: text, action: text,
 } } as const;
@@ -154,7 +175,10 @@ export const AGENT_CONFIG_SPEC = { type: "object", properties: {
       max_installments: positive, min_installment: nonnegative, old_max_installments: positive, old_min_installment: nonnegative,
       parser_max_installments: positive, parser_default_installments: positive, agreement_type: positive,
       wait_before_agreement_ms: nonnegative, wait_after_agreement_ms: nonnegative, timezone_policy: text, locale: text,
-      lookup_endpoint: text, calculate_endpoint: text, agreement_endpoint: text, payment_endpoint: text,
+      lookup_endpoint: ddmEndpoint("https://www.ddmacordos.com/calc/localiza_dev.php"),
+      calculate_endpoint: ddmEndpoint("https://ddmacordos.com/calc/"),
+      agreement_endpoint: ddmEndpoint("https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php"),
+      payment_endpoint: ddmEndpoint("https://ddmpay.ddmacordos.com/acesso/"),
     } },
     immutable_limits: { type: "object", properties: {
       tool_log_chars: positive, last_reply_chars: positive, http_log_chars: positive, variable_log_chars: positive, max_hops: positive,

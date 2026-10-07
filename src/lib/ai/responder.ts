@@ -5,6 +5,7 @@ import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
 import { collectSecretValues, hostCheckUrl, resolveToolSecrets } from '@/lib/ai/tool-secrets';
+import { redactSecrets } from "@/lib/ai-tools/tool-request";
 import { currentAccountSecrets, currentRealAccountSecrets, withAccountSecretsScope } from '@/lib/ai/account-secrets';
 import { toolTimeoutMs } from '@/lib/ai-tools/tool-input';
 import { composeAgentPromptDetailed } from '@/lib/ai/agents/compose';
@@ -1881,6 +1882,8 @@ export interface ToolRealRequest {
   credentialInjected: boolean;
   /** Valores secretos usados: removê-los de qualquer resposta devolvida. */
   secretValues: string[];
+  /** Marcadores sem valor (credencial da conta ausente, host não permitido, {{secret.*}} só do ambiente). Se houver, NÃO chamar de verdade. */
+  missing?: string[];
 }
 
 /**
@@ -2126,11 +2129,11 @@ export async function generateOpenAiResponse(
           const destinationUrl = hostCheckUrl(toolDef.http.url, accountSecrets, interpolate);
           // Resolve URL, body e headers. mask=true troca o valor de credencial por "***"
           // (simulador: o valor real nunca é lido aqui; as regras de host/ausência valem igual).
-          const resolveRequest = (mask: boolean, account = accountSecrets) => {
+          const resolveRequest = (mask: boolean, account = accountSecrets, env: Record<string, string | undefined> = process.env) => {
             const missing: string[] = [];
             let injected = false;
             const withSecrets = (str: string, encode: boolean) => {
-              const r = resolveToolSecrets(str, destinationUrl, process.env, { encode, account, mask });
+              const r = resolveToolSecrets(str, destinationUrl, env, { encode, account, mask });
               missing.push(...r.missing);
               if (r.usedSecrets) injected = true;
               return r.value;
@@ -2189,7 +2192,9 @@ export async function generateOpenAiResponse(
                     // Só a leitura REAL liberada do simulador chega aqui: credenciais reais,
                     // com a mesma regra de host da produção (host não permitido ⇒ missing ⇒ sem valor).
                     const realAccount = (await currentRealAccountSecrets()) ?? accountSecrets;
-                    const r = resolveRequest(false, realAccount);
+                    // Leitura real do simulador: SÓ credencial da conta — nunca o fallback de ambiente
+                    // ({{secret.*}} da plataforma): env vazio ⇒ marcador sem credencial da conta vira "missing".
+                    const r = resolveRequest(false, realAccount, {});
                     return {
                       url: r.url,
                       init: {
@@ -2198,7 +2203,8 @@ export async function generateOpenAiResponse(
                         ...(r.body ? { body: r.body } : {}),
                       },
                       credentialInjected: r.injected,
-                      secretValues: collectSecretValues(realAccount),
+                      secretValues: collectSecretValues(realAccount, {}),
+                      missing: r.missing,
                     };
                   })
                 : await safeFetch(
@@ -2217,7 +2223,11 @@ export async function generateOpenAiResponse(
                     },
                   );
 
-              const httpText = await httpRes.text();
+              // Eco de credencial na resposta nunca vai ao modelo, aos eventos do run nem ao cliente.
+              const rawHttpText = await httpRes.text();
+              const httpText = credentialInjected
+                ? redactSecrets(rawHttpText, collectSecretValues(accountSecrets))
+                : rawHttpText;
               const failure =
                 classifyHttpFailure(httpRes.status, httpText) ??
                 classifyToolBodyFailure(httpText);

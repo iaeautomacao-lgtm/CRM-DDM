@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
   AI_INSTABILITY_TEXT,
@@ -43,22 +44,60 @@ const DEFAULT_TOOL_MOCK = (toolName: string) =>
     mensagem: "Resposta simulada — defina a resposta desta tool no painel Testar fluxo.",
   });
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * Nomes das ferramentas do turno que são do CATÁLOGO salvo (ligadas) e cuja definição HTTP é
+ * idêntica à salva. Só estas podem fazer leitura real no simulador; definição inline ou alterada
+ * no rascunho fica sempre em mock.
+ */
+export async function savedCatalogToolNames(
+  db: SupabaseClient,
+  accountId: string,
+  tools: ReadonlyArray<{ name: string; http: unknown }> | undefined,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!tools?.length) return out;
+  const { data } = await db.from("ai_tools").select("name, http, enabled").eq("account_id", accountId);
+  const saved = new Map(((data ?? []) as Array<{ name: string; http: unknown; enabled: boolean }>).filter((r) => r.enabled).map((r) => [r.name, stableJson(r.http)]));
+  for (const tool of tools) if (saved.get(tool.name) === stableJson(tool.http)) out.add(tool.name);
+  return out;
+}
+
 /**
  * Executa a chamada HTTP de UMA tool no simulador. Real só para tools
  * somente-leitura liberadas no painel (effectiveSimToolMode); o resto —
  * inclusive efetiva_acordo e qualquer método que não seja GET — recebe a
  * resposta mockada e nunca sai do servidor.
  */
-export function simulatedToolFetch(ctx: SimContext, nodeKey: string | null) {
+export function simulatedToolFetch(ctx: SimContext, nodeKey: string | null, savedCatalogTools: ReadonlySet<string> = new Set()) {
   return async (toolName: string, maskedUrl: string, init: RequestInit, real?: () => Promise<ToolRealRequest>): Promise<Response> => {
-    const mode = effectiveSimToolMode(toolName, init.method, ctx.realReadOnlyTools);
+    let mode = effectiveSimToolMode(toolName, init.method, ctx.realReadOnlyTools);
+    // Leitura real só para ferramenta do CATÁLOGO (versão salva), idêntica ao que está no rascunho:
+    // uma definição inline/alterada no rascunho nunca recebe credencial.
+    if (mode === "real_readonly" && !savedCatalogTools.has(toolName)) {
+      simNote(ctx, `Tool ${toolName}: leitura real recusada — só ferramentas salvas no catálogo (Configurações → Ferramentas) podem consultar de verdade; usando resposta simulada`, nodeKey);
+      mode = "mock";
+    }
     if (mode === "real_readonly") {
       // maskedUrl/init chegam com "***" no lugar de {{cred}}/{{secret}}: o painel nunca vê
       // credencial. A resolução REAL só acontece aqui, para esta consulta GET liberada, e
       // segue a mesma regra da produção (host final permitido; senão a tool já falhou antes).
       simNote(ctx, `Tool ${toolName}: consulta REAL somente leitura`, nodeKey, { url: maskedUrl });
       const resolved = await real?.();
-      if (!resolved) return ctx.realFetch(maskedUrl, init);
+      if (!resolved) return new Response(ctx.toolMocks[toolName] ?? DEFAULT_TOOL_MOCK(toolName), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (resolved.missing?.length) {
+        // Credencial da conta ausente (ou host não permitido): a chamada real NÃO acontece.
+        simNote(ctx, `Tool ${toolName}: sem credencial da conta para a chamada real (${[...new Set(resolved.missing)].join(", ")}) — usando resposta simulada`, nodeKey);
+        return new Response(ctx.toolMocks[toolName] ?? DEFAULT_TOOL_MOCK(toolName), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
       const res = await ctx.realFetch(resolved.url, resolved.init, {
         failOnCrossOriginRedirect: resolved.credentialInjected,
       });
@@ -283,6 +322,8 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
       simNote(ctx, "Nó sem prompt próprio: o orquestrador legado de CPF/API DDM do prompt global não é simulado", node);
     }
 
+    // Ferramentas do catálogo SALVO (iguais ao rascunho): só elas podem ter leitura real liberada.
+    const savedTools = await savedCatalogToolNames(db, accountId, tools);
     const toolTally = new Map<string, ToolRoundTally>();
     const trackedOnToolResult = async (toolName: string, result: string, durationMs: number, meta?: ToolExecutionMeta) => {
       tallyToolResult(toolTally, toolName, meta?.failureCode);
@@ -311,7 +352,7 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
           nodeKey,
           responseModel,
           undefined, // onWaiting (heartbeat do vigia): sem efeito no simulador
-          simulatedToolFetch(ctx, node),
+          simulatedToolFetch(ctx, node, savedTools),
         );
       }
       if (tools?.length) simNote(ctx, `Provedor ${aiConfig.api_provider} não usa tools (igual à produção)`, node);

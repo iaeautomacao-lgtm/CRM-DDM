@@ -3,7 +3,7 @@ import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
 import { hasMinRole } from '@/lib/auth/roles'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { checkRateLimit } from '@/lib/rate-limit'
-import { parseSimulateRequest, SIM_MAX_BODY_CHARS } from '@/lib/flows/simulator/parse'
+import { applyRealReadPolicy, parseSimulateRequest, SIM_MAX_BODY_CHARS } from '@/lib/flows/simulator/parse'
 import { simulateTurn } from '@/lib/flows/simulator/run'
 import { SIM_RATE_LIMIT } from '@/lib/flows/simulator/types'
 
@@ -141,8 +141,12 @@ export async function POST(
   ]
   const agents = await loadSimulationAgents(admin, account.accountId, agentIds)
 
+  // Leitura REAL com credencial (consulta somente-leitura) é só para admin/owner: supervisor
+  // continua simulando, mas tudo mockado (nunca usa credencial da conta nem da plataforma).
+  const { request: simRequest, denied: realReadDenied } = applyRealReadPolicy(account.role, parsed)
+
   try {
-    const result = await simulateTurn(parsed, {
+    const result = await simulateTurn(simRequest, {
       accountId: account.accountId,
       userId: (flow.user_id as string | null) ?? account.userId,
       flowId: flow.id as string,
@@ -159,7 +163,7 @@ export async function POST(
         allowed_hosts: string[] | null
       }>,
     })
-    return NextResponse.json({ ...result, remaining: limit.remaining })
+    return NextResponse.json({ ...result, remaining: limit.remaining, ...(realReadDenied ? { real_read_denied: true } : {}) })
   } catch (err) {
     console.error('[flows simulate] falha na simulação:', err)
     return NextResponse.json(
