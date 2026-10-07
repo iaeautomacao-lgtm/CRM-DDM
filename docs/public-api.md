@@ -21,6 +21,7 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 - **Envelope:** sucesso `{ "data": … }`; erro `{ "error": { "code": "…", "message": "…" } }` — ramifique pelo `code` (`unauthorized`, `forbidden`, `rate_limited`, `bad_request`, `not_found`, `conflict`, `payload_too_large`, `recipient_blocked`, `internal`…).
 - **Limite:** 120 requisições por minuto por chave (`429` com `Retry-After`). O limitador é em memória, por processo.
 - **Janela de envio:** horários em Brasília; campanhas respeitam janela e dias úteis.
+- **Identificação de canal em campanhas:** `channel` aceita UUID, `waha_session` para WAHA ou número de telefone para Meta. Para integrações WAHA, prefira `waha_session` porque ele permanece estável mesmo se a linha for removida e recriada no CRM.
 
 ## MCP (DDM Intelligence)
 

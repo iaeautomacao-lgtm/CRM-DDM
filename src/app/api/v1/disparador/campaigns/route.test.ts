@@ -23,6 +23,7 @@ function resetDb() {
   tables.disp_message_queue = []
   tables.campaign_metrics = []
   tables.blacklist = []
+  tables.audit_logs = []
   failQueueInsertOnCall = 0
   queueInsertCalls = 0
   failMetrics = false
@@ -282,7 +283,14 @@ describe('POST /api/v1/disparador/campaigns', () => {
 
   describe('WAHA', () => {
     beforeEach(() => {
-      tables.whatsapp_config = [{ id: '22222222-2222-4222-8222-222222222222', account_id: 'ACC', provider: 'waha', habilitado: true }]
+      tables.whatsapp_config = [{
+        id: '22222222-2222-4222-8222-222222222222',
+        account_id: 'ACC',
+        provider: 'waha',
+        habilitado: true,
+        waha_session: 'brdid_2139551698',
+        created_at: '2026-10-07T18:46:50.000Z',
+      }]
     })
     const waha = (over: Record<string, unknown> = {}) => ({
       campaign_name: 'W',
@@ -291,11 +299,48 @@ describe('POST /api/v1/disparador/campaigns', () => {
       ...over,
     })
 
-    it('substitui em passada única: $& e $1 literais', async () => {
+    it('substitui em passada única:     it('substitui em passada única: $& e $1 literais', async () => {
       const r = await POST(post(waha()))
       expect(r.status).toBe(201)
       expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi $&, valor R$ 10 $1'])
       expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
+    }) e $1 literais', async () => {
+      const r = await POST(post(waha()))
+      expect(r.status).toBe(201)
+      expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi     it('substitui em passada única: $& e $1 literais', async () => {
+      const r = await POST(post(waha()))
+      expect(r.status).toBe(201)
+      expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi $&, valor R$ 10 $1'])
+      expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
+    }), valor R$ 10 $1'])
+      expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
+    })
+
+    it('aceita waha_session como identificador estável do canal', async () => {
+      const r = await POST(post(waha({ channel: 'brdid_2139551698' })))
+      expect(r.status).toBe(201)
+      expect(tables.disp_message_queue[0].session_id).toBe('22222222-2222-4222-8222-222222222222')
+    })
+
+    it('remapeia UUID antigo quando a linha foi excluída e recriada na mesma conta', async () => {
+      const oldId = '33333333-3333-4333-8333-333333333333'
+      tables.audit_logs = [{
+        account_id: 'ACC',
+        resource_type: 'whatsapp_line',
+        resource_id: oldId,
+        action: 'whatsapp_line.deleted',
+        created_at: '2026-10-07T18:46:11.000Z',
+      }]
+
+      const r = await POST(post(waha({ channel: oldId })))
+      expect(r.status).toBe(201)
+      expect(tables.disp_message_queue[0].session_id).toBe('22222222-2222-4222-8222-222222222222')
+    })
+
+    it('UUID desconhecido sem histórico da conta continua rejeitado', async () => {
+      const r = await POST(post(waha({ channel: '44444444-4444-4444-8444-444444444444' })))
+      expect(r.status).toBe(400)
+      expect(tables.campaigns).toHaveLength(0)
     })
 
     it('variável faltante: contato vira missing_variable e não é enfileirado', async () => {

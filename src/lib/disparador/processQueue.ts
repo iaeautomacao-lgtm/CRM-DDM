@@ -13,7 +13,7 @@ import {
   sendMediaMessage,
   MetaApiError,
 } from "@/lib/whatsapp/meta-api";
-import { decrypt } from "@/lib/whatsapp/encryption";
+import { decryptStoredSecret } from "@/lib/whatsapp/encryption";
 import { safeFetch } from "@/lib/security/ssrf-guard";
 import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -269,7 +269,11 @@ export class PreSendError extends Error {}
 
 function decryptOrPreSend(value: string, what: string): string {
   try {
-    return decrypt(value);
+    // Mesmo comportamento dos demais caminhos de envio do CRM: GCM/CBC
+    // são decifrados e valores legados em texto puro continuam válidos
+    // até serem recifrados. O Disparador era a exceção e falhava antes
+    // de chamar WAHA/Meta quando encontrava um segredo legado.
+    return decryptStoredSecret(value, what);
   } catch {
     throw new PreSendError(`Não foi possível ler a ${what} do canal (reconecte o canal)`);
   }

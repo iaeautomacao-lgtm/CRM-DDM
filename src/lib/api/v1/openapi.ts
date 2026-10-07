@@ -369,7 +369,7 @@ export const openApiSpec = {
         description: [
           'Cria uma campanha do Disparador e a coloca na fila imediatamente (status `em_execucao`; não há rascunho/revisão por esta rota). Exige `campaigns:write`.',
           '',
-          '**Canal.** `channel` aceita o UUID do canal ou o número de telefone de um canal **Meta**. Omita apenas se a conta tiver exatamente um canal habilitado. Canais **WAHA** só por UUID.',
+          '**Canal.** `channel` aceita UUID, nome da sessão **WAHA** (`waha_session`) ou número de telefone de um canal **Meta**. Omita apenas se a conta tiver exatamente um canal habilitado. UUIDs WAHA antigos de uma linha excluída/recriada podem ser remapeados com segurança pelo histórico da própria conta.',
           '',
           '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato.',
           '',
@@ -423,7 +423,7 @@ export const openApiSpec = {
                   summary: 'Canal WAHA com texto livre',
                   value: {
                     campaign_name: 'Lembrete de acordo',
-                    channel: '2f0a4c9e-0000-4000-8000-000000000010',
+                    channel: 'brdid_2139551698',
                     message: 'Olá, {{1}}! Sua parcela de {{2}} vence em {{3}}.',
                     dias_envio: [1, 2, 3, 4, 5],
                     contacts: [{ phone: '27999991212', variables: ['Ana', 'R$ 150,00', '10/10'] }],
@@ -909,7 +909,7 @@ export const openApiSpec = {
             pattern: '^[A-Za-z0-9._:\\-/]{1,128}$',
             description: 'Id do seu sistema. Torna a criação idempotente (vence o header `Idempotency-Key`).',
           },
-          channel: { type: 'string', description: 'UUID do canal ou número de um canal Meta. Omita só se houver um único canal habilitado.' },
+          channel: { type: 'string', description: 'UUID do canal, waha_session de um canal WAHA ou número de um canal Meta. Omita só se houver um único canal habilitado.' },
           template_name: { type: 'string', description: '**Meta**: obrigatório; template aprovado na WABA do canal.' },
           template_language: { type: 'string', default: 'pt_BR' },
           message: { type: 'string', description: '**WAHA**: obrigatório; texto livre com `{{1}}`, `{{2}}`…' },
