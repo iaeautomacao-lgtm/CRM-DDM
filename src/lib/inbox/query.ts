@@ -59,9 +59,22 @@ export function applyInboxFilters<Q extends Record<string, any>>(
   if (f.cliente) q = q.eq("client_id", f.cliente);
   if (f.campanha) q = q.eq("origin_campaign_id", f.campanha);
   if (opts.includeStatus) {
-    if (f.status === "active") q = q.in("status", ["open", "pending"]);
-    else if (f.status === "unread") q = q.gt("unread_count", 0).neq("status", "closed");
-    else q = q.eq("status", f.status);
+    if (f.status === "active") {
+      q = q.in("status", ["open", "pending"]);
+    } else if (f.status === "unread") {
+      q = q.gt("unread_count", 0).neq("status", "closed");
+    } else if (f.status === "open") {
+      // status=open é mantido no parâmetro da URL por compatibilidade, mas
+      // no Inbox significa a fila operacional "Em atendimento": conversa
+      // ativa que já possui atendente.
+      q = q.in("status", ["open", "pending"]).not("assigned_agent_id", "is", null);
+    } else if (f.status === "pending") {
+      // status=pending no filtro do Inbox significa "Em espera": conversa
+      // ativa ainda sem atendente, independentemente do status bruto.
+      q = q.in("status", ["open", "pending"]).is("assigned_agent_id", null);
+    } else {
+      q = q.eq("status", "closed");
+    }
   }
   return q;
 }

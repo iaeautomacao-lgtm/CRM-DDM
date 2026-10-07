@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
+import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
+import { phoneKey } from "@/lib/disparador/phone-key";
 
 // GET /api/disparador/campaigns/[id]/audience — quem a campanha vai
 // atingir, para o modal de "Iniciar" (PRD-01). Mesma resolução que
@@ -31,8 +33,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const campaign = rows?.[0];
     if (!campaign) return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
 
-    const audience = await loadCampaignAudience(db, accountId, campaign, "id");
+    const audience = await loadCampaignAudience(db, accountId, campaign, "id, phone");
     if (!audience.ok) return NextResponse.json({ ok: false, error: audience.error });
+
+    const blacklistSet = await loadBlacklistKeySet(db);
+    const blacklisted = audience.contacts.reduce(
+      (count, contact) =>
+        typeof contact.phone === "string" && blacklistSet.has(phoneKey(contact.phone))
+          ? count + 1
+          : count,
+      0,
+    );
 
     const { count: alreadySent } = await db
       .from("disp_message_queue")
@@ -43,6 +54,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({
       ok: true,
       total: audience.contacts.length,
+      blacklisted,
+      eligible: Math.max(0, audience.contacts.length - blacklisted),
       source: audience.source,
       source_label: LABEL[audience.source] ?? audience.source,
       tags: Array.isArray(campaign.tags_filtro) ? campaign.tags_filtro : [],

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
 import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
@@ -14,52 +14,22 @@ import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
  * DELETE /api/flows/[id] — hard delete (RLS+CASCADE clean up nodes,
  *                          runs, events).
  *
- * All three require a signed-in caller who owns the flow. Flows is in
- * soft-GA — the beta gate that previously 404'd non-beta accounts is
- * gone; the "Beta" label in the UI is the only remaining signal.
+ * All three require owner/admin and a flow that belongs to the caller's
+ * account (other account → 404). Writes use the service role, so every
+ * one is also filtered by account_id.
  */
-
-async function requireOwnership(
-  flowId: string,
-): Promise<
-  | {
-      ok: true
-      userId: string
-      supabase: Awaited<ReturnType<typeof createClient>>
-    }
-  | { ok: false; status: number; body: { error: string } }
-> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return { ok: false, status: 401, body: { error: 'Unauthorized' } }
-  }
-  // RLS scopes this to the caller — a flow owned by another user
-  // returns null (404 below).
-  const { data: flow } = await supabase
-    .from('flows')
-    .select('id')
-    .eq('id', flowId)
-    .maybeSingle()
-  if (!flow) {
-    return { ok: false, status: 404, body: { error: 'Not found' } }
-  }
-  return { ok: true, userId: user.id, supabase }
-}
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params
-  const guard = await requireOwnership(id)
-  if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status })
-  const { supabase } = guard
+  const guard = await guardFlow(id)
+  if (!guard.ok) return guard.response
+  const { supabase, accountId } = guard.ctx
 
   const [{ data: flow }, { data: nodes }] = await Promise.all([
-    supabase.from('flows').select('*').eq('id', id).maybeSingle(),
+    supabase.from('flows').select('*').eq('id', id).eq('account_id', accountId).maybeSingle(),
     supabase
       .from('flow_nodes')
       .select('*')
@@ -97,8 +67,9 @@ export async function PUT(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params
-  const guard = await requireOwnership(id)
-  if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status })
+  const guard = await guardFlow(id)
+  if (!guard.ok) return guard.response
+  const { accountId } = guard.ctx
 
   const body = (await request.json().catch(() => null)) as PutBody | null
   if (!body) {
@@ -120,6 +91,7 @@ export async function PUT(
       .from('flows')
       .select('updated_at')
       .eq('id', id)
+      .eq('account_id', accountId)
       .maybeSingle()
     const current = currentVersion?.updated_at ? new Date(currentVersion.updated_at).getTime() : null
     const expected = new Date(body.expected_updated_at).getTime()
@@ -153,6 +125,7 @@ export async function PUT(
       .from('flows')
       .select('account_id, status, name, trigger_type, trigger_config, entry_node_id')
       .eq('id', id)
+      .eq('account_id', accountId)
       .maybeSingle()
     if (current?.status === 'active') {
       let nodes = body.nodes
@@ -249,6 +222,7 @@ export async function PUT(
     .from('flows')
     .update(flowPatch)
     .eq('id', id)
+    .eq('account_id', accountId)
   if (updErr) {
     return NextResponse.json({ error: updErr.message }, { status: 500 })
   }
@@ -307,7 +281,7 @@ export async function PUT(
   // Re-fetch and return the new state — the editor uses the response
   // to reconcile its local form state.
   const [{ data: flow }, { data: nodes }] = await Promise.all([
-    admin.from('flows').select('*').eq('id', id).maybeSingle(),
+    admin.from('flows').select('*').eq('id', id).eq('account_id', accountId).maybeSingle(),
     admin
       .from('flow_nodes')
       .select('*')
@@ -325,7 +299,7 @@ export async function PUT(
       flowId: id,
       nodes: nodes ?? [],
       onlyChangedFrom: previousNodesForHistory,
-      userId: guard.userId,
+      userId: guard.ctx.userId,
     })
   }
 
@@ -337,15 +311,20 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params
-  const guard = await requireOwnership(id)
-  if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status })
+  const guard = await guardFlow(id)
+  if (!guard.ok) return guard.response
+  const { accountId } = guard.ctx
 
   // CASCADE on flow_nodes / flow_runs / flow_run_events handles the
   // children. Active runs end abruptly — there's no graceful "drain"
   // mechanism in v1, but that's intentional: deleting a flow is a
   // deliberate destructive action and the partial unique index will
   // free up the contact for new triggers immediately.
-  const { error } = await supabaseAdmin().from('flows').delete().eq('id', id)
+  const { error } = await supabaseAdmin()
+    .from('flows')
+    .delete()
+    .eq('id', id)
+    .eq('account_id', accountId)
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

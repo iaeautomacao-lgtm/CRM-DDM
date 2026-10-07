@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { canManageCampaigns } from "@/lib/disparador/route-auth";
 
 export async function POST(
   request: Request,
@@ -28,6 +29,13 @@ export async function POST(
     if (profileError || !profile?.account_id)
       return NextResponse.json(
         { error: "Conta indisponível" },
+        { status: 403 }
+      );
+    // Pausar/encerrar: só quem gerencia campanhas (owner/admin, mesmo papel
+    // da página /disparador — route-auth.ts).
+    if (!canManageCampaigns(profile.account_role))
+      return NextResponse.json(
+        { error: "Seu papel não permite gerenciar campanhas do disparador." },
         { status: 403 }
       );
     const { data: campaign, error: campaignError } = await supabaseAdmin()

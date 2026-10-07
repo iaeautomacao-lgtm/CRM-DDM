@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardFlowAccess } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 /**
@@ -69,29 +69,9 @@ interface ImportPayload {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  // Resolve the caller's account_id — `flows.account_id` is NOT NULL,
-  // so an INSERT without it trips the not-null constraint even though
-  // the admin client below bypasses RLS.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .single()
-  const accountId = profile?.account_id as string | undefined
-  if (!accountId) {
-    return NextResponse.json(
-      { error: 'Your profile is not linked to an account.' },
-      { status: 403 },
-    )
-  }
+  const guard = await guardFlowAccess()
+  if (!guard.ok) return guard.response
+  const { userId, accountId } = guard.ctx
 
   const body = (await request.json().catch(() => null)) as ImportPayload | null
   if (!body || typeof body !== 'object') {
@@ -155,7 +135,7 @@ export async function POST(request: Request) {
   const { data: flow, error: flowErr } = await admin
     .from('flows')
     .insert({
-      user_id: user.id,
+      user_id: userId,
       account_id: accountId,
       name,
       description: body.flow.description ?? null,

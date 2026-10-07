@@ -56,10 +56,8 @@ interface MessageTemplatePickerProps {
    * when the campaign's selected sessions include a Meta channel, which
    * can only send approved templates. */
   hasMeta?: boolean;
-  /** When set, restricts the Meta catalog to templates belonging to this
-   * WABA — used when exactly one Meta channel is selected in the campaign,
-   * so a multi-WABA account doesn't offer templates it can't actually send
-   * from the chosen channel. */
+  /** WABA da campanha Meta: o catálogo Meta é SEMPRE filtrado por ela. Sem
+   * WABA (seleção inválida) o picker Meta não lista nada. */
   wabaId?: string;
   /** waba_id -> display_phone_number, purely for labeling each template
    * with the channel it belongs to when the catalog spans multiple WABAs. */
@@ -94,17 +92,21 @@ export function MessageTemplatePicker({
     const supabase = createClient();
 
     if (hasMeta) {
-      let query = supabase
+      // Campanha Meta = uma WABA. Sem ela (números de WABAs diferentes,
+      // número sem waba_id, Meta + WAHA) o catálogo NÃO é oferecido: antes
+      // listava a conta inteira e deixava escolher template de outro número.
+      if (!wabaId) {
+        setTemplates([]);
+        setLoading(false);
+        return;
+      }
+      const { data, error } = await supabase
         .from("message_templates")
         .select("id, name, body_text, language, waba_id, category")
         .eq("account_id", accountId)
-        .eq("status", "APPROVED");
-
-      if (wabaId) {
-        query = query.eq("waba_id", wabaId);
-      }
-
-      const { data, error } = await query.order("name", { ascending: true });
+        .eq("status", "APPROVED")
+        .eq("waba_id", wabaId)
+        .order("name", { ascending: true });
 
       if (error) {
         console.error("Failed to fetch Meta message templates:", error);
@@ -339,6 +341,16 @@ export function MessageTemplatePicker({
                     <p className="text-xs text-muted-foreground">
                       Para usar templates aprovados pela Meta, selecione um canal
                       &quot;WhatsApp Oficial (Meta)&quot; na campanha antes de abrir o picker.
+                    </p>
+                  </div>
+                ) : !wabaId ? (
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <p className="text-sm font-medium text-foreground">
+                      Escolha os números da campanha primeiro
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Os templates são da conta WhatsApp Business (WABA) do número. Selecione só
+                      números Meta da mesma WABA (e com WABA configurada) no passo Público.
                     </p>
                   </div>
                 ) : (
