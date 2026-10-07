@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       {
         generated_at: current.generated_at,
         period: { from: range.fromDate, to: range.toDate, timezone: 'America/Sao_Paulo' },
-        teams: buildTeamsReport(facts, range, current, roster),
+        teams: buildTeamsReport(facts, range, current, roster, query.filters),
       },
       200,
       logCtx,
