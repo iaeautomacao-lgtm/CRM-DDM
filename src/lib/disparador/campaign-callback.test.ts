@@ -15,7 +15,7 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       const result =
         table === "campaigns"
           ? { data: { id: "camp", nome: "Black Friday", status: "concluida", callback_url: "https://hook.exemplo.com/x", updated_at: "2026-10-07T12:00:00Z" }, error: null }
-          : table === "campaign_metrics"
+          : table === "campaign_metrics_live"
             ? { data: { total_entregues: 7, total_lidos: 3 }, error: null }
             : { data: [], count: 0, error: null };
       if (table === "disp_message_queue") mocks.queueFromCalls.push(table);
