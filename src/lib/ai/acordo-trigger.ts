@@ -8,8 +8,9 @@
 // mensagem em conversations.outcome_suggestion_key).
 //
 // O timer vive na memória do processo: um restart no meio da espera só
-// perde aquela análise (a próxima mensagem refaz) — nada recorrente
-// depende dele.
+// perde aquela análise (a próxima mensagem refaz). No Passenger, timers
+// não são compartilhados entre workers e se perdem no restart; limitação
+// aceita para esta sugestão best-effort — nada recorrente depende dele.
 
 export const ACORDO_DEBOUNCE_MS = 15_000;
 

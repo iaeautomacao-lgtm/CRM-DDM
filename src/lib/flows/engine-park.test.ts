@@ -13,6 +13,8 @@ vi.mock("@/lib/ai/responder", () => ({
   AI_EMPTY_REPLY_FALLBACK_TEXT: "fallback",
 }));
 vi.mock("@/lib/logger", () => ({ writeLog: vi.fn() }));
+const suggestOutcome = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ai/outcome-suggestion", () => ({ suggestOutcomeFromAiDecision: suggestOutcome }));
 
 import { advanceFromNodeKey } from "./engine";
 import type { FlowNodeRow, FlowRunRow } from "./types";
@@ -111,9 +113,19 @@ const sent = (content: string, tag: string) => ({
 
 beforeEach(() => {
   handleAiAutoResponse.mockReset();
+  suggestOutcome.mockReset();
 });
 
 describe("estacionar antes do próximo ai_agent (C3)", () => {
+  it("decisão com tag repassa o mesmo db simulado para a sugestão", async () => {
+    handleAiAutoResponse.mockResolvedValueOnce(sent("Encaminhando para a equipe.", "#RECUSA"));
+    const { db } = fakeDb();
+    await advanceFromNodeKey(db as never, run(), "agente_ddm", recusaFlow());
+    // O gancho é best-effort e usa import dinâmico.
+    await vi.waitFor(() => expect(suggestOutcome).toHaveBeenCalledWith(db, expect.objectContaining({
+      account_id: "acc", conversation_id: "cv", ai_exit_code: "#RECUSA",
+    })));
+  });
   it("(e) #RECUSA com pergunta ao cliente: recovery_recusa NÃO roda na mesma mensagem", async () => {
     handleAiAutoResponse.mockResolvedValueOnce(
       sent("Entendo. Antes de encerrar, o que mais pesa para você hoje?", "#RECUSA"),
