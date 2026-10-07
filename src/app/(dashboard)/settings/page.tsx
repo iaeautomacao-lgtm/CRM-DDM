@@ -12,7 +12,9 @@ import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
+import { SecretsSettings } from '@/components/settings/secrets-settings';
 import {
+  canSeeSection,
   resolveSection,
   type SettingsSection,
 } from '@/components/settings/settings-sections';
@@ -34,7 +36,10 @@ function SettingsContent() {
   // Overview instead of the panel. Gated on profileLoading so an owner
   // whose role hasn't resolved yet doesn't flash onto Overview first.
   const aiRestricted = !profileLoading && accountRole !== 'owner';
-  const section = rawSection === 'ai' && aiRestricted ? 'overview' : rawSection;
+  const section =
+    (rawSection === 'ai' && aiRestricted) || (!profileLoading && !canSeeSection(rawSection, accountRole))
+      ? 'overview'
+      : rawSection;
 
   const go = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -59,6 +64,7 @@ function SettingsContent() {
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
     api: <ApiKeysSettings />,
+    secrets: <SecretsSettings />,
     ai: <AiAgentSettings />,
   };
 

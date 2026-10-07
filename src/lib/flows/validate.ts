@@ -23,7 +23,7 @@
  * `node_key`; trigger-scoped use `scope: 'trigger'`.
  */
 
-import { findInlineSecrets } from "@/lib/ai/tool-secrets";
+import { findAccountSecretRefs, findInlineSecrets, inlineSecretAdvice } from "@/lib/ai/tool-secrets";
 import {
   aiProviderLabel,
   getProviderForModel,
@@ -67,7 +67,11 @@ interface NodeInput {
 export function validateFlowForActivation(
   flow: FlowInput,
   nodes: NodeInput[],
-  context: { aiProvider?: string | null } = {},
+  context: {
+    aiProvider?: string | null;
+    /** Nomes cadastrados na conta (Configurações → Variáveis e credenciais). Sem isso, {{cred.X}}/{{var.X}} não são conferidos. */
+    accountSecrets?: { credentials: string[]; variables: string[] } | null;
+  } = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -251,7 +255,7 @@ function validateNextNodeKey(
 function validateNode(
   node: NodeInput,
   knownKeys: Set<string>,
-  context: { aiProvider?: string | null },
+  context: { aiProvider?: string | null; accountSecrets?: { credentials: string[]; variables: string[] } | null },
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -1154,7 +1158,9 @@ function validateNode(
       // Token em texto na URL de uma ferramenta: fica gravado no banco e
       // visível no editor — usar o marcador resolvido no servidor.
       const tools = Array.isArray((node.config as { tools?: unknown }).tools)
-        ? (node.config as { tools: Array<{ name?: string; http?: { url?: string } }> }).tools
+        ? (node.config as {
+            tools: Array<{ name?: string; http?: { url?: string; body?: string; headers?: Record<string, string> } }>;
+          }).tools
         : [];
       for (const tool of tools) {
         const inline = findInlineSecrets(tool.http?.url ?? "");
@@ -1164,8 +1170,31 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: "tools",
-            message: `A ferramenta "${tool.name ?? "sem nome"}" tem um token em texto na URL (${inline.join(", ")}=…). Troque o valor por {{secret.DDM_TOKEN}} — o token fica só no servidor.`,
+            message: inlineSecretAdvice(tool.name ?? "sem nome", inline),
           });
+        }
+        // {{cred.X}} / {{var.X}} que não existe na conta: a ferramenta falharia
+        // em tempo de execução ("variável/credencial não configurada").
+        const known = context.accountSecrets;
+        if (known) {
+          const refs = findAccountSecretRefs([
+            tool.http?.url,
+            tool.http?.body,
+            ...Object.values(tool.http?.headers ?? {}),
+          ]);
+          const missing = [
+            ...refs.creds.filter((n) => !known.credentials.includes(n)).map((n) => `{{cred.${n}}}`),
+            ...refs.vars.filter((n) => !known.variables.includes(n)).map((n) => `{{var.${n}}}`),
+          ];
+          if (missing.length > 0) {
+            issues.push({
+              severity: "warning",
+              scope: "node",
+              node_key: node.node_key,
+              field: "tools",
+              message: `A ferramenta "${tool.name ?? "sem nome"}" usa ${missing.join(", ")}, que não existe nesta conta. Cadastre em Configurações → Variáveis e credenciais.`,
+            });
+          }
         }
       }
       break;

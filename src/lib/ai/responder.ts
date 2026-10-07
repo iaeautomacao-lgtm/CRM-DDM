@@ -5,6 +5,7 @@ import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
 import { resolveToolSecrets } from '@/lib/ai/tool-secrets';
+import { currentAccountSecrets, withAccountSecretsScope } from '@/lib/ai/account-secrets';
 import {
   getAiModelDefinition,
   isModelCompatibleWithProvider,
@@ -1527,7 +1528,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
     generatedText = forceTransferHumanMsg;
   } else {
     try {
-      generatedText = (await callProvider()).trim();
+      generatedText = (await withAccountSecretsScope(accountId, callProvider)).trim();
 
       // Retry automático: o modelo ocasionalmente retorna "" sem lançar
       // exceção (hiccup do provider, resposta filtrada) — isso não cai
@@ -1540,7 +1541,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
       // partir do engine.ts seria descartado silenciosamente pelo claim.
       if (!generatedText) {
         console.warn("[AI Agent] Resposta vazia do modelo, tentando novamente (retry automático)...");
-        generatedText = (await callProvider()).trim();
+        generatedText = (await withAccountSecretsScope(accountId, callProvider)).trim();
       }
     } catch (err) {
       // Rethrown (not just logged + returned) so the Flow Builder's
@@ -2356,9 +2357,12 @@ export async function generateOpenAiResponse(
 
           // Segredos ({{secret.DDM_TOKEN}}) vêm do ambiente do servidor e
           // são trocados ANTES dos argumentos do modelo — ver tool-secrets.ts.
+          // Variáveis/credenciais da CONTA ({{var.X}}/{{cred.X}}/{{secret.X}} com
+          // prioridade sobre o .env): carregadas uma vez por chamada de ferramenta.
+          const accountSecrets = await currentAccountSecrets();
           const missingSecrets: string[] = [];
           const withSecrets = (str: string, encode: boolean) => {
-            const r = resolveToolSecrets(str, toolDef.http.url, process.env, { encode });
+            const r = resolveToolSecrets(str, toolDef.http.url, process.env, { encode, account: accountSecrets });
             missingSecrets.push(...r.missing);
             return r.value;
           };
@@ -2377,7 +2381,7 @@ export async function generateOpenAiResponse(
           const secretFailure = missingSecrets.length
             ? {
                 code: "TOOL_PROVIDER_ERROR" as const,
-                message: `Credencial da integração não configurada no servidor (${[...new Set(missingSecrets)].join(", ")}).`,
+                message: `Variável/credencial da integração não configurada ou sem permissão para este host (${[...new Set(missingSecrets)].join(", ")}).`,
                 retryable: false,
               }
             : null;

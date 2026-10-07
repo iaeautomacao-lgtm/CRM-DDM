@@ -5,8 +5,11 @@ import {
   Shield,
   User,
   Bot,
+  LockKeyhole,
   type LucideIcon,
 } from 'lucide-react';
+
+import { hasMinRole, type AccountRole } from '@/lib/auth/roles';
 
 /**
  * Settings information architecture for the redesigned page.
@@ -30,6 +33,7 @@ export const SETTINGS_SECTIONS = [
   'security',
   'appearance',
   'api',
+  'secrets',
   'ai',
 ] as const;
 
@@ -46,6 +50,8 @@ export interface SectionMeta {
   icon: LucideIcon;
   group: 'top' | 'account' | 'workspace';
   ownerOnly?: boolean;
+  /** Papel mínimo para ver a seção (some do menu e a URL volta à Visão geral). */
+  minRole?: AccountRole;
 }
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
@@ -54,6 +60,13 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace' },
+  secrets: {
+    id: 'secrets',
+    label: 'Variáveis e credenciais',
+    icon: LockKeyhole,
+    group: 'workspace',
+    minRole: 'supervisor',
+  },
   ai: { id: 'ai', label: 'Agente de IA', icon: Bot, group: 'workspace', ownerOnly: true },
 };
 
@@ -62,6 +75,14 @@ export const RAIL_GROUPS: { label: string | null; group: SectionMeta['group'] }[
   { label: 'Conta', group: 'account' },
   { label: 'Espaço de trabalho', group: 'workspace' },
 ];
+
+/** O papel enxerga a seção? (ownerOnly e minRole). */
+export function canSeeSection(section: SettingsSection, role: AccountRole | null | undefined): boolean {
+  const meta = SECTION_META[section];
+  if (meta.ownerOnly && role !== 'owner') return false;
+  if (meta.minRole && !(role && hasMinRole(role, meta.minRole))) return false;
+  return true;
+}
 
 function isSection(value: string | null): value is SettingsSection {
   return !!value && (SETTINGS_SECTIONS as readonly string[]).includes(value);
