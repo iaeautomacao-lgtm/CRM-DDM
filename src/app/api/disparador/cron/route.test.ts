@@ -32,6 +32,14 @@ vi.mock('@/lib/disparador/auto-pause', async (importOriginal) => ({
   checkCampaignAutoPause: pauseMocks.check,
 }));
 vi.mock('@/lib/disparador/receipts-cleanup', () => ({ cleanupOrphanReceipts: vi.fn() }));
+vi.mock('@/lib/disparador/reconcile-unknown-provider-outcomes', () => ({
+  recoverStaleSendingReservations: vi.fn(async () => ({
+    recoveredAccepted: 0,
+    finalizedUnknown: 0,
+    failed: 0,
+    campaignIds: [],
+  })),
+}));
 import { GET, POST } from './route';
 import { clearMemoryCooldowns } from '@/lib/disparador/throughput-config';
 
