@@ -39,7 +39,11 @@ function resolveOverride(name: string, env: Env, realBase: string, forbiddenDoma
   const raw = (env[name] ?? '').trim()
   if (!raw) return realBase
   if (env.DISPATCH_LOAD_TEST !== '1') {
-    throw new LoadTestGateError(`${name} só é aceita com DISPATCH_LOAD_TEST=1 (bancada de carga). Remova a variável deste ambiente.`)
+    // Sem a bancada ligada a variável é IGNORADA (usa o serviço real) em vez de derrubar o app:
+    // o SDK da OpenAI, por exemplo, lê OPENAI_BASE_URL sozinho, e uma variável esquecida no .env
+    // não pode tirar a produção do ar. O mock só é usado com DISPATCH_LOAD_TEST=1.
+    console.warn(`[loadtest] ${name} ignorada: só vale com DISPATCH_LOAD_TEST=1. Usando ${realBase}.`)
+    return realBase
   }
   let url: URL
   try {

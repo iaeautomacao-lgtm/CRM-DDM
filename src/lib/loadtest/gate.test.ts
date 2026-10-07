@@ -23,9 +23,9 @@ describe('gate da bancada de carga — META_API_BASE_URL', () => {
     expect(resolveMetaApiBaseUrl({ ...ok, META_API_BASE_URL: 'http://127.0.0.1:4010' })).toBe('http://127.0.0.1:4010');
   });
 
-  it('SEM DISPATCH_LOAD_TEST=1 (ou com outro valor): aborta — inclusive em produção', () => {
+  it('SEM DISPATCH_LOAD_TEST=1 (ou com outro valor): ignora a variável e usa o serviço real — nunca derruba a produção', () => {
     for (const flag of [undefined, '', '0', 'true', 'yes']) {
-      expect(() => resolveMetaApiBaseUrl({ NODE_ENV: 'production', META_API_BASE_URL: 'http://127.0.0.1:4010', DISPATCH_LOAD_TEST: flag })).toThrow(LoadTestGateError);
+      expect(resolveMetaApiBaseUrl({ NODE_ENV: 'production', META_API_BASE_URL: 'http://127.0.0.1:4010', DISPATCH_LOAD_TEST: flag })).toBe(META_REAL_BASE);
     }
   });
 
@@ -55,17 +55,17 @@ describe('gate da bancada de carga — OPENAI_BASE_URL e boot', () => {
   it('mesmo gate para a OpenAI', () => {
     expect(resolveOpenAiBaseUrl({})).toBe(OPENAI_REAL_BASE);
     expect(resolveOpenAiBaseUrl({ ...ok, OPENAI_BASE_URL: 'http://mock-openai:4020' })).toBe('http://mock-openai:4020');
-    expect(() => resolveOpenAiBaseUrl({ OPENAI_BASE_URL: 'http://mock-openai:4020' })).toThrow(/DISPATCH_LOAD_TEST/);
+    expect(resolveOpenAiBaseUrl({ OPENAI_BASE_URL: 'http://mock-openai:4020' })).toBe(OPENAI_REAL_BASE);
     expect(() => resolveOpenAiBaseUrl({ ...ok, OPENAI_BASE_URL: 'https://api.openai.com' })).toThrow(/REAL/);
   });
 
-  it('assertLoadTestGate (boot): passa limpo, avisa com a bancada ativa e aborta se o gate falhar', () => {
+  it('assertLoadTestGate (boot): passa limpo, avisa com a bancada ativa e só aborta com a bancada ligada apontando para produção', () => {
     const warn = vi.fn();
     expect(assertLoadTestGate({}, { warn })).toEqual({ active: false });
     expect(warn).not.toHaveBeenCalled();
     expect(assertLoadTestGate({ ...ok, META_API_BASE_URL: 'http://mock:4010' }, { warn })).toEqual({ active: true });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('BANCADA DE CARGA ATIVA'));
-    expect(() => assertLoadTestGate({ META_API_BASE_URL: 'http://mock:4010' }, { warn })).toThrow(LoadTestGateError);
+    expect(assertLoadTestGate({ META_API_BASE_URL: 'http://mock:4010' }, { warn })).toEqual({ active: false }); // ignorada sem a bancada ligada
     expect(() => assertLoadTestGate({ DISPATCH_LOAD_TEST: '1', SUPABASE_URL: 'https://cyftbffhgjmsfogxawrl.supabase.co' }, { warn })).toThrow(/PRODUÇÃO/);
   });
 });
