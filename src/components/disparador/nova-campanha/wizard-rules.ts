@@ -15,7 +15,7 @@ import {
   type TemplateMode,
 } from "@/lib/disparador/campaign-validation";
 import type { WizardChannel } from "@/lib/disparador/channel-filter";
-import { forecastCampaign, IMEDIATO_BATCH_SIZE, type ForecastResult } from "@/lib/disparador/dispatch-forecast";
+import { forecastCampaign, IMEDIATO_BATCH_SIZE, type ForecastResult, type ForecastThroughputInput } from "@/lib/disparador/dispatch-forecast";
 import type { ImportColumnMap } from "@/lib/disparador/import-mapping";
 import {
   findVariableProblems,
@@ -463,7 +463,12 @@ export function firstInvalidStep(target: WizardStep, form: WizardForm, ctx: Wiza
  * Previsão de término para o formulário. `contacts` = público conhecido
  * (base importada ou prévia do público); null = desconhecido.
  */
-export function forecastForForm(form: WizardForm, contacts: number | null, now: Date): ForecastResult | null {
+export function forecastForForm(
+  form: WizardForm,
+  contacts: number | null,
+  now: Date,
+  throughput?: ForecastThroughputInput
+): ForecastResult | null {
   if (contacts == null || contacts <= 0 || !form.dispatchMode) return null;
   const startIso = form.startMode === "agendar" ? scheduleIso(form.startDate, form.startTime) : null;
   const start = startIso ? new Date(startIso) : now;
@@ -477,6 +482,7 @@ export function forecastForForm(form: WizardForm, contacts: number | null, now: 
         : { mode: "imediato" },
     start,
     janela: { inicio: form.startTime, fim: form.endTime, dias: [...BUSINESS_DAYS] },
+    throughput,
   });
 }
 

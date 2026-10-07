@@ -2,11 +2,13 @@
 // pelo assistente "Nova campanha" (passo Configurações e Revisão) e pelos
 // cards da lista. Não muda nada no motor: só simula o que ele faz.
 //
-// O que o motor faz (cron/route.ts + startCampaign.ts + window-clock.ts):
-//   - O cron roda 1× por minuto. Por campanha, busca até
-//     min(batch_size, MAX_CRON_BATCH_CANDIDATES) itens vencidos e envia com
-//     até 4 envios simultâneos, dentro de ~35 s de orçamento por tick
-//     (deadline de 40 s menos 5 s de folga).
+// O motor atual é por número em paralelo (throughput-config.ts,
+// dispatch-scheduler.ts):
+//   - O cron roda 1× por minuto.
+//   - Cada número tem concorrência configurada (slots = min(per_number, global))
+//     e orçamento de envio (budgetSeconds, padrão 35 s).
+//   - A vazão real por número é calculada a partir da latência medida:
+//     envios/min por número = slots ÷ latência × budget(s).
 //   - Fora da janela/dia permitido o cron pula a campanha: o tempo da fila
 //     só anda com a janela aberta (relógio de janela).
 //   - "Imediato" = um lote só (batch_size enorme, sem pausa): tudo vence no
@@ -16,37 +18,55 @@
 //     cron consegue mandar num minuto continua nos ticks seguintes; se ela
 //     demorar mais que a pausa, a próxima rodada fica na fila atrás dela.
 //
-// O ritmo real depende do tempo de resposta do provedor (Meta/WAHA) e de
-// quantas campanhas rodam ao mesmo tempo (o tick é compartilhado). Por isso
-// a previsão é uma FAIXA: otimista (0,5 s por envio) e conservadora (2 s por
-// envio), considerando só esta campanha. Feriados não são considerados.
+// Para várias contas no mesmo número a previsão é por campanha isolada
+// (outras campanhas no mesmo número dividem o ritmo). Feriados não são considerados.
 
-import { MAX_CRON_BATCH_CANDIDATES } from "@/lib/disparador/cron-batching";
 import { addOpenWindowTime, scheduleRounds, type SendWindowConfig } from "@/lib/disparador/window-clock";
 
 /** Intervalo do cron externo (crontab, 1×/min). */
 export const CRON_TICK_MS = 60_000;
-/** Orçamento de envio por tick: deadline de 40 s menos 5 s de folga (cron/route.ts). */
+/** Orçamento de envio por tick padrão: deadline de 40 s menos 5 s de folga (cron/route.ts). */
 export const CRON_SEND_BUDGET_SECONDS = 35;
-/** Envios simultâneos por campanha no tick (processWithConcurrency(…, 4) no cron). */
+/** Concorrência padrão de envios por número (claim_dispatch_item default). */
 export const CRON_SEND_CONCURRENCY = 4;
-/** Segundos por envio (provedor + claim/updates no banco): otimista e conservador. */
-export const SEND_SECONDS_PER_ITEM = { otimista: 0.5, conservador: 2 } as const;
-/** batch_size gravado no modo Imediato (um lote só; o cron limita a 700 por tick). */
+/** Segundos por envio padrão (quando não há telemetria recente): Meta (0,85s) e WAHA (2s). */
+export const SEND_SECONDS_PER_ITEM = { otimista: 0.85, conservador: 2 } as const;
+/** batch_size gravado no modo Imediato (um lote só). */
 export const IMEDIATO_BATCH_SIZE = 999_999;
 
+export interface ThroughputRateConfig {
+  slots?: number;
+  budgetSeconds?: number;
+}
+
 /**
- * Itens por minuto que o cron consegue enviar para UMA campanha, dado o
- * limite de candidatos por tick e o tempo médio por envio. Fracionário
+ * Calcula a vazão teórica em envios/min por número:
+ * envios/min = slots ÷ latência × budget(s)
+ */
+export function calculateThroughputPerMinute(
+  slots: number,
+  latencySeconds: number,
+  budgetSeconds: number
+): number {
+  if (slots <= 0 || latencySeconds <= 0 || budgetSeconds <= 0) return 0;
+  return (slots / latencySeconds) * budgetSeconds;
+}
+
+/**
+ * Itens por minuto que o cron consegue enviar para UMA campanha no número,
+ * dado o limite de candidatos e o tempo de resposta medido. Fracionário
  * quando há limite_por_hora baixo (ex.: 30/h = 0,5/min).
  */
 export function cronItemsPerMinute(
   candidateLimit: number,
   secondsPerItem: number,
-  hourlyLimit?: number | null
+  hourlyLimit?: number | null,
+  throughput?: ThroughputRateConfig
 ): number {
-  const byTime = Math.floor((CRON_SEND_CONCURRENCY * CRON_SEND_BUDGET_SECONDS) / Math.max(0.05, secondsPerItem));
-  let perMinute = Math.max(1, Math.min(Math.max(1, candidateLimit), MAX_CRON_BATCH_CANDIDATES, byTime));
+  const slots = throughput?.slots ?? CRON_SEND_CONCURRENCY;
+  const budget = throughput?.budgetSeconds ?? CRON_SEND_BUDGET_SECONDS;
+  const byTime = Math.floor(calculateThroughputPerMinute(slots, Math.max(0.05, secondsPerItem), budget));
+  let perMinute = Math.max(1, Math.min(Math.max(1, candidateLimit), byTime));
   if (hourlyLimit != null && hourlyLimit > 0) perMinute = Math.min(perMinute, hourlyLimit / 60);
   return perMinute;
 }
@@ -56,6 +76,18 @@ export type ForecastDispatch =
   | { mode: "segmentado"; percent: number; pauseMinutes: number }
   /** Lote de tamanho fixo (campanhas antigas "Personalizado"/sequenciais). */
   | { mode: "lote"; contactsPerRound: number; pauseMinutes: number };
+
+export interface ForecastThroughputInput {
+  /** Slots por número: min(per_number, global). Padrão = 4. */
+  slots?: number;
+  /** Orçamento de envio por tick em segundos. Padrão = 35. */
+  budgetSeconds?: number;
+  /** Latência em segundos por envio: otimista (ex: avg) e conservador (ex: p95). */
+  latency?: {
+    otimista: number;
+    conservador: number;
+  };
+}
 
 export interface ForecastInput {
   /** Contatos que vão receber (já sem duplicados/blacklist, quando conhecido). */
@@ -68,6 +100,8 @@ export interface ForecastInput {
   janela: SendWindowConfig;
   /** campaigns.limite_por_hora, se configurado (não tem campo no assistente). */
   hourlyLimit?: number | null;
+  /** Parâmetros do motor real (slots por número, orçamento, latência). */
+  throughput?: ForecastThroughputInput;
 }
 
 export interface ForecastScenario {
@@ -95,6 +129,8 @@ export interface ForecastResult {
   roundsOverlap: boolean;
   /** Rodada de 1 contato: o motor usa o envio sequencial (1 item por intervalo). */
   sequentialFallback: boolean;
+  /** Vazão de referência em envios/min por número para exibição na UI. */
+  ratePerMinute: number;
 }
 
 interface Plan {
@@ -165,11 +201,18 @@ export function forecastCampaign(input: ForecastInput): ForecastResult {
   const items = p.sequentialFallback ? p.rounds : Math.max(0, Math.floor(input.contacts)) * mpc;
   const firstSendAt = addOpenWindowTime(input.start, 0, input.janela);
   const times = scheduleRounds(input.start, p.rounds, p.pauseSeconds, input.janela);
-  const perMinOtimista = cronItemsPerMinute(p.candidateLimit, SEND_SECONDS_PER_ITEM.otimista, input.hourlyLimit);
-  const perMinConservador = cronItemsPerMinute(p.candidateLimit, SEND_SECONDS_PER_ITEM.conservador, input.hourlyLimit);
+
+  const slots = input.throughput?.slots ?? CRON_SEND_CONCURRENCY;
+  const budgetSeconds = input.throughput?.budgetSeconds ?? CRON_SEND_BUDGET_SECONDS;
+  const secOtimista = input.throughput?.latency?.otimista ?? SEND_SECONDS_PER_ITEM.otimista;
+  const secConservador = input.throughput?.latency?.conservador ?? SEND_SECONDS_PER_ITEM.conservador;
+
+  const perMinOtimista = cronItemsPerMinute(p.candidateLimit, secOtimista, input.hourlyLimit, { slots, budgetSeconds });
+  const perMinConservador = cronItemsPerMinute(p.candidateLimit, secConservador, input.hourlyLimit, { slots, budgetSeconds });
   const fullRound = p.itemsPerRound(0);
   const drainMin = Math.ceil(fullRound / perMinOtimista);
   const drainMax = Math.ceil(fullRound / perMinConservador);
+
   return {
     items,
     rounds: p.rounds,
@@ -188,6 +231,7 @@ export function forecastCampaign(input: ForecastInput): ForecastResult {
     roundDrainMinutes: { min: drainMin, max: drainMax },
     roundsOverlap: p.rounds > 1 && p.pauseSeconds > 0 && drainMax * 60 > p.pauseSeconds,
     sequentialFallback: p.sequentialFallback,
+    ratePerMinute: Math.round(calculateThroughputPerMinute(slots, secOtimista, budgetSeconds)),
   };
 }
 
@@ -210,7 +254,8 @@ export function forecastFromCampaign(
   },
   contacts: number,
   messagesPerContactValue: number,
-  start: Date
+  start: Date,
+  throughput?: ForecastThroughputInput
 ): ForecastResult {
   const janela = { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio };
   const pauseMinutes = Math.max(0, campaign.batch_pause_seconds ?? 0) / 60;
@@ -232,5 +277,6 @@ export function forecastFromCampaign(
     start,
     janela,
     hourlyLimit: campaign.limite_por_hora ?? null,
+    throughput,
   });
 }
