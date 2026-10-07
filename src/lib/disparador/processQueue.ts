@@ -20,6 +20,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
+import type { ConfirmArgs, ConfirmResult } from "@/lib/disparador/confirm-batcher";
 
 // Marcador de contato externo WAHA — definido em queue-markers.ts e
 // reexportado aqui para os imports existentes continuarem funcionando.
@@ -171,6 +172,13 @@ export interface ProcessQueueItemOptions {
   blacklistLookup?: BlacklistLookup;
   /** Só observa: nunca altera o destino do item. */
   onProviderCall?: (observation: ProviderCallObservation) => void;
+  /**
+   * O item já foi reivindicado em lote (claim_dispatch_batch, migration 188) e está 'enviando': pula o claim por item.
+   * O resto do fluxo (blacklist, envio, confirmação, erros) é o mesmo.
+   */
+  alreadyClaimed?: boolean;
+  /** Confirmação do envio em micro-lote (confirm-batcher.ts); ausente = confirmação unitária. */
+  confirmBatcher?: { submit(args: ConfirmArgs): Promise<ConfirmResult> };
 }
 
 function observe(options: ProcessQueueItemOptions | undefined, observation: ProviderCallObservation) {
@@ -351,7 +359,7 @@ export async function markQueueError(
   campaignId: string,
   tentativas?: number
 ): Promise<void> {
-  const baseUpdate: Record<string, unknown> = { status: "erro", erro: message };
+  const baseUpdate: Record<string, unknown> = { status: "erro", erro: message, updated_at: new Date().toISOString() };
   if (tentativas !== undefined) baseUpdate.tentativas = tentativas;
 
   const { error } = await supabaseAdmin()
@@ -546,12 +554,13 @@ export async function processQueueItem(
       .from("disp_message_queue")
       .update({ status: "agendado", scheduled_at: tomorrowUtc.toISOString() })
       .eq("id", item.id)
-      .eq("status", "agendado");
+      // Item já reivindicado em lote está 'enviando': volta a 'agendado' para a próxima abertura.
+      .in("status", options?.alreadyClaimed ? ["agendado", "enviando"] : ["agendado"]);
 
     return { outcome: "deferred", reason: "outside_window" };
   }
 
-  const claimed = await claimItemAtomically(item.id, options?.defaultMaxInFlight);
+  const claimed = options?.alreadyClaimed ? true : await claimItemAtomically(item.id, options?.defaultMaxInFlight);
   if (!claimed) {
     // Outro consumidor (worker.ts / cron) já reivindicou este item entre
     // o SELECT do chamador e esta chamada — não reprocessa.
@@ -917,7 +926,7 @@ export async function processQueueItem(
   // deixava a mensagem marcada 'enviado' mas sem log de auditoria e/ou
   // sem incrementar campaign_metrics.total_enviados, sem reconciliação
   // possível depois.
-  const { error: markSentError, replayed } = await confirmItemSent({
+  const confirmArgs = {
     p_item_id: item.id,
     p_campaign_id: item.campaign_id,
     p_contact_id: item.contact_id,
@@ -925,7 +934,10 @@ export async function processQueueItem(
     p_mensagem: cleanText,
     p_waha_message_id: externalMessageId,
     p_tentativas: (item.tentativas || 0) + 1,
-  });
+  };
+  const { error: markSentError, replayed } = options?.confirmBatcher
+    ? await options.confirmBatcher.submit(confirmArgs)
+    : await confirmItemSent(confirmArgs);
 
   if (markSentError) {
     // O provedor JÁ aceitou o envio, mas a confirmação local falhou. Não
@@ -971,7 +983,7 @@ export async function processQueueItem(
 // mark_queue_item_sent e o replay roda à parte, como antes.
 let confirmRpcUnavailable = false;
 
-async function confirmItemSent(
+export async function confirmItemSent(
   args: Record<string, unknown>
 ): Promise<{ error: { message: string } | null; replayed: boolean }> {
   if (!confirmRpcUnavailable) {
