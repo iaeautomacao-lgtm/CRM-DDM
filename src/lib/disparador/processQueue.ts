@@ -20,7 +20,6 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
-import OpenAI from "openai";
 
 // Marcador de contato externo WAHA — definido em queue-markers.ts e
 // reexportado aqui para os imports existentes continuarem funcionando.
@@ -30,6 +29,10 @@ import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/s
 import { classifyProviderError, type BackoffReason } from "@/lib/disparador/provider-signals";
 import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
+import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
+import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
+import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
+import { loadCampaignStatusCounts, summarizeStatusCounts } from "@/lib/disparador/campaign-status-counts";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -572,10 +575,16 @@ export async function processQueueItem(
       .eq("contact_id", item.contact_id)
       .eq("ordem", item.phone_attempt_order ?? 1)
       .maybeSingle();
-    phone = altPhone?.phone || item.contacts?.phone || item.mensagem_final;
+    // Contato do CRM: mensagem_final é texto, nunca telefone.
+    phone = altPhone?.phone || item.contacts?.phone || "";
   } else {
     // Mesma regra que o cron usa para pré-carregar a blacklist.
-    phone = queueItemPrimaryPhone(item) ?? item.mensagem_final;
+    // Só itens externos (contact_id nulo, API v1) guardam o número em mensagem_final.
+    phone = queueItemPrimaryPhone(item) ?? (item.contact_id ? "" : item.mensagem_final);
+  }
+  if (item.contact_id && !hasDialablePhone(phone)) {
+    await markQueueError(item.id, NO_VALID_PHONE_ERROR, true, item.campaign_id, tentativasAtuais + 1);
+    return { outcome: "error", error: NO_VALID_PHONE_ERROR };
   }
 
   // Revalidação do tick (cron): mesma chave do startCampaign, que também
@@ -684,41 +693,23 @@ export async function processQueueItem(
       ? (item.template_variables?.[0] ?? "")
       : item.mensagem_final;
 
-  const disparadorOpenAiKey = process.env.DISPARADOR_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-
-  if (tipo === "ia" && disparadorOpenAiKey) {
-    try {
-      const configuredAiTimeout = Number.parseInt(
-        process.env.DISPATCH_OPENAI_TIMEOUT_MS ?? "",
-        10
-      );
-      const aiTimeoutMs =
-        Number.isFinite(configuredAiTimeout) && configuredAiTimeout > 0
-          ? Math.min(configuredAiTimeout, 120_000)
-          : 30_000;
-      const openai = new OpenAI({
-        apiKey: disparadorOpenAiKey,
-        timeout: aiTimeoutMs,
+  if (tipo === "ia") {
+    // Campanha com IA: mensagem_final é o PROMPT. Falha da IA (429/timeout/sem chave/vazio) NUNCA
+    // pode enviar o prompt ao cliente: o item volta para a fila (erro retentável, sem consumir
+    // tentativa) e a pausa automática conta estas ocorrências.
+    const generated = await generateDispatchAiText(messageText, item.contacts?.name);
+    if (generated === null) {
+      await markQueueError(item.id, AI_UNAVAILABLE_ERROR, false, item.campaign_id, tentativasAtuais);
+      void writeLog({
+        level: "warn",
+        source: "disparador",
+        event: "message_ai_unavailable",
+        message: "Geração por IA indisponível; item devolvido à fila sem enviar nada ao cliente",
+        payload: { campaign_id: item.campaign_id, queue_id: item.id },
       });
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Você é um assistente de vendas para WhatsApp. Gere uma mensagem natural, sem parecer spam. Responda APENAS com a mensagem, sem explicações.",
-          },
-          {
-            role: "user",
-            content: `Contato: nome=${item.contacts?.name || ""}. Prompt: ${messageText}`,
-          },
-        ],
-        max_tokens: 500,
-      });
-      messageText = completion.choices[0]?.message?.content || messageText;
-    } catch (aiErr) {
-      console.warn("[processQueue] AI generation failed, using prompt text:", aiErr);
+      return { outcome: "deferred", reason: "ai_unavailable" };
     }
+    messageText = generated;
   }
 
   const cleanText = applyTemplateVars(messageText, item.contacts).replace(
@@ -746,9 +737,16 @@ export async function processQueueItem(
     // Deixar isso em enviando consome max_in_flight e pode paralisar o
     // número inteiro. Também não podemos reenviar, pois pode duplicar.
     // Resultado: terminaliza como erro permanente sem retry e libera a vaga.
+    // Exceção: falha de CONEXÃO (ECONNREFUSED/ENOTFOUND/EAI_AGAIN/connect timeout) prova que o POST
+    // não saiu — transitório com retry normal (decisão do dono, P0-3).
+    if (isNotConnectedError(sendErr)) {
+      await markQueueError(item.id, NOT_CONNECTED_ERROR, false, item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: NOT_CONNECTED_ERROR };
+    }
     if (!isDefinitiveRejection(sendErr)) {
-      const message =
-        "Resultado externo não confirmado; encerrado sem reenvio para evitar duplicidade";
+      // 502/503/504 e timeout de resposta: pode ter saído. Não reenvia; o auto-pause conta estes
+      // "incertos" (UNCERTAIN_OUTCOME_ERROR) para frear a campanha quando viram um padrão.
+      const message = UNCERTAIN_OUTCOME_ERROR;
       await markQueueError(
         item.id,
         message,
@@ -1182,40 +1180,11 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
       .eq("campaign_id", campaignId)
       .maybeSingle();
 
-    // Buscar resumo dos itens da fila — paginado via .range(), mesmo
-    // padrão de startCampaign.ts (allContacts/contact_import_variables):
-    // sem paginação, uma campanha com mais de 1000 itens batia no cap de
-    // resposta do PostgREST e o resumo abaixo (enviados/erros/bloqueados/
-    // cancelados) vinha truncado e incorreto no payload do callback.
-    const queueSummary: Array<{ status: string }> = [];
-    {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await db
-          .from("disp_message_queue")
-          .select("status")
-          .eq("campaign_id", campaignId)
-          .range(from, from + pageSize - 1);
-        if (pageError) {
-          console.error(
-            `[Callback] Campanha ${campaignId} — falha ao paginar disp_message_queue:`,
-            pageError.message
-          );
-          return false;
-        }
-        queueSummary.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-    }
-
-    const enviados = queueSummary.filter(
-      (i) => i.status === "enviado" || i.status === "entregue" || i.status === "lido"
-    ).length;
-    const erros = queueSummary.filter((i) => i.status === "erro").length;
-    const bloqueados = queueSummary.filter((i) => i.status === "bloqueado").length;
-    const cancelados = queueSummary.filter((i) => i.status === "cancelado").length;
+    // Resumo da fila por status numa agregação só (get_campaign_stats), em vez de paginar a fila
+    // inteira por OFFSET sem ORDER BY (REVISAO F6b/F19). Falha ⇒ a outbox tenta de novo depois.
+    const statusCounts = await loadCampaignStatusCounts(db, campaignId);
+    if (!statusCounts) return false;
+    const { total_enfileirados, enviados, erros, bloqueados, cancelados } = summarizeStatusCounts(statusCounts);
 
     // Nota: só roda quando a campanha tem callback_url configurado (early
     // return na linha acima) — campanhas sem callback externo não geram
@@ -1234,7 +1203,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
       campaign_name: campaign.nome,
       completed_at: campaign.updated_at,
       summary: {
-        total_enfileirados: queueSummary.length,
+        total_enfileirados,
         enviados,
         entregues: metrics?.total_entregues ?? 0,
         lidos: metrics?.total_lidos ?? 0,

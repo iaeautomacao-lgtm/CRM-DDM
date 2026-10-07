@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   send: vi.fn(),
   autoBlacklist: vi.fn(),
+  ai: vi.fn(),
 }));
 vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
@@ -62,8 +63,10 @@ vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/whatsapp/meta-api')>()),
   sendTextMessage: mocks.send,
 }));
+vi.mock('@/lib/disparador/dispatch-ai', () => ({ generateDispatchAiText: mocks.ai }));
 import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
+import { UNCERTAIN_OUTCOME_ERROR } from './provider-outcome';
 
 const item: QueueItem = {
   id: 'item',
@@ -87,6 +90,65 @@ describe('queue provider outcomes', () => {
       data: name === 'claim_dispatch_item' ? mocks.claimed : null,
       error: name === 'confirm_dispatch_item_sent' || name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
     }));
+  });
+  it('contato do CRM sem telefone NUNCA usa o texto da mensagem como número (REVISAO A1)', async () => {
+    const contactItem: QueueItem = {
+      ...item,
+      contact_id: 'contact',
+      mensagem_final: 'Seu debito de R$ 1.234,56 vence 10/10',
+      contacts: { phone: '' },
+    };
+    const result = await processQueueItem(contactItem, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'error', error: 'Contato sem telefone válido' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true)).toBe(true);
+  });
+  it('item externo (API v1, contact_id nulo) continua usando mensagem_final como telefone', async () => {
+    const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ to: '5511999999999' }));
+  });
+  it('falha de CONEXÃO (ECONNREFUSED/ENOTFOUND/EAI_AGAIN/connect timeout): a mensagem não saiu → transitório com retry (P0-3)', async () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']) {
+      mocks.updates.length = 0;
+      mocks.send.mockReset().mockRejectedValue(new TypeError('fetch failed', { cause: { code } }));
+      const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+      expect(result).toMatchObject({ outcome: 'error', error: expect.stringMatching(/não saiu/) });
+      expect(mocks.send).toHaveBeenCalledTimes(1);
+      expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === 1)).toBe(true);
+      expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+    }
+  });
+  it('502/503/504 da Meta e timeout de resposta: INCERTO — terminal, sem reenvio e com a mensagem que o auto-pause conta', async () => {
+    const uncertain = [
+      new MetaApiError('Bad Gateway', null, 502),
+      new MetaApiError('Service Unavailable', null, 503),
+      new MetaApiError('Gateway Timeout', null, 504),
+      Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }),
+    ];
+    for (const err of uncertain) {
+      mocks.updates.length = 0;
+      mocks.send.mockReset().mockRejectedValue(err);
+      const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+      expect(result).toMatchObject({ outcome: 'error', error: UNCERTAIN_OUTCOME_ERROR });
+      expect(mocks.send).toHaveBeenCalledTimes(1); // at-most-once
+      expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true && u.erro === UNCERTAIN_OUTCOME_ERROR)).toBe(true);
+    }
+  });
+  it('tipo=ia: IA falhou → NADA é enviado (nunca o prompt), item volta como erro retentável sem consumir tentativa (P0-2)', async () => {
+    mocks.ai.mockReset().mockResolvedValue(null);
+    const iaItem: QueueItem = { ...item, tipo: 'ia', mensagem_final: 'PROMPT: gere uma cobrança para o cliente', tentativas: 2 };
+    const result = await processQueueItem(iaItem, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toEqual({ outcome: 'deferred', reason: 'ai_unavailable' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === 2 && /IA indisponível/.test(String(u.erro)))).toBe(true);
+    expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+  });
+  it('tipo=ia: IA ok → envia o texto GERADO, não o prompt', async () => {
+    mocks.ai.mockReset().mockResolvedValue('Olá! Seu débito vence hoje.');
+    const iaItem: QueueItem = { ...item, tipo: 'ia', mensagem_final: 'PROMPT: gere uma cobrança' };
+    expect(await processQueueItem(iaItem, { id: 'campaign', status: 'em_execucao' })).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ text: 'Olá! Seu débito vence hoje.' }));
   });
   it('never calls the provider after losing the guarded claim', async () => {
     mocks.claimed = false;
