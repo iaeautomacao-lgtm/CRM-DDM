@@ -43,10 +43,12 @@ describe('dispatch process concurrency config', () => {
     expect(resolveDispatchProcessConcurrency('10')).toBe(10);
   });
 
-  it('número fora da faixa faz clamp em [1, 50] com aviso — nunca cai para 4 (REVISAO F15)', () => {
+  it('número fora da faixa faz clamp em [1, 150] com aviso — nunca cai para 4 (REVISAO F15)', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(resolveDispatchProcessConcurrency('51')).toBe(50);
-    expect(resolveDispatchProcessConcurrency('64')).toBe(50);
+    expect(resolveDispatchProcessConcurrency('151')).toBe(150);
+    expect(resolveDispatchProcessConcurrency('999')).toBe(150);
+    expect(resolveDispatchProcessConcurrency('64')).toBe(64);
+    expect(resolveDispatchProcessConcurrency('150')).toBe(150);
     expect(resolveDispatchProcessConcurrency('0')).toBe(1);
     expect(resolveDispatchProcessConcurrency('-3')).toBe(1);
     expect(resolveDispatchProcessConcurrency('12.5')).toBe(12);

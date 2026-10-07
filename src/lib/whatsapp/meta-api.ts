@@ -10,6 +10,7 @@
  */
 
 import { resolveMetaApiBaseUrl } from '../loadtest/gate'
+import { getMetaDispatcher } from './meta-dispatcher'
 
 const META_API_VERSION = 'v21.0'
 // Base da Graph API, lida UMA vez. Só a bancada de carga muda isto (META_API_BASE_URL, exige DISPATCH_LOAD_TEST=1;
@@ -33,10 +34,12 @@ async function metaFetch(
     ? AbortSignal.any([init.signal, timeoutSignal])
     : timeoutSignal
 
+  // Conexões reaproveitadas (keep-alive) só para a Meta — ver meta-dispatcher.ts. Vale também para META_API_BASE_URL (bancada).
   return globalThis.fetch(input, {
     ...init,
     signal,
-  })
+    dispatcher: getMetaDispatcher(),
+  } as RequestInit)
 }
 
 export interface MetaSendResult {

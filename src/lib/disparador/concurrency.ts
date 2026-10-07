@@ -32,7 +32,7 @@ export async function processWithConcurrency<T>(
 
 
 export const DEFAULT_DISPATCH_PROCESS_CONCURRENCY = 4;
-export const MAX_DISPATCH_PROCESS_CONCURRENCY = 50;
+export const MAX_DISPATCH_PROCESS_CONCURRENCY = 150;
 
 const warned = new Set<string>();
 function warnOnce(raw: string, message: string): void {
@@ -48,7 +48,7 @@ function warnOnce(raw: string, message: string): void {
  * dispatch_channel_limits.max_in_flight. Aqui limitamos apenas quantas
  * operações o processo tenta manter em andamento ao mesmo tempo.
  *
- * Número fora da faixa NÃO derruba a vazão: faz clamp em [1, 50] com aviso
+ * Número fora da faixa NÃO derruba a vazão: faz clamp em [1, 150] com aviso
  * (antes 51+ voltava para 4 em silêncio — de ~2.500 para ~210 envios/min).
  * Decimal é arredondado para baixo. Só texto que não é número (`abc`) usa o
  * padrão seguro, também com aviso.

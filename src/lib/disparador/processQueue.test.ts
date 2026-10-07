@@ -428,6 +428,29 @@ describe('opções do agendador do cron', () => {
     expect(mocks.rpc).not.toHaveBeenCalledWith('claim_dispatch_item', expect.anything());
   });
 
+  it('F8: limite de taxa da Meta (130429/131048/131056) reagenda SEM consumir tentativa — nem vira permanente na última', async () => {
+    for (const code of [130429, 131048, 131056]) {
+      for (const tentativas of [0, 2, 4]) {
+        mocks.updates.length = 0;
+        mocks.send.mockReset().mockRejectedValue(new MetaApiError('rate limit (code ' + code + ')', code, code === 130429 ? 429 : 400));
+        const result = await processQueueItem({ ...item, tentativas }, campaign);
+        expect(result).toMatchObject({ outcome: 'error' });
+        expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === tentativas)).toBe(true);
+        expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+      }
+    }
+  });
+
+  it('F8: outro erro transitório continua consumindo tentativa e vira permanente no limite', async () => {
+    mocks.updates.length = 0;
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('param (code 99999)', 99999, 400));
+    await processQueueItem({ ...item, tentativas: 1 }, campaign);
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.tentativas === 2)).toBe(true);
+    mocks.updates.length = 0;
+    await processQueueItem({ ...item, tentativas: 4 }, campaign);
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true && u.tentativas === 5)).toBe(true);
+  });
+
   it('observa latência e sinal do provedor sem mudar o resultado', async () => {
     const observations: unknown[] = [];
     const ok = await processQueueItem(item, campaign, { onProviderCall: (o) => observations.push(o) });

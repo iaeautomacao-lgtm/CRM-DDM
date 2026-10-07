@@ -1,4 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// after() só existe dentro de uma requisição do Next: aqui registramos os callbacks para executá-los à mão.
+const afterMock = vi.hoisted(() => ({ queued: [] as Array<() => Promise<void> | void> }));
+vi.mock('next/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/server')>()),
+  after: (callback: () => Promise<void> | void) => {
+    afterMock.queued.push(callback);
+  },
+}));
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   rpc: vi.fn(),
@@ -328,6 +336,132 @@ describe('cron: agendador por número', () => {
     expect((await post()).status).toBe(200);
     expect(mocks.rpc.mock.calls.some(([name]) => name === 'retry_transient_queue_errors')).toBe(true);
     expect(mocks.process).toHaveBeenCalled();
+  });
+
+  describe('tick encadeado (P1-3a)', () => {
+    const chainedPost = (hop: number, startedAt = Date.now()) =>
+      POST(
+        new Request('https://crm.test/api/disparador/cron', {
+          method: 'POST',
+          headers: { 'x-cron-secret': 'test-secret', 'x-cron-hop': String(hop), 'x-cron-chain-start': String(startedAt) },
+        })
+      );
+    const enableChain = () => {
+      vi.stubEnv('DISPARADOR_TICK_CHAIN', '1');
+      vi.stubEnv('DISPARADOR_CHAIN_URL', 'http://127.0.0.1:3000');
+    };
+    afterEach(() => {
+      afterMock.queued.length = 0;
+      vi.unstubAllGlobals();
+    });
+
+    it('desligado (padrão): nenhum hop é agendado', async () => {
+      setup();
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      expect((await post()).status).toBe(200);
+      expect(afterMock.queued).toHaveLength(0);
+    });
+
+    it('ligado e com trabalho processado: agenda UM hop que faz POST ao próprio cron com o mesmo segredo e hop 1', async () => {
+      setup();
+      enableChain();
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      const fetchMock = vi.fn(async () => new Response('{}', { status: 202 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const res = await post();
+      expect(res.status).toBe(200);
+      expect((await res.json()).status).toBe('processed');
+      expect(afterMock.queued).toHaveLength(1);
+      await afterMock.queued[0]();
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe('http://127.0.0.1:3000/api/disparador/cron');
+      expect(init.headers).toMatchObject({ 'x-cron-secret': 'test-secret', 'x-cron-hop': '1' });
+    });
+
+    it('para quando não há item vencido: tick ocioso não encadeia', async () => {
+      setup();
+      enableChain();
+      mocks.from.mockImplementation((table: string) => {
+        const builder: Record<string, unknown> = {};
+        for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in', 'not', 'is', 'eq', 'select', 'upsert'])
+          builder[m] = () => builder;
+        builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+        return builder;
+      });
+      const res = await post();
+      expect((await res.json()).status).toBe('idle');
+      expect(afterMock.queued).toHaveLength(0);
+    });
+
+    it('respeita o máximo de hops por cadeia', async () => {
+      setup();
+      enableChain();
+      vi.stubEnv('DISPARADOR_TICK_CHAIN_MAX_HOPS', '2');
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
+      const res = await chainedPost(2);
+      expect(res.status).toBe(202);
+      await afterMock.queued[0]();
+      expect(afterMock.queued).toHaveLength(1); // rodou o tick do hop 2, mas NÃO agendou o hop 3
+      expect(mocks.process).toHaveBeenCalled();
+    });
+
+    it('hop encadeado: responde 202 na hora (tick roda em after) e encadeia o seguinte', async () => {
+      setup();
+      enableChain();
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      const fetchMock = vi.fn(async () => new Response('{}', { status: 202 }));
+      vi.stubGlobal('fetch', fetchMock);
+      const res = await chainedPost(1);
+      expect(res.status).toBe(202);
+      expect(await res.json()).toEqual({ status: 'chained', hop: 1 });
+      expect(mocks.process).not.toHaveBeenCalled(); // nada rodou ainda
+      await afterMock.queued[0]();
+      expect(mocks.process).toHaveBeenCalled();
+      const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(init.headers).toMatchObject({ 'x-cron-hop': '2' });
+    });
+
+    it('hop encadeado sem segredo válido é recusado e nada roda', async () => {
+      setup();
+      enableChain();
+      const res = await POST(
+        new Request('https://crm.test/api/disparador/cron', { method: 'POST', headers: { 'x-cron-secret': 'errado', 'x-cron-hop': '1', 'x-cron-chain-start': String(Date.now()) } })
+      );
+      expect(res.status).toBe(401);
+      expect(afterMock.queued).toHaveLength(0);
+      expect(mocks.process).not.toHaveBeenCalled();
+    });
+
+    it('nunca dois ao mesmo tempo: com o lock tomado o hop devolve already_running, não envia e não encadeia', async () => {
+      setup();
+      enableChain();
+      mocks.rpc.mockImplementation(async (name: string, args: { p_name?: string }) =>
+        name === 'try_acquire_cron_lock' && args.p_name === 'disparador_cron' ? { data: false, error: null } : name === 'blacklisted_phone_keys' ? { data: [], error: null } : { data: true, error: null }
+      );
+      const res = await post();
+      expect(await res.json()).toEqual({ status: 'already_running' });
+      expect(mocks.process).not.toHaveBeenCalled();
+      expect(afterMock.queued).toHaveLength(0);
+    });
+
+    it('manutenção pesada só no hop 0 e a cada N hops (reconcile de recibos pula nos hops intermediários)', async () => {
+      setup();
+      enableChain();
+      mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+      vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 202 })));
+      const reconcileCalls = () => mocks.rpc.mock.calls.filter(([name]) => name === 'reconcile_dispatch_receipts').length;
+      await post(); // hop 0 → manutenção
+      expect(reconcileCalls()).toBe(1);
+      afterMock.queued.length = 0;
+      await (await chainedPost(1)).json();
+      await afterMock.queued[0]();
+      expect(reconcileCalls()).toBe(1); // hop 1: sem manutenção
+      afterMock.queued.length = 0;
+      await chainedPost(5);
+      await afterMock.queued[0]();
+      expect(reconcileCalls()).toBe(2); // hop 5: manutenção de novo
+    });
   });
 });
 
