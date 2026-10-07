@@ -26,6 +26,12 @@ vi.mock('@/lib/disparador/callback-outbox', () => ({ drainCallbackOutbox: vi.fn(
 vi.mock('@/lib/audit/context', () => ({ registerAuditActor: vi.fn() }));
 const logMocks = vi.hoisted(() => ({ writeLog: vi.fn() }));
 vi.mock('@/lib/logger', () => ({ writeLog: logMocks.writeLog }));
+const pauseMocks = vi.hoisted(() => ({ check: vi.fn().mockResolvedValue(false) }));
+vi.mock('@/lib/disparador/auto-pause', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/disparador/auto-pause')>()),
+  checkCampaignAutoPause: pauseMocks.check,
+}));
+vi.mock('@/lib/disparador/receipts-cleanup', () => ({ cleanupOrphanReceipts: vi.fn() }));
 import { GET, POST } from './route';
 import { clearMemoryCooldowns } from '@/lib/disparador/throughput-config';
 
@@ -86,6 +92,7 @@ describe('cron: agendador por número', () => {
     vi.clearAllMocks();
     clearMemoryCooldowns();
     upserts.length = 0;
+    pauseMocks.check.mockResolvedValue(false);
   });
 
   it('alterna campanhas no mesmo número, roda números em paralelo e grava UM cron_tick', async () => {
@@ -167,6 +174,33 @@ describe('cron: agendador por número', () => {
     expect(mocks.process).toHaveBeenCalledTimes(1);
     const tick = logMocks.writeLog.mock.calls.find(([entry]) => entry.event === 'cron_tick')?.[0];
     expect(tick.payload).toMatchObject({ budget_ms: 5000, stopped_early: true, totals: { sent: 1, not_started: 7 } });
+  });
+
+  it('pausa antes do planejamento sem afetar outra campanha ou cron_tick', async () => {
+    setup();
+    pauseMocks.check.mockImplementation(async (_db, campaign) => campaign.id === 'big');
+    mocks.process.mockResolvedValue({ outcome: 'sent', messageId: 'x' });
+    expect((await post()).status).toBe(200);
+    expect(mocks.process.mock.calls.map(([item]) => item.id).sort()).toEqual(['small0', 'small1']);
+    expect(logMocks.writeLog.mock.calls.filter(([entry]) => entry.event === 'cron_tick')).toHaveLength(1);
+  });
+
+  it('pausa durante o lote e preserva os candidatos não iniciados na telemetria', async () => {
+    setup();
+    vi.stubEnv('DISPATCH_PROCESS_CONCURRENCY', '1');
+    vi.stubEnv('DISPARADOR_AUTO_PAUSE_MIN_ATTEMPTS', '2');
+    const evaluations = new Map<string, number>();
+    pauseMocks.check.mockImplementation(async (_db, campaign) => {
+      const count = (evaluations.get(campaign.id) ?? 0) + 1;
+      evaluations.set(campaign.id, count);
+      return campaign.id === 'big' && count > 1;
+    });
+    mocks.process.mockResolvedValue({ outcome: 'error', error: '(#132001) template inexistente' });
+    expect((await post()).status).toBe(200);
+    expect(mocks.process.mock.calls.filter(([item]) => item.campaign_id === 'big')).toHaveLength(2);
+    expect(mocks.process.mock.calls.filter(([item]) => item.campaign_id === 'small')).toHaveLength(2);
+    const tick = logMocks.writeLog.mock.calls.find(([entry]) => entry.event === 'cron_tick')?.[0];
+    expect(tick.payload).toMatchObject({ stopped_early: true, totals: { not_started: 4 } });
   });
 });
 

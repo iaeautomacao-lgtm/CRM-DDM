@@ -30,6 +30,25 @@ function tracker(delay = () => tick()) {
 const items = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
 
 describe('runDispatchSchedule', () => {
+  it('pausa uma campanha em todos os números e mantém fairness e notStarted', async () => {
+    const order: string[] = [];
+    const report = await runDispatchSchedule({
+      channels: [
+        { channelId: 'a', maxConcurrency: 1, campaigns: [
+          { campaignId: 'pause', items: ['p0', 'p1'] },
+          { campaignId: 'other', items: ['o0', 'o1'] },
+        ] },
+        { channelId: 'b', maxConcurrency: 1, campaigns: [{ campaignId: 'pause', items: ['p2'] }] },
+      ],
+      globalConcurrency: 1,
+      shouldStop: () => false,
+      run: async (item) => { order.push(item); return { pauseCampaign: item === 'p0' }; },
+    });
+    expect(order).toEqual(['p0', 'o0', 'o1']);
+    expect(report).toMatchObject({ started: 3, notStarted: 2, stoppedEarly: true });
+    expect(report.channels.b).toMatchObject({ started: 0, notStarted: 1 });
+  });
+
   it('padrões == comportamento antigo: 1 campanha, mesma ordem e mesma concorrência do processWithConcurrency(4)', async () => {
     const list = items('a', 23);
     const before = tracker();

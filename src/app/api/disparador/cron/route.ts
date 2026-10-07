@@ -29,6 +29,8 @@ import {
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
+import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -195,6 +197,7 @@ export async function POST(request: Request) {
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   // Botões de vazão (throughput-config.ts). Padrões = comportamento antigo.
   const config = resolveThroughputConfig();
+  const autoPauseConfig = autoPauseConfigFromEnv();
   const tickStartedAt = Date.now();
   // Orçamento de tempo do tick: nenhum trabalho novo começa depois dele
   // (padrão 35s = o antigo deadline de 40s menos 5s de folga), para a
@@ -291,6 +294,10 @@ export async function POST(request: Request) {
     const planned: PlannedCampaign[] = [];
     for (const campaign of (active ?? []) as Campaign[]) {
       if (outOfTime()) break;
+      // Avalia antes de planejar para não enviar outra rodada de uma
+      // campanha que já passou do limite no tick anterior.
+      if (await checkCampaignAutoPause(db, campaign, autoPauseConfig)) continue;
+      if (outOfTime()) break;
       if (
         !canSendNow({ inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio })
       )
@@ -384,6 +391,9 @@ export async function POST(request: Request) {
     const plannedById = new Map(planned.map((entry) => [entry.campaign.id, entry]));
     const cooldownWrites: Array<Promise<void>> = [];
     const cooledDown = new Set<string>();
+    const attemptsInTick = new Map<string, number>();
+    const pauseChecks = new Map<string, Promise<boolean>>();
+    const pausedCampaigns = new Set<string>();
     schedule = await runDispatchSchedule<QueueItem>({
       channels: channelWork.channels,
       globalConcurrency: config.globalConcurrency,
@@ -403,6 +413,7 @@ export async function POST(request: Request) {
         const entry = plannedById.get(ctx.campaignId);
         if (!entry) return;
         let signal = null as BackoffReason | null;
+        let pauseCampaign = false;
         try {
           const outcome = await processQueueItem(item, entry.campaign, {
             defaultMaxInFlight: channelWork.defaultMaxInFlight.get(ctx.channelId),
@@ -414,20 +425,44 @@ export async function POST(request: Request) {
           telemetry.recordOutcome(ctx.channelId, outcome.outcome);
           if (outcome.outcome === "sent") entry.result.sent++;
           if (outcome.outcome === "pending_confirmation") entry.result.pending_confirmation++;
+          // Reavalia também dentro de lotes grandes (por número), sem uma
+          // query por envio. Uma checagem compartilhada por campanha; outros
+          // números/campanhas continuam livres no agendador.
+          if (autoPauseConfig.enabled && (outcome.outcome === "sent" || outcome.outcome === "error")) {
+            const attempts = (attemptsInTick.get(ctx.campaignId) ?? 0) + 1;
+            attemptsInTick.set(ctx.campaignId, attempts);
+            let checking = pauseChecks.get(ctx.campaignId);
+            if (!checking && attempts % autoPauseConfig.minAttempts === 0 && !outOfTime()) {
+              checking = checkCampaignAutoPause(db, entry.campaign, autoPauseConfig);
+              pauseChecks.set(ctx.campaignId, checking);
+            }
+            if (checking) {
+              if (await checking) pausedCampaigns.add(ctx.campaignId);
+              if (pauseChecks.get(ctx.campaignId) === checking) pauseChecks.delete(ctx.campaignId);
+            }
+            pauseCampaign = pausedCampaigns.has(ctx.campaignId);
+          }
         } catch (error) {
           // Exceção depois da chamada ao provedor NÃO devolve o item à fila:
           // ele fica 'enviando' para reconciliação, evitando reenvio cego.
           telemetry.recordOutcome(ctx.channelId, "exception");
           console.error("[Cron] Item requer investigação:", item.id, error);
         }
-        return { backoff: signal };
+        return { backoff: signal, pauseCampaign };
       },
     });
     await Promise.allSettled(cooldownWrites);
+    // Fecha a avaliação dos lotes menores que o intervalo de checagem.
+    for (const entry of planned) {
+      if (outOfTime()) break;
+      if (!pausedCampaigns.has(entry.campaign.id))
+        await checkCampaignAutoPause(db, entry.campaign, autoPauseConfig);
+    }
     const results = planned.map((entry) => entry.result);
     // Sobrou tempo? Entrega mais callbacks (inclusive de campanhas
     // encerradas neste tick).
     if (!lostLease && Date.now() < stopAt - 5_000) await drainCallbackOutbox();
+    await cleanupOrphanReceipts(db, stopAt, () => lostLease);
     tickStatus = results.length ? "processed" : "idle";
     return NextResponse.json({
       status: tickStatus,

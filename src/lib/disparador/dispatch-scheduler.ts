@@ -34,6 +34,8 @@ export interface ChannelWork<T> {
 
 export interface TaskOutcome {
   backoff?: BackoffReason | null;
+  /** Pausa confirmada no banco: não iniciar mais itens desta campanha. */
+  pauseCampaign?: boolean;
 }
 
 export interface HealthSample {
@@ -135,6 +137,7 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
   let channelCursor = 0;
   let lastHealthAt = now();
   const events: BackoffEvent[] = [];
+  const pausedCampaigns = new Set<string>();
 
   const channels: ChannelState<T>[] = options.channels.map((channel) => {
     const cap = positiveInt(channel.maxConcurrency, "maxConcurrency");
@@ -168,7 +171,9 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
     for (let offset = 0; offset < channels.length; offset++) {
       const index = (channelCursor + offset) % channels.length;
       const channel = channels[index];
-      if (channel.inFlight < channel.cap && pendingOf(channel) > 0) {
+      if (channel.inFlight < channel.cap && channel.queues.some(
+        (queue) => !pausedCampaigns.has(queue.campaignId) && queue.next < queue.items.length
+      )) {
         channelCursor = (index + 1) % channels.length;
         return channel;
       }
@@ -181,7 +186,7 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
     for (let offset = 0; offset < channel.queues.length; offset++) {
       const index = (channel.cursor + offset) % channel.queues.length;
       const queue = channel.queues[index];
-      if (queue.next < queue.items.length) {
+      if (!pausedCampaigns.has(queue.campaignId) && queue.next < queue.items.length) {
         channel.cursor = (index + 1) % channel.queues.length;
         return { campaignId: queue.campaignId, item: queue.items[queue.next++] };
       }
@@ -240,7 +245,7 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
           capEnd: channel.cap,
         };
       }
-      report.stoppedEarly = stopped && report.notStarted > 0;
+      report.stoppedEarly = (stopped || pausedCampaigns.size > 0) && report.notStarted > 0;
       resolve(report);
     };
 
@@ -279,6 +284,7 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
         .finally(() => {
           channel.inFlight--;
           globalInFlight--;
+          if (outcome?.pauseCampaign) pausedCampaigns.add(campaignId);
           const reason = outcome ? outcome.backoff : null;
           if (adaptive && reason) {
             const from = channel.cap;
