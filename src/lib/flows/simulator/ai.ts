@@ -7,8 +7,11 @@ import {
   generateHermesResponse,
   generateOpenAiResponse,
   type AiAutoResponseResult,
+  buildPromptVersion,
   type ToolRealRequest,
 } from "@/lib/ai/responder";
+import { composeAgentPromptDetailed } from "@/lib/ai/agents/compose";
+import { currentAgentRuntime, filterPriorityIntent, protectionEnabled } from "@/lib/ai/agents/scope";
 import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
 import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
 import { BOT_LOOP_MIN_MESSAGES, BOT_LOOP_WINDOW_SECONDS, detectBotLoop } from "@/lib/ai/loop-guard";
@@ -132,12 +135,26 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
     const { data: messages } = await query.order("created_at", { ascending: false }).limit(10);
     const history = ((messages ?? []) as HistoryRow[]).reverse();
 
-    const priorityIntent = classifyPriorityIntent(incomingText);
+    // Agente (perfil) do nó, quando houver: o motor abriu o escopo (withAgentRuntime) com a versão
+    // PUBLICADA seedada no banco em memória. Mesmas travas/toggles da produção; opt-out sempre vale.
+    const agentRuntime = currentAgentRuntime();
+    if (agentRuntime) {
+      const { data: agentRows } = await db.from("ai_agents").select("name").eq("id", agentRuntime.agentId).limit(1);
+      const { data: versionRows } = await db.from("ai_agent_versions").select("version").eq("id", agentRuntime.versionId).limit(1);
+      const agentName = (agentRows?.[0] as { name?: string } | undefined)?.name ?? "agente";
+      const versionNumber = (versionRows?.[0] as { version?: number } | undefined)?.version;
+      simNote(ctx, `Agente: ${agentName}${versionNumber ? ` v${versionNumber}` : ""} (versão publicada)`, node, {
+        agent_id: agentRuntime.agentId,
+        version_id: agentRuntime.versionId,
+        composition: agentRuntime.composition,
+      });
+    }
+    const priorityIntent = filterPriorityIntent(classifyPriorityIntent(incomingText), agentRuntime);
     if (priorityIntent?.kind === "opt_out" || priorityIntent?.kind === "wrong_person") {
       simNote(ctx, "O responder real gravaria o telefone na blacklist — não executado na simulação", node);
     }
 
-    const abuse = priorityIntent ? null : detectAbusiveInput(incomingText || "");
+    const abuse = priorityIntent || !protectionEnabled("anti_xingamento", agentRuntime) ? null : detectAbusiveInput(incomingText || "");
     if (abuse) {
       simNote(ctx, "Trava anti-abuso: iria para a fila humana da equipe (não executado)", node, abuse);
       return {
@@ -148,8 +165,11 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
         guard: { subreason: abuse.kind === "jailbreak" ? "JAILBREAK" : "OFENSA", term: abuse.term, team_id: null, assigned_to: null },
       };
     }
-    if (!priorityIntent) {
-      const since = new Date(Date.now() - BOT_LOOP_WINDOW_SECONDS * 1000).toISOString();
+    const antiLoopCfg = agentRuntime?.config.protections?.anti_loop;
+    const loopWindowSeconds = antiLoopCfg?.window_seconds ?? BOT_LOOP_WINDOW_SECONDS;
+    const loopMinMessages = antiLoopCfg?.min_messages ?? BOT_LOOP_MIN_MESSAGES;
+    if (!priorityIntent && protectionEnabled("anti_loop", agentRuntime)) {
+      const since = new Date(Date.now() - loopWindowSeconds * 1000).toISOString();
       const { data: botRows } = await db
         .from("messages")
         .select("received_at")
@@ -157,8 +177,12 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
         .eq("sender_type", "bot")
         .gte("received_at", since)
         .order("received_at", { ascending: false })
-        .limit(BOT_LOOP_MIN_MESSAGES);
-      const loop = detectBotLoop(((botRows ?? []) as Array<{ received_at: string | null }>).map((r) => r.received_at));
+        .limit(loopMinMessages);
+      const loop = detectBotLoop(
+        ((botRows ?? []) as Array<{ received_at: string | null }>).map((r) => r.received_at),
+        new Date(),
+        { minMessages: loopMinMessages, windowSeconds: loopWindowSeconds, futureToleranceMs: antiLoopCfg?.future_tolerance_ms },
+      );
       if (loop) {
         simNote(ctx, "Trava anti-loop: iria para a fila humana da equipe (não executado)", node, loop);
         return {
@@ -201,11 +225,42 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
       return { outcome: "failed", reason: "missing_provider_api_key", detectedTag: null, modelUsed: responseModel };
     }
 
-    const { data: kbFiles } = await db.from("knowledge_base_files").select("name, content").eq("account_id", accountId);
+    const { data: kbFiles } = await db.from("knowledge_base_files").select("id, name, content").eq("account_id", accountId);
     let systemPrompt = hasOverride
       ? systemPromptOverride!
       : (aiConfig.system_prompt as string | null) || "Você é um assistente virtual. Aguarde um momento.";
-    if (kbFiles && kbFiles.length > 0) {
+    if (agentRuntime) {
+      // Mesmo caminho da produção (responder.ts): seleção de KB do perfil + compose.ts como fonte única.
+      const all = (kbFiles ?? []) as Array<{ id?: string; name: string; content: string | null }>;
+      const knowledge = agentRuntime.config.knowledge;
+      const kbForPrompt =
+        knowledge.selection_mode === "explicit" ? all.filter((f) => f.id !== undefined && new Set(knowledge.file_ids ?? []).has(f.id)) : all;
+      let kbContext: string | undefined;
+      if (kbForPrompt.length > 0) {
+        const recentCustomerText = history
+          .filter((m) => m.sender_type === "customer")
+          .slice(-3)
+          .map((m) => m.content_text || "")
+          .join("\n");
+        kbContext = buildKnowledgeBaseContext(kbForPrompt, recentCustomerText, knowledge.max_chars);
+      }
+      systemPrompt = composeAgentPromptDetailed(
+        buildPromptVersion(aiConfig.system_prompt as string | null, systemPromptOverride ?? "", hasOverride, agentRuntime),
+        {
+          kb_files: kbForPrompt.length > 0 ? kbForPrompt.map((f) => ({ name: f.name, content: f.content ?? "" })) : undefined,
+          kb_context: kbContext,
+          rules: agentRuntime.composition === "sections_v1" ? agentRuntime.rules : undefined,
+          ddm_data: null,
+          found_cpf: null,
+          today_utc: new Date().toISOString().split("T")[0],
+          current_date: new Date().toLocaleDateString("pt-BR"),
+          prompt_interpolated: true,
+        },
+      ).systemPrompt;
+      if (agentRuntime.config.knowledge.rag_external.enabled) {
+        simNote(ctx, "RAG externo do agente não é consultado na simulação", node);
+      }
+    } else if (kbFiles && kbFiles.length > 0) {
       // Mesma dieta de tokens da produção (kb-context.ts, #91).
       const recentCustomerText = history
         .filter((m) => m.sender_type === "customer")
@@ -224,7 +279,7 @@ ${kbContext}
 
 Use as informações da base de conhecimento acima para responder às dúvidas do cliente com a maior precisão possível. Se a informação não estiver na base, aja de acordo com suas instruções normais.`;
     }
-    if (!hasOverride) {
+    if (!hasOverride && !agentRuntime) {
       simNote(ctx, "Nó sem prompt próprio: o orquestrador legado de CPF/API DDM do prompt global não é simulado", node);
     }
 

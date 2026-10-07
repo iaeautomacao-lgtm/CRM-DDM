@@ -25,6 +25,36 @@ import { SIM_RATE_LIMIT } from '@/lib/flows/simulator/types'
  */
 export const maxDuration = 120
 
+type Admin = ReturnType<typeof supabaseAdmin>
+
+/** Leitura (só SELECT) dos agentes e da versão publicada usados pelo rascunho. Falha ⇒ sem agentes (o nó cai em "indisponível"). */
+async function loadSimulationAgents(admin: Admin, accountId: string, agentIds: string[]) {
+  const empty = { agents: [], versions: [], ruleVersions: [] }
+  if (agentIds.length === 0) return empty
+  const { data: agents, error } = await admin
+    .from('ai_agents')
+    .select('id, name, enabled, published_version_id')
+    .eq('account_id', accountId)
+    .in('id', agentIds)
+  if (error || !agents?.length) return empty
+  const versionIds = agents.map((a) => a.published_version_id as string | null).filter((v): v is string => !!v)
+  if (versionIds.length === 0) return { ...empty, agents }
+  const { data: versions } = await admin
+    .from('ai_agent_versions')
+    .select('id, agent_id, version, config, prompt_content, composition, config_hash')
+    .eq('account_id', accountId)
+    .in('id', versionIds)
+  const ruleIds = new Set<string>()
+  for (const v of versions ?? []) {
+    const rules = (v.config as { rules?: Array<{ rule_version_id?: string }> } | null)?.rules ?? []
+    for (const r of rules) if (r.rule_version_id) ruleIds.add(r.rule_version_id)
+  }
+  const { data: ruleVersions } = ruleIds.size
+    ? await admin.from('ai_rule_versions').select('id, rule_id, version, content').eq('account_id', accountId).in('id', [...ruleIds])
+    : { data: [] }
+  return { agents, versions: versions ?? [], ruleVersions: ruleVersions ?? [] }
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -87,7 +117,7 @@ export async function POST(
     admin.from('ai_config').select('*').eq('account_id', account.accountId).limit(1),
     admin
       .from('knowledge_base_files')
-      .select('name, content')
+      .select('id, name, content')
       .eq('account_id', account.accountId)
       .range(0, 199),
     admin.from('teams').select('id, name').eq('account_id', account.accountId).range(0, 499),
@@ -101,6 +131,16 @@ export async function POST(
       .range(0, 499),
   ])
 
+  // Agentes dos nós do rascunho: só a versão PUBLICADA (o simulador não fixa versão por run).
+  const agentIds = [
+    ...new Set(
+      parsed.draft.nodes
+        .map((n) => (n.config as { agent_id?: unknown } | null)?.agent_id)
+        .filter((v): v is string => typeof v === 'string' && v !== ''),
+    ),
+  ]
+  const agents = await loadSimulationAgents(admin, account.accountId, agentIds)
+
   try {
     const result = await simulateTurn(parsed, {
       accountId: account.accountId,
@@ -110,6 +150,7 @@ export async function POST(
       aiConfig: (aiConfigRes.data?.[0] as Record<string, unknown> | undefined) ?? null,
       knowledgeBase: (kbRes.data ?? []) as Array<{ name: string; content: string }>,
       teams: (teamsRes.data ?? []) as Array<{ id: string; name: string }>,
+      agents,
       aiTools: (toolsRes.data ?? []) as Array<Record<string, unknown>>,
       accountSecrets: (secretsRes.data ?? []) as Array<{
         name: string

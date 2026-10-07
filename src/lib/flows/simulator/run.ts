@@ -30,12 +30,22 @@ export interface SimulationSeed {
   flowName: string;
   /** Linha de ai_config da conta (fica só no servidor, nunca volta ao cliente). */
   aiConfig: Record<string, unknown> | null;
-  knowledgeBase: Array<{ name: string; content: string }>;
+  knowledgeBase: Array<{ id?: string; name: string; content: string }>;
   teams: Array<{ id: string; name: string }>;
   /** Catálogo de ferramentas da conta (somente SELECT; sem credenciais — a tabela guarda só marcadores). */
   aiTools?: Array<Record<string, unknown>>;
   /** Variáveis (valor) e credenciais (SÓ nome e hosts — nunca value_encrypted) da conta. */
   accountSecrets?: Array<{ name: string; kind: string; value_plain: string | null; allowed_hosts: string[] | null }>;
+  /**
+   * Agentes (perfis) usados pelos nós do rascunho: o agente, a versão PUBLICADA agora (o simulador
+   * nunca fixa versão — não há run real) e as versões de regra dessa versão. Só marcadores de
+   * credencial ({{cred.X}}) — nenhum valor.
+   */
+  agents?: {
+    agents: Array<Record<string, unknown>>;
+    versions: Array<Record<string, unknown>>;
+    ruleVersions: Array<Record<string, unknown>>;
+  };
 }
 
 export interface SimulateDeps {
@@ -91,6 +101,15 @@ function buildTables(req: SimulateRequest, seed: SimulationSeed, state: SimState
   tables.knowledge_base_files = seed.knowledgeBase.map((f) => ({ ...f, account_id: seed.accountId }));
   tables.teams = seed.teams.map((t) => ({ ...t, account_id: seed.accountId }));
   tables.ai_tools = (seed.aiTools ?? []).map((t) => ({ ...(JSON.parse(JSON.stringify(t)) as SimRow), account_id: seed.accountId }));
+  const withAccount = (r: Record<string, unknown>) => ({
+    ...(JSON.parse(JSON.stringify(r)) as SimRow),
+    account_id: seed.accountId,
+  });
+  tables.ai_agents = (seed.agents?.agents ?? []).map(withAccount);
+  tables.ai_agent_versions = (seed.agents?.versions ?? []).map(withAccount);
+  tables.ai_rule_versions = (seed.agents?.ruleVersions ?? []).map(withAccount);
+  // Vínculos por run: sempre vazios (stateless) — o motor fixa a publicada na própria simulação.
+  tables.flow_run_agent_bindings = [];
   tables.account_secrets = (seed.accountSecrets ?? []).map((r) => ({
     name: r.name,
     kind: r.kind,

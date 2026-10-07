@@ -1889,7 +1889,7 @@ export interface ToolRealRequest {
  * texto-base é SEMPRE o que o engine entregou (variáveis já substituídas + contexto herdado).
  * A base de conhecimento e as proteções do perfil são aplicadas por quem chama.
  */
-function buildPromptVersion(
+export function buildPromptVersion(
   accountPrompt: string | null | undefined,
   override: string,
   hasOverride: boolean,

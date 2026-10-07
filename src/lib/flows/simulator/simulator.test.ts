@@ -83,6 +83,7 @@ vi.mock("@/lib/ai/team-handoff", () => ({ handOffToTeamQueue: real.handOffToTeam
 import { simulateTurn, type SimulationSeed } from "./run";
 import { effectiveSimToolMode, type SimulateRequest, type SimState } from "./types";
 import type { AiAgentTool } from "../types";
+import { convertAiAgentNode } from "@/lib/ai/agents/convert";
 
 // ------------------------------------------------------------
 // Fixture: fluxo oficial (mesma forma do exit-tag-routing.test.ts),
@@ -468,5 +469,83 @@ describe("simulador de fluxo — catálogo de ferramentas e credenciais", () => 
     expect(ai.toolsSent).toHaveLength(1);
     expect(ai.toolsSent[0]).toContain("consulta_cadastro");
     expect(ai.toolsSent[0]).not.toContain("enviar_boleto");
+  });
+});
+
+describe("simulador de fluxo — nós com agent_id", () => {
+  const UUID = "11111111-1111-4111-8111-111111111111";
+  const CRED_VALUE = "SEGREDO-DO-AGENTE-999";
+  const agentConfig = () =>
+    convertAiAgentNode(
+      { mode: "takeover", system_prompt_override: "PROMPT DO AGENTE PUBLICADO" } as never,
+      { account_id: UUID, enabled: true, api_provider: "openai", api_model: "gpt-4o-mini" },
+      { node_key: "ia" },
+    ).config;
+  const agentSeed = (over: { enabled?: boolean; protections?: Record<string, unknown> } = {}): SimulationSeed => {
+    const config = structuredClone(agentConfig()) as Record<string, unknown>;
+    if (over.protections) config.protections = { ...(config.protections as object), ...over.protections };
+    return {
+      ...SEED,
+      agents: {
+        agents: [{ id: "ag1", name: "Agente Cobrança", enabled: over.enabled ?? true, published_version_id: "v3" }],
+        versions: [
+          { id: "v3", agent_id: "ag1", version: 3, config, prompt_content: "PROMPT DO AGENTE PUBLICADO", composition: "legacy_v1", config_hash: "h" },
+        ],
+        ruleVersions: [],
+      },
+    };
+  };
+  const nodes = (extra: Record<string, unknown> = {}) => [
+    { node_key: "start", node_type: "start", config: { next_node_key: "ia" } },
+    { node_key: "ia", node_type: "ai_agent", config: { agent_id: "ag1", system_prompt_override: "RASCUNHO IGNORADO", ...extra } },
+    handoff("fila", "AGENTE_FORA"),
+  ];
+  const req = (text: string, ns: unknown[], state: SimState | null = null) =>
+    request(text, state, {
+      draft: { entry_node_id: "start", trigger_type: "first_inbound_message", trigger_config: {}, fallback_policy: null, nodes: ns as never },
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("usa o prompt composto do agente (versão publicada) e mostra o rótulo", async () => {
+    const ai = stubOpenAi([{ content: "Olá!" }]);
+    const turn = await simulateTurn(req("Oi", nodes()), agentSeed());
+    expect(ai.systemPrompts[0]).toContain("PROMPT DO AGENTE PUBLICADO");
+    expect(ai.systemPrompts[0]).not.toContain("RASCUNHO IGNORADO");
+    expect(turn.timeline.some((e) => e.label.startsWith("Agente: Agente Cobrança v3"))).toBe(true);
+    expect(turn.outbound.map((o) => o.text)).toEqual(["Olá!"]);
+    expect(JSON.stringify(turn)).not.toContain(CRED_VALUE);
+    expectNoRealEffects();
+  });
+
+  it("agente desligado segue pela saída de falha, sem chamar o modelo", async () => {
+    const ai = stubOpenAi([]);
+    const turn = await simulateTurn(req("Oi", nodes({ failure_next_node_key: "fila" })), agentSeed({ enabled: false }));
+    expect(ai.used()).toBe(0);
+    expect(turn.timeline.some((e) => e.type === "handoff")).toBe(true);
+    expectNoRealEffects();
+  });
+
+  it("toggle de proteção do agente vale na simulação; opt-out continua sempre ligado", async () => {
+    const off = { enabled: false };
+    const seed = agentSeed({ protections: { pedido_humano_contestacao: off, pessoa_errada: off } });
+    const ai = stubOpenAi([{ content: "Posso ajudar com isso mesmo." }]);
+    const humano = await simulateTurn(req("quero falar com um atendente humano", nodes()), seed);
+    expect(ai.used()).toBe(1); // o modelo respondeu: a trava de pedido de humano estava desligada
+    expect(humano.timeline.some((e) => e.label.includes("CLIENTE_PEDIU_HUMANO"))).toBe(false);
+    const optOut = await simulateTurn(req("não quero mais receber mensagens, pare", nodes()), seed);
+    expect(optOut.timeline.some((e) => e.label.includes("blacklist"))).toBe(true);
+  });
+
+  it("agente que não existe nesta conta cai na saída de falha", async () => {
+    stubOpenAi([]);
+    const turn = await simulateTurn(req("Oi", nodes({ failure_next_node_key: "fila" })), { ...SEED });
+    expect(turn.timeline.some((e) => e.type === "handoff")).toBe(true);
   });
 });
