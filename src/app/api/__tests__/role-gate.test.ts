@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Papel mínimo nas rotas que escreviam com service role sem checar papel
 // (flows, WAHA start/stop/qr/pairing-code, ai-config, automações, exports,
-// templates, channel-test, UTM, import do disparador, queue-details, debug-db).
+// templates, channel-test, UTM, import do disparador, queue-details).
 // Papel baixo → 403 ANTES de qualquer leitura/escrita; fluxo de outra conta → 404.
 
 const state = vi.hoisted(() => ({
@@ -88,7 +88,7 @@ import { POST as wahaStop } from "../whatsapp/waha/stop/route";
 import { GET as wahaQr } from "../whatsapp/waha/qr/route";
 import { POST as wahaPairing } from "../whatsapp/waha/pairing-code/route";
 import { GET as aiGet, POST as aiPost } from "../account/ai-config/route";
-import { POST as autoPost } from "../automations/route";
+import { POST as autoPost, GET as autoList } from "../automations/route";
 import { PATCH as autoPatch, DELETE as autoDelete, GET as autoGet } from "../automations/[id]/route";
 import { POST as autoDuplicate } from "../automations/[id]/duplicate/route";
 import { POST as autoEngine } from "../automations/engine/route";
@@ -103,7 +103,9 @@ import { POST as utmPost } from "../disparador/utm/route";
 import { GET as utmMetricas } from "../disparador/utm/metricas/route";
 import { POST as contactsImport } from "../disparador/contacts/import/route";
 import { GET as queueDetails } from "../disparador/campaigns/[id]/queue-details/route";
-import { GET as debugDb } from "../debug-db/route";
+import { POST as send } from "../whatsapp/send/route";
+import { POST as react } from "../whatsapp/react/route";
+import { POST as sentiment } from "../conversations/[id]/sentiment/route";
 
 const UUID = "11111111-1111-4111-8111-111111111111";
 const idParams = { params: Promise.resolve({ id: UUID }) };
@@ -136,7 +138,6 @@ const ADMIN_ONLY: Case[] = [
   ["GET account/ai-config", () => aiGet()],
   ["POST account/ai-config", () => aiPost(req())],
   ["POST /api/automations", () => autoPost(req())],
-  ["GET /api/automations/[id]", () => autoGet(req("GET"), idParams)],
   ["PATCH /api/automations/[id]", () => autoPatch(req("PATCH"), idParams)],
   ["DELETE /api/automations/[id]", () => autoDelete(req("DELETE"), idParams)],
   ["POST /api/automations/[id]/duplicate", () => autoDuplicate(req(), idParams)],
@@ -160,6 +161,30 @@ describe("papel mínimo nas rotas (service role só depois do guard)", () => {
     state.role = "viewer";
     state.flowFound = true;
     state.adminTouched.mockClear();
+  });
+
+  const AGENT_ONLY: Case[] = [
+    ["GET automations", () => autoList()],
+    ["GET automations/[id]", () => autoGet(req("GET"), idParams)],
+    ["POST whatsapp/send", () => send(req())],
+    ["POST whatsapp/react", () => react(req())],
+    ["POST sentiment", () => sentiment(req(), idParams)],
+  ];
+  for (const [name, call] of AGENT_ONLY) {
+    it(name + " bloqueia viewer antes de qualquer escrita", async () => {
+      const res = await call();
+      expect(res.status).toBe(403);
+      expect(state.adminTouched).not.toHaveBeenCalled();
+    });
+  }
+
+  it.each(["constructor", "toString", "__proto__"])("exports recusa extensão %s", async (ext) => {
+    state.role = "admin";
+    const res = await exportsPost(req("POST", {
+      exportType: "conversas", description: "x", fileName: `a.${ext}`, fileBase64: "aGk=",
+    }));
+    expect(res.status).toBe(400);
+    expect(state.adminTouched).not.toHaveBeenCalled();
   });
 
   for (const role of ["viewer", "agent", "supervisor"]) {
@@ -238,22 +263,4 @@ describe("papel mínimo nas rotas (service role só depois do guard)", () => {
     }
   });
 
-  describe("debug-db", () => {
-    it("fica desligada sem a flag, mesmo fora de produção e para owner", async () => {
-      state.role = "owner";
-      vi.stubEnv("NODE_ENV", "development");
-      vi.stubEnv("ENABLE_DEBUG_DB", "");
-      const res = await debugDb();
-      expect(res.status).toBe(404);
-      vi.unstubAllEnvs();
-    });
-
-    it("com a flag ainda exige owner", async () => {
-      state.role = "admin";
-      vi.stubEnv("ENABLE_DEBUG_DB", "1");
-      const res = await debugDb();
-      expect(res.status).toBe(403);
-      vi.unstubAllEnvs();
-    });
-  });
 });

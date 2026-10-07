@@ -18,8 +18,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  // Owner/admin; a automação precisa ser da conta do chamador (outra conta → 404).
-  const auth = await guardRole('admin')
+  // Consulta para agent+; a automação precisa ser da conta do chamador.
+  const auth = await guardRole('agent')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
 
