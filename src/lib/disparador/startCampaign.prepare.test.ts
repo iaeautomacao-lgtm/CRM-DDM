@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   campaign: {} as Row,
   campaignUpdates: [] as Row[],
   queueInserts: [] as number[],
+  queuePayloads: [] as Row[],
   messageQueries: 0,
   messagesError: null as { message: string } | null,
   messagesRows: [] as Row[],
@@ -60,7 +61,9 @@ function builder(table: string, viaSchema = false) {
     }
     if (table === "disp_message_queue") {
       if (op === "insert") {
-        state.queueInserts.push((payload as unknown[]).length);
+        const rows = payload as Row[];
+        state.queueInserts.push(rows.length);
+        state.queuePayloads.push(...rows);
         if (state.failInsertAt && state.queueInserts.length === state.failInsertAt) {
           return { data: null, error: { message: "insert falhou" } };
         }
@@ -118,6 +121,7 @@ describe("startCampaign — preparação (B9)", () => {
   beforeEach(() => {
     state.campaignUpdates = [];
     state.queueInserts = [];
+    state.queuePayloads = [];
     state.messageQueries = 0;
     state.messagesError = null;
     state.messagesRows = [];
@@ -133,6 +137,30 @@ describe("startCampaign — preparação (B9)", () => {
     const result = await startCampaign("camp-1", "acc");
     expect(result).toEqual({ ok: true, enqueued: 3 });
     expect(state.messageQueries).toBe(0);
+  });
+
+  it("bulk misto: linhas agendadas enviam erro_permanente=false e inválidas=true", async () => {
+    setCampaign({
+      mensagens: [
+        {
+          tipo: "texto",
+          template_name: "t1",
+          template_language: "pt_BR",
+          template_variable_map: [{ type: "contact_field", field: "name" }],
+          conteudo: "Olá {{1}}",
+        },
+      ],
+    });
+    audienceMock.contacts = [
+      { id: "c0", name: "Ana", phone: "+5511910000000", cpf: null },
+      { id: "c1", name: "", phone: "+5511910000001", cpf: null },
+      { id: "c2", name: "Bia", phone: "+5511910000002", cpf: null },
+    ];
+
+    const result = await startCampaign("camp-1", "acc");
+    expect(result).toEqual({ ok: true, enqueued: 3 });
+    expect(state.queuePayloads.map((r) => r.erro_permanente)).toEqual([false, true, false]);
+    expect(state.queuePayloads.every((r) => typeof r.erro_permanente === "boolean")).toBe(true);
   });
 
   it("texto livre em canal Meta: consulta só inbound dos últimos 24h (received_at > agora-24h)", async () => {
