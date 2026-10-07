@@ -31,6 +31,7 @@ import { classifyProviderError, type BackoffReason } from "@/lib/disparador/prov
 import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
+import { isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -753,9 +754,16 @@ export async function processQueueItem(
     // Deixar isso em enviando consome max_in_flight e pode paralisar o
     // número inteiro. Também não podemos reenviar, pois pode duplicar.
     // Resultado: terminaliza como erro permanente sem retry e libera a vaga.
+    // Exceção: falha de CONEXÃO (ECONNREFUSED/ENOTFOUND/EAI_AGAIN/connect timeout) prova que o POST
+    // não saiu — transitório com retry normal (decisão do dono, P0-3).
+    if (isNotConnectedError(sendErr)) {
+      await markQueueError(item.id, NOT_CONNECTED_ERROR, false, item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: NOT_CONNECTED_ERROR };
+    }
     if (!isDefinitiveRejection(sendErr)) {
-      const message =
-        "Resultado externo não confirmado; encerrado sem reenvio para evitar duplicidade";
+      // 502/503/504 e timeout de resposta: pode ter saído. Não reenvia; o auto-pause conta estes
+      // "incertos" (UNCERTAIN_OUTCOME_ERROR) para frear a campanha quando viram um padrão.
+      const message = UNCERTAIN_OUTCOME_ERROR;
       await markQueueError(
         item.id,
         message,

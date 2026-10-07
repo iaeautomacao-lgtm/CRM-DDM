@@ -64,6 +64,7 @@ vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({
 }));
 import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
+import { UNCERTAIN_OUTCOME_ERROR } from './provider-outcome';
 
 const item: QueueItem = {
   id: 'item',
@@ -104,6 +105,33 @@ describe('queue provider outcomes', () => {
     const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
     expect(result).toMatchObject({ outcome: 'sent' });
     expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ to: '5511999999999' }));
+  });
+  it('falha de CONEXÃO (ECONNREFUSED/ENOTFOUND/EAI_AGAIN/connect timeout): a mensagem não saiu → transitório com retry (P0-3)', async () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']) {
+      mocks.updates.length = 0;
+      mocks.send.mockReset().mockRejectedValue(new TypeError('fetch failed', { cause: { code } }));
+      const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+      expect(result).toMatchObject({ outcome: 'error', error: expect.stringMatching(/não saiu/) });
+      expect(mocks.send).toHaveBeenCalledTimes(1);
+      expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === 1)).toBe(true);
+      expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+    }
+  });
+  it('502/503/504 da Meta e timeout de resposta: INCERTO — terminal, sem reenvio e com a mensagem que o auto-pause conta', async () => {
+    const uncertain = [
+      new MetaApiError('Bad Gateway', null, 502),
+      new MetaApiError('Service Unavailable', null, 503),
+      new MetaApiError('Gateway Timeout', null, 504),
+      Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }),
+    ];
+    for (const err of uncertain) {
+      mocks.updates.length = 0;
+      mocks.send.mockReset().mockRejectedValue(err);
+      const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+      expect(result).toMatchObject({ outcome: 'error', error: UNCERTAIN_OUTCOME_ERROR });
+      expect(mocks.send).toHaveBeenCalledTimes(1); // at-most-once
+      expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true && u.erro === UNCERTAIN_OUTCOME_ERROR)).toBe(true);
+    }
   });
   it('never calls the provider after losing the guarded claim', async () => {
     mocks.claimed = false;

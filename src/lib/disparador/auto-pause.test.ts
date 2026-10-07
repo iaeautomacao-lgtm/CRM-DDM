@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AUTO_PAUSE_DEFAULTS, AUTO_PAUSE_META_CODES, autoPauseConfigFromEnv,
-  checkCampaignAutoPause, decideAutoPause, isCampaignPermanentError, recentAttempts, type AttemptRow,
+  checkCampaignAutoPause, decideAutoPause, decideUncertainPause, isCampaignPermanentError, recentAttempts, type AttemptRow,
 } from "./auto-pause";
+import { UNCERTAIN_OUTCOME_ERROR } from "./provider-outcome";
 
 const log = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/logger", () => ({ writeLog: log }));
@@ -106,5 +107,51 @@ describe("pausa pelo mesmo contrato da pausa manual", () => {
     from.mockClear();
     expect(await checkCampaignAutoPause(db, { id: "camp", account_id: "acc" }, { ...AUTO_PAUSE_DEFAULTS, enabled: false })).toBe(false);
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+describe("resultado incerto (502/503/504/timeout) conta para a pausa (P0-3)", () => {
+  it("regra pura: pausa a partir de uncertainCount (padrão 20 em 60 s)", () => {
+    expect(AUTO_PAUSE_DEFAULTS).toMatchObject({ uncertainCount: 20, uncertainWindowSeconds: 60 });
+    expect(decideUncertainPause(19)).toEqual({ pause: false, count: 19 });
+    expect(decideUncertainPause(20)).toMatchObject({ pause: true, count: 20, reason: expect.stringContaining("NÃO são reenviados") });
+    expect(decideUncertainPause(500, { ...AUTO_PAUSE_DEFAULTS, enabled: false }).pause).toBe(false);
+    expect(autoPauseConfigFromEnv({ DISPARADOR_AUTO_PAUSE_UNCERTAIN_COUNT: "5", DISPARADOR_AUTO_PAUSE_UNCERTAIN_WINDOW_SECONDS: "30" }))
+      .toMatchObject({ uncertainCount: 5, uncertainWindowSeconds: 30 });
+  });
+
+  function uncertainDb(count: number) {
+    const calls: Array<[string, ...unknown[]]> = [];
+    const from = vi.fn((table: string) => {
+      const builder: Record<string, unknown> = {};
+      for (const method of ["select", "eq", "limit", "in", "gt", "or", "order", "update", "gte", "is", "not", "like"])
+        builder[method] = (...args: unknown[]) => { calls.push([`${table}.${method}`, ...args]); return builder; };
+      builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(
+        table === "campaigns" ? { data: [{ status: "em_execucao", auto_pausa_avaliar_desde: null }], error: null }
+          : calls.some(([m]) => m === "disp_message_queue.like") ? { count, data: null, error: null }
+          : { data: [], error: null },
+      ).then(resolve);
+      return builder;
+    });
+    const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+    return { db: { from, rpc } as unknown as SupabaseClient, rpc, calls };
+  }
+
+  it("20 incertos na janela pausam a campanha e registram o motivo (kind uncertain_outcome)", async () => {
+    log.mockClear();
+    const { db, rpc, calls } = uncertainDb(20);
+    expect(await checkCampaignAutoPause(db, { id: "camp", account_id: "acc" })).toBe(true);
+    expect(rpc).toHaveBeenCalledWith("stop_dispatch_campaign", { p_campaign_id: "camp", p_account_id: "acc", p_action: "pause" });
+    expect(calls).toContainEqual(["disp_message_queue.like", "erro", `${UNCERTAIN_OUTCOME_ERROR}%`]);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({
+      event: "campaign_auto_paused",
+      payload: expect.objectContaining({ kind: "uncertain_outcome", uncertain_count: 20, threshold: 20 }),
+    }));
+  });
+
+  it("19 incertos não pausam", async () => {
+    const { db, rpc } = uncertainDb(19);
+    expect(await checkCampaignAutoPause(db, { id: "camp", account_id: "acc" })).toBe(false);
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

@@ -19,12 +19,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { extrairCodigoMetaErro } from "./normalize-meta-error";
 import { writeLog } from "@/lib/logger";
+import { UNCERTAIN_OUTCOME_ERROR } from "./provider-outcome";
 
 export interface AutoPauseConfig {
   enabled: boolean;
   minAttempts: number;
   window: number;
   errorRate: number;
+  /**
+   * Envios de resultado INCERTO (502/503/504, timeout de resposta: pode ter saído, não reenvia)
+   * dentro de `uncertainWindowSeconds` que pausam a campanha. Proposta: 20 em 60 s — 5× a linha de
+   * base observada (2 em 1.218 chamadas ≈ 0,16%, ~4/min a 2.500/min) e ~1% da vazão-alvo.
+   */
+  uncertainCount: number;
+  uncertainWindowSeconds: number;
 }
 
 function positiveInt(raw: string | undefined, fallback: number): number {
@@ -42,6 +50,8 @@ export const AUTO_PAUSE_DEFAULTS: AutoPauseConfig = {
   minAttempts: 50,
   window: 100,
   errorRate: 0.3,
+  uncertainCount: 20,
+  uncertainWindowSeconds: 60,
 };
 
 export function autoPauseConfigFromEnv(env: Record<string, string | undefined> = process.env): AutoPauseConfig {
@@ -54,6 +64,11 @@ export function autoPauseConfigFromEnv(env: Record<string, string | undefined> =
       positiveInt(env.DISPARADOR_AUTO_PAUSE_MIN_ATTEMPTS, AUTO_PAUSE_DEFAULTS.minAttempts)
     ),
     errorRate: rate(env.DISPARADOR_AUTO_PAUSE_ERROR_RATE, AUTO_PAUSE_DEFAULTS.errorRate),
+    uncertainCount: positiveInt(env.DISPARADOR_AUTO_PAUSE_UNCERTAIN_COUNT, AUTO_PAUSE_DEFAULTS.uncertainCount),
+    uncertainWindowSeconds: positiveInt(
+      env.DISPARADOR_AUTO_PAUSE_UNCERTAIN_WINDOW_SECONDS,
+      AUTO_PAUSE_DEFAULTS.uncertainWindowSeconds
+    ),
   };
 }
 
@@ -160,6 +175,22 @@ export function decideAutoPause(
   return { pause: true, attempts, errors: errors.length, percent, topCode, reason };
 }
 
+export type UncertainPauseDecision =
+  | { pause: false; count: number }
+  | { pause: true; count: number; reason: string };
+
+/** Pura: pausa quando há >= uncertainCount envios de resultado incerto na janela. */
+export function decideUncertainPause(count: number, config: AutoPauseConfig = AUTO_PAUSE_DEFAULTS): UncertainPauseDecision {
+  if (!config.enabled || count < config.uncertainCount) return { pause: false, count };
+  return {
+    pause: true,
+    count,
+    reason:
+      `Pausada automaticamente: ${count} envios com resultado não confirmado (502/503/504 ou timeout do provedor) ` +
+      `em ${config.uncertainWindowSeconds}s. Esses itens NÃO são reenviados (evita duplicidade). Verifique o provedor e retome a campanha.`,
+  };
+}
+
 /**
  * Avalia e, se for o caso, pausa a campanha. Nunca lança — falha aqui não
  * pode derrubar o tick do cron. Devolve true se pausou.
@@ -207,7 +238,43 @@ export async function checkCampaignAutoPause(
 
     const rows = recentAttempts([...(sent.data ?? []), ...(rejected.data ?? [])] as TimedAttemptRow[], config.window);
     const decision = decideAutoPause(rows, config);
-    if (!decision.pause) return false;
+    let reason: string;
+    let logPayload: Record<string, unknown>;
+    if (decision.pause) {
+      reason = decision.reason;
+      logPayload = {
+        attempts: decision.attempts,
+        errors: decision.errors,
+        percent: decision.percent,
+        top_code: decision.topCode,
+        threshold: config.errorRate,
+        min_attempts: config.minAttempts,
+        window: config.window,
+      };
+    } else {
+      // Incertos (502/503/504/timeout de resposta): terminais sem reenvio e fora do numerador acima.
+      const windowStart = new Date(Date.now() - config.uncertainWindowSeconds * 1000).toISOString();
+      const { count, error: uncertainError } = await db
+        .from("disp_message_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("campaign_id", campaign.id)
+        .eq("status", "erro")
+        .like("erro", `${UNCERTAIN_OUTCOME_ERROR}%`)
+        .gte("updated_at", since && Date.parse(since) > Date.parse(windowStart) ? since : windowStart);
+      if (uncertainError) {
+        console.error("[AutoPause] Falha ao contar resultados incertos:", campaign.id, uncertainError.message);
+        return false;
+      }
+      const uncertain = decideUncertainPause(count ?? 0, config);
+      if (!uncertain.pause) return false;
+      reason = uncertain.reason;
+      logPayload = {
+        kind: "uncertain_outcome",
+        uncertain_count: uncertain.count,
+        threshold: config.uncertainCount,
+        window_seconds: config.uncertainWindowSeconds,
+      };
+    }
 
     const { data: paused, error: pauseError } = await db.rpc("stop_dispatch_campaign", {
       p_campaign_id: campaign.id,
@@ -221,7 +288,7 @@ export async function checkCampaignAutoPause(
 
     const { error: noteError } = await db
       .from("campaigns")
-      .update({ pausa_automatica_motivo: decision.reason })
+      .update({ pausa_automatica_motivo: reason })
       .eq("id", campaign.id)
       .eq("account_id", campaign.account_id)
       .eq("status", "pausada");
@@ -235,17 +302,8 @@ export async function checkCampaignAutoPause(
       level: "error",
       source: "disparador",
       event: "campaign_auto_paused",
-      message: decision.reason,
-      payload: {
-        campaign_id: campaign.id,
-        attempts: decision.attempts,
-        errors: decision.errors,
-        percent: decision.percent,
-        top_code: decision.topCode,
-        threshold: config.errorRate,
-        min_attempts: config.minAttempts,
-        window: config.window,
-      },
+      message: reason,
+      payload: { campaign_id: campaign.id, ...logPayload },
     });
     return true;
   } catch (err) {
