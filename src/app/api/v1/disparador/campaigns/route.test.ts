@@ -12,6 +12,8 @@ let failQueueInsertOnCall = 0
 let queueInsertCalls = 0
 let failMetrics = false
 let idCounter = 0
+const storageUploads: Array<{ bucket: string; path: string; bytes: number; contentType?: string }> = []
+const storageRemovals: Array<{ bucket: string; paths: string[] }> = []
 
 function resetDb() {
   for (const k of Object.keys(tables)) delete tables[k]
@@ -28,6 +30,8 @@ function resetDb() {
   queueInsertCalls = 0
   failMetrics = false
   idCounter = 0
+  storageUploads.length = 0
+  storageRemovals.length = 0
 }
 
 function builder(table: string) {
@@ -104,7 +108,23 @@ function builder(table: string) {
   return b
 }
 
-vi.mock('@/lib/disparador/admin-client', () => ({ supabaseAdmin: () => ({ from: builder }) }))
+vi.mock('@/lib/disparador/admin-client', () => ({
+  supabaseAdmin: () => ({
+    from: builder,
+    storage: {
+      from: (bucket: string) => ({
+        upload: async (path: string, data: Buffer, options?: { contentType?: string }) => {
+          storageUploads.push({ bucket, path, bytes: data.length, contentType: options?.contentType })
+          return { data: { path }, error: null }
+        },
+        remove: async (paths: string[]) => {
+          storageRemovals.push({ bucket, paths })
+          return { data: paths, error: null }
+        },
+      }),
+    },
+  }),
+}))
 vi.mock('@/lib/auth/api-context', () => ({
   requireApiKey: async () => ({ accountId: 'ACC', keyId: 'KEY', createdBy: 'USER', scopes: ['campaigns:write'] }),
 }))
@@ -156,6 +176,19 @@ describe('POST /api/v1/disparador/campaigns', () => {
     expect((await r.json()).error.message).toMatch(/WABA do canal selecionado/);
     expect(tables.campaigns).toHaveLength(0);
   });
+
+  it('imagem é rejeitada para canal Meta nesta fase', async () => {
+    const r = await POST(
+      post(
+        base({
+          media: { type: 'image', url: 'https://cdn.example.com/banner.jpg' },
+        })
+      )
+    )
+    expect(r.status).toBe(400)
+    expect((await r.json()).error.message).toMatch(/apenas para canais WAHA/)
+    expect(tables.campaigns).toHaveLength(0)
+  })
 
   it('sem chave de idempotência: cria normal (e repetir cria outra, como antes)', async () => {
     const r1 = await POST(post(base()))
@@ -305,6 +338,161 @@ describe('POST /api/v1/disparador/campaigns', () => {
       expect(r.status).toBe(201)
       expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi $&, valor R$ 10 $1'])
       expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
+    })
+
+    it('enfileira imagem HTTPS com o texto resolvido como legenda', async () => {
+      const imageUrl = 'https://cdn.example.com/cobranca/banner.jpg'
+      const r = await POST(
+        post(
+          waha({
+            channel: 'brdid_2139551698',
+            media: { type: 'image', url: imageUrl },
+          })
+        )
+      )
+
+      expect(r.status).toBe(201)
+      const { data } = await r.json()
+      expect(data).toMatchObject({ provider: 'waha', message_type: 'image', enqueued: 1 })
+      expect(tables.disp_message_queue[0]).toMatchObject({
+        tipo: 'imagem',
+        media_url: imageUrl,
+        template_name: '__EXTERNAL_WAHA_TEXT__',
+        template_variables: ['Oi $&, valor R$ 10 $1'],
+      })
+      expect(tables.campaigns[0].mensagens[0]).toMatchObject({
+        tipo: 'imagem',
+        conteudo: 'Oi {{1}}, valor {{2}}',
+        url: imageUrl,
+      })
+    })
+
+    it('enfileira Base64 uma única vez no storage e referencia a imagem na fila', async () => {
+      const png = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+        0x00, 0x00, 0x00, 0x00,
+      ]).toString('base64')
+
+      const r = await POST(
+        post(
+          waha({
+            channel: 'brdid_2139551698',
+            media: {
+              type: 'image',
+              base64: png,
+              mime_type: 'image/png',
+            },
+          })
+        )
+      )
+
+      expect(r.status).toBe(201)
+      const { data } = await r.json()
+      expect(data).toMatchObject({ provider: 'waha', message_type: 'image', enqueued: 1 })
+      expect(storageUploads).toHaveLength(1)
+      expect(storageUploads[0]).toMatchObject({
+        bucket: 'chat-media',
+        bytes: 12,
+        contentType: 'image/png',
+      })
+      expect(storageUploads[0].path).toMatch(/^account-ACC\/api-campaigns\/.+\.png$/)
+      expect(tables.disp_message_queue[0].tipo).toBe('imagem')
+      expect(tables.disp_message_queue[0].media_url).toMatch(/^\/api\/chat-media\/account-ACC\/api-campaigns\//)
+      expect(tables.campaigns[0].mensagens[0]).toMatchObject({
+        tipo: 'imagem',
+        conteudo: 'Oi {{1}}, valor {{2}}',
+      })
+      expect(tables.campaigns[0].mensagens[0].url).toBe(tables.disp_message_queue[0].media_url)
+    })
+
+    it('rejeita Base64 com MIME divergente', async () => {
+      const png = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]).toString('base64')
+      const r = await POST(
+        post(
+          waha({
+            media: {
+              type: 'image',
+              base64: png,
+              mime_type: 'image/jpeg',
+            },
+          })
+        )
+      )
+      expect(r.status).toBe(400)
+      expect((await r.json()).error.message).toMatch(/não corresponde/)
+      expect(storageUploads).toHaveLength(0)
+    })
+
+    it('rejeita URL e Base64 juntos', async () => {
+      const png = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]).toString('base64')
+      const r = await POST(
+        post(
+          waha({
+            media: {
+              type: 'image',
+              url: 'https://cdn.example.com/banner.png',
+              base64: png,
+              mime_type: 'image/png',
+            },
+          })
+        )
+      )
+      expect(r.status).toBe(400)
+      expect((await r.json()).error.message).toMatch(/exatamente um/)
+    })
+
+    it('remove a imagem Base64 do storage se o enfileiramento falhar', async () => {
+      failQueueInsertOnCall = 1
+      const png = Buffer.from([
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      ]).toString('base64')
+
+      const r = await POST(
+        post(
+          waha({
+            media: {
+              type: 'image',
+              base64: png,
+              mime_type: 'image/png',
+            },
+          })
+        )
+      )
+
+      expect(r.status).toBe(500)
+      expect(storageUploads).toHaveLength(1)
+      expect(storageRemovals).toHaveLength(1)
+      expect(storageRemovals[0].paths).toEqual([storageUploads[0].path])
+    })
+
+    it('rejeita imagem sem HTTPS', async () => {
+      const r = await POST(
+        post(
+          waha({
+            media: { type: 'image', url: 'http://cdn.example.com/banner.jpg' },
+          })
+        )
+      )
+      expect(r.status).toBe(400)
+      expect((await r.json()).error.message).toMatch(/HTTPS/)
+      expect(tables.campaigns).toHaveLength(0)
+    })
+
+    it('rejeita outros tipos de mídia nesta fase', async () => {
+      const r = await POST(
+        post(
+          waha({
+            media: { type: 'video', url: 'https://cdn.example.com/video.mp4' },
+          })
+        )
+      )
+      expect(r.status).toBe(400)
+      expect((await r.json()).error.message).toMatch(/media\.type.*image/)
+      expect(tables.campaigns).toHaveLength(0)
     })
 
     it('aceita waha_session como identificador estável do canal', async () => {

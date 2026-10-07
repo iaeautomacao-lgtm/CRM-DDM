@@ -13,6 +13,8 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { sanitizePhoneForMeta } from "@/lib/whatsapp/phone-utils";
 import { assertWahaUrlIsSafe } from "@/lib/whatsapp/waha-api";
 import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
+import { chatMediaReference } from "@/lib/storage/chat-media";
+import { randomUUID } from "crypto";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
 import {
   INVALID_SAMPLE_LIMIT,
@@ -26,6 +28,61 @@ import {
   validateApiWindow,
 } from "@/lib/disparador/api-v1-campaign";
 
+const CAMPAIGN_IMAGE_BASE64_MAX_BYTES = 5 * 1024 * 1024;
+const CAMPAIGN_IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+type CampaignImageMimeType = (typeof CAMPAIGN_IMAGE_MIME_TYPES)[number];
+
+function isCampaignImageMimeType(value: unknown): value is CampaignImageMimeType {
+  return typeof value === "string" && CAMPAIGN_IMAGE_MIME_TYPES.includes(value as CampaignImageMimeType);
+}
+
+function extensionForCampaignImage(mime: CampaignImageMimeType): string {
+  if (mime === "image/jpeg") return "jpg";
+  if (mime === "image/png") return "png";
+  return "webp";
+}
+
+function decodeCampaignImageBase64(value: string): Buffer {
+  // Fase 1 segue o mesmo contrato da API de mensagem avulsa: base64 puro,
+  // sem prefixo data:. Buffer.from é permissivo, então validamos alfabeto,
+  // padding e round-trip para não aceitar lixo silenciosamente.
+  if (!value || value.startsWith("data:")) {
+    throw badRequest("'media.base64' deve ser Base64 puro, sem prefixo data:");
+  }
+  const compact = value.replace(/\s+/g, "");
+  if (
+    compact.length === 0 ||
+    compact.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(compact)
+  ) {
+    throw badRequest("'media.base64' é inválido");
+  }
+  const buffer = Buffer.from(compact, "base64");
+  if (buffer.length === 0 || buffer.toString("base64") !== compact) {
+    throw badRequest("'media.base64' é inválido");
+  }
+  if (buffer.length > CAMPAIGN_IMAGE_BASE64_MAX_BYTES) {
+    throw badRequest(
+      `Imagem excede o limite de 5 MB (recebido: ${(buffer.length / (1024 * 1024)).toFixed(1)} MB)`
+    );
+  }
+  return buffer;
+}
+
+function imageMagicMatches(buffer: Buffer, mime: CampaignImageMimeType): boolean {
+  if (mime === "image/jpeg") {
+    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+  if (mime === "image/png") {
+    return buffer.length >= 8 &&
+      buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 &&
+      buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a;
+  }
+  return buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP";
+}
+
 // Payload esperado pelo sistema externo (Planejamento)
 interface ExternalCampaignPayload {
   campaign_name: string;                  // obrigatório
@@ -33,6 +90,12 @@ interface ExternalCampaignPayload {
   template_name?: string;                 // obrigatório para canais Meta — nome do template aprovado
   template_language?: string;             // padrão: "pt_BR"
   message?: string;                       // obrigatório para canais WAHA — texto livre com {{1}}, {{2}}...
+  media?: {                                 // Fase 1: imagem, somente WAHA
+    type: "image";
+    url?: string;                             // URL pública HTTPS
+    base64?: string;                          // Base64 puro, sem data:
+    mime_type?: CampaignImageMimeType;        // obrigatório com base64
+  };
   channel?: string;                       // UUID do canal OU número de telefone (ex: "+55 21 3030-9159")
   contacts: Array<{
     phone: string;                        // obrigatório — número do contato (com ou sem +)
@@ -49,6 +112,8 @@ interface ExternalCampaignPayload {
 
 type CreationResult = {
   campaign_id: string;
+  provider: "meta" | "waha";
+  message_type: "text" | "image";
   enqueued: number;
   skipped: number;
   duplicates: number;
@@ -169,7 +234,68 @@ export async function POST(request: Request) {
       );
     }
     if (body.channel != null && typeof body.channel !== "string") {
-      throw badRequest("'channel' deve ser texto (UUID do canal ou número)");
+      throw badRequest("'channel' deve ser texto (UUID, sessão WAHA ou número Meta)");
+    }
+
+    let media:
+      | { type: "image"; source: "url"; url: string }
+      | { type: "image"; source: "base64"; base64: string; mimeType: CampaignImageMimeType; buffer: Buffer }
+      | null = null;
+
+    if (body.media != null) {
+      if (typeof body.media !== "object" || Array.isArray(body.media)) {
+        throw badRequest("'media' deve ser um objeto");
+      }
+      const candidate = body.media as {
+        type?: unknown;
+        url?: unknown;
+        base64?: unknown;
+        mime_type?: unknown;
+      };
+      if (candidate.type !== "image") {
+        throw badRequest("'media.type' deve ser 'image' nesta versão da API");
+      }
+
+      const hasUrl = typeof candidate.url === "string" && candidate.url.trim().length > 0;
+      const hasBase64 = typeof candidate.base64 === "string" && candidate.base64.trim().length > 0;
+      if (hasUrl === hasBase64) {
+        throw badRequest("Informe exatamente um de 'media.url' ou 'media.base64'");
+      }
+
+      if (hasUrl) {
+        const mediaUrl = (candidate.url as string).trim();
+        if (mediaUrl.length > 4096) {
+          throw badRequest("'media.url' pode ter no máximo 4096 caracteres");
+        }
+        let parsedMediaUrl: URL;
+        try {
+          parsedMediaUrl = new URL(mediaUrl);
+        } catch {
+          throw badRequest("'media.url' deve ser uma URL HTTPS válida");
+        }
+        if (parsedMediaUrl.protocol !== "https:") {
+          throw badRequest("'media.url' deve usar HTTPS");
+        }
+        media = { type: "image", source: "url", url: parsedMediaUrl.toString() };
+      } else {
+        if (!isCampaignImageMimeType(candidate.mime_type)) {
+          throw badRequest(
+            `'media.mime_type' é obrigatório com Base64 e deve ser: ${CAMPAIGN_IMAGE_MIME_TYPES.join(", ")}`
+          );
+        }
+        const rawBase64 = (candidate.base64 as string).replace(/\s+/g, "");
+        const buffer = decodeCampaignImageBase64(rawBase64);
+        if (!imageMagicMatches(buffer, candidate.mime_type)) {
+          throw badRequest("'media.base64' não corresponde ao 'media.mime_type' informado");
+        }
+        media = {
+          type: "image",
+          source: "base64",
+          base64: rawBase64,
+          mimeType: candidate.mime_type,
+          buffer,
+        };
+      }
     }
 
     const janela_inicio = body.janela_inicio ?? "08:00";
@@ -331,6 +457,19 @@ export async function POST(request: Request) {
     if (provider === "waha" && !body.message?.trim()) {
       throw badRequest("Campo 'message' é obrigatório para canais WAHA");
     }
+    if (media && provider !== "waha") {
+      throw badRequest("'media' nesta versão é suportada apenas para canais WAHA");
+    }
+    if (media?.source === "url") {
+      // A WAHA baixa a URL diretamente. Validamos o destino aqui para
+      // impedir que uma integração use o canal como ponte para acessar
+      // localhost/redes privadas (SSRF).
+      try {
+        await assertWahaUrlIsSafe(media.url);
+      } catch {
+        throw badRequest("'media.url' inválida ou aponta para um destino não permitido");
+      }
+    }
 
     // Validar template aprovado — só se aplica a Meta; WAHA não tem
     // conceito de template, o texto vem direto de body.message.
@@ -393,6 +532,35 @@ export async function POST(request: Request) {
       });
     }
 
+    // URL externa é usada diretamente. Base64 é persistido UMA vez no
+    // bucket privado e a fila guarda apenas a referência interna — nunca
+    // replicamos megabytes de Base64 para cada contato.
+    let queuedMediaUrl: string | null = media?.source === "url" ? media.url : null;
+    let uploadedMediaPath: string | null = null;
+    if (media?.source === "base64") {
+      const ext = extensionForCampaignImage(media.mimeType);
+      uploadedMediaPath = `account-${ctx.accountId}/api-campaigns/${randomUUID()}.${ext}`;
+      const { error: uploadError } = await db.storage
+        .from("chat-media")
+        .upload(uploadedMediaPath, media.buffer, {
+          contentType: media.mimeType,
+          cacheControl: "31536000",
+          upsert: false,
+        });
+      if (uploadError) {
+        throw new ApiError("internal", "Não foi possível armazenar a imagem da campanha", 500);
+      }
+      queuedMediaUrl = chatMediaReference(uploadedMediaPath);
+    }
+
+    const cleanupUploadedMedia = async () => {
+      if (!uploadedMediaPath) return;
+      const { error } = await db.storage.from("chat-media").remove([uploadedMediaPath]);
+      if (error) {
+        console.error("[v1/disparador] falha ao remover mídia órfã:", error.message);
+      }
+    };
+
     // scheduled_at pelo relógio de janela: o que cai fora da janela/dia
     // permitido continua na próxima abertura, mantendo o espaçamento.
     const scheduleTimes = scheduleApiContacts(validContacts.length, {
@@ -437,8 +605,9 @@ export async function POST(request: Request) {
               ]
             : [
                 {
-                  tipo: "texto",
+                  tipo: media ? "imagem" : "texto",
                   conteudo: body.message ?? "",
+                  ...(queuedMediaUrl ? { url: queuedMediaUrl } : {}),
                 },
               ],
         created_by: ctx.createdBy,
@@ -448,11 +617,13 @@ export async function POST(request: Request) {
 
     if (campaignError?.code === "23505" && idem.key) {
       // Corrida: outra requisição com a mesma chave criou a campanha primeiro.
+      await cleanupUploadedMedia();
       const replay = await replayExisting(db, ctx.accountId, idem.key, idem.hash, logCtx);
       if (replay) return replay;
     }
     if (campaignError || !campaign) {
       console.error("[v1/disparador] campaign insert error:", campaignError);
+      await cleanupUploadedMedia();
       throw badRequest("Falha ao criar campanha");
     }
 
@@ -495,8 +666,8 @@ export async function POST(request: Request) {
           session_id: channelId,
           mensagem_final: contact.phone,
           status: "agendado",
-          tipo: "texto",
-          media_url: null,
+          tipo: media ? "imagem" : "texto",
+          media_url: queuedMediaUrl,
           scheduled_at: scheduledAt,
           template_name: EXTERNAL_WAHA_TEXT_MARKER,
           template_language: null,
@@ -532,6 +703,7 @@ export async function POST(request: Request) {
     } catch (err) {
       console.error("[v1/disparador] falha ao enfileirar; desfazendo campanha", campaignId, err);
       await rollbackCampaign(db, campaignId, ctx.accountId);
+      await cleanupUploadedMedia();
       throw creationFailure(campaignId);
     }
 
@@ -540,6 +712,8 @@ export async function POST(request: Request) {
     const estimatedMinutes = Math.max(0, totalSlots - 1) * slotIntervalMinutes;
     const result: CreationResult = {
       campaign_id: campaignId,
+      provider,
+      message_type: media ? "image" : "text",
       enqueued,
       skipped,
       duplicates,

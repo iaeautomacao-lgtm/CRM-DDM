@@ -40,8 +40,10 @@ import {
   shouldChainNext,
   type ChainContext,
 } from "@/lib/disparador/tick-chain";
+import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
+import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -164,6 +166,10 @@ const META_131026_CONFIRM_LOCK_TTL_SECONDS = 270;
 // Consolidação dos deltas de métricas (migration 183): lock próprio, só com sobra de tempo.
 const METRICS_CONSOLIDATE_LOCK_TTL_SECONDS = 30;
 const METRICS_CONSOLIDATE_BATCH = 20_000;
+// Lock do tick: curto; renovado a cada 20 s pelo heartbeat (renew_cron_lock, TTL padrão 90 s após a migration 184).
+const CRON_LOCK_TTL_SECONDS = 90;
+// Movimentação de itens de campanhas pausadas/encerradas/retomadas (migration 184): tempo máximo por tick.
+const QUEUE_MOVES_BUDGET_MS = 8_000;
 const METRICS_CONSOLIDATE_MAX_ROUNDS = 5;
 
 /** Janela (min) sem delivered/read para um failed 131026 (aparelho offline também gera) virar erro definitivo. */
@@ -285,10 +291,10 @@ async function runTick(request: Request, chain: ChainContext) {
   let tickStatus = "error";
   try {
     const db = supabaseAdmin();
-    // Só um tick por vez em todo o cluster. TTL de 600s cobre crash do
-    // processo: o lock expira sozinho e o próximo tick consegue entrar.
+    // Só um tick por vez em todo o cluster. TTL curto (90 s, migration 184): o heartbeat de 20 s renova
+    // durante o tick; se o processo morrer (deploy/crash) o lock expira em ~1,5 min e o próximo tick entra.
     const { data: acquired, error: lockError } = await db.rpc('try_acquire_cron_lock', {
-      p_name: 'disparador_cron', p_owner_id: owner, p_ttl_seconds: 600,
+      p_name: 'disparador_cron', p_owner_id: owner, p_ttl_seconds: CRON_LOCK_TTL_SECONDS,
     });
     if (lockError) throw lockError;
     if (!acquired) return NextResponse.json({ status: 'already_running' });
@@ -311,6 +317,15 @@ async function runTick(request: Request, chain: ChainContext) {
     // primeiro para não ficar sempre sem tempo quando a fila está cheia.
     const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 100 });
     if (receiptsError) throw receiptsError;
+    // Rede de segurança do webhook de status em lote (migration 185): aplica o que o after() do webhook
+    // não conseguiu (processo caiu entre o 200 e o apply, ele não ganhou a vez…). Só com sobra de tempo e
+    // limitado (no máx. ~8 s do orçamento), para nunca atrasar os envios; sem a migration, é no-op.
+    const drainDeadline = tickStartedAt + Math.min(8_000, Math.floor(config.tickBudgetMs / 4));
+    await drainStatusInbox(db, {
+      limit: 1000,
+      maxBatches: 5,
+      shouldStop: () => outOfTime() || Date.now() > drainDeadline,
+    });
     await drainCallbackOutbox(1);
     // Watchdog anti-deadlock. É manutenção best-effort: falha aqui nunca
     // derruba o tick nem impede novos envios.
@@ -414,6 +429,12 @@ async function runTick(request: Request, chain: ChainContext) {
         const { error: releaseError } = await db.rpc("release_cron_lock", { p_name: "disparador_metrics", p_owner_id: owner });
         if (releaseError) console.error("[Cron] Falha ao liberar o lock de métricas:", releaseError.message);
       }
+    }
+    // 2d) Itens de campanhas pausadas/encerradas/retomadas: a RPC de stop/resume só trocou o status; os itens
+    //     movem em lotes aqui (e pela rota). Só com sobra de tempo; falha/RPC ausente não derruba o tick.
+    if (!outOfTime()) {
+      const moved = await drainDispatchMoves(db, null, { budgetMs: QUEUE_MOVES_BUDGET_MS });
+      if (moved.moved > 0) console.log("[Cron] Itens movidos após pausa/encerramento/retomada:", moved.moved, moved.partial ? "(parcial)" : "");
     }
     // 3) Campanhas em execução, mais "atrasadas" primeiro (fairness entre
     //    campanhas quando o tick não dá conta de todas).
