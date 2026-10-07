@@ -24,6 +24,8 @@ const ops: Array<{ table: string; op: string; filters: Array<[string, unknown]> 
 const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = []
 const afterCallbacks: Array<() => Promise<void>> = []
 // Linha simulada de whatsapp_test_sends (aplica os filtros do update de verdade).
+// Linha simulada de messages (status do Inbox/API).
+let messageRow: { id: string; status: string } | null = null
 let testSendRow: { message_id: string; status: string; erro: string | null } | null = null
 
 function channelFor(pn: string): FakeChannel | null {
@@ -74,6 +76,18 @@ vi.mock('@supabase/supabase-js', () => ({
             return true
           })
           if (matches) Object.assign(row, pendingRow)
+        }
+        if (table === 'messages' && messageRow) {
+          if (op === 'select') return resolve({ data: [{ id: messageRow.id }], error: null })
+          if (op === 'update' && pendingRow) {
+            const row = messageRow
+            const ok = filters.every(([c, v]) => {
+              if (c === 'id in') return (v as string[]).includes(row.id)
+              if (c === 'status in') return (v as string[]).includes(row.status)
+              return true
+            })
+            if (ok) Object.assign(row, pendingRow)
+          }
         }
         resolve({ data: [], error: null })
       }
@@ -305,6 +319,7 @@ describe('POST /api/whatsapp/webhook — precedência de status em whatsapp_test
     afterCallbacks.length = 0
     clearAppSecretCache()
     testSendRow = { message_id: WAMID, status: 'sent', erro: null }
+    messageRow = { id: 'MSG-1', status: 'sent' }
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
@@ -348,5 +363,73 @@ describe('POST /api/whatsapp/webhook — precedência de status em whatsapp_test
     testSendRow = { message_id: WAMID, status: 'sent', erro: null }
     await send('failed')
     expect(testSendRow).toEqual({ message_id: WAMID, status: 'failed', erro: 'Falha na entrega (Meta)' })
+  })
+})
+
+describe('POST /api/whatsapp/webhook — precedência de status em messages (Inbox/API)', () => {
+  const WAMID = 'wamid-test-send'
+  async function send(status: string, errors?: Array<{ code: number; title: string }>) {
+    const raw = JSON.stringify({
+      entry: [
+        {
+          id: 'WABA-A',
+          changes: [
+            {
+              field: 'messages',
+              value: {
+                metadata: { phone_number_id: 'PNID-1' },
+                statuses: [{ id: WAMID, status, timestamp: '1', recipient_id: '5511', ...(errors ? { errors } : {}) }],
+              },
+            },
+          ],
+        },
+      ],
+    })
+    const sig = 'sha256=' + crypto.createHmac('sha256', CHANNEL_SECRET).update(raw).digest('hex')
+    const res = await POST(
+      new Request('http://localhost/api/whatsapp/webhook', { method: 'POST', body: raw, headers: { 'x-hub-signature-256': sig } })
+    )
+    expect(res.status).toBe(200)
+    for (const cb of afterCallbacks.splice(0)) await cb()
+  }
+  const failed131026 = [{ code: 131026, title: 'Message undeliverable' }]
+
+  beforeEach(() => {
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    ops.length = 0
+    rpcCalls.length = 0
+    afterCallbacks.length = 0
+    clearAppSecretCache()
+    testSendRow = null
+    messageRow = { id: 'MSG-1', status: 'sent' }
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it('failed 131026 → read: a mensagem termina read', async () => {
+    await send('failed', failed131026)
+    expect(messageRow?.status).toBe('failed')
+    await send('read')
+    expect(messageRow?.status).toBe('read')
+  })
+
+  it('failed 131026 → delivered → read', async () => {
+    await send('failed', failed131026)
+    await send('delivered')
+    expect(messageRow?.status).toBe('delivered')
+    await send('read')
+    expect(messageRow?.status).toBe('read')
+  })
+
+  it('read → failed: continua read (failed não rebaixa)', async () => {
+    await send('read')
+    await send('failed', failed131026)
+    expect(messageRow?.status).toBe('read')
+  })
+
+  it('delivered → failed: continua delivered', async () => {
+    await send('delivered')
+    await send('failed', failed131026)
+    expect(messageRow?.status).toBe('delivered')
   })
 })
