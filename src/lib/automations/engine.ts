@@ -23,6 +23,7 @@ import { closeConversationForAutomation } from './close-conversation'
 import { getConversationChannel, isSocialChannel, sendWebchatMessage } from '@/lib/webchat/send'
 import { sendSocialMessage } from '@/lib/channels/social'
 import { engineWahaSendText } from '@/lib/flows/waha-send'
+import { safeFetch } from '@/lib/security/ssrf-guard'
 
 // ------------------------------------------------------------
 // Public API
@@ -606,11 +607,15 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const cfg = step.step_config as SendWebhookStepConfig
       if (!cfg.url) throw new Error('send_webhook needs url')
       const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
-      const res = await fetch(cfg.url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
-        body,
-      })
+      const res = await safeFetch(
+        cfg.url,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
+          body,
+        },
+        { timeoutMs: 15_000, maxBytes: 256 * 1024 },
+      )
       if (!res.ok) throw new Error(`webhook returned ${res.status}`)
       return `webhook ${res.status}`
     }

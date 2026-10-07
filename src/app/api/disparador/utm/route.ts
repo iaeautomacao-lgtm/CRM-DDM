@@ -1,14 +1,20 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { parseUtmBatchBody } from "@/lib/disparador/utm-body";
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Mesmo papel das rotas de campanha (a chave UTM_API_KEY é da instância).
+  try {
+    await requireDisparadorAccess();
+  } catch (err) {
+    return toErrorResponse(err);
   }
 
-  const body = await request.json();
+  const body = parseUtmBatchBody(await request.json().catch(() => null));
+  if (!body) {
+    return NextResponse.json({ error: "Corpo inválido" }, { status: 400 });
+  }
 
   const res = await fetch(
     "https://utmpay.grupoddm.ia.br/api/gerar-links-lote",
@@ -22,6 +28,6 @@ export async function POST(request: Request) {
     }
   );
 
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return NextResponse.json(data, { status: res.ok ? 200 : res.status });
 }

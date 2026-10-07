@@ -29,3 +29,31 @@ export async function processWithConcurrency<T>(
     })
   );
 }
+
+
+export const DEFAULT_DISPATCH_PROCESS_CONCURRENCY = 4;
+export const MAX_DISPATCH_PROCESS_CONCURRENCY = 50;
+
+/**
+ * Resolve o limite do pool do cron a partir do ambiente.
+ *
+ * O banco continua sendo a barreira final por canal via
+ * dispatch_channel_limits.max_in_flight. Aqui limitamos apenas quantas
+ * operações o processo tenta manter em andamento ao mesmo tempo.
+ *
+ * Valor inválido não derruba o cron: volta ao default seguro.
+ */
+export function resolveDispatchProcessConcurrency(
+  raw = process.env.DISPATCH_PROCESS_CONCURRENCY,
+): number {
+  if (raw == null || raw.trim() === "") return DEFAULT_DISPATCH_PROCESS_CONCURRENCY;
+  const parsed = Number(raw);
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 1 ||
+    parsed > MAX_DISPATCH_PROCESS_CONCURRENCY
+  ) {
+    return DEFAULT_DISPATCH_PROCESS_CONCURRENCY;
+  }
+  return parsed;
+}

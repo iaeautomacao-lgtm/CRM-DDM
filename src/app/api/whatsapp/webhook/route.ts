@@ -21,6 +21,14 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
 import {
+  cacheChannel,
+  channelKeyForChange,
+  getCachedChannel,
+  invalidateChannel,
+  processStatusesIndependently,
+  type ChannelRow,
+} from '@/lib/whatsapp/webhook-fast-path'
+import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
@@ -216,81 +224,60 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Resolve the App Secret to verify against. Each Meta channel can have
-  // its own (whatsapp_config.app_secret) — a single global secret breaks
-  // as soon as an account connects numbers from two different Meta Apps.
-  // We only need the first entry/change's phone_number_id: Meta batches
-  // webhook deliveries per subscribed App, so every entry in one POST
-  // body is already signed with the same App Secret.
-  const phoneNumberId =
-    body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id
-
-  let channelAppSecret: string | null = null
-  let channelSecretIsLegacyPlaintext = false
-  if (phoneNumberId) {
-    const { data: config } = await supabaseAdmin()
-      .from('whatsapp_config')
-      .select('app_secret')
-      .eq('phone_number_id', phoneNumberId)
-      .eq('provider', 'meta')
-      .limit(1)
-      .single()
-    if (config?.app_secret) {
-      channelSecretIsLegacyPlaintext =
-        !isEncryptedSecret(config.app_secret) &&
-        !isLegacyCbcSecret(config.app_secret)
-      try {
-        // decryptStoredSecret aceita texto puro legado (gravado direto no
-        // banco antes da correção) até o script de migração rodar — antes,
-        // o decrypt() lançava e o webhook caía calado no META_APP_SECRET.
-        channelAppSecret = decryptStoredSecret(
-          config.app_secret,
-          'whatsapp_config.app_secret',
-        )
-      } catch (err) {
-        console.error(
-          '[webhook] failed to decrypt app_secret for phone_number_id:',
-          phoneNumberId,
-          err
-        )
-      }
+  // C-2 (auditoria): a assinatura é validada POR CANAL. Cada change só é
+  // processada se o seu phone_number_id (ou, para eventos de template, o WABA
+  // da entry) pertence a um whatsapp_config cujo app_secret valida o HMAC do
+  // corpo. Antes, só o entry[0] era conferido e todo o resto era processado:
+  // quem tinha um App Meta próprio assinava com o próprio segredo e injetava
+  // eventos em números de OUTRAS contas.
+  const channelKeys = new Set<string>()
+  for (const entry of body?.entry ?? []) {
+    for (const change of entry?.changes ?? []) {
+      const key = channelKeyForChange(
+        entry,
+        change,
+        isTemplateWebhookField(change?.field),
+      )
+      if (key) channelKeys.add(key)
     }
   }
 
-  // Fall back to the global env var for channels saved before app_secret
-  // was captured per-config.
-  const secret = channelAppSecret ?? process.env.META_APP_SECRET ?? null
+  const verifiedChannels = new Map<string, ChannelRow>()
+  const rejectedKeys: string[] = []
+  let anyMissingSecret = false
+  if (channelKeys.size === 0) {
+    // Corpo sem canal identificável: nada será processado; só vale validar a
+    // assinatura com o segredo global (comportamento anterior sem phone_number_id).
+    const globalOnly = verifyWithGlobalSecret(rawBody, signature)
+    if (globalOnly === 'no_secret') anyMissingSecret = true
+    if (globalOnly !== 'ok') rejectedKeys.push('(sem canal)')
+  }
+  for (const key of channelKeys) {
+    const result = await verifyChannelKey(key, rawBody, signature)
+    if (result.ok && result.row) {
+      verifiedChannels.set(key, result.row)
+    } else if (!result.ok) {
+      rejectedKeys.push(key)
+      if (result.noSecret) anyMissingSecret = true
+    }
+    // ok sem row: assinado pelo segredo global, mas canal sem whatsapp_config
+    // — não há conta para escopar, então não há o que processar.
+  }
+  // 401 só quando NADA do corpo validou; corpo misto segue com o que validou.
+  const anyValid =
+    verifiedChannels.size > 0 ||
+    (channelKeys.size > 0 && rejectedKeys.length < channelKeys.size)
+  const signatureOk = channelKeys.size === 0 ? rejectedKeys.length === 0 : anyValid
 
-  if (!secret) {
+  if (!signatureOk && anyMissingSecret) {
     console.error(
-      '[webhook] no App Secret configured for phone_number_id:',
-      phoneNumberId
+      '[webhook] no App Secret configured for channels:',
+      rejectedKeys
     )
     return NextResponse.json(
       { error: 'App Secret não configurado para este canal' },
       { status: 401 }
     )
-  }
-
-  let signatureOk = verifyMetaWebhookSignature(rawBody, signature, secret)
-  // Transição: antes, um app_secret em texto puro fazia o decrypt() lançar
-  // e o webhook validava com o META_APP_SECRET global. Para não derrubar
-  // um canal cujo valor legado esteja desatualizado, mantém esse fallback
-  // SÓ para app_secret legado em texto puro, até o script de migração rodar.
-  const globalAppSecret = process.env.META_APP_SECRET
-  if (
-    !signatureOk &&
-    channelSecretIsLegacyPlaintext &&
-    globalAppSecret &&
-    globalAppSecret !== secret
-  ) {
-    signatureOk = verifyMetaWebhookSignature(rawBody, signature, globalAppSecret)
-    if (signatureOk) {
-      console.warn(
-        '[webhook] app_secret legado em texto puro não confere; assinatura validada pelo META_APP_SECRET global. phone_number_id:',
-        phoneNumberId
-      )
-    }
   }
 
   if (!signatureOk) {
@@ -305,11 +292,24 @@ export async function POST(request: Request) {
       source: 'webhook_meta',
       event: 'hmac_rejected',
       message: 'Assinatura HMAC inválida rejeitada no webhook Meta',
-      // phone_number_id é o identificador do canal Meta, não o telefone de
-      // um contato — não precisa de mascaramento (ver maskPhone).
-      payload: { phone_number_id: phoneNumberId ?? null },
+      // Identificadores de canal Meta (phone_number_id/WABA), não telefone de
+      // contato — não precisam de mascaramento (ver maskPhone).
+      payload: { channels: rejectedKeys },
     })
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
+
+  if (rejectedKeys.length > 0) {
+    // Corpo misto: o que não bate com o segredo do seu próprio canal é
+    // descartado (tentativa de injeção cross-tenant), o resto segue.
+    console.warn('[webhook] canais descartados por assinatura inválida:', rejectedKeys)
+    void writeLog({
+      level: 'warn',
+      source: 'webhook_meta',
+      event: 'hmac_partial_rejected',
+      message: 'Canais do POST descartados: assinatura não confere com o app_secret do canal',
+      payload: { channels: rejectedKeys },
+    })
   }
 
   // Process AFTER the response so we ack Meta within their ~20s timeout
@@ -328,7 +328,7 @@ export async function POST(request: Request) {
   // maxDuration).
   after(async () => {
     try {
-      await processWebhook(body)
+      await processWebhook(body, verifiedChannels)
     } catch (error) {
       console.error('Error processing webhook:', error)
     }
@@ -337,20 +337,142 @@ export async function POST(request: Request) {
   return NextResponse.json({ status: 'received' }, { status: 200 })
 }
 
-async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
+type VerifyOutcome =
+  | { ok: true; row: ChannelRow | null }
+  | { ok: false; row: ChannelRow | null; noSecret: boolean }
+
+function verifyWithGlobalSecret(
+  rawBody: string,
+  signature: string | null,
+): 'ok' | 'bad' | 'no_secret' {
+  const globalAppSecret = process.env.META_APP_SECRET
+  if (!globalAppSecret) return 'no_secret'
+  return verifyMetaWebhookSignature(rawBody, signature, globalAppSecret)
+    ? 'ok'
+    : 'bad'
+}
+
+async function resolveChannel(
+  key: string,
+  useCache: boolean,
+): Promise<{ row: ChannelRow | null; fromCache: boolean }> {
+  if (useCache) {
+    const cached = getCachedChannel(key)
+    if (cached) return { row: cached, fromCache: true }
+  }
+  const column = key.startsWith('waba:') ? 'waba_id' : 'phone_number_id'
+  const { data: config } = await supabaseAdmin()
+    .from('whatsapp_config')
+    .select('id, account_id, app_secret')
+    .eq(column, key.slice(key.indexOf(':') + 1))
+    .eq('provider', 'meta')
+    .limit(1)
+    .single()
+  if (!config?.id || !config?.account_id) return { row: null, fromCache: false }
+  const row: ChannelRow = {
+    id: config.id,
+    account_id: config.account_id,
+    app_secret: config.app_secret ?? null,
+  }
+  cacheChannel(key, row)
+  return { row, fromCache: false }
+}
+
+// Valida o HMAC do corpo contra o app_secret do canal `key`. O canal fica em
+// cache (TTL curto): evita 1 ida ao banco antes do 200. Se a assinatura não
+// conferir com o canal vindo do cache (ex.: secret rotacionado há <60s), relê
+// o banco uma vez antes de rejeitar.
+async function verifyChannelKey(
+  key: string,
+  rawBody: string,
+  signature: string | null,
+): Promise<VerifyOutcome> {
+  const attempt = async (useCache: boolean) => {
+    const { row, fromCache } = await resolveChannel(key, useCache)
+    let channelAppSecret: string | null = null
+    let channelSecretIsLegacyPlaintext = false
+    if (row?.app_secret) {
+      channelSecretIsLegacyPlaintext =
+        !isEncryptedSecret(row.app_secret) && !isLegacyCbcSecret(row.app_secret)
+      try {
+        // decryptStoredSecret aceita texto puro legado (gravado direto no
+        // banco antes da correção) até o script de migração rodar — antes,
+        // o decrypt() lançava e o webhook caía calado no META_APP_SECRET.
+        channelAppSecret = decryptStoredSecret(
+          row.app_secret,
+          'whatsapp_config.app_secret',
+        )
+      } catch (err) {
+        console.error('[webhook] failed to decrypt app_secret for channel:', key, err)
+      }
+    }
+
+    // Fall back to the global env var for channels saved before app_secret
+    // was captured per-config.
+    const globalAppSecret = process.env.META_APP_SECRET
+    const secret = channelAppSecret ?? globalAppSecret ?? null
+    if (!secret) return { row, fromCache, ok: false, noSecret: true }
+
+    let ok = verifyMetaWebhookSignature(rawBody, signature, secret)
+    // Transição: antes, um app_secret em texto puro fazia o decrypt() lançar
+    // e o webhook validava com o META_APP_SECRET global. Para não derrubar
+    // um canal cujo valor legado esteja desatualizado, mantém esse fallback
+    // SÓ para app_secret legado em texto puro, até o script de migração rodar.
+    if (
+      !ok &&
+      channelSecretIsLegacyPlaintext &&
+      globalAppSecret &&
+      globalAppSecret !== secret
+    ) {
+      ok = verifyMetaWebhookSignature(rawBody, signature, globalAppSecret)
+      if (ok) {
+        console.warn(
+          '[webhook] app_secret legado em texto puro não confere; assinatura validada pelo META_APP_SECRET global. canal:',
+          key
+        )
+      }
+    }
+    return { row, fromCache, ok, noSecret: false }
+  }
+
+  let result = await attempt(true)
+  if (!result.ok && result.fromCache) {
+    invalidateChannel(key)
+    result = await attempt(false)
+  }
+  return result.ok
+    ? { ok: true, row: result.row }
+    : { ok: false, row: result.row, noSecret: result.noSecret }
+}
+
+async function processWebhook(
+  body: { entry?: WhatsAppWebhookEntry[] },
+  verifiedChannels: Map<string, ChannelRow>,
+) {
   if (!body.entry) return
 
   for (const entry of body.entry) {
     for (const change of entry.changes) {
+      const isTemplate = isTemplateWebhookField(change.field)
+      // Só processa o que pertence a um canal cuja assinatura validou; a
+      // conta usada em tudo abaixo vem DESSE canal, nunca do conteúdo do corpo.
+      const channelKey = channelKeyForChange(entry, change, isTemplate)
+      const channel = channelKey ? verifiedChannels.get(channelKey) : undefined
+      if (!channel) {
+        console.warn('[webhook] change ignorada: canal não validado:', channelKey)
+        continue
+      }
+
       // Template-lifecycle events (status / quality / components
       // updates from Meta) come in on a different change.field and
       // have a different value shape — route them through the
       // dedicated handler. Skip the messaging branches below so we
       // don't try to read message-shaped fields off a template event.
-      if (isTemplateWebhookField(change.field)) {
+      if (isTemplate) {
         await handleTemplateWebhookChange(
           { field: change.field, value: change.value as unknown },
-          supabaseAdmin()
+          supabaseAdmin(),
+          { accountId: channel.account_id }
         )
         continue
       }
@@ -359,9 +481,26 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       // Handle status updates
       if (value.statuses) {
-        for (const status of value.statuses) {
-          await handleStatusUpdate(status)
-        }
+        // Um status que falha não descarta os demais do mesmo POST (a Meta
+        // não reenvia: já recebeu 200). 'sent' é ignorado — não agrega.
+        await processStatusesIndependently(
+          value.statuses,
+          (status) => handleStatusUpdate(status, channel.account_id),
+          (status, error) => {
+            console.error('[webhook] falha ao processar status:', status.id, status.status, error)
+            void writeLog({
+              level: 'error',
+              source: 'webhook_meta',
+              event: 'status_update_failed',
+              message: 'Falha ao processar status de mensagem da Meta',
+              payload: {
+                message_id: status.id,
+                status: status.status,
+                erro: error instanceof Error ? error.message : String(error),
+              },
+            })
+          },
+        )
       }
 
       // Handle incoming messages
@@ -409,6 +548,13 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
 
       const config = configRows[0]
 
+      // Defesa em profundidade: o config usado para processar tem de ser o
+      // mesmo canal cuja assinatura validou.
+      if (config.id !== channel.id) {
+        console.error('[webhook] config divergente do canal validado:', phoneNumberId)
+        continue
+      }
+
       const decryptedAccessToken = decrypt(config.access_token)
 
       for (let i = 0; i < value.messages.length; i++) {
@@ -433,12 +579,17 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
   }
 }
 
-async function handleStatusUpdate(status: {
-  id: string
-  status: string
-  timestamp: string
-  recipient_id: string
-}) {
+async function handleStatusUpdate(
+  status: {
+    id: string
+    status: string
+    timestamp: string
+    recipient_id: string
+  },
+  // Conta do canal cuja assinatura validou o POST — o update de `messages`
+  // só alcança mensagens de conversas dessa conta.
+  accountId: string
+) {
   // Transições permitidas por status recebido da Meta. Os webhooks de
   // status podem chegar fora de ordem ou duplicados; só avançamos a partir
   // dos estados listados, então um 'sent' atrasado nunca rebaixa 'read'.
@@ -449,12 +600,23 @@ async function handleStatusUpdate(status: {
     failed: ['pending', 'sending', 'sent'],
   }
   if (!allowedPrevious[status.status]) return
-  const { error: msgErr } = await supabaseAdmin()
+  // messages não tem account_id: resolve as linhas da conta via conversa e
+  // atualiza por id (um status de outro canal nunca altera mensagem alheia).
+  const { data: ownedMsgs, error: ownedErr } = await supabaseAdmin()
     .from('messages')
-    .update({ status: status.status })
+    .select('id, conversations!inner(account_id)')
     .eq('message_id', status.id)
-    .in('status', allowedPrevious[status.status])
-  if (msgErr) throw msgErr
+    .eq('conversations.account_id', accountId)
+  if (ownedErr) throw ownedErr
+  const ownedIds = ((ownedMsgs ?? []) as Array<{ id: string }>).map((m) => m.id)
+  if (ownedIds.length > 0) {
+    const { error: msgErr } = await supabaseAdmin()
+      .from('messages')
+      .update({ status: status.status })
+      .in('id', ownedIds)
+      .in('status', allowedPrevious[status.status])
+    if (msgErr) throw msgErr
+  }
 
   const errors = (
     status as typeof status & {
@@ -486,7 +648,16 @@ async function handleStatusUpdate(status: {
   // conversation/messages row, so the dialog polls this side table
   // instead. Unconditional update: matches 0 rows (silently, no error)
   // for every non-test-send status event, which is the common case.
+  //
+  // Precedência sent < delivered < read: a Meta pode mandar `failed` (ex.:
+  // 131026) E `read` para o mesmo wamid, em qualquer ordem. `failed` nunca
+  // sobrescreve delivered/read; delivered/read substituem um failed anterior
+  // e limpam o erro. Update condicional no banco (sem read-modify-write).
   const testSendUpdate: Record<string, unknown> = { status: status.status }
+  let testSendQuery = supabaseAdmin()
+    .from('whatsapp_test_sends')
+    .update(testSendUpdate)
+    .eq('message_id', status.id)
   if (status.status === 'failed') {
     const metaErrors = (status as any).errors as
       | Array<{ code: number; title: string }>
@@ -495,11 +666,18 @@ async function handleStatusUpdate(status: {
       metaErrors && metaErrors.length > 0
         ? `Meta: ${metaErrors[0].title} (code ${metaErrors[0].code})`
         : 'Falha na entrega (Meta)'
+    testSendQuery = testSendQuery.not('status', 'in', '(delivered,read)')
+  } else if (status.status === 'delivered') {
+    testSendUpdate.erro = null
+    testSendQuery = testSendQuery.in('status', ['sent', 'failed'])
+  } else if (status.status === 'read') {
+    testSendUpdate.erro = null
+    testSendQuery = testSendQuery.in('status', ['sent', 'delivered', 'failed'])
+  } else {
+    // 'sent' atrasado nunca rebaixa delivered/read/failed.
+    testSendQuery = testSendQuery.eq('status', 'sent')
   }
-  const { error: testSendErr } = await supabaseAdmin()
-    .from('whatsapp_test_sends')
-    .update(testSendUpdate)
-    .eq('message_id', status.id)
+  const { error: testSendErr } = await testSendQuery
   if (testSendErr) {
     console.error('Error updating whatsapp_test_sends status:', testSendErr)
   }

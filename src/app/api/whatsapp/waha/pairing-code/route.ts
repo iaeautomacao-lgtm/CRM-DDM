@@ -1,30 +1,15 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
 import { requestWahaPairingCode } from '@/lib/whatsapp/waha-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-
-    if (!profile?.account_id) {
-      return NextResponse.json({ error: 'No account linked to user.' }, { status: 403 })
-    }
+    // Conectar/derrubar/parear o número é decisão de admin: um papel baixo
+    // poderia vincular o próprio WhatsApp ao canal e receber as conversas.
+    const auth = await guardRole('admin')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId } = auth.ctx
 
     const body = await request.json()
     const { phoneNumber, session: targetSession, configId: targetId } = body
@@ -36,7 +21,7 @@ export async function POST(request: Request) {
     let query = supabase
       .from('whatsapp_config')
       .select('*')
-      .eq('account_id', profile.account_id)
+      .eq('account_id', accountId)
 
     if (targetId) {
       query = query.eq('id', targetId)
@@ -64,6 +49,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, code: result.code })
   } catch (err: any) {
     console.error('[waha/pairing-code] error:', err)
-    return NextResponse.json({ error: err.message || 'Failed to request pairing code' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to request pairing code' }, { status: 500 })
   }
 }

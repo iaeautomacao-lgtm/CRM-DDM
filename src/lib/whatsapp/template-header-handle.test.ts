@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// O fetch passa pelo guard anti-SSRF (coberto em ssrf-guard.test.ts): aqui é stub.
+const safeFetchMock = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/security/ssrf-guard', async (orig) => ({
+  ...(await orig<typeof import('@/lib/security/ssrf-guard')>()),
+  safeFetch: safeFetchMock,
+}));
+
 // Stub the Meta resumable upload so the helper is tested in isolation.
 vi.mock('./meta-api', () => ({
   uploadResumableMedia: vi.fn(async () => ({ handle: 'HANDLE123' })),
@@ -60,7 +67,7 @@ describe('ensureImageHeaderHandle', () => {
 
   it('derives + sets header_handle from a valid image URL', async () => {
     vi.stubEnv('META_APP_ID', 'app-1');
-    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('image/jpeg', 2048)));
+    safeFetchMock.mockImplementation(async () => imgResponse('image/jpeg', 2048));
     const p = payload();
     await ensureImageHeaderHandle(p, 'tok');
     expect(uploadResumableMedia).toHaveBeenCalledOnce();
@@ -69,13 +76,13 @@ describe('ensureImageHeaderHandle', () => {
 
   it('rejects a non-image content type', async () => {
     vi.stubEnv('META_APP_ID', 'app-1');
-    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('text/html')));
+    safeFetchMock.mockImplementation(async () => imgResponse('text/html'));
     await expect(ensureImageHeaderHandle(payload(), 'tok')).rejects.toThrow(/JPEG or PNG/);
   });
 
   it('rejects an image over 5 MB', async () => {
     vi.stubEnv('META_APP_ID', 'app-1');
-    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('image/png', 6 * 1024 * 1024)));
+    safeFetchMock.mockImplementation(async () => imgResponse('image/png', 6 * 1024 * 1024));
     await expect(ensureImageHeaderHandle(payload(), 'tok')).rejects.toThrow(/5 MB/);
   });
 });
