@@ -25,7 +25,7 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 
 ## Campanha WAHA com imagem — Fase 1
 
-O mesmo `POST /api/v1/disparador/campaigns` aceita uma imagem pública por URL HTTPS em canais WAHA. Não é necessário criar outra API key: o escopo continua sendo `campaigns:write`. O campo `message` é enviado como legenda da imagem e continua aceitando variáveis posicionais.
+O mesmo `POST /api/v1/disparador/campaigns` aceita uma imagem por URL HTTPS **ou Base64** em canais WAHA. Não é necessário criar outra API key: o escopo continua sendo `campaigns:write`. O campo `message` é enviado como legenda da imagem e continua aceitando variáveis posicionais.
 
 ```json
 {
@@ -45,12 +45,37 @@ O mesmo `POST /api/v1/disparador/campaigns` aceita uma imagem pública por URL H
 }
 ```
 
+Também é possível enviar Base64:
+
+```json
+{
+  "campaign_name": "Getback - cobrança com imagem",
+  "channel": "brdid_2139551698",
+  "message": "Olá {{1}}, segue o material referente ao seu acordo.",
+  "media": {
+    "type": "image",
+    "base64": "<BASE64_PURO>",
+    "mime_type": "image/png"
+  },
+  "contacts": [
+    {
+      "phone": "5521999998888",
+      "variables": ["Maria"]
+    }
+  ]
+}
+```
+
 Regras da Fase 1:
 
 - `media.type` deve ser `image`;
+- informe **exatamente um** de `media.url` ou `media.base64`;
 - `media.url` deve ser uma URL pública `https://`; localhost e redes privadas são bloqueados;
+- `media.base64` deve ser Base64 puro, sem prefixo `data:`;
+- com Base64, `media.mime_type` é obrigatório e aceita `image/jpeg`, `image/png` ou `image/webp`;
+- imagens Base64 têm limite de **5 MB decodificados**;
+- o Base64 é armazenado uma única vez no bucket privado `chat-media`; a fila guarda apenas a referência, mesmo para milhares de contatos;
 - a mídia é suportada apenas para canal WAHA nesta fase;
-- o servidor da URL deve entregar uma imagem válida para o WAHA (por exemplo JPEG, PNG ou WebP);
 - sem o campo `media`, o comportamento da API permanece exatamente o mesmo: campanha de texto WAHA ou template Meta.
 
 A resposta de criação também informa `provider` e `message_type` (`text` ou `image`).

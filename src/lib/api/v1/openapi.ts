@@ -371,7 +371,7 @@ export const openApiSpec = {
           '',
           '**Canal.** `channel` aceita UUID, nome da sessão **WAHA** (`waha_session`) ou número de telefone de um canal **Meta**. Omita apenas se a conta tiver exatamente um canal habilitado. UUIDs WAHA antigos de uma linha excluída/recriada podem ser remapeados com segurança pelo histórico da própria conta.',
           '',
-          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato. Opcionalmente, envie `media: { type: "image", url: "https://..." }` para mandar a imagem com `message` como legenda.',
+          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato. Opcionalmente, envie uma imagem em `media` por URL HTTPS ou Base64; `message` vira a legenda.',
           '',
           '**Validação e deduplicação (antes de enfileirar).**',
           '- `duplicates`: mesmo número repetido (com/sem `+55`, com/sem o 9º dígito) — o primeiro vale.',
@@ -919,13 +919,19 @@ export const openApiSpec = {
           message: { type: 'string', description: '**WAHA**: obrigatório; texto livre com `{{1}}`, `{{2}}`…; quando `media` é enviado, vira a legenda da imagem.' },
           media: {
             type: 'object',
-            description: 'Fase 1 — opcional e somente para WAHA. Envia uma imagem pública HTTPS junto com a legenda de `message`.',
-            required: ['type', 'url'],
+            description: 'Fase 1 — opcional e somente para WAHA. Envia imagem por URL HTTPS ou Base64; `message` é a legenda. Informe exatamente um de `url` ou `base64`.',
+            required: ['type'],
             additionalProperties: false,
             properties: {
               type: { type: 'string', enum: ['image'] },
               url: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 4096 },
+              base64: { type: 'string', description: 'Base64 puro, sem prefixo data:. Máximo 5 MB decodificado.' },
+              mime_type: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'], description: 'Obrigatório quando `base64` é usado.' },
             },
+            oneOf: [
+              { required: ['url'], not: { required: ['base64'] } },
+              { required: ['base64', 'mime_type'], not: { required: ['url'] } },
+            ],
           },
           contacts: {
             type: 'array',
