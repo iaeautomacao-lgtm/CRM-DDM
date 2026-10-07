@@ -39,7 +39,8 @@ import {
   sendWahaMediaMessageBase64,
   sendWahaVoiceMessageBase64,
 } from '@/lib/whatsapp/waha-api';
-import { decrypt } from '@/lib/whatsapp/encryption';
+import { decrypt, decryptStoredSecret } from '@/lib/whatsapp/encryption';
+import { phoneKey } from '@/lib/disparador/phone-key';
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -101,8 +102,14 @@ export async function POST(request: Request) {
     // 2. Parse request body — dentro do controle de idempotência. Integradores
     // precisam enviar `Idempotency-Key` (sem ela: 400). Ver docs/public-api.md
     // e src/lib/disparador/send-ledger.ts.
-    return await runIdempotentSend(ctx.accountId, request, async () => {
-      const body = await request.json();
+    return await runIdempotentSend(ctx.accountId, request, async (ctl) => {
+      // JSON inválido é 400 (e, como acontece antes do provedor, não consome a
+      // Idempotency-Key).
+      const parsedBody: unknown = await request.json().catch(() => null);
+      if (parsedBody === null || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+        throw badRequest('Corpo da requisição deve ser um objeto JSON válido');
+      }
+      const body = parsedBody as Record<string, any>;
       const { to, phone, text, message, name, media_url: originalMediaUrl, media_base64, media_type, media_caption } = body;
 
       // media_url (assinada, curta) vai para o provedor; originalMediaUrl
@@ -179,6 +186,20 @@ export async function POST(request: Request) {
       const sanitizedPhone = sanitizePhoneForMeta(targetPhone);
       if (!isValidE164(sanitizedPhone)) {
         throw badRequest('Invalid phone number format. Must be in E.164 format (ex: +5527999991212)');
+      }
+
+      // 3b. Blacklist/opt-out: consulta pontual por phoneKey (mesma chave das
+      // campanhas). Bloqueado → 422 sem chamar o provedor. Falha na checagem
+      // fecha (503): melhor não enviar do que enviar a quem pediu para sair.
+      const { data: blockedKeys, error: blacklistError } = await ctx.supabase.rpc('blacklisted_phone_keys', {
+        p_keys: [phoneKey(sanitizedPhone)],
+      });
+      if (blacklistError) {
+        console.error('[API send] Falha ao checar blacklist:', blacklistError.message);
+        throw new ApiError('unavailable', 'Não foi possível verificar a lista de bloqueio; tente novamente', 503);
+      }
+      if (((blockedKeys ?? []) as Array<{ key: string | null }>).length > 0) {
+        throw new ApiError('recipient_blocked', 'O destinatário está na lista de bloqueio (opt-out) e não pode receber mensagens', 422);
       }
 
       // 4. Fetch WhatsApp config for this account — only enabled channels,
@@ -274,6 +295,19 @@ export async function POST(request: Request) {
       // (Meta "recipient not in allowed list" retries). Re-uploading the
       // same bytes per retry would waste calls and media ids for no
       // benefit; the id itself is retry-safe to reuse across variants.
+      // A partir daqui há chamada ao provedor: erros não liberam mais a
+      // Idempotency-Key (resultado pode ser incerto).
+      ctl.providerCalled();
+
+      // waha_api_key fica cifrada no banco (aceita legado em texto puro).
+      const wahaConfig = {
+        waha_url: config.waha_url,
+        waha_session: config.waha_session,
+        waha_api_key: config.waha_api_key
+          ? decryptStoredSecret(config.waha_api_key, 'whatsapp_config.waha_api_key')
+          : null,
+      };
+
       let uploadedMediaId: string | null = null;
       if (hasMediaBase64 && mediaBuffer && config.provider === 'meta' && mediaKind) {
         const ext = MEDIA_TYPE_EXTENSION[media_type] ?? 'bin';
@@ -290,11 +324,6 @@ export async function POST(request: Request) {
       const attemptSend = async (phoneStr: string): Promise<string> => {
         if (mediaKind) {
           if (config.provider === 'waha') {
-            const wahaConfig = {
-              waha_url: config.waha_url,
-              waha_session: config.waha_session,
-              waha_api_key: config.waha_api_key,
-            };
             if (hasMediaUrl) {
               if (mediaKind === 'audio') {
                 const result = await sendWahaVoiceMessage(wahaConfig, phoneStr, media_url);
@@ -362,11 +391,6 @@ export async function POST(request: Request) {
         }
 
         if (config.provider === 'waha') {
-          const wahaConfig = {
-            waha_url: config.waha_url,
-            waha_session: config.waha_session,
-            waha_api_key: config.waha_api_key,
-          };
           const result = await sendWahaTextMessage(wahaConfig, phoneStr, targetText);
           return result.messageId;
         } else {
@@ -474,7 +498,7 @@ export async function POST(request: Request) {
         200,
         logCtx
       );
-    });
+    }, { apiEnvelope: true });
   } catch (err) {
     return toApiErrorResponse(err, logCtx);
   }
