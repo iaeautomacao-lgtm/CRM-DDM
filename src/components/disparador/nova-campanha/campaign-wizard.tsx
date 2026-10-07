@@ -355,7 +355,9 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
         .from("message_templates")
         .select(`id, category, ${TEMPLATE_VALIDATION_COLUMNS}`)
         .eq("account_id", accountId)
-        .or(`waba_id.eq.${wabaId},waba_id.is.null`)
+        // O canal selecionado já define a WABA. Não misture linhas legadas
+        // sem WABA nem templates sincronizados para outro canal.
+        .eq("waba_id", wabaId)
         .order("name", { ascending: true });
       let allowed: Set<string> | null = null;
       if (form.teamId) {
