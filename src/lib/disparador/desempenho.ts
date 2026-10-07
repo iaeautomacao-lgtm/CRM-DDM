@@ -545,6 +545,8 @@ export function deriveThroughputFromTicks(
 
     if (p.channels && Object.keys(p.channels).length > 0) {
       for (const [sessionId, chData] of Object.entries(p.channels)) {
+        // O cron_tick é de todo o motor: só entram os canais da conta (quando a lista dela é conhecida).
+        if (channelsMap.size > 0 && !channelsMap.has(sessionId)) continue;
         if (chData.sent > 0) {
           rows.push({
             session_id: sessionId,
