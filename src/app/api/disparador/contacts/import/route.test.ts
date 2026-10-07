@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
 vi.mock("@/lib/disparador/route-auth", () => ({
   requireDisparadorAccess: async () => ({ accountId: "account-a", userId: "user-a" }),
 }));
-vi.mock("@/lib/disparador/blacklist-keys", () => ({ loadBlacklistKeySet: async () => new Set() }));
+vi.mock("@/lib/disparador/blacklist-keys", () => ({ loadBlacklistKeySet: async () => new Set(), loadBlacklistKeysForPhones: async () => new Set() }));
 vi.mock("@/lib/logger", () => ({ writeLog: vi.fn() }));
 vi.mock("@/lib/disparador/admin-client", () => ({
   supabaseAdmin: () => ({
