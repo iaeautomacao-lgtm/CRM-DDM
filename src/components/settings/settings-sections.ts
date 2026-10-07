@@ -7,6 +7,7 @@ import {
   Bot,
   LockKeyhole,
   Wrench,
+  Sparkles,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -36,6 +37,7 @@ export const SETTINGS_SECTIONS = [
   'api',
   'secrets',
   'tools',
+  'agents',
   'ai',
 ] as const;
 
@@ -73,6 +75,13 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     id: 'tools',
     label: 'Ferramentas',
     icon: Wrench,
+    group: 'workspace',
+    minRole: 'supervisor',
+  },
+  agents: {
+    id: 'agents',
+    label: 'Agentes',
+    icon: Sparkles,
     group: 'workspace',
     minRole: 'supervisor',
   },

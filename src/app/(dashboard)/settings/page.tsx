@@ -14,6 +14,7 @@ import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { SecretsSettings } from '@/components/settings/secrets-settings';
 import { ToolsSettings } from '@/components/settings/tools-settings';
+import { AgentsSettings } from '@/components/settings/agents/agents-settings';
 import {
   canSeeSection,
   resolveSection,
@@ -67,6 +68,7 @@ function SettingsContent() {
     api: <ApiKeysSettings />,
     secrets: <SecretsSettings />,
     tools: <ToolsSettings />,
+    agents: <AgentsSettings />,
     ai: <AiAgentSettings />,
   };
 
