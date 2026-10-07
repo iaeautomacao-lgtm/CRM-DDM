@@ -24,8 +24,10 @@ import {
 import { writeLog } from "@/lib/logger";
 import {
   resolveCronBatchCandidateLimit,
+  resolveCronCandidateCap,
   shouldReserveCampaignCadence,
 } from "@/lib/disparador/cron-batching";
+import { channelConfigFor, preloadBlacklist, queueItemPrimaryPhone } from "@/lib/disparador/tick-preload";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -65,7 +67,12 @@ async function buildChannelWork(
   planned: PlannedCampaign[],
   config: ThroughputConfig,
   telemetry: TickTelemetry
-): Promise<{ channels: ChannelWork<QueueItem>[]; defaultMaxInFlight: Map<string, number | undefined> }> {
+): Promise<{
+  channels: ChannelWork<QueueItem>[];
+  defaultMaxInFlight: Map<string, number | undefined>;
+  /** Linhas de whatsapp_config do tick; null se a leitura falhou (cada envio lê). */
+  configs: Map<string, Record<string, any>> | null;
+}> {
   const byChannel = new Map<string, Map<string, QueueItem[]>>();
   for (const entry of planned) {
     for (const item of entry.items) {
@@ -79,17 +86,24 @@ async function buildChannelWork(
   }
   const ids = [...byChannel.keys()].filter(Boolean);
   const info = new Map<string, { provider: DispatchProvider | null; maxInFlight: number | null; cooldownUntil: string | null }>();
+  let configs: Map<string, Record<string, any>> | null = new Map();
   if (ids.length) {
     const [providers, limits, cooldowns] = await Promise.all([
-      db.from("whatsapp_config").select("id, provider").in("id", ids),
+      // Linha inteira: o envio usa esta leitura (uma por tick) em vez de
+      // ler o canal a cada item.
+      db.from("whatsapp_config").select("*").in("id", ids),
       db.from("dispatch_channel_limits").select("*").in("session_id", ids),
       // Tabela da migration 164; sem ela, só vale o cooldown em memória.
       db.from("dispatch_channel_cooldowns").select("session_id, cooldown_until").in("session_id", ids),
     ]);
-    if (providers.error) console.error("[Cron] Falha ao ler provedores dos canais:", providers.error.message);
+    if (providers.error) {
+      console.error("[Cron] Falha ao ler provedores dos canais:", providers.error.message);
+      configs = null;
+    }
     if (limits.error) console.error("[Cron] Falha ao ler limites dos canais:", limits.error.message);
     for (const id of ids) info.set(id, { provider: null, maxInFlight: null, cooldownUntil: null });
-    for (const row of (providers.data ?? []) as Array<{ id: string; provider: string | null }>) {
+    for (const row of (providers.data ?? []) as Array<Record<string, any> & { id: string; provider: string | null }>) {
+      configs?.set(row.id, row);
       const entry = info.get(row.id);
       if (entry && (row.provider === "meta" || row.provider === "waha")) entry.provider = row.provider;
     }
@@ -128,7 +142,41 @@ async function buildChannelWork(
       campaigns: [...campaigns].map(([campaignId, items]) => ({ campaignId, items })),
     });
   }
-  return { channels, defaultMaxInFlight };
+  return { channels, defaultMaxInFlight, configs };
+}
+
+const CANDIDATE_PAGE_SIZE = 1000;
+
+// O retry de erros transitórios roda no máximo a cada ~5 ticks: o lock
+// expira sozinho (não é liberado) e só o tick que o adquire chama a RPC.
+const RETRY_LOCK_TTL_SECONDS = 270;
+
+// Candidatos vencidos de uma campanha, na ordem (scheduled_at, id), em
+// páginas de 1.000 (o PostgREST corta cada resposta no max-rows, 1.000 por
+// padrão no Supabase). Nada é reservado aqui: o claim decide.
+async function fetchDueCandidates(db: AdminDb, campaignId: string, limit: number): Promise<QueueItem[]> {
+  const items: QueueItem[] = [];
+  const now = new Date().toISOString();
+  while (items.length < limit) {
+    const from = items.length;
+    const to = Math.min(limit, from + CANDIDATE_PAGE_SIZE) - 1;
+    const { data, error } = await db
+      .from("disp_message_queue")
+      .select("*, contacts(name, phone, company)")
+      .eq("campaign_id", campaignId)
+      .eq("status", "agendado")
+      .lte("scheduled_at", now)
+      // Desempate por id: a rodada inteira vence em < 2 s
+      // (roundSpreadOffsetMs), então muitos itens dividem o scheduled_at.
+      .order("scheduled_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to);
+    if (error) throw error;
+    const page = (data ?? []) as QueueItem[];
+    items.push(...page);
+    if (page.length < to - from + 1) break;
+  }
+  return items;
 }
 
 // Cooldown do número após backoff: vale neste processo (memória) e, com a
@@ -276,8 +324,20 @@ export async function POST(request: Request) {
     }
     // 2) Devolve para 'agendado' apenas erros transitórios já classificados
     //    (nunca itens 'enviando' — esses podem ter sido aceitos pelo provedor).
-    const { error: retryError } = await db.rpc("retry_transient_queue_errors");
-    if (retryError) throw retryError;
+    //    A cada ~5 ticks (lock com TTL, sem release): o item só volta 5+ min
+    //    depois do erro e com backoff de minutos, então rodar todo tick só
+    //    custava banco. Falha aqui não derruba o tick (antes: 503 em todo
+    //    tick se a função estourasse o statement_timeout).
+    const { data: retryTurn, error: retryLockError } = await db.rpc("try_acquire_cron_lock", {
+      p_name: "disparador_retry",
+      p_owner_id: owner,
+      p_ttl_seconds: RETRY_LOCK_TTL_SECONDS,
+    });
+    if (retryLockError) console.error("[Cron] Falha no lock do retry de erros transitórios:", retryLockError.message);
+    if (retryTurn) {
+      const { error: retryError } = await db.rpc("retry_transient_queue_errors");
+      if (retryError) console.error("[Cron] Falha no retry de erros transitórios:", retryError.message);
+    }
     // 3) Campanhas em execução, mais "atrasadas" primeiro (fairness entre
     //    campanhas quando o tick não dá conta de todas).
     const { data: active, error: activeError } = await db
@@ -292,6 +352,7 @@ export async function POST(request: Request) {
     //     reflow do lote). Nada é enviado aqui; os candidatos de todas as
     //     campanhas vão para o agendador por número (3b).
     const planned: PlannedCampaign[] = [];
+    const candidateCap = resolveCronCandidateCap(config);
     for (const campaign of (active ?? []) as Campaign[]) {
       if (outOfTime()) break;
       // Avalia antes de planejar para não enviar outra rodada de uma
@@ -322,21 +383,11 @@ export async function POST(request: Request) {
       // budget may leave
       // part of the batch for the next cron invocation; because batched
       // campaigns no longer reserve an extra pause, the next tick resumes the
-      // remaining due rows immediately.
-      const batchSize = resolveCronBatchCandidateLimit(campaign.batch_size);
-      const { data: items, error: queryError } = await db
-        .from("disp_message_queue")
-        .select("*, contacts(name, phone, company)")
-        .eq("campaign_id", campaign.id)
-        .eq("status", "agendado")
-        .lte("scheduled_at", new Date().toISOString())
-        // Desempate por id: a rodada inteira vence em < 2 s
-        // (roundSpreadOffsetMs), então muitos itens dividem o scheduled_at.
-        .order("scheduled_at", { ascending: true })
-        .order("id", { ascending: true })
-        .limit(batchSize);
-      if (queryError) throw queryError;
-      if (!items?.length) {
+      // remaining due rows immediately. The cap is derived from the tick's
+      // max throughput (cron-batching.ts), never below the old fixed 700.
+      const batchSize = resolveCronBatchCandidateLimit(campaign.batch_size, candidateCap);
+      const items = await fetchDueCandidates(db, campaign.id, batchSize);
+      if (!items.length) {
         // Fila vazia: tenta encerrar a campanha. A RPC usa o mesmo lock de
         // campanha dos claims e só encerra se não houver item agendado,
         // enviando (incl. resultado desconhecido), pausado ou com retry
@@ -363,7 +414,7 @@ export async function POST(request: Request) {
       // que soltar a rajada.
       if (
         needsQueueReflow(
-          items as QueueItem[],
+          items,
           { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio },
           campaign.batch_size ?? 1
         )
@@ -376,7 +427,7 @@ export async function POST(request: Request) {
       }
       planned.push({
         campaign,
-        items: items as QueueItem[],
+        items,
         result: { campaign_id: campaign.id, sent: 0, pending_confirmation: 0 },
       });
     }
@@ -387,7 +438,15 @@ export async function POST(request: Request) {
     //     e teto global. O SELECT acima não reserva nada: cada item ainda
     //     passa pelo claim atômico dentro de processQueueItem
     //     (claim_dispatch_item), que pode recusá-lo.
-    const channelWork = await buildChannelWork(db, planned, config, telemetry);
+    const [channelWork, blacklistLookup] = await Promise.all([
+      buildChannelWork(db, planned, config, telemetry),
+      // Revalidação da blacklist de todos os candidatos do tick numa leitura
+      // (tick-preload.ts); sem ela, cada envio consulta como antes.
+      preloadBlacklist(
+        db,
+        planned.flatMap((entry) => entry.items.map(queueItemPrimaryPhone))
+      ),
+    ]);
     const plannedById = new Map(planned.map((entry) => [entry.campaign.id, entry]));
     const cooldownWrites: Array<Promise<void>> = [];
     const cooledDown = new Set<string>();
@@ -417,6 +476,8 @@ export async function POST(request: Request) {
         try {
           const outcome = await processQueueItem(item, entry.campaign, {
             defaultMaxInFlight: channelWork.defaultMaxInFlight.get(ctx.channelId),
+            channelConfig: channelConfigFor(channelWork.configs, ctx.channelId, entry.campaign.account_id),
+            blacklistLookup,
             onProviderCall: (observation) => {
               telemetry.recordProviderCall(observation.provider, observation.latencyMs, observation.code);
               signal = observation.signal ?? signal;

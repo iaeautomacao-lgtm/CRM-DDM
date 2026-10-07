@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   claimed: true,
   confirmationError: null as null | { message: string },
   updates: [] as Array<Record<string, unknown>>,
+  tables: [] as string[],
   rpc: vi.fn(),
   send: vi.fn(),
   autoBlacklist: vi.fn(),
@@ -12,6 +13,7 @@ vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
     rpc: mocks.rpc,
     from: (table: string) => {
+      mocks.tables.push(table);
       const result = {
         data:
           table === 'whatsapp_config'
@@ -80,7 +82,7 @@ describe('queue provider outcomes', () => {
       .mockResolvedValue({ campaignCount: 1, blacklisted: false });
     mocks.rpc.mockReset().mockImplementation(async (name: string) => ({
       data: name === 'claim_dispatch_item' ? mocks.claimed : null,
-      error: name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
+      error: name === 'confirm_dispatch_item_sent' || name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
     }));
   });
   it('never calls the provider after losing the guarded claim', async () => {
@@ -181,7 +183,7 @@ describe('queue provider outcomes', () => {
       )
     ).toBe(false);
     expect(
-      mocks.rpc.mock.calls.some(([name]) => name === 'mark_queue_item_sent')
+      mocks.rpc.mock.calls.some(([name]) => name === 'mark_queue_item_sent' || name === 'confirm_dispatch_item_sent')
     ).toBe(false);
   });
 });
@@ -327,7 +329,66 @@ describe('opções do agendador do cron', () => {
     ]);
   });
 
-  // Por último: o fallback desliga o claim _capped no processo.
+  it('canal e blacklist do tick: sem select por envio', async () => {
+    mocks.tables.length = 0;
+    const lookup = vi.fn(() => false);
+    const channelConfig = { provider: 'meta', access_token: 'encrypted', phone_number_id: 'phone-id' };
+    expect(await processQueueItem(item, campaign, { channelConfig, blacklistLookup: lookup })).toMatchObject({
+      outcome: 'sent',
+    });
+    expect(lookup).toHaveBeenCalledWith('5511999999999');
+    expect(mocks.tables).not.toContain('whatsapp_config');
+    expect(mocks.tables).not.toContain('blacklist');
+  });
+
+  it('blacklist do tick bloqueia sem chamar o provedor', async () => {
+    const result = await processQueueItem(item, campaign, { channelConfig: {}, blacklistLookup: () => true });
+    expect(result).toEqual({ outcome: 'blocked', reason: 'blacklisted' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates).toContainEqual({ status: 'bloqueado', erro: 'Número na Blacklist' });
+  });
+
+  it('telefone fora do tick (lookup undefined) e canal não carregado: consulta como antes', async () => {
+    mocks.tables.length = 0;
+    expect(
+      await processQueueItem(item, campaign, { channelConfig: undefined, blacklistLookup: () => undefined })
+    ).toMatchObject({ outcome: 'sent' });
+    expect(mocks.tables).toContain('blacklist');
+    expect(mocks.tables).toContain('whatsapp_config');
+  });
+
+  it('canal null (outra conta) fecha como erro permanente sem enviar', async () => {
+    const result = await processQueueItem(item, campaign, { channelConfig: null, blacklistLookup: () => false });
+    expect(result).toMatchObject({ outcome: 'error' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true)).toBe(true);
+  });
+
+  it('confirmação com replay numa RPC (migration 167): sem replay à parte', async () => {
+    expect(await processQueueItem(item, campaign)).toMatchObject({ outcome: 'sent' });
+    const names = mocks.rpc.mock.calls.map(([name]) => name);
+    expect(names).toContain('confirm_dispatch_item_sent');
+    expect(names).not.toContain('mark_queue_item_sent');
+    expect(names).not.toContain('replay_dispatch_receipts');
+  });
+
+  // Por último: os fallbacks desligam as RPCs novas no processo.
+  it('sem a migration 167, confirma com mark_queue_item_sent + replay', async () => {
+    mocks.rpc.mockImplementation(async (name: string) => {
+      if (name === 'confirm_dispatch_item_sent')
+        return { data: null, error: { code: 'PGRST202', message: 'not found' } };
+      return { data: name.startsWith('claim_dispatch_item') ? true : null, error: null };
+    });
+    expect(await processQueueItem(item, campaign)).toMatchObject({ outcome: 'sent' });
+    const names = mocks.rpc.mock.calls.map(([name]) => name);
+    expect(names).toEqual(['claim_dispatch_item', 'confirm_dispatch_item_sent', 'mark_queue_item_sent', 'replay_dispatch_receipts']);
+    mocks.rpc.mockClear();
+    await processQueueItem(item, campaign);
+    expect(mocks.rpc.mock.calls.map(([name]) => name)).toEqual([
+      'claim_dispatch_item', 'mark_queue_item_sent', 'replay_dispatch_receipts',
+    ]);
+  });
+
   it('sem a migration 164, cai no claim_dispatch_item', async () => {
     mocks.rpc.mockImplementation(async (name: string) => {
       if (name === 'claim_dispatch_item_capped')

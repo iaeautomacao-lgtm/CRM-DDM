@@ -152,8 +152,13 @@ export function scheduleRounds(
 export const ROUND_STEP_MS = 100;
 /** Espalhamento máximo de uma rodada inteira, qualquer que seja o tamanho. */
 export const ROUND_MAX_SPREAD_MS = 2000;
-/** Espaço entre mensagens da sequência de um mesmo contato. */
-export const INTRA_CONTACT_MS = 3000;
+/**
+ * Espaço entre mensagens da sequência de um mesmo contato. 7 s (era 3 s): a
+ * Meta aceita ~1 mensagem a cada 6 s para o mesmo usuário (erro 131056,
+ * limite por par de usuários); 3 s gerava 131056 em sequências de 2+
+ * templates.
+ */
+export const INTRA_CONTACT_MS = 7000;
 
 /**
  * Deslocamento do item `position` (0-based) numa rodada de `roundSize`
@@ -170,7 +175,7 @@ export const INTRA_CONTACT_MS = 3000;
  * milissegundo), então o ORDER BY (scheduled_at, id) do cron continua barato
  * no índice (campaign_id, status, scheduled_at), e garante que todas as 1ªs
  * mensagens da rodada vencem antes de qualquer 2ª mensagem de sequência
- * (que fica INTRA_CONTACT_MS = 3 s depois da anterior do mesmo contato).
+ * (que fica INTRA_CONTACT_MS = 7 s depois da anterior do mesmo contato).
  */
 export function roundSpreadOffsetMs(position: number, roundSize: number): number {
   const size = Math.max(1, Math.floor(roundSize));
@@ -216,7 +221,7 @@ export function roundContactTimeMs(
  *   inclusivo até HH:MM:59);
  * - "transbordo" de uma rodada iniciada antes do fechamento: os itens da
  *   rodada saem em início + espalhamento (< 2 s; filas antigas: 100 ms ×
- *   posição) + 3 s·mensagem (startCampaign), então uma rodada às 17:59 pode
+ *   posição) + 7 s·mensagem (startCampaign), então uma rodada às 17:59 pode
  *   ter itens um pouco depois das 18:00. `spillToleranceMs` cobre esse
  *   espalhamento.
  */

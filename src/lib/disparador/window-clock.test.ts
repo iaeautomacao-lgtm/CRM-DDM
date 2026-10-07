@@ -178,7 +178,8 @@ describe("roundSpreadOffsetMs / roundContactTimeMs (rodada vence junta)", () => 
     expect(partial[partial.length - 1] - partial[0]).toBe(99 * 20);
   });
 
-  it("sequência do mesmo contato: 3 s entre mensagens, em ordem; todas as 1ªs vencem antes de qualquer 2ª", () => {
+  it("sequência do mesmo contato: 7 s entre mensagens (131056), em ordem; todas as 1ªs vencem antes de qualquer 2ª", () => {
+    expect(INTRA_CONTACT_MS).toBe(7000);
     const { items } = buildQueue(50_000, 999_999, 0, 3);
     let badGap = 0;
     for (let i = 0; i < items.length; i += 3) {
