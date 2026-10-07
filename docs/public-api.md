@@ -23,6 +23,38 @@ A API pública permite integrar sistemas (ex.: planejamento de cobrança) ao CRM
 - **Janela de envio:** horários em Brasília; campanhas respeitam janela e dias úteis.
 - **Identificação de canal em campanhas:** `channel` aceita UUID, `waha_session` para WAHA ou número de telefone para Meta. Para integrações WAHA, prefira `waha_session` porque ele permanece estável mesmo se a linha for removida e recriada no CRM.
 
+## Campanha WAHA com imagem — Fase 1
+
+O mesmo `POST /api/v1/disparador/campaigns` aceita uma imagem pública por URL HTTPS em canais WAHA. Não é necessário criar outra API key: o escopo continua sendo `campaigns:write`. O campo `message` é enviado como legenda da imagem e continua aceitando variáveis posicionais.
+
+```json
+{
+  "campaign_name": "Getback - cobrança com imagem",
+  "channel": "brdid_2139551698",
+  "message": "Olá {{1}}, segue o material referente ao seu acordo.",
+  "media": {
+    "type": "image",
+    "url": "https://cdn.exemplo.com/cobranca/acordo.jpg"
+  },
+  "contacts": [
+    {
+      "phone": "5521999998888",
+      "variables": ["Maria"]
+    }
+  ]
+}
+```
+
+Regras da Fase 1:
+
+- `media.type` deve ser `image`;
+- `media.url` deve ser uma URL pública `https://`; localhost e redes privadas são bloqueados;
+- a mídia é suportada apenas para canal WAHA nesta fase;
+- o servidor da URL deve entregar uma imagem válida para o WAHA (por exemplo JPEG, PNG ou WebP);
+- sem o campo `media`, o comportamento da API permanece exatamente o mesmo: campanha de texto WAHA ou template Meta.
+
+A resposta de criação também informa `provider` e `message_type` (`text` ou `image`).
+
 ## MCP (DDM Intelligence)
 
 Servidor MCP remoto (Streamable HTTP, sem estado, somente leitura) que

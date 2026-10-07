@@ -371,7 +371,7 @@ export const openApiSpec = {
           '',
           '**Canal.** `channel` aceita UUID, nome da sessão **WAHA** (`waha_session`) ou número de telefone de um canal **Meta**. Omita apenas se a conta tiver exatamente um canal habilitado. UUIDs WAHA antigos de uma linha excluída/recriada podem ser remapeados com segurança pelo histórico da própria conta.',
           '',
-          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato.',
+          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato. Opcionalmente, envie `media: { type: "image", url: "https://..." }` para mandar a imagem com `message` como legenda.',
           '',
           '**Validação e deduplicação (antes de enfileirar).**',
           '- `duplicates`: mesmo número repetido (com/sem `+55`, com/sem o 9º dígito) — o primeiro vale.',
@@ -425,6 +425,10 @@ export const openApiSpec = {
                     campaign_name: 'Lembrete de acordo',
                     channel: 'brdid_2139551698',
                     message: 'Olá, {{1}}! Sua parcela de {{2}} vence em {{3}}.',
+                    media: {
+                      type: 'image',
+                      url: 'https://cdn.exemplo.com/cobranca/lembrete.jpg',
+                    },
                     dias_envio: [1, 2, 3, 4, 5],
                     contacts: [{ phone: '27999991212', variables: ['Ana', 'R$ 150,00', '10/10'] }],
                   },
@@ -466,7 +470,7 @@ export const openApiSpec = {
           },
           '400': {
             description:
-              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
+              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), `media` inválida/não HTTPS/não suportada pelo provedor, janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
             content: {
               'application/json': {
                 schema: ref('ErrorEnvelope'),
@@ -912,7 +916,17 @@ export const openApiSpec = {
           channel: { type: 'string', description: 'UUID do canal, waha_session de um canal WAHA ou número de um canal Meta. Omita só se houver um único canal habilitado.' },
           template_name: { type: 'string', description: '**Meta**: obrigatório; template aprovado na WABA do canal.' },
           template_language: { type: 'string', default: 'pt_BR' },
-          message: { type: 'string', description: '**WAHA**: obrigatório; texto livre com `{{1}}`, `{{2}}`…' },
+          message: { type: 'string', description: '**WAHA**: obrigatório; texto livre com `{{1}}`, `{{2}}`…; quando `media` é enviado, vira a legenda da imagem.' },
+          media: {
+            type: 'object',
+            description: 'Fase 1 — opcional e somente para WAHA. Envia uma imagem pública HTTPS junto com a legenda de `message`.',
+            required: ['type', 'url'],
+            additionalProperties: false,
+            properties: {
+              type: { type: 'string', enum: ['image'] },
+              url: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 4096 },
+            },
+          },
           contacts: {
             type: 'array',
             minItems: 1,
@@ -951,6 +965,8 @@ export const openApiSpec = {
         required: ['campaign_id', 'enqueued', 'skipped', 'duplicates', 'invalid'],
         properties: {
           campaign_id: { type: 'string', format: 'uuid' },
+          provider: { type: 'string', enum: ['meta', 'waha'] },
+          message_type: { type: 'string', enum: ['text', 'image'] },
           enqueued: { type: 'integer', description: 'Contatos enfileirados.' },
           skipped: { type: 'integer', description: 'Na blacklist.' },
           duplicates: { type: 'integer', description: 'Repetidos no payload (phoneKey).' },

@@ -157,6 +157,19 @@ describe('POST /api/v1/disparador/campaigns', () => {
     expect(tables.campaigns).toHaveLength(0);
   });
 
+  it('imagem é rejeitada para canal Meta nesta fase', async () => {
+    const r = await POST(
+      post(
+        base({
+          media: { type: 'image', url: 'https://cdn.example.com/banner.jpg' },
+        })
+      )
+    )
+    expect(r.status).toBe(400)
+    expect((await r.json()).error.message).toMatch(/apenas para canais WAHA/)
+    expect(tables.campaigns).toHaveLength(0)
+  })
+
   it('sem chave de idempotência: cria normal (e repetir cria outra, como antes)', async () => {
     const r1 = await POST(post(base()))
     expect(r1.status).toBe(201)
@@ -305,6 +318,59 @@ describe('POST /api/v1/disparador/campaigns', () => {
       expect(r.status).toBe(201)
       expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi $&, valor R$ 10 $1'])
       expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
+    })
+
+    it('enfileira imagem HTTPS com o texto resolvido como legenda', async () => {
+      const imageUrl = 'https://cdn.example.com/cobranca/banner.jpg'
+      const r = await POST(
+        post(
+          waha({
+            channel: 'brdid_2139551698',
+            media: { type: 'image', url: imageUrl },
+          })
+        )
+      )
+
+      expect(r.status).toBe(201)
+      const { data } = await r.json()
+      expect(data).toMatchObject({ provider: 'waha', message_type: 'image', enqueued: 1 })
+      expect(tables.disp_message_queue[0]).toMatchObject({
+        tipo: 'imagem',
+        media_url: imageUrl,
+        template_name: '__EXTERNAL_WAHA_TEXT__',
+        template_variables: ['Oi $&, valor R$ 10 $1'],
+      })
+      expect(tables.campaigns[0].mensagens[0]).toMatchObject({
+        tipo: 'imagem',
+        conteudo: 'Oi {{1}}, valor {{2}}',
+        url: imageUrl,
+      })
+    })
+
+    it('rejeita imagem sem HTTPS', async () => {
+      const r = await POST(
+        post(
+          waha({
+            media: { type: 'image', url: 'http://cdn.example.com/banner.jpg' },
+          })
+        )
+      )
+      expect(r.status).toBe(400)
+      expect((await r.json()).error.message).toMatch(/HTTPS/)
+      expect(tables.campaigns).toHaveLength(0)
+    })
+
+    it('rejeita outros tipos de mídia nesta fase', async () => {
+      const r = await POST(
+        post(
+          waha({
+            media: { type: 'video', url: 'https://cdn.example.com/video.mp4' },
+          })
+        )
+      )
+      expect(r.status).toBe(400)
+      expect((await r.json()).error.message).toMatch(/media\.type.*image/)
+      expect(tables.campaigns).toHaveLength(0)
     })
 
     it('aceita waha_session como identificador estável do canal', async () => {

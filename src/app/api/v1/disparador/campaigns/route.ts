@@ -33,6 +33,10 @@ interface ExternalCampaignPayload {
   template_name?: string;                 // obrigatório para canais Meta — nome do template aprovado
   template_language?: string;             // padrão: "pt_BR"
   message?: string;                       // obrigatório para canais WAHA — texto livre com {{1}}, {{2}}...
+  media?: {                                 // Fase 1: imagem pública HTTPS, somente WAHA
+    type: "image";
+    url: string;
+  };
   channel?: string;                       // UUID do canal OU número de telefone (ex: "+55 21 3030-9159")
   contacts: Array<{
     phone: string;                        // obrigatório — número do contato (com ou sem +)
@@ -49,6 +53,8 @@ interface ExternalCampaignPayload {
 
 type CreationResult = {
   campaign_id: string;
+  provider: "meta" | "waha";
+  message_type: "text" | "image";
   enqueued: number;
   skipped: number;
   duplicates: number;
@@ -169,7 +175,35 @@ export async function POST(request: Request) {
       );
     }
     if (body.channel != null && typeof body.channel !== "string") {
-      throw badRequest("'channel' deve ser texto (UUID do canal ou número)");
+      throw badRequest("'channel' deve ser texto (UUID, sessão WAHA ou número Meta)");
+    }
+
+    let media: { type: "image"; url: string } | null = null;
+    if (body.media != null) {
+      if (typeof body.media !== "object" || Array.isArray(body.media)) {
+        throw badRequest("'media' deve ser um objeto");
+      }
+      const candidate = body.media as { type?: unknown; url?: unknown };
+      if (candidate.type !== "image") {
+        throw badRequest("'media.type' deve ser 'image' nesta versão da API");
+      }
+      if (typeof candidate.url !== "string" || !candidate.url.trim()) {
+        throw badRequest("'media.url' é obrigatória para envio de imagem");
+      }
+      const mediaUrl = candidate.url.trim();
+      if (mediaUrl.length > 4096) {
+        throw badRequest("'media.url' pode ter no máximo 4096 caracteres");
+      }
+      let parsedMediaUrl: URL;
+      try {
+        parsedMediaUrl = new URL(mediaUrl);
+      } catch {
+        throw badRequest("'media.url' deve ser uma URL HTTPS válida");
+      }
+      if (parsedMediaUrl.protocol !== "https:") {
+        throw badRequest("'media.url' deve usar HTTPS");
+      }
+      media = { type: "image", url: parsedMediaUrl.toString() };
     }
 
     const janela_inicio = body.janela_inicio ?? "08:00";
@@ -331,6 +365,19 @@ export async function POST(request: Request) {
     if (provider === "waha" && !body.message?.trim()) {
       throw badRequest("Campo 'message' é obrigatório para canais WAHA");
     }
+    if (media && provider !== "waha") {
+      throw badRequest("'media' nesta versão é suportada apenas para canais WAHA");
+    }
+    if (media) {
+      // A WAHA baixa a URL diretamente. Validamos o destino aqui para
+      // impedir que uma integração use o canal como ponte para acessar
+      // localhost/redes privadas (SSRF).
+      try {
+        await assertWahaUrlIsSafe(media.url);
+      } catch {
+        throw badRequest("'media.url' inválida ou aponta para um destino não permitido");
+      }
+    }
 
     // Validar template aprovado — só se aplica a Meta; WAHA não tem
     // conceito de template, o texto vem direto de body.message.
@@ -437,8 +484,9 @@ export async function POST(request: Request) {
               ]
             : [
                 {
-                  tipo: "texto",
+                  tipo: media ? "imagem" : "texto",
                   conteudo: body.message ?? "",
+                  ...(media ? { url: media.url } : {}),
                 },
               ],
         created_by: ctx.createdBy,
@@ -495,8 +543,8 @@ export async function POST(request: Request) {
           session_id: channelId,
           mensagem_final: contact.phone,
           status: "agendado",
-          tipo: "texto",
-          media_url: null,
+          tipo: media ? "imagem" : "texto",
+          media_url: media?.url ?? null,
           scheduled_at: scheduledAt,
           template_name: EXTERNAL_WAHA_TEXT_MARKER,
           template_language: null,
@@ -540,6 +588,8 @@ export async function POST(request: Request) {
     const estimatedMinutes = Math.max(0, totalSlots - 1) * slotIntervalMinutes;
     const result: CreationResult = {
       campaign_id: campaignId,
+      provider,
+      message_type: media ? "image" : "text",
       enqueued,
       skipped,
       duplicates,
