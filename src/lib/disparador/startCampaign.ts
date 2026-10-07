@@ -12,6 +12,7 @@ import { INTRA_CONTACT_MS, roundContactTimeMs, scheduleRounds } from "@/lib/disp
 import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { writeLog } from "@/lib/logger";
+import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
 
 // campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
 // lida por este código — reaproveitada para guardar o modo de alternância
@@ -173,26 +174,35 @@ async function prepareCampaign(
       .eq("id", campaignId)
       .eq("account_id", accountId)
       .in("status", ["rascunho", "agendado"])
-      .select("id");
+      .select("id, agendamento");
 
     if (claimError) {
       return { ok: false, status: 500, error: claimError.message };
     }
     const claimedFreshStart = !!claimedRows && claimedRows.length > 0;
     state.preparing = claimedFreshStart;
+    // O agendamento vem do próprio claim: se a leitura da campanha logo abaixo falhar por erro
+    // transitório, a campanha volta a 'agendado' (e não a 'rascunho', perdendo o agendamento).
+    if (claimedFreshStart) state.agendamento = claimedRows?.[0]?.agendamento ?? null;
 
     // 2. Fetch campaign configuration — necessário de todo jeito: quando
     // claimedFreshStart, pra ler mensagens/session_ids/etc; quando não,
     // pra decidir entre "retomar pausada" e um 404/409 com a mensagem
     // certa (o claim acima sozinho não diferencia esses casos).
-    const { data: campaign, error: campaignError } = await supabaseAdmin()
+    // limit(1)+[0] (nunca .single()): erro de LEITURA (rede/5xx) é 500 retentável — a campanha
+    // agendada volta a 'agendado' —, e só linha ausente é 404 "não encontrada".
+    const { data: campaignRows, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("*")
       .eq("id", campaignId)
       .eq("account_id", accountId)
-      .single();
+      .limit(1);
 
-    if (campaignError || !campaign) {
+    if (campaignError) {
+      return { ok: false, status: 500, error: `Falha ao ler a campanha: ${campaignError.message}` };
+    }
+    const campaign = campaignRows?.[0];
+    if (!campaign) {
       return { ok: false, status: 404, error: "Campanha não encontrada" };
     }
     state.agendamento = campaign.agendamento ?? null;
@@ -657,6 +667,30 @@ async function prepareCampaign(
           : templateMode === "rotacao"
             ? [mensagens[i % mensagens.length]]
             : [mensagens[Math.floor(Math.random() * mensagens.length)]];
+
+      // Contato sem telefone válido não entra na fila como envio: registra UM erro permanente
+      // explicado (nunca cai no telefone "inventado" a partir do texto da mensagem).
+      if (!hasDialablePhone(contact.phone)) {
+        const firstMsg = messagesToSend[0];
+        queueRows.push({
+          campaign_id: campaignId,
+          account_id: accountId,
+          contact_id: contact.id,
+          session_id: sessionId,
+          mensagem_final: firstMsg?.conteudo || firstMsg?.prompt || "",
+          status: "erro",
+          erro_permanente: true,
+          erro: NO_VALID_PHONE_ERROR,
+          tipo: firstMsg?.tipo || "texto",
+          media_url: firstMsg?.url || null,
+          scheduled_at: new Date(baseTime + contactBaseDelay).toISOString(),
+          template_name: null,
+          template_language: null,
+          template_variables: null,
+        });
+        enqueued++;
+        continue;
+      }
 
       for (let j = 0; j < messagesToSend.length; j++) {
         const msg = messagesToSend[j];
