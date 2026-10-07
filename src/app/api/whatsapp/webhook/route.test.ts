@@ -1,31 +1,65 @@
 import crypto from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { encrypt } from '@/lib/whatsapp/encryption'
+import { clearAppSecretCache } from '@/lib/whatsapp/webhook-fast-path'
 
 // ---------------------------------------------------------------------------
 // Verificação de assinatura do webhook Meta com app_secret por canal:
 // cifrado (formato atual) e texto puro legado (gravado direto no banco antes
-// da correção). O processamento em si (after) é desligado — só a decisão
-// 200/401 importa aqui.
+// da correção; e isolamento entre contas (C-2): cada change só é processada
+// se o seu canal validou a assinatura.
 // ---------------------------------------------------------------------------
 
+interface FakeChannel {
+  id: string
+  account_id: string
+  app_secret: string | null
+}
+// phone_number_id → canal. PNID-1 (conta ACC-1) é controlado por storedAppSecret.
+const extraChannels: Record<string, FakeChannel> = {}
 let storedAppSecret: string | null = null
+let selectCalls = 0
 const updates: Array<Record<string, unknown>> = []
+const ops: Array<{ table: string; op: string; filters: Array<[string, unknown]> }> = []
+const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = []
+const afterCallbacks: Array<() => Promise<void>> = []
+
+function channelFor(pn: string): FakeChannel | null {
+  if (extraChannels[pn]) return extraChannels[pn]
+  if (pn === 'PNID-1' && storedAppSecret !== null) {
+    return { id: 'CFG-1', account_id: 'ACC-1', app_secret: storedAppSecret }
+  }
+  return null
+}
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    from: () => {
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      rpcCalls.push({ fn, args })
+      return { data: true, error: null }
+    },
+    from: (table: string) => {
+      const filters: Array<[string, unknown]> = []
+      let op = 'select'
       const b: Record<string, unknown> = {}
-      for (const m of ['select', 'eq', 'limit', 'neq', 'in', 'order']) {
-        b[m] = () => b
+      for (const m of ['select', 'limit', 'neq', 'order']) b[m] = () => b
+      b.eq = (col: string, val: unknown) => (filters.push([col, val]), b)
+      b.in = (col: string, val: unknown) => (filters.push([col, val]), b)
+      b.single = async () => {
+        selectCalls++
+        const pn = filters.find(([c]) => c === 'phone_number_id')?.[1] as string | undefined
+        const ch = pn ? channelFor(pn) : null
+        return { data: ch, error: null }
       }
-      b.single = async () => ({
-        data: storedAppSecret === null ? null : { app_secret: storedAppSecret },
-        error: null,
-      })
       b.update = (row: Record<string, unknown>) => {
         updates.push(row)
+        op = 'update'
         return b
+      }
+      // await direto no builder (select sem single / update): resultado vazio.
+      b.then = (resolve: (v: unknown) => void) => {
+        ops.push({ table, op, filters })
+        resolve({ data: [], error: null })
       }
       return b
     },
@@ -34,7 +68,7 @@ vi.mock('@supabase/supabase-js', () => ({
 
 vi.mock('next/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('next/server')>()
-  return { ...actual, after: () => {} }
+  return { ...actual, after: (cb: () => Promise<void>) => void afterCallbacks.push(cb) }
 })
 vi.mock('@/lib/audit/context', () => ({
   auditFetch: fetch,
@@ -73,6 +107,12 @@ describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
   beforeEach(() => {
     storedAppSecret = null
     updates.length = 0
+    selectCalls = 0
+    ops.length = 0
+    rpcCalls.length = 0
+    afterCallbacks.length = 0
+    for (const k of Object.keys(extraChannels)) delete extraChannels[k]
+    clearAppSecretCache()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
@@ -105,5 +145,96 @@ describe('POST /api/whatsapp/webhook — app_secret por canal', () => {
   it('canal sem app_secret: usa META_APP_SECRET', async () => {
     storedAppSecret = null
     expect((await POST(req(sign(GLOBAL_SECRET)))).status).toBe(200)
+  })
+
+  it('cache: segundo POST do mesmo canal não vai ao banco', async () => {
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    expect((await POST(req(sign(CHANNEL_SECRET)))).status).toBe(200)
+    expect((await POST(req(sign(CHANNEL_SECRET)))).status).toBe(200)
+    expect(selectCalls).toBe(1)
+  })
+
+  it('cache: assinatura inválida com segredo em cache relê o banco uma vez (rotação)', async () => {
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    expect((await POST(req(sign(CHANNEL_SECRET)))).status).toBe(200)
+    const ROTATED = 'segredo-rotacionado-0123456789abcdef'
+    storedAppSecret = encrypt(ROTATED)
+    expect((await POST(req(sign(ROTATED)))).status).toBe(200)
+    expect(selectCalls).toBe(2)
+    expect((await POST(req(sign('outro-segredo')))).status).toBe(401)
+  })
+
+  // ── C-2: injeção cross-tenant ─────────────────────────────────────────
+  const SECRET_B = 'app-secret-da-conta-B-0123456789abcdef'
+
+  function crossBody(): string {
+    const status = (id: string) => ({ id, status: 'delivered', timestamp: '1', recipient_id: '5511' })
+    return JSON.stringify({
+      entry: [
+        {
+          id: 'WABA-A',
+          changes: [{ field: 'messages', value: { metadata: { phone_number_id: 'PNID-1' }, statuses: [status('wamid-A')] } }],
+        },
+        {
+          id: 'WABA-B',
+          changes: [
+            { field: 'messages', value: { metadata: { phone_number_id: 'PNID-B' }, statuses: [status('wamid-B')] } },
+            { field: 'message_template_status_update', value: { event: 'APPROVED', message_template_id: 'tpl-B' } },
+          ],
+        },
+      ],
+    })
+  }
+
+  function postRaw(raw: string, secret: string): Request {
+    const sig = 'sha256=' + crypto.createHmac('sha256', secret).update(raw).digest('hex')
+    return new Request('http://localhost/api/whatsapp/webhook', {
+      method: 'POST',
+      body: raw,
+      headers: { 'x-hub-signature-256': sig },
+    })
+  }
+
+  async function runAfter() {
+    for (const cb of afterCallbacks) await cb()
+  }
+
+  it('POST assinado pelo app A com número da conta B: nada da conta B é processado', async () => {
+    storedAppSecret = encrypt(CHANNEL_SECRET) // conta A (PNID-1 / ACC-1)
+    extraChannels['PNID-B'] = { id: 'CFG-B', account_id: 'ACC-B', app_secret: encrypt(SECRET_B) }
+
+    const res = await POST(postRaw(crossBody(), CHANNEL_SECRET))
+    expect(res.status).toBe(200) // A validou; B é descartado
+    await runAfter()
+
+    expect(rpcCalls.map((c) => c.args.p_message_id)).toEqual(['wamid-A'])
+    const touchedAccounts = ops
+      .flatMap((o) => o.filters)
+      .filter(([c]) => c === 'conversations.account_id')
+      .map(([, v]) => v)
+    expect(touchedAccounts).toEqual(['ACC-1'])
+    expect(JSON.stringify(ops)).not.toContain('wamid-B')
+    expect(JSON.stringify(ops)).not.toContain('tpl-B')
+    expect(JSON.stringify(ops)).not.toContain('ACC-B')
+  })
+
+  it('POST em que nenhum canal valida: 401 e nada processado', async () => {
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    extraChannels['PNID-B'] = { id: 'CFG-B', account_id: 'ACC-B', app_secret: encrypt(SECRET_B) }
+    const res = await POST(postRaw(crossBody(), 'segredo-do-atacante'))
+    expect(res.status).toBe(401)
+    expect(afterCallbacks.length).toBe(0)
+  })
+
+  it('cada canal valida com o próprio segredo: ambos processados nas suas contas', async () => {
+    // Mesmo corpo não pode ter duas assinaturas, então um corpo com dois apps
+    // legítimos só valida o canal cujo segredo assinou — o outro é descartado.
+    storedAppSecret = encrypt(CHANNEL_SECRET)
+    extraChannels['PNID-B'] = { id: 'CFG-B', account_id: 'ACC-B', app_secret: encrypt(SECRET_B) }
+    const res = await POST(postRaw(crossBody(), SECRET_B))
+    expect(res.status).toBe(200)
+    await runAfter()
+    expect(rpcCalls.map((c) => c.args.p_message_id)).toEqual(['wamid-B'])
+    expect(JSON.stringify(ops)).not.toContain('ACC-1')
   })
 })
