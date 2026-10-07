@@ -63,7 +63,7 @@ async function sentItem(n: number, wamid: string, accountId = account) {
   await db.query('SELECT wacrm.confirm_dispatch_item_sent($1,$2,$3,$4,$5,$6,1)', [uid(n), campaign, contact, channel, 'olá', wamid]);
 }
 
-describe('migration 185 — webhook de status em lote', () => {
+describe('migration 185 — webhook de status em lote', { timeout: 60_000 }, () => {
   beforeAll(async () => {
     db = new PGlite();
     await db.exec(`

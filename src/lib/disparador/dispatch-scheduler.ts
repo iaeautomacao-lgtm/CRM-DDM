@@ -56,7 +56,8 @@ export type BackoffEvent =
     }
   | {
       scope: "global";
-      reason: "event_loop_lag" | "rss";
+      /** "recovered": saúde normalizou por janelas seguidas e as vagas voltaram (parcial ou total). */
+      reason: "event_loop_lag" | "rss" | "recovered";
       value: number;
       atMs: number;
       from: number;
@@ -72,6 +73,10 @@ export interface SchedulerOptions<T> {
   /** Lido no máximo a cada `healthCheckIntervalMs`, após um envio terminar. */
   sampleHealth?: () => HealthSample;
   healthCheckIntervalMs?: number;
+  /** Janelas SEGUIDAS acima do limite antes de cortar as vagas (histerese; padrão 3). */
+  breachWindows?: number;
+  /** Janelas SEGUIDAS saudáveis antes de devolver vagas cortadas (padrão 3). */
+  recoverWindows?: number;
   maxEventLoopLagMs?: number;
   maxRssMb?: number;
   onBackoff?: (event: BackoffEvent) => void;
@@ -143,6 +148,13 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
   const healthInterval = options.healthCheckIntervalMs ?? 1_000;
   const globalStart = positiveInt(options.globalConcurrency, "globalConcurrency");
   let globalCap = globalStart;
+  // F11: um pico isolado de lag (GC, JSON grande) não pode cortar as vagas pela metade. Exige janelas seguidas acima do limite,
+  // nunca desce abaixo de 25% das vagas iniciais e devolve as vagas (em passos) quando a saúde normaliza dentro do tick.
+  const breachWindows = Math.max(1, Math.floor(options.breachWindows ?? 3));
+  const recoverWindows = Math.max(1, Math.floor(options.recoverWindows ?? 3));
+  const globalFloor = Math.max(1, Math.ceil(globalStart * 0.25));
+  let breachStreak = 0;
+  let healthyStreak = 0;
   let globalInFlight = 0;
   let globalPeak = 0;
   let started = 0;
@@ -256,9 +268,25 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
     const rssLimit = options.maxRssMb ?? Number.POSITIVE_INFINITY;
     const reason =
       sample.eventLoopLagP99Ms > lagLimit ? "event_loop_lag" : sample.rssMb > rssLimit ? "rss" : null;
-    if (!reason) return;
+    if (!reason) {
+      breachStreak = 0;
+      healthyStreak++;
+      if (globalCap < globalStart && healthyStreak >= recoverWindows) {
+        // Devolve 50% das vagas cortadas por vez (nunca passa do início).
+        const from = globalCap;
+        globalCap = Math.min(globalStart, globalCap + Math.max(1, Math.ceil((globalStart - globalCap) / 2)));
+        healthyStreak = 0;
+        record({ scope: "global", reason: "recovered", value: sample.eventLoopLagP99Ms, atMs: at, from, to: globalCap });
+      }
+      return;
+    }
+    healthyStreak = 0;
+    breachStreak++;
+    if (breachStreak < breachWindows) return;
+    breachStreak = 0;
     const from = globalCap;
-    globalCap = Math.max(1, Math.floor(globalCap / 2));
+    globalCap = Math.max(globalFloor, Math.floor(globalCap / 2));
+    if (globalCap === from) return; // já no piso: nada a registrar
     record({
       scope: "global",
       reason,
