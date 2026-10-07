@@ -253,12 +253,6 @@ export function isMetaRateLimitNoAttempt(err: unknown): boolean {
   return err instanceof MetaApiError && err.metaCode !== null && META_RATE_LIMIT_NO_ATTEMPT_CODES.has(err.metaCode);
 }
 
-/** Limites de taxa da Meta que reagendam sem gastar tentativa (F8). */
-export const META_RATE_LIMIT_NO_ATTEMPT_CODES: ReadonlySet<number> = new Set([130429, 131048, 131056]);
-export function isMetaRateLimitNoAttempt(err: unknown): boolean {
-  return err instanceof MetaApiError && err.metaCode !== null && META_RATE_LIMIT_NO_ATTEMPT_CODES.has(err.metaCode);
-}
-
 // Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
 // permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
 // funciona para erros da WAHA (`WAHA sendText failed (404): ...`), mas

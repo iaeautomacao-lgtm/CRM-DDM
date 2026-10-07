@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // after() só existe dentro de uma requisição do Next: aqui registramos os callbacks para executá-los à mão.
 const afterMock = vi.hoisted(() => ({ queued: [] as Array<() => Promise<void> | void> }));
 vi.mock('next/server', async (importOriginal) => ({
