@@ -32,6 +32,8 @@ import { channelConfigFor, preloadBlacklist, queueItemPrimaryPhone } from "@/lib
 import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-reflow";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
+import { ChannelClaimer, isBatchClaimEnabled, isClaimToken, planClaimTokens } from "@/lib/disparador/batch-claim";
+import { ConfirmBatcher, registerShutdownDrain, singleConfirm } from "@/lib/disparador/confirm-batcher";
 import {
   fireNextHop,
   isMaintenanceHop,
@@ -204,6 +206,21 @@ async function fetchDueCandidates(db: AdminDb, campaignId: string, limit: number
     if (page.length < to - from + 1) break;
   }
   return items;
+}
+
+// Amostra dos itens vencidos mais antigos (sem OFFSET, sem contatos): só para o detector de reflow no caminho em lote (188).
+async function fetchDueSample(db: AdminDb, campaignId: string, limit = 200): Promise<QueueItem[]> {
+  const { data, error } = await db
+    .from("disp_message_queue")
+    .select("id, campaign_id, session_id, scheduled_at, tentativas")
+    .eq("campaign_id", campaignId)
+    .eq("status", "agendado")
+    .lte("scheduled_at", new Date().toISOString())
+    .order("scheduled_at", { ascending: true })
+    .order("id", { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return (data ?? []) as unknown as QueueItem[];
 }
 
 // Cooldown persistente é reservado a RATE LIMIT explícito. Erro transitório
@@ -451,6 +468,9 @@ async function runTick(request: Request, chain: ChainContext) {
     //     campanhas vão para o agendador por número (3b).
     const planned: PlannedCampaign[] = [];
     const candidateCap = resolveCronCandidateCap(config);
+    // Claim em lote (migration 188, DISPARADOR_BATCH_CLAIM=0 desliga): fichas por campanha×número no planejamento e itens reivindicados
+    // em lotes por número. Se as RPCs não existirem, volta sozinho ao caminho por item (fetchDueCandidates + claim unitário).
+    let batchMode = isBatchClaimEnabled();
     for (const campaign of (active ?? []) as Campaign[]) {
       if (outOfTime()) break;
       // Avalia antes de planejar para não enviar outra rodada de uma
@@ -484,7 +504,21 @@ async function runTick(request: Request, chain: ChainContext) {
       // remaining due rows immediately. The cap is derived from the tick's
       // max throughput (cron-batching.ts), never below the old fixed 700.
       const batchSize = resolveCronBatchCandidateLimit(campaign.batch_size, candidateCap);
-      const items = await fetchDueCandidates(db, campaign.id, batchSize);
+      let items: QueueItem[];
+      let claimTokens: QueueItem[] | null = null;
+      if (batchMode) {
+        const plan = await planClaimTokens(db, campaign.id, batchSize);
+        if (plan === null) {
+          batchMode = false;
+          console.warn("[Cron] count_due_dispatch_items indisponível (migration 188 não aplicada); usando o claim por item.");
+          items = await fetchDueCandidates(db, campaign.id, batchSize);
+        } else {
+          claimTokens = plan.tokens;
+          items = plan.tokens.length ? await fetchDueSample(db, campaign.id) : [];
+        }
+      } else {
+        items = await fetchDueCandidates(db, campaign.id, batchSize);
+      }
       if (!items.length) {
         // Fila vazia: tenta encerrar a campanha. A RPC usa o mesmo lock de
         // campanha dos claims e só encerra se não houver item agendado,
@@ -525,7 +559,7 @@ async function runTick(request: Request, chain: ChainContext) {
       }
       planned.push({
         campaign,
-        items,
+        items: claimTokens ?? items,
         result: { campaign_id: campaign.id, sent: 0, pending_confirmation: 0 },
       });
     }
@@ -551,6 +585,17 @@ async function runTick(request: Request, chain: ChainContext) {
     const attemptsInTick = new Map<string, number>();
     const pauseChecks = new Map<string, Promise<boolean>>();
     const pausedCampaigns = new Set<string>();
+    // Claim/confirmação em lote só quando TODAS as campanhas do tick foram planejadas por fichas (sem mistura de caminhos).
+    const claimer = batchMode
+      ? new ChannelClaimer({
+          db,
+          defaultMaxInFlight: (channelId) => channelWork.defaultMaxInFlight.get(channelId),
+          preload: (claimed) => preloadBlacklist(db, claimed.map(queueItemPrimaryPhone)),
+        })
+      : null;
+    const confirmBatcher = claimer ? new ConfirmBatcher({ db, single: singleConfirm(db) }) : null;
+    const unregisterDrain = confirmBatcher ? registerShutdownDrain(confirmBatcher) : null;
+    try {
     schedule = await runDispatchSchedule<QueueItem>({
       channels: channelWork.channels,
       globalConcurrency: config.globalConcurrency,
@@ -571,16 +616,36 @@ async function runTick(request: Request, chain: ChainContext) {
         cooledDown.add(event.channelId);
         cooldownWrites.push(persistCooldown(db, event.channelId, event.reason, config.cooldownSeconds));
       },
-      run: async (item, ctx) => {
+      run: async (token, ctx) => {
         const entry = plannedById.get(ctx.campaignId);
         if (!entry) return;
+        // Ficha sem claimer (nunca deveria acontecer: o modo é decidido antes de planejar): não envia nada.
+        if (!claimer && isClaimToken(token)) return;
+        let item = token;
+        let itemBlacklist = blacklistLookup;
+        if (claimer) {
+          // A ficha só ocupa a vaga: o item real sai do claim em lote (já 'enviando'). Sem item = nada vencido/cota/limite → ficha vira no-op.
+          let claimed: Awaited<ReturnType<ChannelClaimer["next"]>> = null;
+          try {
+            claimed = await claimer.next(ctx.channelId, ctx.campaignId, ctx.slotsFree);
+          } catch (error) {
+            telemetry.recordOutcome(ctx.channelId, "exception");
+            console.error("[Cron] Falha no claim em lote:", ctx.channelId, error);
+            return;
+          }
+          if (!claimed) return;
+          item = claimed.item;
+          itemBlacklist = claimed.blacklistLookup ?? blacklistLookup;
+        }
         let signal = null as BackoffReason | null;
         let pauseCampaign = false;
         try {
           const outcome = await processQueueItem(item, entry.campaign, {
             defaultMaxInFlight: channelWork.defaultMaxInFlight.get(ctx.channelId),
             channelConfig: channelConfigFor(channelWork.configs, ctx.channelId, entry.campaign.account_id),
-            blacklistLookup,
+            blacklistLookup: itemBlacklist,
+            alreadyClaimed: !!claimer,
+            confirmBatcher: confirmBatcher ?? undefined,
             onProviderCall: (observation) => {
               telemetry.recordProviderCall(observation.provider, observation.latencyMs, observation.code);
               signal = observation.signal ?? signal;
@@ -615,6 +680,12 @@ async function runTick(request: Request, chain: ChainContext) {
         return { backoff: signal, pauseCampaign };
       },
     });
+    } finally {
+      // Fim do tick: devolve a 'agendado' o que foi reivindicado e não chegou ao envio, e grava o micro-lote de confirmações pendente.
+      await claimer?.releaseLeftovers();
+      await confirmBatcher?.drain();
+      unregisterDrain?.();
+    }
     await Promise.allSettled(cooldownWrites);
     // Fecha a avaliação dos lotes menores que o intervalo de checagem.
     for (const entry of planned) {
