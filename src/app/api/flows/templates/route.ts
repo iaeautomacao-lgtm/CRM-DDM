@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardFlowAccess } from '@/lib/flows/route-auth'
 import { listFlowTemplates } from '@/lib/flows/templates'
 
 /**
@@ -10,16 +10,11 @@ import { listFlowTemplates } from '@/lib/flows/templates'
  * without bundling the full template payloads client-side. Bodies
  * are fetched only on actual clone via POST /api/flows.
  *
- * Available to any signed-in user. Flows is in soft-GA.
+ * Owner/admin (mesmo papel da página /flows).
  */
 export async function GET() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const guard = await guardFlowAccess()
+  if (!guard.ok) return guard.response
   // Shallow shape so the client gallery doesn't have to know about
   // the full node tree.
   const templates = listFlowTemplates().map((t) => ({

@@ -19,10 +19,17 @@ import {
   User,
   Trash2,
   Megaphone,
+  Download,
+  ExternalLink,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
 import { MessageReactions } from "./message-reactions";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface MessageBubbleProps {
   message: Message;
@@ -85,38 +92,77 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [downloading, setDownloading] = useState(false);
 
-  const loadImage = useCallback(async () => {
-    if (!url) return;
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setError(false);
+    setLoading(true);
 
-    // Proxy URLs need auth fetch to create blob URL
-    if (url.startsWith("/api/whatsapp/media/")) {
+    const load = async () => {
       try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error("Failed to load media");
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        setSrc(blobUrl);
+        // WAHA fallback/proxy precisa de fetch autenticado antes de virar src.
+        // /api/chat-media pode ficar como URL: o navegador segue o redirect
+        // autenticado para a signed URL de curta duração.
+        if (url.startsWith("/api/whatsapp/media/")) {
+          const res = await fetch(url, { credentials: "include" });
+          if (!res.ok) throw new Error("Failed to load media");
+          const blob = await res.blob();
+          objectUrl = URL.createObjectURL(blob);
+          if (!cancelled) setSrc(objectUrl);
+        } else if (!cancelled) {
+          setSrc(url);
+        }
       } catch {
-        setError(true);
+        if (!cancelled) setError(true);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    } else {
-      setSrc(url);
-      setLoading(false);
-    }
+    };
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
   }, [url]);
 
   useEffect(() => {
-    loadImage();
-    return () => {
-      if (src?.startsWith("blob:")) {
-        URL.revokeObjectURL(src);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadImage]);
+    if (!viewerOpen) setZoom(1);
+  }, [viewerOpen]);
+
+  const downloadImage = useCallback(async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("download failed");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const rawName = decodeURIComponent(url.split("?")[0].split("/").pop() || "imagem");
+      const hasExtension = /\.[a-z0-9]{2,5}$/i.test(rawName);
+      const extension = blob.type === "image/png" ? ".png"
+        : blob.type === "image/webp" ? ".webp"
+        : blob.type === "image/gif" ? ".gif"
+        : ".jpg";
+      anchor.href = objectUrl;
+      anchor.download = hasExtension ? rawName : `${rawName || "imagem"}${extension}`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch {
+      // Fallback para mídia externa sem CORS: abre o original para o
+      // navegador oferecer suas próprias ações de salvar.
+      window.open(src ?? url, "_blank", "noopener,noreferrer");
+    } finally {
+      setDownloading(false);
+    }
+  }, [downloading, src, url]);
 
   if (error) {
     return (
@@ -135,12 +181,89 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   }
 
   return (
-    <img
-      src={src ?? ""}
-      alt={alt}
-      className="max-h-64 max-w-60 rounded-lg object-cover"
-      onError={() => setError(true)}
-    />
+    <>
+      <button
+        type="button"
+        onClick={() => setViewerOpen(true)}
+        className="block cursor-zoom-in rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label="Ampliar imagem"
+      >
+        <img
+          src={src ?? ""}
+          alt={alt}
+          className="max-h-64 max-w-60 rounded-lg object-cover"
+          onError={() => setError(true)}
+        />
+      </button>
+
+      <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+        <DialogContent
+          showCloseButton
+          className="h-[92dvh] max-h-[92dvh] w-[96vw] max-w-[96vw] overflow-hidden bg-background/95 p-0 sm:max-w-[96vw]"
+        >
+          <DialogTitle className="sr-only">Visualizar imagem</DialogTitle>
+          <div className="absolute left-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-border bg-background/90 p-1 shadow-sm">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setZoom((z) => Math.max(0.5, Number((z - 0.25).toFixed(2))))}
+              aria-label="Diminuir zoom"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <span className="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
+              {Math.round(zoom * 100)}%
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setZoom((z) => Math.min(4, Number((z + 0.25).toFixed(2))))}
+              aria-label="Aumentar zoom"
+            >
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setZoom(1)}
+              aria-label="Restaurar zoom"
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => void downloadImage()}
+              disabled={downloading}
+              aria-label="Salvar imagem"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => window.open(src ?? url, "_blank", "noopener,noreferrer")}
+              aria-label="Abrir imagem original"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex h-full w-full items-center justify-center overflow-auto p-12">
+            <img
+              src={src ?? ""}
+              alt={alt}
+              className="max-h-none max-w-none object-contain transition-transform duration-100"
+              style={{ transform: `scale(${zoom})`, transformOrigin: "center" }}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

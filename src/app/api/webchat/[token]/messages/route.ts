@@ -14,6 +14,7 @@ import {
   webchatUploadPrefix,
 } from '@/lib/webchat/api'
 import { WEBCHAT_ALLOWED_MIME, mediaKindFromMime, toClientMessage } from '@/lib/webchat/messages'
+import { reopenConversationFields } from '@/lib/conversations/reopen'
 
 // /api/webchat/[token]/messages
 //
@@ -194,7 +195,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
     last_message_at: now,
     updated_at: now,
   }
-  if (conversation.status === 'closed') convUpdates.status = 'pending'
+  if (conversation.status === 'closed') Object.assign(convUpdates, reopenConversationFields())
   await db.from('conversations').update(convUpdates).eq('id', conversationId)
   const { error: unreadError } = await db.rpc('increment_unread_count', {
     conversation_id: conversationId,

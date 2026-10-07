@@ -1,4 +1,5 @@
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { safeFetch, SsrfBlockedError } from "@/lib/security/ssrf-guard";
 import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
@@ -29,6 +30,8 @@ import {
 } from "@/lib/ai/tool-recovery";
 import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
 import { createAiHeartbeat, type AiHeartbeat } from "@/lib/ai/heartbeat";
+import { gatedFetch } from "@/lib/ai/llm-gate";
+import { buildKnowledgeBaseContext } from "@/lib/ai/kb-context";
 import { BOT_LOOP_MIN_MESSAGES, BOT_LOOP_WINDOW_SECONDS, detectBotLoop } from "@/lib/ai/loop-guard";
 import { handOffToTeamQueue } from "@/lib/ai/team-handoff";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
@@ -1079,10 +1082,16 @@ async function handleAiAutoResponseAttempt(
     tracker.promptVersion = effectivePromptVersion({ hasOverride, accountPrompt: aiConfig.system_prompt });
   }
   if (kbFiles && kbFiles.length > 0) {
-    const kbContext = kbFiles
-      .map((file) => `[ARQUIVO: ${file.name}]\n${file.content}\n---`)
-      .join("\n\n");
-    
+    // Dieta de tokens: com teto de tamanho (kb-context.ts); abaixo do teto o
+    // texto é idêntico ao de antes, acima entram os arquivos mais relevantes
+    // para o que o cliente acabou de dizer.
+    const recentCustomerText = history
+      .filter((m: any) => m.sender_type === "customer")
+      .slice(-3)
+      .map((m: any) => m.content_text || "")
+      .join("\n");
+    const kbContext = buildKnowledgeBaseContext(kbFiles, recentCustomerText);
+
     systemPromptWithKb = `${systemPromptWithKb}
 
 === BASE DE CONHECIMENTO DISPONÍVEL ===
@@ -1500,6 +1509,8 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
         trackedOnToolResult,
         nodeKey,
         responseModel,
+        // Esperando vaga/429 conta como "IA trabalhando" para o vigia.
+        () => tracker?.heartbeat?.beat() ?? Promise.resolve(),
       );
     } else if (aiConfig.api_provider === "claude") {
       return generateClaudeResponse(activeKey, systemPromptWithKb, history, responseModel);
@@ -2170,9 +2181,10 @@ export async function generateOpenAiResponse(
   ) => Promise<void>,
   nodeKey?: string,
   model = "gpt-4o-mini",
+  onWaiting?: () => void | Promise<void>,
   // Simulador de fluxo (PRD 05): executa a chamada HTTP da tool no lugar
-  // do fetch real (mock / leitura real controlada). Ausente — produção —
-  // segue o boundedFetch de sempre.
+  // do safeFetch real (mock / leitura real controlada). Ausente — produção —
+  // segue o safeFetch (guard anti-SSRF) de sempre.
   toolFetch?: (toolName: string, url: string, init: RequestInit) => Promise<Response>,
 ): Promise<string> {
   const url = "https://api.openai.com/v1/chat/completions";
@@ -2246,11 +2258,17 @@ export async function generateOpenAiResponse(
       body.tool_choice = "auto";
     }
 
-    const response = await boundedFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify(body),
-    });
+    // Semáforo por processo + espera/nova tentativa em 429 (llm-gate.ts). O
+    // timeout de 15s do boundedFetch só começa depois de obter a vaga.
+    const response = await gatedFetch(
+      () =>
+        boundedFetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify(body),
+        }),
+      { onWaiting },
+    );
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
@@ -2382,6 +2400,8 @@ export async function generateOpenAiResponse(
             attempt += 1;
 
             try {
+              // URL de tool é configurável por tenant → guard anti-SSRF (produção).
+              // Simulador: toolFetch decide (mock ou leitura real somente-leitura).
               const httpInit: RequestInit = {
                 method: toolDef.http.method,
                 headers: {
@@ -2389,11 +2409,18 @@ export async function generateOpenAiResponse(
                   ...resolvedHeaders,
                 },
                 ...(resolvedBody ? { body: resolvedBody } : {}),
-                signal: AbortSignal.timeout(30000),
               };
               const httpRes = toolFetch
                 ? await toolFetch(toolName, resolvedUrl, httpInit)
-                : await boundedFetch(resolvedUrl, httpInit);
+                : await safeFetch(
+                    resolvedUrl,
+                    {
+                      method: toolDef.http.method,
+                      headers: httpInit.headers,
+                      ...(resolvedBody ? { body: resolvedBody } : {}),
+                    },
+                    { timeoutMs: 30_000, maxBytes: 1024 * 1024 },
+                  );
 
               const httpText = await httpRes.text();
               const failure =
@@ -2426,7 +2453,14 @@ export async function generateOpenAiResponse(
 
               break;
             } catch (err) {
-              const failure = classifyFetchFailure(err);
+              const failure =
+                err instanceof SsrfBlockedError && err.reason !== "timeout"
+                  ? {
+                      code: "TOOL_PROVIDER_ERROR" as const,
+                      message: "URL da integração não permitida.",
+                      retryable: false,
+                    }
+                  : classifyFetchFailure(err);
               finalFailure = failure;
               toolResult = serializeToolFailure(failure, attempt);
 

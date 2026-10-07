@@ -31,7 +31,37 @@ export async function GET(request: Request) {
         return [channel ?? 'all', count ?? 0] as const
       })
     )
-    return NextResponse.json({ unread: Object.fromEntries(counts) })
+
+    // Totais por fila operacional. A classificação usa atribuição humana:
+    // com assigned_agent_id = Em atendimento; sem atendente = Em espera.
+    const statusTotals = await Promise.all(
+      ([
+        ['open', true],
+        ['pending', false],
+      ] as const).map(async ([statusKey, assigned]) => {
+        let query = applyInboxFilters(
+          supabase
+            .from('conversations')
+            .select('id', { count: 'exact', head: true })
+            .in('status', ['open', 'pending']),
+          filters,
+          { accountId, userId, line },
+          { includeStatus: false }
+        )
+        query = assigned
+          ? query.not('assigned_agent_id', 'is', null)
+          : query.is('assigned_agent_id', null)
+        const { count, error } = await query
+        // Total da seção é complemento: se falhar, devolve null e a UI usa
+        // a contagem carregada — nunca derruba os contadores de não lidas.
+        if (error) {
+          console.error('[inbox/counts] total por fila falhou:', error.message)
+          return [statusKey, null] as const
+        }
+        return [statusKey, count ?? 0] as const
+      })
+    )
+    return NextResponse.json({ unread: Object.fromEntries(counts), status: Object.fromEntries(statusTotals) })
   } catch (err) {
     return toErrorResponse(err)
   }

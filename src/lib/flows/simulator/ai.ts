@@ -15,6 +15,7 @@ import { extractAiExitTag, stripAiExitTag } from "@/lib/ai/exit-tags";
 import { effectivePromptVersion } from "@/lib/ai/attempt-telemetry";
 import { isModelCompatibleWithProvider, resolveAiModel } from "@/lib/ai/models";
 import { tallyToolResult, type ToolExecutionMeta, type ToolRoundTally } from "@/lib/ai/tool-recovery";
+import { buildKnowledgeBaseContext } from "@/lib/ai/kb-context";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
 import type { FlowEffects } from "../effects";
 import { captureOutbound, simNote, type SimContext } from "./context";
@@ -193,9 +194,16 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
       ? systemPromptOverride!
       : (aiConfig.system_prompt as string | null) || "Você é um assistente virtual. Aguarde um momento.";
     if (kbFiles && kbFiles.length > 0) {
-      const kbContext = (kbFiles as Array<{ name: string; content: string }>)
-        .map((file) => `[ARQUIVO: ${file.name}]\n${file.content}\n---`)
-        .join("\n\n");
+      // Mesma dieta de tokens da produção (kb-context.ts, #91).
+      const recentCustomerText = history
+        .filter((m) => m.sender_type === "customer")
+        .slice(-3)
+        .map((m) => m.content_text || "")
+        .join("\n");
+      const kbContext = buildKnowledgeBaseContext(
+        kbFiles as Array<{ name: string; content: string }>,
+        recentCustomerText,
+      );
       systemPrompt = `${systemPrompt}
 
 === BASE DE CONHECIMENTO DISPONÍVEL ===
@@ -226,6 +234,7 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
           trackedOnToolResult,
           nodeKey,
           responseModel,
+          undefined, // onWaiting (heartbeat do vigia): sem efeito no simulador
           simulatedToolFetch(ctx, node),
         );
       }

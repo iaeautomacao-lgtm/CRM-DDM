@@ -35,6 +35,8 @@ export type ApiErrorCode =
   | 'rate_limited' // per-key budget exhausted
   | 'bad_request' // malformed input
   | 'not_found'
+  | 'conflict' // Idempotency-Key/external_id reutilizado com outro conteúdo, ou criação em curso
+  | 'payload_too_large' // corpo/lote acima do teto
   | 'internal';
 
 /**
@@ -52,15 +54,19 @@ export class ApiError extends Error {
    * key exists would leak information to a probe. */
   readonly accountId: string | null;
   readonly keyId: string | null;
+  /** Campos extras do objeto `error` (ex.: campaign_id para reconciliação). */
+  readonly extra?: Record<string, unknown>;
 
   constructor(
     code: ApiErrorCode,
     message: string,
     status: number,
     headers?: Record<string, string>,
-    context?: ApiErrorAccountContext
+    context?: ApiErrorAccountContext,
+    extra?: Record<string, unknown>
   ) {
     super(message);
+    this.extra = extra;
     this.name = 'ApiError';
     this.code = code;
     this.status = status;
@@ -83,6 +89,21 @@ export function forbidden(message: string, context?: ApiErrorAccountContext): Ap
 /** 400 — bad input. */
 export function badRequest(message: string): ApiError {
   return new ApiError('bad_request', message, 400);
+}
+
+/** 400 com campos extras no objeto `error`. */
+export function badRequestWith(message: string, extra: Record<string, unknown>): ApiError {
+  return new ApiError('bad_request', message, 400, undefined, undefined, extra);
+}
+
+/** 409 — conflito de idempotência. */
+export function conflict(message: string): ApiError {
+  return new ApiError('conflict', message, 409);
+}
+
+/** 413 — corpo/lote grande demais. */
+export function payloadTooLarge(message: string): ApiError {
+  return new ApiError('payload_too_large', message, 413);
 }
 
 /** 404 — no such resource, or it exists but belongs to another
@@ -141,7 +162,7 @@ export function toApiErrorResponse(err: unknown, logCtx?: ApiCallLogContext): Ne
       );
     }
     return NextResponse.json(
-      { error: { code: err.code, message: err.message } },
+      { error: { code: err.code, message: err.message, ...(err.extra ?? {}) } },
       { status: err.status, headers: err.headers }
     );
   }

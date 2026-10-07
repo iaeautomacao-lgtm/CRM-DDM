@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { safeFetch } from "@/lib/security/ssrf-guard";
 import { dispatchInboundToFlows } from "../engine";
 import { runWithFlowEffects } from "../effects";
 import type { FlowRunRow, ParsedInbound } from "../types";
@@ -277,7 +278,19 @@ export async function simulateTurn(
     toolMocks: req.toolMocks ?? {},
     realReadOnlyTools: req.realReadOnlyTools ?? [],
     httpMocks: req.httpMocks ?? {},
-    realFetch: deps.realFetch ?? ((input, init) => fetch(input, init)),
+    realFetch:
+      deps.realFetch ??
+      // Leitura real das tools liberadas também passa pelo guard anti-SSRF (#98).
+      ((input, init) =>
+        safeFetch(
+          String(input),
+          {
+            method: init?.method,
+            headers: init?.headers,
+            body: typeof init?.body === "string" ? init.body : undefined,
+          },
+          { timeoutMs: 30_000, maxBytes: 1024 * 1024 },
+        )),
     seq,
   };
 

@@ -3,6 +3,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
 import { startCampaign } from "@/lib/disparador/startCampaign";
+import { canManageCampaigns } from "@/lib/disparador/route-auth";
 
 export async function POST(
   request: Request,
@@ -82,6 +83,14 @@ export async function POST(
           { status: 400 }
         );
       }
+      // Iniciar / "Iniciar agora" / retomar: só quem gerencia campanhas
+      // (owner/admin, mesmo papel da página /disparador — route-auth.ts).
+      if (!canManageCampaigns(profile.account_role)) {
+        return NextResponse.json(
+          { error: "Seu papel não permite gerenciar campanhas do disparador." },
+          { status: 403 }
+        );
+      }
       accountId = profile.account_id;
 
       // wacrm.campaigns has no account_id column (only created_by), so
@@ -113,7 +122,10 @@ export async function POST(
 
     ensureQueueWorkerRunning();
 
-    const result = await startCampaign(campaignId, accountId);
+    // "Iniciar agora" numa campanha agendada ({ agora: true }): a fila começa
+    // agora, não no horário agendado. Corpo vazio/inválido = início normal.
+    const body = (await request.json().catch(() => null)) as { agora?: unknown } | null;
+    const result = await startCampaign(campaignId, accountId, { startNow: body?.agora === true });
     if (!result.ok) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }

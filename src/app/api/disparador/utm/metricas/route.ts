@@ -1,18 +1,41 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { supabaseAdmin } from "@/lib/disparador/admin-client";
 
 export async function GET(request: Request) {
-  const supabase = await createClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let accountId: string;
+  try {
+    accountId = (await requireDisparadorAccess()).accountId;
+  } catch (err) {
+    return toErrorResponse(err);
   }
 
   const { searchParams } = new URL(request.url);
-  const campanha = searchParams.get("campanha") ?? "";
+  const campanha = (searchParams.get("campanha") ?? "").trim();
   const canal = searchParams.get("canal") ?? "whatsapp";
   const dataInicio = searchParams.get("data_inicio") ?? "";
   const dataFim = searchParams.get("data_fim") ?? "";
+
+  if (!campanha || campanha.length > 200) {
+    return NextResponse.json({ error: "campanha é obrigatória" }, { status: 400 });
+  }
+
+  // O serviço de UTM indexa só pelo nome: sem isto, qualquer conta lia as
+  // métricas de outra pelo nome da campanha. Só repassa se a campanha é da conta.
+  const { data: owned, error: ownErr } = await supabaseAdmin()
+    .from("campaigns")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("nome", campanha)
+    .limit(1);
+  if (ownErr) {
+    console.error("[utm/metricas] posse da campanha:", ownErr.message);
+    return NextResponse.json({ error: "Erro ao validar a campanha" }, { status: 500 });
+  }
+  if (!owned || owned.length === 0) {
+    return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
+  }
 
   const params = new URLSearchParams({ campanha, canal });
   if (dataInicio) params.set("data_inicio", dataInicio);
@@ -27,6 +50,6 @@ export async function GET(request: Request) {
     }
   );
 
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return NextResponse.json(data, { status: res.ok ? 200 : res.status });
 }

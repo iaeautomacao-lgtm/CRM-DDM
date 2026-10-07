@@ -2,19 +2,30 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 import { phoneKey } from "@/lib/disparador/phone-key";
+import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
-
-type TemplateMode = "sequencia" | "rotacao" | "aleatorio";
+import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
+import { formatStartFailureReason, parseTemplateMode } from "@/lib/disparador/campaign-validation";
+import { INTRA_CONTACT_MS, roundContactTimeMs, scheduleRounds } from "@/lib/disparador/window-clock";
+import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
+import { writeLog } from "@/lib/logger";
 
 // campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
 // lida por este código — reaproveitada para guardar o modo de alternância
 // de templates sem precisar de uma migration nova (ver EDITABLE_FIELDS em
-// api/disparador/campaigns/[id]/route.ts e campanhas/page.tsx). Linhas
-// antigas ainda têm o array-default [1,2,3,4,5,6]; qualquer valor que não
-// seja "rotacao"/"aleatorio" cai em "sequencia" (comportamento original:
-// todas as mensagens enviadas em sequência para cada contato).
-function parseTemplateMode(raw: unknown): TemplateMode {
-  return raw === "rotacao" || raw === "aleatorio" ? raw : "sequencia";
+// api/disparador/campaigns/[id]/route.ts e o assistente). Linhas antigas
+// ainda têm o array-default [1,2,3,4,5,6]; qualquer valor que não seja
+// "rotacao"/"aleatorio" cai em "sequencia" ("Padrão" na tela: todas as
+// mensagens enviadas em sequência para cada contato). parseTemplateMode e a
+// regra de quantidade por modo ficam em campaign-validation.ts.
+
+export interface StartCampaignOptions {
+  /**
+   * "Iniciar agora" numa campanha agendada: a fila começa agora, não no
+   * horário agendado (antes os itens ficavam presos ao agendamento futuro
+   * com a campanha já em execução).
+   */
+  startNow?: boolean;
 }
 
 export type StartCampaignResult =
@@ -34,13 +45,99 @@ export type StartCampaignResult =
 // enfileira, assumindo que accountId já é confiável.
 export async function startCampaign(
   campaignId: string,
-  accountId: string
+  accountId: string,
+  options: StartCampaignOptions = {}
 ): Promise<StartCampaignResult> {
-  // true enquanto esta chamada é dona da preparação (status 'preparando').
-  // Se sair por erro com ela ainda true, o finally devolve a campanha a
-  // 'rascunho' para não ficar presa.
-  let preparing = false;
+  // preparing: true enquanto esta chamada é dona da preparação (status
+  // 'preparando'). Se sair por erro com ela ainda true, a campanha volta a
+  // 'rascunho' para não ficar presa — com o motivo gravado e visível no
+  // card (antes uma campanha agendada que falhava voltava a rascunho em
+  // silêncio e o agendamento simplesmente sumia).
+  const state: PrepareState = { preparing: false, agendamento: null };
+  const evaluationSince = new Date().toISOString();
+  let result: StartCampaignResult;
   try {
+    result = await prepareCampaign(campaignId, accountId, state, options);
+  } catch (err: unknown) {
+    console.error("[startCampaign] Failed to schedule queue:", err);
+    result = { ok: false, status: 500, error: err instanceof Error ? err.message : String(err) };
+  }
+
+  if (state.preparing) {
+    // Falhou no meio da preparação: volta para 'rascunho'. Os itens
+    // parciais já inseridos não são consumidos (campanha não está em
+    // execução) e o próximo start limpa a fila antes de publicar.
+    // Crash do processo não passa por aqui: o cron devolve a 'rascunho'
+    // o que ficar preso em 'preparando' por mais de 30 min.
+    const { error } = await supabaseAdmin()
+      .from("campaigns")
+      .update({ status: "rascunho" })
+      .eq("id", campaignId)
+      .eq("account_id", accountId)
+      .eq("status", "preparando");
+    if (error) console.error("[startCampaign] Recuperação de preparação pendente:", error.message);
+    if (!result.ok) await recordStartFailure(campaignId, accountId, state.agendamento, result.error);
+  } else if (result.ok) {
+    await clearStartFailure(campaignId);
+    // Vale tanto para retomada sequencial quanto para o reflow do lote.
+    // Não reutilizar os erros que motivaram a pausa anterior.
+    const { error } = await supabaseAdmin().from("campaigns")
+      .update({ pausa_automatica_motivo: null, auto_pausa_avaliar_desde: evaluationSince })
+      .eq("id", campaignId).eq("account_id", accountId).eq("status", "em_execucao");
+    if (error) console.error("[startCampaign] Falha ao reiniciar avaliação de pausa automática:", error.message);
+  }
+  return result;
+}
+
+interface PrepareState {
+  preparing: boolean;
+  /** campaigns.agendamento lido na preparação (para o motivo da falha). */
+  agendamento: string | null;
+}
+
+// campaigns.motivo_falha_inicio (migration 160). Gravado em UPDATE separado
+// e tolerante: sem a coluna, o início/recuperação continuam funcionando.
+async function recordStartFailure(
+  campaignId: string,
+  accountId: string,
+  agendamento: string | null,
+  error: string
+): Promise<void> {
+  const motivo = formatStartFailureReason(error, agendamento);
+  const { error: updateError } = await supabaseAdmin()
+    .from("campaigns")
+    .update({ motivo_falha_inicio: motivo })
+    .eq("id", campaignId)
+    .eq("account_id", accountId);
+  if (updateError) console.error("[startCampaign] Falha ao gravar motivo_falha_inicio:", updateError.message);
+  void writeLog({
+    account_id: accountId,
+    level: "warn",
+    source: "disparador",
+    event: "campaign_start_failed",
+    message: motivo,
+    payload: { campaign_id: campaignId },
+  });
+}
+
+async function clearStartFailure(campaignId: string): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from("campaigns")
+    .update({ motivo_falha_inicio: null })
+    .eq("id", campaignId)
+    .not("motivo_falha_inicio", "is", null);
+  if (error) console.error("[startCampaign] Falha ao limpar motivo_falha_inicio:", error.message);
+}
+
+async function prepareCampaign(
+  campaignId: string,
+  accountId: string,
+  state: PrepareState,
+  options: StartCampaignOptions
+): Promise<StartCampaignResult> {
+  // Bloco = antigo corpo do try (indentação preservada para o diff); erro
+  // lançado aqui é tratado em startCampaign().
+  {
     // 1. Claim condicional rascunho/agendado -> 'preparando'. Enquanto a
     // fila é montada a campanha NÃO está 'em_execucao', então o cron e o
     // claim_dispatch_item ignoram os itens já inseridos — nenhum consumidor
@@ -60,7 +157,7 @@ export async function startCampaign(
       return { ok: false, status: 500, error: claimError.message };
     }
     const claimedFreshStart = !!claimedRows && claimedRows.length > 0;
-    preparing = claimedFreshStart;
+    state.preparing = claimedFreshStart;
 
     // 2. Fetch campaign configuration — necessário de todo jeito: quando
     // claimedFreshStart, pra ler mensagens/session_ids/etc; quando não,
@@ -76,6 +173,7 @@ export async function startCampaign(
     if (campaignError || !campaign) {
       return { ok: false, status: 404, error: "Campanha não encontrada" };
     }
+    state.agendamento = campaign.agendamento ?? null;
 
     // Not claimed above (não era rascunho/agendado) e não é retomada de
     // pausada — genuinamente não iniciável agora. Enforced aqui, não só
@@ -101,6 +199,18 @@ export async function startCampaign(
     // de onde parou. Reativa os itens pausados in-place e retorna sem
     // tocar em mensagens/contatos/fila nova.
     if (campaign.status === "pausada") {
+      // Lote/"Segmentado": a retomada simples poria a fila inteira vencida
+      // ao mesmo tempo (rajada). Redistribui no ritmo da campanha antes de
+      // reativar (queue-reflow.ts). A validação de template/canal do início
+      // não roda na retomada: os itens já estão montados.
+      if ((campaign.batch_size ?? 1) > 1) {
+        const resumed = await resumeBatchedCampaign(campaign, accountId);
+        if (resumed.ok) return { ok: true, enqueued: resumed.resumed };
+        if (resumed.reason === "state_changed")
+          return { ok: false, status: 409, error: "Estado da campanha mudou; atualize antes de retomar" };
+        console.error("[startCampaign] Falha ao retomar campanha em lote:", resumed.error);
+        return { ok: false, status: 500, error: "Falha ao retomar campanha" };
+      }
       // RPC (migration 118) faz tudo numa transação com lock da campanha:
       // confirma 'pausada', volta itens 'pausado' -> 'agendado' e põe a
       // campanha em 'em_execucao'. Retorna NULL se o status mudou nesse
@@ -163,29 +273,35 @@ export async function startCampaign(
       }
     }
 
-    // Buscar provider de cada canal selecionado na campanha
-    // Só canais da própria conta: session_ids vêm do cliente (antes um UUID
-    // de outra conta bastava para disparar por ela).
-    const { data: channelConfigs } = await supabaseAdmin()
-      .from("whatsapp_config")
-      .select("id, provider, phone_number_id")
-      .in("id", sessionIds)
-      .eq("account_id", accountId);
-
-    const channelMap = new Map((channelConfigs ?? []).map((c) => [c.id, c]));
-    const validSessionIds = sessionIds.filter((id: string) => channelMap.has(id));
-    if (validSessionIds.length === 0) {
-      return {
-        ok: false,
-        status: 400,
-        error: "Nenhum dos canais selecionados pertence a esta conta.",
-      };
+    // Canais e mensagens, ANTES de mexer na fila (campaign-validation.ts —
+    // mesma regra do PATCH e do assistente): só canais da própria conta
+    // (session_ids vêm do cliente) e habilitados; nunca Meta + WAHA na
+    // mesma campanha; Meta = uma única WABA e toda mensagem é template
+    // aprovado, presente no catálogo dessa WABA e compatível (template não
+    // aprovado, com mídia no cabeçalho, URL dinâmica ou mais {{n}} do que
+    // variáveis mapeadas faria a Meta recusar TODOS os envios).
+    const configCheck = await checkCampaignConfig(supabaseAdmin(), accountId, sessionIds, mensagens, {
+      templateMode,
+      audienceMode: campaign.audience_mode ?? null,
+    });
+    if (!configCheck.ok) {
+      void writeLog({
+        account_id: accountId,
+        level: "warn",
+        source: "disparador",
+        event: "campaign_start_config_invalid",
+        message: configCheck.error,
+        payload: { campaign_id: campaignId },
+      });
+      return { ok: false, status: configCheck.status, error: configCheck.error };
     }
 
-    // IDs dos canais Meta nesta campanha
-    const metaSessionIds = (channelConfigs ?? [])
-      .filter((c) => c.provider === "meta")
-      .map((c) => c.id);
+    const channelMap = new Map(configCheck.channels.map((c) => [c.id, c]));
+    const validSessionIds: string[] = [...new Set(sessionIds as string[])].filter((id) => channelMap.has(id));
+
+    // IDs dos canais Meta nesta campanha (todos, ou nenhum — a validação
+    // acima não deixa misturar providers).
+    const metaSessionIds = configCheck.channels.filter((c) => c.provider === "meta").map((c) => c.id);
 
     // windowMap: contact_id → Date do último inbound via canal Meta
     // Usado para decidir template vs texto livre no loop de enfileiramento
@@ -282,32 +398,9 @@ export async function startCampaign(
     // antes da limpeza da fila, ver audience acima.
     const contacts = audience.contacts;
 
-    // Fetch Blacklist to skip — paginado via .range(), mesmo padrão de
-    // allContacts/contact_import_variables acima: sem filtro nenhum (a
-    // blacklist não tem account_id, ver import/route.ts) e sem
-    // paginação, uma blacklist com mais de 1000 números batia no cap de
-    // resposta do PostgREST e truncava silenciosamente — números fora do
-    // corte paravam de ser excluídos, sem erro nenhum.
-    const blacklist: Array<{ telefone: string }> = [];
-    {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await supabaseAdmin()
-          .from("blacklist")
-          .select("telefone")
-          .range(from, from + pageSize - 1);
-        if (pageError) {
-          throw new Error(`Erro ao carregar blacklist: ${pageError.message}`);
-        }
-        blacklist.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-    }
-    // Comparação por chave (DDD + 8 últimos dígitos): entradas antigas sem
-    // 55 ou sem o 9º dígito também bloqueiam — ver phone-key.ts.
-    const blacklistSet = new Set(blacklist.map((b) => phoneKey(b.telefone)));
+    // Mesma fonte paginada usada pela prévia/importação. Assim, o número
+    // exibido como "na Blacklist" é exatamente o que é removido da fila.
+    const blacklistSet = await loadBlacklistKeySet(supabaseAdmin());
 
     // Contatos que já receberam com sucesso numa tentativa anterior desta
     // campanha (ex: a campanha falhou no meio — chunk de insert quebrou,
@@ -440,7 +533,7 @@ export async function startCampaign(
     // como falsy e silenciosamente forçaria os defaults de 90s/300s.
     const minDelay = (campaign.intervalo_min ?? 90) * 1000;
     const maxDelay = (campaign.intervalo_max ?? 300) * 1000;
-    const intraDelay = 3000; // 3 seconds between messages for the same contact
+    const intraDelay = INTRA_CONTACT_MS; // 7 s entre mensagens do mesmo contato (131056)
 
     // batch_size > 1: contatos são agrupados em lotes que saem juntos (ver
     // abaixo), e o cron processa até batch_size itens "agendado" em
@@ -474,17 +567,32 @@ export async function startCampaign(
         );
       }
     }
-    const batchPauseMs = (campaign.batch_pause_seconds ?? 0) * 1000;
-
     // Se a campanha tem agendamento futuro, usa como base do scheduled_at
     // (ex: start manual antecipado de uma campanha "agendado"). Senão usa
     // Date.now() — inclui o caso normal em que o cron só chama start
     // depois que agendamento já passou, onde essa condição é sempre falsa.
+    // "Iniciar agora" (options.startNow) ignora o agendamento futuro.
     const now = new Date().toISOString();
     const baseTime =
-      campaign.agendamento && new Date(campaign.agendamento) > new Date()
+      !options.startNow && campaign.agendamento && new Date(campaign.agendamento) > new Date()
         ? new Date(campaign.agendamento).getTime()
         : Date.now();
+
+    // Lote/"Segmentado": horário de cada rodada no relógio de janela
+    // (window-clock.ts) — a pausa entre rodadas só conta tempo com a janela
+    // aberta e em dia permitido. Antes era base + k·pausa no relógio comum:
+    // as rodadas que caíam à noite/no fim de semana venciam todas juntas e
+    // saíam numa rajada na abertura seguinte. Ritmo e tamanho do lote não
+    // mudam. Índice da rodada = Math.floor(i / batchSize), igual a antes.
+    const roundTimes =
+      batchSize > 1
+        ? scheduleRounds(
+            new Date(baseTime),
+            Math.ceil(contacts.length / batchSize),
+            campaign.batch_pause_seconds ?? 0,
+            { inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio }
+          )
+        : [];
 
     let contactDelay = 0;
     let enqueued = 0;
@@ -507,19 +615,20 @@ export async function startCampaign(
 
       let contactBaseDelay: number;
       if (batchSize > 1) {
-        // Contatos do mesmo lote (mesmo Math.floor(i / batchSize)) recebem
-        // o mesmo scheduled_at base — só um jitter de 100ms entre eles pra
-        // desempate estável no ORDER BY scheduled_at do cron, não pra
-        // espaçar o envio de verdade (o cron já processa o lote inteiro em
-        // paralelo). O próximo lote só fica agendado batch_pause_seconds
-        // depois. Pausas anti-spam fixas (1h/100, 10min/20) NÃO se
+        // Contatos do mesmo lote (mesmo Math.floor(i / batchSize)) vencem
+        // juntos: horário da rodada + um espalhamento de no máximo 2 s na
+        // rodada inteira (roundSpreadOffsetMs) — só para manter a ordem e
+        // os empates do ORDER BY (scheduled_at, id) do cron pequenos, não
+        // para espaçar o envio. Antes era 100 ms × posição: no "Imediato"
+        // (rodada única) 50 mil contatos levavam ~83 min só para vencer.
+        // Quem dá o ritmo são as vagas do motor (max_in_flight por número,
+        // concorrência, limite_por_hora). O próximo lote só fica agendado batch_pause_seconds
+        // de janela aberta depois (roundTimes). Pausas anti-spam fixas (1h/100, 10min/20) NÃO se
         // aplicam aqui — o usuário já configurou o ritmo manualmente via
         // batch_size/batch_pause_seconds (mesma regra já usada na
         // estimativa de tempo em campanhas/page.tsx: estimarDisparo
         // suprime essas pausas quando batchSizeEfetivo > 1).
-        const loteIndex = Math.floor(i / batchSize);
-        const jitter = (i % batchSize) * 100;
-        contactBaseDelay = loteIndex * batchPauseMs + jitter;
+        contactBaseDelay = roundContactTimeMs(roundTimes, i, batchSize, contacts.length) - baseTime;
       } else {
         // Comportamento original: pacing sequencial por contato via
         // intervalo_min/max, com pausas anti-spam fixas.
@@ -751,27 +860,8 @@ export async function startCampaign(
     if (activateError || !activated?.length) {
       return { ok: false, status: 500, error: "Falha ao ativar campanha" };
     }
-    preparing = false;
+    state.preparing = false;
 
     return { ok: true, enqueued };
-  } catch (err: any) {
-    console.error("[startCampaign] Failed to schedule queue:", err);
-    return { ok: false, status: 500, error: err.message };
-  } finally {
-    if (preparing) {
-      // Falhou no meio da preparação: volta para 'rascunho'. Os itens
-      // parciais já inseridos não são consumidos (campanha não está em
-      // execução) e o próximo start limpa a fila antes de publicar.
-      // Crash do processo não passa por aqui: campanha presa em
-      // 'preparando' exige revisão manual.
-      const { error } = await supabaseAdmin()
-        .from("campaigns")
-        .update({ status: "rascunho" })
-        .eq("id", campaignId)
-        .eq("account_id", accountId)
-        .eq("status", "preparando");
-      if (error)
-        console.error("[startCampaign] Recuperação de preparação pendente:", error.message);
-    }
   }
 }

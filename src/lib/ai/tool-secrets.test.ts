@@ -30,9 +30,14 @@ describe("resolveToolSecrets", () => {
 });
 
 describe("findInlineSecrets", () => {
-  it("acusa token em texto e ignora marcador", () => {
+  it("acusa token em texto e ignora marcador válido", () => {
     expect(findInlineSecrets("https://ddmacordos.com/calc/?tk=a1b2c3d4e5f6g7h8&cpf={{cpf}}")).toEqual(["tk"]);
     expect(findInlineSecrets("https://ddmacordos.com/calc/?tk={{secret.DDM_TOKEN}}&cpf={{cpf}}")).toEqual([]);
     expect(findInlineSecrets("https://x.com/?page=1")).toEqual([]);
+  });
+
+  it("rejeita marcador de segredo com resíduo concatenado", () => {
+    const malformed = "https://ddmacordos.com/calc/?tk={{secret.DDM_TOKEN}}" + "RESIDUAL_VALUE_123&cpf={{cpf}}";
+    expect(findInlineSecrets(malformed)).toEqual(["tk"]);
   });
 });

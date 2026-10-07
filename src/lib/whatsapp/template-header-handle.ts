@@ -1,5 +1,6 @@
 import { uploadResumableMedia } from '@/lib/whatsapp/meta-api'
 import type { TemplatePayload } from '@/lib/whatsapp/template-validators'
+import { safeFetch, SsrfBlockedError } from '@/lib/security/ssrf-guard'
 
 /**
  * Meta requires an `example.header_handle` (from the Resumable Upload
@@ -37,8 +38,11 @@ export async function ensureImageHeaderHandle(
   // and for a manually-pasted public link).
   let res: Response
   try {
-    res = await fetch(payload.header_media_url)
-  } catch {
+    res = await safeFetch(payload.header_media_url, {}, { maxBytes: IMAGE_MAX_BYTES + 1, timeoutMs: 20_000 })
+  } catch (err) {
+    if (err instanceof SsrfBlockedError && err.reason === 'response_too_large') {
+      throw new Error("Header image is larger than Meta's 5 MB limit.")
+    }
     throw new Error('Could not fetch the header image URL. Make sure it is publicly reachable.')
   }
   if (!res.ok) {

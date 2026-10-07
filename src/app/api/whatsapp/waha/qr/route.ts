@@ -1,29 +1,15 @@
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
 import { getWahaQrCode } from '@/lib/whatsapp/waha-api'
+import { safeInlineContentType, mediaResponseHeaders } from '@/lib/security/media-proxy'
 import { decrypt } from '@/lib/whatsapp/encryption'
 
 export async function GET(request: Request) {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return new Response('Unauthorized', { status: 401 })
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-
-    if (!profile?.account_id) {
-      return new Response('Forbidden', { status: 403 })
-    }
+    // Conectar/derrubar/parear o número é decisão de admin: um papel baixo
+    // poderia vincular o próprio WhatsApp ao canal e receber as conversas.
+    const auth = await guardRole('admin')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId } = auth.ctx
 
     const { searchParams } = new URL(request.url)
     const targetSession = searchParams.get('session')
@@ -32,7 +18,7 @@ export async function GET(request: Request) {
     let query = supabase
       .from('whatsapp_config')
       .select('*')
-      .eq('account_id', profile.account_id)
+      .eq('account_id', accountId)
 
     if (targetId) {
       query = query.eq('id', targetId)
@@ -55,18 +41,22 @@ export async function GET(request: Request) {
     }
 
     const wahaRes = await getWahaQrCode(wahaConfig)
-    const contentType = wahaRes.headers.get('content-type') || 'image/png'
+    // Nunca repassa Content-Type do servidor WAHA (configurável pelo tenant).
+    const contentType = safeInlineContentType(wahaRes.headers.get('content-type'))
+    if (!contentType?.startsWith('image/')) {
+      return new Response('Invalid QR response', { status: 502 })
+    }
     const body = await wahaRes.arrayBuffer()
 
     return new Response(body, {
       status: 200,
       headers: {
-        'Content-Type': contentType,
+        ...mediaResponseHeaders(contentType),
         'Cache-Control': 'no-store, max-age=0',
       },
     })
   } catch (err: any) {
     console.error('[waha/qr] error:', err)
-    return new Response(err.message || 'Internal server error', { status: 500 })
+    return new Response('Internal server error', { status: 500 })
   }
 }

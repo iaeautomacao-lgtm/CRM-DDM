@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const safeFetchMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/security/ssrf-guard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/security/ssrf-guard")>()),
+  safeFetch: safeFetchMock,
+}));
+
 import {
   flowEffects,
   liveFlowEffects,
@@ -56,5 +63,29 @@ describe("flowEffects", () => {
         writeLog({ level: "info", source: "flows", event: "x", message: "y" }),
       ),
     ).rejects.toThrow("writeLog:c");
+  });
+});
+
+describe("http_fetch × guard anti-SSRF (#98)", () => {
+  it("produção: httpFetch passa pelo safeFetch com o timeout do nó", async () => {
+    safeFetchMock.mockReset().mockResolvedValue(new Response("{}", { status: 200 }));
+    await liveFlowEffects.httpFetch("n1", "https://api.exemplo.com/x", { method: "POST", headers: { a: "b" }, body: "{}" }, { timeoutMs: 7000 });
+    expect(safeFetchMock).toHaveBeenCalledTimes(1);
+    const [url, init, options] = safeFetchMock.mock.calls[0];
+    expect(url).toBe("https://api.exemplo.com/x");
+    expect(init).toMatchObject({ method: "POST", body: "{}" });
+    expect(options).toEqual({ timeoutMs: 7000 });
+  });
+
+  it("simulador: httpFetch mockado nunca chama safeFetch nem rede", async () => {
+    safeFetchMock.mockReset();
+    const sim: FlowEffects = {
+      ...liveFlowEffects,
+      mode: "simulation",
+      httpFetch: async () => new Response("mock", { status: 200 }),
+    };
+    const res = await runWithFlowEffects(sim, () => flowEffects().httpFetch("n1", "http://169.254.169.254/", { method: "GET" }, { timeoutMs: 1000 }));
+    expect(await res.text()).toBe("mock");
+    expect(safeFetchMock).not.toHaveBeenCalled();
   });
 });

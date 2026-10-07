@@ -19,9 +19,11 @@ import { supabaseAdmin } from './admin-client'
 import { engineSendText, engineSendTemplate } from './meta-send'
 import { DEFAULT_CURRENCY } from '@/lib/currency'
 import { endActiveRunForConversation } from '@/lib/flows/engine'
+import { closeConversationForAutomation } from './close-conversation'
 import { getConversationChannel, isSocialChannel, sendWebchatMessage } from '@/lib/webchat/send'
 import { sendSocialMessage } from '@/lib/channels/social'
 import { engineWahaSendText } from '@/lib/flows/waha-send'
+import { safeFetch } from '@/lib/security/ssrf-guard'
 
 // ------------------------------------------------------------
 // Public API
@@ -605,11 +607,15 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const cfg = step.step_config as SendWebhookStepConfig
       if (!cfg.url) throw new Error('send_webhook needs url')
       const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
-      const res = await fetch(cfg.url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
-        body,
-      })
+      const res = await safeFetch(
+        cfg.url,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
+          body,
+        },
+        { timeoutMs: 15_000, maxBytes: 256 * 1024 },
+      )
       if (!res.ok) throw new Error(`webhook returned ${res.status}`)
       return `webhook ${res.status}`
     }
@@ -618,55 +624,34 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       if (!args.contactId) throw new Error('close_conversation needs a contact')
       const cfg = step.step_config as CloseConversationStepConfig
 
-      let outcomeTagId = cfg.outcome_tag_id || null
-
-      if (!outcomeTagId) {
-        // No tag configured on this step — fall back to the account's
-        // "Sem Tabulação" tag (codigo_tabulacao = 16) so an
-        // automation-driven close still records an outcome, matching
-        // the requirement enforced in the inbox UI (message-thread.tsx).
-        const { data: fallbackTag, error: fallbackErr } = await db
-          .from('tags')
-          .select('id')
-          .eq('account_id', args.automation.account_id)
-          .eq('kind', 'outcome')
-          .eq('codigo_tabulacao', 16)
-          .maybeSingle()
-
-        if (fallbackErr || !fallbackTag) {
-          console.warn(
-            '[automations] close_conversation: no outcome_tag_id configured and fallback tag (codigo_tabulacao=16) not found for account',
-            args.automation.account_id,
-            fallbackErr
-          )
-        } else {
-          outcomeTagId = fallbackTag.id
-        }
+      // Fecha só a conversa resolvida pelo passo (mesma resolução dos
+      // passos de envio: id do webhook, senão a conversa WhatsApp do
+      // contato) — nunca todas as conversas do contato. Status/tabulação
+      // seguem as regras de closeConversationForAutomation.
+      let conversationId: string
+      try {
+        conversationId = await resolveConversationId(args)
+      } catch (err) {
+        console.warn('[automations] close_conversation: could not resolve conversation', err)
+        return 'no conversation to close'
       }
 
-      await db
-        .from('conversations')
-        .update({
-          status: 'closed',
-          outcome_tag_id: outcomeTagId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('account_id', args.automation.account_id)
-        .eq('contact_id', args.contactId)
+      const result = await closeConversationForAutomation(db, {
+        accountId: args.automation.account_id,
+        conversationId,
+        configuredOutcomeTagId: cfg.outcome_tag_id,
+      })
+      if (result === 'not_found') return 'no conversation to close'
 
       // Best-effort — stop the flow engine from continuing to process a
-      // conversation this automation just closed. Resolve the same way
-      // send-type steps do (webhook-provided id, falling back to the
-      // contact's conversation) rather than failing the whole close over
-      // a lookup miss.
+      // conversation this automation just closed.
       try {
-        const conversationId = await resolveConversationId(args)
         await endActiveRunForConversation(conversationId, 'conversation_closed')
       } catch (err) {
-        console.warn('[automations] close_conversation: could not resolve conversation to end its flow run', err)
+        console.warn('[automations] close_conversation: could not end flow run', err)
       }
 
-      return 'conversation closed'
+      return result === 'already_closed' ? 'conversation already closed' : 'conversation closed'
     }
 
     default:

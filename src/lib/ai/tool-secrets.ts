@@ -79,7 +79,11 @@ export function findInlineSecrets(url: string): string[] {
   const re = /[?&](tk|token|api_?key|apikey|key|secret)=([^&#]*)/gi;
   for (const m of url.matchAll(re)) {
     const value = m[2];
-    if (value.length >= 12 && !value.includes("{{")) found.push(m[1]);
+    // A valid secret placeholder must occupy the whole parameter value.
+    // "{{secret.DDM_TOKEN}}abc..." is malformed: the suffix is still an
+    // inline credential fragment and must be rejected by validation.
+    const placeholderOnly = /^\{\{\s*secret\.[A-Z0-9_]+\s*\}\}$/i.test(value);
+    if (!placeholderOnly && value.length >= 12) found.push(m[1]);
   }
   return found;
 }

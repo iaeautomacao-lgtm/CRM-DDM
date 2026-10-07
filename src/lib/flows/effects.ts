@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { handleAiAutoResponse } from "@/lib/ai/responder";
 import { writeLog } from "@/lib/logger";
+import { safeFetch } from "@/lib/security/ssrf-guard";
 import { sendSocialMessage } from "@/lib/channels/social";
 import { resolveProviderMedia } from "@/lib/storage/provider-media";
 import { getConversationChannel, sendWebchatMessage } from "@/lib/webchat/send";
@@ -70,8 +71,11 @@ export interface FlowEffects {
 
   /** IA do nó ai_agent (modelo + tools + envio da resposta). */
   handleAiAutoResponse: typeof handleAiAutoResponse;
-  /** HTTP do nó http_fetch. `nodeKey` só é usado pelo simulador (mocks por nó). */
-  httpFetch(nodeKey: string, url: string, init: RequestInit): Promise<Response>;
+  /**
+   * HTTP do nó http_fetch. `nodeKey` só é usado pelo simulador (mocks por nó).
+   * Produção passa pelo guard anti-SSRF (safeFetch, #98) com `options.timeoutMs`.
+   */
+  httpFetch(nodeKey: string, url: string, init: RequestInit, options?: { timeoutMs?: number }): Promise<Response>;
   /** system_logs (best-effort, nunca lança). */
   writeLog: typeof writeLog;
   /** Espera do debounce do ai_agent. */
@@ -99,7 +103,17 @@ export const liveFlowEffects: FlowEffects = {
   sendWebchatInvite: (input) => sendWebchatInvite(input),
   resolveProviderMedia: (url, accountId) => resolveProviderMedia(url, accountId),
   handleAiAutoResponse: (...args) => handleAiAutoResponse(...args),
-  httpFetch: (_nodeKey, url, init) => fetch(url, init),
+  httpFetch: (_nodeKey, url, init, options) =>
+    safeFetch(
+      url,
+      {
+        method: init.method,
+        headers: init.headers,
+        body: typeof init.body === "string" ? init.body : undefined,
+        signal: init.signal ?? undefined,
+      },
+      { timeoutMs: options?.timeoutMs },
+    ),
   writeLog: (params) => writeLog(params),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };

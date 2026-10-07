@@ -10,6 +10,8 @@ import { decrypt } from "@/lib/whatsapp/encryption";
 import { fetchSocialProfile } from "./graph";
 import { socialAttachmentContentType, type SocialInboundEvent } from "./inbound";
 import type { ChannelRow } from "./social";
+import { reopenConversationFields } from "@/lib/conversations/reopen";
+import { safeFetch } from "@/lib/security/ssrf-guard";
 
 // Pipeline de entrada do Instagram/Messenger — mesma sequência dos webhooks
 // de WhatsApp: canal → contato (por identidade do canal) → conversa da
@@ -82,7 +84,7 @@ export async function ingestSocialEvent(ev: SocialInboundEvent): Promise<void> {
     last_message_at: createdAt,
     updated_at: new Date().toISOString(),
   };
-  if (conversation.status === "closed") convUpdates.status = "pending";
+  if (conversation.status === "closed") Object.assign(convUpdates, reopenConversationFields());
   await db.from("conversations").update(convUpdates).eq("id", conversation.id);
   await db.rpc("increment_unread_count", { conversation_id: conversation.id });
 
@@ -252,7 +254,7 @@ async function buildContent(
     return { contentType: "text", contentText: [ev.text, attachment.url].filter(Boolean).join("\n"), mediaUrl: null, mime: "" };
   }
   try {
-    const res = await fetch(attachment.url, { signal: AbortSignal.timeout(20_000) });
+    const res = await safeFetch(attachment.url, {}, { timeoutMs: 20_000, maxBytes: MEDIA_MAX_BYTES });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const mime = res.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
     const buffer = Buffer.from(await res.arrayBuffer());

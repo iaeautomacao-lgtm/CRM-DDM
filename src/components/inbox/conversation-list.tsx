@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import type { Conversation, ConversationStatus } from "@/types";
+import type { Conversation } from "@/types";
 import {
   Search,
   ChevronDown,
@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
-import { CONVERSATION_STATUS_LABELS, CONVERSATION_STATUS_LABELS_PLURAL } from "./status-labels";
+import { CONVERSATION_STATUS_LABELS_PLURAL } from "./status-labels";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,6 +42,8 @@ import {
   type InboxFilters,
   type InboxStatus,
 } from "@/lib/inbox/filters";
+import { sectionTotal, shouldAutoLoadMore } from "@/lib/inbox/pagination";
+import { INBOX_QUEUE_LABELS, inboxQueueSection } from "@/lib/inbox/queue-section";
 
 // Lista do inbox (F2). Os dados vêm de /api/inbox/conversations, paginados
 // e filtrados no servidor (RLS do usuário). Os filtros ficam na URL
@@ -67,11 +69,11 @@ interface ConversationListProps {
   onCreateConversation?: () => void;
 }
 
-const STATUS_COLORS: Record<ConversationStatus, string> = {
-  open: "bg-primary",
-  pending: "bg-amber-500",
+const QUEUE_COLORS = {
+  attending: "bg-primary",
+  waiting: "bg-amber-500",
   closed: "bg-muted-foreground",
-};
+} as const;
 
 const STATUS_OPTIONS: { label: string; value: InboxStatus }[] = [
   { label: "Em andamento", value: "active" },
@@ -201,6 +203,9 @@ export function ConversationList({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadMoreFailed, setLoadMoreFailed] = useState(false);
+  const [statusTotals, setStatusTotals] = useState<{ open?: number; pending?: number }>({});
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const options = useFilterOptions(accountId);
 
@@ -269,6 +274,8 @@ export function ConversationList({
         onConversationsLoadedRef.current(list.conversations ?? []);
         setNextCursor(list.next_cursor ?? null);
         setUnread(counts.unread ?? {});
+        setStatusTotals(counts.status ?? {});
+        setLoadMoreFailed(false);
       } catch (err) {
         console.error("Failed to fetch conversations:", err);
       } finally {
@@ -283,6 +290,7 @@ export function ConversationList({
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
     setLoadingMore(true);
+    setLoadMoreFailed(false);
     try {
       const res = await apiFetch(
         `/api/inbox/conversations?${filtersKey}${filtersKey ? "&" : ""}cursor=${encodeURIComponent(nextCursor)}`
@@ -297,10 +305,29 @@ export function ConversationList({
       setNextCursor(json.next_cursor ?? null);
     } catch (err) {
       console.error("Failed to load more conversations:", err);
+      setLoadMoreFailed(true);
     } finally {
       setLoadingMore(false);
     }
   }, [filtersKey, nextCursor, loadingMore]);
+
+  // Rolagem infinita: ao aproximar do fim da lista carrega a próxima página.
+  // O observer é recriado a cada página, então se o sentinela continuar
+  // visível (página curta/filtro client-side) ele dispara de novo.
+  const autoLoad = shouldAutoLoadMore({ nextCursor, loading, loadingMore, failed: loadMoreFailed });
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!autoLoad || !el || typeof IntersectionObserver === "undefined") return;
+    const root = el.closest<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) void loadMore();
+      },
+      { root, rootMargin: "0px 0px 400px 0px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [autoLoad, loadMore]);
 
   // Conversas que chegam pelo tempo real entram na lista do pai sem
   // passar pelos filtros: aqui só fica o que casa com eles.
@@ -320,8 +347,17 @@ export function ConversationList({
   }, [conversations, filters, selectedLine, user?.id]);
 
   const grouped = filters.status === "active";
-  const openGroup = useMemo(() => visible.filter((c) => c.status === "open"), [visible]);
-  const pendingGroup = useMemo(() => visible.filter((c) => c.status === "pending"), [visible]);
+  // A fila do operador é determinada por atribuição humana. Isso evita
+  // pending com assigned_agent_id aparecer em "Em espera" e open sem
+  // atendente aparecer como se já estivesse em atendimento.
+  const openGroup = useMemo(
+    () => visible.filter((c) => inboxQueueSection(c) === "attending"),
+    [visible],
+  );
+  const pendingGroup = useMemo(
+    () => visible.filter((c) => inboxQueueSection(c) === "waiting"),
+    [visible],
+  );
 
   const clientsById = useMemo(() => new Map(options.clients.map((c) => [c.id, c])), [options.clients]);
   const linesForTab = useMemo(
@@ -540,7 +576,7 @@ export function ConversationList({
           <div className="flex flex-col py-1">
             <SectionHeader
               label={CONVERSATION_STATUS_LABELS_PLURAL.open}
-              count={openGroup.length}
+              count={sectionTotal(openGroup.length, filters.q ? null : statusTotals.open, Boolean(nextCursor))}
               expanded={openSectionExpanded}
               onToggle={() => toggleSection("open")}
             />
@@ -553,7 +589,7 @@ export function ConversationList({
             <div className="mt-2">
               <SectionHeader
                 label={CONVERSATION_STATUS_LABELS_PLURAL.pending}
-                count={pendingGroup.length}
+                count={sectionTotal(pendingGroup.length, filters.q ? null : statusTotals.pending, Boolean(nextCursor))}
                 expanded={pendingSectionExpanded}
                 onToggle={() => toggleSection("pending")}
               />
@@ -569,10 +605,17 @@ export function ConversationList({
           <div className="flex flex-col">{renderItems(visible)}</div>
         )}
         {!loading && nextCursor && (
-          <div className="p-3">
-            <Button variant="ghost" size="sm" className="w-full text-xs" onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Carregar mais"}
-            </Button>
+          <div ref={sentinelRef} className="p-3">
+            {loadMoreFailed ? (
+              <Button variant="ghost" size="sm" className="w-full text-xs" onClick={loadMore}>
+                Erro ao carregar. Tentar novamente
+              </Button>
+            ) : (
+              <div className="flex items-center justify-center gap-2 py-1 text-xs text-muted-foreground" role="status">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                Carregando…
+              </div>
+            )}
           </div>
         )}
       </ScrollArea>
@@ -716,6 +759,8 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
   const channelBadge = CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"];
   const waiting = waitingLabel(conversation);
   const negative = conversation.sentiment === "negative";
+  const queueSection = inboxQueueSection(conversation);
+  const queueLabel = INBOX_QUEUE_LABELS[queueSection];
 
   const timeAgo = conversation.last_message_at ? compactTimeAgo(conversation.last_message_at) : "";
   // Tooltip com a forma longa em pt-BR ("há 3 dias").
@@ -794,12 +839,12 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
               </span>
             ) : (
               <span
-                className={cn("h-2 w-2 rounded-full", STATUS_COLORS[conversation.status])}
-                title={CONVERSATION_STATUS_LABELS[conversation.status]}
+                className={cn("h-2 w-2 rounded-full", QUEUE_COLORS[queueSection])}
+                title={queueLabel}
                 aria-hidden="true"
               />
             )}
-            <span className="sr-only">Status: {CONVERSATION_STATUS_LABELS[conversation.status]}</span>
+            <span className="sr-only">Status: {queueLabel}</span>
           </div>
         </div>
       </div>
