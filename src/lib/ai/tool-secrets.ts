@@ -46,6 +46,11 @@ export interface AccountSecretsContext {
 const MARKER = /\{\{\s*(secret|cred|var)\.([A-Z0-9_]+)\s*\}\}/g;
 const VAR_MARKER = /\{\{\s*var\.([A-Z0-9_]+)\s*\}\}/g;
 
+/** A URL aponta para um dos hosts (ou subdomínios) permitidos? */
+export function hostAllowedFor(url: string, hosts: readonly string[]): boolean {
+  return hostAllowed(url, hosts);
+}
+
 function hostAllowed(url: string, hosts: readonly string[]): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase();

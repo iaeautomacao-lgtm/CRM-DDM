@@ -11,6 +11,11 @@ export interface PromptContext extends LegacyDdmContext {
   current_node_key?: string;
   previous_tool_results?: { node_key: string | null; tool_name?: string; result?: string }[];
   rules?: AgentRule[];
+  /**
+   * O texto de prompt_content JÁ teve {{vars.x}} substituído (o engine faz isso antes de chamar
+   * o responder): não interpolar de novo — preserva byte a byte o que o responder sempre recebeu.
+   */
+  prompt_interpolated?: boolean;
 }
 
 function interpolateVars(text: string, vars: Record<string, unknown>): string {
@@ -47,6 +52,14 @@ function inheritedContext(version: AgentPromptVersion, context: PromptContext): 
 
 /** Pura: recebe dados/KB/datas. Nunca resolve credenciais nem chama RAG, tools ou LLM. */
 export function composeAgentPrompt(version: AgentPromptVersion, context: PromptContext = {}): string {
+  return composeAgentPromptDetailed(version, context).systemPrompt;
+}
+
+/** Igual a composeAgentPrompt, mais a resposta forçada de transferência dos templates legados (instituições educacionais). */
+export function composeAgentPromptDetailed(
+  version: AgentPromptVersion,
+  context: PromptContext = {},
+): { systemPrompt: string; forcedReply: string } {
   const { config } = version;
   const kbEnabled = config.knowledge.kb_enabled ?? LEGACY_AGENT_DEFAULTS.knowledge.kb_enabled;
   const kbFiles = kbEnabled ? (context.kb_files ?? []) : [];
@@ -56,7 +69,9 @@ export function composeAgentPrompt(version: AgentPromptVersion, context: PromptC
   const inherit = inheritedContext(version, context);
   if (version.composition === "legacy_v1") {
     if (context.rules?.some((rule) => rule.enabled)) throw new Error("legacy_v1 mantém rules=[]; publique sections_v1 para adicionar regras.");
-    let override = config.prompt.legacy_override_present ? interpolateVars(version.prompt_content, context.vars ?? {}) : "";
+    let override = config.prompt.legacy_override_present
+      ? (context.prompt_interpolated ? version.prompt_content : interpolateVars(version.prompt_content, context.vars ?? {}))
+      : "";
     if (inherit) override += "\n\n---\n" + inherit;
     const hasOverride = override.trim() !== "";
     let prompt = hasOverride ? override : (config.prompt.account_content ? config.prompt.account_content : LEGACY_AGENT_DEFAULTS.fallback_prompt);
@@ -68,14 +83,14 @@ ${kb}
 === FIM DA BASE DE CONHECIMENTO ===
 
 Use as informações da base de conhecimento acima para responder às dúvidas do cliente com a maior precisão possível. Se a informação não estiver na base, aja de acordo com suas instruções normais.`;
-    return composeLegacyDdm(prompt, hasOverride, config.prompt.account_content, context).systemPrompt;
+    return composeLegacyDdm(prompt, hasOverride, config.prompt.account_content, context);
   }
   const rules = [...(context.rules ?? [])].filter((r) => r.enabled).sort((a, b) => a.position - b.position);
   if (new Set(rules.map((r) => r.position)).size !== rules.length) throw new Error("Posições de regras devem ser únicas.");
-  const blocks = [interpolateVars(version.prompt_content, context.vars ?? {})];
+  const blocks = [context.prompt_interpolated ? version.prompt_content : interpolateVars(version.prompt_content, context.vars ?? {})];
   if (rules.length) blocks.push("## Regras obrigatórias\n\n" + rules.map((r) => r.content).join("\n\n"));
   if (inherit) blocks.push(inherit);
   if (kb) blocks.push("## Base de conhecimento\n\n" + kb);
   // rag_external é apenas contrato/config nesta fase; nenhum fetch nem bloco de retorno implícito.
-  return blocks.join("\n\n");
+  return { systemPrompt: blocks.join("\n\n"), forcedReply: "" };
 }

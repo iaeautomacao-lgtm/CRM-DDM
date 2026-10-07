@@ -57,6 +57,7 @@ import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
 import { useFlowEditor } from "../flow-editor-state";
 import { AiToolEditor } from "./ai-tool-editor";
+import { AgentPicker } from "./agent-picker";
 import { ToolCatalogPicker } from "./tool-catalog-picker";
 import { PromptHistoryButton } from "@/components/ai/prompt-history-button";
 import {
@@ -2661,6 +2662,9 @@ interface AiAgentCfg {
   tools?: AiAgentTool[];
   /** Ids de ferramentas do catálogo (wacrm.ai_tools). */
   tool_refs?: string[];
+  /** Agente (perfil) de Configurações → Agentes. */
+  agent_id?: string;
+  failure_next_node_key?: string;
   herdar_contexto_anterior?: boolean;
 }
 
@@ -2714,6 +2718,21 @@ function AiAgentForm({
 
   return (
     <>
+      {/* ── Agente (perfil) — Fase 4 ── */}
+      <AgentPicker
+        agentId={cfg.agent_id}
+        failureKey={cfg.failure_next_node_key}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(patch) => onUpdateConfig(patch)}
+      />
+
+      {/* Configuração inline = LEGADO. Com agente ela é ignorada (o agente define tudo). */}
+      <details open={!cfg.agent_id} className="space-y-3">
+        <summary className="cursor-pointer text-sm font-medium text-foreground">
+          Configuração legada (sem agente)
+          {cfg.agent_id ? " — ignorada enquanto houver agente" : ""}
+        </summary>
       <div>
         <label className="mb-1 block text-xs text-muted-foreground">Modo</label>
         <Select
@@ -2947,6 +2966,7 @@ function AiAgentForm({
           </div>
         ))}
       </div>
+      </details>
     </>
   );
 }

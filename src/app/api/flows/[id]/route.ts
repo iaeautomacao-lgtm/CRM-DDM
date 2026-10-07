@@ -3,6 +3,7 @@ import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
 import { listAccountTools } from '@/lib/ai-tools/runtime'
+import { listAccountAgents } from '@/lib/ai/agents/runtime'
 import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
 
 /**
@@ -151,7 +152,7 @@ export async function PUT(
           entry_node_id: body.entry_node_id !== undefined ? body.entry_node_id : current.entry_node_id,
         },
         nodes,
-        { aiProvider: aiConfig?.api_provider ?? null, aiTools: await listAccountTools(current.account_id) },
+        { aiProvider: aiConfig?.api_provider ?? null, aiTools: await listAccountTools(current.account_id), agents: await listAccountAgents(admin, current.account_id) },
       ).filter((i) => i.severity === 'error')
       if (blockers.length > 0) {
         return NextResponse.json(
