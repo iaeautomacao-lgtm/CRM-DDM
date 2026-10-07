@@ -166,7 +166,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
               <code className="text-xs">/api/v1</code>) so you can build your
               own automations. Send them as{' '}
               <code className="text-xs">Authorization: Bearer &lt;key&gt;</code>.{' '}
-              <Link href="/settings/api-docs" className="underline">
+              <Link href="/docs/api" target="_blank" className="underline">
                 Ver documentação da API
               </Link>
             </>
