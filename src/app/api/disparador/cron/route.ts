@@ -98,7 +98,7 @@ async function buildChannelWork(
     }
   }
   const ids = [...byChannel.keys()].filter(Boolean);
-  const info = new Map<string, { provider: DispatchProvider | null; maxInFlight: number | null; cooldownUntil: string | null }>();
+  const info = new Map<string, { provider: DispatchProvider | null; maxInFlight: number | null; cooldownUntil: string | null; paused: boolean }>();
   let configs: Map<string, Record<string, any>> | null = new Map();
   if (ids.length) {
     const [providers, limits, cooldowns] = await Promise.all([
@@ -114,15 +114,19 @@ async function buildChannelWork(
       configs = null;
     }
     if (limits.error) console.error("[Cron] Falha ao ler limites dos canais:", limits.error.message);
-    for (const id of ids) info.set(id, { provider: null, maxInFlight: null, cooldownUntil: null });
+    for (const id of ids) info.set(id, { provider: null, maxInFlight: null, cooldownUntil: null, paused: false });
     for (const row of (providers.data ?? []) as Array<Record<string, any> & { id: string; provider: string | null }>) {
       configs?.set(row.id, row);
       const entry = info.get(row.id);
       if (entry && (row.provider === "meta" || row.provider === "waha")) entry.provider = row.provider;
     }
-    for (const row of (limits.data ?? []) as Array<{ session_id: string; max_in_flight: number | null }>) {
+    for (const row of (limits.data ?? []) as Array<{ session_id: string; max_in_flight: number | null; paused?: boolean | null }>) {
       const entry = info.get(row.session_id);
-      if (entry) entry.maxInFlight = row.max_in_flight ?? null;
+      if (entry) {
+        entry.maxInFlight = row.max_in_flight ?? null;
+        // Migration 192: número pausado no front não recebe trabalho (o claim também recusa no banco).
+        entry.paused = row.paused === true;
+      }
     }
     for (const row of (cooldowns.data ?? []) as Array<{ session_id: string; cooldown_until: string | null }>) {
       const entry = info.get(row.session_id);
@@ -134,6 +138,7 @@ async function buildChannelWork(
   const defaultMaxInFlight = new Map<string, number | undefined>();
   for (const [channelId, campaigns] of byChannel) {
     const channelInfo = info.get(channelId);
+    if (channelInfo?.paused) continue;
     const provider = channelInfo?.provider ?? null;
     const inCooldown = isInCooldown(channelId, now, channelInfo?.cooldownUntil);
     const maxConcurrency = resolveChannelConcurrency({
