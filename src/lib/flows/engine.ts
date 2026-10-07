@@ -55,6 +55,9 @@ import {
 } from "./ai-turns";
 import { supabaseAdmin } from "./admin-client";
 import { writeLog } from "@/lib/logger";
+import { resolveEffectiveTools } from "@/lib/ai-tools/runtime";
+import { loadAccountSecrets } from "@/lib/ai/account-secrets";
+import { hostCheckUrl, resolveToolSecrets } from "@/lib/ai/tool-secrets";
 import {
   engineMetaSendTemplate,
   engineSendInteractiveButtons,
@@ -3147,21 +3150,50 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "http_fetch") {
       const cfg = node.config as unknown as HttpFetchNodeConfig;
-      const url = interpolateVars(cfg.url, run.vars);
+      let url = interpolateVars(cfg.url, run.vars);
+      let fetchHeaders = cfg.headers;
+      let fetchBody =
+        cfg.method === "GET" || !cfg.body_template
+          ? undefined
+          : interpolateVars(cfg.body_template, run.vars);
       const timeoutMs = (cfg.timeout_seconds ?? 10) * 1000;
+      let credentialInjected = false;
       try {
+        // Variáveis/credenciais da conta ({{var.X}}/{{cred.X}}/{{secret.X}}), só quando o
+        // template usa algum marcador (fluxos antigos não consultam o banco). A
+        // credencial só vai se o host da URL FINAL estiver nos hosts permitidos dela.
+        if (/{{s*(?:cred|var|secret)./.test(JSON.stringify([cfg.url, cfg.headers, cfg.body_template]))) {
+          const account = await loadAccountSecrets(run.account_id);
+          const destination = hostCheckUrl(cfg.url, account, (t) => interpolateVars(t, run.vars));
+          const missing: string[] = [];
+          const resolveMarkers = (text: string, encode: boolean) => {
+            const r = resolveToolSecrets(text, destination, process.env, { encode, account });
+            missing.push(...r.missing);
+            if (r.usedSecrets) credentialInjected = true;
+            return r.value;
+          };
+          url = interpolateVars(resolveMarkers(cfg.url, true), run.vars);
+          if (cfg.headers) {
+            fetchHeaders = Object.fromEntries(
+              Object.entries(cfg.headers).map(([k, v]) => [k, interpolateVars(resolveMarkers(v, false), run.vars)]),
+            );
+          }
+          if (fetchBody !== undefined && cfg.body_template) {
+            fetchBody = interpolateVars(resolveMarkers(cfg.body_template, false), run.vars);
+          }
+          if (missing.length > 0) {
+            throw new Error(`Variável/credencial não configurada ou sem permissão para este host: ${[...new Set(missing)].join(", ")}`);
+          }
+        }
         // Guard anti-SSRF: DNS validado, redirects revalidados, limite de tamanho.
         const res = await safeFetch(
           url,
           {
             method: cfg.method,
-            headers: cfg.headers,
-            body:
-              cfg.method === "GET" || !cfg.body_template
-                ? undefined
-                : interpolateVars(cfg.body_template, run.vars),
+            headers: fetchHeaders,
+            body: fetchBody,
           },
-          { timeoutMs },
+          { timeoutMs, failOnCrossOriginRedirect: credentialInjected },
         );
         let responseBodyText: string;
         if (cfg.response_var) {
@@ -3567,7 +3599,7 @@ export async function advanceFromNodeKey(
         undefined,
         run.started_at,  // usa início do run — agente vê histórico completo desde o trigger
         undefined,
-        cfg.tools,
+        await resolveEffectiveTools(run.account_id, cfg.tools, cfg.tool_refs),
         // run.current_node_key ainda não reflete este nó aqui — dentro do
         // walk síncrono de advanceFromNodeKey ele só é persistido quando
         // um nó suspende/termina, então pode estar apontando pro nó
@@ -4300,7 +4332,7 @@ async function handleReplyForActiveRun(
       undefined,
       run.started_at,  // historyAfter — exclui runs anteriores
       undefined,       // historyBefore — sem corte superior, agente vê histórico completo da run
-      cfg.tools,
+      await resolveEffectiveTools(run.account_id, cfg.tools, cfg.tool_refs),
       undefined,       // currentNodeKeyOverride — run.current_node_key já é o nó certo aqui
       cfg.herdar_contexto_anterior,
       flowExitTagsFromNodes(nodes.values()),

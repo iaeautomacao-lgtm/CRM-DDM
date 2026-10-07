@@ -56,6 +56,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
 import { useFlowEditor } from "../flow-editor-state";
+import { AiToolEditor } from "./ai-tool-editor";
+import { ToolCatalogPicker } from "./tool-catalog-picker";
 import { PromptHistoryButton } from "@/components/ai/prompt-history-button";
 import {
   WEBCHAT_BUTTON_TEXT_MAX,
@@ -2657,6 +2659,8 @@ interface AiAgentCfg {
   next_node_key?: string;
   max_turns?: number;
   tools?: AiAgentTool[];
+  /** Ids de ferramentas do catálogo (wacrm.ai_tools). */
+  tool_refs?: string[];
   herdar_contexto_anterior?: boolean;
 }
 
@@ -2879,11 +2883,17 @@ function AiAgentForm({
         />
       )}
 
+      {/* ── Ferramentas do catálogo (Configurações → Ferramentas) ── */}
+      <ToolCatalogPicker
+        selected={cfg.tool_refs ?? []}
+        onChange={(refs) => onUpdateConfig({ tool_refs: refs })}
+      />
+
       {/* ── Tools ── */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <label className="text-sm font-medium text-foreground">
-            Ferramentas (chamadas HTTP)
+            Ferramentas inline (legado)
           </label>
           <button
             type="button"
@@ -2928,219 +2938,12 @@ function AiAgentForm({
               </button>
             </div>
 
-            {/* name */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Nome (sem espaços)</label>
-              <input
-                type="text"
-                className="w-full rounded border border-input bg-background px-2 py-1 text-xs"
-                placeholder="ex: buscar_cpf"
-                value={tool.name}
-                onChange={(e) => {
-                  const updated = (cfg.tools ?? []).map((t, i) =>
-                    i === toolIdx ? { ...t, name: e.target.value.replace(/\s+/g, "_") } : t
-                  );
-                  onUpdateConfig({ tools: updated });
-                }}
-              />
-            </div>
-
-            {/* description */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Descrição (instrui o agente quando usar)</label>
-              <textarea
-                rows={2}
-                className="w-full rounded border border-input bg-background px-2 py-1 text-xs resize-none"
-                placeholder="Descreva quando e como o agente deve usar esta tool"
-                value={tool.description}
-                onChange={(e) => {
-                  const updated = (cfg.tools ?? []).map((t, i) =>
-                    i === toolIdx ? { ...t, description: e.target.value } : t
-                  );
-                  onUpdateConfig({ tools: updated });
-                }}
-              />
-            </div>
-
-            {/* HTTP config */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Método</label>
-              <select
-                className="w-full rounded border border-input bg-background px-2 py-1 text-xs"
-                value={tool.http.method}
-                onChange={(e) => {
-                  const updated = (cfg.tools ?? []).map((t, i) =>
-                    i === toolIdx
-                      ? { ...t, http: { ...t.http, method: e.target.value as AiAgentTool["http"]["method"] } }
-                      : t
-                  );
-                  onUpdateConfig({ tools: updated });
-                }}
-              >
-                {["GET", "POST", "PUT", "PATCH", "DELETE"].map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">
-                URL (use {`{{param}}`} para interpolar parâmetros)
-              </label>
-              <input
-                type="text"
-                className="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono"
-                placeholder="https://api.exemplo.com/endpoint?cpf={{cpf}}"
-                value={tool.http.url}
-                onChange={(e) => {
-                  const updated = (cfg.tools ?? []).map((t, i) =>
-                    i === toolIdx ? { ...t, http: { ...t.http, url: e.target.value } } : t
-                  );
-                  onUpdateConfig({ tools: updated });
-                }}
-              />
-            </div>
-
-            {/* body — only for POST/PUT/PATCH */}
-            {["POST", "PUT", "PATCH"].includes(tool.http.method) && (
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">
-                  Body JSON (use {`{{param}}`} para interpolar)
-                </label>
-                <textarea
-                  rows={3}
-                  className="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono resize-none"
-                  placeholder={`{"cpf": "{{cpf}}"}`}
-                  value={tool.http.body ?? ""}
-                  onChange={(e) => {
-                    const updated = (cfg.tools ?? []).map((t, i) =>
-                      i === toolIdx ? { ...t, http: { ...t.http, body: e.target.value } } : t
-                    );
-                    onUpdateConfig({ tools: updated });
-                  }}
-                />
-              </div>
-            )}
-
-            {/* Parameters */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-muted-foreground">Parâmetros</label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const props = { ...(tool.parameters.properties ?? {}) };
-                    const newKey = `param${Object.keys(props).length + 1}`;
-                    props[newKey] = { type: "string", description: "" };
-                    const updated = (cfg.tools ?? []).map((t, i) =>
-                      i === toolIdx
-                        ? { ...t, parameters: { ...t.parameters, properties: props } }
-                        : t
-                    );
-                    onUpdateConfig({ tools: updated });
-                  }}
-                  className="text-xs text-primary hover:underline"
-                >
-                  + Parâmetro
-                </button>
-              </div>
-
-              {Object.entries(tool.parameters.properties ?? {}).map(([paramKey, paramVal]) => (
-                <div key={paramKey} className="rounded border border-border bg-background p-2 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      className="flex-1 rounded border border-input bg-muted px-2 py-0.5 text-xs font-mono"
-                      placeholder="nome_param"
-                      value={paramKey}
-                      onChange={(e) => {
-                        const props = { ...(tool.parameters.properties ?? {}) };
-                        const val = props[paramKey];
-                        delete props[paramKey];
-                        props[e.target.value || paramKey] = val;
-                        const updated = (cfg.tools ?? []).map((t, i) =>
-                          i === toolIdx
-                            ? { ...t, parameters: { ...t.parameters, properties: props } }
-                            : t
-                        );
-                        onUpdateConfig({ tools: updated });
-                      }}
-                    />
-                    <select
-                      className="rounded border border-input bg-muted px-1 py-0.5 text-xs"
-                      value={(paramVal as AiAgentToolParameter).type ?? "string"}
-                      onChange={(e) => {
-                        const props = { ...(tool.parameters.properties ?? {}) };
-                        props[paramKey] = { ...(props[paramKey] as AiAgentToolParameter), type: e.target.value };
-                        const updated = (cfg.tools ?? []).map((t, i) =>
-                          i === toolIdx
-                            ? { ...t, parameters: { ...t.parameters, properties: props } }
-                            : t
-                        );
-                        onUpdateConfig({ tools: updated });
-                      }}
-                    >
-                      <option value="string">texto</option>
-                      <option value="number">número</option>
-                      <option value="boolean">sim/não</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const props = { ...(tool.parameters.properties ?? {}) };
-                        delete props[paramKey];
-                        const updated = (cfg.tools ?? []).map((t, i) =>
-                          i === toolIdx
-                            ? { ...t, parameters: { ...t.parameters, properties: props } }
-                            : t
-                        );
-                        onUpdateConfig({ tools: updated });
-                      }}
-                      className="text-xs text-destructive hover:underline shrink-0"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    className="w-full rounded border border-input bg-muted px-2 py-0.5 text-xs"
-                    placeholder="Descrição do parâmetro (instrui o agente)"
-                    value={(paramVal as AiAgentToolParameter).description ?? ""}
-                    onChange={(e) => {
-                      const props = { ...(tool.parameters.properties ?? {}) };
-                      props[paramKey] = { ...(props[paramKey] as AiAgentToolParameter), description: e.target.value };
-                      const updated = (cfg.tools ?? []).map((t, i) =>
-                        i === toolIdx
-                          ? { ...t, parameters: { ...t.parameters, properties: props } }
-                          : t
-                      );
-                      onUpdateConfig({ tools: updated });
-                    }}
-                  />
-                  {/* Required toggle */}
-                  <label className="flex items-center gap-1 text-xs text-muted-foreground cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="h-3 w-3"
-                      checked={(tool.parameters.required ?? []).includes(paramKey)}
-                      onChange={(e) => {
-                        const req = tool.parameters.required ?? [];
-                        const newReq = e.target.checked
-                          ? [...req, paramKey]
-                          : req.filter((k) => k !== paramKey);
-                        const updated = (cfg.tools ?? []).map((t, i) =>
-                          i === toolIdx
-                            ? { ...t, parameters: { ...t.parameters, required: newReq } }
-                            : t
-                        );
-                        onUpdateConfig({ tools: updated });
-                      }}
-                    />
-                    Obrigatório
-                  </label>
-                </div>
-              ))}
-            </div>
+            <AiToolEditor
+              tool={tool}
+              onChange={(next) =>
+                onUpdateConfig({ tools: (cfg.tools ?? []).map((t, i) => (i === toolIdx ? next : t)) })
+              }
+            />
           </div>
         ))}
       </div>

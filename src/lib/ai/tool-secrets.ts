@@ -63,6 +63,24 @@ export interface SecretResolution {
    * "var.NOME"/"cred.NOME"; segredos do ambiente, só o NOME (como antes).
    */
   missing: string[];
+  /** true se algum {{cred.X}}/{{secret.X}} virou valor real (a requisição carrega credencial). */
+  usedSecrets: boolean;
+}
+
+/**
+ * URL FINAL usada para decidir se uma credencial pode ir: {{var.X}} resolvido,
+ * marcadores de segredo removidos e os argumentos do modelo ({{param}})
+ * interpolados — o host que importa é o de DESTINO, não o do template (um
+ * argumento ou variável pode montar o host). `interpolate` é a mesma função
+ * que o responder aplica à URL real.
+ */
+export function hostCheckUrl(
+  template: string,
+  account: AccountSecretsContext | null | undefined,
+  interpolate: (text: string) => string = (t) => t,
+): string {
+  const withVars = account ? template.replace(VAR_MARKER, (_m, n: string) => account.vars.get(n) ?? "") : template;
+  return interpolate(withVars.replace(MARKER, ""));
 }
 
 /**
@@ -78,6 +96,7 @@ export function resolveToolSecrets(
   opts: { encode?: boolean; account?: AccountSecretsContext | null } = {},
 ): SecretResolution {
   const missing: string[] = [];
+  let usedSecrets = false;
   const account = opts.account ?? null;
   const out = (v: string) => (opts.encode ? encodeURIComponent(v) : v);
   const hostUrl = account
@@ -99,6 +118,7 @@ export function resolveToolSecrets(
         missing.push(`cred.${name}`);
         return "";
       }
+      usedSecrets = true;
       return out(cred.value);
     }
     // secret.NOME: credencial da conta com o mesmo nome vence o ambiente.
@@ -108,6 +128,7 @@ export function resolveToolSecrets(
         missing.push(name);
         return "";
       }
+      usedSecrets = true;
       return out(accountCred.value);
     }
     const def = TOOL_SECRETS[name];
@@ -120,9 +141,10 @@ export function resolveToolSecrets(
       missing.push(name);
       return "";
     }
+    usedSecrets = true;
     return out(secret);
   });
-  return { value, missing };
+  return { value, missing, usedSecrets };
 }
 
 /** Nomes referenciados em `{{cred.X}}` / `{{var.X}}` dentro de textos (URL, headers, body). */

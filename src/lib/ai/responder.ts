@@ -4,8 +4,9 @@ import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound';
 import { writeLog } from '@/lib/logger';
-import { resolveToolSecrets } from '@/lib/ai/tool-secrets';
+import { hostCheckUrl, resolveToolSecrets } from '@/lib/ai/tool-secrets';
 import { currentAccountSecrets, withAccountSecretsScope } from '@/lib/ai/account-secrets';
+import { toolTimeoutMs } from '@/lib/ai-tools/tool-input';
 import {
   getAiModelDefinition,
   isModelCompatibleWithProvider,
@@ -2360,10 +2361,16 @@ export async function generateOpenAiResponse(
           // Variáveis/credenciais da CONTA ({{var.X}}/{{cred.X}}/{{secret.X}} com
           // prioridade sobre o .env): carregadas uma vez por chamada de ferramenta.
           const accountSecrets = await currentAccountSecrets();
+          // O host que libera uma credencial é o da URL FINAL (depois de {{var}} e dos
+          // argumentos do modelo), não o do template: um argumento/variável pode montar
+          // o host. Os argumentos continuam sem poder virar {{cred}}/{{var}}.
+          const destinationUrl = hostCheckUrl(toolDef.http.url, accountSecrets, interpolate);
           const missingSecrets: string[] = [];
+          let credentialInjected = false;
           const withSecrets = (str: string, encode: boolean) => {
-            const r = resolveToolSecrets(str, toolDef.http.url, process.env, { encode, account: accountSecrets });
+            const r = resolveToolSecrets(str, destinationUrl, process.env, { encode, account: accountSecrets });
             missingSecrets.push(...r.missing);
+            if (r.usedSecrets) credentialInjected = true;
             return r.value;
           };
 
@@ -2411,7 +2418,13 @@ export async function generateOpenAiResponse(
                   },
                   ...(resolvedBody ? { body: resolvedBody } : {}),
                 },
-                { timeoutMs: 30_000, maxBytes: 1024 * 1024 },
+                {
+                  timeoutMs: toolTimeoutMs(toolDef.timeout_ms),
+                  maxBytes: 1024 * 1024,
+                  // Credencial na requisição: redirect para outra origem falha (não vaza
+                  // header custom/query/body para o destino do redirect).
+                  failOnCrossOriginRedirect: credentialInjected,
+                },
               );
 
               const httpText = await httpRes.text();

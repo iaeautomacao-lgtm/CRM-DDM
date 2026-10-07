@@ -71,6 +71,8 @@ export function validateFlowForActivation(
     aiProvider?: string | null;
     /** Nomes cadastrados na conta (Configurações → Variáveis e credenciais). Sem isso, {{cred.X}}/{{var.X}} não são conferidos. */
     accountSecrets?: { credentials: string[]; variables: string[] } | null;
+    /** Catálogo de ferramentas da conta (id, nome, ligada). Sem isso, tool_refs não são conferidos. */
+    aiTools?: Array<{ id: string; name: string; enabled: boolean }> | null;
   } = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
@@ -255,7 +257,11 @@ function validateNextNodeKey(
 function validateNode(
   node: NodeInput,
   knownKeys: Set<string>,
-  context: { aiProvider?: string | null; accountSecrets?: { credentials: string[]; variables: string[] } | null },
+  context: {
+    aiProvider?: string | null;
+    accountSecrets?: { credentials: string[]; variables: string[] } | null;
+    aiTools?: Array<{ id: string; name: string; enabled: boolean }> | null;
+  },
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -1154,6 +1160,53 @@ function validateNode(
           field: "max_turns",
           message: "O limite de turnos do loop precisa ser um número maior que zero.",
         });
+      }
+      // Ferramentas do catálogo (tool_refs): referência inexistente/de outra conta
+      // é erro; ferramenta desligada é aviso (não vai ao modelo); nome repetido
+      // (catálogo × inline) é erro — o runtime usaria só a primeira.
+      const toolRefs = Array.isArray((node.config as { tool_refs?: unknown }).tool_refs)
+        ? ((node.config as { tool_refs: unknown[] }).tool_refs.filter((r) => typeof r === "string") as string[])
+        : [];
+      if (toolRefs.length > 0 && context.aiTools) {
+        const catalog = new Map(context.aiTools.map((t) => [t.id, t]));
+        const names = new Set<string>();
+        for (const ref of toolRefs) {
+          const found = catalog.get(ref);
+          if (!found) {
+            issues.push({
+              severity: "error",
+              scope: "node",
+              node_key: node.node_key,
+              field: "tool_refs",
+              message: "O nó usa uma ferramenta do catálogo que não existe nesta conta (foi apagada ou é de outra conta). Remova-a do nó.",
+            });
+            continue;
+          }
+          if (!found.enabled) {
+            issues.push({
+              severity: "warning",
+              scope: "node",
+              node_key: node.node_key,
+              field: "tool_refs",
+              message: `A ferramenta "${found.name}" está desligada no catálogo: o agente não vai usá-la até ser ligada em Configurações → Ferramentas.`,
+            });
+            continue;
+          }
+          names.add(found.name);
+        }
+        const inlineNames = Array.isArray((node.config as { tools?: unknown }).tools)
+          ? ((node.config as { tools: Array<{ name?: string }> }).tools.map((t) => t?.name).filter(Boolean) as string[])
+          : [];
+        const dup = inlineNames.find((n) => names.has(n));
+        if (dup) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "tools",
+            message: `Já existe a ferramenta "${dup}" no catálogo deste nó; renomeie ou remova a inline (o agente usaria só a primeira).`,
+          });
+        }
       }
       // Token em texto na URL de uma ferramenta: fica gravado no banco e
       // visível no editor — usar o marcador resolvido no servidor.

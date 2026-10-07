@@ -51,7 +51,7 @@ describe("resolveToolSecrets — variáveis e credenciais da conta", () => {
   it("{{cred.X}} só vai para host permitido (e subdomínios)", () => {
     const account = ctx({}, { API_KEY: { value: "segredo-123", hosts: ["exemplo.com"] } });
     const ok = "https://api.exemplo.com/x?k={{cred.API_KEY}}";
-    expect(resolveToolSecrets(ok, ok, {}, { account })).toEqual({ value: "https://api.exemplo.com/x?k=segredo-123", missing: [] });
+    expect(resolveToolSecrets(ok, ok, {}, { account })).toEqual({ value: "https://api.exemplo.com/x?k=segredo-123", missing: [], usedSecrets: true });
     const bad = "https://evil.com/x?k={{cred.API_KEY}}";
     const r = resolveToolSecrets(bad, bad, {}, { account });
     expect(r.value).toBe("https://evil.com/x?k=");

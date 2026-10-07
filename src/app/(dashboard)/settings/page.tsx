@@ -13,6 +13,7 @@ import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { SecretsSettings } from '@/components/settings/secrets-settings';
+import { ToolsSettings } from '@/components/settings/tools-settings';
 import {
   canSeeSection,
   resolveSection,
@@ -65,6 +66,7 @@ function SettingsContent() {
     appearance: <AppearancePanel />,
     api: <ApiKeysSettings />,
     secrets: <SecretsSettings />,
+    tools: <ToolsSettings />,
     ai: <AiAgentSettings />,
   };
 
