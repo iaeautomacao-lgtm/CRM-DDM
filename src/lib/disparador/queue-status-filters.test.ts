@@ -31,7 +31,8 @@ describe("queue detail status filters", () => {
       "enviando",
       "enviado",
     ]);
-    expect(PENDING_CONFIRMATION_OR_FILTER).toContain("waha_message_id");
-    expect(PENDING_CONFIRMATION_OR_FILTER).toContain("entrega_pendente_131026.eq.true");
+    expect(PENDING_CONFIRMATION_OR_FILTER).toBe(
+      "and(status.eq.enviando,waha_message_id.not.is.null),and(status.eq.enviado,entrega_pendente_131026.eq.true)"
+    );
   });
 });
