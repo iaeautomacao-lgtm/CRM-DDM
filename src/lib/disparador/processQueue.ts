@@ -20,7 +20,6 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
-import OpenAI from "openai";
 
 // Marcador de contato externo WAHA — definido em queue-markers.ts e
 // reexportado aqui para os imports existentes continuarem funcionando.
@@ -31,7 +30,8 @@ import { classifyProviderError, type BackoffReason } from "@/lib/disparador/prov
 import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
-import { isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
+import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
+import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -692,41 +692,23 @@ export async function processQueueItem(
       ? (item.template_variables?.[0] ?? "")
       : item.mensagem_final;
 
-  const disparadorOpenAiKey = process.env.DISPARADOR_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-
-  if (tipo === "ia" && disparadorOpenAiKey) {
-    try {
-      const configuredAiTimeout = Number.parseInt(
-        process.env.DISPATCH_OPENAI_TIMEOUT_MS ?? "",
-        10
-      );
-      const aiTimeoutMs =
-        Number.isFinite(configuredAiTimeout) && configuredAiTimeout > 0
-          ? Math.min(configuredAiTimeout, 120_000)
-          : 30_000;
-      const openai = new OpenAI({
-        apiKey: disparadorOpenAiKey,
-        timeout: aiTimeoutMs,
+  if (tipo === "ia") {
+    // Campanha com IA: mensagem_final é o PROMPT. Falha da IA (429/timeout/sem chave/vazio) NUNCA
+    // pode enviar o prompt ao cliente: o item volta para a fila (erro retentável, sem consumir
+    // tentativa) e a pausa automática conta estas ocorrências.
+    const generated = await generateDispatchAiText(messageText, item.contacts?.name);
+    if (generated === null) {
+      await markQueueError(item.id, AI_UNAVAILABLE_ERROR, false, item.campaign_id, tentativasAtuais);
+      void writeLog({
+        level: "warn",
+        source: "disparador",
+        event: "message_ai_unavailable",
+        message: "Geração por IA indisponível; item devolvido à fila sem enviar nada ao cliente",
+        payload: { campaign_id: item.campaign_id, queue_id: item.id },
       });
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Você é um assistente de vendas para WhatsApp. Gere uma mensagem natural, sem parecer spam. Responda APENAS com a mensagem, sem explicações.",
-          },
-          {
-            role: "user",
-            content: `Contato: nome=${item.contacts?.name || ""}. Prompt: ${messageText}`,
-          },
-        ],
-        max_tokens: 500,
-      });
-      messageText = completion.choices[0]?.message?.content || messageText;
-    } catch (aiErr) {
-      console.warn("[processQueue] AI generation failed, using prompt text:", aiErr);
+      return { outcome: "deferred", reason: "ai_unavailable" };
     }
+    messageText = generated;
   }
 
   const cleanText = applyTemplateVars(messageText, item.contacts).replace(

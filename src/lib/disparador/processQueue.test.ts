@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   send: vi.fn(),
   autoBlacklist: vi.fn(),
+  ai: vi.fn(),
 }));
 vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
@@ -62,6 +63,7 @@ vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/whatsapp/meta-api')>()),
   sendTextMessage: mocks.send,
 }));
+vi.mock('@/lib/disparador/dispatch-ai', () => ({ generateDispatchAiText: mocks.ai }));
 import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
 import { UNCERTAIN_OUTCOME_ERROR } from './provider-outcome';
@@ -132,6 +134,21 @@ describe('queue provider outcomes', () => {
       expect(mocks.send).toHaveBeenCalledTimes(1); // at-most-once
       expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true && u.erro === UNCERTAIN_OUTCOME_ERROR)).toBe(true);
     }
+  });
+  it('tipo=ia: IA falhou → NADA é enviado (nunca o prompt), item volta como erro retentável sem consumir tentativa (P0-2)', async () => {
+    mocks.ai.mockReset().mockResolvedValue(null);
+    const iaItem: QueueItem = { ...item, tipo: 'ia', mensagem_final: 'PROMPT: gere uma cobrança para o cliente', tentativas: 2 };
+    const result = await processQueueItem(iaItem, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toEqual({ outcome: 'deferred', reason: 'ai_unavailable' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === 2 && /IA indisponível/.test(String(u.erro)))).toBe(true);
+    expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+  });
+  it('tipo=ia: IA ok → envia o texto GERADO, não o prompt', async () => {
+    mocks.ai.mockReset().mockResolvedValue('Olá! Seu débito vence hoje.');
+    const iaItem: QueueItem = { ...item, tipo: 'ia', mensagem_final: 'PROMPT: gere uma cobrança' };
+    expect(await processQueueItem(iaItem, { id: 'campaign', status: 'em_execucao' })).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ text: 'Olá! Seu débito vence hoje.' }));
   });
   it('never calls the provider after losing the guarded claim', async () => {
     mocks.claimed = false;

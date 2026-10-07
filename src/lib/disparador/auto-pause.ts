@@ -19,7 +19,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { extrairCodigoMetaErro } from "./normalize-meta-error";
 import { writeLog } from "@/lib/logger";
-import { UNCERTAIN_OUTCOME_ERROR } from "./provider-outcome";
+import { AI_UNAVAILABLE_ERROR, UNCERTAIN_OUTCOME_ERROR } from "./provider-outcome";
 
 export interface AutoPauseConfig {
   enabled: boolean;
@@ -191,6 +191,18 @@ export function decideUncertainPause(count: number, config: AutoPauseConfig = AU
   };
 }
 
+/** Pura: IA indisponível (nada enviado, item devolvido à fila) repetida >= uncertainCount na janela. */
+export function decideAiUnavailablePause(count: number, config: AutoPauseConfig = AUTO_PAUSE_DEFAULTS): UncertainPauseDecision {
+  if (!config.enabled || count < config.uncertainCount) return { pause: false, count };
+  return {
+    pause: true,
+    count,
+    reason:
+      `Pausada automaticamente: a geração de texto por IA falhou ${count} vezes em ${config.uncertainWindowSeconds}s. ` +
+      "Nenhuma mensagem foi enviada ao cliente. Verifique a chave/limite da OpenAI e retome a campanha.",
+  };
+}
+
 /**
  * Avalia e, se for o caso, pausa a campanha. Nunca lança — falha aqui não
  * pode derrubar o tick do cron. Devolve true se pausou.
@@ -266,14 +278,39 @@ export async function checkCampaignAutoPause(
         return false;
       }
       const uncertain = decideUncertainPause(count ?? 0, config);
-      if (!uncertain.pause) return false;
-      reason = uncertain.reason;
-      logPayload = {
-        kind: "uncertain_outcome",
-        uncertain_count: uncertain.count,
-        threshold: config.uncertainCount,
-        window_seconds: config.uncertainWindowSeconds,
-      };
+      if (uncertain.pause) {
+        reason = uncertain.reason;
+        logPayload = {
+          kind: "uncertain_outcome",
+          uncertain_count: uncertain.count,
+          threshold: config.uncertainCount,
+          window_seconds: config.uncertainWindowSeconds,
+        };
+      } else {
+        // IA indisponível (tipo=ia): erro retentável (casa com idx_dmq_retryable) devolvido sem enviar.
+        const { count: aiCount, error: aiError } = await db
+          .from("disp_message_queue")
+          .select("id", { count: "exact", head: true })
+          .eq("campaign_id", campaign.id)
+          .eq("status", "erro")
+          .or("erro_permanente.is.null,erro_permanente.eq.false")
+          .lt("tentativas", 5)
+          .like("erro", `${AI_UNAVAILABLE_ERROR}%`)
+          .gte("updated_at", since && Date.parse(since) > Date.parse(windowStart) ? since : windowStart);
+        if (aiError) {
+          console.error("[AutoPause] Falha ao contar falhas de IA:", campaign.id, aiError.message);
+          return false;
+        }
+        const ai = decideAiUnavailablePause(aiCount ?? 0, config);
+        if (!ai.pause) return false;
+        reason = ai.reason;
+        logPayload = {
+          kind: "ai_unavailable",
+          ai_unavailable_count: ai.count,
+          threshold: config.uncertainCount,
+          window_seconds: config.uncertainWindowSeconds,
+        };
+      }
     }
 
     const { data: paused, error: pauseError } = await db.rpc("stop_dispatch_campaign", {

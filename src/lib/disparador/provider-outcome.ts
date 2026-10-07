@@ -38,3 +38,11 @@ function collectCodes(err: unknown, depth = 0, out: string[] = []): string[] {
 export function isNotConnectedError(err: unknown): boolean {
   return collectCodes(err).some((code) => NOT_CONNECTED_CODES.has(code));
 }
+
+/**
+ * Mensagem do item de campanha `tipo=ia` cuja geração de texto falhou (OpenAI 429/timeout/sem chave):
+ * NADA é enviado ao cliente; o item fica em 'erro' retentável (sem consumir tentativa) e a pausa
+ * automática conta estas ocorrências.
+ */
+export const AI_UNAVAILABLE_ERROR =
+  "Geração de texto por IA indisponível; nada foi enviado ao cliente e o item será tentado novamente";

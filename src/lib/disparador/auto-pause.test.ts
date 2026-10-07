@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AUTO_PAUSE_DEFAULTS, AUTO_PAUSE_META_CODES, autoPauseConfigFromEnv,
-  checkCampaignAutoPause, decideAutoPause, decideUncertainPause, isCampaignPermanentError, recentAttempts, type AttemptRow,
+  checkCampaignAutoPause, decideAiUnavailablePause, decideAutoPause, decideUncertainPause, isCampaignPermanentError, recentAttempts, type AttemptRow,
 } from "./auto-pause";
 import { UNCERTAIN_OUTCOME_ERROR } from "./provider-outcome";
 
@@ -153,5 +153,33 @@ describe("resultado incerto (502/503/504/timeout) conta para a pausa (P0-3)", ()
     const { db, rpc } = uncertainDb(19);
     expect(await checkCampaignAutoPause(db, { id: "camp", account_id: "acc" })).toBe(false);
     expect(rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("IA indisponível conta para a pausa (P0-2)", () => {
+  it("regra pura e consulta: 20 falhas de IA na janela pausam; 19 não", async () => {
+    expect(decideAiUnavailablePause(19).pause).toBe(false);
+    expect(decideAiUnavailablePause(20)).toMatchObject({ pause: true, reason: expect.stringContaining("IA falhou 20 vezes") });
+    for (const [n, paused] of [[20, true], [19, false]] as const) {
+      log.mockClear();
+      const calls: string[] = [];
+      const from = vi.fn((table: string) => {
+        const builder: Record<string, unknown> = {};
+        for (const method of ["select", "eq", "limit", "in", "gt", "or", "order", "update", "gte", "is", "not", "lt"])
+          builder[method] = () => builder;
+        builder.like = (_c: string, pattern: string) => { calls.push(pattern); return builder; };
+        builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(
+          table === "campaigns" ? { data: [{ status: "em_execucao", auto_pausa_avaliar_desde: null }], error: null }
+            : calls.length === 0 ? { data: [], error: null }
+            : calls[calls.length - 1].startsWith("Geração") ? { count: n, data: null, error: null }
+            : { count: 0, data: null, error: null },
+        ).then(resolve);
+        return builder;
+      });
+      const rpc = vi.fn().mockResolvedValue({ data: true, error: null });
+      const result = await checkCampaignAutoPause({ from, rpc } as unknown as SupabaseClient, { id: "camp", account_id: "acc" });
+      expect(result).toBe(paused);
+      if (paused) expect(log).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ kind: "ai_unavailable" }) }));
+    }
   });
 });
