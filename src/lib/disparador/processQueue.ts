@@ -1177,7 +1177,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
 
     // Buscar métricas da campanha
     const { data: metrics } = await db
-      .from("campaign_metrics")
+      .from("campaign_metrics_live")
       .select("*")
       .eq("campaign_id", campaignId)
       .maybeSingle();

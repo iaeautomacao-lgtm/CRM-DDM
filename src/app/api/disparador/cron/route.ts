@@ -153,6 +153,10 @@ const CANDIDATE_PAGE_SIZE = 1000;
 const RETRY_LOCK_TTL_SECONDS = 270;
 // Confirmação das ocorrências 131026 pendentes (a cada ~5 ticks, lock próprio).
 const META_131026_CONFIRM_LOCK_TTL_SECONDS = 270;
+// Consolidação dos deltas de métricas (migration 183): lock próprio, só com sobra de tempo.
+const METRICS_CONSOLIDATE_LOCK_TTL_SECONDS = 30;
+const METRICS_CONSOLIDATE_BATCH = 20_000;
+const METRICS_CONSOLIDATE_MAX_ROUNDS = 5;
 
 /** Janela (min) sem delivered/read para um failed 131026 (aparelho offline também gera) virar erro definitivo. */
 function meta131026ConfirmMinutes(): number {
@@ -372,6 +376,31 @@ export async function POST(request: Request) {
           p_limit: 200,
         });
         if (confirmError) console.error("[Cron] Falha ao confirmar 131026 pendentes:", confirmError.message);
+      }
+    }
+    // 2c) Métricas: soma os deltas pendentes de campaign_metrics (increment_campaign_metric só insere
+    //     deltas — sem linha quente) e apaga os consolidados, em lotes. Só se sobrar tempo; lock próprio.
+    //     Atrasar não perde nada: a leitura (campaign_metrics_live) já soma os deltas pendentes.
+    if (!outOfTime()) {
+      const { data: metricsTurn, error: metricsLockError } = await db.rpc("try_acquire_cron_lock", {
+        p_name: "disparador_metrics",
+        p_owner_id: owner,
+        p_ttl_seconds: METRICS_CONSOLIDATE_LOCK_TTL_SECONDS,
+      });
+      if (metricsLockError) console.error("[Cron] Falha no lock da consolidação de métricas:", metricsLockError.message);
+      if (metricsTurn) {
+        for (let round = 0; round < METRICS_CONSOLIDATE_MAX_ROUNDS && !outOfTime(); round++) {
+          const { data: consolidated, error: consolidateError } = await db.rpc("consolidate_campaign_metrics", {
+            p_limit: METRICS_CONSOLIDATE_BATCH,
+          });
+          if (consolidateError) {
+            console.error("[Cron] Falha ao consolidar métricas:", consolidateError.message);
+            break;
+          }
+          if ((Number(consolidated) || 0) < METRICS_CONSOLIDATE_BATCH) break;
+        }
+        const { error: releaseError } = await db.rpc("release_cron_lock", { p_name: "disparador_metrics", p_owner_id: owner });
+        if (releaseError) console.error("[Cron] Falha ao liberar o lock de métricas:", releaseError.message);
       }
     }
     // 3) Campanhas em execução, mais "atrasadas" primeiro (fairness entre
