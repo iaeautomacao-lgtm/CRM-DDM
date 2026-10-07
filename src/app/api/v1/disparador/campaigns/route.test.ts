@@ -136,6 +136,26 @@ describe('POST /api/v1/disparador/campaigns', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
+  it('Meta rejeita template legado sem waba_id mesmo se APPROVED', async () => {
+    tables.message_templates = [
+      { id: 'LEGACY', name: 'promo', language: 'pt_BR', waba_id: null, status: 'APPROVED', account_id: 'ACC' },
+    ];
+    const r = await POST(post(base()));
+    expect(r.status).toBe(400);
+    expect((await r.json()).error.message).toMatch(/WABA do canal selecionado/);
+    expect(tables.campaigns).toHaveLength(0);
+  });
+
+  it('Meta rejeita template aprovado de outra WABA', async () => {
+    tables.message_templates = [
+      { id: 'OTHER', name: 'promo', language: 'pt_BR', waba_id: 'W2', status: 'APPROVED', account_id: 'ACC' },
+    ];
+    const r = await POST(post(base()));
+    expect(r.status).toBe(400);
+    expect((await r.json()).error.message).toMatch(/WABA do canal selecionado/);
+    expect(tables.campaigns).toHaveLength(0);
+  });
+
   it('sem chave de idempotência: cria normal (e repetir cria outra, como antes)', async () => {
     const r1 = await POST(post(base()))
     expect(r1.status).toBe(201)

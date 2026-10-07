@@ -90,8 +90,10 @@ describe("validateCampaignTemplate", () => {
     if (!r.ok) expect(r.error).toMatch(/waba-b.*rejeitado/);
   });
 
-  it("linha sem waba_id (antes da 073) vale para qualquer WABA", () => {
-    expect(input([{ ...base, waba_id: null }], { wabaIds: ["waba-x"] })).toEqual({ ok: true });
+  it("linha sem waba_id não autoriza campanha quando a WABA é conhecida", () => {
+    const r = input([{ ...base, waba_id: null }], { wabaIds: ["waba-x"] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/não encontrado no catálogo deste número/);
   });
 
   it("WABA sem linha local bloqueia (template de outro número)", () => {
@@ -114,9 +116,11 @@ describe("validateCampaignTemplate", () => {
     expect(input([base, { ...base, waba_id: null, header_type: "image" }], { wabaIds: ["waba-a"] })).toEqual({ ok: true });
   });
 
-  it("antiga só vale para a WABA sem linha própria", () => {
+  it("WABA diferente não herda linha legada", () => {
     const rows = [{ ...base, status: "REJECTED" }, { ...base, waba_id: null }];
-    expect(input(rows, { wabaIds: ["waba-b"] })).toEqual({ ok: true });
+    const r = input(rows, { wabaIds: ["waba-b"] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/não encontrado no catálogo deste número/);
   });
 });
 
