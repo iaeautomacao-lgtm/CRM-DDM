@@ -21,7 +21,7 @@ vi.mock("@/lib/auth/account", () => {
 
 function chain(result: unknown): unknown {
   const proxy: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "in", "is", "not", "limit", "gte", "order"]) {
+  for (const m of ["select", "eq", "in", "is", "not", "limit", "gte", "order", "range"]) {
     proxy[m] = () => chain(result);
   }
   proxy.single = async () => result;

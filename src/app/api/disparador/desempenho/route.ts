@@ -14,6 +14,13 @@ import {
   type RawThroughputRow,
   type ThroughputDataPoint,
 } from "@/lib/disparador/desempenho";
+import {
+  aggregateChannelStats,
+  computeCapacity,
+  fetchAllTicks,
+  fetchThroughputRows,
+  peakPerNumber,
+} from "@/lib/disparador/desempenho-extra";
 
 // ============================================================
 // GET /api/disparador/desempenho?janela=15m|1h|6h|24h
@@ -66,17 +73,15 @@ export async function GET(request: Request) {
       channelsList.push(info);
     }
 
-    // 2. Busca os registros do cron_tick em system_logs
-    const { data: logRows, error: logError } = await db
-      .from("system_logs")
-      .select("id, created_at, payload")
-      .eq("source", "disparador")
-      .eq("event", "cron_tick")
-      .gte("created_at", startIso)
-      .order("created_at", { ascending: false })
-      .limit(1000);
-
-    if (logError) {
+    // 2. Busca os registros do cron_tick em system_logs — a janela INTEIRA, paginada (antes:
+    //    .limit(1000), que cortava 24 h em ~16,7 h e distorcia médias/p95 da janela).
+    let rawTicks: RawSystemLogTick[];
+    let ticksTruncated = false;
+    try {
+      const fetched = await fetchAllTicks(db, startIso);
+      rawTicks = fetched.rows;
+      ticksTruncated = fetched.truncated;
+    } catch (logError) {
       console.error("[Desempenho] Erro ao consultar system_logs:", logError);
       return NextResponse.json(
         { ok: false, error: "Falha ao consultar logs de telemetria do disparador" },
@@ -84,28 +89,20 @@ export async function GET(request: Request) {
       );
     }
 
-    const rawTicks = (logRows ?? []) as RawSystemLogTick[];
-
     // 3. Busca a vazão por minuto por número na view wacrm.dispatch_throughput_per_minute
     let throughputSeries: ThroughputDataPoint[] = [];
     const accountSessionIds = (channelRows ?? []).map((c) => c.id);
 
+    let throughputTruncated = false;
     try {
-      let query = db
-        .from("dispatch_throughput_per_minute")
-        .select("session_id, minute, sent")
-        .gte("minute", startIso)
-        .order("minute", { ascending: true });
+      // Paginada em ordem decrescente de minuto: acima de 1000 linhas o corte do PostgREST caía nos
+      // minutos MAIS RECENTES (a leitura era crescente e sem limite).
+      const view = await fetchThroughputRows(db, startIso, accountSessionIds);
+      throughputTruncated = view.truncated;
 
-      if (accountSessionIds.length > 0) {
-        query = query.in("session_id", accountSessionIds);
-      }
-
-      const { data: viewRows, error: viewError } = await query;
-
-      if (!viewError && Array.isArray(viewRows) && viewRows.length > 0) {
+      if (view.available && view.rows.length > 0) {
         throughputSeries = formatThroughputSeries(
-          viewRows as RawThroughputRow[],
+          view.rows as RawThroughputRow[],
           channelsMap
         );
       } else {
@@ -120,6 +117,13 @@ export async function GET(request: Request) {
     // 4. Calcula o sumário consolidado e as 20 linhas mais recentes para a tabela
     const metrics = computeWindowMetrics(rawTicks);
     const recentTicks = rawTicks.slice(0, 20).map(formatTickRow);
+    // 5. Por número (channels{} do cron_tick) e capacidade teórica × real — só canais da conta.
+    const channelStats = aggregateChannelStats(rawTicks, channelsMap);
+    const capacity = computeCapacity({
+      latest: rawTicks.find((t) => t.payload)?.payload ?? null,
+      series: throughputSeries,
+      peakPerNumber: peakPerNumber(throughputSeries),
+    });
 
     return NextResponse.json({
       ok: true,
@@ -128,6 +132,9 @@ export async function GET(request: Request) {
       ticks: recentTicks,
       throughputSeries,
       channels: channelsList,
+      channelStats,
+      capacity,
+      truncated: { ticks: ticksTruncated, throughput: throughputTruncated },
       refreshedAt: new Date().toISOString(),
     });
   } catch (err) {
