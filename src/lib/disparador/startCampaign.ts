@@ -795,6 +795,12 @@ async function prepareCampaign(
           session_id: sessionId,
           mensagem_final: resolvedText,
           status: "agendado",
+          // O bloco pode conter também linhas de erro com
+          // erro_permanente=true. Em bulk inserts heterogêneos o PostgREST
+          // pode materializar a chave ausente como NULL em vez de usar o
+          // DEFAULT da coluna. Como a coluna é NOT NULL, toda linha precisa
+          // enviar o boolean explicitamente.
+          erro_permanente: false,
           tipo: msg.tipo || "texto",
           media_url: msg.url || null,
           scheduled_at: scheduledAt,

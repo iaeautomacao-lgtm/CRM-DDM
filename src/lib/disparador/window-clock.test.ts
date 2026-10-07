@@ -4,6 +4,7 @@ import {
   isScheduledInClosedWindow,
   INTRA_CONTACT_MS,
   lastWindowClose,
+  openWindowDurationMs,
   ROUND_MAX_SPREAD_MS,
   roundContactTimeMs,
   roundSpreadOffsetMs,
@@ -97,6 +98,20 @@ describe("addOpenWindowTime", () => {
     expect(addOpenWindowTime(br(15, 9), 30 * MIN, { ...comercial, dias: [9] }).toISOString()).toBe(
       br(15, 9, 30).toISOString()
     );
+  });
+});
+
+describe("openWindowDurationMs", () => {
+  it("mede apenas o trecho dentro da janela", () => {
+    expect(openWindowDurationMs(br(15, 7), br(15, 20), comercial)).toBe(10 * 60 * MIN);
+  });
+
+  it("atravessa noite e fim de semana sem inflar o tempo efetivo", () => {
+    expect(openWindowDurationMs(br(16, 17), br(19, 9), diasUteis)).toBe(2 * 60 * MIN);
+  });
+
+  it("sem janela configurada mede o relógio comum", () => {
+    expect(openWindowDurationMs(br(15, 10), br(15, 12), {})).toBe(2 * 60 * MIN);
   });
 });
 

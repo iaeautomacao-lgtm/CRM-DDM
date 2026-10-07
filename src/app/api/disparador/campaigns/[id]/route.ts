@@ -14,6 +14,7 @@ import {
   normalizeHHMM,
   pickCampaignFields,
 } from "@/lib/disparador/campaign-payload";
+import { syncCampaignPlannedMetrics } from "@/lib/disparador/campaign-planning";
 
 // Status em que a campanha ainda pode ser editada: a fila não existe. Em
 // "agendado" a edição é permitida (antes só "rascunho"): o cron só monta a
@@ -139,6 +140,17 @@ export async function PATCH(
         { error: "A campanha começou a ser preparada enquanto você editava. Atualize a página." },
         { status: 409 }
       );
+    }
+
+    // Público, tabulações ou configuração podem ter mudado na edição.
+    // Atualiza o total planejado usado no card/previsão antes do início.
+    const planned = await syncCampaignPlannedMetrics(
+      supabaseAdmin(),
+      accountId,
+      campaignId
+    );
+    if (!planned.ok) {
+      console.warn("[Campaign Update] planned metrics:", planned.error);
     }
 
     return NextResponse.json({ success: true, status: updates.status });
