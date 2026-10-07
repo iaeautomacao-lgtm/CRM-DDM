@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auditFetch } from '@/lib/audit/context'
-import { createClient as createServerClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { encrypt, tryDecrypt } from '@/lib/whatsapp/encryption'
 import { recordPromptVersion } from '@/lib/ai/prompt-versions'
@@ -51,36 +51,14 @@ function maskSecret(value: string): string {
   return `${trimmed.slice(0, 3)}...${trimmed.slice(-4)}`
 }
 
+// Chave de API, prompt do agente e liga/desliga da IA: só owner/admin (mesmo
+// papel da tela de configurações). Leitura inclusive — mesmo mascarada.
 async function resolveAccountId(): Promise<
   { accountId: string; userId: string } | { error: NextResponse }
 > {
-  const supabase = await createServerClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
-  }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  const accountId = profile?.account_id as string | undefined
-  if (!accountId) {
-    return {
-      error: NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
-        { status: 403 }
-      ),
-    }
-  }
-
-  return { accountId, userId: user.id }
+  const auth = await guardRole('admin')
+  if (!auth.ok) return { error: auth.response }
+  return { accountId: auth.ctx.accountId, userId: auth.ctx.userId }
 }
 
 const DEFAULT_CONFIG = {
@@ -109,7 +87,8 @@ export async function GET() {
       .maybeSingle()
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error('[ai-config] GET falhou:', error.message)
+      return NextResponse.json({ error: 'Failed to load AI config' }, { status: 500 })
     }
 
     if (!aiConfig) {
@@ -137,10 +116,8 @@ export async function GET() {
       elevenlabs_model_id: aiConfig.elevenlabs_model_id || 'eleven_multilingual_v2',
     })
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message || 'Failed to load AI config' },
-      { status: 500 }
-    )
+    console.error('[ai-config] GET erro:', err)
+    return NextResponse.json({ error: 'Failed to load AI config' }, { status: 500 })
   }
 }
 
@@ -162,7 +139,8 @@ export async function POST(request: Request) {
       .eq('account_id', accountId)
       .eq('status', 'active')
     if (activeFlowsError) {
-      return NextResponse.json({ error: activeFlowsError.message }, { status: 500 })
+      console.error('[ai-config] POST flows:', activeFlowsError.message)
+      return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
     }
 
     const activeFlowIds = (activeFlows ?? []).map((flow) => flow.id)
@@ -173,7 +151,8 @@ export async function POST(request: Request) {
         .in('flow_id', activeFlowIds)
         .eq('node_type', 'ai_agent')
       if (aiNodesError) {
-        return NextResponse.json({ error: aiNodesError.message }, { status: 500 })
+        console.error('[ai-config] POST nós de IA:', aiNodesError.message)
+        return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
       }
       const incompatible = (aiNodes ?? []).filter((node) => {
         const model =
@@ -268,7 +247,8 @@ export async function POST(request: Request) {
       .upsert(payload, { onConflict: 'account_id' })
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      console.error('[ai-config] POST upsert:', error.message)
+      return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
     }
 
     const newPrompt = payload.system_prompt as string
@@ -285,9 +265,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true })
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message || 'Failed to save AI config' },
-      { status: 500 }
-    )
+    console.error('[ai-config] POST erro:', err)
+    return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
   }
 }

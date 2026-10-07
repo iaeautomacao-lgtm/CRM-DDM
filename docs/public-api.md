@@ -251,8 +251,10 @@ curl -X POST https://your-crm.example.com/api/v1/disparador/campaigns \
 | `template_name` | Meta channels only | Must already be an **approved** template on that account. |
 | `message` | WAHA channels only | Free text; use `{{1}}`, `{{2}}`, … for positional variables. |
 | `contacts` | yes | Array of `{ phone, variables: string[] }`. External contacts — not matched against your CRM's contact list. |
-| `slot_size` / `slot_interval_minutes` | no | Defaults `1000` / `30`. Contacts beyond one slot are scheduled in later slots at this interval. |
-| `janela_inicio` / `janela_fim` | no | Defaults `08:00` / `18:00`. |
+| `external_id` | no | Your own id for this campaign (up to 128 chars: letters, digits, `. _ : - /`). Makes the call idempotent — see [Idempotency](#idempotency-campaigns). |
+| `slot_size` / `slot_interval_minutes` | no | Defaults `1000` / `30`. Contacts beyond one slot are scheduled in later slots, `slot_interval_minutes` of **open window time** apart. |
+| `janela_inicio` / `janela_fim` | no | `HH:MM`, `janela_fim` after `janela_inicio`. Defaults `08:00` / `18:00` (Brasília time). Invalid values return `400`. |
+| `dias_envio` | no | Days allowed to send, `0` = Sunday … `6` = Saturday. Default: business days (Mon–Fri), same as the dashboard. |
 | `callback_url` | no | Fetched by the server when the campaign finishes. Rejected if it resolves to a private/internal address. |
 
 ```json
@@ -261,6 +263,9 @@ curl -X POST https://your-crm.example.com/api/v1/disparador/campaigns \
     "campaign_id": "…",
     "enqueued": 1,
     "skipped": 0,
+    "duplicates": 0,
+    "invalid": 0,
+    "invalid_sample": [],
     "slots": 1,
     "slot_size": 1000,
     "slot_interval_minutes": 30,
@@ -269,11 +274,26 @@ curl -X POST https://your-crm.example.com/api/v1/disparador/campaigns \
 }
 ```
 
-`skipped` counts contacts dropped for having no phone or being on the
-blacklist. Errors: `bad_request` (400) for a missing `campaign_name`/
+**Limits and validation.** Up to **20,000 contacts per request** (above that: `413` `payload_too_large` — split into several campaigns) and a 15 MB body. Contacts are validated and de-duplicated before anything is queued:
+
+- `duplicates` — same number more than once (with/without `+55`, with/without the 9th digit); the first one is kept.
+- `skipped` — numbers on the blacklist.
+- `invalid` — not an object, missing/invalid phone (7–15 digits; `55` numbers need 12–13), or, on WAHA channels, a `{{n}}` placeholder with no value in `variables` (`missing_variable`). `invalid_sample` lists up to 20 of them as `{ index, phone, reason }` (`invalid_contact`, `missing_phone`, `invalid_phone`, `missing_variable`). If nothing valid is left the call returns `400` with the same counters.
+
+**Schedule.** Sending happens inside the window and allowed days only. A campaign created at 20:00 with window 08:00–18:00 starts at 08:00 on the next allowed day, and each slot is spaced by `slot_interval_minutes` of open window time (what does not fit before 18:00 continues on the next allowed day — no burst when the window opens).
+
+**WAHA text.** `{{1}}`, `{{2}}`… are replaced in a single pass with the literal value (`$&`, `{{2}}` inside a value are not interpreted); a `{{n}}` never reaches the customer unresolved.
+
+#### Idempotency (campaigns)
+
+Optional. Send the `Idempotency-Key` header (8–128 chars) **or** `external_id` in the body (`external_id` wins if both are sent). Repeating the call with the same content returns the existing campaign (`200`, same body as the creation, no new queue); the same key with different content returns `409` `conflict`; a repeat while the first call is still being created also returns `409`. Calls without either keep the old behaviour (every call creates a campaign).
+
+If queueing fails halfway the queued items are removed, the campaign is closed (`encerrada`), the idempotency key is released, and the response is `500` with `error.campaign_id` — repeating the request is safe.
+
+Errors: `bad_request` (400) for a missing `campaign_name`/
 `contacts`, an unresolvable `channel`, a missing/unapproved
 `template_name` on a Meta channel, a missing `message` on a WAHA
-channel, or an unsafe `callback_url`.
+channel, an invalid window/`dias_envio`/`external_id`, no valid contact, invalid JSON, or an unsafe `callback_url`. `409` `conflict` and `413` `payload_too_large` as described above.
 
 ### `GET /api/v1/disparador/campaigns/{id}`
 
