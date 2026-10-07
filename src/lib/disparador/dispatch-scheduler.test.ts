@@ -153,7 +153,7 @@ describe('runDispatchSchedule', () => {
     expect(report.started).toBe(0);
   });
 
-  it('backoff por número: 429/131056 cortam pela metade só aquele número', async () => {
+  it('rate limit real reduz o número imediatamente, mas no máximo uma vez por tick', async () => {
     const t = tracker(() => new Promise((resolve) => setTimeout(resolve, 2)));
     const events: unknown[] = [];
     const signals = [
@@ -177,14 +177,44 @@ describe('runDispatchSchedule', () => {
     });
     expect(signals).toEqual(['rate_limit', 'rate_limit']);
     expect(report.channels.hot.capStart).toBe(8);
-    expect(report.channels.hot.capEnd).toBe(2);
+    expect(report.channels.hot.capEnd).toBe(4);
     expect(report.channels.ok.capEnd).toBe(4);
     expect(report.backoffEvents).toEqual([
       expect.objectContaining({ scope: 'channel', channelId: 'hot', reason: 'rate_limit', from: 8, to: 4 }),
-      expect.objectContaining({ scope: 'channel', channelId: 'hot', reason: 'rate_limit', from: 4, to: 2 }),
     ]);
-    expect(events).toHaveLength(2);
+    expect(events).toHaveLength(1);
     expect(report.channels.hot.started).toBe(30);
+  });
+
+  it('2 erros transitórios isolados não acionam freio nem reduzem concorrência', async () => {
+    const report = await runDispatchSchedule({
+      channels: [{ channelId: 'meta', maxConcurrency: 24, campaigns: [{ campaignId: 'k', items: items('a', 120) }] }],
+      globalConcurrency: 24,
+      shouldStop: () => false,
+      run: async (item) => {
+        if (item === 'a20' || item === 'a80') return { backoff: 'server_error' };
+      },
+    });
+    expect(report.channels.meta.capEnd).toBe(24);
+    expect(report.backoffEvents).toEqual([]);
+  });
+
+  it('erros transitórios recorrentes na janela recente reduzem uma única vez', async () => {
+    const transient = new Set(['a20', 'a30', 'a40', 'a50', 'a60']);
+    const report = await runDispatchSchedule({
+      channels: [{ channelId: 'meta', maxConcurrency: 24, campaigns: [{ campaignId: 'k', items: items('a', 140) }] }],
+      globalConcurrency: 24,
+      shouldStop: () => false,
+      run: async (item) => {
+        if (transient.has(item)) return { backoff: item === 'a60' ? 'timeout' : 'server_error' };
+      },
+    });
+    expect(report.channels.meta.capStart).toBe(24);
+    expect(report.channels.meta.capEnd).toBe(12);
+    expect(report.backoffEvents).toHaveLength(1);
+    expect(report.backoffEvents[0]).toEqual(
+      expect.objectContaining({ scope: 'channel', channelId: 'meta', from: 24, to: 12 })
+    );
   });
 
   it('backoff desligado não mexe na concorrência', async () => {

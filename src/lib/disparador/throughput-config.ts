@@ -22,7 +22,8 @@ import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency"
 //   DISPARADOR_ADAPTIVE_BACKOFF            (ligado; "0"/"false" desliga)
 //   DISPARADOR_MAX_EVENT_LOOP_LAG_MS       (200)  p99 acima disso → reduz global
 //   DISPARADOR_MAX_RSS_MB                  (1024) RSS acima disso → reduz global
-//   DISPARADOR_BACKOFF_COOLDOWN_SECONDS    (300)  número fica com metade da
+//   DISPARADOR_BACKOFF_COOLDOWN_SECONDS    (300)  após RATE LIMIT explícito,
+//                                          número fica com metade da
 //                                          concorrência nos ticks seguintes
 //
 // Por número, wacrm.dispatch_channel_limits.max_in_flight (quando a linha
@@ -39,7 +40,8 @@ import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency"
 //      número é que manda).
 //   3. A cada passo, conferir no cron_tick: duration_ms perto do orçamento,
 //      event_loop_lag_p99_ms < 100, rss_mb estável, latency.*.p95_ms sem
-//      subir, provider_errors sem 429/131048/131056 e backoff_events vazio.
+//      subir e provider_errors sem 429/131048/131056. 5xx/timeout/rede
+//      isolados ficam na telemetria; só um padrão recorrente aciona freio.
 //      Se houver backoff recorrente, volte um passo.
 //   4. WAHA: manter 1–4. Só suba com DISPARADOR_PER_NUMBER_CONCURRENCY_WAHA
 //      ou max_in_flight do canal, um número de cada vez.
@@ -111,7 +113,7 @@ export function resolveThroughputConfig(env: Env = process.env): ThroughputConfi
  * Concorrência inicial de um número no tick.
  * - linha em dispatch_channel_limits → max_in_flight dela;
  * - senão, o padrão do provedor (variáveis de ambiente);
- * - em cooldown (backoff recente) → metade, mínimo 1.
+ * - em cooldown por rate limit recente → metade, mínimo 1.
  */
 export function resolveChannelConcurrency(params: {
   provider: DispatchProvider | null;
@@ -127,7 +129,7 @@ export function resolveChannelConcurrency(params: {
 }
 
 // ------------------------------------------------------------
-// Cooldown por número. O banco (wacrm.dispatch_channel_cooldowns,
+// Cooldown por número após rate limit. O banco (wacrm.dispatch_channel_cooldowns,
 // migration 164) vale entre processos/restarts; este Map é só um atalho
 // do mesmo processo para quando a tabela ainda não existe. Não é worker
 // em memória: nada roda em segundo plano, só é consultado no tick.

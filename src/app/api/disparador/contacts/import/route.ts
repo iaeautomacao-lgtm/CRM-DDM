@@ -11,7 +11,7 @@ import {
   type ContactTagAssignment,
 } from "@/lib/contacts/resolve-import-tags";
 import { formatBrazilianPhone, phoneKey } from "@/lib/disparador/phone-key";
-import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
+import { loadBlacklistKeysForPhones } from "@/lib/disparador/blacklist-keys";
 import {
   dedupeAltPhoneAssignments,
   dedupeImportVariables,
@@ -42,13 +42,25 @@ const BACKFILL_CONCURRENCY = 10;
 // O mapa de cabeçalhos normalizados é montado uma vez por linha (cache por
 // objeto) — antes era refeito a cada getField, ~15 vezes por linha.
 const normalizedRowCache = new WeakMap<object, Record<string, any>>();
+// Cabeçalho cru → normalizado, memorizado: as linhas de um arquivo repetem as mesmas poucas
+// colunas, então trim/toLowerCase de cada cabeçalho roda uma vez por arquivo, não por linha.
+const headerNormCache = new Map<string, string>();
+function normalizeHeader(raw: string): string {
+  let norm = headerNormCache.get(raw);
+  if (norm === undefined) {
+    norm = raw.trim().toLowerCase();
+    if (headerNormCache.size >= 2000) headerNormCache.clear();
+    headerNormCache.set(raw, norm);
+  }
+  return norm;
+}
 
 function getField(row: Record<string, any>, ...keys: string[]): string | undefined {
   let normalizedRow = normalizedRowCache.get(row);
   if (!normalizedRow) {
     normalizedRow = {};
     for (const rawKey of Object.keys(row)) {
-      normalizedRow[rawKey.trim().toLowerCase()] = row[rawKey];
+      normalizedRow[normalizeHeader(rawKey)] = row[rawKey];
     }
     normalizedRowCache.set(row, normalizedRow);
   }
@@ -59,22 +71,6 @@ function getField(row: Record<string, any>, ...keys: string[]): string | undefin
     }
   }
   return undefined;
-}
-
-// Blacklist em cache curto no processo: um import em blocos manda dezenas
-// de requisições seguidas, e recarregar a lista inteira (paginada) a cada
-// uma custaria mais que o resto do bloco. 60 s de defasagem não importa
-// aqui — startCampaign confere a blacklist de novo ao iniciar a campanha.
-const BLACKLIST_CACHE_TTL_MS = 60_000;
-let blacklistCache: { keys: Set<string>; at: number } | null = null;
-
-async function getBlacklistKeys(): Promise<Set<string>> {
-  if (blacklistCache && Date.now() - blacklistCache.at < BLACKLIST_CACHE_TTL_MS) {
-    return blacklistCache.keys;
-  }
-  const keys = await loadBlacklistKeySet(supabaseAdmin());
-  blacklistCache = { keys, at: Date.now() };
-  return keys;
 }
 
 // column_map opcional enviado pelo wizard (Step 2 do campanhas/page.tsx) —
@@ -384,8 +380,7 @@ export async function POST(request: Request) {
     // Blacklist has no account_id column in the disparador schema — it's a
     // single shared list across every account on this instance, not scoped
     // per-tenant. Left unfiltered here; scoping it requires a migration.
-    // Paginada (loadBlacklistKeySet) — antes parava em 1000 linhas.
-    const blacklistSet = await getBlacklistKeys();
+    // Carregada mais abaixo, só para os telefones DESTE bloco (loadBlacklistKeysForPhones).
 
     // Existing contacts for this account, keyed by normalized phone. Used
     // instead of a DB-level upsert because the real unique constraint,
@@ -402,6 +397,7 @@ export async function POST(request: Request) {
     // sem os existentes criaria contatos duplicados.
     const lookupDigits = new Set<string>();
     const lookupCpfs = new Set<string>();
+    const blockPhoneKeys = new Set<string>();
     for (const row of rows) {
       const rawPhone =
         resolveField(row, columnMap.phone, TELEFONE1_KEYS) ||
@@ -409,11 +405,16 @@ export async function POST(request: Request) {
         getField(row, ...TELEFONE3_KEYS);
       if (rawPhone) {
         const formatted = formatBrazilianPhone(rawPhone);
-        if (formatted) for (const d of contactLookupDigits(formatted)) lookupDigits.add(d);
+        if (formatted) {
+          for (const d of contactLookupDigits(formatted)) lookupDigits.add(d);
+          if (formatted.length >= 10) blockPhoneKeys.add(phoneKey(formatted));
+        }
       }
       const cpf = normalizeCpf(resolveField(row, columnMap.cpf, CPF_FIELD_KEYS));
       if (cpf) lookupCpfs.add(cpf);
     }
+    // Blacklist só dos telefones do bloco (RPC por chaves; sem ela, a lista inteira em cache curto).
+    const blacklistSet = await loadBlacklistKeysForPhones(supabaseAdmin(), blockPhoneKeys);
     const existingById = new Map<string, any>();
     {
       const lookups: Array<{ column: "phone_normalized" | "cpf"; values: string[] }> = [
@@ -666,14 +667,29 @@ export async function POST(request: Request) {
 
     // 3b. Backfill dos contatos existentes (nome / CPF), em paralelo. Falha
     // numa linha só é registrada — não derruba o import.
-    await processWithConcurrency(nameBackfills, BACKFILL_CONCURRENCY, async ({ id, name }) => {
-      const { error } = await supabaseAdmin().from("contacts").update({ name }).eq("id", id);
-      if (error) console.error("[Contacts Import] Failed to backfill name:", error);
-    });
-    await processWithConcurrency(cpfBackfills, BACKFILL_CONCURRENCY, async ({ id, cpf }) => {
-      const { error } = await supabaseAdmin().from("contacts").update({ cpf }).eq("id", id).is("cpf", null);
-      if (error) console.error("[Contacts Import] Failed to backfill cpf:", error);
-    });
+    // Um UPDATE … FROM por fatia de 1.000 contatos (RPC import_backfill_contacts, migration 181).
+    // Se a RPC não existir ou a fatia for recusada (ex.: CPF já usado por outro contato), refaz a
+    // fatia linha a linha — como antes — para que uma linha ruim não derrube as outras.
+    if (nameBackfills.length > 0 || cpfBackfills.length > 0) {
+      const backfillById = new Map<string, { id: string; name?: string; cpf?: string }>();
+      for (const { id, name } of nameBackfills) backfillById.set(id, { ...backfillById.get(id), id, name });
+      for (const { id, cpf } of cpfBackfills) backfillById.set(id, { ...backfillById.get(id), id, cpf });
+      await processWithConcurrency(sliceInto([...backfillById.values()], BULK_WRITE_CHUNK), WRITE_CONCURRENCY, async (slice) => {
+        const { error } = await supabaseAdmin().rpc("import_backfill_contacts", { p_account_id: accountId, p_items: slice });
+        if (!error) return;
+        console.warn("[Contacts Import] Backfill em lote indisponível; gravando linha a linha:", error.message);
+        await processWithConcurrency(slice, BACKFILL_CONCURRENCY, async ({ id, name, cpf }) => {
+          if (name) {
+            const { error: nameErr } = await supabaseAdmin().from("contacts").update({ name }).eq("id", id);
+            if (nameErr) console.error("[Contacts Import] Failed to backfill name:", nameErr);
+          }
+          if (cpf) {
+            const { error: cpfErr } = await supabaseAdmin().from("contacts").update({ cpf }).eq("id", id).is("cpf", null);
+            if (cpfErr) console.error("[Contacts Import] Failed to backfill cpf:", cpfErr);
+          }
+        });
+      });
+    }
 
     // 4. Resolve tag names -> ids up front, scoped to this account
     const allTagNames = pending.flatMap((p) => p.tagsArray);
@@ -692,8 +708,10 @@ export async function POST(request: Request) {
     // linha ruim/duplicada não derruba as outras.
     const tagAssignments: ContactTagAssignment[] = [];
 
+    const insertedNowIds = new Set<string>();
     const onInserted = (source: PendingContact, contactId: string) => {
       results.importados++;
+      insertedNowIds.add(contactId);
       if (source.tagsArray.length > 0) {
         tagAssignments.push({ contactId, tagNames: source.tagsArray });
       }
@@ -958,7 +976,25 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
-      const linkRows = [...importedContactIds].map((contact_id) => ({
+      // Reenvio do mesmo bloco (ou contato repetido em blocos diferentes): não reinserir vínculos que já
+      // existem — o INSERT em lote falharia por unicidade e o fallback linha a linha custaria 1 ida por linha.
+      // O bloco 0 acabou de limpar os vínculos, então só os seguintes precisam da checagem.
+      const alreadyLinked = new Set<string>();
+      // Contatos criados agora neste bloco ainda não podem estar vinculados: só os pré-existentes entram na checagem.
+      const preExistingIds = [...importedContactIds].filter((id) => !insertedNowIds.has(id));
+      if (chunkIndex > 0 && preExistingIds.length > 0) {
+        await processWithConcurrency(sliceInto(preExistingIds, LOOKUP_IN_CHUNK), LOOKUP_CONCURRENCY, async (ids) => {
+          const { data: linked, error: linkedErr } = await supabaseAdmin()
+            .from("disp_import_contacts")
+            .select("contact_id")
+            .eq("account_id", accountId)
+            .eq(idColumn, idValue)
+            .in("contact_id", ids);
+          if (linkedErr) return; // sem a checagem, o INSERT/fallback abaixo continua correto, só mais lento
+          for (const r of linked ?? []) alreadyLinked.add(r.contact_id);
+        });
+      }
+      const linkRows = [...importedContactIds].filter((id) => !alreadyLinked.has(id)).map((contact_id) => ({
         account_id: accountId,
         contact_id,
         campaign_id: campaignIdRaw,

@@ -10,6 +10,7 @@ import {
   validateCampaignSettings,
 } from "@/lib/disparador/campaign-validation";
 import { isMissingColumnError, isUuid, pickCampaignFields } from "@/lib/disparador/campaign-payload";
+import { syncCampaignPlannedMetrics } from "@/lib/disparador/campaign-planning";
 
 // POST /api/disparador/campaigns — cria a campanha no servidor.
 //
@@ -109,6 +110,14 @@ export async function POST(request: Request) {
       ]);
       if (utm.error) console.error("[Campaign Create] relink UTM:", utm.error.message);
       if (vars.error) console.error("[Campaign Create] relink VAR1–3:", vars.error.message);
+    }
+
+    // Pré-calcula o público elegível para que o card de uma campanha
+    // agendada já mostre "Disparos previstos" e a previsão de término.
+    // É melhor esforço: uma falha de métrica não desfaz a campanha salva.
+    const planned = await syncCampaignPlannedMetrics(db, accountId, campaignId);
+    if (!planned.ok) {
+      console.warn("[Campaign Create] planned metrics:", planned.error);
     }
 
     return NextResponse.json({ ok: true, id: campaignId, status }, { status: 201 });

@@ -15,6 +15,7 @@ import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
 import { SecretsSettings } from '@/components/settings/secrets-settings';
 import { ToolsSettings } from '@/components/settings/tools-settings';
 import { AgentsSettings } from '@/components/settings/agents/agents-settings';
+import { ApiDocsPanel } from '@/components/settings/api-docs-panel';
 import {
   canSeeSection,
   resolveSection,
@@ -69,6 +70,7 @@ function SettingsContent() {
     secrets: <SecretsSettings />,
     tools: <ToolsSettings />,
     agents: <AgentsSettings />,
+    'api-docs': <ApiDocsPanel />,
     ai: <AiAgentSettings />,
   };
 

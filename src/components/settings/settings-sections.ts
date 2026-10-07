@@ -8,6 +8,7 @@ import {
   LockKeyhole,
   Wrench,
   Sparkles,
+  BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -38,6 +39,7 @@ export const SETTINGS_SECTIONS = [
   'secrets',
   'tools',
   'agents',
+  'api-docs',
   'ai',
 ] as const;
 
@@ -85,6 +87,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     group: 'workspace',
     minRole: 'supervisor',
   },
+  'api-docs': { id: 'api-docs', label: 'Documentação da API', icon: BookOpen, group: 'workspace', minRole: 'supervisor' },
   ai: { id: 'ai', label: 'Agente de IA', icon: Bot, group: 'workspace', ownerOnly: true },
 };
 

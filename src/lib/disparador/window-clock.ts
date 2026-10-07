@@ -101,6 +101,42 @@ export function addOpenWindowTime(from: Date, ms: number, janela: SendWindowConf
   return new Date(cursor + remaining);
 }
 
+/**
+ * Soma quanto de um intervalo de relógio comum caiu dentro da janela real
+ * de envio. É o inverso conceitual de addOpenWindowTime: em vez de avançar
+ * N ms de tempo aberto, mede quantos ms abertos existem entre dois
+ * instantes.
+ *
+ * Usado nas métricas de campanha para que "tempo efetivo de disparo" não
+ * conte noite, fim de semana ou outro período em que o motor não poderia
+ * enviar. Configuração inválida de dias segue a mesma tolerância de
+ * addOpenWindowTime e cai para relógio comum.
+ */
+export function openWindowDurationMs(
+  from: Date,
+  to: Date,
+  janela: SendWindowConfig
+): number {
+  const start = from.getTime();
+  const end = to.getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
+
+  const intervals = openIntervals(janela);
+  const days = allowedDays(janela);
+  if (days && days.size === 0) return end - start;
+
+  let total = 0;
+  let dayStart = brasiliaDayStart(start);
+  for (let i = 0; i < MAX_DAYS && dayStart < end; i++, dayStart += DAY_MS) {
+    for (const [segStart, segEnd] of daySegments(dayStart, intervals, days)) {
+      const overlapStart = Math.max(start, segStart);
+      const overlapEnd = Math.min(end, segEnd);
+      if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
+    }
+  }
+  return total;
+}
+
 /** O instante está em tempo aberto do relógio de janela? */
 export function isOpenWindowTime(at: Date, janela: SendWindowConfig): boolean {
   return addOpenWindowTime(at, 0, janela).getTime() === at.getTime();
