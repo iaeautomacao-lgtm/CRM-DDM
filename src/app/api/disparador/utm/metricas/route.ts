@@ -37,7 +37,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
   }
 
-  const params = new URLSearchParams({ campanha, canal });
+  // Mesmo namespace usado na geração; não consultar o nome global legado.
+  const params = new URLSearchParams({ campanha: `${accountId}:${campanha}`, canal });
   if (dataInicio) params.set("data_inicio", dataInicio);
   if (dataFim) params.set("data_fim", dataFim);
 

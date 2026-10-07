@@ -11,7 +11,7 @@ import {
 } from '@/lib/automations/validate'
 
 export async function GET() {
-  const auth = await guardRole('viewer')
+  const auth = await guardRole('agent')
   if (!auth.ok) return auth.response
   const { supabase, accountId } = auth.ctx
 

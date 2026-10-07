@@ -1,7 +1,8 @@
 import { runIdempotentSend } from '@/lib/disparador/send-ledger';
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import type { AccountContext } from '@/lib/auth/account'
+import { guardRole } from '@/lib/auth/route-guard'
 import {
   sendTextMessage,
   sendTemplateMessage,
@@ -35,40 +36,12 @@ import { templateRowsForWaba } from '@/lib/disparador/template-validation'
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
+    const auth = await guardRole('agent')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId, userId } = auth.ctx
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Per-user rate limit. Bucket key is scoped to this route so
-    // `/broadcast` has an independent budget.
-    const limit = checkRateLimit(`send:${user.id}`, RATE_LIMITS.send)
-    if (!limit.success) {
-      return rateLimitResponse(limit)
-    }
-
-    // Resolve the caller's account_id. Every downstream lookup
-    // (conversation, whatsapp_config, message_templates) is account-
-    // scoped post-multi-user, so the previous `user_id` filters
-    // returned nothing for teammates who didn't author the row.
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
-        { status: 403 }
-      )
-    }
+    const limit = checkRateLimit(`send:${userId}`, RATE_LIMITS.send)
+    if (!limit.success) return rateLimitResponse(limit)
 
     // Todo o envio roda dentro do controle de idempotência: o composer
     // (apiFetch) gera uma Idempotency-Key por mensagem e a reaproveita no
@@ -219,7 +192,7 @@ export async function POST(request: Request) {
         const resolved = await findOrCreateConversation(
           supabase,
           accountId,
-          user.id,
+          userId,
           contact_id,
           targetSession
         )
@@ -265,7 +238,7 @@ export async function POST(request: Request) {
         const sent = await sendWebchatMessage({
           conversationId: conversation_id,
           senderType: 'agent',
-          senderId: user.id,
+          senderId: userId,
           contentType: message_type as 'text' | 'image' | 'video' | 'audio' | 'document',
           text: content_text || (isMediaKind ? filename : null) || null,
           mediaUrl: isMediaKind ? originalMediaUrl : null,
@@ -276,7 +249,7 @@ export async function POST(request: Request) {
         if (!(conversation as { assigned_agent_id?: string | null }).assigned_agent_id) {
           await supabase
             .from('conversations')
-            .update({ assigned_agent_id: user.id })
+            .update({ assigned_agent_id: userId })
             .eq('id', conversation_id)
         }
         if (conversation.contact?.id) {
@@ -303,7 +276,7 @@ export async function POST(request: Request) {
           const sent = await sendSocialMessage({
             conversationId: conversation_id,
             senderType: 'agent',
-            senderId: user.id,
+            senderId: userId,
             contentType: message_type as 'text' | 'image' | 'video' | 'audio' | 'document',
             text: content_text || null,
             mediaUrl: isMediaKind ? originalMediaUrl : null,
@@ -311,7 +284,7 @@ export async function POST(request: Request) {
           if (!(conversation as { assigned_agent_id?: string | null }).assigned_agent_id) {
             await supabase
               .from('conversations')
-              .update({ assigned_agent_id: user.id })
+              .update({ assigned_agent_id: userId })
               .eq('id', conversation_id)
           }
           if (conversation.contact?.id) {
@@ -684,7 +657,7 @@ export async function POST(request: Request) {
       }
 
       if (!(conversation as any).assigned_agent_id) {
-        convUpdate.assigned_agent_id = user.id
+        convUpdate.assigned_agent_id = userId
       }
 
       await supabase
@@ -743,7 +716,7 @@ async function pauseActiveFlowRuns(accountId: string, contactId: string) {
   }
 }
 
-type SendSupabase = Awaited<ReturnType<typeof createClient>>
+type SendSupabase = AccountContext['supabase']
 
 /**
  * Return the contact's conversation in this account, creating one if it
