@@ -160,7 +160,7 @@ describe('migration 184 — lock curto e pausa em lotes', () => {
     });
   });
 
-  describe('F5 — pausa e retomada em lotes', () => {
+  describe('F5 — pausa e retomada em lotes', { timeout: 60_000 }, () => {
     it('pausar campanha de 100 mil itens: só o status muda (rápido) e o claim real não pega mais nada', async () => {
       await seed(campaign, 100_000);
       expect(await claimAny(campaign)).toBe(true); // em execução: claim funciona

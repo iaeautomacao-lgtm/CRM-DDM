@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   rows: [] as Array<{ id: string; contact_id: string | null; scheduled_at: string | null }>,
   rpc: vi.fn(),
-  drain: vi.fn(async () => ({ ok: true, moved: 0, partial: false })),
+  drain: vi.fn(async (_db?: unknown, _campaignId?: string | null) => ({ ok: true, moved: 0, partial: false })),
   updates: [] as Array<{ value: Record<string, unknown>; filters: Array<[string, unknown]> }>,
 }));
 vi.mock("@/lib/disparador/queue-moves", () => ({ drainDispatchMoves: mocks.drain }));
