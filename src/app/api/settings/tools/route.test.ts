@@ -219,6 +219,17 @@ describe('/api/settings/tools', () => {
     expect(state.rows).toHaveLength(0)
   })
 
+  it('DELETE: 409 se usada por qualquer versão de agente, mesmo com force', async () => {
+    const { body } = await create()
+    const id = body.tool.id
+    // O mock compartilha as linhas entre tabelas: esta simula ai_agent_tools.
+    state.rows.push({ account_id: state.accountId, tool_id: id, agent_version_id: 'v1' })
+    const blocked = await DELETE(req('DELETE', undefined, 'http://localhost/x?force=true'), ctx(id))
+    expect(blocked.status).toBe(409)
+    expect((await blocked.json()).used_by_agents).toBe(true)
+    expect(state.rows.some((r) => r.id === id)).toBe(true)
+  })
+
   describe('Testar ferramenta', () => {
     it('devolve só status + corpo sanitizado: sem URL/headers e com a credencial trocada por ***', async () => {
       const { body } = await create()

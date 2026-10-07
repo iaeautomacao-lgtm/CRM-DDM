@@ -10,7 +10,8 @@ import { toPublicTool, unknownSecretRefs, validateToolInput, type ToolRow } from
 //  - PATCH com outros campos: mescla com o atual e valida tudo de novo
 //    (credencial literal → 400). O nome da função é imutável (fluxos e o
 //    histórico dos agentes usam o nome).
-//  - DELETE: 409 se algum fluxo usa a ferramenta (use ?force=true para apagar
+//  - DELETE: 409 se algum agente (qualquer versão) usa a ferramenta — sem
+//    exceção; 409 se algum fluxo usa (use ?force=true para apagar
 //    mesmo assim; o validador do fluxo passa a acusar a referência quebrada).
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -81,6 +82,25 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const { accountId } = auth.ctx
   if (!UUID.test(id)) return NextResponse.json({ error: 'Não encontrada.' }, { status: 404 })
   if (!(await loadOwn(id, accountId))) return NextResponse.json({ error: 'Não encontrada.' }, { status: 404 })
+
+  // Versão de agente que referencia a ferramenta impede o DELETE (FK da 180):
+  // apagar quebraria o histórico/rollback do agente. Nem o force passa.
+  const { data: agentRefs, error: agentRefsError } = await supabaseAdmin()
+    .from('ai_agent_tools')
+    .select('agent_version_id')
+    .eq('account_id', accountId)
+    .eq('tool_id', id)
+    .limit(1)
+  if (agentRefsError) {
+    console.error('[settings/tools] falha ao checar uso por agentes:', agentRefsError.code ?? agentRefsError.message)
+    return NextResponse.json({ error: 'Não foi possível apagar.' }, { status: 500 })
+  }
+  if ((agentRefs ?? []).length > 0) {
+    return NextResponse.json(
+      { error: 'Esta ferramenta é usada por agentes (inclusive em versões anteriores). Desligue-a em vez de excluir.', used_by_agents: true },
+      { status: 409 },
+    )
+  }
 
   const force = new URL(request.url).searchParams.get('force') === 'true'
   if (!force) {
