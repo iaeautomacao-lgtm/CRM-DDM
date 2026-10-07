@@ -292,6 +292,7 @@ describe('POST /api/v1/disparador/campaigns', () => {
         created_at: '2026-10-07T18:46:50.000Z',
       }]
     })
+
     const waha = (over: Record<string, unknown> = {}) => ({
       campaign_name: 'W',
       message: 'Oi {{1}}, valor {{2}}',
@@ -299,20 +300,10 @@ describe('POST /api/v1/disparador/campaigns', () => {
       ...over,
     })
 
-    it('substitui em passada única:     it('substitui em passada única: $& e $1 literais', async () => {
+    it('substitui em passada única: $& e $1 literais', async () => {
       const r = await POST(post(waha()))
       expect(r.status).toBe(201)
       expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi $&, valor R$ 10 $1'])
-      expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
-    }) e $1 literais', async () => {
-      const r = await POST(post(waha()))
-      expect(r.status).toBe(201)
-      expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi     it('substitui em passada única: $& e $1 literais', async () => {
-      const r = await POST(post(waha()))
-      expect(r.status).toBe(201)
-      expect(tables.disp_message_queue[0].template_variables).toEqual(['Oi $&, valor R$ 10 $1'])
-      expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
-    }), valor R$ 10 $1'])
       expect(tables.disp_message_queue[0].template_name).toBe('__EXTERNAL_WAHA_TEXT__')
     })
 
