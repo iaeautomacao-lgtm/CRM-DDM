@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { logAuditEvent } from "@/lib/audit/log-event";
 import * as XLSX from "xlsx";
 
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
 import {
@@ -26,6 +27,10 @@ const STATUS_FILTERS = QUEUE_DETAIL_STATUS_FILTERS;
 const REPLIED_KEY = REPLIED_QUEUE_DETAIL_KEY;
 
 // Itens por página escolhidos no modal (20 por padrão, teto de 200).
+// Exportação xlsx: lê em páginas de 1000 até este teto.
+const EXPORT_PAGE_SIZE = 1000;
+const EXPORT_MAX_ROWS = 100_000;
+
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 200;
 
@@ -161,7 +166,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await getCurrentAccount();
+    // Nome + telefone de todos os destinatários: mesmo papel da página de campanhas.
+    const ctx = await requireDisparadorAccess();
     const { id: campaignId } = await params;
 
     const { searchParams } = new URL(request.url);
@@ -183,10 +189,7 @@ export async function GET(
       );
     }
 
-    // Campanhas não têm checagem de role aqui — qualquer membro da
-    // conta que já pode abrir o modal de métricas pode ver o
-    // detalhamento (mesmo nível de acesso de hoje). Só precisa
-    // pertencer à mesma conta do chamador.
+    // A campanha precisa pertencer à conta do chamador.
     const { data: campaign } = await supabaseAdmin()
       .from("campaigns")
       .select("id, account_id, import_draft_id")
@@ -208,7 +211,9 @@ export async function GET(
       // filtro do PostgREST e um nome/telefone de busca contendo um
       // deles quebraria o parse (400), não um risco de injeção de SQL
       // (a gramática do PostgREST não executa SQL arbitrário).
-      const safeSearch = search.replace(/[,()]/g, " ").trim();
+      // % e _ também saem: são curingas do ILIKE e deixariam a busca
+      // devolver (ou exportar) contatos que o termo não nomeia.
+      const safeSearch = search.replace(/[,()%_]/g, " ").trim();
       const { data: matchedContacts, error: contactSearchError } = await supabaseAdmin()
         .from("contacts")
         .select("id")
@@ -252,22 +257,31 @@ export async function GET(
 
     if (exportFormat === "xlsx") {
       const replied = statusKey === REPLIED_KEY;
-      let query = supabaseAdmin()
-        .from("disp_message_queue")
-        .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS)
-        .eq("campaign_id", campaignId);
-      if (statuses) query = query.in("status", statuses);
-      query = replied
-        ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
-        : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false });
+      // Em páginas (.range): o PostgREST corta em max_rows e uma campanha grande
+      // exportava só o começo, ou estourava a memória lendo tudo de uma vez.
+      const exported: unknown[] = [];
+      for (let offset = 0; offset < EXPORT_MAX_ROWS; offset += EXPORT_PAGE_SIZE) {
+        let query = supabaseAdmin()
+          .from("disp_message_queue")
+          .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS)
+          .eq("campaign_id", campaignId);
+        if (statuses) query = query.in("status", statuses);
+        query = replied
+          ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
+          : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false });
+        // Desempate por id: sem ele a paginação repete/pula linhas empatadas.
+        query = query.order("id", { ascending: true });
 
-      if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
+        if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
 
-      const { data, error } = await query;
-      if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
+        const { data, error } = await query.range(offset, offset + EXPORT_PAGE_SIZE - 1);
+        if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
+        exported.push(...(data ?? []));
+        if ((data?.length ?? 0) < EXPORT_PAGE_SIZE) break;
+      }
 
       const rows = await attachLegacyCsvNames(
-        (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow)),
+        exported.map((r) => toDetailRow(r as unknown as QueueRow)),
         campaignId,
         campaign.import_draft_id ?? null,
       );

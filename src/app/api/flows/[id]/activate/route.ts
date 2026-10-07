@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
 import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
@@ -24,13 +24,9 @@ export async function POST(
 ) {
   const { id } = await context.params
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const guard = await guardFlow(id)
+  if (!guard.ok) return guard.response
+  const { userId, accountId } = guard.ctx
 
   const body = (await request.json().catch(() => null)) as
     | { status?: 'draft' | 'active' | 'archived' }
@@ -41,16 +37,6 @@ export async function POST(
       { error: "status must be one of 'draft' | 'active' | 'archived'" },
       { status: 400 },
     )
-  }
-
-  // Ownership via RLS — caller's client.
-  const { data: existing } = await supabase
-    .from('flows')
-    .select('id')
-    .eq('id', id)
-    .maybeSingle()
-  if (!existing) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
   const admin = supabaseAdmin()
@@ -64,6 +50,7 @@ export async function POST(
         .from('flows')
         .select('account_id, name, trigger_type, trigger_config, entry_node_id')
         .eq('id', id)
+        .eq('account_id', accountId)
         .maybeSingle(),
       admin
         .from('flow_nodes')
@@ -110,6 +97,7 @@ export async function POST(
     .from('flows')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
+    .eq('account_id', accountId)
     .select()
     .maybeSingle()
   if (error) {
@@ -122,7 +110,7 @@ export async function POST(
       accountId: updated.account_id as string,
       flowId: id,
       nodes: activatedNodes,
-      userId: user.id,
+      userId,
     })
   }
   return NextResponse.json({ flow: updated })

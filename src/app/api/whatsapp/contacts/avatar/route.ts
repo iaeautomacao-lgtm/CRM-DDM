@@ -1,5 +1,5 @@
 ﻿import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { getWahaProfilePicture } from '@/lib/whatsapp/waha-api'
@@ -7,29 +7,17 @@ import { safeFetch } from '@/lib/security/ssrf-guard'
 import { mediaResponseHeaders, safeInlineContentType } from '@/lib/security/media-proxy'
 
 export async function GET(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  if (!profile?.account_id) {
-    return NextResponse.json({ error: 'Account not found' }, { status: 403 })
+  // Qualquer papel da conta (o inbox mostra o avatar a todos); a conta vem da
+  // sessão, nunca do query param `account_id` que o front ainda manda.
+  let accountId: string
+  try {
+    accountId = (await getCurrentAccount()).accountId
+  } catch (err) {
+    return toErrorResponse(err)
   }
 
   const { searchParams } = new URL(request.url)
   const phone = searchParams.get('phone')
-  const account_id = profile.account_id
 
   if (!phone) {
     return NextResponse.json({ error: 'phone required' }, { status: 400 })
@@ -40,7 +28,7 @@ export async function GET(request: Request) {
   const { data: config, error: configError } = await db
     .from('whatsapp_config')
     .select('waha_url, waha_session, waha_api_key')
-    .eq('account_id', account_id)
+    .eq('account_id', accountId)
     .maybeSingle()
 
   if (configError || !config) {
