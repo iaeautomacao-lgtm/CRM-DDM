@@ -466,7 +466,7 @@ export const openApiSpec = {
           },
           '400': {
             description:
-              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, template ausente/não aprovado (Meta), `message` ausente (WAHA), janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
+              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
             content: {
               'application/json': {
                 schema: ref('ErrorEnvelope'),
