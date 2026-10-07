@@ -67,6 +67,8 @@ async function rollbackCampaign(db: Db, campaignId: string, accountId: string): 
   const steps: Array<[string, PromiseLike<{ error: { message: string } | null }>]> = [
     ["fila", db.from("disp_message_queue").delete().eq("campaign_id", campaignId).eq("account_id", accountId)],
     ["métricas", db.from("campaign_metrics").delete().eq("campaign_id", campaignId)],
+    // Deltas pendentes (migration 183): sem isto a consolidação recriaria a linha de métricas.
+    ["deltas de métricas", db.from("campaign_metric_deltas").delete().eq("campaign_id", campaignId)],
     [
       "campanha",
       db
