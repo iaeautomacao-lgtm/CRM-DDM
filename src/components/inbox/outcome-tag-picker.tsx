@@ -30,6 +30,9 @@ interface OutcomeTagPickerProps {
   conversationId?: string;
 }
 
+// Selecionar (ou pré-selecionar a sugestão da IA) só marca a tabulação.
+// O fechamento exige confirmação explícita no botão "Encerrar".
+
 /**
  * Lista de tabulações da conversa: com conversationId, as tags de desfecho
  * da conta filtradas pela equipe (team_outcome_tags); sem, todas as tags
