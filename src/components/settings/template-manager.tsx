@@ -275,14 +275,14 @@ export function TemplateManager() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user) {
+    if (!user || !accountId) {
       setLoading(false);
       return;
     }
-    fetchTemplates(user.id);
+    fetchTemplates(accountId);
     fetchFolders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, user?.id]);
+  }, [authLoading, user?.id, accountId]);
 
   // Enabled Meta channels for the "Canal" select — direct Supabase
   // read (RLS already scopes whatsapp_config to account members), same
@@ -344,13 +344,40 @@ export function TemplateManager() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accountId]);
 
-  async function fetchTemplates(userId: string) {
+  async function fetchTemplates(accountIdValue: string) {
     try {
       setLoading(true);
+
+      // O catálogo pertence à conta/WABA, não ao usuário que executou o sync.
+      // Busca somente WABAs Meta atualmente habilitadas; linhas legadas sem
+      // waba_id e WABAs desativadas permanecem no banco como histórico, mas
+      // não representam o catálogo atual mostrado nesta tela.
+      const { data: activeChannels, error: channelError } = await supabase
+        .from('whatsapp_config')
+        .select('waba_id')
+        .eq('account_id', accountIdValue)
+        .eq('provider', 'meta')
+        .eq('habilitado', true)
+        .not('waba_id', 'is', null);
+      if (channelError) throw channelError;
+
+      const activeWabaIds = [
+        ...new Set(
+          (activeChannels ?? [])
+            .map((c) => c.waba_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        ),
+      ];
+      if (activeWabaIds.length === 0) {
+        setTemplates([]);
+        return;
+      }
+
       const { data, error } = await supabase
         .from('message_templates')
         .select('*')
-        .eq('user_id', userId)
+        .eq('account_id', accountIdValue)
+        .in('waba_id', activeWabaIds)
         .order('created_at', { ascending: false });
       if (error) throw error;
       setTemplates(data || []);
@@ -422,7 +449,7 @@ export function TemplateManager() {
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Falha ao mover template');
-      if (user) await fetchTemplates(user.id);
+      if (accountId) await fetchTemplates(accountId);
     }
   }
 
@@ -689,7 +716,7 @@ export function TemplateManager() {
       }
       // Refresh first, then close — re-opening the dialog
       // immediately should not show a stale list.
-      if (user) await fetchTemplates(user.id);
+      if (accountId) await fetchTemplates(accountId);
       toast.success(
         data.dry_run
           ? isEdit
@@ -743,7 +770,7 @@ export function TemplateManager() {
           { duration: 10000 },
         );
       }
-      await fetchTemplates(user.id);
+      if (accountId) await fetchTemplates(accountId);
     } catch (err) {
       console.error('Template sync error:', err);
       toast.error(err instanceof Error ? err.message : 'Falha ao sincronizar templates');
