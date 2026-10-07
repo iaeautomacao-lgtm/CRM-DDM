@@ -120,6 +120,7 @@ export class TickTelemetry {
         concurrency_start: report?.capStart ?? null,
         concurrency_end: report?.capEnd ?? null,
         peak_in_flight: report?.peakInFlight ?? 0,
+        rate_per_second: report?.ratePerSecond ?? null,
       };
     }
     return {
