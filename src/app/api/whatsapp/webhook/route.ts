@@ -21,6 +21,13 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
 import {
+  drainStatusInbox,
+  extractStatusEvents,
+  ingestStatusEvents,
+  MAX_WEBHOOK_BODY_BYTES,
+} from '@/lib/whatsapp/status-inbox'
+import {
+  allowExpensiveRejection,
   cacheChannel,
   channelKeyForChange,
   getCachedChannel,
@@ -212,9 +219,17 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   // Auditoria: escritas desta requisição saem como "webhook" (webhook_meta_whatsapp).
   await registerAuditActor({ actorType: 'webhook', source: 'webhook_meta_whatsapp' })
+  // Teto de corpo (~1 MB): os POSTs da Meta são pequenos; recusa antes de ler/parsear.
+  const declaredLength = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_WEBHOOK_BODY_BYTES) {
+    return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
+  }
   // Read raw body first so we can HMAC-verify the exact bytes Meta
   // signed. request.json() would re-encode and break the signature.
   const rawBody = await request.text()
+  if (rawBody.length > MAX_WEBHOOK_BODY_BYTES) {
+    return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
+  }
   const signature = request.headers.get('x-hub-signature-256')
 
   let body: { entry?: WhatsAppWebhookEntry[] }
@@ -287,15 +302,18 @@ export async function POST(request: Request) {
     console.warn('[webhook] rejected request with invalid signature')
     // Fire-and-forget — não faz sentido atrasar a resposta 401 pra Meta
     // esperando o insert do log.
-    void writeLog({
-      level: 'warn',
-      source: 'webhook_meta',
-      event: 'hmac_rejected',
-      message: 'Assinatura HMAC inválida rejeitada no webhook Meta',
-      // Identificadores de canal Meta (phone_number_id/WABA), não telefone de
-      // contato — não precisam de mascaramento (ver maskPhone).
-      payload: { channels: rejectedKeys },
-    })
+    // W4: log (INSERT em system_logs) amostrado — no máx. 1× por janela e por conjunto de canais.
+    if (allowExpensiveRejection(`log:${rejectedKeys.join(',')}`)) {
+      void writeLog({
+        level: 'warn',
+        source: 'webhook_meta',
+        event: 'hmac_rejected',
+        message: 'Assinatura HMAC inválida rejeitada no webhook Meta',
+        // Identificadores de canal Meta (phone_number_id/WABA), não telefone de
+        // contato — não precisam de mascaramento (ver maskPhone).
+        payload: { channels: rejectedKeys },
+      })
+    }
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
   }
 
@@ -326,12 +344,35 @@ export async function POST(request: Request) {
   // (see issue #301). `after()` hands the callback to the runtime, which
   // keeps the function alive until it resolves (within the route's
   // maxDuration).
-  after(async () => {
-    try {
-      await processWebhook(body, verifiedChannels)
-    } catch (error) {
-      console.error('Error processing webhook:', error)
+  // Status delivered/read/failed: gravados no inbox DURÁVEL antes do 200 (uma chamada por POST).
+  // Se a gravação falhar, responde 500 e a Meta reenvia (antes: o erro era engolido e o recibo se perdia).
+  // Migration 185 ausente ⇒ caminho antigo (3 chamadas por evento depois do 200).
+  let statusesIngested = false
+  const statusEvents = extractStatusEvents(body, verifiedChannels, (entry, change) =>
+    channelKeyForChange(entry, change, isTemplateWebhookField(change?.field ?? "")),
+  )
+  if (statusEvents.length > 0) {
+    const ingest = await ingestStatusEvents(supabaseAdmin(), statusEvents)
+    if (ingest.ok) {
+      statusesIngested = true
+    } else if (!ingest.missing) {
+      console.error('[webhook] falha ao gravar o lote de status; a Meta vai reenviar:', ingest.error)
+      return NextResponse.json({ error: 'Status ingestion failed' }, { status: 500 })
     }
+  }
+
+  after(async () => {
+    // Drenar o inbox e processar o resto do corpo são independentes: um não derruba o outro.
+    await Promise.allSettled([
+      (async () => {
+        try {
+          await processWebhook(body, verifiedChannels, { statusesIngested })
+        } catch (error) {
+          console.error('Error processing webhook:', error)
+        }
+      })(),
+      statusesIngested ? drainStatusInbox(supabaseAdmin(), { requireTurn: true }) : Promise.resolve(),
+    ])
   })
 
   return NextResponse.json({ status: 'received' }, { status: 200 })
@@ -436,7 +477,9 @@ async function verifyChannelKey(
   }
 
   let result = await attempt(true)
-  if (!result.ok && result.fromCache) {
+  // W4: relê o banco no máximo 1× por janela por canal (rotação legítima corrige na 1ª tentativa; uma
+  // rajada de assinaturas inválidas não vira uma rajada de SELECTs).
+  if (!result.ok && result.fromCache && allowExpensiveRejection(`recheck:${key}`)) {
     invalidateChannel(key)
     result = await attempt(false)
   }
@@ -448,6 +491,7 @@ async function verifyChannelKey(
 async function processWebhook(
   body: { entry?: WhatsAppWebhookEntry[] },
   verifiedChannels: Map<string, ChannelRow>,
+  options: { statusesIngested?: boolean } = {},
 ) {
   if (!body.entry) return
 
@@ -480,7 +524,8 @@ async function processWebhook(
       const value = change.value
 
       // Handle status updates
-      if (value.statuses) {
+      // (statusesIngested: delivered/read/failed já estão no inbox durável e são aplicados em lote.)
+      if (value.statuses && !options.statusesIngested) {
         // Um status que falha não descarta os demais do mesmo POST (a Meta
         // não reenvia: já recebeu 200). 'sent' é ignorado — não agrega.
         await processStatusesIndependently(

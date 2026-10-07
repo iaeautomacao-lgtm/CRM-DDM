@@ -229,7 +229,7 @@ describe('runDispatchSchedule', () => {
     expect(report.backoffEvents).toEqual([]);
   });
 
-  it('event loop lento / RSS alto reduz o teto global (nunca abaixo de 1)', async () => {
+  it('event loop lento / RSS alto reduz o teto global só após janelas seguidas, nunca abaixo de 25% das vagas', async () => {
     let clock = 0;
     const t = tracker();
     const report = await runDispatchSchedule({
@@ -244,11 +244,62 @@ describe('runDispatchSchedule', () => {
       run: t.run,
     });
     expect(report.globalStart).toBe(8);
-    expect(report.globalEnd).toBe(1);
+    expect(report.globalEnd).toBe(2); // piso: 25% de 8
     expect(report.backoffEvents[0]).toEqual(
       expect.objectContaining({ scope: 'global', reason: 'event_loop_lag', from: 8, to: 4 })
     );
     expect(report.started).toBe(40);
+  });
+
+  describe('freio do event loop com histerese (F11)', () => {
+    const GOOD = { eventLoopLagP99Ms: 10, rssMb: 100 };
+    const BAD = { eventLoopLagP99Ms: 900, rssMb: 100 };
+    // Cada conclusão de tarefa é uma amostra (relógio avança 10 ms por leitura; intervalo 1 ms).
+    async function runWith(samples: Array<typeof GOOD>, slots = 8, total = 60) {
+      let clock = 0;
+      let i = 0;
+      return runDispatchSchedule({
+        channels: [{ channelId: 'c1', maxConcurrency: slots, campaigns: [{ campaignId: 'k', items: items('a', total) }] }],
+        globalConcurrency: slots,
+        shouldStop: () => false,
+        now: () => (clock += 10),
+        healthCheckIntervalMs: 1,
+        sampleHealth: () => samples[Math.min(i++, samples.length - 1)],
+        maxEventLoopLagMs: 200,
+        maxRssMb: 1024,
+        run: async () => { await tick(); },
+      });
+    }
+
+    it('um pico isolado (ou 2 janelas) NÃO corta as vagas', async () => {
+      const spike = await runWith([GOOD, BAD, GOOD]);
+      expect(spike.backoffEvents).toEqual([]);
+      expect(spike.globalEnd).toBe(8);
+      const two = await runWith([GOOD, BAD, BAD, GOOD]);
+      expect(two.backoffEvents).toEqual([]);
+      expect(two.globalEnd).toBe(8);
+    });
+
+    it('3 janelas seguidas acima do limite cortam pela metade', async () => {
+      const report = await runWith([BAD, BAD, BAD, GOOD], 8, 40);
+      const cut = report.backoffEvents.find((e) => e.scope === 'global' && e.reason === 'event_loop_lag');
+      expect(cut).toEqual(expect.objectContaining({ from: 8, to: 4 }));
+    });
+
+    it('piso de 25% das vagas iniciais (nunca cai para 1 de uma vez só por insistência)', async () => {
+      const report = await runWith(Array(60).fill(BAD), 16, 80);
+      expect(report.globalEnd).toBe(4);
+      const cuts = report.backoffEvents.filter((e) => e.reason === 'event_loop_lag');
+      expect(cuts.map((e) => (e.scope === 'global' ? [e.from, e.to] : null))).toEqual([[16, 8], [8, 4]]);
+    });
+
+    it('recupera dentro do tick quando a saúde normaliza (janelas seguidas saudáveis)', async () => {
+      const report = await runWith([BAD, BAD, BAD, ...Array(30).fill(GOOD)], 8, 80);
+      const events = report.backoffEvents.filter((e) => e.scope === 'global');
+      expect(events[0]).toEqual(expect.objectContaining({ reason: 'event_loop_lag', from: 8, to: 4 }));
+      expect(events.some((e) => e.reason === 'recovered' && e.scope === 'global' && e.to > e.from)).toBe(true);
+      expect(report.globalEnd).toBe(8);
+    });
   });
 
   it('erro inesperado da tarefa não derruba o lote', async () => {

@@ -17,6 +17,8 @@ const state = vi.hoisted(() => ({
   messagesRows: [] as Row[],
   messagesFilters: [] as Array<[string, unknown]>,
   failInsertAt: 0,
+  campaignReadError: null as { message: string } | null,
+  campaignMissing: false,
 }));
 
 function builder(table: string, viaSchema = false) {
@@ -49,8 +51,10 @@ function builder(table: string, viaSchema = false) {
     if (table === "campaigns") {
       if (op === "update") {
         state.campaignUpdates.push(payload);
-        return { data: [{ id: "camp-1" }], error: null };
+        return { data: [{ id: "camp-1", agendamento: state.campaign.agendamento ?? null }], error: null };
       }
+      if (state.campaignReadError) return { data: null, error: state.campaignReadError };
+      if (state.campaignMissing) return { data: single ? null : [], error: null };
       return { data: single ? state.campaign : [state.campaign], error: null };
     }
     if (table === "messages") {
@@ -127,6 +131,8 @@ describe("startCampaign — preparação (B9)", () => {
     state.messagesRows = [];
     state.messagesFilters = [];
     state.failInsertAt = 0;
+    state.campaignReadError = null;
+    state.campaignMissing = false;
     audienceMock.contacts = contacts(3);
     setCampaign();
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -161,6 +167,39 @@ describe("startCampaign — preparação (B9)", () => {
     expect(result).toEqual({ ok: true, enqueued: 3 });
     expect(state.queuePayloads.map((r) => r.erro_permanente)).toEqual([false, true, false]);
     expect(state.queuePayloads.every((r) => typeof r.erro_permanente === "boolean")).toBe(true);
+  });
+
+  it("contato sem telefone válido vira UM erro permanente explicado e nunca um envio (REVISAO A1)", async () => {
+    setCampaign({ mensagens: [templateMsg, { ...templateMsg, template_name: "t2" }] });
+    audienceMock.contacts = [
+      { id: "c0", name: "Ana", phone: "+5511910000000", cpf: null },
+      { id: "c1", name: "Sem", phone: "", cpf: null },
+      { id: "c2", name: "Curto", phone: "12345", cpf: null },
+    ];
+    const result = await startCampaign("camp-1", "acc");
+    expect(result.ok).toBe(true);
+    const bad = state.queuePayloads.filter((r) => r.contact_id !== "c0");
+    expect(bad).toHaveLength(2); // um por contato inválido, mesmo com 2 mensagens
+    for (const row of bad) {
+      expect(row).toMatchObject({ status: "erro", erro_permanente: true, erro: "Contato sem telefone válido" });
+    }
+    expect(state.queuePayloads.filter((r) => r.contact_id === "c0")).toHaveLength(2);
+  });
+
+  it("erro TRANSITÓRIO ao ler a campanha: 500 e a campanha agendada volta a 'agendado' (não a 'rascunho') — A2", async () => {
+    state.campaignReadError = { message: "fetch failed" };
+    const result = await startCampaign("camp-1", "acc");
+    expect(result).toMatchObject({ ok: false, status: 500 });
+    expect((result as { error: string }).error).toMatch(/ler a campanha/);
+    expect(state.campaignUpdates.some((u) => u.status === "agendado")).toBe(true);
+    expect(state.campaignUpdates.some((u) => u.status === "rascunho")).toBe(false);
+    expect(state.queueInserts).toEqual([]);
+  });
+
+  it("campanha realmente inexistente: 404 (sem confundir com erro de leitura)", async () => {
+    state.campaignMissing = true;
+    const result = await startCampaign("camp-1", "acc");
+    expect(result).toMatchObject({ ok: false, status: 404, error: "Campanha não encontrada" });
   });
 
   it("texto livre em canal Meta: consulta só inbound dos últimos 24h (received_at > agora-24h)", async () => {

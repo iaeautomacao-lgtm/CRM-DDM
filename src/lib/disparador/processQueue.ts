@@ -20,7 +20,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
-import OpenAI from "openai";
+import type { ConfirmArgs, ConfirmResult } from "@/lib/disparador/confirm-batcher";
 
 // Marcador de contato externo WAHA — definido em queue-markers.ts e
 // reexportado aqui para os imports existentes continuarem funcionando.
@@ -30,6 +30,11 @@ import { canSendNow, isWithinSendWindow, nextSendSlot } from "@/lib/disparador/s
 import { classifyProviderError, type BackoffReason } from "@/lib/disparador/provider-signals";
 import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
+import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
+import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
+import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
+import { metaCodesWhere, reportUnknownMetaCode } from "@/lib/disparador/meta-error-catalog";
+import { loadCampaignStatusCounts, summarizeStatusCounts } from "@/lib/disparador/campaign-status-counts";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -167,6 +172,13 @@ export interface ProcessQueueItemOptions {
   blacklistLookup?: BlacklistLookup;
   /** Só observa: nunca altera o destino do item. */
   onProviderCall?: (observation: ProviderCallObservation) => void;
+  /**
+   * O item já foi reivindicado em lote (claim_dispatch_batch, migration 188) e está 'enviando': pula o claim por item.
+   * O resto do fluxo (blacklist, envio, confirmação, erros) é o mesmo.
+   */
+  alreadyClaimed?: boolean;
+  /** Confirmação do envio em micro-lote (confirm-batcher.ts); ausente = confirmação unitária. */
+  confirmBatcher?: { submit(args: ConfirmArgs): Promise<ConfirmResult> };
 }
 
 function observe(options: ProcessQueueItemOptions | undefined, observation: ProviderCallObservation) {
@@ -211,7 +223,7 @@ export async function claimQueueItem(campaignId: string): Promise<QueueItem | nu
 // 131047 (janela de 24h fechada) NÃO é número inválido: o telefone é bom,
 // só não aceita texto livre agora — ver META_PERMANENT_CODES. Antes ele
 // marcava contact_phones como 'invalido' e pulava para TELEFONE2/3.
-const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131021]);
+const META_INVALID_PHONE_CODES = metaCodesWhere((e) => e.numeroInvalido === true);
 
 // Códigos Meta que são permanentes mas NÃO são "número inválido" (ex:
 // conta suspensa, parâmetro inválido, token expirado/inválido) — sem
@@ -232,7 +244,14 @@ const META_INVALID_PHONE_CODES = new Set([131030, 131045, 131021]);
 // Repetir automaticamente dentro da mesma campanha não cria evidência nova.
 // 131047: mensagem fora da janela de 24h — retentar texto livre não muda
 // nada; precisa de template.
-const META_PERMANENT_CODES = new Set([131026, 131031, 131047, 131051, 368, 190, 131008, 131009, 132000, 132001]);
+// Derivado do catálogo único (meta-error-catalog.ts): flag `permanente`.
+const META_PERMANENT_CODES = metaCodesWhere((e) => e.permanente === true);
+
+/** Limites de taxa da Meta que reagendam sem gastar tentativa (F8). */
+export const META_RATE_LIMIT_NO_ATTEMPT_CODES: ReadonlySet<number> = new Set([130429, 131048, 131056]);
+export function isMetaRateLimitNoAttempt(err: unknown): boolean {
+  return err instanceof MetaApiError && err.metaCode !== null && META_RATE_LIMIT_NO_ATTEMPT_CODES.has(err.metaCode);
+}
 
 // Antes da MetaApiError (ver meta-api.ts), a única forma de detectar
 // permanência era procurar um código HTTP tipo "4XX" solto na mensagem —
@@ -535,12 +554,13 @@ export async function processQueueItem(
       .from("disp_message_queue")
       .update({ status: "agendado", scheduled_at: tomorrowUtc.toISOString() })
       .eq("id", item.id)
-      .eq("status", "agendado");
+      // Item já reivindicado em lote está 'enviando': volta a 'agendado' para a próxima abertura.
+      .in("status", options?.alreadyClaimed ? ["agendado", "enviando"] : ["agendado"]);
 
     return { outcome: "deferred", reason: "outside_window" };
   }
 
-  const claimed = await claimItemAtomically(item.id, options?.defaultMaxInFlight);
+  const claimed = options?.alreadyClaimed ? true : await claimItemAtomically(item.id, options?.defaultMaxInFlight);
   if (!claimed) {
     // Outro consumidor (worker.ts / cron) já reivindicou este item entre
     // o SELECT do chamador e esta chamada — não reprocessa.
@@ -572,10 +592,16 @@ export async function processQueueItem(
       .eq("contact_id", item.contact_id)
       .eq("ordem", item.phone_attempt_order ?? 1)
       .maybeSingle();
-    phone = altPhone?.phone || item.contacts?.phone || item.mensagem_final;
+    // Contato do CRM: mensagem_final é texto, nunca telefone.
+    phone = altPhone?.phone || item.contacts?.phone || "";
   } else {
     // Mesma regra que o cron usa para pré-carregar a blacklist.
-    phone = queueItemPrimaryPhone(item) ?? item.mensagem_final;
+    // Só itens externos (contact_id nulo, API v1) guardam o número em mensagem_final.
+    phone = queueItemPrimaryPhone(item) ?? (item.contact_id ? "" : item.mensagem_final);
+  }
+  if (item.contact_id && !hasDialablePhone(phone)) {
+    await markQueueError(item.id, NO_VALID_PHONE_ERROR, true, item.campaign_id, tentativasAtuais + 1);
+    return { outcome: "error", error: NO_VALID_PHONE_ERROR };
   }
 
   // Revalidação do tick (cron): mesma chave do startCampaign, que também
@@ -684,41 +710,23 @@ export async function processQueueItem(
       ? (item.template_variables?.[0] ?? "")
       : item.mensagem_final;
 
-  const disparadorOpenAiKey = process.env.DISPARADOR_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
-
-  if (tipo === "ia" && disparadorOpenAiKey) {
-    try {
-      const configuredAiTimeout = Number.parseInt(
-        process.env.DISPATCH_OPENAI_TIMEOUT_MS ?? "",
-        10
-      );
-      const aiTimeoutMs =
-        Number.isFinite(configuredAiTimeout) && configuredAiTimeout > 0
-          ? Math.min(configuredAiTimeout, 120_000)
-          : 30_000;
-      const openai = new OpenAI({
-        apiKey: disparadorOpenAiKey,
-        timeout: aiTimeoutMs,
+  if (tipo === "ia") {
+    // Campanha com IA: mensagem_final é o PROMPT. Falha da IA (429/timeout/sem chave/vazio) NUNCA
+    // pode enviar o prompt ao cliente: o item volta para a fila (erro retentável, sem consumir
+    // tentativa) e a pausa automática conta estas ocorrências.
+    const generated = await generateDispatchAiText(messageText, item.contacts?.name);
+    if (generated === null) {
+      await markQueueError(item.id, AI_UNAVAILABLE_ERROR, false, item.campaign_id, tentativasAtuais);
+      void writeLog({
+        level: "warn",
+        source: "disparador",
+        event: "message_ai_unavailable",
+        message: "Geração por IA indisponível; item devolvido à fila sem enviar nada ao cliente",
+        payload: { campaign_id: item.campaign_id, queue_id: item.id },
       });
-      const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content:
-              "Você é um assistente de vendas para WhatsApp. Gere uma mensagem natural, sem parecer spam. Responda APENAS com a mensagem, sem explicações.",
-          },
-          {
-            role: "user",
-            content: `Contato: nome=${item.contacts?.name || ""}. Prompt: ${messageText}`,
-          },
-        ],
-        max_tokens: 500,
-      });
-      messageText = completion.choices[0]?.message?.content || messageText;
-    } catch (aiErr) {
-      console.warn("[processQueue] AI generation failed, using prompt text:", aiErr);
+      return { outcome: "deferred", reason: "ai_unavailable" };
     }
+    messageText = generated;
   }
 
   const cleanText = applyTemplateVars(messageText, item.contacts).replace(
@@ -746,9 +754,16 @@ export async function processQueueItem(
     // Deixar isso em enviando consome max_in_flight e pode paralisar o
     // número inteiro. Também não podemos reenviar, pois pode duplicar.
     // Resultado: terminaliza como erro permanente sem retry e libera a vaga.
+    // Exceção: falha de CONEXÃO (ECONNREFUSED/ENOTFOUND/EAI_AGAIN/connect timeout) prova que o POST
+    // não saiu — transitório com retry normal (decisão do dono, P0-3).
+    if (isNotConnectedError(sendErr)) {
+      await markQueueError(item.id, NOT_CONNECTED_ERROR, false, item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: NOT_CONNECTED_ERROR };
+    }
     if (!isDefinitiveRejection(sendErr)) {
-      const message =
-        "Resultado externo não confirmado; encerrado sem reenvio para evitar duplicidade";
+      // 502/503/504 e timeout de resposta: pode ter saído. Não reenvia; o auto-pause conta estes
+      // "incertos" (UNCERTAIN_OUTCOME_ERROR) para frear a campanha quando viram um padrão.
+      const message = UNCERTAIN_OUTCOME_ERROR;
       await markQueueError(
         item.id,
         message,
@@ -762,6 +777,16 @@ export async function processQueueItem(
       console.error(
         `[Disparador] Meta error code: ${sendErr.metaCode}, http: ${sendErr.httpStatus}`
       );
+      // Código fora do catálogo: comportamento atual + aviso "código novo" (1× por processo e por código).
+      reportUnknownMetaCode(sendErr.metaCode, (code) => {
+        void writeLog({
+          level: "warn",
+          source: "disparador",
+          event: "meta_error_code_unknown",
+          message: `Código novo da Meta fora do catálogo de erros: ${code}`,
+          payload: { campaign_id: item.campaign_id, queue_id: item.id, metaCode: code },
+        });
+      });
 
       // 131026 encerra esta tentativa sem retry automático, mas só vira
       // blacklist definitiva quando ocorrer em 3 CAMPANHAS DISTINTAS.
@@ -788,6 +813,7 @@ export async function processQueueItem(
             message: "Meta 131026 registrado; número ainda não entrou na blacklist definitiva",
             payload: {
               campaign_id: item.campaign_id,
+              queue_id: item.id,
               contact_id: item.contact_id,
               phone: maskPhone(normalizedPhone),
               metaCode: 131026,
@@ -840,6 +866,7 @@ export async function processQueueItem(
           message: "Destino bloqueado definitivamente após 131026 em 3 campanhas distintas",
           payload: {
             campaign_id: item.campaign_id,
+            queue_id: item.id,
             contact_id: item.contact_id,
             phone: maskPhone(normalizedPhone),
             metaCode: 131026,
@@ -866,8 +893,12 @@ export async function processQueueItem(
       // também cobre os mesmos códigos de META_INVALID_PHONE_CODES).
     }
 
-    const novasTentativas = tentativasAtuais + 1;
-    const permanent = isPermanentSendError(sendErr) || novasTentativas >= MAX_TENTATIVAS;
+    // F8: limite de taxa da Meta (130429 throughput, 131048 spam, 131056 par) NÃO é falha do item — é o número saturado.
+    // Reagenda (retry com backoff) SEM consumir tentativa: senão uma rajada de 429 transforma itens bons em erro
+    // permanente depois de MAX_TENTATIVAS, só porque o ritmo passou do limite. O freio do número (cooldown/backoff) é quem desacelera.
+    const rateLimited = isMetaRateLimitNoAttempt(sendErr);
+    const novasTentativas = rateLimited ? tentativasAtuais : tentativasAtuais + 1;
+    const permanent = isPermanentSendError(sendErr) || (!rateLimited && novasTentativas >= MAX_TENTATIVAS);
     const message = sendErr?.message || String(sendErr);
     if (isPermanentSendError(sendErr)) {
       void writeLog({
@@ -877,6 +908,7 @@ export async function processQueueItem(
         message: "Item da fila marcado como erro permanente — código Meta não retenta",
         payload: {
           campaign_id: item.campaign_id,
+          queue_id: item.id,
           contact_id: item.contact_id,
           phone: maskPhone(normalizedPhone),
           metaCode: sendErr instanceof MetaApiError ? sendErr.metaCode : null,
@@ -894,7 +926,7 @@ export async function processQueueItem(
   // deixava a mensagem marcada 'enviado' mas sem log de auditoria e/ou
   // sem incrementar campaign_metrics.total_enviados, sem reconciliação
   // possível depois.
-  const { error: markSentError, replayed } = await confirmItemSent({
+  const confirmArgs = {
     p_item_id: item.id,
     p_campaign_id: item.campaign_id,
     p_contact_id: item.contact_id,
@@ -902,7 +934,10 @@ export async function processQueueItem(
     p_mensagem: cleanText,
     p_waha_message_id: externalMessageId,
     p_tentativas: (item.tentativas || 0) + 1,
-  });
+  };
+  const { error: markSentError, replayed } = options?.confirmBatcher
+    ? await options.confirmBatcher.submit(confirmArgs)
+    : await confirmItemSent(confirmArgs);
 
   if (markSentError) {
     // O provedor JÁ aceitou o envio, mas a confirmação local falhou. Não
@@ -948,7 +983,7 @@ export async function processQueueItem(
 // mark_queue_item_sent e o replay roda à parte, como antes.
 let confirmRpcUnavailable = false;
 
-async function confirmItemSent(
+export async function confirmItemSent(
   args: Record<string, unknown>
 ): Promise<{ error: { message: string } | null; replayed: boolean }> {
   if (!confirmRpcUnavailable) {
@@ -1182,40 +1217,11 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
       .eq("campaign_id", campaignId)
       .maybeSingle();
 
-    // Buscar resumo dos itens da fila — paginado via .range(), mesmo
-    // padrão de startCampaign.ts (allContacts/contact_import_variables):
-    // sem paginação, uma campanha com mais de 1000 itens batia no cap de
-    // resposta do PostgREST e o resumo abaixo (enviados/erros/bloqueados/
-    // cancelados) vinha truncado e incorreto no payload do callback.
-    const queueSummary: Array<{ status: string }> = [];
-    {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await db
-          .from("disp_message_queue")
-          .select("status")
-          .eq("campaign_id", campaignId)
-          .range(from, from + pageSize - 1);
-        if (pageError) {
-          console.error(
-            `[Callback] Campanha ${campaignId} — falha ao paginar disp_message_queue:`,
-            pageError.message
-          );
-          return false;
-        }
-        queueSummary.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-    }
-
-    const enviados = queueSummary.filter(
-      (i) => i.status === "enviado" || i.status === "entregue" || i.status === "lido"
-    ).length;
-    const erros = queueSummary.filter((i) => i.status === "erro").length;
-    const bloqueados = queueSummary.filter((i) => i.status === "bloqueado").length;
-    const cancelados = queueSummary.filter((i) => i.status === "cancelado").length;
+    // Resumo da fila por status numa agregação só (get_campaign_stats), em vez de paginar a fila
+    // inteira por OFFSET sem ORDER BY (REVISAO F6b/F19). Falha ⇒ a outbox tenta de novo depois.
+    const statusCounts = await loadCampaignStatusCounts(db, campaignId);
+    if (!statusCounts) return false;
+    const { total_enfileirados, enviados, erros, bloqueados, cancelados } = summarizeStatusCounts(statusCounts);
 
     // Nota: só roda quando a campanha tem callback_url configurado (early
     // return na linha acima) — campanhas sem callback externo não geram
@@ -1234,7 +1240,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
       campaign_name: campaign.nome,
       completed_at: campaign.updated_at,
       summary: {
-        total_enfileirados: queueSummary.length,
+        total_enfileirados,
         enviados,
         entregues: metrics?.total_entregues ?? 0,
         lidos: metrics?.total_lidos ?? 0,

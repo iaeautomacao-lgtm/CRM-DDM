@@ -23,4 +23,4 @@ export const PENDING_CONFIRMATION_QUEUE_DETAIL_KEY = "aguardando_confirmacao";
 // Sintaxe raw do PostgREST usada por supabase-js .or(). Mantida centralizada
 // para o card e o drilldown terem exatamente a mesma definição.
 export const PENDING_CONFIRMATION_OR_FILTER =
-  "and(status.eq.enviando,.not.waha_message_id.is.null),and(status.eq.enviado,entrega_pendente_131026.eq.true)";
+  "and(status.eq.enviando,waha_message_id.not.is.null),and(status.eq.enviado,entrega_pendente_131026.eq.true)";

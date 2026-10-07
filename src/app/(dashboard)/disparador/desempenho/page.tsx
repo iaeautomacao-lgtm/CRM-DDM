@@ -48,6 +48,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import type { Capacity, ChannelStats } from "@/lib/disparador/desempenho-extra";
+import { formatInt } from "@/lib/disparador/monitor-format";
 import type {
   ChannelInfo,
   DesempenhoWindow,
@@ -95,6 +97,9 @@ export default function DisparadorDesempenhoPage() {
   const [ticks, setTicks] = useState<FormattedTickRow[]>([]);
   const [throughputSeries, setThroughputSeries] = useState<ThroughputDataPoint[]>([]);
   const [channels, setChannels] = useState<ChannelInfo[]>([]);
+  const [channelStats, setChannelStats] = useState<ChannelStats[]>([]);
+  const [capacity, setCapacity] = useState<Capacity | null>(null);
+  const [truncated, setTruncated] = useState<{ ticks: boolean; throughput: boolean } | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   const [live, setLive] = useState<LivePerformanceSnapshot | null>(null);
   const [lastLiveAt, setLastLiveAt] = useState<Date | null>(null);
@@ -136,6 +141,9 @@ export default function DisparadorDesempenhoPage() {
           setTicks(data.ticks ?? []);
           setThroughputSeries(data.throughputSeries ?? []);
           setChannels(data.channels ?? []);
+          setChannelStats(data.channelStats ?? []);
+          setCapacity(data.capacity ?? null);
+          setTruncated(data.truncated ?? null);
           setLastRefreshedAt(new Date());
           setSecondsUntilRefresh(30);
         } else {
@@ -913,119 +921,124 @@ export default function DisparadorDesempenhoPage() {
             </CardContent>
           </Card>
 
-          {/* 4. BLOCO DE TEXTO: COMO SUBIR A VELOCIDADE */}
-          <Card className="border-primary/20 bg-primary/[0.02] shadow-sm">
+          {/* 4. POR NÚMERO (channels{} do cron_tick) */}
+          <Card className="shadow-sm">
             <CardHeader className="pb-3">
-              <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-                <Zap className="size-4 text-primary" />
-                Como Subir a Velocidade do Disparo com Segurança
+              <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+                <Radio className="size-4 text-primary" />
+                Por número na janela
               </CardTitle>
-              <CardDescription className="text-xs text-muted-foreground mt-0.5">
-                Guia operacional para calibração de concorrência e capacidade sem sobrecarregar a Meta ou o servidor.
+              <CardDescription className="mt-0.5 text-xs text-muted-foreground">
+                Soma dos ciclos do motor por número: envios, falhas, adiados, pico em voo e freios.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4 text-xs text-foreground/90 leading-relaxed">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Princípio de funcionamento */}
-                <div className="space-y-2 rounded-lg border border-border/80 bg-card p-3.5">
-                  <h4 className="font-semibold text-foreground text-sm flex items-center gap-1.5">
-                    <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-                      1
-                    </span>
-                    Concorrência Cooperativa (Por Número e Global)
-                  </h4>
-                  <p className="text-muted-foreground">
-                    O motor utiliza dois tetos em conjunto:
-                  </p>
-                  <ul className="list-disc list-inside space-y-1 text-muted-foreground pl-1">
-                    <li>
-                      <strong className="text-foreground">Teto por número (<code>max_in_flight</code>):</strong> configurado na tabela <code>wacrm.dispatch_channel_limits</code> ou na variável <code>DISPARADOR_PER_NUMBER_CONCURRENCY_META</code>.
-                    </li>
-                    <li>
-                      <strong className="text-foreground">Teto global do servidor:</strong> definido na variável <code>DISPATCH_PROCESS_CONCURRENCY</code> (limite máximo de mensagens simultâneas em voo no processo).
-                    </li>
-                  </ul>
-                  <p className="text-muted-foreground">
-                    <strong>Regra de ouro:</strong> Suba <code>max_in_flight</code> do número e <code>DISPATCH_PROCESS_CONCURRENCY</code> <em>juntos</em>. Não adianta aumentar apenas o global se o canal estiver limitado a 12, nem o canal se o processo não tiver vagas globais.
-                  </p>
-                </div>
-
-                {/* Subir um degrau por vez */}
-                <div className="space-y-2 rounded-lg border border-border/80 bg-card p-3.5">
-                  <h4 className="font-semibold text-foreground text-sm flex items-center gap-1.5">
-                    <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-                      2
-                    </span>
-                    Suba um Degrau por Vez e Observe
-                  </h4>
-                  <p className="text-muted-foreground">
-                    Ajuste os valores gradualmente e acompanhe este painel por pelo menos 15 a 30 minutos em horário de pico comercial:
-                  </p>
-                  <div className="space-y-1.5 text-muted-foreground">
-                    <div className="rounded border border-border/60 bg-muted/30 p-2 font-mono text-[11px]">
-                      • <strong>Degrau 1 (Padrão seguro):</strong> Concorrência 12 · Tick 35s → ~480 env/min por número
-                    </div>
-                    <div className="rounded border border-border/60 bg-muted/30 p-2 font-mono text-[11px]">
-                      • <strong>Degrau 2 (Aceleração):</strong> Concorrência 18 · Tick 40s → ~800 a 950 env/min por número
-                    </div>
-                    <div className="rounded border border-border/60 bg-muted/30 p-2 font-mono text-[11px]">
-                      • <strong>Degrau 3 (Alto volume):</strong> Concorrência 24 · Tick 45s (<code>DISPARADOR_TICK_BUDGET_MS=45000</code>) → ~1.100 a 1.250 env/min por número
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Indicadores de estabilidade e quando recuar */}
-              <div className="rounded-lg border border-border/80 bg-card p-3.5 space-y-2">
-                <h4 className="font-semibold text-foreground text-sm flex items-center gap-1.5">
-                  <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-                    3
-                  </span>
-                  Quando Voltar Imediatamente ao Degrau Anterior
-                </h4>
-                <p className="text-muted-foreground">
-                  Se qualquer um dos seguintes sintomas ocorrer na tabela acima, <strong>reduza a concorrência imediatamente</strong>:
+            <CardContent className="overflow-x-auto px-0 sm:px-6">
+              {channelStats.length === 0 ? (
+                <p className="px-6 py-6 text-center text-sm text-muted-foreground">Nenhum envio por número na janela.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Número</TableHead>
+                      <TableHead className="text-right">Enviados</TableHead>
+                      <TableHead className="text-right">Falhas</TableHead>
+                      <TableHead className="text-right">Adiados</TableHead>
+                      <TableHead className="text-right">Pico em voo</TableHead>
+                      <TableHead className="text-right">Vagas (início → menor)</TableHead>
+                      <TableHead className="text-right">Ciclos com freio</TableHead>
+                      <TableHead className="text-right">Ciclos em cooldown</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {channelStats.map((c) => (
+                      <TableRow key={c.id}>
+                        <TableCell>
+                          <div className="font-medium">{c.label}</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            {c.provider === "meta" ? "API oficial (Meta)" : c.provider === "waha" ? "WAHA" : "—"} · {c.ticks} {c.ticks === 1 ? "ciclo" : "ciclos"}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums font-semibold">{formatInt(c.sent)}</TableCell>
+                        <TableCell className={cn("text-right tabular-nums", c.failed > 0 && "text-amber-700 dark:text-amber-300")}>{formatInt(c.failed)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatInt(c.deferred)}</TableCell>
+                        <TableCell className="text-right tabular-nums">{formatInt(c.peakInFlight)}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {c.concurrencyStart ?? "—"} → {c.concurrencyEndMin ?? "—"}
+                        </TableCell>
+                        <TableCell className={cn("text-right tabular-nums", c.brakeTicks > 0 && "font-semibold text-rose-700 dark:text-rose-300")}>{formatInt(c.brakeTicks)}</TableCell>
+                        <TableCell className={cn("text-right tabular-nums", c.cooldownTicks > 0 && "font-semibold text-rose-700 dark:text-rose-300")}>{formatInt(c.cooldownTicks)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              {truncated && (truncated.ticks || truncated.throughput) && (
+                <p className="px-6 pt-3 text-[11px] text-amber-700 dark:text-amber-300">
+                  A janela é maior que o limite de leitura: os dados mais antigos foram omitidos (os mais recentes estão completos).
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
-                  <div className="rounded border border-rose-500/30 bg-rose-500/5 p-2.5">
-                    <strong className="text-rose-700 dark:text-rose-400 block font-semibold mb-1">
-                      1. Freio Acionado (Backoff)
-                    </strong>
-                    <span className="text-muted-foreground text-[11px]">
-                      O código cortou a concorrência pela metade para se proteger de timeout ou lentidão.
-                    </span>
-                  </div>
-
-                  <div className="rounded border border-rose-500/30 bg-rose-500/5 p-2.5">
-                    <strong className="text-rose-700 dark:text-rose-400 block font-semibold mb-1">
-                      2. Erros 429 / 131048 / 131056
-                    </strong>
-                    <span className="text-muted-foreground text-[11px]">
-                      A Meta atingiu o limite de taxa do número ou da WABA. Reduza o ritmo antes de sofrer bloqueio.
-                    </span>
-                  </div>
-
-                  <div className="rounded border border-amber-500/30 bg-amber-500/5 p-2.5">
-                    <strong className="text-amber-700 dark:text-amber-400 block font-semibold mb-1">
-                      3. Event Loop Lag &gt; 100 ms
-                    </strong>
-                    <span className="text-muted-foreground text-[11px]">
-                      O Node.js está sobrecarregado processando a fila, impactando a navegação do CRM.
-                    </span>
-                  </div>
-
-                  <div className="rounded border border-amber-500/30 bg-amber-500/5 p-2.5">
-                    <strong className="text-amber-700 dark:text-amber-400 block font-semibold mb-1">
-                      4. Memória RSS &gt; 600 MB
-                    </strong>
-                    <span className="text-muted-foreground text-[11px]">
-                      Consumo de memória se aproximando do limite do container (1.024 MB).
-                    </span>
-                  </div>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
+
+          {/* 5. CAPACIDADE: TETO TEÓRICO × REAL (calculado dos limites e da latência atuais) */}
+          {capacity && (
+            <Card className="border-primary/20 bg-primary/[0.02] shadow-sm">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+                  <Zap className="size-4 text-primary" />
+                  Capacidade: teto teórico × real
+                </CardTitle>
+                <CardDescription className="mt-0.5 text-xs text-muted-foreground">
+                  Calculado agora com as vagas e a latência medidas pelo motor — não é uma tabela fixa.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-xs">
+                <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <dt className="text-muted-foreground">Teto teórico por número</dt>
+                    <dd className="mt-1 text-lg font-bold tabular-nums">
+                      {capacity.theoreticalPerMinPerNumber ? `${formatInt(capacity.theoreticalPerMinPerNumber)}/min` : "—"}
+                    </dd>
+                    <dd className="text-[11px] text-muted-foreground">
+                      {capacity.slotsPerNumber ?? "?"} vagas ÷ {capacity.latencySeconds.toLocaleString("pt-BR")} s × {capacity.budgetSeconds} s do ciclo
+                    </dd>
+                  </div>
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <dt className="text-muted-foreground">Real: média / pico</dt>
+                    <dd className="mt-1 text-lg font-bold tabular-nums">
+                      {formatInt(capacity.realAvgPerMin)} / {formatInt(capacity.realPeakPerMin)}
+                    </dd>
+                    <dd className="text-[11px] text-muted-foreground">envios por minuto, todos os números</dd>
+                  </div>
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <dt className="text-muted-foreground">Uso do teto (número mais ativo)</dt>
+                    <dd className="mt-1 text-lg font-bold tabular-nums">{capacity.utilizationPct != null ? `${capacity.utilizationPct}%` : "—"}</dd>
+                    <dd className="text-[11px] text-muted-foreground">perto de 100% = falta vaga, não demanda</dd>
+                  </div>
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <dt className="text-muted-foreground">Vagas para 80 envios/s</dt>
+                    <dd className="mt-1 text-lg font-bold tabular-nums">{capacity.slotsFor80PerSecond ?? "—"}</dd>
+                    <dd className="text-[11px] text-muted-foreground">
+                      por número, com esta latência e o tempo ativo do ciclo
+                    </dd>
+                  </div>
+                </dl>
+                {capacity.above50SlotCap && (
+                  <div className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-amber-900 dark:text-amber-200">
+                    <Info className="mt-0.5 size-4 shrink-0" />
+                    <p>
+                      80 envios/s por número exige mais de 50 vagas, e hoje o limite do sistema é de 50 vagas por número e 50 no total. Para chegar lá
+                      é preciso elevar esses limites e encadear os ciclos do motor (etapa de capacidade do plano); subir só a configuração não basta.
+                    </p>
+                  </div>
+                )}
+                <p className="text-muted-foreground">
+                  Suba a velocidade em degraus e confira este painel por 15–30 min em horário de pico. Volte um degrau se aparecerem freios, erros de limite
+                  da Meta (429, 130429, 131048, 131056), lag do servidor acima de 100 ms ou memória acima de 600 MB.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </div>

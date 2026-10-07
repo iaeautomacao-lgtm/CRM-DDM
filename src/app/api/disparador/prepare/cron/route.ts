@@ -22,7 +22,8 @@ import { prepareDueCampaigns, recoverStuckPreparing } from "@/lib/disparador/pre
 export const maxDuration = 300;
 
 const LOCK_NAME = "disparador_prepare";
-const LOCK_TTL_SECONDS = 600;
+// TTL curto: o heartbeat (renew_cron_lock, 20 s) mantém o lock durante o preparo; crash libera em ~1,5 min (migration 184).
+const LOCK_TTL_SECONDS = 90;
 const DEFAULT_BUDGET_MS = 240_000;
 
 function budgetMs(): number {
