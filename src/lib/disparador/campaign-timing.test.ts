@@ -45,7 +45,7 @@ describe("computeCampaignTiming", () => {
     });
 
     expect(result.active_seconds).toBe(2 * HOUR);
-    expect(result.paused_seconds).toBe(2 * HOUR); // qua 17–18 + qui 13–14
+    expect(result.paused_seconds).toBe(21 * HOUR); // pausa corrida, incluindo a noite
     expect(result.wall_clock_seconds).toBe(23 * HOUR);
     expect(result.pause_count).toBe(1);
   });
