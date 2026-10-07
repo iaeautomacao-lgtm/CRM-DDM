@@ -33,6 +33,7 @@ import { needsQueueReflow, reflowCampaignQueue } from "@/lib/disparador/queue-re
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { autoPauseConfigFromEnv, checkCampaignAutoPause } from "@/lib/disparador/auto-pause";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
+import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -296,6 +297,29 @@ export async function POST(request: Request) {
     const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 100 });
     if (receiptsError) throw receiptsError;
     await drainCallbackOutbox(1);
+    // Watchdog anti-deadlock. É manutenção best-effort: falha aqui nunca
+    // derruba o tick nem impede novos envios.
+    try {
+      const recovered = await recoverStaleSendingReservations(db);
+      if (recovered.recoveredAccepted > 0 || recovered.finalizedUnknown > 0 || recovered.failed > 0) {
+        for (const campaignId of recovered.campaignIds) {
+          const { error: completeError } = await db.rpc("complete_dispatch_campaign", {
+            p_campaign_id: campaignId,
+          });
+          if (completeError)
+            console.error("[Cron] Watchdog: falha ao tentar finalizar campanha:", campaignId, completeError.message);
+        }
+        await writeLog({
+          level: recovered.failed > 0 ? "warn" : "info",
+          source: "disparador",
+          event: "dispatch_stale_sending_recovered",
+          message: "Watchdog liberou reservas antigas sem reenviar",
+          payload: recovered,
+        });
+      }
+    } catch (watchdogError) {
+      console.error("[Cron] Watchdog falhou; envio continua:", watchdogError);
+    }
     // Preflight de deploy: se a coluna next_batch_at (migration 118) não
     // existir, o código novo subiu sem as migrations. Para aqui, antes de
     // qualquer preparação de campanha ou envio externo.

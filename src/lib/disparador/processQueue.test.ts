@@ -169,22 +169,23 @@ describe('queue provider outcomes', () => {
       )
     ).toBe(false);
   });
-  it('quarantines an unknown transport outcome instead of scheduling another POST', async () => {
+  it('terminaliza resultado de transporte desconhecido sem reenviar nem prender a vaga', async () => {
     mocks.send.mockRejectedValue(new TypeError('connection lost after POST'));
     expect(
       await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
     ).toMatchObject({
-      outcome: 'pending_confirmation',
-      reason: 'provider_outcome_unknown',
+      outcome: 'error',
+      error: expect.stringMatching(/sem reenvio/),
     });
     expect(
       mocks.updates.some(
-        (update) => update.status === 'agendado' || update.status === 'erro'
+        (update) => update.status === 'erro' && update.erro_permanente === true
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       mocks.rpc.mock.calls.some(([name]) => name === 'mark_queue_item_sent' || name === 'confirm_dispatch_item_sent')
     ).toBe(false);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 });
 
