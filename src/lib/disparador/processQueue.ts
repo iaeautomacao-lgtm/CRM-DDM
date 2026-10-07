@@ -79,9 +79,10 @@ export interface Campaign {
 // - sent: provedor aceitou e a confirmação local foi gravada.
 // - deferred: item reagendado (fora da janela, telefone alternativo...).
 // - blocked: contato na blacklist; não haverá envio.
-// - pending_confirmation: o item fica em 'enviando' para reconciliação
-//   manual — o provedor PODE ter recebido a mensagem (timeout/5xx) ou
-//   aceitou mas a gravação local falhou. Nunca é reenfileirado sozinho.
+// - pending_confirmation: reservado só para aceite confirmado pelo
+//   provedor cuja gravação local falhou (há message id para reconciliar).
+// - timeout/5xx/rede sem message id viram erro terminal inconclusivo:
+//   nunca são reenviados e nunca ocupam max_in_flight indefinidamente.
 // - error: rejeição comprovada do provedor ou falha antes do envio.
 export type ProcessResult =
   | { outcome: "sent"; messageId: string }
@@ -737,25 +738,21 @@ export async function processQueueItem(
       const { reason, code } = classifyProviderError(sendErr);
       observe(options, { provider, latencyMs: Date.now() - providerStartedAt, ok: false, signal: reason, code });
     }
-    // Timeout, erro de rede ou 5xx NÃO provam que o POST foi rejeitado — o
-    // provedor pode ter entregue a mensagem. Mantém o item em 'enviando'
-    // (reservado) e só anota o motivo: um segundo POST automático poderia
-    // duplicar o envio. Rejeições explícitas (Meta/WAHA 4xx, falha antes do
-    // envio) seguem para o erro/retry abaixo — ver isDefinitiveRejection.
+    // Timeout, erro de rede ou 5xx não provam se o POST foi aceito.
+    // Deixar isso em enviando consome max_in_flight e pode paralisar o
+    // número inteiro. Também não podemos reenviar, pois pode duplicar.
+    // Resultado: terminaliza como erro permanente sem retry e libera a vaga.
     if (!isDefinitiveRejection(sendErr)) {
-      const { error } = await supabaseAdmin()
-        .from("disp_message_queue")
-        .update({
-          erro: "Resultado externo desconhecido; requer reconciliação antes de reenviar",
-        })
-        .eq("id", item.id)
-        .eq("status", "enviando");
-      if (error)
-        console.error("[Disparador] Falha ao registrar resultado desconhecido:", error.message);
-      return {
-        outcome: "pending_confirmation",
-        reason: "provider_outcome_unknown",
-      };
+      const message =
+        "Resultado externo não confirmado; encerrado sem reenvio para evitar duplicidade";
+      await markQueueError(
+        item.id,
+        message,
+        true,
+        item.campaign_id,
+        tentativasAtuais + 1,
+      );
+      return { outcome: "error", error: message };
     }
     if (sendErr instanceof MetaApiError) {
       console.error(
