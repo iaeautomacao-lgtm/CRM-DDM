@@ -1,32 +1,19 @@
 ﻿import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { getWahaProfilePicture } from '@/lib/whatsapp/waha-api'
 
+// Teto por chamada (200 ms por contato): quem tem mais contatos chama de novo.
+const MAX_CONTACTS_PER_RUN = 500
+
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-
-  if (!profile?.account_id) {
-    return NextResponse.json({ error: 'Account not found' }, { status: 403 })
-  }
+  // Laço de 200 ms por contato com a chave WAHA da conta: só admin.
+  const auth = await guardRole('admin')
+  if (!auth.ok) return auth.response
+  const account_id = auth.ctx.accountId
 
   const db = supabaseAdmin()
-  const account_id = profile.account_id
 
   const { data: config, error: configError } = await db
     .from('whatsapp_config')
@@ -43,6 +30,7 @@ export async function POST(request: Request) {
     .select('id, phone')
     .eq('account_id', account_id)
     .or('avatar_url.is.null,avatar_url.eq.')
+    .limit(MAX_CONTACTS_PER_RUN)
 
   if (contactsError || !contacts) {
     return NextResponse.json({ error: 'Failed to fetch contacts' }, { status: 500 })

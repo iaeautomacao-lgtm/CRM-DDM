@@ -1,34 +1,33 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
+/** Remove da resposta tudo que parece segredo (token, chave, senha). */
+function stripSecrets(row: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(row).filter(([k]) => !/secret|token|key|password/i.test(k)),
+  )
+}
+
 export async function GET() {
-  // Debug-only introspection route — never expose it in production.
-  if (process.env.NODE_ENV === 'production') {
+  // Introspecção de debug: desligada por padrão em QUALQUER ambiente (antes
+  // dependia só de NODE_ENV e, fora de produção, entregava contatos e
+  // conversas a qualquer papel). Só liga com a flag explícita abaixo.
+  if (process.env.ENABLE_DEBUG_DB !== '1') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
   try {
-    const supabase = await createClient()
+    const auth = await guardRole('owner')
+    if (!auth.ok) return auth.response
+    const { supabase, userId, accountId } = auth.ctx
     const admin = supabaseAdmin()
 
-    // 1. Get authenticated user
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated in browser session' }, { status: 401 })
-    }
-
-    // 2. Get user profile
     const { data: profile } = await supabase
       .from('profiles')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .maybeSingle()
-
-    const accountId = profile?.account_id
-    if (!accountId) {
-      return NextResponse.json({ error: 'Profile has no account_id' }, { status: 400 })
-    }
 
     // 3. Count tables using admin (bypassing RLS), scoped to the caller's account
     const { count: contactsCount } = await admin.from('contacts').select('*', { count: 'exact', head: true }).eq('account_id', accountId)
@@ -54,8 +53,7 @@ export async function GET() {
 
     return NextResponse.json({
       auth: {
-        userId: user.id,
-        email: user.email,
+        userId,
         profileAccountId: profile?.account_id,
         profileRole: profile?.account_role
       },
@@ -65,11 +63,12 @@ export async function GET() {
         messages: msgsCount,
         whatsapp_config: configCount
       },
-      configs: configs || [],
+      configs: (configs || []).map(stripSecrets),
       conversations: conversations || [],
       contacts: contacts || []
     })
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 })
+    console.error('[debug-db] erro:', err)
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
   }
 }

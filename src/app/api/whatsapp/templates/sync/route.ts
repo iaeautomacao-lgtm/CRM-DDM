@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
+import type { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
 import {
@@ -129,31 +130,11 @@ function extractSampleValues(
 
 export async function POST() {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Resolve the caller's account_id — both whatsapp_config and
-    // the message_templates we sync into are account-scoped.
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
-        { status: 403 },
-      )
-    }
+    // Templates/canais mexem no WABA da conta (Meta) ou no número conectado: só admin
+    // (mesmo papel das páginas /templates e /canais).
+    const auth = await guardRole('admin')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId } = auth.ctx
 
     // Todos os canais Meta habilitados da conta, agrupados por WABA: cada
     // WABA tem o próprio catálogo de templates. Antes só o canal mais
@@ -215,7 +196,7 @@ export async function POST() {
 
       for (const t of fetched.templates) {
         syncedKeys.add(templateKey(t.name, t.language))
-        const result = await upsertSyncedTemplate(supabase, accountId, user.id, wabaId, t)
+        const result = await upsertSyncedTemplate(supabase, accountId, auth.ctx.userId, wabaId, t)
         if (result === 'inserted') inserted++
         else if (result === 'updated') updated++
         else errors.push({ name: t.name, language: t.language, message: result.error })

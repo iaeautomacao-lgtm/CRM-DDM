@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import * as Papa from "papaparse";
 import * as XLSX from "xlsx";
@@ -17,15 +18,39 @@ import {
   importPhoneKey,
   writeInBatches,
 } from "@/lib/disparador/import-dedupe";
+import { processWithConcurrency } from "@/lib/disparador/concurrency";
+import { contactLookupDigits, IMPORT_SERVER_MAX_ROWS, sliceInto } from "@/lib/disparador/import-chunks";
 import { writeLog } from "@/lib/logger";
+
+// Lotes de escrita (um import de 100 mil linhas fazia ~2.700 idas ao banco:
+// contatos de 50 em 50, VARs de 100 em 100). Até WRITE_CONCURRENCY lotes
+// gravam ao mesmo tempo.
+const CONTACT_INSERT_CHUNK = 500;
+const CONTACT_FALLBACK_CHUNK = 50;
+const BULK_WRITE_CHUNK = 1000;
+const WRITE_CONCURRENCY = 3;
+// Consultas .in() de contatos existentes: valores curtos (dígitos/CPF), 200
+// por consulta cabem na URL com folga.
+const LOOKUP_IN_CHUNK = 200;
+const LOOKUP_CONCURRENCY = 6;
+const BACKFILL_CONCURRENCY = 10;
 
 // Looks up a value in `row` by trying each of `keys` against the row's
 // keys lowercased/trimmed, so CSV/XLSX headers can vary in case, spacing,
 // or naming (e.g. "Telefone", "celular", "whatsapp") without breaking import.
+//
+// O mapa de cabeçalhos normalizados é montado uma vez por linha (cache por
+// objeto) — antes era refeito a cada getField, ~15 vezes por linha.
+const normalizedRowCache = new WeakMap<object, Record<string, any>>();
+
 function getField(row: Record<string, any>, ...keys: string[]): string | undefined {
-  const normalizedRow: Record<string, any> = {};
-  for (const rawKey of Object.keys(row)) {
-    normalizedRow[rawKey.trim().toLowerCase()] = row[rawKey];
+  let normalizedRow = normalizedRowCache.get(row);
+  if (!normalizedRow) {
+    normalizedRow = {};
+    for (const rawKey of Object.keys(row)) {
+      normalizedRow[rawKey.trim().toLowerCase()] = row[rawKey];
+    }
+    normalizedRowCache.set(row, normalizedRow);
   }
   for (const key of keys) {
     const value = normalizedRow[key.toLowerCase()];
@@ -34,6 +59,22 @@ function getField(row: Record<string, any>, ...keys: string[]): string | undefin
     }
   }
   return undefined;
+}
+
+// Blacklist em cache curto no processo: um import em blocos manda dezenas
+// de requisições seguidas, e recarregar a lista inteira (paginada) a cada
+// uma custaria mais que o resto do bloco. 60 s de defasagem não importa
+// aqui — startCampaign confere a blacklist de novo ao iniciar a campanha.
+const BLACKLIST_CACHE_TTL_MS = 60_000;
+let blacklistCache: { keys: Set<string>; at: number } | null = null;
+
+async function getBlacklistKeys(): Promise<Set<string>> {
+  if (blacklistCache && Date.now() - blacklistCache.at < BLACKLIST_CACHE_TTL_MS) {
+    return blacklistCache.keys;
+  }
+  const keys = await loadBlacklistKeySet(supabaseAdmin());
+  blacklistCache = { keys, at: Date.now() };
+  return keys;
 }
 
 // column_map opcional enviado pelo wizard (Step 2 do campanhas/page.tsx) —
@@ -103,35 +144,69 @@ function normalizeCpf(raw: string | undefined): string | null {
   return digits.length === 11 ? digits : null;
 }
 
+const MAX_IMPORT_FILE_BYTES = 20 * 1024 * 1024;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function POST(request: Request) {
   try {
-    // 1. Authenticate user and resolve their account
-    const supabase = await createServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    // 1. Sessão + conta + papel (mesmo das rotas de campanha). Antes só
+    // exigia login: qualquer papel importava contatos e mexia em vínculos.
+    let accountId: string;
+    let userId: string;
+    try {
+      ({ accountId, userId } = await requireDisparadorAccess());
+    } catch (err) {
+      return toErrorResponse(err);
     }
 
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("account_id")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    const accountId = profile?.account_id;
-    if (!accountId) {
+    // 2. Parse da requisição. Dois formatos:
+    //   - JSON (assistente "Nova campanha"): { rows, chunk_index, ... } — um
+    //     bloco de linhas já lidas no navegador; o corpo fica bem abaixo do
+    //     limite do middleware (10 MB) mesmo para bases de 100 mil linhas.
+    //   - FormData com o arquivo (tela de contatos do disparador): a base
+    //     inteira numa requisição só.
+    const isJsonBody = (request.headers.get("content-type") ?? "").includes("application/json");
+    let jsonBody: Record<string, any> | null = null;
+    let formData: FormData;
+    let file: File | null = null;
+    if (isJsonBody) {
+      try {
+        jsonBody = await request.json();
+      } catch {
+        return NextResponse.json({ error: "Corpo da requisição inválido." }, { status: 400 });
+      }
+      if (!jsonBody || !Array.isArray(jsonBody.rows)) {
+        return NextResponse.json({ error: "Nenhuma linha enviada" }, { status: 400 });
+      }
+      if (jsonBody.rows.length > IMPORT_SERVER_MAX_ROWS) {
+        return NextResponse.json(
+          { error: `Bloco grande demais (máximo ${IMPORT_SERVER_MAX_ROWS} linhas por requisição).` },
+          { status: 400 }
+        );
+      }
+      formData = new FormData();
+      for (const field of ["campaign_id", "draft_id", "column_map", "mapping_confirmed"] as const) {
+        const v = jsonBody[field];
+        if (v !== undefined && v !== null) {
+          formData.set(field, typeof v === "string" ? v : JSON.stringify(v));
+        }
+      }
+    } else {
+      formData = await request.formData();
+      file = formData.get("file") as File | null;
+      if (!file) {
+        return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 });
+      }
+    }
+    if (file && file.size > MAX_IMPORT_FILE_BYTES) {
       return NextResponse.json(
-        { error: "Seu perfil não está vinculado a uma conta." },
-        { status: 400 }
+        { error: "Arquivo muito grande (máximo de 20 MB)." },
+        { status: 413 }
       );
     }
-
-    // 2. Parse request FormData
-    const formData = await request.formData();
-    const file = formData.get("file") as File | null;
-    if (!file) {
-      return NextResponse.json({ error: "Nenhum arquivo enviado" }, { status: 400 });
-    }
+    // Só o primeiro bloco limpa o vínculo anterior do rascunho/campanha; os
+    // seguintes apenas acrescentam. Sem chunk_index (FormData) = bloco único.
+    const chunkIndex = isJsonBody ? Math.max(0, Math.floor(Number(jsonBody?.chunk_index ?? 0)) || 0) : 0;
     // campaign_id só vem preenchido quando o import acontece numa edição
     // de campanha já existente; draft_id cobre a criação de campanha nova
     // (import roda no Step 2 do wizard, antes do insert em wacrm.campaigns
@@ -140,6 +215,25 @@ export async function POST(request: Request) {
     // aqui depende disso pra continuar funcionando se vier vazio.
     const campaignIdRaw = (formData.get("campaign_id") as string | null)?.trim() || null;
     const draftIdRaw = (formData.get("draft_id") as string | null)?.trim() || null;
+    if (
+      (campaignIdRaw && !UUID_RE.test(campaignIdRaw)) ||
+      (draftIdRaw && !UUID_RE.test(draftIdRaw))
+    ) {
+      return NextResponse.json({ error: "Identificador inválido." }, { status: 400 });
+    }
+    // campaign_id vem do cliente: a campanha precisa ser desta conta (outra
+    // conta → 404) antes de qualquer escrita com service role.
+    if (campaignIdRaw) {
+      const { data: ownCampaign } = await supabaseAdmin()
+        .from("campaigns")
+        .select("id")
+        .eq("id", campaignIdRaw)
+        .eq("account_id", accountId)
+        .limit(1);
+      if (!ownCampaign || ownCampaign.length === 0) {
+        return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
+      }
+    }
 
     // column_map (Correção 3) — JSON opcional { name, phone, cpf, var1,
     // var2, var3 } vindo do sub-step de mapeamento do wizard. JSON
@@ -174,11 +268,17 @@ export async function POST(request: Request) {
       }
     }
 
-    const filename = file.name.toLowerCase();
-    const buffer = Buffer.from(await file.arrayBuffer());
+    const filename = file?.name.toLowerCase() ?? "";
     let rows: any[] = [];
 
-    if (filename.endsWith(".csv") || filename.endsWith(".txt")) {
+    if (jsonBody) {
+      // Linhas já lidas pelo assistente (objetos cabeçalho → valor). Valores
+      // não-texto viram texto aqui, igual ao que o parse do arquivo daria.
+      rows = (jsonBody.rows as unknown[])
+        .filter((r): r is Record<string, unknown> => !!r && typeof r === "object" && !Array.isArray(r))
+        .map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v == null ? "" : String(v)])));
+    } else if (filename.endsWith(".csv") || filename.endsWith(".txt")) {
+      const buffer = Buffer.from(await file!.arrayBuffer());
       // Decode content removing BOM (\uFEFF)
       let content = buffer.toString("utf-8").replace(/^\uFEFF/, "");
 
@@ -221,12 +321,16 @@ export async function POST(request: Request) {
               .map((header, index) => [header, values[index] ?? ""]))
           );
     } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
+      const buffer = Buffer.from(await file!.arrayBuffer());
       const workbook = XLSX.read(buffer, { type: "buffer" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      // raw:false + defval:"" — todas as células viram texto (como no
+      // navegador). Com raw:true, telefone/CPF numérico chegava como number
+      // e quebrava o .replace() mais abaixo (TypeError → 500).
       if (hasHeader) {
-        rows = XLSX.utils.sheet_to_json(sheet);
+        rows = XLSX.utils.sheet_to_json(sheet, { raw: false, defval: "" });
       } else {
-        const values = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: "" });
+        const values = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1, defval: "", raw: false });
         rows = values.map((row) =>
           Object.fromEntries((columnHeaders.length > 0 ? columnHeaders : row.map((_, i) => `coluna_${i + 1}`))
             .map((header, index) => [header, row[index] ?? ""]))
@@ -236,7 +340,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Formato de arquivo inválido. Envie um CSV ou XLSX." }, { status: 400 });
     }
 
-    if (mappingConfirmed) {
+    if (mappingConfirmed && chunkIndex === 0) {
       const hasResolvedContact = rows.some((row) => resolveField(row, columnMap.phone, [])?.trim());
       if (!hasResolvedContact) {
         return NextResponse.json(
@@ -263,7 +367,7 @@ export async function POST(request: Request) {
     // single shared list across every account on this instance, not scoped
     // per-tenant. Left unfiltered here; scoping it requires a migration.
     // Paginada (loadBlacklistKeySet) — antes parava em 1000 linhas.
-    const blacklistSet = await loadBlacklistKeySet(supabaseAdmin());
+    const blacklistSet = await getBlacklistKeys();
 
     // Existing contacts for this account, keyed by normalized phone. Used
     // instead of a DB-level upsert because the real unique constraint,
@@ -272,25 +376,43 @@ export async function POST(request: Request) {
     // arbiter from a bare column list — the same reason the main contacts
     // CSV importer (import-modal.tsx) pre-checks and inserts rather than
     // upserts.
-    // Paginado via .range() — mesmo padrão de startCampaign.ts (contact_tags)
-    // — sem isso, o cap de resposta do PostgREST (1000 linhas) trunca contas
-    // com mais de 1000 contatos, e o dedup abaixo não reconhece contatos
-    // fora da primeira página, criando duplicatas silenciosamente num reimport.
-    const existingRows: any[] = [];
+    // Em vez de carregar a conta inteira (100 mil contatos = 100+ páginas a
+    // cada bloco), busca só os contatos que podem coincidir com as linhas
+    // deste bloco: por phone_normalized (todas as formas do número, ver
+    // contactLookupDigits) e por CPF. Ambas as consultas são `.in()` em
+    // fatias curtas, indexadas, em paralelo. Erro de leitura lança — seguir
+    // sem os existentes criaria contatos duplicados.
+    const lookupDigits = new Set<string>();
+    const lookupCpfs = new Set<string>();
+    for (const row of rows) {
+      const rawPhone =
+        resolveField(row, columnMap.phone, TELEFONE1_KEYS) ||
+        getField(row, ...TELEFONE2_KEYS) ||
+        getField(row, ...TELEFONE3_KEYS);
+      if (rawPhone) {
+        const formatted = formatBrazilianPhone(rawPhone);
+        if (formatted) for (const d of contactLookupDigits(formatted)) lookupDigits.add(d);
+      }
+      const cpf = normalizeCpf(resolveField(row, columnMap.cpf, CPF_FIELD_KEYS));
+      if (cpf) lookupCpfs.add(cpf);
+    }
+    const existingById = new Map<string, any>();
     {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page } = await supabaseAdmin()
+      const lookups: Array<{ column: "phone_normalized" | "cpf"; values: string[] }> = [
+        ...sliceInto([...lookupDigits], LOOKUP_IN_CHUNK).map((values) => ({ column: "phone_normalized" as const, values })),
+        ...sliceInto([...lookupCpfs], LOOKUP_IN_CHUNK).map((values) => ({ column: "cpf" as const, values })),
+      ];
+      await processWithConcurrency(lookups, LOOKUP_CONCURRENCY, async ({ column, values }) => {
+        const { data, error } = await supabaseAdmin()
           .from("contacts")
           .select("id, name, phone_normalized, cpf")
           .eq("account_id", accountId)
-          .range(from, from + pageSize - 1);
-        existingRows.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
+          .in(column, values);
+        if (error) throw new Error(`Erro ao consultar contatos existentes: ${error.message}`);
+        for (const r of data ?? []) existingById.set(r.id, r);
+      });
     }
+    const existingRows: any[] = [...existingById.values()];
     type ExistingByPhone = {
       id: string;
       name: string | null;
@@ -365,6 +487,12 @@ export async function POST(request: Request) {
     const seenInFile = new Set<string>();
     const seenCpfInFile = new Set<string>();
     const seenContactIds = new Set<string>();
+    // Preenchimento de nome/CPF de contatos que já existiam: coletado no
+    // laço e gravado depois, em paralelo (antes: um UPDATE por linha, em
+    // série, dentro do laço — uma reimportação de 100 mil linhas levava
+    // horas). Só entram contatos que realmente precisam do preenchimento.
+    const nameBackfills: Array<{ id: string; name: string }> = [];
+    const cpfBackfills: Array<{ id: string; cpf: string }> = [];
 
     for (const row of rows) {
       // t2/t3 (telefones alternativos) não fazem parte dos campos do
@@ -473,28 +601,13 @@ export async function POST(request: Request) {
           (matched.name === matched.phone_normalized || /^\d{10,13}$/.test(matched.name));
         if (!matched.name || nomePareceTelefone) {
           const parsedName = resolveField(row, columnMap.name, NAME_FIELD_KEYS);
-          if (parsedName) {
-            const { error: updateErr } = await supabaseAdmin()
-              .from("contacts")
-              .update({ name: parsedName })
-              .eq("id", matched.id);
-            if (updateErr) {
-              console.error("[Contacts Import] Failed to backfill name:", updateErr);
-            }
-          }
+          if (parsedName) nameBackfills.push({ id: matched.id, name: parsedName });
         }
         // Backfill de CPF: só quando o contato foi encontrado por
         // telefone e ainda não tinha CPF gravado — se foi encontrado
         // por CPF, ele já tem exatamente esse CPF.
         if (!existingContact && cpfNormalized && !matched.cpf) {
-          const { error: cpfErr } = await supabaseAdmin()
-            .from("contacts")
-            .update({ cpf: cpfNormalized })
-            .eq("id", matched.id)
-            .is("cpf", null);
-          if (cpfErr) {
-            console.error("[Contacts Import] Failed to backfill cpf:", cpfErr);
-          }
+          cpfBackfills.push({ id: matched.id, cpf: cpfNormalized });
         }
         for (const alt of altPhones) {
           altPhoneAssignments.push({ contact_id: matched.id, ...alt });
@@ -533,98 +646,114 @@ export async function POST(request: Request) {
       });
     }
 
+    // 3b. Backfill dos contatos existentes (nome / CPF), em paralelo. Falha
+    // numa linha só é registrada — não derruba o import.
+    await processWithConcurrency(nameBackfills, BACKFILL_CONCURRENCY, async ({ id, name }) => {
+      const { error } = await supabaseAdmin().from("contacts").update({ name }).eq("id", id);
+      if (error) console.error("[Contacts Import] Failed to backfill name:", error);
+    });
+    await processWithConcurrency(cpfBackfills, BACKFILL_CONCURRENCY, async ({ id, cpf }) => {
+      const { error } = await supabaseAdmin().from("contacts").update({ cpf }).eq("id", id).is("cpf", null);
+      if (error) console.error("[Contacts Import] Failed to backfill cpf:", error);
+    });
+
     // 4. Resolve tag names -> ids up front, scoped to this account
     const allTagNames = pending.flatMap((p) => p.tagsArray);
     let tagIdByKey = new Map<string, string>();
     if (allTagNames.length > 0) {
       ({ tagIdByKey } = await resolveImportTagIds(supabaseAdmin(), {
         accountId,
-        userId: user.id,
+        userId: userId,
         tagNames: allTagNames,
         canCreateTags: true,
       }));
     }
 
-    // 5. Insert contacts in chunks; a chunk failure retries row-by-row so
-    // one bad/duplicate row doesn't sink the whole batch.
+    // 5. Insert contacts em blocos de 500, até 3 em paralelo. Um bloco com
+    // erro é refeito em fatias de 50 e, se ainda falhar, linha a linha — uma
+    // linha ruim/duplicada não derruba as outras.
     const tagAssignments: ContactTagAssignment[] = [];
-    const chunkSize = 50;
 
-    for (let i = 0; i < pending.length; i += chunkSize) {
-      const chunk = pending.slice(i, i + chunkSize);
-      const insertRows = chunk.map((p) => ({
-        user_id: user.id,
-        account_id: accountId,
-        phone: p.phone,
-        name: p.name,
-        email: p.email,
-        company: p.company,
-        cpf: p.cpf,
-      }));
+    const onInserted = (source: PendingContact, contactId: string) => {
+      results.importados++;
+      if (source.tagsArray.length > 0) {
+        tagAssignments.push({ contactId, tagNames: source.tagsArray });
+      }
+      for (const alt of source.altPhones) {
+        altPhoneAssignments.push({ contact_id: contactId, ...alt });
+      }
+      source.csvVars.forEach((v, idx) => {
+        if (v) csvVarAssignments.push({ contact_id: contactId, var_index: idx, value: v });
+      });
+      importedContactIds.add(contactId);
+    };
 
-      const { data, error } = await supabaseAdmin()
-        .from("contacts")
-        .insert(insertRows)
-        .select("id");
+    const toInsertRow = (p: PendingContact) => ({
+      user_id: userId,
+      account_id: accountId,
+      phone: p.phone,
+      name: p.name,
+      email: p.email,
+      company: p.company,
+      cpf: p.cpf,
+    });
 
-      if (error) {
-        for (let j = 0; j < insertRows.length; j++) {
-          const source = chunk[j];
-          const { data: singleData, error: singleErr } = await supabaseAdmin()
-            .from("contacts")
-            .insert(insertRows[j])
-            .select("id")
-            .single();
+    const insertOneByOne = async (chunk: PendingContact[]) => {
+      for (const source of chunk) {
+        const row = toInsertRow(source);
+        const { data: singleData, error: singleErr } = await supabaseAdmin()
+          .from("contacts")
+          .insert(row)
+          .select("id")
+          .single();
 
-          if (!singleErr && singleData) {
-            results.importados++;
-            if (source.tagsArray.length > 0) {
-              tagAssignments.push({ contactId: singleData.id, tagNames: source.tagsArray });
-            }
-            for (const alt of source.altPhones) {
-              altPhoneAssignments.push({ contact_id: singleData.id, ...alt });
-            }
-            source.csvVars.forEach((v, idx) => {
-              if (v) csvVarAssignments.push({ contact_id: singleData.id, var_index: idx, value: v });
-            });
-            importedContactIds.add(singleData.id);
-          } else if (isUniqueViolation(singleErr)) {
-            results.duplicados++;
-            // Já existia (corrida ou chave normalizada diferente): continua
-            // sendo um contato do CSV, então entra no vínculo do import.
-            const digits = String(insertRows[j]?.phone ?? "").replace(/\D/g, "");
-            if (digits) {
-              const { data: existing } = await supabaseAdmin()
-                .from("contacts")
-                .select("id")
-                .eq("account_id", accountId)
-                .eq("phone_normalized", digits)
-                .limit(1);
-              if (existing?.[0]?.id) importedContactIds.add(existing[0].id);
-            }
-          } else {
-            results.erros.push(`${source.phone}: ${singleErr?.message}`);
+        if (!singleErr && singleData) {
+          onInserted(source, singleData.id);
+        } else if (isUniqueViolation(singleErr)) {
+          results.duplicados++;
+          // Já existia (corrida ou chave normalizada diferente): continua
+          // sendo um contato do CSV, então entra no vínculo do import.
+          const digits = String(row.phone ?? "").replace(/\D/g, "");
+          if (digits) {
+            const { data: existing } = await supabaseAdmin()
+              .from("contacts")
+              .select("id")
+              .eq("account_id", accountId)
+              .eq("phone_normalized", digits)
+              .limit(1);
+            if (existing?.[0]?.id) importedContactIds.add(existing[0].id);
           }
-        }
-      } else {
-        const inserted = data ?? [];
-        results.importados += inserted.length;
-        for (let j = 0; j < inserted.length; j++) {
-          const source = chunk[j];
-          if (!source) continue;
-          if (source.tagsArray.length > 0) {
-            tagAssignments.push({ contactId: inserted[j].id, tagNames: source.tagsArray });
-          }
-          for (const alt of source.altPhones) {
-            altPhoneAssignments.push({ contact_id: inserted[j].id, ...alt });
-          }
-          source.csvVars.forEach((v, idx) => {
-            if (v) csvVarAssignments.push({ contact_id: inserted[j].id, var_index: idx, value: v });
-          });
-          importedContactIds.add(inserted[j].id);
+        } else {
+          results.erros.push(`${source.phone}: ${singleErr?.message}`);
         }
       }
-    }
+    };
+
+    const insertChunk = async (chunk: PendingContact[], canSplit: boolean): Promise<void> => {
+      const { data, error } = await supabaseAdmin()
+        .from("contacts")
+        .insert(chunk.map(toInsertRow))
+        .select("id");
+      if (!error) {
+        const inserted = data ?? [];
+        for (let j = 0; j < inserted.length; j++) {
+          const source = chunk[j];
+          if (source) onInserted(source, inserted[j].id);
+        }
+        return;
+      }
+      if (canSplit && chunk.length > CONTACT_FALLBACK_CHUNK) {
+        for (const slice of sliceInto(chunk, CONTACT_FALLBACK_CHUNK)) await insertChunk(slice, false);
+        return;
+      }
+      await insertOneByOne(chunk);
+    };
+
+    await processWithConcurrency(
+      sliceInto(pending, CONTACT_INSERT_CHUNK),
+      WRITE_CONCURRENCY,
+      (chunk) => insertChunk(chunk, true)
+    );
 
     // 6. Wire tags onto the contacts we just created. Failure here must not
     // mask a successful contact import.
@@ -646,13 +775,14 @@ export async function POST(request: Request) {
     if (altPhoneAssignments.length > 0) {
       const altSummary = await writeInBatches(
         dedupeAltPhoneAssignments(altPhoneAssignments),
-        100,
+        BULK_WRITE_CHUNK,
         async (chunk) => {
           const { error: altErr } = await supabaseAdmin()
             .from("contact_phones")
             .upsert(chunk, { onConflict: "contact_id,ordem" });
           return altErr;
-        }
+        },
+        WRITE_CONCURRENCY
       );
       if (altSummary.failedBatches > 0) {
         console.error("[Contacts Import] Failed to save alternate phones:", altSummary.firstError);
@@ -672,7 +802,7 @@ export async function POST(request: Request) {
     // independente e as falhas voltam em results.variaveis_falhas/erros e
     // em system_logs.
     if (csvVarAssignments.length > 0) {
-      const varChunkSize = 100;
+      const varChunkSize = BULK_WRITE_CHUNK;
       const varRows = dedupeImportVariables(csvVarAssignments);
       let varFailedRows = 0;
       let varFirstError: string | null = null;
@@ -717,7 +847,7 @@ export async function POST(request: Request) {
                 }))
               );
             return insertErr;
-          });
+          }, WRITE_CONCURRENCY);
           varFailedRows = summary.failedRows;
           varFirstError = summary.firstError;
         }
@@ -739,7 +869,7 @@ export async function POST(request: Request) {
               { onConflict }
             );
           return varErr;
-        });
+        }, WRITE_CONCURRENCY);
         varFailedRows = summary.failedRows;
         varFirstError = summary.firstError;
       }
@@ -770,17 +900,23 @@ export async function POST(request: Request) {
     // 9. Vínculo import → campanha (migration 132). Diferente dos passos
     // acima, NÃO é best-effort: sem ele a campanha de CSV não pode iniciar
     // (startCampaign recusa), então a falha volta como erro do import.
-    // Reimportar o CSV substitui o vínculo anterior do mesmo rascunho/campanha.
+    // Reimportar o CSV substitui o vínculo anterior do mesmo rascunho/campanha:
+    // em import por blocos, só o primeiro (chunk_index 0) limpa; os demais
+    // acrescentam.
     if (campaignIdRaw || draftIdRaw) {
       const idColumn = campaignIdRaw ? "campaign_id" : "draft_id";
       const idValue = (campaignIdRaw ?? draftIdRaw) as string;
-      let { error: clearErr } = await supabaseAdmin()
-        .from("disp_import_contacts")
-        .delete()
-        .eq(idColumn, idValue);
+      let clearErr: { message: string } | null = null;
+      if (chunkIndex === 0) {
+        ({ error: clearErr } = await supabaseAdmin()
+          .from("disp_import_contacts")
+          .delete()
+          .eq("account_id", accountId)
+          .eq(idColumn, idValue));
+      }
       // Reimport ao editar: o vínculo antigo da criação (por rascunho) sai
       // também — a lista nova substitui a antiga, nunca soma.
-      if (!clearErr && campaignIdRaw) {
+      if (chunkIndex === 0 && !clearErr && campaignIdRaw) {
         const { data: camp } = await supabaseAdmin()
           .from("campaigns")
           .select("import_draft_id")
@@ -792,6 +928,7 @@ export async function POST(request: Request) {
           ({ error: clearErr } = await supabaseAdmin()
             .from("disp_import_contacts")
             .delete()
+            .eq("account_id", accountId)
             .eq("draft_id", draftOfCampaign));
         }
       }
@@ -808,23 +945,39 @@ export async function POST(request: Request) {
         campaign_id: campaignIdRaw,
         draft_id: campaignIdRaw ? null : draftIdRaw,
       }));
-      for (let i = 0; i < linkRows.length; i += 500) {
-        const { error: linkErr } = await supabaseAdmin()
-          .from("disp_import_contacts")
-          .insert(linkRows.slice(i, i + 500));
-        if (linkErr) {
-          console.error("[Contacts Import] Failed to link import contacts:", linkErr);
-          return NextResponse.json(
-            { error: "Contatos importados, mas não foi possível vinculá-los à campanha. Tente importar de novo." },
-            { status: 500 }
-          );
+      let linkFailed = false;
+      await processWithConcurrency(sliceInto(linkRows, BULK_WRITE_CHUNK), WRITE_CONCURRENCY, async (slice) => {
+        if (linkFailed) return;
+        const { error: linkErr } = await supabaseAdmin().from("disp_import_contacts").insert(slice);
+        if (!linkErr) return;
+        if (isUniqueViolation(linkErr)) {
+          // Mesmo contato já vinculado por um bloco anterior (duas linhas de
+          // blocos diferentes caíram no mesmo contato existente): refaz o
+          // lote linha a linha ignorando só as repetidas.
+          for (const row of slice) {
+            const { error: rowErr } = await supabaseAdmin().from("disp_import_contacts").insert(row);
+            if (rowErr && !isUniqueViolation(rowErr)) {
+              console.error("[Contacts Import] Failed to link import contacts:", rowErr);
+              linkFailed = true;
+              return;
+            }
+          }
+          return;
         }
+        console.error("[Contacts Import] Failed to link import contacts:", linkErr);
+        linkFailed = true;
+      });
+      if (linkFailed) {
+        return NextResponse.json(
+          { error: "Contatos importados, mas não foi possível vinculá-los à campanha. Tente importar de novo." },
+          { status: 500 }
+        );
       }
     }
 
     return NextResponse.json({ success: true, results, linked: importedContactIds.size });
   } catch (err: any) {
     console.error("[Contacts Import] Failed:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: "Falha ao importar os contatos." }, { status: 500 });
   }
 }

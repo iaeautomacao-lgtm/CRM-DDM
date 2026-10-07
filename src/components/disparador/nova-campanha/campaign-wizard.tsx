@@ -24,6 +24,12 @@ import { suggestImportColumnMap, type ImportColumnMap } from "@/lib/disparador/i
 import { parseImportCsv, summarizeImport, tableFromMatrix, type ParsedImportTable } from "@/lib/disparador/import-parse";
 import { phoneKey } from "@/lib/disparador/phone-key";
 import { resolveProviderThroughput, type RitmoResponse } from "@/lib/disparador/ritmo";
+import {
+  chunkImportRows,
+  EMPTY_IMPORT_RESULTS,
+  mergeImportResults,
+  type ImportChunkResults,
+} from "@/lib/disparador/import-chunks";
 import { TEMPLATE_VALIDATION_COLUMNS } from "@/lib/disparador/template-validation";
 import { utmCpfKey, utmPhoneKey } from "@/lib/disparador/utm-links";
 import { SAMPLE_PREVIEW_CONTACT } from "./message-preview";
@@ -70,6 +76,33 @@ interface CampaignWizardProps {
 
 const DRAFT_VERSION = 2;
 
+// Envia um bloco da base. Reenviar é seguro (o servidor reconhece os contatos
+// que já gravou e o vínculo ignora repetidos), então falha de rede ou 5xx
+// (reinício do Passenger, 504) tenta de novo até 3 vezes; erro 4xx não.
+async function sendImportChunk(body: Record<string, unknown>): Promise<{ results?: Partial<ImportChunkResults> }> {
+  const maxAttempts = 3;
+  for (let attempt = 1; ; attempt++) {
+    let retryable = false;
+    let message = "Erro ao importar contatos";
+    try {
+      const res = await apiFetch("/api/disparador/contacts/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) return json;
+      message = json.error || message;
+      retryable = res.status >= 500;
+    } catch {
+      message = "Sem resposta do servidor ao importar contatos";
+      retryable = true;
+    }
+    if (!retryable || attempt >= maxAttempts) throw new Error(message);
+    await new Promise((resolve) => setTimeout(resolve, 1000 * attempt));
+  }
+}
+
 function draftKey(accountId: string | null): string | null {
   return accountId ? `disparador:campaign-draft:v${DRAFT_VERSION}:${accountId}` : null;
 }
@@ -89,6 +122,8 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
   const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID());
   const [pendingDraft, setPendingDraft] = useState<WizardForm | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Progresso do envio da base em blocos (linhas já enviadas / total).
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [now, setNow] = useState(() => new Date());
 
   // Base importada nesta sessão
@@ -651,29 +686,41 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
     setSubmitting(true);
     try {
       if (importFile) {
-        const fd = new FormData();
-        fd.append("file", importFile);
-        if (editing) fd.append("campaign_id", editing.id);
-        else fd.append("draft_id", draftId);
-        fd.append("column_map", JSON.stringify(columnMap));
-        fd.append("mapping_confirmed", "true");
-        fd.append("has_header", table?.hasHeader ? "true" : "false");
-        fd.append("column_headers", JSON.stringify(table?.headers ?? []));
-        const res = await apiFetch("/api/disparador/contacts/import", { method: "POST", body: fd });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error || "Erro ao importar contatos");
-        const r = json.results ?? {};
+        // A base já está lida no navegador: vai em blocos JSON (5.000 linhas)
+        // em vez do arquivo inteiro, que estourava o limite de corpo (10 MB)
+        // do middleware. Linhas inválidas/duplicadas/da blacklist já foram
+        // descartadas no resumo; o servidor confere de novo cada bloco.
+        const chunks = chunkImportRows((summary?.rows ?? []).map((row) => row.raw));
+        const totalRows = chunks.reduce((n, c) => n + c.length, 0);
+        let r: ImportChunkResults = { ...EMPTY_IMPORT_RESULTS };
+        setImportProgress({ done: 0, total: totalRows });
+        let sent = 0;
+        for (let i = 0; i < chunks.length; i++) {
+          const json = await sendImportChunk({
+            rows: chunks[i],
+            chunk_index: i,
+            total_chunks: chunks.length,
+            ...(editing ? { campaign_id: editing.id } : { draft_id: draftId }),
+            column_map: columnMap,
+            mapping_confirmed: true,
+          });
+          r = mergeImportResults(r, json.results);
+          sent += chunks[i].length;
+          setImportProgress({ done: sent, total: totalRows });
+        }
+        const invalidos = r.invalidos + (summary?.invalidos ?? 0);
+        const duplicados = r.duplicados + (summary?.duplicados ?? 0);
         toast.success(
-          [`${r.importados ?? 0} importados`, r.duplicados ? `${r.duplicados} duplicados` : "", r.invalidos ? `${r.invalidos} inválidos` : ""]
+          [`${r.importados} importados`, duplicados ? `${duplicados} duplicados` : "", invalidos ? `${invalidos} inválidos` : ""]
             .filter(Boolean)
             .join(" · ")
         );
-        if (Number(r.variaveis_falhas ?? 0) > 0) {
+        if (r.variaveis_falhas > 0) {
           toast.error(`${r.variaveis_falhas} valores de VAR1–VAR3 não foram salvos. Importe o arquivo de novo antes de iniciar.`, {
             duration: 15000,
           });
         }
-        trackAction("csv_imported", { total_rows: Number(r.importados ?? 0) + Number(r.duplicados ?? 0) + Number(r.invalidos ?? 0) });
+        trackAction("csv_imported", { total_rows: r.importados + duplicados + invalidos });
       }
 
       const payload = buildCampaignPayload(form, ctx, editing ? null : draftId);
@@ -713,6 +760,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
       toast.error(err instanceof Error ? err.message : "Erro ao salvar a campanha");
     } finally {
       setSubmitting(false);
+      setImportProgress(null);
     }
   };
 
@@ -913,7 +961,11 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
               className="gap-1.5"
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-              {submitting ? "Salvando…" : submitLabel}
+              {submitting
+                ? importProgress
+                  ? `Importando contatos… ${importProgress.done.toLocaleString("pt-BR")} de ${importProgress.total.toLocaleString("pt-BR")}`
+                  : "Salvando…"
+                : submitLabel}
             </Button>
           )}
         </footer>
