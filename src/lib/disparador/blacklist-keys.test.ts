@@ -69,3 +69,42 @@ describe("loadBlacklistKeySet", () => {
     await expect(loadBlacklistKeySet(db)).rejects.toThrow(/blacklist/);
   });
 });
+
+describe("loadBlacklistKeysForPhones", () => {
+  const rpcDb = (blocked: string[], rpcError: { message: string } | null = null) => {
+    const calls: string[][] = [];
+    const db = {
+      rpc: async (_fn: string, args: { p_keys: string[] }) => {
+        calls.push(args.p_keys);
+        return rpcError
+          ? { data: null, error: rpcError }
+          : { data: args.p_keys.filter((k) => blocked.includes(k)).map((key) => ({ key })), error: null };
+      },
+    };
+    return { db: db as unknown as SupabaseClient, calls };
+  };
+
+  it("consulta só as chaves do bloco, em fatias, sem carregar a lista inteira", async () => {
+    const { loadBlacklistKeysForPhones } = await import("./blacklist-keys");
+    const keys = Array.from({ length: 4500 }, (_, i) => `k${i}`);
+    const { db, calls } = rpcDb(["k3", "k4400"]);
+    const out = await loadBlacklistKeysForPhones(db, keys);
+    expect([...out].sort()).toEqual(["k3", "k4400"]);
+    expect(calls.map((c) => c.length)).toEqual([2000, 2000, 500]);
+  });
+
+  it("sem chaves não consulta nada", async () => {
+    const { loadBlacklistKeysForPhones } = await import("./blacklist-keys");
+    const { db, calls } = rpcDb([]);
+    expect((await loadBlacklistKeysForPhones(db, [])).size).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  it("RPC ausente: cai na lista inteira e filtra pelas chaves do bloco", async () => {
+    const { loadBlacklistKeysForPhones } = await import("./blacklist-keys");
+    const inner = fakeDb([{ id: 1, telefone: "11999998888" }, { id: 2, telefone: "21988887777" }]).db as unknown as Record<string, unknown>;
+    const db = { ...inner, rpc: async () => ({ data: null, error: { message: "function does not exist" } }) } as unknown as SupabaseClient;
+    const out = await loadBlacklistKeysForPhones(db, [phoneKey("11999998888"), phoneKey("31977776666")]);
+    expect([...out]).toEqual([phoneKey("11999998888")]);
+  });
+});
