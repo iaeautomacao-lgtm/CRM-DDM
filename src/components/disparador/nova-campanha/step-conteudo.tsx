@@ -617,7 +617,7 @@ function WahaMessages({
                   className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-xs focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
                 />
                 <Button type="button" variant="secondary" className="h-9 shrink-0 text-xs" onClick={() => fileRefs.current[i]?.click()}>
-                  Upload
+                  Carregar
                 </Button>
                 <input
                   ref={(el) => {

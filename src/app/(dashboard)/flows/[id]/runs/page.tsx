@@ -1168,8 +1168,8 @@ function EventPayloadBody({ ev }: { ev: EventRow }) {
 
       {hasInputOutput ? (
         <>
-          {"input" in payload && <PayloadSection label="Input" value={payload.input} />}
-          {"output" in payload && <PayloadSection label="Output" value={payload.output} />}
+          {"input" in payload && <PayloadSection label="Entrada" value={payload.input} />}
+          {"output" in payload && <PayloadSection label="Saída" value={payload.output} />}
         </>
       ) : (
         <PayloadSection label="Payload" value={payload} />
