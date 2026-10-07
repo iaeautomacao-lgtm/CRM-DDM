@@ -3,8 +3,8 @@
 A API pública permite integrar sistemas e automações ao CRM DDM sem depender da interface do dashboard. Ela expõe operações autenticadas para envio de mensagens, campanhas e consultas de contexto operacional.
 
 > **Status:** authentication, scopes, rate limiting, `GET /api/v1/me`,
-> `POST /api/v1/whatsapp/send`, `POST /api/v1/disparador/campaigns`,
-> and `GET /api/v1/disparador/campaigns/{id}` ship now. The remaining
+> `POST /api/v1/whatsapp/send`, Disparador campaigns, and the
+> `/api/v1/reports/*` Reporting API ship now. The remaining
 > data endpoints (`contacts`, `conversations`, …) land one at a time
 > in follow-up releases — see [Roadmap](#roadmap).
 
@@ -50,6 +50,7 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `campaigns:write`    | Create and enqueue Disparador campaigns  |
 | `campaigns:read`     | Read Disparador campaign status and metrics |
+| `reports:read`       | Read aggregated CRM reports and operational metrics |
 | `intelligence:read`  | Chave **pessoal** do MCP do DDM Intelligence (ver [MCP](#mcp-ddm-intelligence)) |
 
 A key with **no scopes** still authenticates and can call
@@ -410,3 +411,13 @@ Planned endpoints, shipping one per release (tracked in
 ### Idempotência de envio (alteração de contrato)
 
 POST /api/v1/whatsapp/send exige o cabeçalho Idempotency-Key, com 8 a 128 caracteres de letras, números, ponto, hífen, dois-pontos ou sublinhado. Gere uma chave por intenção e preserve-a ao repetir a mesma requisição. A chave é isolada por conta e vinculada ao caminho e corpo exatos. Repetir após conclusão retorna o resultado persistido; reutilizar com outro conteúdo retorna 409. Operação em andamento/resultado desconhecido retorna 409 com provider_outcome_unknown: true e exige reconciliação, sem novo POST com uma chave diferente. Ausência de cabeçalho retorna 400; falha da coordenação retorna 503. Aceitação remota com falha local pode retornar 202 e reconciliation_required: true: não reenviar.
+
+
+## Reporting API
+
+Para Power BI, Metabase, n8n e relatórios externos, use o scope
+`reports:read` e os endpoints agregados em `/api/v1/reports/*`.
+Eles expõem atendimentos, filas atuais, operadores/equipes e tabulações sem
+dar acesso ao banco ou a mensagens brutas.
+
+Documentação completa: [Reporting API](./reporting-api.md).
