@@ -58,6 +58,10 @@ export function collectAutomationRefs(
         case 'close_conversation':
           add('tags', cfg.outcome_tag_id)
           break
+        case 'condition':
+          // Condição "tem a etiqueta": o operando é o id de uma etiqueta.
+          if (cfg.subject === 'tag_presence') add('tags', cfg.operand)
+          break
       }
       walk(s.branches?.yes)
       walk(s.branches?.no)
