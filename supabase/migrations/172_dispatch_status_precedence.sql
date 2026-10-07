@@ -486,6 +486,7 @@ BEGIN
       GET DIAGNOSTICS v_rows = ROW_COUNT;
 
       IF v_rows > 0 AND to_regclass('wacrm.system_logs') IS NOT NULL THEN
+        BEGIN
         EXECUTE 'INSERT INTO wacrm.system_logs(account_id, level, source, event, message, payload)
                  VALUES ($1, ''info'', ''disparador'', ''meta_131026_false_positive'', $2, $3)'
         USING v_item.account_id,
@@ -496,6 +497,9 @@ BEGIN
                 'message_id', p_message_id,
                 'status', p_status
               );
+        EXCEPTION WHEN OTHERS THEN
+          NULL; -- log é telemetria: falha nele nunca desfaz o status
+        END;
       END IF;
 
       -- Bloqueio automático só cai se a regra das 3 campanhas (só
