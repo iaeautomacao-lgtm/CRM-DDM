@@ -9,7 +9,18 @@ const mocks = vi.hoisted(() => ({
   profileRole: { value: "admin" as string },
   adminFrom: vi.fn(),
   start: vi.fn(),
+  after: vi.fn(),
 }));
+
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return {
+    ...actual,
+    // Este teste chama a rota diretamente, fora do request scope do Next.
+    // O comportamento do callback é coberto em dispatch-kick.test.ts.
+    after: (callback: () => Promise<void>) => mocks.after(callback),
+  };
+});
 
 vi.mock("@/lib/auth/account", () => {
   class ForbiddenError extends Error {
@@ -117,6 +128,7 @@ describe("rotas de campanha exigem o papel do disparador", () => {
     const res = await START(json({ agora: true }), params);
     expect(res.status).toBe(200);
     expect(mocks.start).toHaveBeenCalledWith("camp-1", "acc-1", { startNow: true });
+    expect(mocks.after).toHaveBeenCalledTimes(1);
     expect((await UNSCHEDULE(new Request("https://crm.test/x", { method: "POST" }), params)).status).not.toBe(403);
     expect((await STOP(new Request("https://crm.test/x?action=pause", { method: "POST" }), params)).status).not.toBe(403);
   });
