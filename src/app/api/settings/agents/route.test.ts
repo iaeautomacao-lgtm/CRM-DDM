@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { hasMinRole, type AccountRole } from '@/lib/auth/roles';
+import { hasMinRole, type AccountRole } from '@/lib/auth/roles'
+import { can, type Permission } from '@/lib/auth/permissions';
 import { convertAiAgentNode, convertGlobalResponder } from '@/lib/ai/agents/convert';
 import { composeAgentPrompt } from '@/lib/ai/agents/compose';
 
@@ -120,8 +121,8 @@ vi.mock('@/lib/flows/admin-client', () => ({
   }),
 }));
 vi.mock('@/lib/auth/route-guard', () => ({
-  guardRole: async (min: AccountRole) =>
-    hasMinRole(state.role, min)
+  guardPermission: async (permission: Permission) =>
+    can({ role: state.role }, permission)
       ? { ok: true, ctx: { accountId: A, userId: USER, role: state.role } }
       : {
           ok: false,

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { parseLineIds } from '@/lib/automations/line-ids'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { validateAutomationRefs } from '@/lib/automations/step-refs'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { getTemplate } from '@/lib/automations/templates'
@@ -11,7 +11,7 @@ import {
 } from '@/lib/automations/validate'
 
 export async function GET() {
-  const auth = await guardRole('agent')
+  const auth = await guardPermission('automations.view')
   if (!auth.ok) return auth.response
   const { supabase, accountId } = auth.ctx
 
@@ -27,7 +27,7 @@ export async function GET() {
 export async function POST(request: Request) {
   // Automação roda com service role (envia mensagem, atribui, tag...): só
   // owner/admin cria. Antes qualquer papel logado criava automação ativa.
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('automations.edit')
   if (!auth.ok) return auth.response
   const { userId, accountId } = auth.ctx
 

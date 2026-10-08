@@ -5,6 +5,9 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   test: {
+    // PGlite sobe um Postgres inteiro no beforeAll: com a máquina carregada (CI, vários agentes)
+    // os 10 s padrão estouram. Só afeta hooks; o timeout de cada teste segue o padrão.
+    hookTimeout: 60_000,
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     // Dummy secrets — encryption.ts / webhook-signature.ts read these

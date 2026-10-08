@@ -32,6 +32,8 @@
  *     INSERT raises 23505 and the runner catches & exits.
  */
 
+import { buildToolResultPayload, loadRunToolResults } from "@/lib/flows/tool-results";
+import { maskPiiArgs } from "@/lib/privacy/mask";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
   type AiGuardDetail,
@@ -602,7 +604,12 @@ export function pickRoundToolFailure(
       typeof event.payload.tool_name === "string" ? event.payload.tool_name : null;
     const result =
       typeof event.payload.result === "string" ? event.payload.result : null;
-    const failure = result ? parseToolFailure(result) : null;
+    // Evento novo (migration 212) não guarda o corpo: a mensagem de falha vem em payload.tool_failure.
+    const failure = result
+      ? parseToolFailure(result)
+      : typeof event.payload.tool_failure === "string"
+        ? event.payload.tool_failure
+        : null;
     if (!failure) {
       if (toolName) succeeded.add(toolName);
       continue;
@@ -2144,15 +2151,10 @@ async function canonicalizeAgreementArgsFromRun(
   run: FlowRunRow,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const { data } = await db
-    .from("flow_run_events")
-    .select("payload")
-    .eq("flow_run_id", run.id)
-    .eq("event_type", "tool_result")
-    .order("created_at", { ascending: false })
-    .limit(20);
+  // Resultado bruto: tabela fechada (migration 212) + eventos antigos (ver tool-results.ts).
+  const data = await loadRunToolResults(db, run.id, { newestFirst: true, limit: 20 });
 
-  for (const event of data ?? []) {
+  for (const event of data) {
     const payload = event.payload as { tool_name?: string; result?: string } | null;
     if (payload?.tool_name !== "localizar_devedor" || !payload.result) continue;
     const normalized = canonicalizeAgreementToolArgs(args, payload.result);
@@ -2382,13 +2384,7 @@ async function runAiAgentCore(
     let enrichedSystemPromptOverride = systemPromptOverride;
     if (herdarContextoAnterior) {
       const nodeKeyAtual = currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia";
-      const { data: previousToolResults } = await db
-        .from("flow_run_events")
-        .select("payload")
-        .eq("flow_run_id", run.id)
-        .eq("event_type", "tool_result")
-        .neq("node_key", nodeKeyAtual)
-        .order("created_at", { ascending: true });
+      const previousToolResults = await loadRunToolResults(db, run.id, { excludeNodeKey: nodeKeyAtual });
 
       const MAX_RESULT_CHARS = 3000;
       // Nomes das tools já chamadas, coletados junto com os blocos —
@@ -2463,7 +2459,8 @@ async function runAiAgentCore(
           duration_ms: 0,
           payload: {
             tool_name: toolName,
-            args,
+            // Só o EVENTO é mascarado (CPF); os args reais da chamada seguem intactos.
+            args: maskPiiArgs(args),
           },
         });
       },
@@ -2478,8 +2475,16 @@ async function runAiAgentCore(
         // nenhum (ver messages.push({role:"tool", content: toolResult})
         // em src/lib/ai/responder.ts), e collectedToolResults acima também
         // guarda o `result` cru, não `truncated`.
-        const truncated = result.length > 8000 ? result.slice(0, 8000) + "…" : result;
         const toolFailure = parseToolFailure(result);
+        // O bruto (truncado em 8000, como sempre) vai para a tabela fechada; o evento leva só o resumo.
+        const toolResultPayload = await buildToolResultPayload(
+          db,
+          { runId: run.id, accountId: run.account_id, nodeKey: currentNodeKeyOverride ?? run.current_node_key ?? "agente_de_ia" },
+          toolName,
+          result,
+          toolFailure,
+          meta,
+        );
         await logRunEvent(db, {
           run_id: run.id,
           flow_id: run.flow_id,
@@ -2490,14 +2495,7 @@ async function runAiAgentCore(
           status: toolFailure ? "error" : "success",
           duration_ms: durationMs,
           error_message: toolFailure,
-          payload: {
-            tool_name: toolName,
-            result: truncated,
-            attempts: meta?.attempts ?? 1,
-            recovered: meta?.recovered ?? false,
-            failure_code: meta?.failureCode ?? null,
-            http_status: meta?.httpStatus ?? null,
-          },
+          payload: toolResultPayload,
         });
         await logAiDecision(db, {
           account_id: run.account_id,

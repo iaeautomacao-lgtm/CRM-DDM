@@ -24,9 +24,7 @@ import type {
 import {
   MessageSquare,
   ChevronDown,
-  UserPlus,
   Check,
-  Clock,
   ArrowLeft,
   RefreshCw,
   PanelRightOpen,
@@ -345,25 +343,6 @@ export function MessageThread({
         : null,
     [transferConvId, transferAgentId, transferTeamId],
   );
-
-  const clientId = conversation?.client_id ?? null;
-  const [client, setClient] = useState<{ id: string; name: string; color: string } | null>(null);
-  useEffect(() => {
-    if (!clientId) return;
-    let cancelled = false;
-    createClient()
-      .from("clients")
-      .select("id, name, color")
-      .eq("id", clientId)
-      .limit(1)
-      .then(({ data }) => {
-        if (!cancelled) setClient(data?.[0] ?? null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [clientId]);
-  const clientBadge = client && client.id === clientId ? client : null;
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
@@ -1388,15 +1367,7 @@ export function MessageThread({
             )}
           </div>
           <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate text-[14px] font-semibold text-foreground">{displayName}</h2>
-              {clientBadge && (
-                <span className="hidden min-w-0 items-center gap-1 text-[11px] text-muted-foreground lg:inline-flex">
-                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: clientBadge.color }} aria-hidden="true" />
-                  <span className="max-w-28 truncate">{clientBadge.name}</span>
-                </span>
-              )}
-            </div>
+            <h2 className="truncate text-[14px] font-semibold text-foreground">{displayName}</h2>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
               {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"] && (
                 <span className="shrink-0">
@@ -1409,80 +1380,74 @@ export function MessageThread({
                   <span className="truncate">{contact.phone ?? contact.email}</span>
                 </>
               )}
-              {sessionInfo.remaining && (
-                <>
-                  <span className="hidden sm:inline" aria-hidden="true">·</span>
-                  <span
-                    className={cn(
-                      "hidden shrink-0 items-center gap-1 sm:inline-flex",
-                      sessionInfo.expired && "font-medium text-destructive"
-                    )}
-                  >
-                    <Clock className="h-3 w-3" aria-hidden="true" />
-                    {sessionInfo.remaining}
-                  </span>
-                </>
-              )}
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
-          {/* Visíveis: Status, Atribuir, Transferir, painel do contato.
-              Atualizar, Ligar e Excluir ficam em "Mais ações". */}
-          {/* Status dropdown */}
+        <div className="flex items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
           <DropdownMenu>
             <DropdownMenuTrigger
-                aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
-                className={cn(
-                  "inline-flex h-8 items-center justify-center gap-1 rounded-md bg-muted/55 px-2.5 text-xs font-medium transition-colors hover:bg-muted",
-                  currentStatus?.color ?? "text-muted-foreground"
-                )}>
-                {currentStatus?.label ?? "Status"}
-                <ChevronDown className="h-4 w-4" aria-hidden="true" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="border-border bg-popover"
+              aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
+              className={cn(
+                "inline-flex h-8 shrink-0 items-center gap-1 rounded-md bg-muted/55 px-2.5 text-xs font-medium transition-colors hover:bg-muted",
+                currentStatus?.color ?? "text-muted-foreground",
+              )}
             >
+              {currentStatus?.label ?? "Status"}
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44 border-border bg-popover">
               {STATUS_OPTIONS.map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
                   onClick={() => handleStatusOptionClick(opt.value)}
-                  className={cn("text-sm", opt.color)}
+                  className="text-sm"
                 >
-                  {opt.label}
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      opt.value === "open"
+                        ? "bg-primary"
+                        : opt.value === "pending"
+                          ? "bg-amber-500"
+                          : "bg-muted-foreground/60",
+                    )}
+                    aria-hidden="true"
+                  />
+                  <span className="flex-1">{opt.label}</span>
+                  {opt.value === conversation.status && (
+                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
                 </DropdownMenuItem>
               ))}
+              {conversation.status === "closed" && conversation.outcome_tag && (
+                <>
+                  <DropdownMenuSeparator />
+                  <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted-foreground">
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ backgroundColor: conversation.outcome_tag.color }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate">{conversation.outcome_tag.name}</span>
+                  </div>
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {conversation.status === "closed" && conversation.outcome_tag && (
-            <span className="inline-flex h-6 items-center gap-1 rounded-full border border-border px-2 text-xs text-foreground">
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: conversation.outcome_tag.color }} aria-hidden="true" />
-              {conversation.outcome_tag.name}
-            </span>
-          )}
-
-          {/* Assign dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
-              // No celular o rótulo some (só o ícone) — o nome acessível
-              // continua dizendo a quem a conversa está atribuída.
-              aria-label={assignedAgentId ? `Atribuída a ${assignLabel}` : "Atribuir conversa"}
+              aria-label={assignedAgentId ? `Responsável: ${assignLabel}` : "Definir responsável"}
               className={cn(
-                "inline-flex h-8 max-w-40 items-center justify-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-muted",
-                assignedAgentId ? "text-foreground" : "text-muted-foreground"
+                "inline-flex h-8 max-w-32 items-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-muted",
+                assignedAgentId ? "text-foreground" : "text-muted-foreground",
               )}
             >
-              <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span className="hidden truncate sm:inline">{assignLabel}</span>
-              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{assignedAgentId ? assignLabel : "Sem responsável"}</span>
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="border-border bg-popover"
-            >
+            <DropdownMenuContent align="end" className="min-w-52 border-border bg-popover">
               {profiles.length === 0 ? (
                 <DropdownMenuItem disabled className="text-sm text-muted-foreground">
                   Nenhum membro disponível
@@ -1495,37 +1460,29 @@ export function MessageThread({
                     <DropdownMenuItem
                       key={p.id}
                       onClick={() => handleAssignChange(p.user_id)}
-                      className={cn(
-                        "text-sm",
-                        isSelected ? "text-primary" : "text-popover-foreground"
-                      )}
+                      className="text-sm"
                     >
                       <PresenceDot
                         status={presence}
                         label={presenceLabel(
                           presence,
                           getRow(p.user_id)?.last_seen_at ?? null,
-                          now
+                          now,
                         )}
-                        className="mr-2"
+                        className="mr-1"
                       />
                       <span className="flex-1">
                         {p.full_name}
                         {p.user_id === user?.id ? " (eu)" : ""}
                       </span>
-                      {isSelected && (
-                        <>
-                          <Check className="ml-2 h-3 w-3" aria-hidden="true" />
-                          <span className="sr-only">(atual)</span>
-                        </>
-                      )}
+                      {isSelected && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
                     </DropdownMenuItem>
                   );
                 })
               )}
               {assignedAgentId && (
                 <>
-                  <DropdownMenuSeparator className="bg-border" />
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => handleAssignChange(null)}
                     className="text-sm text-muted-foreground"
@@ -1537,52 +1494,14 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {accountRole !== "viewer" && (
-            <button
-              type="button"
-              onClick={() => setTransferOpen(true)}
-              aria-label="Transferir conversa"
-              title="Transferir (atendente/equipe, com motivo)"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-            >
-              <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
-            </button>
-          )}
-
-          {/* Contact-panel toggle — desktop only. The contact sidebar
-              eats a chunk of horizontal width that crowds the thread on
-              smaller laptops; this lets agents reclaim it when they just
-              want to read and reply. Hidden on mobile, where the sidebar
-              never renders as a permanent panel anyway. Issue #258. */}
-          {onToggleContactPanel && (
-            <button
-              type="button"
-              onClick={onToggleContactPanel}
-              aria-label={
-                contactPanelOpen ? "Ocultar painel de contato" : "Exibir painel de contato"
-              }
-              aria-pressed={contactPanelOpen}
-              title={contactPanelOpen ? "Ocultar contato" : "Exibir contato"}
-              className={cn(
-                "hidden h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground lg:inline-flex",
-                contactPanelOpen ? "text-primary" : "text-muted-foreground",
-              )}
-            >
-              {contactPanelOpen ? (
-                <PanelRightClose className="h-4 w-4" aria-hidden="true" />
-              ) : (
-                <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
-              )}
-            </button>
-          )}
-
-          {/* Mais ações: Atualizar (refetch manual quando o realtime perde
-              um evento), Ligar (VoIP WAHA) e Excluir (com confirmação). */}
           {(() => {
             const canCall =
               whatsappProvider === "waha" && !!contact?.phone && conversation.channel_type !== "webchat";
             const canDelete = !!onDeleteConversation && accountRole !== "agent";
-            if (!onRefresh && !canCall && !canDelete) return null;
+            const canTransfer = accountRole !== "viewer";
+            const canTogglePanel = !!onToggleContactPanel;
+            if (!onRefresh && !canCall && !canDelete && !canTransfer && !canTogglePanel) return null;
+
             return (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -1596,13 +1515,36 @@ export function MessageThread({
                     <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
                   )}
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-48 border-border bg-popover">
+                <DropdownMenuContent align="end" className="min-w-52 border-border bg-popover">
+                  {canTransfer && (
+                    <DropdownMenuItem onClick={() => setTransferOpen(true)} className="text-sm">
+                      <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
+                      Transferir atendimento
+                    </DropdownMenuItem>
+                  )}
+
+                  {canTogglePanel && (
+                    <DropdownMenuItem onClick={onToggleContactPanel} className="text-sm">
+                      {contactPanelOpen ? (
+                        <PanelRightClose className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+                      )}
+                      {contactPanelOpen ? "Ocultar contexto" : "Exibir contexto"}
+                    </DropdownMenuItem>
+                  )}
+
+                  {(canTransfer || canTogglePanel) && (onRefresh || canCall || canDelete) && (
+                    <DropdownMenuSeparator />
+                  )}
+
                   {onRefresh && (
                     <DropdownMenuItem onClick={handleRefreshClick} disabled={isRefreshing} className="text-sm">
                       <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} aria-hidden="true" />
                       Atualizar conversa
                     </DropdownMenuItem>
                   )}
+
                   {canCall && (
                     <DropdownMenuItem
                       onClick={() => contact.phone && startOutboundCall(contact.phone)}
@@ -1612,9 +1554,10 @@ export function MessageThread({
                       Ligar pelo WhatsApp
                     </DropdownMenuItem>
                   )}
+
                   {canDelete && (
                     <>
-                      <DropdownMenuSeparator className="bg-border" />
+                      <DropdownMenuSeparator />
                       <DropdownMenuItem
                         variant="destructive"
                         onClick={handleDeleteClick}

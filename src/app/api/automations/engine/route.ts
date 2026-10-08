@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import type { AutomationTriggerType } from '@/types'
 
@@ -20,7 +20,7 @@ const AUTOMATION_TRIGGER_TYPES = new Set<string>([
  */
 export async function POST(request: Request) {
   // Dispara automações da conta com service role: só owner/admin.
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('automations.edit')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
 

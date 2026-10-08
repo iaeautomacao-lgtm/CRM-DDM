@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
 
-import { guardRole, type GuardResult } from "@/lib/auth/route-guard";
+import type { Permission } from "@/lib/auth/permissions";
+import { guardPermission, type GuardResult } from "@/lib/auth/route-guard";
 
-// Papel mínimo para mexer em fluxos (criar, editar, ativar, apagar, importar,
-// ver execuções): o mesmo da página /flows (owner/admin — ROUTE_ALLOWLIST).
+// Permissão para mexer em fluxos (PRD 20, 20.3d): `flows.edit` (criar, editar, ativar, apagar, importar) ou
+// `flows.view_runs` (ver/limpar execuções) — hoje ambas owner/admin, os mesmos da página /flows.
 // Antes as rotas só pediam sessão e escreviam com service role, então um
 // viewer/agente chamando a API direto editava fluxos e prompts de IA.
 
-export async function guardFlowAccess(): Promise<GuardResult> {
-  return guardRole("admin");
+export type FlowPermission = Extract<Permission, "flows.edit" | "flows.view_runs">;
+
+export async function guardFlowAccess(permission: FlowPermission = "flows.edit"): Promise<GuardResult> {
+  return guardPermission(permission);
 }
 
 /**
@@ -16,8 +19,8 @@ export async function guardFlowAccess(): Promise<GuardResult> {
  * 404, sem revelar que existe). Devolve o contexto para as escritas com
  * service role filtrarem por `ctx.accountId`.
  */
-export async function guardFlow(flowId: string): Promise<GuardResult> {
-  const auth = await guardFlowAccess();
+export async function guardFlow(flowId: string, permission: FlowPermission = "flows.edit"): Promise<GuardResult> {
+  const auth = await guardFlowAccess(permission);
   if (!auth.ok) return auth;
   const { data } = await auth.ctx.supabase
     .from("flows")

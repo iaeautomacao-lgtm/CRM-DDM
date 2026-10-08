@@ -33,12 +33,12 @@ const real = (over: Record<string, unknown> = {}) => async () => ({
 describe("simulador: leitura real (REVISAO-113 #1)", () => {
   it("só admin/owner mantém realReadOnlyTools; supervisor vira tudo mock", () => {
     const req = { realReadOnlyTools: ["consultar_debitos"] };
-    expect(applyRealReadPolicy("owner", req)).toEqual({ request: req, denied: false });
-    expect(applyRealReadPolicy("admin", req).request.realReadOnlyTools).toEqual(["consultar_debitos"]);
+    expect(applyRealReadPolicy({ role: "owner" }, req)).toEqual({ request: req, denied: false });
+    expect(applyRealReadPolicy({ role: "admin" }, req).request.realReadOnlyTools).toEqual(["consultar_debitos"]);
     for (const role of ["supervisor", "agent", "viewer"] as const) {
-      expect(applyRealReadPolicy(role, req)).toEqual({ request: { realReadOnlyTools: [] }, denied: true });
+      expect(applyRealReadPolicy({ role: role }, req)).toEqual({ request: { realReadOnlyTools: [] }, denied: true });
     }
-    expect(applyRealReadPolicy("supervisor", { realReadOnlyTools: [] }).denied).toBe(false);
+    expect(applyRealReadPolicy({ role: "supervisor" }, { realReadOnlyTools: [] }).denied).toBe(false);
   });
 
   it("ferramenta que NÃO é do catálogo salvo (inline/rascunho): mock, sem credencial nem rede", async () => {

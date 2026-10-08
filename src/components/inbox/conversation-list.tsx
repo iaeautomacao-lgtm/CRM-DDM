@@ -80,6 +80,7 @@ const CHANNEL_TABS: { label: string; value: InboxChannel | null }[] = [
 ];
 
 export const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
+  whatsapp: { label: "WhatsApp", className: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" },
   webchat: { label: "Webchat", className: "text-cyan-600 bg-cyan-500/10 border-cyan-500/20" },
   instagram: { label: "Instagram", className: "text-pink-600 bg-pink-500/10 border-pink-500/20" },
   messenger: { label: "Messenger", className: "text-blue-600 bg-blue-500/10 border-blue-500/20" },

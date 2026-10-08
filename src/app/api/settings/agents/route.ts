@@ -1,11 +1,10 @@
 import { agentRoute } from './handler';
 import { listAgents, publishAgent } from '@/lib/ai/agents/service';
 export async function GET() {
-  return agentRoute('supervisor', (ctx) => listAgents(ctx.accountId));
+  return agentRoute('ai.agents.view', (ctx) => listAgents(ctx.accountId));
 }
 export async function POST(request: Request) {
-  return agentRoute(
-    'admin',
+  return agentRoute('ai.agents.edit',
     async (ctx) => {
       const result = await publishAgent(
         ctx.accountId,
