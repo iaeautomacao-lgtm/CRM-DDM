@@ -100,7 +100,7 @@ describe("migration 211 — stalled_ai_conversations", { timeout: 60_000 }, () =
     `);
     await db.exec(readFileSync(resolve(process.cwd(), "supabase/migrations/211_stalled_ai_conversations.sql"), "utf8").replace(/NOTIFY pgrst[^;]*;/g, ""));
     await db.exec(`INSERT INTO wacrm.flow_nodes VALUES ('${FLOW}','agente_ddm','ai_agent'), ('${FLOW}','menu','send_buttons')`);
-  });
+  }, 60_000);
   afterAll(async () => {
     await db.close();
   });

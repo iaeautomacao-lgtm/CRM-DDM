@@ -37,6 +37,8 @@ vi.mock("@/lib/auth/account", async () => {
     p.then = (resolve: (v: unknown) => unknown) => resolve(result);
     return p;
   };
+  // can()/permissionsForRole reais: o gate por permissão (PRD 20.3) é testado com o catálogo de verdade.
+  const perms = await import("@/lib/auth/permissions");
   const getCurrentAccount = async () => ({
     supabase: {
       from: () => chain({ data: state.flowFound ? [{ id: "flow-1" }] : [], error: null }),
@@ -44,6 +46,7 @@ vi.mock("@/lib/auth/account", async () => {
     userId: "user-1",
     accountId: "acc-1",
     role: state.role,
+    permissions: perms.permissionsForRole(state.role as never),
     account: { id: "acc-1", name: "Conta" },
   });
   const requireRole = async (min: string) => {
@@ -53,11 +56,19 @@ vi.mock("@/lib/auth/account", async () => {
     }
     return ctx;
   };
+  const requirePermission = async (permission: string) => {
+    const ctx = await getCurrentAccount();
+    if (!perms.can(ctx as never, permission as never)) {
+      throw new ForbiddenError("This action requires the '" + permission + "' permission");
+    }
+    return ctx;
+  };
   return {
     UnauthorizedError,
     ForbiddenError,
     getCurrentAccount,
     requireRole,
+    requirePermission,
     toErrorResponse: (err: unknown) =>
       new Response(JSON.stringify({ error: String(err) }), {
         status: (err as { status?: number })?.status ?? 500,
