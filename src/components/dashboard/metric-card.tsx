@@ -22,9 +22,9 @@ interface MetricCardProps {
  */
 export function MetricCard({ title, value, delta, subtitle }: MetricCardProps) {
   return (
-    <div className="min-w-0 px-5 py-4 lg:px-6 lg:py-5">
-      <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <p className="mt-2 text-[26px] font-semibold leading-none tracking-tight tabular-nums text-foreground">
+    <div className="min-w-0 px-5 py-5 lg:px-6 lg:py-6">
+      <p className="text-[13px] font-medium text-muted-foreground">{title}</p>
+      <p className="mt-2.5 text-[32px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
         {value}
       </p>
       {delta ? <DeltaRow sign={delta.sign} label={delta.label} /> : subtitle ? (
@@ -38,7 +38,7 @@ function DeltaRow({ sign, label }: { sign: number; label: string }) {
   const Arrow = sign > 0 ? ArrowUp : sign < 0 ? ArrowDown : Minus
 
   return (
-    <div className="mt-2 flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+    <div className="mt-2.5 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground/80">
       <Arrow className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span className="truncate tabular-nums">{label}</span>
     </div>
