@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { toErrorResponse } from "@/lib/auth/account";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { loadChannelIdentities, type ChannelIdentity } from "@/lib/disparador/channel-label";
 import {
   computeWindowMetrics,
   deriveThroughputFromTicks,
@@ -44,29 +45,23 @@ export async function GET(request: Request) {
     const db = supabaseAdmin();
 
     // 1. Busca os canais vinculados à conta para rotular e filtrar
-    const { data: channelRows, error: channelError } = await db
-      .from("whatsapp_config")
-      .select("id, phone_number:display_phone_number, display_name:waha_session, provider")
-      .eq("account_id", accountId);
-
-    if (channelError) {
-      console.warn("[Desempenho] Falha ao listar whatsapp_config:", channelError.message);
+    // Nome/telefone iguais à tela Canais (channel-label.ts).
+    let identities: ChannelIdentity[] = [];
+    try {
+      identities = await loadChannelIdentities(db, accountId);
+    } catch (channelError) {
+      console.warn("[Desempenho] Falha ao listar whatsapp_config:", channelError instanceof Error ? channelError.message : channelError);
     }
 
     const channelsMap = new Map<string, ChannelInfo>();
     const channelsList: ChannelInfo[] = [];
 
-    for (const c of channelRows ?? []) {
-      const label =
-        c.display_name?.trim() ||
-        c.phone_number?.trim() ||
-        `Canal ${c.id.slice(0, 8)}`;
-
+    for (const c of identities) {
       const info: ChannelInfo = {
         id: c.id,
-        label,
-        provider: (c.provider as "meta" | "waha") ?? "unknown",
-        phoneNumber: c.phone_number ?? null,
+        label: c.name,
+        provider: c.provider,
+        phoneNumber: c.phone,
       };
 
       channelsMap.set(c.id, info);
@@ -91,7 +86,7 @@ export async function GET(request: Request) {
 
     // 3. Busca a vazão por minuto por número na view wacrm.dispatch_throughput_per_minute
     let throughputSeries: ThroughputDataPoint[] = [];
-    const accountSessionIds = (channelRows ?? []).map((c) => c.id);
+    const accountSessionIds = identities.map((c) => c.id);
 
     let throughputTruncated = false;
     try {

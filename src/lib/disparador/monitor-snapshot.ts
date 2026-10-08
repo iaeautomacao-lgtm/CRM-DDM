@@ -11,6 +11,7 @@
 // A parte pura (buildMonitorSnapshot, computeEtaMinutes…) não faz IO e é coberta por testes.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadChannelIdentities } from "./channel-label";
 import { calculateThroughputPerMinute } from "./dispatch-forecast";
 import { describeMetaError } from "./meta-error-catalog";
 import { resolveThroughputConfig, type ThroughputConfig } from "./throughput-config";
@@ -34,6 +35,8 @@ export interface MonitorNumberRow {
   provider: "meta" | "waha" | "unknown";
   phone: string | null;
   enabled: boolean;
+  connected: boolean | null;
+  connectionError: string | null;
   sent1m: number;
   sent5m: number;
   /** Média por minuto dos últimos 15 min (soma dos ticks). */
@@ -138,6 +141,9 @@ export interface RawChannel {
   provider: "meta" | "waha" | "unknown";
   phone: string | null;
   enabled: boolean;
+  /** Último poll de saúde na Meta: true ok, false falhou, null sem leitura (igual ao Conectado/Desconectado da tela Canais). */
+  connected?: boolean | null;
+  connectionError?: string | null;
 }
 export interface RawCampaign {
   id: string;
@@ -303,6 +309,8 @@ export function buildMonitorSnapshot(input: MonitorInput): MonitorSnapshot {
       provider: ch.provider,
       phone: ch.phone,
       enabled: ch.enabled,
+      connected: ch.connected ?? null,
+      connectionError: ch.connectionError ?? null,
       sent1m,
       sent5m,
       avgPerMin15: Math.round(avg15 * 10) / 10,
@@ -545,8 +553,8 @@ export async function loadMonitorInput(db: Db, accountId: string, now: Date = ne
   const since30 = new Date(now.getTime() - 30 * 60_000).toISOString();
   const since24h = new Date(now.getTime() - 24 * 3_600_000).toISOString();
 
-  const [channelsRes, campaignsRes, ticksRes, logsRes, pendingRes] = await Promise.all([
-    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session, provider, habilitado").eq("account_id", accountId),
+  const [identities, campaignsRes, ticksRes, logsRes, pendingRes] = await Promise.all([
+    loadChannelIdentities(db, accountId),
     db
       .from("campaigns")
       .select("*")
@@ -580,18 +588,20 @@ export async function loadMonitorInput(db: Db, accountId: string, now: Date = ne
       .limit(5000),
   ]);
 
-  if (channelsRes.error) throw channelsRes.error;
   if (campaignsRes.error) throw campaignsRes.error;
   if (ticksRes.error) degraded.push("telemetria do motor (cron_tick)");
   if (logsRes.error) degraded.push("eventos recentes");
   if (pendingRes.error) degraded.push("131026 pendentes");
 
-  const channels: RawChannel[] = (channelsRes.data ?? []).map((c: Record<string, unknown>) => ({
-    id: c.id as string,
-    label: ((c.display_name as string | null)?.trim() || (c.phone_number as string | null)?.trim() || `Canal ${(c.id as string).slice(0, 8)}`),
-    provider: c.provider === "meta" || c.provider === "waha" ? (c.provider as "meta" | "waha") : "unknown",
-    phone: (c.phone_number as string | null) ?? null,
-    enabled: c.habilitado !== false,
+  // Nome/telefone iguais à tela Canais (channel-label.ts): habilitados primeiro.
+  const channels: RawChannel[] = identities.map((i) => ({
+    id: i.id,
+    label: i.name,
+    provider: i.provider,
+    phone: i.phone,
+    enabled: i.enabled,
+    connected: i.connected,
+    connectionError: i.connectionError,
   }));
   const channelIds = channels.map((c) => c.id);
 

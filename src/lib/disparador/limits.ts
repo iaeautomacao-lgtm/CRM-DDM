@@ -17,6 +17,7 @@ import {
 import { isTickChainEnabled } from "./tick-chain";
 import { isBatchClaimEnabled } from "./batch-claim";
 import { listRateLimits } from "./rate-limits-service";
+import { loadChannelIdentities, type ChannelIdentity } from "./channel-label";
 
 export class LimitsInputError extends Error {
   constructor(
@@ -178,6 +179,9 @@ export interface NumberLimits {
   phone: string | null;
   provider: DispatchProvider | "unknown";
   enabled: boolean;
+  /** Último poll de saúde na Meta: true = conectado, false = desconectado (ver connectionError), null = sem leitura. */
+  connected: boolean | null;
+  connectionError: string | null;
   /** Valor da linha do banco (null = sem linha: vale o padrão do provedor). */
   maxInFlight: number | null;
   /** Vagas que valem hoje (linha ou padrão do provedor). */
@@ -332,12 +336,15 @@ export function readGlobals(env: Record<string, string | undefined> = process.en
   };
 }
 
+/** Canal com nome/telefone resolvidos como na tela Canais (channel-label.ts). */
 interface RawConfig {
   id: string;
   phone_number: string | null;
-  display_name: string | null;
+  display_name: string;
   provider: string | null;
   habilitado: boolean | null;
+  connected: boolean | null;
+  connectionError: string | null;
 }
 interface RawLimit {
   session_id: string;
@@ -346,12 +353,18 @@ interface RawLimit {
   paused?: boolean | null;
 }
 
+const toRawConfig = (i: ChannelIdentity): RawConfig => ({
+  id: i.id,
+  phone_number: i.phone,
+  display_name: i.name,
+  provider: i.provider,
+  habilitado: i.enabled,
+  connected: i.connected,
+  connectionError: i.connectionError,
+});
+
 async function loadConfigs(db: LimitsDb, accountId: string): Promise<RawConfig[]> {
-  const { data, error } = await run<RawConfig[]>(
-    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session, provider, habilitado").eq("account_id", accountId).limit(500),
-  );
-  if (error) throw new Error(`Falha ao ler números: ${error.message}`);
-  return data ?? [];
+  return (await loadChannelIdentities(db, accountId)).map(toRawConfig);
 }
 
 const providerOf = (p: string | null): DispatchProvider | "unknown" => (p === "meta" || p === "waha" ? p : "unknown");
@@ -370,8 +383,8 @@ async function loadLimitRows(db: LimitsDb, ids: string[]): Promise<{ rows: Map<s
   return { rows, pauseSupported };
 }
 
-export function labelOf(c: Pick<RawConfig, "id" | "display_name" | "phone_number">): string {
-  return c.display_name?.trim() || c.phone_number?.trim() || c.id.slice(0, 8);
+export function labelOf(c: Pick<RawConfig, "display_name">): string {
+  return c.display_name;
 }
 
 export async function loadLimitsOverview(
@@ -406,6 +419,8 @@ export async function loadLimitsOverview(
       id: c.id,
       label: labelOf(c),
       phone: c.phone_number,
+      connected: c.connected,
+      connectionError: c.connectionError,
       provider,
       enabled: c.habilitado !== false,
       maxInFlight: row?.max_in_flight ?? null,
@@ -418,7 +433,8 @@ export async function loadLimitsOverview(
       activeCampaigns: bySession.get(c.id) ?? [],
     };
   });
-  numbers.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
+  // Habilitados primeiro, depois por nome.
+  numbers.sort((a, b) => Number(b.enabled) - Number(a.enabled) || a.label.localeCompare(b.label, "pt-BR"));
 
   const history = await loadHistory(db, accountId, new Map(configs.map((c) => [c.id, labelOf(c)])));
   const labels = new Map(configs.map((c) => [c.id, labelOf(c)]));
@@ -485,11 +501,7 @@ export async function applyLimitsChange(
   req: LimitsRequest,
   env: Record<string, string | undefined> = process.env,
 ): Promise<ApplyResult> {
-  const { data: cfgRows, error: cfgErr } = await run<RawConfig[]>(
-    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session, provider, habilitado").eq("id", req.sessionId).eq("account_id", accountId).limit(1),
-  );
-  if (cfgErr) throw new Error(`Falha ao ler o número: ${cfgErr.message}`);
-  const cfg = (cfgRows ?? [])[0];
+  const cfg = (await loadChannelIdentities(db, accountId, { sessionId: req.sessionId })).map(toRawConfig)[0];
   // Número de outra conta é indistinguível de inexistente.
   if (!cfg) throw new LimitsInputError("Número não encontrado.", 404);
 

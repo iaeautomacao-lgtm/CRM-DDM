@@ -124,6 +124,8 @@ export async function verifyPhoneNumber(
 export interface MetaPhoneHealth {
   id?: string
   display_phone_number?: string
+  /** Nome verificado do número na Meta (o mesmo que a tela Canais mostra). */
+  verified_name?: string
   /** GREEN | YELLOW | RED | NA (a Meta devolve NA para número novo). */
   quality_rating?: string
   /** TIER_50 | TIER_250 | TIER_1K | TIER_10K | TIER_100K | TIER_UNLIMITED. */
@@ -139,7 +141,7 @@ export interface MetaPhoneHealth {
  */
 export async function getPhoneNumberHealth(args: VerifyPhoneNumberArgs): Promise<MetaPhoneHealth> {
   const { phoneNumberId, accessToken } = args
-  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,quality_rating,messaging_limit_tier,throughput`
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,messaging_limit_tier,throughput`
   const response = await metaFetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })

@@ -93,6 +93,27 @@ export default function NumerosPage() {
     };
   }, [loadLive, loadConfig]);
 
+  // "Atualizar dados da Meta": re-consulta nome/telefone/qualidade agora (1 por minuto por conta), sem esperar o cron.
+  const [metaRefreshing, setMetaRefreshing] = useState(false);
+  const [metaMessage, setMetaMessage] = useState<string | null>(null);
+  const refreshFromMeta = useCallback(async () => {
+    setMetaRefreshing(true);
+    setMetaMessage(null);
+    try {
+      const res = await apiFetch("/api/disparador/health/refresh", { method: "POST" });
+      const body = (await res.json().catch(() => ({}))) as { refreshed?: number; failed?: number; error?: string; retry_after_seconds?: number };
+      if (res.status === 429) setMetaMessage(`Aguarde ${body.retry_after_seconds ?? 60} s para atualizar de novo.`);
+      else if (!res.ok) setMetaMessage(body.error ?? "Falha ao atualizar os dados da Meta.");
+      else setMetaMessage(body.failed ? `Atualizado: ${body.refreshed ?? 0} número(s); ${body.failed} falhou(aram).` : `Dados da Meta atualizados (${body.refreshed ?? 0} número(s)).`);
+      await loadConfig();
+      await loadLive();
+    } catch {
+      setMetaMessage("Falha ao atualizar os dados da Meta.");
+    } finally {
+      setMetaRefreshing(false);
+    }
+  }, [loadConfig, loadLive]);
+
   const live = new Map((snapshot?.numbers ?? []).map((n) => [n.id, n]));
   const numbers: NumberLimits[] = overview?.numbers ?? [];
 
@@ -112,11 +133,23 @@ export default function NumerosPage() {
             .
           </p>
         </div>
-        <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => { void loadLive(); void loadConfig(); }}>
-          <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
-          Atualizar
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" disabled={metaRefreshing} onClick={() => void refreshFromMeta()}>
+            <RefreshCw className={cn("h-3.5 w-3.5", metaRefreshing && "animate-spin")} aria-hidden="true" />
+            Atualizar dados da Meta
+          </Button>
+          <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => { void loadLive(); void loadConfig(); }}>
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
+            Atualizar
+          </Button>
+        </div>
       </div>
+
+      {metaMessage && (
+        <p role="status" className="text-xs text-muted-foreground">
+          {metaMessage}
+        </p>
+      )}
 
       {error && (
         <div role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
@@ -155,6 +188,14 @@ export default function NumerosPage() {
                           </Badge>
                         ) : (
                           status && <Badge variant="outline" className={STATUS_CLASS[status]}>{NUMBER_STATUS_LABELS[status]}</Badge>
+                        )}
+                        {n.connected === true && (
+                          <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200">Conectado</Badge>
+                        )}
+                        {n.connected === false && (
+                          <Badge variant="outline" className="border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-200" title={n.connectionError ?? undefined}>
+                            Desconectado
+                          </Badge>
                         )}
                         {!n.enabled && <Badge variant="outline">Desabilitado</Badge>}
                       </div>

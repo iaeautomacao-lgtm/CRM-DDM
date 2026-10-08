@@ -49,7 +49,16 @@ function fakeDb(handlers: Record<string, Handler>) {
 const has = (call: Call, ...op: Op) => call.ops.some((o) => JSON.stringify(o) === JSON.stringify(op));
 const find = (calls: Call[], table: string, method: string) => calls.find((c) => c.table === table && c.ops.some((o) => o[0] === method));
 
-const cfg = (id: string, provider: string, name: string) => ({ id, phone_number: "5511", display_name: name, provider, habilitado: true });
+// Colunas reais de whatsapp_config (o nome da Meta vem de channel_health.verified_name; o do WAHA, de waha_session).
+const cfg = (id: string, provider: string, name: string) => ({
+  id,
+  display_phone_number: "5511",
+  phone_number_id: "pn-" + id.slice(0, 4),
+  waha_session: provider === "waha" ? name : null,
+  provider,
+  habilitado: true,
+});
+const healthName = (id: string, name: string) => ({ session_id: id, verified_name: name, display_phone_number: "5511", checked_at: "2026-10-08T10:00:00Z", last_error: null });
 const base = { sessionId: META, reason: "teste de capacidade", confirm: true };
 
 describe("parseLimitsRequest", () => {
@@ -190,6 +199,7 @@ describe("loadLimitsOverview", () => {
   it("monta números (efetivo/padrão/teto/pausa/campanhas), globais e histórico", async () => {
     const { db, calls } = fakeDb({
       whatsapp_config: () => ({ data: [cfg(WAHA, "waha", "Waha"), cfg(META, "meta", "Principal")] }),
+      channel_health: (call) => ({ data: call.ops.some((o) => String(o[1] ?? "").includes("verified_name")) ? [healthName(META, "Principal")] : [] }),
       dispatch_channel_limits: () => ({ data: [{ session_id: META, max_in_flight: 40, hourly_limit: 9000, paused: true }] }),
       campaigns: () => ({ data: [{ id: "c1", nome: "Camp", session_ids: [META] }] }),
       audit_logs: () => ({
@@ -214,7 +224,7 @@ describe("loadLimitsOverview", () => {
 
   const rateHandlers = {
     whatsapp_config: () => ({ data: [cfg(META, "meta", "Principal")] }),
-    channel_health: () => ({ data: [{ session_id: META, quality_rating: "YELLOW", messaging_limit_tier: "TIER_10K", daily_limit: 10000 }] }),
+    channel_health: () => ({ data: [{ ...healthName(META, "Principal"), quality_rating: "YELLOW", messaging_limit_tier: "TIER_10K", daily_limit: 10000 }] }),
     dispatch_channel_rate: () => ({
       data: [{ session_id: META, auto_rate_per_second: 30, manual_rate_per_second: 12, manual_reason: "teste", force_above_quality: false }],
     }),
