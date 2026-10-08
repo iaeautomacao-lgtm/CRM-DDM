@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardRole } from '@/lib/auth/route-guard'
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit'
 import { sendWahaTextMessage } from '@/lib/whatsapp/waha-api'
@@ -38,12 +39,13 @@ export async function POST(request: Request) {
       )
     }
 
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('id', configId)
-      .eq('account_id', accountId)
-      .maybeSingle()
+    // Segredos só pelo servidor (migration 200b); visibilidade = RLS do usuário.
+    const { data: configRows, error: configError } = await fetchChannelConfigs(
+      supabase,
+      accountId,
+      (q) => q.eq('id', configId).eq('account_id', accountId),
+    )
+    const config = (configRows?.[0] ?? null) as any
 
     if (configError || !config) {
       return NextResponse.json({ error: 'Channel not found' }, { status: 404 })

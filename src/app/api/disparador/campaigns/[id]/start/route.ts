@@ -5,6 +5,7 @@ import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { canManageCampaigns } from "@/lib/disparador/route-auth";
 import { kickDispatchCron } from "@/lib/disparador/dispatch-kick";
+import { resolveCronBaseUrl } from "@/lib/disparador/tick-chain";
 import { writeLog } from "@/lib/logger";
 import { parseRedConfirmation } from "@/lib/disparador/red-quality-gate";
 
@@ -155,11 +156,12 @@ export async function POST(
     // lock global, claims atômicos, backoff, limites e telemetria continuam
     // todos no /api/disparador/cron.
     if (!isInternalCall) {
-      const requestUrl = request.url;
+      // Origem do app vem do ambiente da plataforma, NUNCA do Host/URL desta requisição (o x-cron-secret vai nela).
+      const baseUrl = resolveCronBaseUrl();
       after(async () => {
         const startedAt = Date.now();
         const kick = await kickDispatchCron({
-          requestUrl,
+          baseUrl,
           secret: process.env.CRON_SECRET,
         });
         await writeLog({

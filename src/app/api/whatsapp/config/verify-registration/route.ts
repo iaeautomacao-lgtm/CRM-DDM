@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
@@ -55,11 +56,10 @@ export async function GET() {
     })
   }
 
-  const { data: config } = await supabase
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', accountId)
-    .maybeSingle()
+  // Segredos só pelo servidor (migration 200b); visibilidade = RLS do usuário.
+  // Exatamente 1 canal, como o .maybeSingle() anterior (vários = sem config).
+  const { data: configRows } = await fetchChannelConfigs(supabase, accountId, (q) => q.eq('account_id', accountId))
+  const config = configRows?.length === 1 ? (configRows[0] as any) : null
 
   if (!config) {
     return NextResponse.json({

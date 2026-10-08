@@ -15,6 +15,7 @@ import {
 } from '@/lib/whatsapp/waha-api'
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound'
 import { sendWebchatMessage } from '@/lib/webchat/send'
 import { hasActiveWebchatSession } from '@/lib/webchat/sessions'
@@ -323,21 +324,24 @@ export async function POST(request: Request) {
       }
 
       // Fetch and decrypt WhatsApp config
-      let configQuery = supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-
-      if (conversation && (conversation as any).config_id) {
-        configQuery = configQuery.eq('id', (conversation as any).config_id)
-      } else if (conversation && (conversation as any).waha_session) {
-        configQuery = configQuery.eq(
-          'waha_session',
-          (conversation as any).waha_session
-        )
-      }
-
-      const { data: configList, error: configError } = await configQuery
+      // Segredos (access_token, waha_api_key) só pelo servidor: a visibilidade
+      // do canal segue a RLS do usuário (migration 200b; fetchChannelConfigs).
+      const { data: configList, error: configError } = await fetchChannelConfigs(
+        supabase,
+        accountId,
+        (q) => {
+          let configQuery = q.eq('account_id', accountId)
+          if (conversation && (conversation as any).config_id) {
+            configQuery = configQuery.eq('id', (conversation as any).config_id)
+          } else if (conversation && (conversation as any).waha_session) {
+            configQuery = configQuery.eq(
+              'waha_session',
+              (conversation as any).waha_session
+            )
+          }
+          return configQuery
+        }
+      )
 
       const isListEmpty =
         !configList || (Array.isArray(configList) && configList.length === 0)
@@ -363,10 +367,12 @@ export async function POST(request: Request) {
         // concurrent sends both produce valid GCM ciphertexts of the same
         // plaintext, last write wins.
         if (isLegacyFormat(config.access_token)) {
-          void supabase
+          // Service role: o authenticated não escreve segredo (migration 153).
+          void supabaseAdmin()
             .from('whatsapp_config')
             .update({ access_token: encrypt(accessToken) })
             .eq('id', config.id)
+            .eq('account_id', accountId)
             .then(({ error }: { error: any }) => {
               if (error) {
                 console.warn(

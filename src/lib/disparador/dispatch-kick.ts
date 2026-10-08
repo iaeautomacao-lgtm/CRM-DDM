@@ -9,7 +9,11 @@ export interface DispatchKickResult {
 }
 
 interface KickOptions {
-  requestUrl: string;
+  /**
+   * Origem CONFIÁVEL do app (resolveCronBaseUrl: env da plataforma). Nunca derive de request.url / Host da
+   * requisição: o x-cron-secret iria para o host que o chamador escolher (SG-4).
+   */
+  baseUrl: string | null | undefined;
   secret?: string | null;
   fetchImpl?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -18,8 +22,8 @@ interface KickOptions {
 
 const DEFAULT_RETRY_DELAYS_MS = [0, 1_000, 3_000] as const;
 
-function cronUrlFromRequest(requestUrl: string): string {
-  return new URL("/api/disparador/cron", requestUrl).toString();
+function cronUrl(baseUrl: string): string {
+  return new URL("/api/disparador/cron", baseUrl).toString();
 }
 
 /**
@@ -37,10 +41,14 @@ export async function kickDispatchCron(options: KickOptions): Promise<DispatchKi
   const secret = options.secret?.trim();
   if (!secret) return { outcome: "skipped", attempts: 0, error: "CRON_SECRET ausente" };
 
+  // Sem origem confiável configurada o segredo NÃO sai daqui: o cron de 1 minuto segue como fallback.
+  const baseUrl = options.baseUrl?.trim();
+  if (!baseUrl) return { outcome: "skipped", attempts: 0, error: "URL do app ausente (NEXT_PUBLIC_APP_URL/DISPARADOR_CHAIN_URL)" };
+
   const fetchImpl = options.fetchImpl ?? fetch;
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const delays = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
-  const url = cronUrlFromRequest(options.requestUrl);
+  const url = cronUrl(baseUrl);
   let attempts = 0;
 
   for (const delay of delays) {
