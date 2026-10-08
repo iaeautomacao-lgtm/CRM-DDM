@@ -124,3 +124,41 @@ describe('WH-03/04: contato ausente ou sem perfil não derruba a mensagem', () =
     expect((insert?.payload as { name: string }).name).toBe('5511999990001')
   })
 })
+
+describe('WH-06: conteúdo legível de button/order/contacts/system (efeitos a jusante aceitos pelo dono)', () => {
+  const base = { from: '5511999990001', timestamp: '1760000000' }
+  const contactInfo = { profile: { name: 'Fulano' }, wa_id: '5511999990001' }
+  const stored = (): { content_text: string | null; content_type: string } => {
+    const insert = calls.find((c) => c.table === 'messages' && c.op === 'insert')
+    return insert?.payload as { content_text: string | null; content_type: string }
+  }
+
+  it.each([
+    ['button (texto do botão)', { id: 'w1', ...base, type: 'button', button: { text: 'Quero negociar', payload: 'p1' } }, 'Quero negociar'],
+    ['button sem texto usa o payload', { id: 'w2', ...base, type: 'button', button: { payload: 'SIM' } }, 'SIM'],
+    ['button vazio mantém o marcador', { id: 'w3', ...base, type: 'button' }, '[Unsupported message type: button]'],
+    ['order com itens e nota', { id: 'w4', ...base, type: 'order', order: { text: 'entregar amanhã', product_items: [{ quantity: 2 }, { quantity: 1 }] } }, 'Pedido com 3 itens: entregar amanhã'],
+    ['order com 1 item', { id: 'w5', ...base, type: 'order', order: { product_items: [{ quantity: 1 }] } }, 'Pedido com 1 item'],
+    ['order vazio', { id: 'w6', ...base, type: 'order' }, 'Pedido'],
+    ['contacts', { id: 'w7', ...base, type: 'contacts', contacts: [{ name: { formatted_name: 'Maria' }, phones: [{ phone: '+55 11 98888-0000' }] }] }, 'Contato compartilhado: Maria (+55 11 98888-0000)'],
+    ['contacts vazio', { id: 'w8', ...base, type: 'contacts' }, 'Contato compartilhado'],
+    ['system com body', { id: 'w9', ...base, type: 'system', system: { body: 'Cliente trocou de número', type: 'user_changed_number' } }, 'Mensagem do sistema: Cliente trocou de número'],
+    ['system sem body', { id: 'w10', ...base, type: 'system' }, 'Mensagem do sistema'],
+  ])('%s', async (_name, message, expected) => {
+    expect(await run(message, contactInfo)).toBe('processed')
+    expect(stored().content_text).toBe(expected)
+    expect(stored().content_type).toBe('text')
+  })
+
+  it('o texto do botão é o que vai para o fluxo (como um texto digitado)', async () => {
+    await run({ id: 'w11', ...base, type: 'button', button: { text: 'Sim' } }, contactInfo)
+    expect(dispatchInboundToFlows).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.objectContaining({ kind: 'text', text: 'Sim' }) }),
+    )
+  })
+
+  it('tipo realmente desconhecido continua como marcador', async () => {
+    await run({ id: 'w12', ...base, type: 'hologram' }, contactInfo)
+    expect(stored().content_text).toBe('[Unsupported message type: hologram]')
+  })
+})
