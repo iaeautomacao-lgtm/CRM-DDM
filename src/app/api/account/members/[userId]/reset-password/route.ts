@@ -19,6 +19,8 @@ import { NextResponse } from "next/server";
 
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/account/admin-client";
+import { logAuditEvent } from "@/lib/audit/log-event";
+import { passwordResetEvent } from "@/lib/audit/security-events";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -72,7 +74,7 @@ export async function POST(
     // before touching auth.users — see file header.
     const { data: targetProfile, error: profileErr } = await admin
       .from("profiles")
-      .select("account_id")
+      .select("id, account_id, full_name")
       .eq("user_id", userId)
       .maybeSingle();
 
@@ -101,6 +103,17 @@ export async function POST(
         { status: 500 },
       );
     }
+
+    // 20.8: quem redefiniu a senha de quem (sem a senha). Nunca derruba a resposta.
+    await logAuditEvent(
+      passwordResetEvent({
+        accountId: ctx.accountId,
+        memberProfileId: targetProfile.id as string,
+        targetUserId: userId,
+        targetName: (targetProfile.full_name as string | null) ?? null,
+        actorUserId: ctx.userId,
+      }),
+    );
 
     return NextResponse.json({ success: true });
   } catch (err) {

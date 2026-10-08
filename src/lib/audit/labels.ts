@@ -36,6 +36,7 @@ export const RESOURCE_LABEL: Record<string, string> = {
   template: "Template",
   member: "Membro",
   audit: "Auditoria",
+  api_key: "Chave de API",
 };
 
 export const EVENT_LABEL: Record<AuditLog["event_type"], string> = {
@@ -102,6 +103,9 @@ export const ACTION_LABEL: Record<string, string> = {
   "member.updated": "Membro alterado",
   "member.deleted": "Membro removido",
   "audit.exported": "Exportação da auditoria",
+  "member.password_reset": "Senha do membro redefinida",
+  "api_key.created": "Chave de API criada",
+  "api_key.revoked": "Chave de API revogada",
 };
 
 /** Ações oferecidas no filtro (as mais usadas na investigação). */
