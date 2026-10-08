@@ -164,3 +164,86 @@ describe("sweepStalledAiConversations", () => {
     expect(w.notOlderThan).toBe(ago(30 * 60));
   });
 });
+
+describe("sweepStalledAiConversations — RPC stalled_ai_conversations (migration 211)", () => {
+  const rpcRow = (over: Row = {}) => ({
+    conversation_id: "c1",
+    account_id: "a",
+    last_customer_message_at: ago(200),
+    ai_in_progress_at: null,
+    run_id: "r1",
+    flow_id: "f",
+    current_node_key: "agente_ddm",
+    ...over,
+  });
+  function withRpc(tables: ReturnType<typeof stalledTables>, rpc: (fn: string, args: Row) => { data?: unknown; error?: { code?: string; message: string } | null }) {
+    const fake = fakeDb(tables);
+    const calls: Array<{ fn: string; args: Row }> = [];
+    const db = {
+      from: (t: string) => (fake.db as unknown as { from: (t: string) => unknown }).from(t),
+      rpc: async (fn: string, args: Row) => (calls.push({ fn, args }), { data: null, error: null, ...rpc(fn, args) }),
+    } as unknown as SupabaseClient;
+    return { db, calls, tables: fake.tables };
+  }
+
+  it("usa a RPC (uma consulta), com a janela de hoje, e transfere só o que ela devolve", async () => {
+    const { db, calls, tables } = withRpc(stalledTables(), () => ({ data: [rpcRow()] }));
+    expect(await sweepStalledAiConversations(db, now)).toBe(1);
+    expect(calls).toHaveLength(1);
+    const win = stallWindow(now);
+    expect(calls[0].args).toMatchObject({ p_stalled_before: win.stalledBefore, p_not_older_than: win.notOlderThan, p_limit: 50 });
+    expect(calls[0].args.p_heartbeat_after).toBe(new Date(now.getTime() - 120_000).toISOString());
+    expect(tables.flow_runs[0]).toMatchObject({ status: "handed_off", end_reason: AI_STALL_REASON });
+    expect(tables.conversations[0].status).toBe("pending");
+    expect(tables.ai_decisions).toHaveLength(1);
+  });
+
+  it("não consulta messages/flow_runs/flow_nodes por candidata (sem N+1)", async () => {
+    const t = stalledTables();
+    const fake = fakeDb(t);
+    const selects: string[] = [];
+    const db = {
+      from: (table: string) => {
+        const b = (fake.db as unknown as { from: (t: string) => Record<string, unknown> }).from(table);
+        const select = b.select as () => unknown;
+        b.select = () => (selects.push(table), select());
+        return b;
+      },
+      rpc: async () => ({ data: [rpcRow()], error: null }),
+    } as unknown as SupabaseClient;
+    await sweepStalledAiConversations(db, now);
+    expect(selects).toEqual(["flow_runs"]); // só o select(id) do UPDATE guardado; nada de lookups por candidata
+  });
+
+  it("RPC sem linhas: nada a fazer, sem cair no caminho antigo", async () => {
+    const { db, tables } = withRpc(stalledTables(), () => ({ data: [] }));
+    expect(await sweepStalledAiConversations(db, now)).toBe(0);
+    expect(tables.flow_runs[0].status).toBe("active");
+  });
+
+  it("heartbeat renovado entre a consulta e agora: não transfere (mesma checagem de antes)", async () => {
+    const { db, tables } = withRpc(stalledTables(), () => ({ data: [rpcRow({ ai_in_progress_at: ago(40) })] }));
+    expect(await sweepStalledAiConversations(db, now)).toBe(0);
+    expect(tables.flow_runs[0].status).toBe("active");
+  });
+
+  it("run que avançou depois da consulta (UPDATE guardado não acerta): não mexe na conversa", async () => {
+    const { db, tables } = withRpc(stalledTables({ run: { status: "completed" } }), () => ({ data: [rpcRow()] }));
+    expect(await sweepStalledAiConversations(db, now)).toBe(0);
+    expect(tables.conversations[0].status).toBe("open");
+  });
+
+  it("sem a função (PGRST202/42883): cai no caminho antigo e continua funcionando", async () => {
+    for (const code of ["PGRST202", "42883"]) {
+      const { db, tables } = withRpc(stalledTables(), () => ({ error: { code, message: "Could not find the function wacrm.stalled_ai_conversations" } }));
+      expect(await sweepStalledAiConversations(db, now)).toBe(1);
+      expect(tables.flow_runs[0].status).toBe("handed_off");
+    }
+  });
+
+  it("erro real da RPC: não derruba o cron (devolve 0)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { db } = withRpc(stalledTables(), () => ({ error: { code: "57014", message: "statement timeout" } }));
+    expect(await sweepStalledAiConversations(db, now)).toBe(0);
+  });
+});
