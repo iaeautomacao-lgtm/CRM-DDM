@@ -112,7 +112,7 @@ function verifyTokenMatches(stored: string, supplied: string): boolean {
 export async function GET(request: Request) {
   try {
     // Teto por IP no processo (sem infra nova): barra quem testa verify_token em laço.
-    const limit = checkRateLimit(`webhook-verify:${clientIp(request.headers) ?? 'unknown'}`, RATE_LIMITS.webhookVerify)
+    const limit = await checkRateLimit(`webhook-verify:${clientIp(request.headers) ?? 'unknown'}`, RATE_LIMITS.webhookVerify)
     if (!limit.success) return rateLimitResponse(limit)
 
     const { searchParams } = new URL(request.url)

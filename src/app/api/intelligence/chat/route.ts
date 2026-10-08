@@ -89,7 +89,7 @@ export async function POST(request: Request) {
     return intelligenceErrorResponse(err)
   }
 
-  const limit = checkRateLimit(`intelligence-chat:${scope.userId}`, CHAT_RATE)
+  const limit = await checkRateLimit(`intelligence-chat:${scope.userId}`, CHAT_RATE)
   if (!limit.success) return rateLimitResponse(limit)
 
   const db = supabaseAdmin()

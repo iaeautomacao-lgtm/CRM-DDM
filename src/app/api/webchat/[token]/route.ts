@@ -1,13 +1,15 @@
 import { supabaseAdmin } from '@/lib/flows/admin-client'
-import { requireActiveSession, webchatJson } from '@/lib/webchat/api'
+import { requireActiveSession, webchatJson, webchatRateLimit } from '@/lib/webchat/api'
 import { loadWebchatSettings, renderWelcome } from '@/lib/webchat/settings'
 
 // GET /api/webchat/[token] — dados da sessão para a página do cliente:
 // marca (nome da conta), primeiro nome do contato e validade do link.
 // Só leitura: abrir a conversa é o POST /open.
 
-export async function GET(_request: Request, { params }: { params: Promise<{ token: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  const limited = await webchatRateLimit(request, token, 'read')
+  if (limited) return limited
   const result = await requireActiveSession(token)
   if ('response' in result) return result.response
   const { session } = result

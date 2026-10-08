@@ -129,6 +129,10 @@
       "kind": "registry"
     },
     {
+      "version": "221_rate_limit_shared",
+      "kind": "registry"
+    },
+    {
       "version": "240_roles_foundation",
       "kind": "registry"
     },

@@ -131,3 +131,48 @@ describe("requireApiKey", () => {
     );
   });
 });
+
+// PRD 14, 14.9 (AP-09): chave inválida é barrada por IP ANTES de consultar o banco.
+describe("requireApiKey — flood de chave inválida por IP (AP-09)", () => {
+  const BAD = generateApiKey().plaintext; // formato válido, mas desconhecido no banco
+  const fromIp = (ip: string, key = BAD) =>
+    new Request("https://crm.example.com/api/v1/me", { headers: { authorization: `Bearer ${key}`, "x-real-ip": ip } });
+
+  it("depois de 30 tentativas inválidas do mesmo IP, a seguinte vira 429 SEM consultar o banco", async () => {
+    findActiveKeyByHash.mockResolvedValue(null);
+    for (let i = 0; i < RATE_LIMITS.apiKeyFailures.limit; i++) {
+      await expectApiError(requireApiKey(fromIp("203.0.113.7")), "unauthorized", 401);
+    }
+    expect(findActiveKeyByHash.mock.calls.length).toBe(RATE_LIMITS.apiKeyFailures.limit);
+    // a 31ª falha já passa do teto: 429; as seguintes nem chegam ao banco
+    await expectApiError(requireApiKey(fromIp("203.0.113.7")), "rate_limited", 429);
+    const afterBlock = findActiveKeyByHash.mock.calls.length;
+    await expectApiError(requireApiKey(fromIp("203.0.113.7")), "rate_limited", 429);
+    await expectApiError(requireApiKey(fromIp("203.0.113.7")), "rate_limited", 429);
+    expect(findActiveKeyByHash.mock.calls.length).toBe(afterBlock); // 0 consultas novas
+  });
+
+  it("outro IP não é afetado; o IP barrado fica fora mesmo com chave válida", async () => {
+    findActiveKeyByHash.mockResolvedValue(null);
+    for (let i = 0; i < 40; i++) await requireApiKey(fromIp("198.51.100.1")).catch(() => undefined);
+    findActiveKeyByHash.mockResolvedValue(row());
+    await expectApiError(requireApiKey(fromIp("198.51.100.1", KEY)), "rate_limited", 429);
+    const ok = await requireApiKey(fromIp("198.51.100.2", KEY));
+    expect(ok.accountId).toBe("acct-1");
+  });
+
+  it("chave válida não conta como falha", async () => {
+    findActiveKeyByHash.mockResolvedValue(row());
+    for (let i = 0; i < 40; i++) await requireApiKey(fromIp("192.0.2.9", KEY)).catch(() => undefined);
+    findActiveKeyByHash.mockResolvedValue(null);
+    await expectApiError(requireApiKey(fromIp("192.0.2.9")), "unauthorized", 401);
+  });
+
+  it("cabeçalho malformado também conta como tentativa inválida (sem consulta ao banco)", async () => {
+    for (let i = 0; i < RATE_LIMITS.apiKeyFailures.limit; i++) {
+      await requireApiKey(fromIp("203.0.113.50", "nao-e-uma-chave")).catch(() => undefined);
+    }
+    await expectApiError(requireApiKey(fromIp("203.0.113.50", "nao-e-uma-chave")), "rate_limited", 429);
+    expect(findActiveKeyByHash).not.toHaveBeenCalled();
+  });
+});

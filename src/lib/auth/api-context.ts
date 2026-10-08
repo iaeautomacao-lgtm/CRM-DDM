@@ -34,7 +34,8 @@ import { findActiveKeyByHash, touchLastUsed } from '@/lib/api-keys/store';
 import { hashApiKey, looksLikeApiKey } from '@/lib/api-keys/keys';
 import { hasScope, type ApiScope } from '@/lib/api-keys/scopes';
 import { forbidden, rateLimited, unauthorized } from '@/lib/api/v1/respond';
-import { checkRateLimit, RATE_LIMITS } from '@/lib/rate-limit';
+import { clientIp } from '@/lib/audit/context';
+import { checkRateLimit, isRateLimitedLocal, RATE_LIMITS } from '@/lib/rate-limit';
 
 export interface ApiKeyContext {
   /** Discriminant — lets shared logic tell key auth from cookie auth. */
@@ -82,12 +83,29 @@ function extractKey(request: Request): string | null {
  * On success, bumps `last_used_at` (fire-and-forget) and returns the
  * account context.
  */
+/** Conta uma tentativa inválida do IP no limitador compartilhado; devolve o resultado se o IP passou do teto. */
+async function registerKeyFailure(key: string) {
+  const result = await checkRateLimit(key, RATE_LIMITS.apiKeyFailures);
+  return result.success ? null : result;
+}
+
 export async function requireApiKey(
   request: Request,
   scope?: ApiScope | ApiScope[]
 ): Promise<ApiKeyContext> {
+  // AP-09 (PRD 14, 14.9): chave inválida custava uma consulta ao banco por tentativa. Um IP que já estourou as tentativas
+  // inválidas do minuto é barrado ANTES do lookup (o Map do processo; o contador compartilhado o satura em todas as instâncias).
+  const ip = clientIp(request.headers) ?? 'unknown';
+  const failureKey = `apikey-fail:${ip}`;
+  if (isRateLimitedLocal(failureKey, RATE_LIMITS.apiKeyFailures.limit)) {
+    throw rateLimited(
+      { success: false, remaining: 0, reset: Date.now() + RATE_LIMITS.apiKeyFailures.windowMs, limit: RATE_LIMITS.apiKeyFailures.limit },
+    );
+  }
+
   const presented = extractKey(request);
   if (!presented || !looksLikeApiKey(presented)) {
+    await registerKeyFailure(failureKey);
     throw unauthorized();
   }
 
@@ -96,12 +114,14 @@ export async function requireApiKey(
     // Covers unknown, revoked, and expired keys alike — we don't
     // distinguish them on the wire so a probe can't learn whether a
     // key ever existed.
+    const over = await registerKeyFailure(failureKey);
+    if (over) throw rateLimited(over);
     throw unauthorized();
   }
 
   // Rate-limit per key, before the scope check, so an unauthorized-
   // scope caller still can't hammer the endpoint for free.
-  const limit = checkRateLimit(`apikey:${row.id}`, RATE_LIMITS.publicApi);
+  const limit = await checkRateLimit(`apikey:${row.id}`, RATE_LIMITS.publicApi);
   if (!limit.success) {
     throw rateLimited(limit, { accountId: row.account_id, keyId: row.id });
   }

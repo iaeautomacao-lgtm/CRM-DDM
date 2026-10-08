@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 
   // Keyed by user id — see the budget's doc comment for why this beats
   // an IP key for a guessable-length secret.
-  const limit = checkRateLimit(
+  const limit = await checkRateLimit(
     `invite-code-redeem:${user.id}`,
     RATE_LIMITS.invitationRedeemByCode,
   );

@@ -127,7 +127,7 @@ export async function POST(request: Request) {
   try {
     const ctx = await requirePermission("members.bulk_invite");
 
-    const limit = checkRateLimit(
+    const limit = await checkRateLimit(
       `admin:bulkInviteMembers:${ctx.userId}`,
       RATE_LIMITS.adminAction,
     );

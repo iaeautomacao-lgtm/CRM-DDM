@@ -6,6 +6,6 @@ import { checkRateLimit, type RateLimitResult } from "@/lib/rate-limit";
 
 export const INTELLIGENCE_TOOL_RATE = { limit: 60, windowMs: 60_000 } as const;
 
-export function checkIntelligenceToolRate(userId: string): RateLimitResult {
-  return checkRateLimit(`intelligence:${userId}`, INTELLIGENCE_TOOL_RATE);
+export async function checkIntelligenceToolRate(userId: string): Promise<RateLimitResult> {
+  return await checkRateLimit(`intelligence:${userId}`, INTELLIGENCE_TOOL_RATE);
 }

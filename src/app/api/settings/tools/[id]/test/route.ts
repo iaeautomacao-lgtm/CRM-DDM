@@ -25,7 +25,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { accountId, userId } = auth.ctx
   if (!UUID.test(id)) return NextResponse.json({ error: 'Não encontrada.' }, { status: 404 })
 
-  const limit = checkRateLimit(`tool-test:${userId}`, { limit: 20, windowMs: 60_000 })
+  const limit = await checkRateLimit(`tool-test:${userId}`, { limit: 20, windowMs: 60_000 })
   if (!limit.success) return NextResponse.json({ error: 'Muitos testes seguidos. Aguarde um instante.' }, { status: 429 })
 
   const { data } = await supabaseAdmin().from('ai_tools').select('*').eq('id', id).eq('account_id', accountId).limit(1)
