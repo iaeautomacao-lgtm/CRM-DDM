@@ -2,13 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import {
-  AlertTriangle,
-  Bot,
-  Loader2,
-  Plus,
-  Trash2,
-} from 'lucide-react';
+import { AlertTriangle, Bot, Loader2, Plus, Trash2 } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -39,6 +33,15 @@ import {
   getExitTagDescription,
 } from '@/lib/tabulacoes/ai-exit-tags';
 import type { Tag } from '@/types';
+
+/**
+ * Flag de produto: mantém a coluna e os controles de "Encerrar automaticamente" (auto_close)
+ * ocultos na interface até haver decisão definitiva de produto sobre o comportamento.
+ * Motivo: ligar auto_close encerra a conversa enquanto o fluxo do bot ainda pode
+ * estar rodando o ramo da tag (mensagens de despedida/encerramento ou handoff).
+ * Não apagar o código de suporte a auto_close.
+ */
+const SHOW_AUTO_CLOSE = false;
 
 export interface AiExitTagOutcomeMapRow {
   id: string;
@@ -76,7 +79,8 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
   const [togglingAutoClose, setTogglingAutoClose] = useState(false);
 
   // Delete modal state
-  const [deleteTarget, setDeleteTarget] = useState<AiExitTagOutcomeMapRow | null>(null);
+  const [deleteTarget, setDeleteTarget] =
+    useState<AiExitTagOutcomeMapRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const tabulacaoById = useMemo(() => {
@@ -122,7 +126,9 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
       return;
     }
     if (tabulacoes.length === 0) {
-      toast.error('Crie ao menos uma tabulação de desfecho antes de mapear tags');
+      toast.error(
+        'Crie ao menos uma tabulação de desfecho antes de mapear tags'
+      );
       return;
     }
     setSelectedTag(availableTags[0] ?? '');
@@ -168,7 +174,10 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
     }
   }
 
-  async function handleOutcomeChange(row: AiExitTagOutcomeMapRow, newOutcomeId: string) {
+  async function handleOutcomeChange(
+    row: AiExitTagOutcomeMapRow,
+    newOutcomeId: string
+  ) {
     if (row.outcome_tag_id === newOutcomeId) return;
 
     try {
@@ -183,7 +192,9 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
       if (updateErr) throw updateErr;
 
       setMappings((prev) =>
-        prev.map((m) => (m.id === row.id ? { ...m, outcome_tag_id: newOutcomeId } : m))
+        prev.map((m) =>
+          m.id === row.id ? { ...m, outcome_tag_id: newOutcomeId } : m
+        )
       );
       toast.success(`Tabulação da tag ${row.exit_tag} atualizada`);
     } catch (err: unknown) {
@@ -192,7 +203,10 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
     }
   }
 
-  function handleAutoCloseSwitchClick(row: AiExitTagOutcomeMapRow, nextChecked: boolean) {
+  function handleAutoCloseSwitchClick(
+    row: AiExitTagOutcomeMapRow,
+    nextChecked: boolean
+  ) {
     if (!canEditSettings) return;
 
     if (nextChecked) {
@@ -257,15 +271,21 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
   }
 
   return (
-    <section className="space-y-4 pt-4 border-t border-border">
+    <section className="border-border space-y-4 border-t pt-4">
       <SettingsPanelHead
         title="Tabulação automática pela IA"
-        description="Associe tags de saída emitidas pelo fluxo da IA às tabulações de desfecho da conta. Opcionalmente, configure o encerramento automático da conversa ao emitir cada tag."
+        description={
+          SHOW_AUTO_CLOSE
+            ? 'Associe tags de saída emitidas pelo fluxo da IA às tabulações de desfecho da conta. Opcionalmente, configure o encerramento automático da conversa ao emitir cada tag.'
+            : 'Associe tags de saída emitidas pelo fluxo da IA às tabulações de desfecho da conta para classificar conversas automaticamente.'
+        }
         action={
           canEditSettings ? (
             <Button
               onClick={openAddDialog}
-              disabled={loading || availableTags.length === 0 || tabulacoes.length === 0}
+              disabled={
+                loading || availableTags.length === 0 || tabulacoes.length === 0
+              }
             >
               <Plus className="size-4" />
               Mapear tag da IA
@@ -275,23 +295,29 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
       />
 
       {!canEditSettings && (
-        <p className="text-xs text-muted-foreground">
-          Visualização somente leitura. Apenas administradores e proprietários da conta podem
-          gerenciar as regras de tabulação automática.
+        <p className="text-muted-foreground text-xs">
+          Visualização somente leitura. Apenas administradores e proprietários
+          da conta podem gerenciar as regras de tabulação automática.
+          Supervisores e demais usuários têm acesso apenas para consulta.
         </p>
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-10 text-muted-foreground">
-          <Loader2 className="size-6 animate-spin text-primary mr-2" />
+        <div className="text-muted-foreground flex items-center justify-center py-10">
+          <Loader2 className="text-primary mr-2 size-6 animate-spin" />
           <span>Carregando mapeamentos da IA…</span>
         </div>
       ) : error ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-            <AlertTriangle className="size-6 text-destructive" />
-            <p className="text-sm text-foreground">{error}</p>
-            <Button variant="outline" size="sm" onClick={fetchMappings} className="mt-2">
+            <AlertTriangle className="text-destructive size-6" />
+            <p className="text-foreground text-sm">{error}</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchMappings}
+              className="mt-2"
+            >
               Tentar novamente
             </Button>
           </CardContent>
@@ -299,13 +325,14 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
       ) : mappings.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-            <Bot className="size-6 text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">
+            <Bot className="text-muted-foreground size-6" />
+            <p className="text-foreground text-sm font-medium">
               Nenhuma tag da IA mapeada ainda
             </p>
-            <p className="text-xs text-muted-foreground max-w-md">
-              Mapeie as tags de saída dos fluxos (como #ACORDOFORMALIZADO ou #RECUSA_CONFIRMADA)
-              para que as conversas recebam automaticamente a tabulação sugerida correspondente.
+            <p className="text-muted-foreground max-w-md text-xs">
+              Mapeie as tags de saída dos fluxos (como #ACORDOFORMALIZADO ou
+              #RECUSA_CONFIRMADA) para que as conversas recebam automaticamente
+              a tabulação sugerida correspondente.
             </p>
             {canEditSettings && tabulacoes.length > 0 && (
               <Button size="sm" onClick={openAddDialog} className="mt-2">
@@ -314,8 +341,9 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
               </Button>
             )}
             {tabulacoes.length === 0 && (
-              <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                Cadastre ao menos uma tabulação de desfecho acima para começar a mapear.
+              <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                Cadastre ao menos uma tabulação de desfecho acima para começar a
+                mapear.
               </p>
             )}
           </CardContent>
@@ -325,7 +353,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm" role="table">
-                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground uppercase">
+                <thead className="border-border bg-muted/40 text-muted-foreground border-b text-xs uppercase">
                   <tr>
                     <th scope="col" className="px-4 py-3 font-semibold">
                       Tag de saída da IA
@@ -333,30 +361,41 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                     <th scope="col" className="px-4 py-3 font-semibold">
                       Tabulação sugerida
                     </th>
-                    <th scope="col" className="px-4 py-3 font-semibold text-center">
-                      Encerrar automaticamente
-                    </th>
+                    {SHOW_AUTO_CLOSE && (
+                      <th
+                        scope="col"
+                        className="px-4 py-3 text-center font-semibold"
+                      >
+                        Encerrar automaticamente
+                      </th>
+                    )}
                     {canEditSettings && (
-                      <th scope="col" className="px-4 py-3 font-semibold text-right">
+                      <th
+                        scope="col"
+                        className="px-4 py-3 text-right font-semibold"
+                      >
                         <span className="sr-only">Ações</span>
                       </th>
                     )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-border divide-y">
                   {mappings.map((row) => {
                     const matchedTag = tabulacaoById.get(row.outcome_tag_id);
                     const tagDesc = getExitTagDescription(row.exit_tag);
 
                     return (
-                      <tr key={row.id} className="hover:bg-muted/20 transition-colors">
+                      <tr
+                        key={row.id}
+                        className="hover:bg-muted/20 transition-colors"
+                      >
                         {/* Tag IA */}
                         <td className="px-4 py-3 align-middle">
                           <div className="flex flex-col gap-0.5">
-                            <span className="font-mono text-xs font-semibold text-foreground">
+                            <span className="text-foreground font-mono text-xs font-semibold">
                               {row.exit_tag}
                             </span>
-                            <span className="text-xs text-muted-foreground">
+                            <span className="text-muted-foreground text-xs">
                               {tagDesc}
                             </span>
                           </div>
@@ -389,11 +428,15 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                                       return (
                                         <span className="flex items-center gap-1.5 truncate">
                                           <span
-                                            className="size-2 rounded-full shrink-0"
-                                            style={{ backgroundColor: tag.color }}
+                                            className="size-2 shrink-0 rounded-full"
+                                            style={{
+                                              backgroundColor: tag.color,
+                                            }}
                                             aria-hidden="true"
                                           />
-                                          <span className="truncate">{tag.name}</span>
+                                          <span className="truncate">
+                                            {tag.name}
+                                          </span>
                                         </span>
                                       );
                                     }}
@@ -401,10 +444,14 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                                 </SelectTrigger>
                                 <SelectContent>
                                   {tabulacoes.map((t) => (
-                                    <SelectItem key={t.id} value={t.id} className="text-xs">
+                                    <SelectItem
+                                      key={t.id}
+                                      value={t.id}
+                                      className="text-xs"
+                                    >
                                       <span className="flex items-center gap-1.5">
                                         <span
-                                          className="size-2 rounded-full shrink-0"
+                                          className="size-2 shrink-0 rounded-full"
                                           style={{ backgroundColor: t.color }}
                                           aria-hidden="true"
                                         />
@@ -417,7 +464,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                             </div>
                           ) : matchedTag ? (
                             <Badge
-                              className="border border-border text-xs gap-1.5 py-0.5 px-2 font-normal"
+                              className="border-border gap-1.5 border px-2 py-0.5 text-xs font-normal"
                               style={{
                                 backgroundColor: `${matchedTag.color}15`,
                                 borderColor: `${matchedTag.color}40`,
@@ -425,48 +472,52 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                               }}
                             >
                               <span
-                                className="size-2 rounded-full shrink-0"
+                                className="size-2 shrink-0 rounded-full"
                                 style={{ backgroundColor: matchedTag.color }}
                                 aria-hidden="true"
                               />
                               {matchedTag.name}
                             </Badge>
                           ) : (
-                            <span className="text-xs text-muted-foreground italic">
+                            <span className="text-muted-foreground text-xs italic">
                               Não configurada
                             </span>
                           )}
                         </td>
 
                         {/* Encerrar automaticamente (Switch) */}
-                        <td className="px-4 py-3 align-middle text-center">
-                          <div className="flex flex-col items-center justify-center gap-1">
-                            <div className="flex items-center gap-2">
-                              <Switch
-                                id={`switch-auto-close-${row.id}`}
-                                checked={row.auto_close}
-                                onCheckedChange={(checked) =>
-                                  handleAutoCloseSwitchClick(row, checked)
-                                }
-                                disabled={!canEditSettings || togglingAutoClose}
-                                aria-label={`Encerrar conversa automaticamente para ${row.exit_tag}`}
-                              />
+                        {SHOW_AUTO_CLOSE && (
+                          <td className="px-4 py-3 text-center align-middle">
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  id={`switch-auto-close-${row.id}`}
+                                  checked={row.auto_close}
+                                  onCheckedChange={(checked) =>
+                                    handleAutoCloseSwitchClick(row, checked)
+                                  }
+                                  disabled={
+                                    !canEditSettings || togglingAutoClose
+                                  }
+                                  aria-label={`Encerrar conversa automaticamente para ${row.exit_tag}`}
+                                />
+                              </div>
+                              <span
+                                className={`text-[10px] font-medium ${
+                                  row.auto_close
+                                    ? 'text-emerald-700 dark:text-emerald-400'
+                                    : 'text-muted-foreground'
+                                }`}
+                              >
+                                {row.auto_close ? 'Ativo' : 'Inativo'}
+                              </span>
                             </div>
-                            <span
-                              className={`text-[10px] font-medium ${
-                                row.auto_close
-                                  ? 'text-emerald-700 dark:text-emerald-400'
-                                  : 'text-muted-foreground'
-                              }`}
-                            >
-                              {row.auto_close ? 'Ativo' : 'Inativo'}
-                            </span>
-                          </div>
-                        </td>
+                          </td>
+                        )}
 
                         {/* Ações */}
                         {canEditSettings && (
-                          <td className="px-4 py-3 align-middle text-right">
+                          <td className="px-4 py-3 text-right align-middle">
                             <Button
                               variant="ghost"
                               size="icon-xs"
@@ -495,8 +546,8 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
           <DialogHeader>
             <DialogTitle>Mapear tag da IA</DialogTitle>
             <DialogDescription>
-              Selecione uma tag de saída da IA e defina qual tabulação de desfecho deve ser
-              registrada quando o fluxo emitir essa decisão.
+              Selecione uma tag de saída da IA e defina qual tabulação de
+              desfecho deve ser registrada quando o fluxo emitir essa decisão.
             </DialogDescription>
           </DialogHeader>
 
@@ -523,7 +574,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                 </SelectContent>
               </Select>
               {selectedTag && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-muted-foreground text-xs">
                   {getExitTagDescription(selectedTag)}
                 </p>
               )}
@@ -545,7 +596,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                       return (
                         <span className="flex items-center gap-2">
                           <span
-                            className="size-2 rounded-full shrink-0"
+                            className="size-2 shrink-0 rounded-full"
                             style={{ backgroundColor: tag.color }}
                             aria-hidden="true"
                           />
@@ -560,7 +611,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                     <SelectItem key={t.id} value={t.id}>
                       <span className="flex items-center gap-2">
                         <span
-                          className="size-2 rounded-full shrink-0"
+                          className="size-2 shrink-0 rounded-full"
                           style={{ backgroundColor: t.color }}
                           aria-hidden="true"
                         />
@@ -573,33 +624,40 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
             </div>
 
             {/* Switch auto_close */}
-            <div className="pt-2 space-y-2">
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-border p-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="modal-auto-close" className="text-sm font-medium text-foreground">
-                    Encerrar automaticamente
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Finaliza e tabula a conversa sem necessidade de um atendente humano.
-                  </p>
+            {SHOW_AUTO_CLOSE && (
+              <div className="space-y-2 pt-2">
+                <div className="border-border flex items-center justify-between gap-2 rounded-lg border p-3">
+                  <div className="space-y-0.5">
+                    <Label
+                      htmlFor="modal-auto-close"
+                      className="text-foreground text-sm font-medium"
+                    >
+                      Encerrar automaticamente
+                    </Label>
+                    <p className="text-muted-foreground text-xs">
+                      Finaliza e tabula a conversa sem necessidade de um
+                      atendente humano.
+                    </p>
+                  </div>
+                  <Switch
+                    id="modal-auto-close"
+                    checked={addAutoClose}
+                    onCheckedChange={setAddAutoClose}
+                    disabled={savingNew}
+                  />
                 </div>
-                <Switch
-                  id="modal-auto-close"
-                  checked={addAutoClose}
-                  onCheckedChange={setAddAutoClose}
-                  disabled={savingNew}
-                />
-              </div>
 
-              {addAutoClose && (
-                <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2">
-                  <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
-                  <span>
-                    Aviso: Ao emitir esta tag, a conversa será encerrada e tabulada imediatamente.
-                  </span>
-                </div>
-              )}
-            </div>
+                {addAutoClose && (
+                  <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span>
+                      Aviso: Ao emitir esta tag, a conversa será encerrada e
+                      tabulada imediatamente.
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -625,68 +683,72 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
       </Dialog>
 
       {/* Modal: Confirmação de Ativação do Encerramento Automático */}
-      <Dialog
-        open={confirmAutoCloseTarget !== null}
-        onOpenChange={(open) => !open && setConfirmAutoCloseTarget(null)}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="size-5 text-amber-600 dark:text-amber-400" />
-              Confirmar encerramento automático?
-            </DialogTitle>
-            <DialogDescription className="space-y-2 pt-2 text-sm text-muted-foreground text-left">
-              <span className="block">
-                Ao ativar esta opção para a tag{' '}
-                <strong className="font-mono text-foreground font-semibold">
-                  {confirmAutoCloseTarget?.exit_tag}
-                </strong>
-                , qualquer conversa em que a IA emitir essa tag será{' '}
-                <strong>encerrada e tabulada imediatamente</strong> como &quot;
-                {confirmAutoCloseTarget
-                  ? tabulacaoById.get(confirmAutoCloseTarget.outcome_tag_id)?.name ??
-                    'Tabulação configurada'
-                  : ''}
-                &quot; <strong>sem passar por um atendente humano</strong>.
-              </span>
-              <span className="block text-xs text-amber-700 dark:text-amber-400 font-medium">
-                Certifique-se de que o fluxo do bot já envia todas as mensagens de despedida e
-                conclusão necessárias antes de emitir a tag.
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setConfirmAutoCloseTarget(null)}
-              disabled={togglingAutoClose}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => {
-                if (confirmAutoCloseTarget) {
-                  void updateAutoClose(
-                    confirmAutoCloseTarget.id,
-                    confirmAutoCloseTarget.exit_tag,
-                    true
-                  );
-                }
-              }}
-              disabled={togglingAutoClose}
-            >
-              {togglingAutoClose ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Salvando…
-                </>
-              ) : (
-                'Confirmar encerramento'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {SHOW_AUTO_CLOSE && (
+        <Dialog
+          open={confirmAutoCloseTarget !== null}
+          onOpenChange={(open) => !open && setConfirmAutoCloseTarget(null)}
+        >
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="size-5 text-amber-600 dark:text-amber-400" />
+                Confirmar encerramento automático?
+              </DialogTitle>
+              <DialogDescription className="text-muted-foreground space-y-2 pt-2 text-left text-sm">
+                <span className="block">
+                  Ao ativar esta opção para a tag{' '}
+                  <strong className="text-foreground font-mono font-semibold">
+                    {confirmAutoCloseTarget?.exit_tag}
+                  </strong>
+                  , qualquer conversa em que a IA emitir essa tag será{' '}
+                  <strong>encerrada e tabulada imediatamente</strong> como
+                  &quot;
+                  {confirmAutoCloseTarget
+                    ? (tabulacaoById.get(confirmAutoCloseTarget.outcome_tag_id)
+                        ?.name ?? 'Tabulação configurada')
+                    : ''}
+                  &quot; <strong>sem passar por um atendente humano</strong>.
+                </span>
+                <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">
+                  Certifique-se de que o fluxo do bot já envia todas as
+                  mensagens de despedida e conclusão necessárias antes de emitir
+                  a tag.
+                </span>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmAutoCloseTarget(null)}
+                disabled={togglingAutoClose}
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => {
+                  if (confirmAutoCloseTarget) {
+                    void updateAutoClose(
+                      confirmAutoCloseTarget.id,
+                      confirmAutoCloseTarget.exit_tag,
+                      true
+                    );
+                  }
+                }}
+                disabled={togglingAutoClose}
+              >
+                {togglingAutoClose ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    Salvando…
+                  </>
+                ) : (
+                  'Confirmar encerramento'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Modal: Exclusão de Mapeamento */}
       <Dialog
@@ -698,7 +760,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
             <DialogTitle>Remover mapeamento</DialogTitle>
             <DialogDescription>
               Deseja remover o mapeamento da tag{' '}
-              <strong className="font-mono text-foreground">
+              <strong className="text-foreground font-mono">
                 {deleteTarget?.exit_tag}
               </strong>
               ? A IA não sugerirá mais essa tabulação ao emitir essa tag.
