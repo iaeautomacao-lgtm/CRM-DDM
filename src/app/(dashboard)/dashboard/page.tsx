@@ -2,14 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useAuth } from '@/hooks/use-auth'
-import {
-  MessageSquare,
-  UserPlus,
-  CheckCircle,
-  Send,
-} from 'lucide-react'
-
 import {
   loadActivity,
   loadConversationsSeries,
@@ -170,65 +162,70 @@ export default function DashboardPage() {
   )
 
   return (
-    // Explicit mt-* per section (rather than a blanket space-y-* on this
-    // container) so the three section-opener gaps below can be widened
-    // independently — space-y's margin-top would otherwise win over a
-    // per-child override at equal specificity.
-    <div>
-      {/* Header — the top bar (components/layout/header.tsx) already
-          renders the "Dashboard" H1 for this route; only the subtitle
-          belongs here. */}
-      <p className="text-sm text-muted-foreground">
-        Análise em tempo real de conversas, contatos, negócios, transmissões e automações.
-      </p>
+    <div className="mx-auto w-full max-w-[1600px] pb-10">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">Visão geral da operação</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">Atendimento, volume e resultados em um só lugar.</p>
+          <p suppressHydrationWarning className="mt-2 text-xs capitalize text-muted-foreground/80">
+            {new Intl.DateTimeFormat('pt-BR', {
+              weekday: 'long',
+              day: '2-digit',
+              month: 'long',
+            }).format(new Date())}
+          </p>
+        </div>
+        <QuickActions />
+      </div>
 
-      {/* Falha parcial: gráficos que não carregaram ficariam em skeleton
-          para sempre — avisa e permite recarregar tudo. As seções de
-          métricas e IA têm o próprio estado de erro abaixo. */}
       {(failed.has('series') || failed.has('status') || failed.has('responseTime') || failed.has('activity')) && (
         <ErrorState
-          className="mt-5 min-h-0"
+          className="mt-6 min-h-0"
           title="Parte do painel não pôde ser carregada"
           onRetry={retryAll}
         />
       )}
 
-      {/* Metric cards */}
-      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mt-7">
+        <SectionHeading
+          title="Operação agora"
+          description="O que exige atenção neste momento."
+          primary
+        />
+
         {failed.has('metrics') ? (
           <ErrorState
-            className="sm:col-span-2 lg:col-span-4"
+            className="mt-3"
             title="Não foi possível carregar os indicadores"
             onRetry={retryAll}
           />
         ) : metricsLoading || !metrics ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonCard key={i} className="min-h-[120px]" />
-          ))
+          <div className="mt-3 grid grid-cols-1 gap-px overflow-hidden border-y border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <SkeletonCard key={i} className="min-h-[112px] rounded-none border-0" />
+            ))}
+          </div>
         ) : (
-          <>
+          <div className="mt-3 grid grid-cols-1 divide-y divide-border border-y border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
             <MetricCard
-              title="Conversas Ativas"
-              value={metrics.activeConversations.current.toLocaleString()}
-              icon={MessageSquare}
+              title="Conversas ativas"
+              value={metrics.activeConversations.current.toLocaleString('pt-BR')}
               delta={{
                 sign: metrics.activeConversations.previous,
                 label: deltaLabel(metrics.activeConversations.previous, 'novas hoje vs ontem'),
               }}
             />
             <MetricCard
-              title="Conversas Pendentes"
-              value={metrics.pendingConversations.current.toLocaleString()}
-              icon={UserPlus}
+              title="Conversas pendentes"
+              value={metrics.pendingConversations.current.toLocaleString('pt-BR')}
               delta={{
                 sign: metrics.pendingConversations.previous,
                 label: deltaLabel(metrics.pendingConversations.previous, 'vs ontem'),
               }}
             />
             <MetricCard
-              title="Conversas Resolvidas Hoje"
-              value={metrics.resolvedConversationsToday.current.toLocaleString()}
-              icon={CheckCircle}
+              title="Resolvidas hoje"
+              value={metrics.resolvedConversationsToday.current.toLocaleString('pt-BR')}
               delta={{
                 sign: metrics.resolvedConversationsToday.current - metrics.resolvedConversationsToday.previous,
                 label: deltaLabel(
@@ -238,80 +235,96 @@ export default function DashboardPage() {
               }}
             />
             <MetricCard
-              title="Mensagens Enviadas Hoje"
-              value={metrics.messagesSentToday.current.toLocaleString()}
-              icon={Send}
+              title="Mensagens enviadas hoje"
+              value={metrics.messagesSentToday.current.toLocaleString('pt-BR')}
               delta={{
-                sign:
-                  metrics.messagesSentToday.current - metrics.messagesSentToday.previous,
+                sign: metrics.messagesSentToday.current - metrics.messagesSentToday.previous,
                 label: deltaLabel(
                   metrics.messagesSentToday.current - metrics.messagesSentToday.previous,
                   'vs ontem',
                 ),
               }}
             />
-          </>
+          </div>
         )}
-      </div>
+      </section>
 
-      {/* Quick actions */}
-      <div className="mt-5">
-        <QuickActions />
-      </div>
-
-      {/* Recuperação Financeira */}
-      <div className="mt-10">
-        <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Recuperação Financeira</h3>
-        {failed.has('ai') ? (
-          <ErrorState title="Não foi possível carregar a recuperação financeira" onRetry={retryAll} />
-        ) : (
-          <FinancialPerformance data={aiPerformance} loading={aiPerformanceLoading} />
-        )}
-      </div>
-
-      {/* Desempenho da IA e Vendas */}
-      <div className="mt-10">
-        <h3 className="mb-4 text-sm font-semibold text-muted-foreground uppercase tracking-wider">Desempenho da IA & Conversão</h3>
-        {failed.has('ai') ? (
-          <ErrorState title="Não foi possível carregar o desempenho da IA" onRetry={retryAll} />
-        ) : (
-          <AiPerformance data={aiPerformance} loading={aiPerformanceLoading} />
-        )}
-      </div>
-
-      {/* Charts row */}
-      <div className="mt-10 grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <div className="h-full lg:col-span-3">
-          <ConversationsChart
-            series={series}
-            loading={seriesLoading}
-            range={range}
-            onRangeChange={handleRangeChange}
-          />
+      <section className="mt-12">
+        <SectionHeading title="Movimento da operação" />
+        <div className="mt-3 grid grid-cols-1 gap-6 lg:grid-cols-5">
+          <div className="lg:col-span-3">
+            <ConversationsChart
+              series={series}
+              loading={seriesLoading}
+              range={range}
+              onRangeChange={handleRangeChange}
+            />
+          </div>
+          <div className="lg:col-span-2">
+            <ConversationsStatusDonut data={statusData} loading={statusLoading} />
+          </div>
         </div>
-        <div className="h-full lg:col-span-2">
-          <ConversationsStatusDonut
-            data={statusData}
-            loading={statusLoading}
-          />
+      </section>
+
+      <section className="mt-12">
+        <SectionHeading title="Tempo de resposta" />
+        <div className="mt-3">
+          <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
         </div>
-      </div>
+      </section>
 
-      {/* Response time */}
-      <div className="mt-5">
-        <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
-      </div>
+      <section className="mt-12">
+        <SectionHeading title="Recuperação financeira" />
+        <div className="mt-3">
+          {failed.has('ai') ? (
+            <ErrorState title="Não foi possível carregar a recuperação financeira" onRetry={retryAll} />
+          ) : (
+            <FinancialPerformance data={aiPerformance} loading={aiPerformanceLoading} />
+          )}
+        </div>
+      </section>
 
-      {/* Activity feed */}
-      <div className="mt-5">
+      <section className="mt-12">
+        <SectionHeading title="IA e conversão" />
+        <div className="mt-3">
+          {failed.has('ai') ? (
+            <ErrorState title="Não foi possível carregar o desempenho da IA" onRetry={retryAll} />
+          ) : (
+            <AiPerformance data={aiPerformance} loading={aiPerformanceLoading} />
+          )}
+        </div>
+      </section>
+
+      <section className="mt-12">
         <ActivityFeed items={activity} loading={activityLoading} />
-      </div>
+      </section>
+    </div>
+  )
+}
+
+function SectionHeading({
+  title,
+  description,
+  primary = false,
+}: {
+  title: string
+  description?: string
+  primary?: boolean
+}) {
+  return (
+    <div>
+      <h2 className={"text-lg font-semibold tracking-[-0.02em] text-foreground"}>
+        {title}
+      </h2>
+      {description ? (
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      ) : null}
     </div>
   )
 }
 
 function deltaLabel(delta: number, suffix: string): string {
-  if (delta === 0) return `Sem alteração ${suffix}`
+  if (delta === 0) return `Igual a ontem`
   const sign = delta > 0 ? '+' : ''
   return `${sign}${delta.toLocaleString()} ${suffix}`
 }

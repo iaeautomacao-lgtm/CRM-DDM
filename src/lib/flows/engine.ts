@@ -1,5 +1,3 @@
-import { resolveProviderMedia } from '@/lib/storage/provider-media';
-import { safeFetch } from '@/lib/security/ssrf-guard';
 /**
  * Flow runner.
  *
@@ -35,7 +33,6 @@ import { safeFetch } from '@/lib/security/ssrf-guard';
  */
 
 import {
-  handleAiAutoResponse,
   AI_EMPTY_REPLY_FALLBACK_TEXT,
   type AiGuardDetail,
 } from "@/lib/ai/responder";
@@ -53,34 +50,18 @@ import {
   readTurnVar,
   type AdvanceWalkContext,
 } from "./ai-turns";
-import { supabaseAdmin } from "./admin-client";
-import { writeLog } from "@/lib/logger";
-import {
-  engineMetaSendTemplate,
-  engineSendInteractiveButtons,
-  engineSendInteractiveList,
-  engineSendMedia,
-  engineSendText,
-} from "./meta-send";
-import {
-  engineWahaSendButtons,
-  engineWahaSendList,
-  engineWahaSendMedia,
-  engineWahaSendText,
-} from "./waha-send";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { flowEffects, viaFlowEffects } from "./effects";
+import { loadAccountSecrets } from "@/lib/ai/account-secrets";
+import { withAgentRuntime } from "@/lib/ai/agents/scope";
+import { resolveBoundAiNode, snapshotRunAgentBindings, type ResolvedAiNode } from "./agent-binding";
+import { collectSecretValues, hostCheckUrl, resolveToolSecrets } from "@/lib/ai/tool-secrets";
+import { redactSecrets } from "@/lib/ai-tools/tool-request";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
-  getConversationChannel,
   isSocialChannel,
-  sendWebchatMessage,
   type WebchatOutgoingMessage,
 } from "@/lib/webchat/send";
-import { sendSocialMessage } from "@/lib/channels/social";
-import {
-  createWebchatSession,
-  hasActiveWebchatSession,
-  sendWebchatInvite,
-} from "@/lib/webchat/sessions";
 import {
   type AddNoteNodeConfig,
   type AiAgentNodeConfig,
@@ -112,6 +93,33 @@ import {
   type SwitchNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
+
+// ============================================================
+// Efeitos externos (banco, envio Meta/WAHA/canais, IA, logs) — via
+// FlowEffects (effects.ts). Fora do simulador cada atalho chama
+// exatamente a mesma função de antes; os call sites abaixo não mudaram.
+// ============================================================
+const supabaseAdmin = viaFlowEffects("db");
+const engineSendText = viaFlowEffects("engineSendText");
+const engineSendMedia = viaFlowEffects("engineSendMedia");
+const engineSendInteractiveButtons = viaFlowEffects("engineSendInteractiveButtons");
+const engineSendInteractiveList = viaFlowEffects("engineSendInteractiveList");
+const engineMetaSendTemplate = viaFlowEffects("engineMetaSendTemplate");
+const engineWahaSendText = viaFlowEffects("engineWahaSendText");
+const engineWahaSendMedia = viaFlowEffects("engineWahaSendMedia");
+const engineWahaSendButtons = viaFlowEffects("engineWahaSendButtons");
+const engineWahaSendList = viaFlowEffects("engineWahaSendList");
+const sendWebchatMessage = viaFlowEffects("sendWebchatMessage");
+const sendSocialMessage = viaFlowEffects("sendSocialMessage");
+const getConversationChannel = viaFlowEffects("getConversationChannel");
+const createWebchatSession = viaFlowEffects("createWebchatSession");
+const hasActiveWebchatSession = viaFlowEffects("hasActiveWebchatSession");
+const sendWebchatInvite = viaFlowEffects("sendWebchatInvite");
+const resolveProviderMedia = viaFlowEffects("resolveProviderMedia");
+const handleAiAutoResponse = viaFlowEffects("handleAiAutoResponse");
+const writeLog = viaFlowEffects("writeLog");
+// Catálogo de ferramentas (tool_refs): no simulador a lista efetiva é a mesma da produção (leitura real, somente SELECT).
+const resolveEffectiveTools = viaFlowEffects("resolveEffectiveTools");
 
 /** go_to's jump cap — catches cyclical anchor chains without spinning forever. */
 const MAX_HOPS = 50;
@@ -238,7 +246,7 @@ export function evaluateConditionPredicate(args: {
 // readable. Errors surface as thrown — the entry point catches.
 // ============================================================
 
-type AdminClient = ReturnType<typeof supabaseAdmin>;
+type AdminClient = SupabaseClient;
 
 async function loadActiveRunForContact(
   db: AdminClient,
@@ -490,6 +498,8 @@ async function logAiDecision(
   db: AdminClient,
   input: AiDecisionInput,
 ): Promise<void> {
+  // Tag de saída da IA → sugestão de tabulação (best-effort, migration 157).
+  if (input.ai_exit_code) void import("@/lib/ai/outcome-suggestion").then((m) => m.suggestOutcomeFromAiDecision(db, input)).catch(() => {});
   // Telemetria best-effort: nunca derruba o fluxo.
   let error: { message: string } | null = null;
   try {
@@ -1310,6 +1320,33 @@ async function executeHandoff(
     },
   });
   await endRun(db, run, "handed_off", "handoff_node");
+}
+
+/**
+ * Agente (perfil) do nó desligado/inexistente/indisponível: o run NUNCA trava. Segue pela saída de
+ * falha configurada no nó (`failure_next_node_key`) ou, sem ela, passa a conversa para a fila humana.
+ * Retorna a chave do próximo nó quando há saída de falha válida; null quando fez o handoff.
+ */
+async function leaveUnavailableAgent(
+  db: AdminClient,
+  run: FlowRunRow,
+  node: FlowNodeRow,
+  resolved: ResolvedAiNode,
+  nodes: Map<string, FlowNodeRow>,
+): Promise<string | null> {
+  const reason = resolved.disabled?.reason ?? "agent_unavailable";
+  await logEvent(db, run.id, "node_entered", node.node_key, {
+    exit_reason: reason,
+    agent_id: resolved.agentId,
+    agent_version_id: resolved.agentVersionId,
+  });
+  const target = resolved.cfg.failure_next_node_key;
+  if (target && nodes.has(target)) return target;
+  await executeHandoff(db, run, {
+    ...node,
+    config: { ...node.config, reason_code: "AGENTE_INDISPONIVEL", reason_subcode: reason },
+  } as FlowNodeRow);
+  return null;
 }
 
 /**
@@ -3147,35 +3184,78 @@ export async function advanceFromNodeKey(
     }
     if (node.node_type === "http_fetch") {
       const cfg = node.config as unknown as HttpFetchNodeConfig;
-      const url = interpolateVars(cfg.url, run.vars);
+      let url = interpolateVars(cfg.url, run.vars);
+      let fetchHeaders = cfg.headers;
+      let fetchBody =
+        cfg.method === "GET" || !cfg.body_template
+          ? undefined
+          : interpolateVars(cfg.body_template, run.vars);
       const timeoutMs = (cfg.timeout_seconds ?? 10) * 1000;
+      let credentialInjected = false;
+      let secretValues: string[] = [];
+      let logUrl = url;
       try {
-        // Guard anti-SSRF: DNS validado, redirects revalidados, limite de tamanho.
-        const res = await safeFetch(
+        // Variáveis/credenciais da conta ({{var.X}}/{{cred.X}}/{{secret.X}}), só quando o
+        // template usa algum marcador (fluxos antigos não consultam o banco). A
+        // credencial só vai se o host da URL FINAL estiver nos hosts permitidos dela.
+        // No simulador a credencial NUNCA é resolvida: o valor vira "***" (a chamada é mock).
+        if (/\{\{\s*(?:cred|var|secret)\./.test(JSON.stringify([cfg.url, cfg.headers, cfg.body_template]))) {
+          const account = await loadAccountSecrets(run.account_id);
+          secretValues = collectSecretValues(account);
+          const destination = hostCheckUrl(cfg.url, account, (t) => interpolateVars(t, run.vars));
+          const simulating = flowEffects().mode === "simulation";
+          const missing: string[] = [];
+          const resolveMarkers = (text: string, encode: boolean, mask = simulating) => {
+            const r = resolveToolSecrets(text, destination, process.env, { encode, account, mask });
+            if (mask === simulating) missing.push(...r.missing);
+            if (r.usedSecrets && mask === simulating) credentialInjected = true;
+            return r.value;
+          };
+          url = interpolateVars(resolveMarkers(cfg.url, true), run.vars);
+          if (cfg.headers) {
+            fetchHeaders = Object.fromEntries(
+              Object.entries(cfg.headers).map(([k, v]) => [k, interpolateVars(resolveMarkers(v, false), run.vars)]),
+            );
+          }
+          if (fetchBody !== undefined && cfg.body_template) {
+            fetchBody = interpolateVars(resolveMarkers(cfg.body_template, false), run.vars);
+          }
+          if (missing.length > 0) {
+            throw new Error(`Variável/credencial não configurada ou sem permissão para este host: ${[...new Set(missing)].join(", ")}`);
+          }
+          // Log/eventos: a URL com a credencial NUNCA vai para flow_run_events nem para a simulação.
+          logUrl = interpolateVars(resolveMarkers(cfg.url, true, true), run.vars);
+        }
+        // Guard anti-SSRF (#98: DNS validado, redirects revalidados, limite de
+        // tamanho) é aplicado por liveFlowEffects.httpFetch; o simulador troca
+        // o conjunto de efeitos e responde com mock, sem rede.
+        const res = await flowEffects().httpFetch(
+          node.node_key,
           url,
           {
             method: cfg.method,
-            headers: cfg.headers,
-            body:
-              cfg.method === "GET" || !cfg.body_template
-                ? undefined
-                : interpolateVars(cfg.body_template, run.vars),
+            headers: fetchHeaders,
+            body: fetchBody,
           },
-          { timeoutMs },
+          { timeoutMs, failOnCrossOriginRedirect: credentialInjected },
         );
         let responseBodyText: string;
+        // Eco de credencial: sanitiza ANTES de ir para run.vars e para os eventos do run
+        // (a truncagem abaixo continua igual).
+        const rawResponseText = await res.text();
+        const safeResponseText = credentialInjected ? redactSecrets(rawResponseText, secretValues) : rawResponseText;
         if (cfg.response_var) {
           let parsed: unknown;
           try {
-            parsed = await res.clone().json();
+            parsed = JSON.parse(safeResponseText);
           } catch {
-            parsed = await res.text();
+            parsed = safeResponseText;
           }
           await updateRunVars(db, run, { [cfg.response_var]: parsed });
           responseBodyText =
             typeof parsed === "string" ? parsed : JSON.stringify(parsed);
         } else {
-          responseBodyText = await res.clone().text();
+          responseBodyText = safeResponseText;
         }
         const response_body =
           responseBodyText.length > 2000
@@ -3187,7 +3267,7 @@ export async function advanceFromNodeKey(
         });
         await nodeCompleted({
           method: cfg.method,
-          url,
+          url: logUrl,
           response_status: res.status,
           response_body,
         });
@@ -3197,7 +3277,7 @@ export async function advanceFromNodeKey(
           reason: "http_fetch_failed",
           detail,
         });
-        await nodeError(detail, err, { method: cfg.method, url });
+        await nodeError(detail, err, { method: cfg.method, url: logUrl });
       }
       currentKey = cfg.next_node_key;
       continue;
@@ -3517,7 +3597,19 @@ export async function advanceFromNodeKey(
       return { outcome: "advanced" };
     }
     if (node.node_type === "ai_agent") {
-      const cfg = node.config as unknown as AiAgentNodeConfig;
+      // Nó vinculado a um agente (agent_id): config efetiva = versão FIXADA no run. Sem agent_id,
+      // resolved.cfg é o próprio config do nó (inline/legado) — comportamento idêntico ao de antes.
+      const resolved = await resolveBoundAiNode(db, run, node);
+      const cfg = resolved.cfg;
+      if (resolved.disabled) {
+        const failureKey = await leaveUnavailableAgent(db, run, node, resolved, nodes);
+        if (failureKey) {
+          currentKey = failureKey;
+          await nodeCompleted({ agent_unavailable: resolved.disabled.reason, exit_reason: "agent_unavailable" });
+          continue;
+        }
+        return { outcome: "handed_off" };
+      }
 
       // Limpa assigned_agent_id para que replies do cliente cheguem ao agente
       if (run.conversation_id) {
@@ -3558,7 +3650,7 @@ export async function advanceFromNodeKey(
         return { outcome: "advanced" };
       }
 
-      const core = await runAiAgentCore(
+      const core = await withAgentRuntime(resolved.runtime, async () => runAiAgentCore(
         db,
         run,
         cfg.system_prompt_override
@@ -3567,7 +3659,7 @@ export async function advanceFromNodeKey(
         undefined,
         run.started_at,  // usa início do run — agente vê histórico completo desde o trigger
         undefined,
-        cfg.tools,
+        await resolveEffectiveTools(run.account_id, cfg.tools, cfg.tool_refs),
         // run.current_node_key ainda não reflete este nó aqui — dentro do
         // walk síncrono de advanceFromNodeKey ele só é persistido quando
         // um nó suspende/termina, então pode estar apontando pro nó
@@ -3577,7 +3669,7 @@ export async function advanceFromNodeKey(
         flowExitTagsFromNodes(nodes.values()),
         cfg.model,
         promptVersionOf(cfg.system_prompt_override),
-      );
+      ));
       if (!core.ok) {
         await logEvent(db, run.id, "error", node.node_key, {
           reason: "ai_agent_failed",
@@ -4119,7 +4211,7 @@ async function debounceAiAgentReply(db: AdminClient, runId: string): Promise<boo
     return debounceAiAgentReplyInMemory(runId);
   }
 
-  await new Promise((resolve) => setTimeout(resolve, AI_AGENT_REPLY_DEBOUNCE_MS));
+  await flowEffects().sleep(AI_AGENT_REPLY_DEBOUNCE_MS);
 
   const { data: row } = await db
     .from("flow_runs")
@@ -4268,7 +4360,17 @@ async function handleReplyForActiveRun(
   // with nothing actually sent, eventually handing off after
   // max_reprompts) instead of ever reaching the AI again.
   if (currentNode.node_type === "ai_agent") {
-    const cfg = currentNode.config as unknown as AiAgentNodeConfig;
+    const resolved = await resolveBoundAiNode(db, run, currentNode);
+    const cfg = resolved.cfg;
+    if (resolved.disabled) {
+      // Agente desligado com o run parado nele: segue pela saída de falha ou vai para a fila humana.
+      const failureKey = await leaveUnavailableAgent(db, run, currentNode, resolved, nodes);
+      if (failureKey) {
+        const outcome = await advanceFromNodeKey(db, run, failureKey, nodes);
+        return { consumed: true, flow_run_id: run.id, outcome: outcome.outcome };
+      }
+      return { consumed: true, flow_run_id: run.id, outcome: "handed_off" };
+    }
 
     // Debounce — see debounceAiAgentReply's own comment. If a newer
     // reply for this run supersedes us before the window elapses, bail
@@ -4291,7 +4393,7 @@ async function handleReplyForActiveRun(
       return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
     }
 
-    const core = await runAiAgentCore(
+    const core = await withAgentRuntime(resolved.runtime, async () => runAiAgentCore(
       db,
       run,
       cfg.system_prompt_override
@@ -4300,13 +4402,13 @@ async function handleReplyForActiveRun(
       undefined,
       run.started_at,  // historyAfter — exclui runs anteriores
       undefined,       // historyBefore — sem corte superior, agente vê histórico completo da run
-      cfg.tools,
+      await resolveEffectiveTools(run.account_id, cfg.tools, cfg.tool_refs),
       undefined,       // currentNodeKeyOverride — run.current_node_key já é o nó certo aqui
       cfg.herdar_contexto_anterior,
       flowExitTagsFromNodes(nodes.values()),
       cfg.model,
       promptVersionOf(cfg.system_prompt_override),
-    );
+    ));
     if (!core.ok) {
       await logEvent(db, run.id, "error", currentNode.node_key, {
         reason: "ai_agent_failed",
@@ -4707,6 +4809,8 @@ async function startNewRun(
     return { consumed: false, outcome: "no_match" };
   }
   const run = inserted as FlowRunRow;
+  // Fixa a versão publicada dos agentes vinculados aos nós de IA deste fluxo (Fase 4).
+  await snapshotRunAgentBindings(db, run, nodes.values());
 
   if (input.conversationId) {
     await db
@@ -4796,6 +4900,8 @@ async function startTransferredRun(
     return;
   }
   const newRun = inserted as FlowRunRow;
+  // Fixa a versão dos agentes vinculados (runs em andamento continuam nela).
+  await snapshotRunAgentBindings(db, newRun, nodes.values());
   await logEvent(db, newRun.id, "started", targetFlow.entry_node_id, {
     flow_id: targetFlow.id,
     trigger_type: "go_to_flow",

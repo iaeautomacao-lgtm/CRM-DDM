@@ -1,6 +1,6 @@
 "use client";
 
-import { Brain, Bot, Users, Percent, Award, TrendingUp } from "lucide-react";
+import type { ReactNode } from "react";
 import type { AiAnalyticsData } from "@/lib/dashboard/types";
 
 interface AiPerformanceProps {
@@ -11,15 +11,12 @@ interface AiPerformanceProps {
 export function AiPerformance({ data, loading }: AiPerformanceProps) {
   if (loading || !data) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 animate-pulse">
+      <div className="grid animate-pulse grid-cols-1 gap-8 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="bg-card border border-border rounded-xl p-5 h-56 space-y-4">
-            <div className="h-4 bg-muted rounded w-1/3" />
-            <div className="h-8 bg-muted rounded w-1/2" />
-            <div className="space-y-2">
-              <div className="h-3 bg-muted rounded w-full" />
-              <div className="h-3 bg-muted rounded w-5/6" />
-            </div>
+          <div key={i} className="py-2 md:px-6 first:md:pl-0 last:md:pr-0">
+            <div className="h-3 w-24 rounded bg-muted" />
+            <div className="mt-3 h-7 w-20 rounded bg-muted" />
+            <div className="mt-5 h-24 rounded bg-muted" />
           </div>
         ))}
       </div>
@@ -27,8 +24,6 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
   }
 
   const { sentiment, messagesRatio, conversion } = data;
-
-  // Percentage calculations
   const totalSentiment = sentiment.total || 1;
   const pctPositive = Math.round((sentiment.positive / totalSentiment) * 100);
   const pctNeutral = Math.round((sentiment.neutral / totalSentiment) * 100);
@@ -40,156 +35,109 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
   const pctHuman = Math.round((messagesRatio.human / totalOutbound) * 100);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {/* 1. Sentiment Card */}
-      <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Brain className="h-4 w-4 text-primary" />
-            Sentimento Geral
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl font-extrabold text-foreground">
-              {pctPositive}%
-            </span>
-            <span className="text-xs text-emerald-500 font-medium flex items-center">
-              Receptividade Positiva
-            </span>
-          </div>
-        </div>
+    <div className="grid grid-cols-1 gap-8 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
+      <MetricColumn eyebrow="Sentimento" value={pctPositive + "%"} description="positivo">
+        <BreakdownRow label="Positivo" value={sentiment.positive + " (" + pctPositive + "%)"} percent={pctPositive} tone="success" />
+        <BreakdownRow label="Neutro" value={sentiment.neutral + " (" + pctNeutral + "%)"} percent={pctNeutral} />
+        <BreakdownRow label="Negativo" value={sentiment.negative + " (" + pctNegative + "%)"} percent={pctNegative} tone="danger" />
+        {sentiment.mixed > 0 ? (
+          <BreakdownRow label="Misto" value={sentiment.mixed + " (" + pctMixed + "%)"} percent={pctMixed} tone="warning" />
+        ) : null}
+      </MetricColumn>
 
-        <div className="space-y-2">
-          {/* Positive bar */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[11px]">
-              <span className="text-muted-foreground flex items-center gap-1">😊 Positivo</span>
-              <span className="font-semibold text-foreground tabular-nums">{sentiment.positive} ({pctPositive}%)</span>
-            </div>
-            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-emerald-500 rounded-full opacity-80 shadow-[0_0_6px_rgba(16,185,129,0.5)]"
-                style={{ width: `${pctPositive}%` }}
-              />
-            </div>
-          </div>
+      <MetricColumn eyebrow="Automação" value={pctBot + "%"} description="das mensagens pela IA">
+        <BreakdownRow label="IA" value={messagesRatio.bot.toLocaleString("pt-BR")} percent={pctBot} />
+        <BreakdownRow label="Humano" value={messagesRatio.human.toLocaleString("pt-BR")} percent={pctHuman} />
+      </MetricColumn>
 
-          {/* Neutral bar */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[11px]">
-              <span className="text-muted-foreground flex items-center gap-1">😐 Neutro</span>
-              <span className="font-semibold text-foreground tabular-nums">{sentiment.neutral} ({pctNeutral}%)</span>
-            </div>
-            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-slate-400 rounded-full opacity-80" style={{ width: `${pctNeutral}%` }} />
-            </div>
-          </div>
+      <MetricColumn eyebrow="Conversão" value={conversion.rate + "%"} description="de fechamento">
+        <SimpleRow label="Ganhos" value={conversion.won} tone="success" />
+        <SimpleRow label="Perdidos" value={conversion.lost} tone="danger" />
+        <SimpleRow label="Em aberto" value={conversion.open} />
+      </MetricColumn>
+    </div>
+  );
+}
 
-          {/* Negative bar */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[11px]">
-              <span className="text-muted-foreground flex items-center gap-1">😡 Negativo</span>
-              <span className="font-semibold text-foreground tabular-nums">{sentiment.negative} ({pctNegative}%)</span>
-            </div>
-            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-rose-500 rounded-full opacity-80 shadow-[0_0_6px_rgba(244,63,94,0.5)]"
-                style={{ width: `${pctNegative}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Mixed bar */}
-          {sentiment.mixed > 0 && (
-            <div className="space-y-1">
-              <div className="flex justify-between text-[11px]">
-                <span className="text-muted-foreground flex items-center gap-1">😕 Misto</span>
-                <span className="font-semibold text-foreground tabular-nums">{sentiment.mixed} ({pctMixed}%)</span>
-              </div>
-              <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 rounded-full opacity-80" style={{ width: `${pctMixed}%` }} />
-              </div>
-            </div>
-          )}
-        </div>
+function MetricColumn({
+  eyebrow,
+  value,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  value: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="py-2 md:px-6 first:md:pl-0 last:md:pr-0">
+      <p className="text-xs font-medium text-muted-foreground">{eyebrow}</p>
+      <div className="mt-2 flex items-baseline gap-2">
+        <strong className="text-[28px] font-semibold tracking-[-0.03em] tabular-nums text-foreground">{value}</strong>
+        <span className="text-xs text-muted-foreground">{description}</span>
       </div>
+      <div className="mt-5 space-y-3">{children}</div>
+    </section>
+  );
+}
 
-      {/* 2. Messages Ratio Card */}
-      <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Bot className="h-4 w-4 text-primary" />
-            Automação vs Humano
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl font-extrabold text-foreground">
-              {pctBot}%
-            </span>
-            <span className="text-xs text-primary font-medium">
-              Atendimentos pela IA
-            </span>
-          </div>
-        </div>
+function BreakdownRow({
+  label,
+  value,
+  percent,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  percent: number;
+  tone?: "neutral" | "success" | "warning" | "danger";
+}) {
+  const barClass =
+    tone === "success"
+      ? "bg-emerald-500"
+      : tone === "warning"
+        ? "bg-amber-500"
+        : tone === "danger"
+          ? "bg-rose-500"
+          : "bg-primary";
 
-        <div className="space-y-3.5">
-          <div className="flex items-center justify-between text-xs border-b border-border pb-2">
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              <Bot className="h-3.5 w-3.5 text-primary" /> Robô de IA
-            </span>
-            <span className="font-bold text-foreground">{messagesRatio.bot} mensagens</span>
-          </div>
-          <div className="flex items-center justify-between text-xs border-b border-border pb-2">
-            <span className="text-muted-foreground flex items-center gap-1.5">
-              <Users className="h-3.5 w-3.5 text-muted-foreground" /> Atendentes
-            </span>
-            <span className="font-bold text-foreground">{messagesRatio.human} mensagens</span>
-          </div>
-
-          {/* Double fill progress bar */}
-          <div className="space-y-1">
-            <div className="h-2.5 w-full bg-muted rounded-full overflow-hidden flex">
-              <div className="h-full bg-primary" style={{ width: `${pctBot}%` }} title={`Robô: ${pctBot}%`} />
-              <div className="h-full bg-slate-400" style={{ width: `${pctHuman}%` }} title={`Humano: ${pctHuman}%`} />
-            </div>
-            <div className="flex justify-between text-[10px] text-muted-foreground">
-              <span>Robô ({pctBot}%)</span>
-              <span>Humano ({pctHuman}%)</span>
-            </div>
-          </div>
-        </div>
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="font-medium tabular-nums text-foreground">{value}</span>
       </div>
-
-      {/* 3. Conversion Card */}
-      <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-5 shadow-sm space-y-4 flex flex-col justify-between">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Percent className="h-4 w-4 text-primary" />
-            Conversão do Funil
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl font-extrabold text-foreground">
-              {conversion.rate}%
-            </span>
-            <span className="text-xs text-emerald-500 font-medium flex items-center gap-0.5">
-              <TrendingUp className="h-3 w-3" /> Fechamento de Vendas
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="bg-muted/40 rounded-lg p-2.5 space-y-0.5 border border-border/50">
-            <span className="text-[10px] uppercase font-bold text-emerald-500">Ganhos</span>
-            <div className="text-sm font-bold text-foreground">{conversion.won}</div>
-          </div>
-          <div className="bg-muted/40 rounded-lg p-2.5 space-y-0.5 border border-border/50">
-            <span className="text-[10px] uppercase font-bold text-rose-500">Perdidos</span>
-            <div className="text-sm font-bold text-foreground">{conversion.lost}</div>
-          </div>
-          <div className="bg-muted/40 rounded-lg p-2.5 space-y-0.5 border border-border/50">
-            <span className="text-[10px] uppercase font-bold text-muted-foreground">Abertos</span>
-            <div className="text-sm font-bold text-foreground">{conversion.open}</div>
-          </div>
-        </div>
+      <div className="mt-1.5 h-1 overflow-hidden bg-muted">
+        <div
+          className={"h-full " + barClass}
+          style={{ width: String(Math.max(0, Math.min(100, percent))) + "%" }}
+        />
       </div>
+    </div>
+  );
+}
+
+function SimpleRow({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "success" | "danger";
+}) {
+  const toneClass =
+    tone === "success"
+      ? "text-emerald-600 dark:text-emerald-400"
+      : tone === "danger"
+        ? "text-rose-600 dark:text-rose-400"
+        : "text-foreground";
+
+  return (
+    <div className="flex items-center justify-between border-b border-border pb-2 text-xs last:border-b-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={"font-medium tabular-nums " + toneClass}>{value.toLocaleString("pt-BR")}</span>
     </div>
   );
 }

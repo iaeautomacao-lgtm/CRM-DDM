@@ -1,57 +1,46 @@
 import { ArrowDown, ArrowUp, Minus } from 'lucide-react'
-import type { ComponentType } from 'react'
-import { cn } from '@/lib/utils'
 
 interface MetricCardProps {
   title: string
-  /** Pre-formatted value for display (e.g. "42" or "$1,250"). */
+  /** Pre-formatted value for display (e.g. "42" or "1.250"). */
   value: string
-  icon: ComponentType<{ className?: string }>
-  /**
-   * Delta-mode secondary row: arrow + delta text. Omit when the metric
-   * doesn't have a sensible comparison (e.g. total pipeline value).
-   */
   delta?: {
-    /** Positive / negative / zero drives arrow + color. */
+    /** Positive / negative / zero controls only the direction arrow. */
     sign: number
-    /** Pre-formatted delta, e.g. "+3 vs yesterday". */
+    /** Pre-formatted comparison label. */
     label: string
   }
-  /** Used instead of `delta` when the metric has a static subtitle. */
   subtitle?: string
 }
 
-export function MetricCard({ title, value, icon: Icon, delta, subtitle }: MetricCardProps) {
+/**
+ * Compact operational metric used inside the Dashboard KPI strip.
+ *
+ * The container owns the border/surface. This component deliberately
+ * avoids icon badges, shadows and semantic delta colours: a positive
+ * delta is not inherently good (for example, more pending conversations).
+ */
+export function MetricCard({ title, value, delta, subtitle }: MetricCardProps) {
   return (
-    <div className="min-h-[120px] rounded-xl border border-border bg-card p-5">
-      <div className="flex items-start justify-between">
-        <p className="text-sm font-medium text-muted-foreground">{title}</p>
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="h-4 w-4" />
-        </div>
-      </div>
-      <p className="mt-3 text-[28px] leading-none font-bold tabular-nums text-foreground">
+    <div className="min-w-0 px-5 py-5 lg:px-6 lg:py-6">
+      <p className="text-[13px] font-medium text-muted-foreground">{title}</p>
+      <p className="mt-2.5 text-[32px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
         {value}
       </p>
       {delta ? <DeltaRow sign={delta.sign} label={delta.label} /> : subtitle ? (
-        <p className="mt-2 text-sm text-muted-foreground">{subtitle}</p>
+        <p className="mt-2 truncate text-xs text-muted-foreground">{subtitle}</p>
       ) : null}
     </div>
   )
 }
 
 function DeltaRow({ sign, label }: { sign: number; label: string }) {
-  const tone =
-    sign > 0
-      ? 'text-primary'
-      : sign < 0
-      ? 'text-red-400'
-      : 'text-muted-foreground'
   const Arrow = sign > 0 ? ArrowUp : sign < 0 ? ArrowDown : Minus
+
   return (
-    <div className={cn('mt-2 flex items-center gap-1 overflow-hidden text-sm', tone)}>
-      <Arrow className="h-4 w-4 shrink-0" aria-hidden />
-      <span className="min-w-0 flex-1 truncate overflow-hidden tabular-nums">{label}</span>
+    <div className="mt-2.5 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground/80">
+      <Arrow className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      <span className="truncate tabular-nums">{label}</span>
     </div>
   )
 }

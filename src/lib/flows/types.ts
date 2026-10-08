@@ -413,7 +413,17 @@ export interface AiAgentNodeConfig {
   next_node_key?: string;
   /** Safety cap for `loop` mode. Defaults to 20 when unset. */
   max_turns?: number;
-  tools?: AiAgentTool[]; // ← novo campo
+  tools?: AiAgentTool[]; // ← novo campo (inline; legado)
+  /** Ids de wacrm.ai_tools (catálogo de ferramentas reutilizáveis da conta). */
+  tool_refs?: string[];
+  /**
+   * Agente (perfil) de wacrm.ai_agents. Com `agent_id`, modo, turnos, prompt, modelo,
+   * ferramentas, base de conhecimento e proteções vêm do agente (versão FIXADA no run);
+   * sem ele vale a configuração inline (legado), exatamente como antes.
+   */
+  agent_id?: string;
+  /** Para onde seguir se o agente estiver desligado/indisponível. Sem isso: handoff para a fila humana. */
+  failure_next_node_key?: string;
   /** When true, injects tool_results logged by OTHER ai_agent nodes in
    *  this same run (flow_run_events, event_type='tool_result') into this
    *  node's system prompt — see runAiAgentCore in engine.ts. */
@@ -440,6 +450,8 @@ export interface AiAgentTool {
     headers?: Record<string, string>;
     body?: string; // JSON template com {{param}} placeholders
   };
+  /** Timeout da chamada HTTP em ms (catálogo). Padrão 30000. */
+  timeout_ms?: number;
 }
 
 /**

@@ -321,7 +321,7 @@ export default function ExportacoesPage() {
                             className="text-popover-foreground"
                           >
                             <Download className="size-4" />
-                            {downloadingId === row.id ? "Gerando link…" : "Download"}
+                            {downloadingId === row.id ? "Gerando link…" : "Baixar"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => setPendingDeleteIds([row.id])}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ChevronRight, FileText, Loader2, PlugZap, Tags, UsersRound, type LucideIcon } from 'lucide-react';
+import { ChevronRight, FileText, Loader2, MessageSquareText, PlugZap, Tags, UsersRound, type LucideIcon } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -231,6 +231,15 @@ export function SettingsOverview({
           : `${counts?.tags ?? 0} tag${counts?.tags === 1 ? '' : 's'} · ${
               counts?.customFields ?? 0
             } campo${counts?.customFields === 1 ? '' : 's'} personalizado${counts?.customFields === 1 ? '' : 's'}`,
+    },
+    {
+      kind: 'link',
+      key: 'quick-replies',
+      href: '/respostas-rapidas',
+      icon: MessageSquareText,
+      label: 'Respostas rápidas',
+      loading: false,
+      subtitle: 'Atalhos usados no atendimento do Inbox',
     },
     {
       kind: 'section',

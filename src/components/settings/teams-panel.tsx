@@ -173,7 +173,7 @@ export function TeamsPanel() {
       }
     } catch (err) {
       console.error('[TeamsPanel] fetch error:', err);
-      toast.error('Failed to load teams');
+      toast.error('Erro ao carregar equipes');
     } finally {
       setLoading(false);
     }
@@ -225,12 +225,12 @@ export function TeamsPanel() {
     try {
       const { error } = await supabase.from('teams').delete().eq('id', deleteTarget.id);
       if (error) throw error;
-      toast.success('Team deleted');
+      toast.success('Equipe excluída');
       setTeams((prev) => prev.filter((t) => t.id !== deleteTarget.id));
       setDeleteTarget(null);
     } catch (err) {
       console.error('[TeamsPanel] delete error:', err);
-      toast.error('Failed to delete team');
+      toast.error('Erro ao excluir equipe');
     } finally {
       setDeleting(false);
     }

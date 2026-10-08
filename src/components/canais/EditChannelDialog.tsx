@@ -371,7 +371,7 @@ export function EditChannelDialog({
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="edit-meta-phone-id">Phone Number ID</Label>
+              <Label htmlFor="edit-meta-phone-id">Número de telefone ID</Label>
               <Input
                 id="edit-meta-phone-id"
                 value={phoneNumberId}
@@ -390,7 +390,7 @@ export function EditChannelDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="edit-meta-token">Access Token</Label>
+              <Label htmlFor="edit-meta-token">Token de acesso</Label>
               {tokenEdited ? (
                 <Input
                   id="edit-meta-token"
@@ -434,7 +434,7 @@ export function EditChannelDialog({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="edit-meta-verify">Verify Token</Label>
+              <Label htmlFor="edit-meta-verify">Verificar token</Label>
               <Input
                 id="edit-meta-verify"
                 value={verifyToken}
