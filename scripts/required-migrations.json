@@ -61,6 +61,15 @@
       "kind": "registry"
     },
     {
+      "version": "194_dispatch_inflight_lease",
+      "kind": "registry"
+    },
+    {
+      "version": "194b_dispatch_inflight_idx",
+      "kind": "index",
+      "index": "idx_dmq_enviando_inflight"
+    },
+    {
       "version": "200_ai_config_secret_columns",
       "kind": "registry"
     },

@@ -146,6 +146,7 @@ $$;
 --   191 dispatch_errors_summary (função)                                              191b índice idx_dmq_erro_updated (válido)
 --   192 coluna dispatch_channel_limits.paused
 --   193 colunas channel_health.verified_name e display_phone_number
+--   194 coluna disp_message_queue.inflight_until + claim_dispatch_item_capped grava o lease 194b índice idx_dmq_enviando_inflight (válido)
 --   200 policy ai_config_select + authenticated SEM select em ai_config.api_key
 --   200b authenticated SEM select nos 4 segredos de whatsapp_config E com select em id
 --   201 webhook_message_inbox (tabela) + ingest_message_events, claim_message_inbox (funções)
@@ -183,6 +184,11 @@ SELECT d.v, 'backfill'
     ('192_dispatch_channel_paused', pg_temp.col('dispatch_channel_limits', 'paused')),
     ('193_channel_health_name_phone',
        pg_temp.col('channel_health', 'verified_name') AND pg_temp.col('channel_health', 'display_phone_number')),
+    ('194_dispatch_inflight_lease',
+       pg_temp.col('disp_message_queue', 'inflight_until')
+       AND EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+                    WHERE n.nspname = 'wacrm' AND p.proname = 'claim_dispatch_item_capped' AND p.prosrc ILIKE '%inflight_until%')),
+    ('194b_dispatch_inflight_idx', pg_temp.idx('idx_dmq_enviando_inflight')),
     ('200_ai_config_secret_columns',
        pg_temp.policy('ai_config', 'ai_config_select') AND pg_temp.auth_can_select('ai_config', 'api_key') IS FALSE),
     ('200b_whatsapp_config_select_columns',
