@@ -27,3 +27,6 @@ SHELL=/bin/bash
 
 # Renovação de tokens do Instagram (diário, 03:10)
 10 3 * * *    . ~/.crm-cron.env; curl -fsS -m 120 -X POST -H "x-cron-secret: $AUTOMATION_CRON_SECRET" "$APP/api/channels/refresh-tokens" >/dev/null
+
+# Disparador — importação de contatos em segundo plano, em blocos retomáveis (1 min)
+* * * * *     . ~/.crm-cron.env; curl -fsS -m 130 -X POST -H "x-cron-secret: $CRON_SECRET" "$APP/api/disparador/imports/cron" >/dev/null
