@@ -18,8 +18,11 @@ it.each([1, 50])("retomada (batch_size=%i) limpa motivo e reinicia a avaliação
     for (const method of ["eq", "in", "not", "select"])
       builder[method] = () => builder;
     builder.update = (row: Record<string, unknown>) => { writes.push(row); return builder; };
-    builder.single = async () => ({ data: { id: "camp", status: "pausada", batch_size: batchSize }, error: null });
-    builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
+    // A leitura da campanha usa limit(1)+[0] (nunca .single()).
+    let limited = false;
+    builder.limit = () => { limited = true; return builder; };
+    builder.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data: limited ? [{ id: "camp", status: "pausada", batch_size: batchSize }] : [], error: null }).then(resolve);
     return builder;
   });
   mocks.rpc.mockResolvedValue({ data: 7, error: null });

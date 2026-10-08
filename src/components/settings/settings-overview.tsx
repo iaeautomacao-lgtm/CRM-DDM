@@ -12,7 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
-import { SECTION_META, type SettingsSection } from './settings-sections';
+import { SECTION_META, canSeeSection, type SettingsSection } from './settings-sections';
 import { SettingsChip, StatusDot } from './settings-chip';
 import { ROLE_META } from './role-meta';
 
@@ -285,9 +285,7 @@ export function SettingsOverview({
           // de IA) não aparecem para quem não é owner.
           .filter(
             (tile) =>
-              tile.kind !== 'section' ||
-              !SECTION_META[tile.section].ownerOnly ||
-              accountRole === 'owner',
+              tile.kind !== 'section' || canSeeSection(tile.section, accountRole),
           )
           .map((tile) => {
           const Icon = tile.kind === 'section' ? SECTION_META[tile.section].icon : tile.icon;

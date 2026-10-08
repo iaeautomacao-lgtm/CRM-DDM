@@ -108,7 +108,7 @@ describe("runChatLoop", () => {
     expect(calls[1].toolsOffered).toBe(true);
     // Auditoria com o escopo do servidor.
     expect(audit.entries).toHaveLength(1);
-    expect(audit.entries[0]).toMatchObject({ toolName: "get_overview_metrics", success: true, scope: { accountId: A, userId: "owner" } });
+    expect(audit.entries[0]).toMatchObject({ origin: "chat", toolName: "get_overview_metrics", success: true, scope: { accountId: A, userId: "owner" } });
     // Streaming: o texto chega em pedaços e recompõe a resposta.
     const text = events.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
     expect(text).toBe(res.answer);
@@ -150,7 +150,7 @@ describe("runChatLoop", () => {
     expect(res.stopReason).toBe("refused");
     expect(res.toolCalls[0]).toMatchObject({ name: "search_conversations", ok: false, error_kind: "forbidden" });
     expect(audit.entries).toHaveLength(1);
-    expect(audit.entries[0]).toMatchObject({ toolName: "search_conversations", success: false });
+    expect(audit.entries[0]).toMatchObject({ origin: "chat", toolName: "search_conversations", success: false });
     expect(audit.entries[0].error).toContain("forbidden");
     // O modelo recebe o erro de escopo e a rodada seguinte vai SEM ferramentas.
     const [toolMsg] = toolMessages(calls[1].messages);
@@ -187,6 +187,7 @@ describe("runChatLoop", () => {
     expect(JSON.parse(msgs[1].content)).toMatchObject({ erro: "bad_request" });
     // Falhas também são auditadas; o modelo continua podendo usar ferramentas.
     expect(audit.entries.map((e) => e.success)).toEqual([false, false]);
+    expect(audit.entries.every((e) => e.origin === "chat")).toBe(true);
     expect(calls[1].toolsOffered).toBe(true);
     expect(res.answer).toBe("Não consegui obter os dados agora.");
   });
@@ -201,6 +202,7 @@ describe("runChatLoop", () => {
     const r2 = await open("drop_table", "{}");
     expect(r2).toMatchObject({ ok: false, kind: "unknown_tool" });
     expect(audit.entries).toHaveLength(2);
+    expect(audit.entries.every((e) => e.origin === "chat")).toBe(true);
   });
 
   it("descarta o texto já transmitido quando a rodada termina em chamada de ferramenta", async () => {

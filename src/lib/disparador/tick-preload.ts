@@ -31,7 +31,9 @@ export function queueItemPrimaryPhone(item: {
 }): string | null {
   if (item.contact_id) {
     if ((item.phone_attempt_order ?? 1) > 1) return null;
-    return item.contacts?.phone || item.mensagem_final || null;
+    // Contato do CRM: só o telefone do contato. mensagem_final é o TEXTO da mensagem
+    // (nunca vira telefone); só itens externos (contact_id nulo) guardam o número ali.
+    return item.contacts?.phone || null;
   }
   return item.mensagem_final || null;
 }

@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import type { AccountRole } from '@/lib/auth/roles';
 import {
   RAIL_GROUPS,
+  canSeeSection,
   SECTION_META,
   SETTINGS_SECTIONS,
   type SettingsSection,
@@ -59,7 +60,7 @@ export function SettingsRail({
     >
       {RAIL_GROUPS.map(({ label, group }) => {
         const items = SETTINGS_SECTIONS.filter(
-          (s) => SECTION_META[s].group === group && (!SECTION_META[s].ownerOnly || role === 'owner'),
+          (s) => SECTION_META[s].group === group && canSeeSection(s, role),
         );
         return (
           <div
