@@ -364,7 +364,12 @@ const toRawConfig = (i: ChannelIdentity): RawConfig => ({
 });
 
 async function loadConfigs(db: LimitsDb, accountId: string): Promise<RawConfig[]> {
-  return (await loadChannelIdentities(db, accountId)).map(toRawConfig);
+  // Números/Controles são superfícies operacionais: configurações antigas
+  // desabilitadas continuam visíveis em /canais, mas não participam do
+  // motor nem recebem limites/vagas no Disparador.
+  return (await loadChannelIdentities(db, accountId))
+    .filter((identity) => identity.enabled)
+    .map(toRawConfig);
 }
 
 const providerOf = (p: string | null): DispatchProvider | "unknown" => (p === "meta" || p === "waha" ? p : "unknown");
@@ -501,9 +506,13 @@ export async function applyLimitsChange(
   req: LimitsRequest,
   env: Record<string, string | undefined> = process.env,
 ): Promise<ApplyResult> {
-  const cfg = (await loadChannelIdentities(db, accountId, { sessionId: req.sessionId })).map(toRawConfig)[0];
-  // Número de outra conta é indistinguível de inexistente.
-  if (!cfg) throw new LimitsInputError("Número não encontrado.", 404);
+  const identity = (await loadChannelIdentities(db, accountId, { sessionId: req.sessionId }))[0];
+  // Número de outra conta, inexistente ou desabilitado não pode receber
+  // alteração operacional pelo endpoint, mesmo por chamada direta.
+  if (!identity || !identity.enabled) {
+    throw new LimitsInputError("Número não encontrado ou desabilitado.", 404);
+  }
+  const cfg = toRawConfig(identity);
 
   const provider = providerOf(cfg.provider);
   validatePatchForProvider(req.patch, provider);
