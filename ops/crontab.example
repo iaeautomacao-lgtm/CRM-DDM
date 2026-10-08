@@ -15,6 +15,7 @@ SHELL=/bin/bash
 
 # Disparador — saúde dos números Meta (a cada 5 min)
 */5 * * * *   . ~/.crm-cron.env; curl -fsS -m 130 -X POST -H "x-cron-secret: $CRON_SECRET" "$APP/api/disparador/health/cron" >/dev/null
+* * * * *     . ~/.crm-cron.env; curl -fsS -m 120 -X POST -H "x-cron-secret: $CRON_SECRET" "$APP/api/disparador/exports/cron" >/dev/null
 
 # Automações com espera (1 min)
 * * * * *     . ~/.crm-cron.env; curl -fsS -m 60 -X POST -H "x-cron-secret: $AUTOMATION_CRON_SECRET" "$APP/api/automations/cron" >/dev/null
