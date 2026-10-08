@@ -266,14 +266,14 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-10">
+      <section className="mt-12">
         <SectionHeading title="Tempo de resposta" />
         <div className="mt-3">
           <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
         </div>
       </section>
 
-      <section className="mt-10">
+      <section className="mt-12">
         <SectionHeading title="Recuperação financeira" />
         <div className="mt-3">
           {failed.has('ai') ? (
@@ -284,7 +284,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-10">
+      <section className="mt-12">
         <SectionHeading title="IA e conversão" />
         <div className="mt-3">
           {failed.has('ai') ? (
@@ -295,7 +295,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-10">
+      <section className="mt-12">
         <ActivityFeed items={activity} loading={activityLoading} />
       </section>
     </div>
@@ -313,7 +313,7 @@ function SectionHeading({
 }) {
   return (
     <div>
-      <h2 className={primary ? "text-lg font-semibold tracking-[-0.02em] text-foreground" : "text-lg font-semibold tracking-[-0.02em] text-foreground"}>
+      <h2 className={"text-lg font-semibold tracking-[-0.02em] text-foreground"}>
         {title}
       </h2>
       {description ? (
