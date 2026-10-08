@@ -4,9 +4,8 @@ import { NextResponse } from 'next/server'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveFallbackPolicy } from '@/lib/flows/fallback'
-import { advanceFromNodeKey, loadAllNodes } from '@/lib/flows/engine'
+import { wakeDelayedRuns } from '@/lib/flows/wake-runs'
 import { sweepStalledAiConversations } from '@/lib/flows/ai-watchdog'
-import type { FlowRunRow, SmartDelayNodeConfig } from '@/lib/flows/types'
 
 /**
  * Sweep abandoned active flow runs.
@@ -109,64 +108,23 @@ export async function POST(request: Request) {
   }
 
   // ------------------------------------------------------------
-  // Wake smart_delay runs whose wait has elapsed. Bounded to 20 per
-  // sweep (same cadence as the timeout sweep above) — a run that
-  // misses this tick just gets picked up on the next one, a few
-  // minutes late at worst.
+  // Wake smart_delay runs whose wait has elapsed (src/lib/flows/wake-runs.ts):
+  // ordem wake_at, run inconsistente encerrado de forma controlada (nunca
+  // fica `active` preso) e falha de um run isolada dos demais. Lote do
+  // caminho padrão: 20; com FLOWS_CRON_V2 (migration 210) o lote é
+  // configurável (?batch=, padrão 50) e repete até esvaziar ou 30 s.
   // ------------------------------------------------------------
-  const { data: delayedRuns, error: delayedErr } = await admin
-    .from('flow_runs')
-    .select('*')
-    .eq('status', 'delayed')
-    .lte('wake_at', now.toISOString())
-    .limit(20)
-
-  if (delayedErr) {
-    console.error('[flows-cron] delayed-run scan failed:', delayedErr.message)
-  }
-
-  let woken = 0
-  for (const run of (delayedRuns ?? []) as FlowRunRow[]) {
-    // Optimistic guard: only the sweep that actually flips
-    // status='delayed' → 'active' gets to resume the run — protects
-    // against two overlapping cron invocations waking the same run
-    // twice.
-    const { data: claimed } = await admin
-      .from('flow_runs')
-      .update({ status: 'active', wake_at: null })
-      .eq('id', run.id)
-      .eq('status', 'delayed')
-      .select('id')
-    if (!Array.isArray(claimed) || claimed.length === 0) continue
-
-    if (!run.current_node_key) {
-      console.error(`[flows-cron] delayed run ${run.id} has no current_node_key`)
-      continue
-    }
-    const nodes = await loadAllNodes(admin, run.flow_id)
-    // The run suspended AT the smart_delay node itself (same pattern
-    // as collect_input/send_buttons/send_list) — resume from ITS
-    // next_node_key, not by re-entering smart_delay (which would just
-    // re-send the message and re-suspend forever).
-    const delayNode = nodes.get(run.current_node_key)
-    const nextKey = delayNode
-      ? (delayNode.config as unknown as SmartDelayNodeConfig).next_node_key
-      : null
-    if (!nextKey) {
-      console.error(
-        `[flows-cron] delayed run ${run.id}: smart_delay node ${run.current_node_key} missing next_node_key`,
-      )
-      continue
-    }
-    await advanceFromNodeKey(admin, { ...run, status: 'active', wake_at: null }, nextKey, nodes)
-    woken += 1
-  }
+  const batchParam = Number.parseInt(new URL(request.url).searchParams.get('batch') ?? '', 10)
+  const { woken, failed, skipped } = await wakeDelayedRuns(admin, {
+    now,
+    batch: Number.isFinite(batchParam) ? batchParam : undefined,
+  })
 
   // IA travada: cliente falou por último, fluxo ativo e ninguém respondeu
-  // há mais de ~90 s → fila humana (ver ai-watchdog.ts).
+  // há mais de AI_STALL_SECONDS (padrão 180 s) → fila humana (ver ai-watchdog.ts).
   const stalled = await sweepStalledAiConversations(admin, now)
 
-  return NextResponse.json({ swept, woken, stalled })
+  return NextResponse.json({ swept, woken, failed, skipped, stalled })
 }
 
 // GET = só diagnóstico (health check): confere o segredo e se a tabela
