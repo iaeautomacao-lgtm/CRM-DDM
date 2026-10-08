@@ -883,7 +883,7 @@ async function processMessage(
 
   // Parse message content based on type
   const { contentText, mediaUrl, mediaType, interactiveReplyId } =
-    await parseMessageContent(message, accessToken)
+    await parseMessageContent(message, accessToken, accountId)
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -1232,8 +1232,9 @@ const MAX_META_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_META_AUDIO_BYTES = 25 * 1024 * 1024
 
 // Baixa mídia da Meta (URL de CDN curta e autenticada, só resolvível com
-// o access_token do canal) e reenvia pro bucket público `chat-media` do
-// Supabase Storage, no mesmo padrão já usado pelo webhook WAHA. Sem isso,
+// o access_token do canal) e reenvia pro bucket privado `chat-media` do
+// Supabase Storage, sempre sob account-<uuid>/ para a rota autenticada
+// /api/chat-media conseguir validar a posse do arquivo. Sem isso,
 // `messages.media_url` fica só com a rota /api/whatsapp/media/[mediaId]
 // (protegida por sessão de usuário) — inacessível pra qualquer coisa que
 // não seja o browser autenticado do CRM, incluindo a OpenAI (vision) e o
@@ -1245,6 +1246,7 @@ const MAX_META_AUDIO_BYTES = 25 * 1024 * 1024
 async function downloadAndStoreMetaMedia(
   mediaId: string,
   accessToken: string,
+  accountId: string,
   maxBytes: number,
   fallbackExt: string
 ): Promise<string | null> {
@@ -1265,7 +1267,7 @@ async function downloadAndStoreMetaMedia(
     const finalContentType =
       contentType || mediaInfo.mimeType || 'application/octet-stream'
     const ext = extensionForMimeType(finalContentType, fallbackExt)
-    const storagePath = `meta/${mediaId}.${ext}`
+    const storagePath = `account-${accountId}/meta/${mediaId}.${ext}`
 
     const { error: uploadError } = await supabaseAdmin()
       .storage.from('chat-media')
@@ -1311,7 +1313,8 @@ async function downloadAndStoreMetaMedia(
 
 async function parseMessageContent(
   message: WhatsAppMessage,
-  accessToken: string
+  accessToken: string,
+  accountId: string
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -1364,6 +1367,7 @@ async function parseMessageContent(
         const storedUrl = await downloadAndStoreMetaMedia(
           mediaId,
           accessToken,
+          accountId,
           MAX_META_IMAGE_BYTES,
           'jpg'
         )
@@ -1408,6 +1412,7 @@ async function parseMessageContent(
         const storedUrl = await downloadAndStoreMetaMedia(
           mediaId,
           accessToken,
+          accountId,
           MAX_META_AUDIO_BYTES,
           'ogg'
         )
