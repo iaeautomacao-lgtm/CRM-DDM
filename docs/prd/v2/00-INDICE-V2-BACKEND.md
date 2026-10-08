@@ -25,7 +25,7 @@ O CRM é uma **plataforma para outras empresas usarem**. Tudo o que é configura
 | Só o **essencial da plataforma**: banco/Supabase, `ENCRYPTION_KEY`, `CRON_SECRET`, URL do app | Configuração ou credencial de cliente: vai para o **cofre por conta** (175) e para as telas |
 | Flags de implantação (shadow/on, claim em lote, tick encadeado), **temporárias**. Depois de estabilizar, são removidas ou viram configuração de plataforma no banco. | — |
 
-O **PRD 19** vai cuidar disso: inventário de todas as variáveis de ambiente, com o que migra para configuração por conta. Ele está em preparação a partir do inventário mecânico.
+O **PRD 19** cuida disso: inventário de todas as variáveis de ambiente, com o que migra para configuração por conta.
 
 ## Documentos
 
@@ -37,21 +37,22 @@ O **PRD 19** vai cuidar disso: inventário de todas as variáveis de ambiente, c
 | 14 | [Segurança e dados](14-seguranca-e-dados.md) | Sextante | RLS e grants, segredos e rotação de chave, papéis por rota, SSRF, LGPD, tipos gerados do banco e drift de schema (causa do #143/#144) |
 | 15 | [Plataforma e operação](15-plataforma-e-operacao.md) | Sextante | Inbox durável de **mensagens**, API pública V2, webhooks de saída, alertas e crons versionados, CI na `v2`, staging, deploy e rollback, registro de migrations |
 | 16 | [Comparativo Voll 360 × Fortics](16-comparativo-voll360-fortics.md) | Pesquisa | Onde estamos à frente e atrás; lacunas de backend |
+| 19 | [Configuração por conta e `.env` mínimo](19-config-por-conta-env-minimo.md) | Sextante | 3 camadas (`.env` essencial, `platform_config`, config por conta e cofre), resolvedor único de chave de LLM, modelo de app Meta, migração env→banco |
+| 20 | [Organizações, papéis e permissões](20-organizacoes-papeis-permissoes.md) | Sextante | Separação por organização, papéis fixos e papel personalizado criado só pelo proprietário *(em preparação)* |
+| — | [Inventário de variáveis de ambiente](inventario-env.md) | Prisma | Mecânico (117 variáveis). Correções no PRD 19 |
 | — | [Inventário de rotas](inventario-rotas.md) e [de tabelas](inventario-tabelas.md) | Prisma | Mecânico. ⚠️ RLS em laço `DO`/`EXECUTE` gera falso "sem RLS". Vale o banco live (PRD 14, Anexo A) |
 | — | [Modelo dos PRDs](_MODELO.md) | — | Estrutura e regras (inclui a REGRA DO DONO sobre negócio) |
 
-## ⚠️ Urgente na V1 (produção hoje, fora da regra de "só V2")
+## Regra de entrega (dono, 08/10): nada vai para a V1
 
-São riscos de **segurança ou perda de dados** que já existem na `main`.
+Tudo, inclusive segurança e perda de dados, entra só na `v2` (branch nova a partir de `origin/v2`, PR com base `v2`). Os antigos itens "urgentes na V1" viraram PRs da V2:
 
-| Item | PRD | Risco | Proposta |
-|---|---|---|---|
-| **WH-01/WH-02** | 15 | Mensagem do cliente vinda da Meta é gravada **depois** do 200, em `after()`. Um restart ou deploy, ou erro do banco, **perde a mensagem** sem retry. | Inbox durável de mensagens, como o de status (#134), em modo sombra antes de ligar |
-| **R-1** | 14 | `ai_config` (`api_key`, `elevenlabs_api_key`, prompt) é **legível e gravável por qualquer membro**, inclusive viewer, direto pelo PostgREST. Linhas antigas têm chave em texto puro. | Policy nova + REVOKE de colunas (migration). Cifrar o legado. |
-| **R-2** | 14 | `whatsapp_config`: a 153 fechou a escrita dos segredos, mas a **leitura** continua aberta a qualquer membro (`access_token`, `app_secret`, `verify_token`, `waha_api_key`). | `REVOKE SELECT` + `GRANT SELECT` por coluna |
-| **SG-4** | 14 | `dispatch-kick` monta a URL do cron pelo `Host` da requisição e **envia o `CRON_SECRET`** para ela. | Usar a URL de env confiável, como o `tick-chain` |
-| **#150** | 13/14 | Token DDM em texto via importação de fluxo; erro da DDM tratado como sucesso. | **PR pronto**: merge e deploy |
-| **P-01/P-02** | 15 | Nenhum alerta ativo; crons não versionados. | Lista de crons versionada e alertas mínimos |
+| Item | PRD | PR (base `v2`) |
+|---|---|---|
+| WH-01/WH-02: inbox durável de mensagens (`WHATSAPP_MESSAGE_INBOX`, padrão `off`) | 15 | #154, migration 201 |
+| R-1/R-2 + SG-4: segredos fora do navegador; kick sem `CRON_SECRET` no `Host` | 14 | #155, migrations 200 e 200b (**deploy do código antes ou junto da 200b**) |
+| Token DDM em texto e erro da DDM tratado como sucesso | 13/14 | #150 (= PR-0 do PRD 13 e 14.1) |
+| P-01/P-02: alertas e crons versionados | 15 | pendente (depende do canal de alerta e do crontab) |
 
 ## Ordem de implementação recomendada (V2)
 
@@ -75,18 +76,21 @@ São riscos de **segurança ou perda de dados** que já existem na `main`.
 | ≤ 193 | já em produção (V1) ou na V2 (175–182) |
 | 194–198 | PRD 11 |
 | 199 | PRD 12 (leases e bucket do worker; pode ocupar 199a/b) |
-| 200, 200b | PRD 14: R-1/R-2. **Se forem para a V1 agora, ficam com esses números.** |
-| 201–209 | PRD 15: inbox de mensagens, webhooks de saída, registro de migrations |
-| 210–219 | PRD 13 |
-| 220+ | PRD 14 (demais) |
+| 200, 200b | PRD 14: R-1/R-2 (**ocupados**, #155) |
+| 201 | PRD 15: inbox de mensagens (**ocupado**, #154) |
+| 202–209 | PRD 15: webhooks de saída, registro de migrations, demais |
+| 210–219 | PRD 13 (210/210b = cron de fluxos, em andamento) |
+| 220–229 | PRD 14 (demais) |
+| 230–239 | PRD 19 (config por conta) |
+| 240–249 | PRD 20 (organizações e permissões) |
 
-O orquestrador confirma o número no momento do PR, sempre conferindo a `main` e a `v2`.
+⚠️ Os números citados **dentro** dos PRDs 12–15 (ex.: 194/195/197/199 no PRD 15, 199/200/201 no PRD 12) foram escritos antes desta reserva e **não valem**. Quem vale é esta tabela. O orquestrador confirma o número no momento do PR, conferindo a `v2`.
 
 ## Perguntas ao dono (consolidadas)
 
 **Prioritárias** (destravam a V1 urgente):
-1. Corrigir **já na V1**: WH-01/02 (inbox de mensagens), R-1/R-2 (segredos legíveis) e SG-4 (`CRON_SECRET`)?
-2. **Alguém lê `whatsapp_config` ou `ai_config` direto pelo Supabase** com a anon key (script, BI, planilha)? (R-1/R-2)
+1. ~~Corrigir já na V1?~~ **Respondida (08/10): não. Tudo vai só para a V2** (#150, #154, #155).
+2. ~~Alguém lê `whatsapp_config` ou `ai_config` direto pelo Supabase?~~ **Respondida: ninguém lê essas tabelas direto.**
 3. O **token DDM antigo** já foi revogado na DDM? (#150)
 4. **Canal de alerta e plantão:** Slack, grupo de WhatsApp ou e-mail? Quem fica de plantão e em que horário? (PRD 15)
 5. Acesso ao **crontab real**, ou print do agendador do EasyPanel, para versionar os crons. (PRD 15)
