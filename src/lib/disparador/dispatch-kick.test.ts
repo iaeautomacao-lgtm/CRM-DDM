@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { kickDispatchCron } from "./dispatch-kick";
+import { resolveCronBaseUrl } from "./tick-chain";
 
 describe("kickDispatchCron", () => {
   it("dispara o POST do cron imediatamente", async () => {
@@ -14,7 +15,7 @@ describe("kickDispatchCron", () => {
     }) as unknown as typeof fetch;
 
     const result = await kickDispatchCron({
-      requestUrl: "https://crm.test/api/disparador/campaigns/c1/start",
+      baseUrl: "https://crm.test",
       secret: "secret",
       fetchImpl,
       retryDelaysMs: [0],
@@ -42,7 +43,7 @@ describe("kickDispatchCron", () => {
     const sleep = vi.fn(async () => {});
 
     const result = await kickDispatchCron({
-      requestUrl: "https://crm.test/api/disparador/campaigns/c1/start",
+      baseUrl: "https://crm.test",
       secret: "secret",
       fetchImpl,
       sleep,
@@ -62,7 +63,7 @@ describe("kickDispatchCron", () => {
     ) as unknown as typeof fetch;
 
     const result = await kickDispatchCron({
-      requestUrl: "https://crm.test/api/disparador/campaigns/c1/start",
+      baseUrl: "https://crm.test",
       secret: "secret",
       fetchImpl,
       sleep: async () => {},
@@ -76,12 +77,34 @@ describe("kickDispatchCron", () => {
   it("sem CRON_SECRET faz fail-safe e deixa o cron agendado como fallback", async () => {
     const fetchImpl = vi.fn() as unknown as typeof fetch;
     const result = await kickDispatchCron({
-      requestUrl: "https://crm.test/api/disparador/campaigns/c1/start",
+      baseUrl: "https://crm.test",
       secret: "",
       fetchImpl,
     });
 
     expect(result.outcome).toBe("skipped");
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("sem origem confiável do app o segredo não sai: nada é chamado (SG-4)", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    for (const baseUrl of [null, undefined, "", "   "]) {
+      const result = await kickDispatchCron({ baseUrl, secret: "segredo-do-cron", fetchImpl });
+      expect(result).toMatchObject({ outcome: "skipped", attempts: 0 });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveCronBaseUrl", () => {
+  it("usa só variáveis da plataforma (DISPARADOR_CHAIN_URL, senão NEXT_PUBLIC_APP_URL), normalizadas para a origem", () => {
+    expect(resolveCronBaseUrl({ NEXT_PUBLIC_APP_URL: "https://crm.exemplo.com/qualquer/caminho" })).toBe("https://crm.exemplo.com");
+    expect(resolveCronBaseUrl({ DISPARADOR_CHAIN_URL: "http://localhost:3000", NEXT_PUBLIC_APP_URL: "https://crm.exemplo.com" })).toBe("http://localhost:3000");
+    expect(resolveCronBaseUrl({})).toBeNull();
+  });
+  it("rejeita valor inválido, esquema estranho e URL com credenciais", () => {
+    for (const bad of ["crm.exemplo.com", "ftp://crm.exemplo.com", "javascript:alert(1)", "https://user:pass@crm.exemplo.com", "  "]) {
+      expect(resolveCronBaseUrl({ NEXT_PUBLIC_APP_URL: bad }), bad).toBeNull();
+    }
   });
 });

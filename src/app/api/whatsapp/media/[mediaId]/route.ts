@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { createClient } from '@/lib/supabase/server'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -73,13 +74,13 @@ export async function GET(
       }
 
       // Fetch active waha config
-      const { data: wahaConfig, error: configError } = await supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .eq('provider', 'waha')
-        .limit(1)
-        .maybeSingle()
+      // Segredos só pelo servidor (migration 200b); visibilidade = RLS do usuário.
+      const { data: wahaRows, error: configError } = await fetchChannelConfigs(
+        supabase,
+        accountId,
+        (q) => q.eq('account_id', accountId).eq('provider', 'waha').limit(1)
+      )
+      const wahaConfig = (wahaRows?.[0] ?? null) as any
 
       if (configError || !wahaConfig) {
         return NextResponse.json(
@@ -131,11 +132,13 @@ export async function GET(
     }
 
     // Fetch and decrypt WhatsApp config
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .single()
+    // Exatamente 1 canal, como o .single() anterior (vários = erro).
+    const { data: configRows, error: configError } = await fetchChannelConfigs(
+      supabase,
+      accountId,
+      (q) => q.eq('account_id', accountId)
+    )
+    const config = configRows?.length === 1 ? (configRows[0] as any) : null
 
     if (configError || !config) {
       return NextResponse.json(

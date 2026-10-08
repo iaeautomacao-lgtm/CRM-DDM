@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardRole } from '@/lib/auth/route-guard'
 import type { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -141,13 +142,17 @@ export async function POST() {
     // antigo era lido e os templates das outras WABAs nunca chegavam ao
     // catálogo local (e a campanha não tinha como validar o template do
     // número escolhido).
-    const { data: configs, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-      .eq('provider', 'meta')
-      .eq('habilitado', true)
-      .order('created_at', { ascending: true })
+    // Segredos só pelo servidor (migration 200b); visibilidade = RLS do usuário.
+    const { data: configs, error: configError } = await fetchChannelConfigs(
+      supabase,
+      accountId,
+      (q) =>
+        q
+          .eq('account_id', accountId)
+          .eq('provider', 'meta')
+          .eq('habilitado', true)
+          .order('created_at', { ascending: true })
+    )
 
     if (configError || !configs || configs.length === 0) {
       return NextResponse.json(

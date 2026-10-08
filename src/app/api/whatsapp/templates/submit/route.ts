@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { guardRole } from '@/lib/auth/route-guard'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -174,22 +175,23 @@ export async function POST(request: Request) {
       metaTemplateId = `dry-run-${crypto.randomUUID()}`
       metaStatus = 'PENDING'
     } else {
-      let configQuery = supabase
-        .from('whatsapp_config')
-        .select('*')
-        .eq('account_id', accountId)
-        .eq('provider', 'meta')
-
       // channel_id given: use exactly that channel (still scoped to
       // this account — a cross-account id simply matches no row below).
       // Otherwise: the account's oldest enabled Meta channel, same
       // "pick the primary one" convention as /api/v1/whatsapp/send and
       // the whatsapp_config PATCH handler.
-      configQuery = channelId
-        ? configQuery.eq('id', channelId)
-        : configQuery.eq('habilitado', true).order('created_at', { ascending: true }).limit(1)
-
-      const { data: config, error: configError } = await configQuery.maybeSingle()
+      // Segredos só pelo servidor (migration 200b); visibilidade = RLS do usuário.
+      const { data: configRows, error: configError } = await fetchChannelConfigs(
+        supabase,
+        accountId,
+        (q) => {
+          const base = q.eq('account_id', accountId).eq('provider', 'meta')
+          return channelId
+            ? base.eq('id', channelId)
+            : base.eq('habilitado', true).order('created_at', { ascending: true }).limit(1)
+        }
+      )
+      const config = (configRows?.[0] ?? null) as any
       if (configError || !config) {
         return NextResponse.json(
           {
