@@ -14,6 +14,16 @@
 import { createClient } from "@supabase/supabase-js";
 import { existsSync, readFileSync } from "node:fs";
 
+// O supabase-js 2.10x cria o cliente de realtime no construtor e, no Node 20 (sem
+// WebSocket nativo), aborta. Este script nunca usa realtime: um transporte que só
+// falha se alguém tentar conectar resolve sem instalar o pacote ws.
+class NoRealtimeTransport {
+  constructor() {
+    throw new Error("realtime não é usado neste script");
+  }
+}
+
+
 for (const file of [".env.local", ".env.production.local", ".env.production", ".env"]) {
   if (!existsSync(file)) continue;
   for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
@@ -194,7 +204,7 @@ async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios.");
-  const db = createClient(url, key, { auth: { persistSession: false }, db: { schema: "wacrm" } });
+  const db = createClient(url, key, { realtime: { transport: NoRealtimeTransport },  auth: { persistSession: false }, db: { schema: "wacrm" } });
   const convert = await import("../src/lib/ai/agents/convert.ts");
 
   const flows = await fetchAll(() => {
