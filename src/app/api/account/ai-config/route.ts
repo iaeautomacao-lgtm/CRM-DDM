@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { auditFetch } from '@/lib/audit/context'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { encrypt, tryDecrypt } from '@/lib/whatsapp/encryption'
 import { recordPromptVersion } from '@/lib/ai/prompt-versions'
@@ -56,7 +56,7 @@ function maskSecret(value: string): string {
 async function resolveAccountId(): Promise<
   { accountId: string; userId: string } | { error: NextResponse }
 > {
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('ai.config')
   if (!auth.ok) return { error: auth.response }
   return { accountId: auth.ctx.accountId, userId: auth.ctx.userId }
 }

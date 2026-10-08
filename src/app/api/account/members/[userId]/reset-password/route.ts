@@ -17,7 +17,7 @@
 
 import { NextResponse } from "next/server";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/account/admin-client";
 import {
   checkRateLimit,
@@ -32,7 +32,7 @@ export async function POST(
   { params }: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const ctx = await requireRole("owner");
+    const ctx = await requirePermission("members.reset_password");
 
     const limit = checkRateLimit(
       `admin:resetMemberPassword:${ctx.userId}`,
