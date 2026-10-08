@@ -8,6 +8,8 @@ import type { FlowRunRow } from "../types";
 export const SIM_STATE_TABLES = [
   "flow_runs",
   "flow_run_events",
+  // Resultado bruto das tools (migration 212): o motor lê daqui no turno seguinte (herdar contexto / iddev).
+  "flow_run_tool_results",
   "messages",
   "conversations",
   "contacts",

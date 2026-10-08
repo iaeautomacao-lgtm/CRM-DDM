@@ -169,8 +169,11 @@ export function buildTimeline(
   newDecisions: SimRow[],
   notes: SimTimelineEvent[],
   teams: SimulationSeed["teams"],
+  /** Resultados brutos do turno (flow_run_tool_results): o evento tool_result só carrega o resumo. */
+  newToolResults: SimRow[] = [],
 ): { timeline: SimTimelineEvent[]; path: string[] } {
   const timeline: SimTimelineEvent[] = [...notes];
+  const rawResults = [...newToolResults];
   const path: string[] = [];
   for (const ev of newEvents) {
     const at = String(ev.created_at ?? "");
@@ -207,7 +210,13 @@ export function buildTimeline(
           type: "tool_result",
           node_key: nodeKey,
           label: `Resultado de ${payload.tool_name}${ev.status === "error" ? " (erro)" : ""}`,
-          detail: payload.result,
+          // Eventos novos não trazem o corpo: o simulador mostra o bruto (dados fictícios) da tabela fechada.
+          detail:
+            payload.result ??
+            (() => {
+              const i = rawResults.findIndex((r) => r.tool_name === payload.tool_name);
+              return i >= 0 ? rawResults.splice(i, 1)[0].result : undefined;
+            })(),
         });
         break;
       case "node_error":
@@ -258,6 +267,7 @@ export async function simulateTurn(
   const before = {
     events: tables.flow_run_events.length,
     decisions: tables.ai_decisions.length,
+    toolResults: tables.flow_run_tool_results.length,
   };
 
   const initialVars = { ...req.contact.vars };
@@ -362,6 +372,7 @@ export async function simulateTurn(
     tables.ai_decisions.slice(before.decisions),
     ctx.notes,
     seed.teams,
+    tables.flow_run_tool_results.slice(before.toolResults),
   );
   if (!dispatch.consumed) {
     timeline.push({
