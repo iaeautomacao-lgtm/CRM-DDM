@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/relatorios/admin-client";
 
 const BUCKET = "relatorio-exports";
@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   try {
     // Quem exporta relatórios (supervisor+, como as páginas de relatório) registra
     // o histórico; papéis abaixo não geram arquivo nenhum na conta.
-    const ctx = await requireRole("supervisor");
+    const ctx = await requirePermission("reports.export");
     const declaredLength = Number(request.headers.get("content-length") ?? 0);
     if (declaredLength > MAX_BASE64_LENGTH + 64 * 1024) {
       return NextResponse.json({ error: "Arquivo muito grande" }, { status: 413 });
@@ -148,7 +148,7 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   try {
     // Apagar exportação da conta: owner/admin (mesmo papel da página Exportações).
-    const ctx = await requireRole("admin");
+    const ctx = await requirePermission("exports.manage");
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     if (!id) {

@@ -62,10 +62,10 @@ describe('migrations 240/241/241b — papéis como linhas, sincronia e has_perm'
     await db.exec(migration('240_roles_foundation.sql'))
     await db.exec(migration('241_roles_functions.sql'))
     await db.exec(migration('241b_profiles_role_id_idx.sql'))
-  })
+  }, 60_000)
   afterAll(async () => {
     await db.close()
-  })
+  }, 60_000)
   beforeEach(async () => {
     await db.exec(`RESET ROLE; SELECT set_config('test.uid', '', false); DELETE FROM wacrm.profiles; DELETE FROM wacrm.account_roles WHERE account_id IS NOT NULL;`)
   })

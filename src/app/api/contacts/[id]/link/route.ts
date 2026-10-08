@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { logAuditEvent } from '@/lib/audit/log-event'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 
@@ -22,7 +22,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { supabase, accountId } = await requireRole('agent')
+    const { supabase, accountId } = await requirePermission('contacts.edit')
     const { id: contactId } = await params
     const body = (await request.json().catch(() => ({}))) as { phone?: unknown; email?: unknown }
 

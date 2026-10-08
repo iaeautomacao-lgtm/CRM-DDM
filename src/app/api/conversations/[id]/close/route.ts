@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { endActiveRunForConversation } from "@/lib/flows/engine";
 import { buildHumanClosePatch, suggestionVerdict } from "@/lib/conversations/outcome";
@@ -28,7 +28,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { supabase, accountId, userId } = await requireRole("agent");
+    const { supabase, accountId, userId } = await requirePermission("inbox.close");
     const { id: conversationId } = await params;
     if (!UUID_RE.test(conversationId)) {
       return NextResponse.json({ error: "Conversa inválida" }, { status: 400 });
