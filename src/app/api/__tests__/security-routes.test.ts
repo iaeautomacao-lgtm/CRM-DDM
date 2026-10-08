@@ -30,10 +30,12 @@ function client() {
 
 vi.mock("@/lib/auth/account", async () => {
   const { hasMinRole } = await import("@/lib/auth/roles");
+  const perms = await import("@/lib/auth/permissions");
   class ForbiddenError extends Error { readonly status = 403; }
   const getCurrentAccount = async () => ({
     supabase: client(), accountId: state.accountId, userId: state.userId,
-    role: state.role, account: { id: state.accountId, name: "Conta" },
+    role: state.role, permissions: perms.permissionsForRole(state.role as never),
+    account: { id: state.accountId, name: "Conta" },
   });
   return {
     ForbiddenError, getCurrentAccount,
@@ -41,11 +43,11 @@ vi.mock("@/lib/auth/account", async () => {
       if (!hasMinRole(state.role as Parameters<typeof hasMinRole>[0], min)) throw new ForbiddenError();
       return getCurrentAccount();
     },
-    // 20.3: as rotas pedem PERMISSÃO; o mock usa o can() REAL do catálogo (não reimplementa a regra).
-    requirePermission: async (permission: import("@/lib/auth/permissions").Permission) => {
-      const { can } = await import("@/lib/auth/permissions");
-      if (!can({ role: state.role as import("@/lib/auth/roles").AccountRole }, permission)) throw new ForbiddenError();
-      return getCurrentAccount();
+    // Gate por permissão (PRD 20.3) com o catálogo real.
+    requirePermission: async (permission: string) => {
+      const ctx = await getCurrentAccount();
+      if (!perms.can(ctx as never, permission as never)) throw new ForbiddenError();
+      return ctx;
     },
     toErrorResponse: (err: unknown) => new Response(JSON.stringify({ error: "Falha" }), {
       status: err instanceof ForbiddenError ? 403 : 500,

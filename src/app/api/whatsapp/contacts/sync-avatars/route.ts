@@ -1,5 +1,5 @@
 ﻿import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { getWahaProfilePicture } from '@/lib/whatsapp/waha-api'
@@ -9,7 +9,7 @@ const MAX_CONTACTS_PER_RUN = 500
 
 export async function POST(request: Request) {
   // Laço de 200 ms por contato com a chave WAHA da conta: só admin.
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('channels.manage')
   if (!auth.ok) return auth.response
   const account_id = auth.ctx.accountId
 

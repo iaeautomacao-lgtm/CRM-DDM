@@ -98,7 +98,10 @@ export function describeEvent(ev: RunEvent): string {
     }
     case "tool_result": {
       const ok = ev.status !== "error";
-      const result = str(p.result ?? p.output, 90);
+      // Eventos novos (migration 212) trazem só o resumo do resultado, nunca o corpo.
+      const summary = p.result_summary && typeof p.result_summary === "object" ? (p.result_summary as { format?: unknown; chars?: unknown }) : null;
+      const summaryText = summary ? `${String(summary.format ?? "resultado")}, ${String(summary.chars ?? "?")} caracteres` : null;
+      const result = str(p.result ?? p.output ?? summaryText, 90);
       return `${String(p.tool_name ?? "Ferramenta")} ${ok ? "respondeu" : "falhou"}${ms(ev.duration_ms)}${
         result ? `: ${result}` : ""
       }`;

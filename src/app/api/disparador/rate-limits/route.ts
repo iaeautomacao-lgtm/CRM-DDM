@@ -15,7 +15,7 @@ function handle(err: unknown) {
 
 export async function GET() {
   try {
-    const ctx = await requireDisparadorAccess();
+    const ctx = await requireDisparadorAccess("campaigns.rate_limit");
     return NextResponse.json(await listRateLimits(supabaseAdmin(), ctx.accountId));
   } catch (err) {
     return handle(err);
@@ -24,10 +24,10 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const ctx = await requireDisparadorAccess();
+    const ctx = await requireDisparadorAccess("campaigns.rate_limit");
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
     if (!body) return NextResponse.json({ error: "Corpo inválido." }, { status: 400 });
-    const actor = { accountId: ctx.accountId, userId: ctx.userId, role: ctx.role };
+    const actor = { accountId: ctx.accountId, userId: ctx.userId, role: ctx.role, permissions: ctx.permissions };
     if (body.policy && typeof body.policy === "object") {
       return NextResponse.json(await updatePolicy(supabaseAdmin(), actor, body.policy as Record<string, unknown>, body.reason));
     }

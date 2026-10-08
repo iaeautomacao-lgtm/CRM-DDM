@@ -1,3 +1,4 @@
+import { maskCpfForLog } from '@/lib/privacy/mask';
 import { openAiUrl } from '@/lib/loadtest/gate';
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { safeFetch, SsrfBlockedError } from "@/lib/security/ssrf-guard";
@@ -63,10 +64,6 @@ import {
 } from "@/lib/whatsapp/phone-utils";
 
 
-// CPF nunca vai inteiro para o log do servidor.
-function maskCpfForLog(cpf: string): string {
-  return cpf.length >= 2 ? `***${cpf.slice(-2)}` : "***";
-}
 // fetch com teto de 15s para todas as chamadas externas da IA (OpenAI,
 // Gemini, Claude, API DDM, TTS, download de mídia). Sem isso uma API lenta
 // segurava a requisição indefinidamente. Se o chamador já passar um

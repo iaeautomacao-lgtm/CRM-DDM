@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
+import { getCurrentAccount, requirePermission, toErrorResponse } from '@/lib/auth/account'
 
 const NAME_MAX_LENGTH = 50
 
@@ -25,7 +25,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requirePermission('templates.manage')
 
     let body: { name?: string }
     try {

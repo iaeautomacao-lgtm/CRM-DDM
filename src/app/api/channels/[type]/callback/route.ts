@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/account'
+import { requirePermission } from '@/lib/auth/account'
 import { exchangeInstagramCode, exchangeMessengerCode, verifyOAuthState } from '@/lib/channels/oauth'
 import { saveConnectedChannels } from '@/lib/channels/store'
 
@@ -25,7 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ type
   }
 
   try {
-    const { accountId, userId } = await requireRole('admin')
+    const { accountId, userId } = await requirePermission('channels.manage')
     const state = verifyOAuthState(url.searchParams.get('state'))
     if (!state || state.accountId !== accountId || state.userId !== userId || state.type !== type) {
       return backToChannels(request, { channel_error: 'Sessão de conexão inválida ou expirada' })

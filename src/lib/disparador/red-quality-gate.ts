@@ -4,6 +4,8 @@
 // Sem as tabelas da migration 190 (ou sem leitura) nada é bloqueado: inerte.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { can } from "@/lib/auth/permissions";
+import { isAccountRole } from "@/lib/auth/roles";
 import { logAuditEvent } from "@/lib/audit/log-event";
 import { redChannelsNeedingOwner } from "@/lib/disparador/rate-limits-service";
 
@@ -28,7 +30,9 @@ export function parseRedConfirmation(
   actorId: string | null | undefined,
   body: { confirm_red_quality?: unknown; red_quality_reason?: unknown } | null | undefined,
 ): RedConfirmation | undefined {
-  if (role !== "owner" || !actorId || body?.confirm_red_quality !== true) return undefined;
+  // Só quem tem campaigns.red_quality_override (owner hoje); papel desconhecido nega (fail-closed).
+  if (!isAccountRole(role) || !can({ role }, "campaigns.red_quality_override")) return undefined;
+  if (!actorId || body?.confirm_red_quality !== true) return undefined;
   const reason = typeof body.red_quality_reason === "string" ? body.red_quality_reason.trim() : "";
   if (reason.length < 3 || reason.length > 500) return undefined;
   return { actorId, reason };
