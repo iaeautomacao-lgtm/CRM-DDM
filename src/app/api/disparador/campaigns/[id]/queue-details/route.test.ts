@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const selects: Array<{ table: string; columns: string; options: unknown }> = [];
 let statusRows: Array<{ status: string; qty: number }> = [];
 let rpcError = false;
+/** Fila "grande": cada página do export devolve 1000 linhas (para o teto da exportação síncrona). */
+let bigQueueRows = 0;
 
 vi.mock("@/lib/disparador/route-auth", () => ({ requireDisparadorAccess: async () => ({ accountId: "acc-1", userId: "u1" }) }));
 vi.mock("@/lib/audit/log-event", () => ({ logAuditEvent: async () => {} }));
@@ -27,7 +29,10 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       b.then = (resolve: (v: unknown) => void) => {
         const opts = selects[selects.length - 1]?.options as { head?: boolean; count?: string } | undefined;
         // Como o PostgREST: só devolve count quando foi pedido.
-        if (table === "disp_message_queue") return resolve({ data: opts?.head ? null : [], error: null, count: opts?.count ? 7 : null });
+        if (table === "disp_message_queue") {
+          const data = opts?.head ? null : bigQueueRows > 0 ? Array.from({ length: 1000 }, (_, i) => ({ id: `q${i}`, status: "enviado", contacts: { name: "N", phone: "1" } })) : [];
+          return resolve({ data, error: null, count: opts?.count ? 7 : null });
+        }
         return resolve({ data: [], error: null });
       };
       return b;
@@ -40,6 +45,7 @@ const call = (qs: string) => GET(new Request(`http://x/api/disparador/campaigns/
 const queuePageSelects = () => selects.filter((s) => s.table === "disp_message_queue");
 
 beforeEach(() => {
+  bigQueueRows = 0;
   selects.length = 0;
   rpcError = false;
   statusRows = [
@@ -74,5 +80,20 @@ describe("GET queue-details — total sem count exact", () => {
   it("'respondido' e 'aguardando_confirmacao' (filtros próprios) seguem com count exato", async () => {
     await call("status=aguardando_confirmacao");
     expect(queuePageSelects().some((s) => (s.options as { count?: string } | undefined)?.count === "exact")).toBe(true);
+  });
+});
+
+describe("GET queue-details?export=xlsx — teto da exportação síncrona (A22)", () => {
+  it("fila grande (mais de 10.000 linhas): 409 com o código e o endpoint do job; nada de XLSX gigante na requisição", async () => {
+    bigQueueRows = 1;
+    const res = await call("status=enviado&export=xlsx");
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ code: "export_too_large", async_endpoint: "/api/disparador/exports", max_sync_rows: 10000 });
+  });
+
+  it("fila pequena: segue gerando o XLSX na hora", async () => {
+    const res = await call("status=enviado&export=xlsx");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("spreadsheetml");
   });
 });
