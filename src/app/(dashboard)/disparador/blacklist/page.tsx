@@ -10,7 +10,11 @@ import {
   X,
   Search,
   CheckCircle2,
-  AlertOctagon
+  AlertOctagon,
+  Users,
+  RadioTower,
+  Settings2,
+  ListFilter
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -27,6 +31,7 @@ interface BlacklistEntry {
 }
 
 type BlacklistType = "opt_out" | "manual" | "meta_131026" | "automatic" | "unknown";
+type BlacklistGroup = "all" | "human" | "meta" | "system";
 
 interface BlacklistClassification {
   type: BlacklistType;
@@ -59,8 +64,8 @@ function classifyBlacklistEntry(entry: BlacklistEntry): BlacklistClassification 
     return {
       type: "meta_131026",
       label: "Automático — Meta 131026",
-      severity: "Preventivo",
-      description: "Falha de entrega pela Meta neste envio",
+      severity: "Forte",
+      description: "131026 confirmado em 3 campanhas diferentes",
     };
   }
 
@@ -96,12 +101,19 @@ function severityClass(severity: BlacklistClassification["severity"]): string {
   return "bg-zinc-500/10 text-zinc-600 border-zinc-500/20";
 }
 
+function groupForClassification(classification: BlacklistClassification): Exclude<BlacklistGroup, "all"> {
+  if (classification.type === "opt_out" || classification.type === "manual") return "human";
+  if (classification.type === "meta_131026") return "meta";
+  return "system";
+}
+
 export default function BlacklistPage() {
   const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
   const [filteredList, setFilteredList] = useState<BlacklistEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState<BlacklistGroup>("all");
   const [originFilter, setOriginFilter] = useState<BlacklistType | "all">("all");
   // Resolvido em loadBlacklist() — mesmo padrão de campanhas/page.tsx
   // (getDisparadorScope). Necessário pra migration 040/085 (RLS do
@@ -128,14 +140,21 @@ export default function BlacklistPage() {
       const { accountId: scopedAccountId } = await getDisparadorScope(supabase);
       setAccountId(scopedAccountId);
 
-      const { data, error } = await supabase
-        .from("blacklist")
-        .select("*")
-        .order("data_bloqueio", { ascending: false });
-
-      if (error) throw error;
-      setBlacklist(data ?? []);
-      setFilteredList(data ?? []);
+      const pageSize = 1000;
+      const allRows: BlacklistEntry[] = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase
+          .from("blacklist")
+          .select("*")
+          .eq("account_id", scopedAccountId)
+          .order("data_bloqueio", { ascending: false })
+          .range(from, from + pageSize - 1);
+        if (error) throw error;
+        allRows.push(...((data ?? []) as BlacklistEntry[]));
+        if (!data || data.length < pageSize) break;
+      }
+      setBlacklist(allRows);
+      setFilteredList(allRows);
     } catch (err) {
       console.error("Failed to load blacklist:", err);
       setLoadError("Não foi possível carregar a blacklist. Tente novamente.");
@@ -154,21 +173,16 @@ export default function BlacklistPage() {
           entry.telefone.toLowerCase().includes(query) ||
           entry.mensagem_detectada?.toLowerCase().includes(query) ||
           entry.motivo.toLowerCase().includes(query);
+        const classification = classifyBlacklistEntry(entry);
+        const matchesGroup =
+          groupFilter === "all" || groupForClassification(classification) === groupFilter;
         const matchesOrigin =
-          originFilter === "all" || classifyBlacklistEntry(entry).type === originFilter;
-        return Boolean(matchesSearch && matchesOrigin);
+          originFilter === "all" || classification.type === originFilter;
+        return Boolean(matchesSearch && matchesGroup && matchesOrigin);
       })
     );
-  }, [search, blacklist, originFilter]);
+  }, [search, blacklist, groupFilter, originFilter]);
 
-  const originFilters: Array<{ key: BlacklistType | "all"; label: string }> = [
-    { key: "all", label: "Todos" },
-    { key: "opt_out", label: "Opt-out" },
-    { key: "manual", label: "Manual" },
-    { key: "meta_131026", label: "Meta 131026" },
-    { key: "automatic", label: "Automático" },
-    { key: "unknown", label: "Não informado" },
-  ];
   const originCounts = useMemo(() => {
     const counts: Record<BlacklistType, number> = {
       opt_out: 0,
@@ -182,6 +196,48 @@ export default function BlacklistPage() {
     });
     return counts;
   }, [blacklist]);
+
+  const groupCounts = useMemo(
+    () => ({
+      all: blacklist.length,
+      human: originCounts.opt_out + originCounts.manual,
+      meta: originCounts.meta_131026,
+      system: originCounts.automatic + originCounts.unknown,
+    }),
+    [blacklist.length, originCounts],
+  );
+
+  const groupFilters: Array<{
+    key: BlacklistGroup;
+    label: string;
+    description: string;
+    icon: typeof Users;
+  }> = [
+    { key: "all", label: "Todos", description: "Toda a blacklist", icon: ListFilter },
+    { key: "human", label: "Solicitações / Humano", description: "Opt-out e bloqueios manuais", icon: Users },
+    { key: "meta", label: "Erros Meta", description: "Falhas técnicas confirmadas", icon: RadioTower },
+    { key: "system", label: "Sistema / Outros", description: "Automáticos não Meta", icon: Settings2 },
+  ];
+
+  const visibleOriginFilters: Array<{ key: BlacklistType | "all"; label: string }> =
+    groupFilter === "human"
+      ? [
+          { key: "all", label: "Todos humanos" },
+          { key: "opt_out", label: "Opt-out" },
+          { key: "manual", label: "Manual" },
+        ]
+      : groupFilter === "meta"
+        ? [
+            { key: "all", label: "Todos Meta" },
+            { key: "meta_131026", label: "Meta 131026" },
+          ]
+        : groupFilter === "system"
+          ? [
+              { key: "all", label: "Todos do sistema" },
+              { key: "automatic", label: "Automático" },
+              { key: "unknown", label: "Não informado" },
+            ]
+          : [];
 
   // Remove from Blacklist
   const handleRemove = async (id: string) => {
@@ -250,7 +306,7 @@ export default function BlacklistPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
         <div>
@@ -284,29 +340,70 @@ export default function BlacklistPage() {
         />
       </div>
 
-      <div className="space-y-2">
-        <div className="flex flex-wrap gap-2">
-          {originFilters.map((filter) => {
-            const count = filter.key === "all" ? blacklist.length : originCounts[filter.key];
-            const active = originFilter === filter.key;
+      <div className="space-y-3">
+        <div role="tablist" aria-label="Separar blacklist por origem" className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {groupFilters.map((filter) => {
+            const active = groupFilter === filter.key;
+            const Icon = filter.icon;
             return (
-              <Button
+              <button
                 key={filter.key}
                 type="button"
-                size="sm"
-                variant={active ? "secondary" : "outline"}
-                onClick={() => setOriginFilter(filter.key)}
-                aria-pressed={active}
-                className="gap-1.5"
+                role="tab"
+                aria-selected={active}
+                onClick={() => {
+                  setGroupFilter(filter.key);
+                  setOriginFilter("all");
+                }}
+                className={
+                  active
+                    ? "flex items-center gap-3 rounded-lg border border-primary/50 bg-primary/10 px-3 py-2.5 text-left ring-1 ring-primary/20"
+                    : "flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
+                }
               >
-                {filter.label}
-                <span className="text-[10px] text-muted-foreground">({count})</span>
-              </Button>
+                <span className={active ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary" : "flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"}>
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold text-foreground">{filter.label}</span>
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                      {groupCounts[filter.key].toLocaleString("pt-BR")}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{filter.description}</span>
+                </span>
+              </button>
             );
           })}
         </div>
+
+        {visibleOriginFilters.length > 1 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-medium text-muted-foreground">Refinar:</span>
+            {visibleOriginFilters.map((filter) => {
+              const count = filter.key === "all" ? groupCounts[groupFilter] : originCounts[filter.key];
+              const active = originFilter === filter.key;
+              return (
+                <Button
+                  key={filter.key}
+                  type="button"
+                  size="sm"
+                  variant={active ? "secondary" : "outline"}
+                  onClick={() => setOriginFilter(filter.key)}
+                  aria-pressed={active}
+                  className="h-7 gap-1.5 px-2.5 text-xs"
+                >
+                  {filter.label}
+                  <span className="text-[10px] text-muted-foreground">({count})</span>
+                </Button>
+              );
+            })}
+          </div>
+        )}
+
         <p className="text-xs text-muted-foreground">
-          Bloqueios por opt-out e manuais são fortes. Falhas Meta 131026 são preventivas e indicam que a Meta não conseguiu entregar naquele envio.
+          Solicitações humanas ficam separadas das falhas técnicas. Opt-out e bloqueios manuais são imediatos; Meta 131026 só entra definitivamente após ocorrer em 3 campanhas diferentes para o mesmo número.
         </p>
       </div>
 
@@ -328,8 +425,14 @@ export default function BlacklistPage() {
         ) : filteredList.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center text-center text-muted-foreground border border-dashed border-border rounded-xl">
             <CheckCircle2 className="h-10 w-10 text-emerald-500/30 mb-2" />
-            <h4 className="font-semibold text-foreground">Sua blacklist está vazia</h4>
-            <p className="text-xs max-w-xs mt-1">Nenhum número foi bloqueado ainda. Adicione contatos manualmente se necessário.</p>
+            <h4 className="font-semibold text-foreground">
+              {blacklist.length === 0 ? "Sua blacklist está vazia" : "Nenhum registro neste filtro"}
+            </h4>
+            <p className="text-xs max-w-xs mt-1">
+              {blacklist.length === 0
+                ? "Nenhum número foi bloqueado ainda. Adicione contatos manualmente se necessário."
+                : "Ajuste a categoria, o refinamento ou a busca para ver outros registros."}
+            </p>
           </div>
         ) : (
           // Rolagem horizontal só dentro da tabela (celular), nunca na página.

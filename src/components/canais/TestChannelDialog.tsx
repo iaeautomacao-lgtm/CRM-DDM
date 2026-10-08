@@ -53,6 +53,7 @@ export function TestChannelDialog({
   const [testResult, setTestResult] = useState<
     | { status: "pending"; messageId: string }
     | { status: "delivered" }
+    | { status: "warning" }
     | { status: "failed"; error: string }
     | null
   >(null);
@@ -145,8 +146,13 @@ export function TestChannelDialog({
       setTestResult({ status: "pending", messageId });
 
       // Polling por até 15 segundos (10 tentativas a cada 1.5s)
-      let attempts = 0;
       const MAX_ATTEMPTS = 10;
+      // Com 131026 provisório acompanha por mais tempo (~10 min).
+      const PROVISIONAL_MAX_ATTEMPTS = 400;
+      let attempts = 0;
+      // 131026 é provisório (aparelho offline também gera): segue acompanhando.
+      let provisional131026 = false;
+      let maxAttempts = MAX_ATTEMPTS;
       const INTERVAL_MS = 1500;
 
       const poll = async (): Promise<void> => {
@@ -166,16 +172,22 @@ export function TestChannelDialog({
             return;
           }
           if (row?.status === "failed") {
-            setTestResult({ status: "failed", error: row.erro ?? "Falha na entrega" });
-            return;
+            if ((row.erro ?? "").includes("131026")) {
+              provisional131026 = true;
+              maxAttempts = PROVISIONAL_MAX_ATTEMPTS;
+              setTestResult({ status: "warning" });
+            } else {
+              setTestResult({ status: "failed", error: row.erro ?? "Falha na entrega" });
+              return;
+            }
           }
         } catch {
           // Silencioso — continua tentando
         }
 
-        if (attempts < MAX_ATTEMPTS) {
+        if (attempts < maxAttempts) {
           setTimeout(poll, INTERVAL_MS);
-        } else {
+        } else if (!provisional131026) {
           // Timeout — Meta provavelmente entregou mas webhook não chegou
           setTestResult({ status: "delivered" });
         }
@@ -309,6 +321,12 @@ export function TestChannelDialog({
                 <div className="flex items-center gap-2 text-xs text-green-600">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Mensagem entregue com sucesso!
+                </div>
+              )}
+              {testResult?.status === "warning" && (
+                <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 p-2 text-xs text-yellow-800">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  A Meta informou que não conseguiu entregar ainda (131026). Pode ser aparelho offline — a entrega será confirmada quando o aparelho ficar online.
                 </div>
               )}
               {testResult?.status === "failed" && (

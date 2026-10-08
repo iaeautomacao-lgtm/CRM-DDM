@@ -23,6 +23,7 @@ import { closeConversationForAutomation } from './close-conversation'
 import { getConversationChannel, isSocialChannel, sendWebchatMessage } from '@/lib/webchat/send'
 import { sendSocialMessage } from '@/lib/channels/social'
 import { engineWahaSendText } from '@/lib/flows/waha-send'
+import { safeFetch } from '@/lib/security/ssrf-guard'
 
 // ------------------------------------------------------------
 // Public API
@@ -476,6 +477,11 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       // runAutomationsForTrigger.
       const cfg = step.step_config as TagStepConfig
       if (!args.contactId || !cfg.tag_id) throw new Error('add_tag needs contact + tag_id')
+      // Defesa em profundidade: passos gravados antes da validação de
+      // referências podem apontar para etiqueta de outra conta.
+      if (!(await accountOwns(db, 'tags', 'id', cfg.tag_id, args.automation.account_id))) {
+        return `tag ${cfg.tag_id} not in this account`
+      }
       await db
         .from('contact_tags')
         .upsert(
@@ -490,6 +496,9 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       // ownership guard, since contact_tags carries no account_id.
       const cfg = step.step_config as TagStepConfig
       if (!args.contactId || !cfg.tag_id) throw new Error('remove_tag needs contact + tag_id')
+      if (!(await accountOwns(db, 'tags', 'id', cfg.tag_id, args.automation.account_id))) {
+        return `tag ${cfg.tag_id} not in this account`
+      }
       await db
         .from('contact_tags')
         .delete()
@@ -514,6 +523,9 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         agentId = profiles?.[0]?.user_id
       }
       if (!agentId) return 'no agent resolved'
+      if (!(await accountOwns(db, 'profiles', 'user_id', agentId, args.automation.account_id))) {
+        return `agent ${agentId} not in this account`
+      }
       await db
         .from('conversations')
         .update({ assigned_agent_id: agentId })
@@ -606,11 +618,15 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
       const cfg = step.step_config as SendWebhookStepConfig
       if (!cfg.url) throw new Error('send_webhook needs url')
       const body = cfg.body_template ? interpolate(cfg.body_template, args) : JSON.stringify(args.context)
-      const res = await fetch(cfg.url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
-        body,
-      })
+      const res = await safeFetch(
+        cfg.url,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(cfg.headers ?? {}) },
+          body,
+        },
+        { timeoutMs: 15_000, maxBytes: 256 * 1024 },
+      )
       if (!res.ok) throw new Error(`webhook returned ${res.status}`)
       return `webhook ${res.status}`
     }
@@ -694,6 +710,27 @@ function triggerMatches(automation: Automation, ctx: AutomationContext | undefin
     const k = cfg.case_sensitive ? raw : raw.toLowerCase()
     return cfg.match_type === 'exact' ? haystack === k : haystack.includes(k)
   })
+}
+
+/**
+ * A linha `column = value` existe NESTA conta? Usado antes de gravar com
+ * service role referências vindas da configuração do passo (tag/agente).
+ * Falha de consulta = não pertence (fail-closed).
+ */
+async function accountOwns(
+  db: ReturnType<typeof supabaseAdmin>,
+  table: 'tags' | 'profiles',
+  column: 'id' | 'user_id',
+  value: string,
+  accountId: string,
+): Promise<boolean> {
+  const { data, error } = await db
+    .from(table)
+    .select(column)
+    .eq(column, value)
+    .eq('account_id', accountId)
+    .limit(1)
+  return !error && (data?.length ?? 0) > 0
 }
 
 async function evaluateCondition(cfg: ConditionStepConfig, args: ExecuteArgs): Promise<boolean> {

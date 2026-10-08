@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countBodyVariables,
   templateComponentProblem,
+  templateRowsForWaba,
   validateCampaignTemplate,
   type LocalTemplateRow,
 } from "./template-validation";
@@ -53,12 +54,14 @@ describe("templateComponentProblem", () => {
 
 describe("validateCampaignTemplate", () => {
   it("template aprovado e compatível passa", () => {
-    expect(input([base])).toEqual({ ok: true, checked: true });
+    expect(input([base])).toEqual({ ok: true });
   });
 
-  it("fora do catálogo local: não bloqueia, mas avisa que não validou", () => {
-    expect(input([])).toEqual({ ok: true, checked: false });
-    expect(input([{ ...base, language: "en_US" }])).toEqual({ ok: true, checked: false });
+  it("fora do catálogo local: bloqueia pedindo sincronização", () => {
+    for (const r of [input([]), input([{ ...base, language: "en_US" }])]) {
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/não encontrado no catálogo deste número — sincronize os templates/);
+    }
   });
 
   it("não aprovado falha com o status em pt-BR", () => {
@@ -87,11 +90,52 @@ describe("validateCampaignTemplate", () => {
     if (!r.ok) expect(r.error).toMatch(/waba-b.*rejeitado/);
   });
 
-  it("linha sem waba_id (antes da 073) vale para qualquer WABA", () => {
-    expect(input([{ ...base, waba_id: null }], { wabaIds: ["waba-x"] })).toEqual({ ok: true, checked: true });
+  it("linha sem waba_id não autoriza campanha quando a WABA é conhecida", () => {
+    const r = input([{ ...base, waba_id: null }], { wabaIds: ["waba-x"] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/não encontrado no catálogo deste número/);
   });
 
-  it("WABA sem linha local não é validada (não bloqueia)", () => {
-    expect(input([base], { wabaIds: ["waba-z"] })).toEqual({ ok: true, checked: false });
+  it("WABA sem linha local bloqueia (template de outro número)", () => {
+    const r = input([base], { wabaIds: ["waba-z"] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/sincronize os templates/);
+  });
+
+  it("linha da WABA REJEITADA + antiga APROVADA: bloqueia (a linha da WABA decide)", () => {
+    const rows = [{ ...base, status: "REJECTED" }, { ...base, waba_id: null }];
+    const r = input(rows, { wabaIds: ["waba-a"] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/rejeitado/);
+  });
+
+  it("componentes vêm da linha da WABA, não da antiga", () => {
+    const rows = [{ ...base, header_type: "image" }, { ...base, waba_id: null }];
+    expect(input(rows, { wabaIds: ["waba-a"] }).ok).toBe(false);
+    // Antiga com mídia não atrapalha quando a da WABA é compatível.
+    expect(input([base, { ...base, waba_id: null, header_type: "image" }], { wabaIds: ["waba-a"] })).toEqual({ ok: true });
+  });
+
+  it("WABA diferente não herda linha legada", () => {
+    const rows = [{ ...base, status: "REJECTED" }, { ...base, waba_id: null }];
+    const r = input(rows, { wabaIds: ["waba-b"] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/não encontrado no catálogo deste número/);
+  });
+});
+
+describe("templateRowsForWaba", () => {
+  const rows = [
+    { name: "t", language: "pt_BR", waba_id: "a", tag: "a-pt" },
+    { name: "t", language: "pt_BR", waba_id: null, tag: "legacy-pt" },
+    { name: "t", language: "en_US", waba_id: null, tag: "legacy-en" },
+    { name: "t", language: "pt_BR", waba_id: "b", tag: "b-pt" },
+  ];
+  it("por idioma: a da WABA substitui a antiga; antiga sem par continua; outras WABAs saem", () => {
+    expect(templateRowsForWaba(rows, "a").map((r) => r.tag)).toEqual(["a-pt", "legacy-en"]);
+    expect(templateRowsForWaba(rows, "c").map((r) => r.tag)).toEqual(["legacy-pt", "legacy-en"]);
+  });
+  it("sem WABA conhecida: tudo", () => {
+    expect(templateRowsForWaba(rows, null)).toHaveLength(4);
   });
 });

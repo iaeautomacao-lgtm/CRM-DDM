@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { parseLineIds } from '@/lib/automations/line-ids'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
+import { validateAutomationRefs } from '@/lib/automations/step-refs'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import {
   loadStepsTree,
@@ -12,28 +13,22 @@ import {
   validateTriggerForActivation,
 } from '@/lib/automations/validate'
 
-async function requireUser() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  return user
-}
-
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const user = await requireUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Consulta para agent+; a automação precisa ser da conta do chamador.
+  const auth = await guardRole('agent')
+  if (!auth.ok) return auth.response
+  const { accountId } = auth.ctx
 
   const admin = supabaseAdmin()
   const { data: automation, error } = await admin
     .from('automations')
     .select('*')
     .eq('id', id)
-    .eq('user_id', user.id)
+    .eq('account_id', accountId)
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -48,8 +43,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const user = await requireUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Owner/admin; a automação precisa ser da conta do chamador (outra conta → 404).
+  const auth = await guardRole('admin')
+  if (!auth.ok) return auth.response
+  const { accountId } = auth.ctx
 
   const body = await request.json().catch(() => null)
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
@@ -60,10 +57,11 @@ export async function PATCH(
   // to compute the post-patch "effective" state for validation.
   const { data: existing } = await admin
     .from('automations')
-    .select('id, user_id, is_active, trigger_type, trigger_config')
+    .select('id, is_active, trigger_type, trigger_config')
     .eq('id', id)
+    .eq('account_id', accountId)
     .maybeSingle()
-  if (!existing || existing.user_id !== user.id) {
+  if (!existing) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
 
@@ -110,11 +108,22 @@ export async function PATCH(
     }
   }
 
+  // Etiqueta/agente/funil de outra conta no gatilho ou nos passos.
+  if ('trigger_config' in update || Array.isArray(body.steps)) {
+    const refsError = await validateAutomationRefs(
+      accountId,
+      update.trigger_config,
+      Array.isArray(body.steps) ? (body.steps as BuilderStepInput[]) : undefined,
+    )
+    if (refsError) return NextResponse.json({ error: refsError }, { status: 400 })
+  }
+
   if (Object.keys(update).length > 0) {
     const { error: updErr } = await admin
       .from('automations')
       .update(update)
       .eq('id', id)
+      .eq('account_id', accountId)
     if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 })
   }
 
@@ -131,14 +140,16 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const user = await requireUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  // Owner/admin; a automação precisa ser da conta do chamador (outra conta → 404).
+  const auth = await guardRole('admin')
+  if (!auth.ok) return auth.response
+  const { accountId } = auth.ctx
 
   const { error } = await supabaseAdmin()
     .from('automations')
     .delete()
     .eq('id', id)
-    .eq('user_id', user.id)
+    .eq('account_id', accountId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
 }

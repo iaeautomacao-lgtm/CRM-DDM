@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { canManageCampaigns } from "@/lib/disparador/route-auth";
+import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 
 export async function POST(
   request: Request,
@@ -28,6 +30,13 @@ export async function POST(
     if (profileError || !profile?.account_id)
       return NextResponse.json(
         { error: "Conta indisponível" },
+        { status: 403 }
+      );
+    // Pausar/encerrar: só quem gerencia campanhas (owner/admin, mesmo papel
+    // da página /disparador — route-auth.ts).
+    if (!canManageCampaigns(profile.account_role))
+      return NextResponse.json(
+        { error: "Seu papel não permite gerenciar campanhas do disparador." },
         { status: 403 }
       );
     const { data: campaign, error: campaignError } = await supabaseAdmin()
@@ -79,9 +88,13 @@ export async function POST(
         { error: "Estado da campanha não permite a ação" },
         { status: 409 }
       );
+    // A RPC só trocou o status (instantâneo; nenhum item é enviado a partir daqui). Os itens movem em lotes:
+    // um orçamento curto aqui; o que sobrar (campanha muito grande) o cron termina.
+    const moves = await drainDispatchMoves(supabaseAdmin(), campaignId, { budgetMs: 15_000 });
     return NextResponse.json({
       success: true,
       status: action === "pause" ? "pausada" : "encerrada",
+      items_pending_move: moves.partial || !moves.ok,
     });
   } catch (err: any) {
     console.error("[Campaign Stop/Pause] Failed:", err);

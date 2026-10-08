@@ -107,3 +107,31 @@ export function nextSendSlot(
   }
   return candidate;
 }
+
+// ---- Agendamento (campaigns.agendamento) ----
+// O assistente usa <input type="datetime-local">, que não carrega fuso.
+// Antes, new Date(valor) usava o fuso do NAVEGADOR — um operador com o
+// sistema fora de Brasília agendava horas antes/depois do que a tela dizia
+// ("Horário de Brasília"). Mesma premissa de UTC-3 fixo usada acima.
+
+/** "2026-10-06T14:30" (horário de Brasília) → ISO UTC; null se inválido. */
+export function brasiliaLocalToIso(local: string | null | undefined): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec((local ?? "").trim());
+  if (!m) return null;
+  const date = new Date(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] ?? "00"}-03:00`);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/** Instante → "06/10/2026, 14:30" no horário de Brasília. */
+export function formatBrasilia(value: string | Date): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}

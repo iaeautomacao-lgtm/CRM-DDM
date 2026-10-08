@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit'
 import { sendWahaTextMessage } from '@/lib/whatsapp/waha-api'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -17,29 +18,15 @@ import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
  */
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
+    // Templates/canais mexem no WABA da conta (Meta) ou no número conectado: só admin
+    // (mesmo papel das páginas /templates e /canais).
+    const auth = await guardRole('admin')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId } = auth.ctx
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
-        { status: 403 },
-      )
-    }
+    // O orçamento é compartilhado por todos os administradores da conta.
+    const limit = checkRateLimit(`channel-test:${accountId}`, { limit: 10, windowMs: 60_000 })
+    if (!limit.success) return rateLimitResponse(limit)
 
     const body = await request.json().catch(() => ({}))
     const { configId, phone, templateId, params: bodyParams } = body
@@ -111,7 +98,7 @@ export async function POST(request: Request) {
           stack: err instanceof Error ? err.stack : undefined,
         })
         return NextResponse.json(
-          { error: `Meta API error: ${message}` },
+          { error: 'Falha ao enviar o teste pela Meta. Confira o canal e o template.' },
           { status: 502 },
         )
       }
@@ -146,7 +133,7 @@ export async function POST(request: Request) {
       const message = err instanceof Error ? err.message : 'Unknown WAHA API error'
       console.error('[channel-test] WAHA send failed:', message)
       return NextResponse.json(
-        { error: `WAHA API error: ${message}` },
+        { error: 'Falha ao enviar o teste pelo WAHA. Confira se a sessão está conectada.' },
         { status: 502 },
       )
     }

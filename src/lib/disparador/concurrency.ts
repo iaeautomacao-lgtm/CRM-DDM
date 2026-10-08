@@ -29,3 +29,43 @@ export async function processWithConcurrency<T>(
     })
   );
 }
+
+
+export const DEFAULT_DISPATCH_PROCESS_CONCURRENCY = 4;
+export const MAX_DISPATCH_PROCESS_CONCURRENCY = 150;
+
+const warned = new Set<string>();
+function warnOnce(raw: string, message: string): void {
+  if (warned.has(raw)) return;
+  warned.add(raw);
+  console.warn(`[Disparador] DISPATCH_PROCESS_CONCURRENCY="${raw}": ${message}`);
+}
+
+/**
+ * Resolve o limite do pool do cron a partir do ambiente.
+ *
+ * O banco continua sendo a barreira final por canal via
+ * dispatch_channel_limits.max_in_flight. Aqui limitamos apenas quantas
+ * operações o processo tenta manter em andamento ao mesmo tempo.
+ *
+ * Número fora da faixa NÃO derruba a vazão: faz clamp em [1, 150] com aviso
+ * (antes 51+ voltava para 4 em silêncio — de ~2.500 para ~210 envios/min).
+ * Decimal é arredondado para baixo. Só texto que não é número (`abc`) usa o
+ * padrão seguro, também com aviso.
+ */
+export function resolveDispatchProcessConcurrency(
+  raw = process.env.DISPATCH_PROCESS_CONCURRENCY,
+): number {
+  if (raw == null || raw.trim() === "") return DEFAULT_DISPATCH_PROCESS_CONCURRENCY;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) {
+    warnOnce(raw, `valor inválido; usando o padrão ${DEFAULT_DISPATCH_PROCESS_CONCURRENCY}`);
+    return DEFAULT_DISPATCH_PROCESS_CONCURRENCY;
+  }
+  const whole = Math.floor(parsed);
+  const clamped = Math.min(MAX_DISPATCH_PROCESS_CONCURRENCY, Math.max(1, whole));
+  if (clamped !== parsed) {
+    warnOnce(raw, `fora da faixa inteira [1, ${MAX_DISPATCH_PROCESS_CONCURRENCY}]; usando ${clamped}`);
+  }
+  return clamped;
+}

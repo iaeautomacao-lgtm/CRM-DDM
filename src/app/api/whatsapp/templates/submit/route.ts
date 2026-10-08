@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { submitMessageTemplate } from '@/lib/whatsapp/meta-api'
 import {
@@ -10,6 +10,7 @@ import {
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
+import { pickCatalogRowId } from '@/lib/whatsapp/template-catalog'
 
 /**
  * Shared upsert payload builder — both the Meta-failure path and the
@@ -32,9 +33,8 @@ function buildUpsertRow(
     // of migration 017. Without this an INSERT throws on the
     // not-null constraint.
     account_id: accountId,
-    // Original author — kept as audit only. The unique index is
-    // still on (user_id, name, language) — see the upsert helper
-    // for the cross-teammate dedup follow-up.
+    // Original author — kept as audit only. A chave única é
+    // (account_id, waba_id, name, language) — migration 160.
     user_id: userId,
     name: payload.name,
     category: payload.category,
@@ -64,23 +64,49 @@ async function upsertTemplateRow(
   supabase: SupabaseClient,
   row: ReturnType<typeof buildUpsertRow>,
 ) {
-  // TODO(account-sharing): conflict target is still scoped to
-  // user_id. Once a follow-up migration drops the legacy unique
-  // index on (user_id, name, language) and adds (account_id,
-  // name, language), switch `onConflict` here so two teammates
-  // can't shadow each other's same-named template.
-  return supabase
+  // Chave do catálogo: (account_id, waba_id, name, language) — migration
+  // 160. O mesmo nome/idioma em duas WABAs são duas linhas (antes a chave
+  // (user_id, name, language) fazia o último submit/sync sobrescrever o
+  // waba_id do outro número). Busca + update/insert em vez de
+  // upsert(onConflict) para funcionar antes e depois da migration.
+  //
+  // Prioridade: linha desta WABA → linha antiga sem waba_id (adotada: o
+  // update grava o waba_id nela) → insert. Antes o submit inseria a linha
+  // da WABA ao lado da antiga, e as duas passavam a coexistir (a antiga
+  // aprovada mascarava a nova rejeitada na validação da campanha).
+  // waba_id vem de whatsapp_config (só dígitos) — seguro no filtro .or().
+  const lookup = supabase
     .from('message_templates')
-    .upsert(row, { onConflict: 'user_id,name,language' })
-    .select()
-    .single()
+    .select('id, waba_id')
+    .eq('account_id', row.account_id)
+    .eq('name', row.name)
+    .eq('language', row.language)
+  const { data: candidates, error: lookupErr } = await (row.waba_id
+    ? lookup.or(`waba_id.eq.${row.waba_id},waba_id.is.null`)
+    : lookup.is('waba_id', null)
+  ).limit(20)
+  if (lookupErr) return { data: null, error: lookupErr }
+
+  const existingId = pickCatalogRowId(
+    (candidates ?? []) as Array<{ id: string; waba_id: string | null }>,
+    row.waba_id,
+  )
+  if (existingId) {
+    return supabase
+      .from('message_templates')
+      .update(row)
+      .eq('id', existingId)
+      .select()
+      .single()
+  }
+  return supabase.from('message_templates').insert(row).select().single()
 }
 
 /**
  * Submit a template to Meta for approval AND persist it locally.
  *
  * Auth → fetch whatsapp_config → validate → (DRY_RUN short-circuit) →
- * POST to Meta → upsert local row by (user_id, name, language) with
+ * POST to Meta → upsert local row by (account_id, waba_id, name, language) with
  * status, meta_template_id, sample_values, last_submitted_at.
  *
  * When WHATSAPP_TEMPLATES_DRY_RUN=true, we skip the network call and
@@ -92,29 +118,11 @@ async function upsertTemplateRow(
  */
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Resolve the caller's account_id — whatsapp_config + the
-    // message_templates row are account-scoped post-multi-user.
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
-        { status: 403 },
-      )
-    }
+    // Templates/canais mexem no WABA da conta (Meta) ou no número conectado: só admin
+    // (mesmo papel das páginas /templates e /canais).
+    const auth = await guardRole('admin')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId } = auth.ctx
 
     let payload: TemplatePayload
     // channel_id: optional, lets the caller target a specific Meta
@@ -233,7 +241,7 @@ export async function POST(request: Request) {
         // until they fix and re-submit.
         await upsertTemplateRow(
           supabase,
-          buildUpsertRow(accountId, user.id, payload, {
+          buildUpsertRow(accountId, auth.ctx.userId, payload, {
             status: 'DRAFT',
             metaTemplateId: null,
             submissionError: message,
@@ -254,7 +262,7 @@ export async function POST(request: Request) {
 
     const { data: row, error: upsertErr } = await upsertTemplateRow(
       supabase,
-      buildUpsertRow(accountId, user.id, payload, {
+      buildUpsertRow(accountId, auth.ctx.userId, payload, {
         status: normalizeStatus(metaStatus),
         metaTemplateId,
         submissionError: null,

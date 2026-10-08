@@ -2,9 +2,16 @@ import { NextResponse } from "next/server";
 import { logAuditEvent } from "@/lib/audit/log-event";
 import * as XLSX from "xlsx";
 
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
+import {
+  PENDING_CONFIRMATION_OR_FILTER,
+  PENDING_CONFIRMATION_QUEUE_DETAIL_KEY,
+  QUEUE_DETAIL_STATUS_FILTERS,
+  REPLIED_QUEUE_DETAIL_KEY,
+} from "@/lib/disparador/queue-status-filters";
 
 // GET /api/disparador/campaigns/[id]/queue-details?status=enviado&search=&page=1&pageSize=50
 // GET /api/disparador/campaigns/[id]/queue-details?status=erro&export=xlsx
@@ -12,24 +19,21 @@ import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
 // Detalhamento por contato de uma métrica do modal de métricas da
 // campanha (campanhas/page.tsx). `status` é a chave da métrica clicada,
 // não necessariamente um valor literal de disp_message_queue.status —
-// "enviado" e "entregue" agregam mais de um status real (ver
-// STATUS_FILTERS), espelhando como wacrm.recalculate_campaign_metrics
+// "agendado" representa o card "A enviar" e agrega trabalho ainda não
+// concluído (agendado/pendente/pausado/enviando); "enviado" e "entregue"
+// também agregam mais de um status real (ver STATUS_FILTERS), espelhando
+// como wacrm.recalculate_campaign_metrics
 // (migration 112) calcula os KPIs, para que a contagem do drilldown
 // bata com o número exibido no card.
-const STATUS_FILTERS: Record<string, string[]> = {
-  agendado: ["agendado"],
-  enviado: ["enviado", "entregue", "lido"],
-  entregue: ["entregue", "lido"],
-  lido: ["lido"],
-  erro: ["erro"],
-  bloqueado: ["bloqueado"],
-  // "Respostas": enviados cujo contato respondeu (replied_at, gravado por
-  // reply-tracker.ts junto com o total_respostas do card — mesma contagem).
-  respondido: ["enviado", "entregue", "lido"],
-};
-const REPLIED_KEY = "respondido";
+const STATUS_FILTERS = QUEUE_DETAIL_STATUS_FILTERS;
+const REPLIED_KEY = REPLIED_QUEUE_DETAIL_KEY;
+const PENDING_CONFIRMATION_KEY = PENDING_CONFIRMATION_QUEUE_DETAIL_KEY;
 
 // Itens por página escolhidos no modal (20 por padrão, teto de 200).
+// Exportação xlsx: lê em páginas de 1000 até este teto.
+const EXPORT_PAGE_SIZE = 1000;
+const EXPORT_MAX_ROWS = 100_000;
+
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 200;
 
@@ -81,6 +85,55 @@ function toDetailRow(row: QueueRow): QueueDetailRow {
 }
 
 /**
+ * Imports antigos podem ter o nome apenas em VAR1, mesmo com contacts.name
+ * vazio. O importador atual também trata VAR1 como fallback de nome quando
+ * não há uma coluna de nome explícita, então fazemos a mesma recuperação
+ * no drilldown para campanhas CSV legadas.
+ */
+async function attachLegacyCsvNames(
+  rows: QueueDetailRow[],
+  campaignId: string,
+  draftId: string | null,
+): Promise<QueueDetailRow[]> {
+  const missingIds = [
+    ...new Set(
+      rows
+        .filter((r) => !r.contact_name?.trim() && r.contact_id)
+        .map((r) => r.contact_id as string),
+    ),
+  ];
+  if (missingIds.length === 0) return rows;
+
+  const byContact = new Map<string, string>();
+  const load = async (column: "campaign_id" | "draft_id", value: string) => {
+    const { data, error } = await supabaseAdmin()
+      .from("contact_import_variables")
+      .select("contact_id, value")
+      .eq(column, value)
+      .eq("var_index", 0)
+      .in("contact_id", missingIds);
+    if (error) throw new Error(`Falha ao recuperar nomes do CSV: ${error.message}`);
+    for (const item of data ?? []) {
+      if (item.contact_id && item.value?.trim() && !byContact.has(item.contact_id)) {
+        byContact.set(item.contact_id, item.value.trim());
+      }
+    }
+  };
+
+  await load("campaign_id", campaignId);
+  if (draftId && byContact.size < missingIds.length) {
+    await load("draft_id", draftId);
+  }
+
+  return rows.map((row) => ({
+    ...row,
+    contact_name:
+      row.contact_name?.trim() ||
+      (row.contact_id ? byContact.get(row.contact_id) ?? null : null),
+  }));
+}
+
+/**
  * Conversa de cada contato para o link do detalhamento: a que veio desta
  * campanha (origin_campaign_id) ou, sem ela, a mais recente do contato.
  */
@@ -116,7 +169,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await getCurrentAccount();
+    // Nome + telefone de todos os destinatários: mesmo papel da página de campanhas.
+    const ctx = await requireDisparadorAccess();
     const { id: campaignId } = await params;
 
     const { searchParams } = new URL(request.url);
@@ -129,21 +183,20 @@ export async function GET(
       Math.max(1, parseInt(searchParams.get("pageSize") ?? "", 10) || DEFAULT_PAGE_SIZE)
     );
 
-    const statuses = STATUS_FILTERS[statusKey];
-    if (!statuses) {
+    const isTotal = statusKey === "total";
+    const isPendingConfirmation = statusKey === PENDING_CONFIRMATION_KEY;
+    const statuses = isTotal ? null : STATUS_FILTERS[statusKey];
+    if (!isTotal && !statuses) {
       return NextResponse.json(
         { error: `status inválido: ${statusKey}` },
         { status: 400 }
       );
     }
 
-    // Campanhas não têm checagem de role aqui — qualquer membro da
-    // conta que já pode abrir o modal de métricas pode ver o
-    // detalhamento (mesmo nível de acesso de hoje). Só precisa
-    // pertencer à mesma conta do chamador.
+    // A campanha precisa pertencer à conta do chamador.
     const { data: campaign } = await supabaseAdmin()
       .from("campaigns")
-      .select("id, account_id")
+      .select("id, account_id, import_draft_id")
       .eq("id", campaignId)
       .maybeSingle();
 
@@ -162,18 +215,50 @@ export async function GET(
       // filtro do PostgREST e um nome/telefone de busca contendo um
       // deles quebraria o parse (400), não um risco de injeção de SQL
       // (a gramática do PostgREST não executa SQL arbitrário).
-      const safeSearch = search.replace(/[,()]/g, " ").trim();
+      // % e _ são escapados para não ampliar a busca com curingas.
+      const safeSearch = search.replace(/[,()"\\*]/g, " ").trim().replace(/[%_]/g, "\\$&");
+      if (!safeSearch) {
+        return exportFormat === "xlsx"
+          ? buildXlsxResponse([], statusKey)
+          : NextResponse.json({ rows: [], total: 0, page, pageSize: PAGE_SIZE });
+      }
+      // Aspas protegem a gramática do .or(); a barra chega ao ILIKE para
+      // buscar % e _ literalmente, sem transformar o termo em curinga.
+      const pattern = JSON.stringify(`%${safeSearch}%`);
       const { data: matchedContacts, error: contactSearchError } = await supabaseAdmin()
         .from("contacts")
         .select("id")
         .eq("account_id", ctx.accountId)
-        .or(`name.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%`);
+        .or(`name.ilike.${pattern},phone.ilike.${pattern}`);
 
       if (contactSearchError) {
         throw new Error(`Falha ao buscar contatos: ${contactSearchError.message}`);
       }
 
-      contactIdFilter = (matchedContacts ?? []).map((c) => c.id);
+      const matchedIds = new Set((matchedContacts ?? []).map((c) => c.id));
+
+      // Para imports legados, contacts.name pode estar vazio e o nome ter
+      // ficado apenas em VAR1. Inclui esses contatos na busca pelo nome.
+      const loadLegacyNameMatches = async (
+        column: "campaign_id" | "draft_id",
+        value: string,
+      ) => {
+        const { data, error } = await supabaseAdmin()
+          .from("contact_import_variables")
+          .select("contact_id")
+          .eq(column, value)
+          .eq("var_index", 0)
+          .ilike("value", `%${safeSearch}%`);
+        if (error) throw new Error(`Falha ao buscar nomes do CSV: ${error.message}`);
+        for (const item of data ?? []) if (item.contact_id) matchedIds.add(item.contact_id);
+      };
+
+      await loadLegacyNameMatches("campaign_id", campaignId);
+      if (campaign.import_draft_id) {
+        await loadLegacyNameMatches("draft_id", campaign.import_draft_id);
+      }
+
+      contactIdFilter = [...matchedIds];
       if (contactIdFilter.length === 0) {
         return exportFormat === "xlsx"
           ? buildXlsxResponse([], statusKey)
@@ -183,21 +268,35 @@ export async function GET(
 
     if (exportFormat === "xlsx") {
       const replied = statusKey === REPLIED_KEY;
-      let query = supabaseAdmin()
-        .from("disp_message_queue")
-        .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS)
-        .eq("campaign_id", campaignId)
-        .in("status", statuses);
-      query = replied
-        ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
-        : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false });
+      // Em páginas (.range): o PostgREST corta em max_rows e uma campanha grande
+      // exportava só o começo, ou estourava a memória lendo tudo de uma vez.
+      const exported: unknown[] = [];
+      for (let offset = 0; offset < EXPORT_MAX_ROWS; offset += EXPORT_PAGE_SIZE) {
+        let query = supabaseAdmin()
+          .from("disp_message_queue")
+          .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS)
+          .eq("campaign_id", campaignId);
+        if (statuses) query = query.in("status", statuses);
+        if (isPendingConfirmation) query = query.or(PENDING_CONFIRMATION_OR_FILTER);
+        query = replied
+          ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
+          : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false });
+        // Desempate por id: sem ele a paginação repete/pula linhas empatadas.
+        query = query.order("id", { ascending: true });
 
-      if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
+        if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
 
-      const { data, error } = await query;
-      if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
+        const { data, error } = await query.range(offset, offset + EXPORT_PAGE_SIZE - 1);
+        if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
+        exported.push(...(data ?? []));
+        if ((data?.length ?? 0) < EXPORT_PAGE_SIZE) break;
+      }
 
-      const rows = (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow));
+      const rows = await attachLegacyCsvNames(
+        exported.map((r) => toDetailRow(r as unknown as QueueRow)),
+        campaignId,
+        campaign.import_draft_id ?? null,
+      );
       await logAuditEvent({
         accountId: ctx.accountId,
         eventType: "action",
@@ -217,8 +316,9 @@ export async function GET(
     let query = supabaseAdmin()
       .from("disp_message_queue")
       .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS, { count: "exact" })
-      .eq("campaign_id", campaignId)
-      .in("status", statuses);
+      .eq("campaign_id", campaignId);
+    if (statuses) query = query.in("status", statuses);
+    if (isPendingConfirmation) query = query.or(PENDING_CONFIRMATION_OR_FILTER);
     query = (
       replied
         ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
@@ -236,8 +336,13 @@ export async function GET(
     }
     if (error) throw new Error(`Falha ao buscar itens: ${error.message}`);
 
-    const rows = await attachConversations(
+    const namedRows = await attachLegacyCsvNames(
       (data ?? []).map((r) => toDetailRow(r as unknown as QueueRow)),
+      campaignId,
+      campaign.import_draft_id ?? null,
+    );
+    const rows = await attachConversations(
+      namedRows,
       ctx.accountId,
       campaignId,
     );
@@ -248,6 +353,7 @@ export async function GET(
 }
 
 const STATUS_FILE_LABELS: Record<string, string> = {
+  total: "total-contatos",
   agendado: "a-enviar",
   enviado: "enviados",
   entregue: "entregues",
@@ -255,10 +361,12 @@ const STATUS_FILE_LABELS: Record<string, string> = {
   erro: "erros",
   respondido: "respostas",
   bloqueado: "blacklist",
+  aguardando_confirmacao: "aguardando-confirmacao",
 };
 
 function buildXlsxResponse(rows: QueueDetailRow[], statusKey: string): NextResponse {
   const hasErrorColumn = statusKey === "erro";
+  const isPendingConfirmation = statusKey === PENDING_CONFIRMATION_KEY;
   const sheetRows = rows.map((r) => {
     const base: Record<string, unknown> = {
       Contato: r.contact_name ?? "-",
@@ -267,6 +375,7 @@ function buildXlsxResponse(rows: QueueDetailRow[], statusKey: string): NextRespo
       "Mensagem Final": r.mensagem_final ?? "",
     };
     if (hasErrorColumn) base["Tipo de Erro"] = r.tipo_erro ?? "Outro";
+    if (isPendingConfirmation) base["Motivo"] = r.erro ?? "Aguardando confirmação final";
     base["Data/Hora"] = r.data_hora
       ? new Date(r.data_hora).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
       : "-";

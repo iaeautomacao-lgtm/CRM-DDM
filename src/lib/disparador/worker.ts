@@ -85,6 +85,7 @@ export function ensureQueueWorkerRunning() {
             .eq("status", "agendado")
             .lte("scheduled_at", now)
             .order("scheduled_at", { ascending: true })
+            .order("id", { ascending: true })
             .limit(batchSize);
 
           if (queryError) {

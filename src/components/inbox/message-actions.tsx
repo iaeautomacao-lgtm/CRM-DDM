@@ -43,6 +43,11 @@ export function MessageActions({
     message.sender_type === "agent" || message.sender_type === "bot";
 
   const handleContextMenu = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    // Em mídia/links preservamos o menu nativo do navegador ("Salvar imagem
+    // como...", "Abrir em nova guia"...). O long-press customizado continua
+    // existindo no restante da bolha para reações/resposta.
+    if (target.closest("img, video, audio, a[href]")) return;
     e.preventDefault();
     setTouchOpen(true);
   };

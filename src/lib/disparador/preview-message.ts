@@ -16,7 +16,7 @@
 import type { ImportColumnMap } from "./import-mapping";
 
 export type VariableSource =
-  | { type: "contact_field"; field: "name" | "phone" | "company" }
+  | { type: "contact_field"; field: "name" | "phone" | "company" | "cpf" }
   | { type: "static"; value: string }
   | { type: "utm_link" }
   | { type: "csv_var"; index: 0 | 1 | 2 };
@@ -38,6 +38,7 @@ export interface PreviewContact {
   name?: string | null;
   phone?: string | null;
   company?: string | null;
+  cpf?: string | null;
   /** VAR1..VAR3 da linha do CSV; undefined = sem CSV nesta sessão. */
   csvVars?: readonly (string | null | undefined)[];
   utmLink?: string | null;
@@ -109,7 +110,13 @@ function sourceLabel(entry: VariableSource | undefined): string {
   if (!entry) return "sem fonte";
   switch (entry.type) {
     case "contact_field":
-      return entry.field === "name" ? "nome do contato" : entry.field === "phone" ? "telefone" : "empresa";
+      return entry.field === "name"
+        ? "nome do contato"
+        : entry.field === "phone"
+          ? "telefone"
+          : entry.field === "cpf"
+            ? "CPF"
+            : "empresa";
     case "utm_link":
       return "link UTM do contato";
     case "csv_var":
@@ -263,7 +270,7 @@ export function findVariableProblems(
       problems.push(
         map
           ? `{{${n}}} não tem fonte definida.`
-          : `{{${n}}} não tem fonte: mapeie a coluna VAR${n} do CSV no passo Público ou carregue um template.`
+          : `{{${n}}} não tem fonte: mapeie a coluna VAR${n} do CSV no passo Origem.`
       );
       continue;
     }
@@ -271,14 +278,14 @@ export function findVariableProblems(
       problems.push(
         effective.template_name
           ? `{{${n}}} está como valor fixo vazio — preencha o valor ou escolha outra fonte.`
-          : `{{${n}}} não tem fonte: mapeie a coluna VAR${n} do CSV no passo Público.`
+          : `{{${n}}} não tem fonte: mapeie a coluna VAR${n} do CSV no passo Origem.`
       );
       continue;
     }
     if (entry.type === "csv_var" && ctx.hasCsv) {
       const key = (["var1", "var2", "var3"] as const)[entry.index];
       if (!ctx.columnMap[key]) {
-        problems.push(`{{${n}}} usa a VAR${entry.index + 1} do CSV, mas essa coluna não foi mapeada no passo Público.`);
+        problems.push(`{{${n}}} usa a VAR${entry.index + 1} do CSV, mas essa coluna não foi mapeada no passo Origem.`);
       }
     }
   }

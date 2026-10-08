@@ -8,6 +8,12 @@
 // envio WhatsApp, persistência…): isso exigiria simular o banco todo sem
 // testar nada a mais da decisão de instabilidade.
 
+// Tools HTTP passam pelo guard anti-SSRF (ssrf-guard.test.ts); aqui delega ao fetch simulado.
+vi.mock("@/lib/security/ssrf-guard", async (orig) => ({
+  ...(await orig<typeof import("@/lib/security/ssrf-guard")>()),
+  safeFetch: (url: string, init?: RequestInit) => globalThis.fetch(url, init),
+}));
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/logger", () => ({ writeLog: vi.fn() }));

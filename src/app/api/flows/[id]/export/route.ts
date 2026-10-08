@@ -1,38 +1,13 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardFlow } from '@/lib/flows/route-auth'
 
 /**
  * GET /api/flows/[id]/export — download a flow definition as JSON.
  *
- * Read-only, RLS-scoped (the request uses the caller's own supabase
- * client, not the admin client) — a flow owned by another account
- * 404s via the same `is_account_member` policy every other flows
- * route relies on.
+ * Read-only, owner/admin, RLS-scoped (the request uses the caller's own
+ * supabase client, not the admin client) — a flow owned by another
+ * account 404s.
  */
-
-async function requireOwnership(
-  flowId: string,
-): Promise<
-  | { ok: true; supabase: Awaited<ReturnType<typeof createClient>> }
-  | { ok: false; status: number; body: { error: string } }
-> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) {
-    return { ok: false, status: 401, body: { error: 'Unauthorized' } }
-  }
-  const { data: flow } = await supabase
-    .from('flows')
-    .select('id')
-    .eq('id', flowId)
-    .maybeSingle()
-  if (!flow) {
-    return { ok: false, status: 404, body: { error: 'Not found' } }
-  }
-  return { ok: true, supabase }
-}
 
 const DIACRITICS_RE = new RegExp('[̀-ͯ]', 'g')
 
@@ -51,12 +26,12 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   const { id } = await context.params
-  const guard = await requireOwnership(id)
-  if (!guard.ok) return NextResponse.json(guard.body, { status: guard.status })
-  const { supabase } = guard
+  const guard = await guardFlow(id)
+  if (!guard.ok) return guard.response
+  const { supabase, accountId } = guard.ctx
 
   const [{ data: flow }, { data: nodes }] = await Promise.all([
-    supabase.from('flows').select('*').eq('id', id).maybeSingle(),
+    supabase.from('flows').select('*').eq('id', id).eq('account_id', accountId).maybeSingle(),
     supabase
       .from('flow_nodes')
       .select('*')

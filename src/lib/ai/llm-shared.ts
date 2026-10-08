@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
+import { gatedFetch } from "@/lib/ai/llm-gate";
+import { openAiUrl } from "@/lib/loadtest/gate";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   getAiModelDefinition,
@@ -119,6 +121,11 @@ export function stripJsonFences(raw: string): string {
     .trim();
 }
 
+/** Teto de tempo de uma análise (sentimento, tag, tabulação); antes não havia. */
+const ANALYSIS_TIMEOUT_MS = 20_000;
+/** Teto de saída das análises: respondem um JSON curto. */
+const ANALYSIS_MAX_TOKENS = 500;
+
 /**
  * Sends `prompt` to the given provider's chat/completion endpoint and
  * returns the raw text response (expected to be a JSON string per the
@@ -138,26 +145,28 @@ export async function callLlmForAnalysis(
   }
 
   if (provider === "openai") {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: effectiveModel,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.2,
-        response_format: { type: "json_object" },
-        ...(getAiModelDefinition("openai", effectiveModel)?.openai_chat
-          ?.reasoning_effort
-          ? {
-              reasoning_effort: getAiModelDefinition("openai", effectiveModel)!
-                .openai_chat!.reasoning_effort,
-            }
-          : {}),
+    const reasoningEffort = getAiModelDefinition("openai", effectiveModel)?.openai_chat
+      ?.reasoning_effort;
+    // Mesmo semáforo e tratamento de 429 do responder (llm-gate.ts).
+    const response = await gatedFetch(() =>
+      fetch(openAiUrl("/chat/completions"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+        body: JSON.stringify({
+          model: effectiveModel,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+          ...(reasoningEffort
+            ? { reasoning_effort: reasoningEffort, max_completion_tokens: ANALYSIS_MAX_TOKENS }
+            : { max_tokens: ANALYSIS_MAX_TOKENS }),
+        }),
       }),
-    });
+    );
     if (!response.ok) throw new Error(`OpenAI error: ${response.status}`);
     const data = await response.json();
     return data?.choices?.[0]?.message?.content || "";
@@ -169,9 +178,10 @@ export async function callLlmForAnalysis(
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
+      signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
       body: JSON.stringify({
         model: effectiveModel,
-        max_tokens: 500,
+        max_tokens: ANALYSIS_MAX_TOKENS,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -190,10 +200,12 @@ export async function callLlmForAnalysis(
         "HTTP-Referer": "https://wacrm.vercel.app",
         "X-Title": "WA CRM",
       },
+      signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
       body: JSON.stringify({
         model: effectiveModel,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
+        max_tokens: ANALYSIS_MAX_TOKENS,
         response_format: { type: "json_object" },
       }),
     });
@@ -206,10 +218,11 @@ export async function callLlmForAnalysis(
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          maxOutputTokens: 500,
+          maxOutputTokens: ANALYSIS_MAX_TOKENS,
           temperature: 0.2,
           responseMimeType: "application/json",
         },

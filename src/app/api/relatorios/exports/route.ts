@@ -15,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/relatorios/admin-client";
 
 const BUCKET = "relatorio-exports";
@@ -24,6 +24,10 @@ const CONTENT_TYPES: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   csv: "text/csv",
 };
+
+// base64 ≈ 4/3 do binário: 25 MB de arquivo cabem em ~34 MB de texto.
+const MAX_EXPORT_BYTES = 25 * 1024 * 1024;
+const MAX_BASE64_LENGTH = Math.ceil((MAX_EXPORT_BYTES * 4) / 3) + 4;
 
 const EXPORT_TYPES = ["conversas", "envio-em-lote", "atendimentos"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
@@ -44,7 +48,13 @@ function isExportType(value: unknown): value is ExportType {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await getCurrentAccount();
+    // Quem exporta relatórios (supervisor+, como as páginas de relatório) registra
+    // o histórico; papéis abaixo não geram arquivo nenhum na conta.
+    const ctx = await requireRole("supervisor");
+    const declaredLength = Number(request.headers.get("content-length") ?? 0);
+    if (declaredLength > MAX_BASE64_LENGTH + 64 * 1024) {
+      return NextResponse.json({ error: "Arquivo muito grande" }, { status: 413 });
+    }
     const body = (await request.json()) as Partial<ExportUploadBody>;
 
     if (
@@ -59,11 +69,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid export payload" }, { status: 400 });
     }
 
-    const ext = body.fileName.split(".").pop()?.toLowerCase() ?? "";
-    const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
-    const storagePath = `${ctx.accountId}/${randomUUID()}.${ext || "bin"}`;
+    if (body.fileBase64.length > MAX_BASE64_LENGTH) {
+      return NextResponse.json({ error: "Arquivo muito grande" }, { status: 413 });
+    }
+
+    // A extensão entra na chave do Storage: só as conhecidas (nada de "/", ".."
+    // ou extensão arbitrária vinda do nome enviado pelo cliente).
+    const ext = /\.(xlsx|csv)$/i.exec(body.fileName)?.[1].toLowerCase();
+    if (!ext) {
+      return NextResponse.json({ error: "Formato de arquivo não suportado" }, { status: 400 });
+    }
+    const contentType = CONTENT_TYPES[ext];
+    if (!contentType) {
+      return NextResponse.json({ error: "Formato de arquivo não suportado" }, { status: 400 });
+    }
+    const storagePath = `${ctx.accountId}/${randomUUID()}.${ext}`;
 
     const buffer = Buffer.from(body.fileBase64, "base64");
+    if (buffer.length > MAX_EXPORT_BYTES) {
+      return NextResponse.json({ error: "Arquivo muito grande" }, { status: 413 });
+    }
 
     // ctx.account is the ACCOUNT's name — the actor's own name lives on
     // their profile row, one extra lookup since AccountContext doesn't
@@ -122,7 +147,8 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
-    const ctx = await getCurrentAccount();
+    // Apagar exportação da conta: owner/admin (mesmo papel da página Exportações).
+    const ctx = await requireRole("admin");
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     if (!id) {
@@ -155,7 +181,11 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "Failed to delete file" }, { status: 500 });
     }
 
-    const { error: deleteError } = await admin.from("export_history").delete().eq("id", id);
+    const { error: deleteError } = await admin
+      .from("export_history")
+      .delete()
+      .eq("id", id)
+      .eq("account_id", ctx.accountId);
     if (deleteError) {
       console.error("[DELETE /api/relatorios/exports] delete error:", deleteError);
       return NextResponse.json({ error: "Failed to delete export record" }, { status: 500 });

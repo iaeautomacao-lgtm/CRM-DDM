@@ -63,9 +63,11 @@ const SECURITY_HEADERS = [
       // Next.js needs 'unsafe-inline' for its inline hydration script
       // and 'unsafe-eval' in dev + some production optimisations.
       // Nonce-based CSP is a later project.
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      // Só o Scalar API Reference fixado (página pública /docs/api); manter a versão igual à de SCALAR_VERSION
+      // (src/components/docs/api-reference.tsx).
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.73.0/",
       // Tailwind + inline style attributes on lots of components.
-      "style-src 'self' 'unsafe-inline'",
+      "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.73.0/",
       // Supabase public-bucket avatars, contact avatars (arbitrary
       // https URLs paste-able from the UI), OG images, data URLs for
       // tiny inline assets.
@@ -88,6 +90,15 @@ const nextConfig: NextConfig = {
   // Each service owns its dependencies; parent lockfiles must not change resolution.
   turbopack: { root: __dirname },
   deploymentId: resolveDeploymentId(),
+  // O middleware cobre /api/* e guarda o corpo em memória até este limite
+  // (padrão 10 MB; acima disso o corpo chega truncado e formData() falha).
+  // O import do assistente já vai em blocos pequenos; isto cobre o upload do
+  // arquivo inteiro da tela de contatos do disparador.
+  // undici (Agent da Meta) usa módulos nativos do Node: não empacotar.
+  serverExternalPackages: ["undici"],
+  experimental: {
+    proxyClientMaxBodySize: "50mb",
+  },
   /**
    * Cache-Control policy.
    *

@@ -1,7 +1,8 @@
 import { runIdempotentSend } from '@/lib/disparador/send-ledger';
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import type { AccountContext } from '@/lib/auth/account'
+import { guardRole } from '@/lib/auth/route-guard'
 import {
   sendTextMessage,
   sendTemplateMessage,
@@ -31,43 +32,16 @@ import {
 } from '@/lib/rate-limit'
 import type { MessageTemplate } from '@/types'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
+import { templateRowsForWaba } from '@/lib/disparador/template-validation'
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
+    const auth = await guardRole('agent')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId, userId } = auth.ctx
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Per-user rate limit. Bucket key is scoped to this route so
-    // `/broadcast` has an independent budget.
-    const limit = checkRateLimit(`send:${user.id}`, RATE_LIMITS.send)
-    if (!limit.success) {
-      return rateLimitResponse(limit)
-    }
-
-    // Resolve the caller's account_id. Every downstream lookup
-    // (conversation, whatsapp_config, message_templates) is account-
-    // scoped post-multi-user, so the previous `user_id` filters
-    // returned nothing for teammates who didn't author the row.
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
-        { status: 403 }
-      )
-    }
+    const limit = checkRateLimit(`send:${userId}`, RATE_LIMITS.send)
+    if (!limit.success) return rateLimitResponse(limit)
 
     // Todo o envio roda dentro do controle de idempotência: o composer
     // (apiFetch) gera uma Idempotency-Key por mensagem e a reaproveita no
@@ -218,7 +192,7 @@ export async function POST(request: Request) {
         const resolved = await findOrCreateConversation(
           supabase,
           accountId,
-          user.id,
+          userId,
           contact_id,
           targetSession
         )
@@ -264,7 +238,7 @@ export async function POST(request: Request) {
         const sent = await sendWebchatMessage({
           conversationId: conversation_id,
           senderType: 'agent',
-          senderId: user.id,
+          senderId: userId,
           contentType: message_type as 'text' | 'image' | 'video' | 'audio' | 'document',
           text: content_text || (isMediaKind ? filename : null) || null,
           mediaUrl: isMediaKind ? originalMediaUrl : null,
@@ -275,7 +249,7 @@ export async function POST(request: Request) {
         if (!(conversation as { assigned_agent_id?: string | null }).assigned_agent_id) {
           await supabase
             .from('conversations')
-            .update({ assigned_agent_id: user.id })
+            .update({ assigned_agent_id: userId })
             .eq('id', conversation_id)
         }
         if (conversation.contact?.id) {
@@ -302,7 +276,7 @@ export async function POST(request: Request) {
           const sent = await sendSocialMessage({
             conversationId: conversation_id,
             senderType: 'agent',
-            senderId: user.id,
+            senderId: userId,
             contentType: message_type as 'text' | 'image' | 'video' | 'audio' | 'document',
             text: content_text || null,
             mediaUrl: isMediaKind ? originalMediaUrl : null,
@@ -310,7 +284,7 @@ export async function POST(request: Request) {
           if (!(conversation as { assigned_agent_id?: string | null }).assigned_agent_id) {
             await supabase
               .from('conversations')
-              .update({ assigned_agent_id: user.id })
+              .update({ assigned_agent_id: userId })
               .eq('id', conversation_id)
           }
           if (conversation.contact?.id) {
@@ -445,8 +419,11 @@ export async function POST(request: Request) {
 
       // For template sends, load the row so sendTemplateMessage can
       // build header + button components from the template definition.
-      // Match on (user_id, name, language) — same triple the unique
-      // index enforces — so multi-language templates work correctly.
+      // Match on (name, language) and prefer the row of this channel's
+      // WABA: since migration 160 the same name/language may exist once
+      // per WABA (key account_id, waba_id, name, language), so
+      // .maybeSingle() would error with 2 rows and silently drop to the
+      // body-only path. Rows without waba_id (pre-073) are the fallback.
       // Missing template falls through with `templateRow = null` and
       // the legacy body-only path runs.
       // Load the template row so sendTemplateMessage can build header
@@ -455,13 +432,25 @@ export async function POST(request: Request) {
       // crashing the send-builder later in the stack.
       let templateRow: MessageTemplate | null = null
       if (message_type === 'template' && template_name) {
-        const { data } = await supabase
+        const { data: candidates } = await supabase
           .from('message_templates')
           .select('*')
           .eq('account_id', accountId)
           .eq('name', template_name)
           .eq('language', template_language || 'en_US')
-          .maybeSingle()
+          .limit(20)
+        const rows = (candidates ?? []) as Array<
+          Record<string, unknown> & { name: string; language?: string | null; waba_id?: string | null }
+        >
+        // Linha da WABA do canal decide; a antiga sem waba_id só se a WABA
+        // não tiver linha própria. Linha de outra WABA não vale (componentes
+        // podem ser outros) — sem nenhuma, segue o caminho só-corpo.
+        const decided = templateRowsForWaba(rows, config.waba_id ?? null)
+        const data =
+          decided.find((t) => config.waba_id && t.waba_id === config.waba_id) ??
+          decided.find((t) => !t.waba_id) ??
+          decided[0] ??
+          null
         if (data && !isMessageTemplate(data)) {
           return NextResponse.json(
             {
@@ -626,6 +615,7 @@ export async function POST(request: Request) {
       const persisted = await persistOutboundMessage(supabase, {
         conversation_id,
         sender_type: 'agent',
+        sender_id: userId,
         content_type: message_type,
         content_text: content_text || null,
         media_url: originalMediaUrl || null,
@@ -668,7 +658,7 @@ export async function POST(request: Request) {
       }
 
       if (!(conversation as any).assigned_agent_id) {
-        convUpdate.assigned_agent_id = user.id
+        convUpdate.assigned_agent_id = userId
       }
 
       await supabase
@@ -727,7 +717,7 @@ async function pauseActiveFlowRuns(accountId: string, contactId: string) {
   }
 }
 
-type SendSupabase = Awaited<ReturnType<typeof createClient>>
+type SendSupabase = AccountContext['supabase']
 
 /**
  * Return the contact's conversation in this account, creating one if it

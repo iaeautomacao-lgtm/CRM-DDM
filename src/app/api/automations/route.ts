@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { parseLineIds } from '@/lib/automations/line-ids'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
+import { validateAutomationRefs } from '@/lib/automations/step-refs'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import { getTemplate } from '@/lib/automations/templates'
 import { insertSteps, type BuilderStepInput } from '@/lib/automations/steps-tree'
@@ -10,42 +11,25 @@ import {
 } from '@/lib/automations/validate'
 
 export async function GET() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const auth = await guardRole('agent')
+  if (!auth.ok) return auth.response
+  const { supabase, accountId } = auth.ctx
 
   const { data, error } = await supabase
     .from('automations')
     .select('*')
+    .eq('account_id', accountId)
     .order('created_at', { ascending: false })
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ automations: data ?? [] })
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  // Resolve the caller's account_id — `automations.account_id` is NOT
-  // NULL post-017, so an INSERT without it trips the not-null constraint
-  // even though the admin client bypasses RLS.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .single()
-  const accountId = profile?.account_id as string | undefined
-  if (!accountId) {
-    return NextResponse.json(
-      { error: 'Your profile is not linked to an account.' },
-      { status: 403 },
-    )
-  }
+  // Automação roda com service role (envia mensagem, atribui, tag...): só
+  // owner/admin cria. Antes qualquer papel logado criava automação ativa.
+  const auth = await guardRole('admin')
+  if (!auth.ok) return auth.response
+  const { userId, accountId } = auth.ctx
 
   const body = await request.json().catch(() => null)
   if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
@@ -97,11 +81,18 @@ export async function POST(request: Request) {
     }
   }
 
+  const refsError = await validateAutomationRefs(
+    accountId,
+    effectiveTriggerConfig,
+    effectiveSteps,
+  )
+  if (refsError) return NextResponse.json({ error: refsError }, { status: 400 })
+
   const admin = supabaseAdmin()
   const { data: automation, error: insertErr } = await admin
     .from('automations')
     .insert({
-      user_id: user.id,
+      user_id: userId,
       account_id: accountId,
       name: effectiveName,
       description: effectiveDescription ?? null,
