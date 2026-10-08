@@ -25,7 +25,7 @@ const tool = {
 beforeEach(() => {
   vi.mocked(currentIntelligenceScope).mockResolvedValue(scope)
   vi.mocked(getTool).mockReturnValue(tool)
-  vi.mocked(checkIntelligenceToolRate).mockReturnValue({ success: true, limit: 10, remaining: 9, reset: 0 })
+  vi.mocked(checkIntelligenceToolRate).mockResolvedValue({ success: true, limit: 10, remaining: 9, reset: 0 })
   vi.mocked(logToolCall).mockResolvedValue(undefined)
 })
 

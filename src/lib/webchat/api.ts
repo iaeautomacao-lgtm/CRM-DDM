@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { clientIp } from "@/lib/audit/context";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { resolveWebchatSession, type WebchatSessionRow } from "./sessions";
 
 // Helpers das rotas públicas /api/webchat/[token]/*. Não há login: o token
@@ -15,6 +17,25 @@ export function webchatError(
     { state, error: message ?? state },
     { status, headers: { "Cache-Control": "no-store" } }
   );
+}
+
+/**
+ * Limite por IP + token das rotas públicas do Webchat (AP-19): flood de leitura/abertura/upload com um token válido.
+ * Chamar ANTES de resolver a sessão (não gasta consulta ao banco). `kind`: 'read' (GET/poll/mídia) ou 'write' (abrir, enviar).
+ * Devolve a resposta 429 (com Retry-After) ou null.
+ */
+export async function webchatRateLimit(
+  request: Request,
+  token: string,
+  kind: "read" | "write",
+): Promise<NextResponse | null> {
+  const ip = clientIp(request.headers) ?? "unknown";
+  const options = kind === "read" ? RATE_LIMITS.webchatRead : RATE_LIMITS.webchatWrite;
+  const result = await checkRateLimit(`webchat:${kind}:${ip}:${token.slice(0, 32)}`, options);
+  if (result.success) return null;
+  const response = webchatError("rate_limited", 429, "Muitas requisições. Aguarde um instante.");
+  response.headers.set("Retry-After", String(Math.max(1, Math.ceil((result.reset - Date.now()) / 1000))));
+  return response;
 }
 
 export async function requireActiveSession(

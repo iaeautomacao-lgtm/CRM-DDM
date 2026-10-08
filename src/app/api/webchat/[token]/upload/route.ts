@@ -5,6 +5,7 @@ import {
   requireActiveSession,
   webchatError,
   webchatJson,
+  webchatRateLimit,
   webchatUploadPrefix,
 } from '@/lib/webchat/api'
 import { WEBCHAT_ALLOWED_MIME, mediaKindFromMime, safeUploadName } from '@/lib/webchat/messages'
@@ -19,6 +20,8 @@ const WEBCHAT_MAX_UPLOADS_PER_SESSION = 50
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  const limited = await webchatRateLimit(request, token, 'write')
+  if (limited) return limited
   const result = await requireActiveSession(token)
   if ('response' in result) return result.response
   const { session } = result

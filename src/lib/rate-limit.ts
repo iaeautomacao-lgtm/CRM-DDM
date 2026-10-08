@@ -20,6 +20,7 @@
  * runtimes that don't keep timers alive across requests.
  */
 
+import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
 export interface RateLimitOptions {
@@ -57,7 +58,114 @@ function sweepExpired(now: number) {
   }
 }
 
-export function checkRateLimit(
+/** Resultado de um acerto no contador COMPARTILHADO (RPC wacrm.rate_limit_hit, migration 221). */
+export interface SharedHit {
+  success: boolean;
+  remaining: number;
+  /** Unix ms em que a janela do banco vence. */
+  resetAt: number;
+}
+
+/** Backend compartilhado: devolve null se indisponível (o chamador cai no Map). */
+export type SharedBackend = (key: string, limit: number, windowSeconds: number) => Promise<SharedHit | null>;
+
+const SHARED_TIMEOUT_MS = 1_000;
+const SHARED_DOWN_MS = 30_000; // erro/timeout: não insiste por 30 s
+const SHARED_MISSING_MS = 60_000; // 221 ainda não aplicada: confere de novo em 1 min
+let sharedDownUntil = 0;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- cliente com schema wacrm, sem tipos gerados
+let sharedClient: any = null;
+let sharedOverride: SharedBackend | null | undefined;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getSharedClient(): any {
+  if (sharedClient) return sharedClient;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null; // testes/ambiente sem banco: só o Map
+  sharedClient = createClient(url, key, {
+    db: { schema: 'wacrm' },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  return sharedClient;
+}
+
+/** Backend padrão: 1 RPC por chamada, com timeout curto e disjuntor. Nunca lança. */
+const defaultSharedBackend: SharedBackend = async (key, limit, windowSeconds) => {
+  const now = Date.now();
+  if (now < sharedDownUntil) return null;
+  const client = getSharedClient();
+  if (!client) return null;
+  try {
+    const call = client.rpc('rate_limit_hit', { p_key: key, p_limit: limit, p_window_s: windowSeconds });
+    const result = await Promise.race([
+      call,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SHARED_TIMEOUT_MS)),
+    ]);
+    if (result === null) {
+      sharedDownUntil = Date.now() + SHARED_DOWN_MS;
+      return null;
+    }
+    const { data, error } = result as { data: unknown; error: { code?: string; message?: string } | null };
+    if (error) {
+      const missing = error.code === 'PGRST202' || error.code === '42883' || /could not find the function|does not exist/i.test(error.message ?? '');
+      sharedDownUntil = Date.now() + (missing ? SHARED_MISSING_MS : SHARED_DOWN_MS);
+      return null;
+    }
+    const row = (Array.isArray(data) ? data[0] : data) as { success?: boolean; remaining?: number; reset_at?: string } | null | undefined;
+    if (!row || typeof row.success !== 'boolean' || !row.reset_at) return null;
+    return { success: row.success, remaining: Math.max(0, Number(row.remaining ?? 0)), resetAt: new Date(row.reset_at).getTime() };
+  } catch {
+    sharedDownUntil = Date.now() + SHARED_DOWN_MS;
+    return null;
+  }
+};
+
+/** Só para testes: troca o backend compartilhado (null = só Map; undefined = o padrão). */
+export function __setSharedBackendForTests(backend: SharedBackend | null | undefined): void {
+  sharedOverride = backend;
+  sharedDownUntil = 0;
+}
+
+/**
+ * Limite com DOIS níveis (PRD 14, 14.9): o Map do processo barra rajada sem custo; o contador compartilhado no Postgres
+ * (migration 221) vale entre processos e sobrevive a restart. Se o compartilhado falhar, estourar o tempo (1 s) ou não
+ * existir, vale só o Map — o limitador nunca derruba a rota. 1 RPC por chamada permitida pelo Map: NÃO use em caminho
+ * quente (tick/cron/webhook de status); lá use checkRateLimitLocal.
+ */
+export async function checkRateLimit(key: string, options: RateLimitOptions): Promise<RateLimitResult> {
+  const local = checkRateLimitLocal(key, options);
+  if (!local.success) return local;
+
+  const backend = sharedOverride === undefined ? defaultSharedBackend : sharedOverride;
+  if (!backend) return local;
+  let shared: SharedHit | null = null;
+  try {
+    shared = await backend(key, options.limit, Math.max(1, Math.ceil(options.windowMs / 1000)));
+  } catch {
+    shared = null;
+  }
+  if (!shared) return local;
+
+  if (!shared.success) {
+    // Outras instâncias já gastaram o orçamento: satura o Map até a janela do banco vencer (não repete a RPC em enxurrada).
+    const entry = buckets.get(key);
+    if (entry) {
+      entry.count = options.limit;
+      entry.resetAt = shared.resetAt;
+    }
+  }
+  return { success: shared.success, remaining: shared.remaining, reset: shared.resetAt, limit: options.limit };
+}
+
+/** O Map já está saturado para esta chave (limite atingido na janela corrente)? Não conta, não faz rede. */
+export function isRateLimitedLocal(key: string, limit: number): boolean {
+  const entry = buckets.get(key);
+  return !!entry && entry.resetAt > Date.now() && entry.count >= limit;
+}
+
+/** Só o Map do processo (síncrono, sem rede): para caminhos quentes ou quando a RPC não faz sentido. */
+export function checkRateLimitLocal(
   key: string,
   { limit, windowMs }: RateLimitOptions,
 ): RateLimitResult {
@@ -158,6 +266,14 @@ export const RATE_LIMITS = {
    *  (re)assinar; 30/min por IP cobre tentativas legítimas e barra quem testa
    *  verify_token em laço (PRD 14, SG-9). */
   webhookVerify: { limit: 30, windowMs: 60_000 },
+  /** Telemetria e feedback do app (por usuário) — AP-08. */
+  telemetry: { limit: 60, windowMs: 60_000 },
+  feedback: { limit: 60, windowMs: 60_000 },
+  /** Tentativas com chave de API inválida, por IP — barra o flood ANTES de consultar o banco (AP-09). */
+  apiKeyFailures: { limit: 30, windowMs: 60_000 },
+  /** Webchat público (por IP + token) — AP-19: leitura/poll/mídia e abertura/upload. */
+  webchatRead: { limit: 120, windowMs: 60_000 },
+  webchatWrite: { limit: 30, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't
@@ -165,4 +281,7 @@ export const RATE_LIMITS = {
 export function __resetRateLimitForTests() {
   buckets.clear();
   callsSinceSweep = 0;
+  sharedOverride = undefined;
+  sharedDownUntil = 0;
+  sharedClient = null;
 }

@@ -36,7 +36,7 @@ export async function POST(
   try {
     const ctx = await requirePermission("members.reset_password");
 
-    const limit = checkRateLimit(
+    const limit = await checkRateLimit(
       `admin:resetMemberPassword:${ctx.userId}`,
       RATE_LIMITS.adminAction,
     );

@@ -29,7 +29,7 @@ export async function DELETE(
   try {
     const ctx = await requirePermission("members.invite");
 
-    const limit = checkRateLimit(
+    const limit = await checkRateLimit(
       `admin:inviteRevoke:${ctx.userId}`,
       RATE_LIMITS.adminAction,
     );

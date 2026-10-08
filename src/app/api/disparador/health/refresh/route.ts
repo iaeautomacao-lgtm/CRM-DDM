@@ -14,7 +14,7 @@ export const maxDuration = 60;
 export async function POST() {
   try {
     const { accountId } = await requireDisparadorAccess();
-    const limit = checkRateLimit(`disparador-health-refresh:${accountId}`, { limit: 1, windowMs: 60_000 });
+    const limit = await checkRateLimit(`disparador-health-refresh:${accountId}`, { limit: 1, windowMs: 60_000 });
     if (!limit.success) return rateLimitResponse(limit);
     const report = await refreshAccountChannelHealth(supabaseAdmin(), accountId);
     return NextResponse.json({ ok: true, ...report });

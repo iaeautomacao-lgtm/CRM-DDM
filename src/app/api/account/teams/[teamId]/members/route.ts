@@ -85,7 +85,7 @@ export async function POST(
     const ctx = await requirePermission("teams.manage");
     const { teamId } = await params;
 
-    const limit = checkRateLimit(
+    const limit = await checkRateLimit(
       `admin:teamMemberAdd:${ctx.userId}`,
       RATE_LIMITS.adminAction,
     );
@@ -159,7 +159,7 @@ export async function DELETE(
     const ctx = await requirePermission("teams.manage");
     const { teamId } = await params;
 
-    const limit = checkRateLimit(
+    const limit = await checkRateLimit(
       `admin:teamMemberRemove:${ctx.userId}`,
       RATE_LIMITS.adminAction,
     );

@@ -10,6 +10,7 @@ import {
   WEBCHAT_LIMITS,
   requireActiveSession,
   webchatError,
+  webchatRateLimit,
   webchatJson,
   webchatUploadPrefix,
 } from '@/lib/webchat/api'
@@ -30,6 +31,8 @@ const MESSAGE_COLUMNS =
 
 export async function GET(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  const limited = await webchatRateLimit(request, token, 'read')
+  if (limited) return limited
   const result = await requireActiveSession(token)
   if ('response' in result) return result.response
   const { session } = result
