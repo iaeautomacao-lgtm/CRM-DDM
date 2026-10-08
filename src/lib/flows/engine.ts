@@ -1,5 +1,3 @@
-import { resolveProviderMedia } from '@/lib/storage/provider-media';
-import { safeFetch } from '@/lib/security/ssrf-guard';
 /**
  * Flow runner.
  *
@@ -35,7 +33,6 @@ import { safeFetch } from '@/lib/security/ssrf-guard';
  */
 
 import {
-  handleAiAutoResponse,
   AI_EMPTY_REPLY_FALLBACK_TEXT,
   type AiGuardDetail,
 } from "@/lib/ai/responder";
@@ -53,34 +50,13 @@ import {
   readTurnVar,
   type AdvanceWalkContext,
 } from "./ai-turns";
-import { supabaseAdmin } from "./admin-client";
-import { writeLog } from "@/lib/logger";
-import {
-  engineMetaSendTemplate,
-  engineSendInteractiveButtons,
-  engineSendInteractiveList,
-  engineSendMedia,
-  engineSendText,
-} from "./meta-send";
-import {
-  engineWahaSendButtons,
-  engineWahaSendList,
-  engineWahaSendMedia,
-  engineWahaSendText,
-} from "./waha-send";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { flowEffects, viaFlowEffects } from "./effects";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
-  getConversationChannel,
   isSocialChannel,
-  sendWebchatMessage,
   type WebchatOutgoingMessage,
 } from "@/lib/webchat/send";
-import { sendSocialMessage } from "@/lib/channels/social";
-import {
-  createWebchatSession,
-  hasActiveWebchatSession,
-  sendWebchatInvite,
-} from "@/lib/webchat/sessions";
 import {
   type AddNoteNodeConfig,
   type AiAgentNodeConfig,
@@ -112,6 +88,31 @@ import {
   type SwitchNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
+
+// ============================================================
+// Efeitos externos (banco, envio Meta/WAHA/canais, IA, logs) — via
+// FlowEffects (effects.ts). Fora do simulador cada atalho chama
+// exatamente a mesma função de antes; os call sites abaixo não mudaram.
+// ============================================================
+const supabaseAdmin = viaFlowEffects("db");
+const engineSendText = viaFlowEffects("engineSendText");
+const engineSendMedia = viaFlowEffects("engineSendMedia");
+const engineSendInteractiveButtons = viaFlowEffects("engineSendInteractiveButtons");
+const engineSendInteractiveList = viaFlowEffects("engineSendInteractiveList");
+const engineMetaSendTemplate = viaFlowEffects("engineMetaSendTemplate");
+const engineWahaSendText = viaFlowEffects("engineWahaSendText");
+const engineWahaSendMedia = viaFlowEffects("engineWahaSendMedia");
+const engineWahaSendButtons = viaFlowEffects("engineWahaSendButtons");
+const engineWahaSendList = viaFlowEffects("engineWahaSendList");
+const sendWebchatMessage = viaFlowEffects("sendWebchatMessage");
+const sendSocialMessage = viaFlowEffects("sendSocialMessage");
+const getConversationChannel = viaFlowEffects("getConversationChannel");
+const createWebchatSession = viaFlowEffects("createWebchatSession");
+const hasActiveWebchatSession = viaFlowEffects("hasActiveWebchatSession");
+const sendWebchatInvite = viaFlowEffects("sendWebchatInvite");
+const resolveProviderMedia = viaFlowEffects("resolveProviderMedia");
+const handleAiAutoResponse = viaFlowEffects("handleAiAutoResponse");
+const writeLog = viaFlowEffects("writeLog");
 
 /** go_to's jump cap — catches cyclical anchor chains without spinning forever. */
 const MAX_HOPS = 50;
@@ -238,7 +239,7 @@ export function evaluateConditionPredicate(args: {
 // readable. Errors surface as thrown — the entry point catches.
 // ============================================================
 
-type AdminClient = ReturnType<typeof supabaseAdmin>;
+type AdminClient = SupabaseClient;
 
 async function loadActiveRunForContact(
   db: AdminClient,
@@ -490,6 +491,8 @@ async function logAiDecision(
   db: AdminClient,
   input: AiDecisionInput,
 ): Promise<void> {
+  // Tag de saída da IA → sugestão de tabulação (best-effort, migration 157).
+  if (input.ai_exit_code) void import("@/lib/ai/outcome-suggestion").then((m) => m.suggestOutcomeFromAiDecision(db, input)).catch(() => {});
   // Telemetria best-effort: nunca derruba o fluxo.
   let error: { message: string } | null = null;
   try {
@@ -3150,8 +3153,11 @@ export async function advanceFromNodeKey(
       const url = interpolateVars(cfg.url, run.vars);
       const timeoutMs = (cfg.timeout_seconds ?? 10) * 1000;
       try {
-        // Guard anti-SSRF: DNS validado, redirects revalidados, limite de tamanho.
-        const res = await safeFetch(
+        // Guard anti-SSRF (#98: DNS validado, redirects revalidados, limite de
+        // tamanho) é aplicado por liveFlowEffects.httpFetch; o simulador troca
+        // o conjunto de efeitos e responde com mock, sem rede.
+        const res = await flowEffects().httpFetch(
+          node.node_key,
           url,
           {
             method: cfg.method,
@@ -4119,7 +4125,7 @@ async function debounceAiAgentReply(db: AdminClient, runId: string): Promise<boo
     return debounceAiAgentReplyInMemory(runId);
   }
 
-  await new Promise((resolve) => setTimeout(resolve, AI_AGENT_REPLY_DEBOUNCE_MS));
+  await flowEffects().sleep(AI_AGENT_REPLY_DEBOUNCE_MS);
 
   const { data: row } = await db
     .from("flow_runs")

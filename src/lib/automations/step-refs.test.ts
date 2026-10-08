@@ -49,6 +49,14 @@ describe("collectAutomationRefs", () => {
     expect([...refs.pipeline_stages]).toEqual(["stage-1"]);
   });
 
+  it("condição tag_presence referencia etiqueta (operando)", () => {
+    const refs = collectAutomationRefs(null, [
+      { step_type: "condition", step_config: { subject: "tag_presence", operand: "tag-9" }, branches: { yes: [], no: [] } },
+      { step_type: "condition", step_config: { subject: "contact_field", operand: "email" }, branches: { yes: [], no: [] } },
+    ]);
+    expect([...refs.tags]).toEqual(["tag-9"]);
+  });
+
   it("ignora config vazia ou sem ids", () => {
     const refs = collectAutomationRefs(null, [{ step_type: "add_tag", step_config: { tag_id: "" } }]);
     expect(refs.tags.size).toBe(0);

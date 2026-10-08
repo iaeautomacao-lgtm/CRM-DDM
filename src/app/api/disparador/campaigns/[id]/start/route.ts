@@ -1,9 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
 import { startCampaign } from "@/lib/disparador/startCampaign";
 import { canManageCampaigns } from "@/lib/disparador/route-auth";
+import { kickDispatchCron } from "@/lib/disparador/dispatch-kick";
+import { writeLog } from "@/lib/logger";
+import { parseRedConfirmation } from "@/lib/disparador/red-quality-gate";
+
+export const maxDuration = 60;
 
 export async function POST(
   request: Request,
@@ -35,6 +40,8 @@ export async function POST(
     }
 
     let accountId: string;
+    let callerRole: string | null = null;
+    let callerId: string | null = null;
     if (isInternalCall) {
       // Sem sessão de usuário — resolve a conta via created_by ->
       // profiles.account_id. wacrm.campaigns não tem account_id
@@ -92,6 +99,8 @@ export async function POST(
         );
       }
       accountId = profile.account_id;
+      callerRole = profile.account_role ?? null;
+      callerId = user.id;
 
       // wacrm.campaigns has no account_id column (only created_by), so
       // "mesma conta" é resolvido via o profile do criador. Donos/admins
@@ -124,11 +133,60 @@ export async function POST(
 
     // "Iniciar agora" numa campanha agendada ({ agora: true }): a fila começa
     // agora, não no horário agendado. Corpo vazio/inválido = início normal.
-    const body = (await request.json().catch(() => null)) as { agora?: unknown } | null;
-    const result = await startCampaign(campaignId, accountId, { startNow: body?.agora === true });
+    // Número em qualidade vermelha: só o owner inicia, com confirm_red_quality: true + red_quality_reason.
+    const body = (await request.json().catch(() => null)) as
+      | { agora?: unknown; confirm_red_quality?: unknown; red_quality_reason?: unknown }
+      | null;
+    const result = await startCampaign(campaignId, accountId, {
+      startNow: body?.agora === true,
+      redConfirmation: parseRedConfirmation(callerRole, callerId, body),
+    });
     if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status });
+      return NextResponse.json(
+        { error: result.error, ...(result.code ? { code: result.code, channels: result.channels ?? [] } : {}) },
+        { status: result.status }
+      );
     }
+
+    // Campanha manual acabava dependendo do próximo cron de 1 minuto.
+    // Exemplo real: a fila foi publicada ~360 ms depois do tick das 16:01,
+    // então 967 envios ficaram parados até 16:02. Acordamos o MESMO cron em
+    // after(), depois de responder ao usuário. Não criamos um worker novo:
+    // lock global, claims atômicos, backoff, limites e telemetria continuam
+    // todos no /api/disparador/cron.
+    if (!isInternalCall) {
+      const requestUrl = request.url;
+      after(async () => {
+        const startedAt = Date.now();
+        const kick = await kickDispatchCron({
+          requestUrl,
+          secret: process.env.CRON_SECRET,
+        });
+        await writeLog({
+          account_id: accountId,
+          level: kick.outcome === "failed" ? "warn" : "info",
+          source: "disparador",
+          event: "campaign_dispatch_kick",
+          message:
+            kick.outcome === "triggered"
+              ? "Motor do disparador acionado após início manual"
+              : kick.outcome === "busy"
+                ? "Motor já estava ocupado; cron agendado permanece como fallback"
+                : kick.outcome === "skipped"
+                  ? "Kick imediato não configurado; cron agendado permanece como fallback"
+                  : "Falha no kick imediato; cron agendado permanece como fallback",
+          payload: {
+            campaign_id: campaignId,
+            outcome: kick.outcome,
+            attempts: kick.attempts,
+            cron_status: kick.cronStatus ?? null,
+            http_status: kick.httpStatus ?? null,
+            elapsed_ms: Date.now() - startedAt,
+          },
+        });
+      });
+    }
+
     return NextResponse.json({ success: true, enqueued: result.enqueued });
   } catch (err: any) {
     console.error("[Campaign Start] Failed to schedule queue:", err);

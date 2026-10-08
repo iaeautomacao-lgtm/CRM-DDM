@@ -25,9 +25,9 @@ export interface CatalogTemplate extends LocalTemplateRow {
 export interface TemplateCatalogState {
   loading: boolean;
   error: string | null;
-  /** Aprovados da WABA, já filtrados pela equipe. */
+  /** Templates APPROVED da WABA do canal selecionado. */
   available: CatalogTemplate[];
-  /** A equipe tem lista de templates liberados (team_allowed_templates). */
+  /** Mantido por compatibilidade visual; campanhas não são filtradas por equipe. */
   teamRestricted: boolean;
 }
 
@@ -112,6 +112,7 @@ export function StepConteudo({
         <MetaTemplates
           form={form}
           setMensagens={setMensagens}
+          setTemplateMode={(templateMode) => update({ templateMode })}
           catalog={catalog}
           catalogRows={catalogRows}
           columnMap={columnMap}
@@ -172,6 +173,7 @@ export function StepConteudo({
 function MetaTemplates({
   form,
   setMensagens,
+  setTemplateMode,
   catalog,
   catalogRows,
   columnMap,
@@ -181,6 +183,7 @@ function MetaTemplates({
 }: {
   form: WizardForm;
   setMensagens: (next: WizardMessage[]) => void;
+  setTemplateMode: (mode: TemplateMode) => void;
   catalog: TemplateCatalogState;
   catalogRows: readonly LocalTemplateRow[];
   columnMap: ImportColumnMap;
@@ -200,6 +203,15 @@ function MetaTemplates({
       return;
     }
     const msg = messageFromTemplate(t, columnMap, hasFile);
+    if (single && mensagens.length > 0) {
+      // Fluxo histórico: selecionar um segundo template significa rodízio.
+      // Em vez de substituir silenciosamente o primeiro, ativa Rotação e
+      // mantém ambos. O usuário ainda pode escolher Aleatório no passo de
+      // configurações se preferir sorteio.
+      setTemplateMode("rotacao");
+      setMensagens([...mensagens, msg]);
+      return;
+    }
     setMensagens(single ? [msg] : [...mensagens, msg]);
   };
 
@@ -225,12 +237,17 @@ function MetaTemplates({
       <section className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h4 className="text-sm font-semibold text-foreground">
-            Templates aprovados {single ? "(escolha 1)" : "(escolha 2 ou mais)"}
+            Templates aprovados {single ? "(selecione outro para ativar rotação)" : "(escolha 2 ou mais)"}
           </h4>
           <span className="text-xs text-muted-foreground">
             {mensagens.length} selecionado{mensagens.length === 1 ? "" : "s"}
           </span>
         </div>
+        {single && mensagens.length === 1 && (
+          <p className="text-xs text-muted-foreground">
+            Selecione um segundo template para ativar o rodízio automaticamente.
+          </p>
+        )}
         {catalog.teamRestricted && (
           <p className="text-xs text-muted-foreground">Mostrando só os templates liberados para a equipe escolhida.</p>
         )}

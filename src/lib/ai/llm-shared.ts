@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
 import { gatedFetch } from "@/lib/ai/llm-gate";
+import { openAiUrl } from "@/lib/loadtest/gate";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   getAiModelDefinition,
@@ -148,7 +149,7 @@ export async function callLlmForAnalysis(
       ?.reasoning_effort;
     // Mesmo semáforo e tratamento de 429 do responder (llm-gate.ts).
     const response = await gatedFetch(() =>
-      fetch("https://api.openai.com/v1/chat/completions", {
+      fetch(openAiUrl("/chat/completions"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

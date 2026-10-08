@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireRole, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { endActiveRunForConversation } from "@/lib/flows/engine";
+import { buildHumanClosePatch, suggestionVerdict } from "@/lib/conversations/outcome";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -63,7 +64,7 @@ export async function POST(
     // Permission check uses the caller's RLS-scoped client.
     const { data: visible, error: visibleError } = await supabase
       .from("conversations")
-      .select("id,status,assigned_agent_id")
+      .select("id,status,assigned_agent_id,suggested_outcome_tag_id")
       .eq("id", conversationId)
       .eq("account_id", accountId)
       .maybeSingle();
@@ -75,13 +76,14 @@ export async function POST(
       );
     }
 
-    const patch: Record<string, string> = {
-      status: "closed",
-      outcome_tag_id: outcomeTagId,
-    };
-    if (!visible.assigned_agent_id) {
-      patch.assigned_agent_id = userId;
-    }
+    // outcome_source='human' + quem/quando (migration 157). A sugestão
+    // (suggested_*) NÃO é apagada: fica para medir aceite x troca.
+    const patch = buildHumanClosePatch({
+      outcomeTagId,
+      userId,
+      assignedAgentId: visible.assigned_agent_id,
+    });
+    const verdict = suggestionVerdict(visible.suggested_outcome_tag_id, outcomeTagId);
 
     const db = supabaseAdmin();
     const { data: updated, error: updateError } = await db
@@ -108,7 +110,7 @@ export async function POST(
       console.error("[conversations/close] failed to end active flow:", err);
     }
 
-    return NextResponse.json({ conversation: updated });
+    return NextResponse.json({ conversation: updated, suggestion: verdict });
   } catch (err) {
     return toErrorResponse(err);
   }

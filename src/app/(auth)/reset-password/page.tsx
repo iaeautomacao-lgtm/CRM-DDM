@@ -136,9 +136,9 @@ export default function ResetPasswordPage() {
             </Link>
             <Link
               href="/login"
-              className="text-muted-foreground hover:text-foreground mt-6 flex items-center justify-center gap-2 text-sm"
+              className="text-muted-foreground hover:text-foreground mt-6 flex items-center justify-center gap-2 text-sm rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               Voltar para o login
             </Link>
           </CardContent>
@@ -152,10 +152,10 @@ export default function ResetPasswordPage() {
       <Card className="border-border bg-card w-full max-w-md">
         <CardHeader className="items-center text-center">
           <div className="bg-primary/10 mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
-            <KeyRound className="text-primary h-6 w-6" />
+            <KeyRound className="text-primary h-6 w-6" aria-hidden="true" />
           </div>
           <CardTitle className="text-foreground text-xl">
-            Definir Nova Senha
+            Definir nova senha
           </CardTitle>
           <CardDescription className="text-muted-foreground">
             Escolha uma nova senha forte para sua conta
@@ -164,22 +164,29 @@ export default function ResetPasswordPage() {
         <CardContent>
           <form onSubmit={handleUpdatePassword} className="flex flex-col gap-4">
             {error && (
-              <div role="alert" className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive">
+              <div
+                id="reset-error"
+                role="alert"
+                className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive"
+              >
                 {error}
               </div>
             )}
 
             <div className="flex flex-col gap-2">
-              <Label htmlFor="password" className="text-muted-foreground">
-                Nova Senha
+              <Label htmlFor="password" className="font-medium text-foreground">
+                Nova senha
               </Label>
               <Input
                 id="password"
-                type="password" autoComplete="new-password"
+                type="password"
+                autoComplete="new-password"
                 placeholder={`Pelo menos ${MIN_PASSWORD_LENGTH} caracteres`}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? "reset-error" : undefined}
                 className="border-border bg-muted text-foreground focus-visible:border-primary focus-visible:ring-primary/20"
               />
             </div>
@@ -187,17 +194,20 @@ export default function ResetPasswordPage() {
             <div className="flex flex-col gap-2">
               <Label
                 htmlFor="confirmPassword"
-                className="text-muted-foreground"
+                className="font-medium text-foreground"
               >
-                Confirmar Nova Senha
+                Confirmar nova senha
               </Label>
               <Input
                 id="confirmPassword"
-                type="password" autoComplete="new-password"
-                placeholder="******"
+                type="password"
+                autoComplete="new-password"
+                placeholder="Digite a nova senha novamente"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
+                aria-invalid={error ? true : undefined}
+                aria-describedby={error ? "reset-error" : undefined}
                 className="border-border bg-muted text-foreground focus-visible:border-primary focus-visible:ring-primary/20"
               />
             </div>
@@ -207,16 +217,16 @@ export default function ResetPasswordPage() {
               disabled={loading}
               className="bg-primary text-primary-foreground hover:bg-primary/90 mt-2 h-10 w-full disabled:opacity-50"
             >
-              {loading ? "Salvando..." : "Redefinir Senha"}
+              {loading ? "Salvando..." : "Redefinir senha"}
             </Button>
           </form>
 
           <Link
             href="/login"
-            className="text-muted-foreground hover:text-foreground mt-6 flex items-center justify-center gap-2 text-sm"
+            className="text-muted-foreground hover:text-foreground mt-6 flex items-center justify-center gap-2 text-sm rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
-            <ArrowLeft className="h-4 w-4" />
-            Cancelar e Voltar
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Cancelar e voltar para o login
           </Link>
         </CardContent>
       </Card>

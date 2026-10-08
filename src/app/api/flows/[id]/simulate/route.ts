@@ -1,0 +1,114 @@
+import { NextResponse } from 'next/server'
+import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
+import { hasMinRole } from '@/lib/auth/roles'
+import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { checkRateLimit } from '@/lib/rate-limit'
+import { parseSimulateRequest, SIM_MAX_BODY_CHARS } from '@/lib/flows/simulator/parse'
+import { simulateTurn } from '@/lib/flows/simulator/run'
+import { SIM_RATE_LIMIT } from '@/lib/flows/simulator/types'
+
+/**
+ * POST /api/flows/[id]/simulate — painel "Testar fluxo" (PRD 05).
+ *
+ * Processa UMA mensagem do "cliente" no motor real, com o RASCUNHO do
+ * editor (nós ainda não publicados) e os efeitos de simulação: nada é
+ * enviado pelo WhatsApp, nada é gravado em tabela real, tools com mock.
+ * Stateless — o cliente manda o estado da simulação e recebe o novo.
+ *
+ * Supervisor ou acima, e o fluxo tem que ser visível ao usuário (RLS,
+ * mesma checagem do editor). Limite de custo: SIM_RATE_LIMIT por usuário
+ * (cada mensagem pode chamar o modelo de IA).
+ *
+ * Leituras reais (só SELECT, fora do escopo da simulação): ai_config da
+ * conta (fica no servidor — nunca volta na resposta), base de
+ * conhecimento e nomes das equipes.
+ */
+export const maxDuration = 120
+
+export async function POST(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id } = await context.params
+
+  let account
+  try {
+    account = await getCurrentAccount()
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+  if (!hasMinRole(account.role, 'supervisor')) {
+    return NextResponse.json(
+      { error: 'O simulador de fluxo é restrito a supervisor ou acima.' },
+      { status: 403 },
+    )
+  }
+
+  const { data: flow } = await account.supabase
+    .from('flows')
+    .select('id, account_id, name, user_id')
+    .eq('id', id)
+    .maybeSingle()
+  if (!flow || flow.account_id !== account.accountId) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  }
+
+  const rawText = await request.text()
+  if (rawText.length > SIM_MAX_BODY_CHARS) {
+    return NextResponse.json(
+      { error: 'Simulação longa demais — clique em Reiniciar.' },
+      { status: 413 },
+    )
+  }
+  let raw: unknown
+  try {
+    raw = JSON.parse(rawText)
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  }
+  const parsed = parseSimulateRequest(raw)
+  if (typeof parsed === 'string') {
+    return NextResponse.json({ error: parsed }, { status: 400 })
+  }
+
+  const limit = checkRateLimit(`flows:simulate:${account.userId}`, SIM_RATE_LIMIT)
+  if (!limit.success) {
+    const minutes = Math.max(1, Math.ceil((limit.reset - Date.now()) / 60_000))
+    return NextResponse.json(
+      {
+        error: `Limite do simulador atingido (${SIM_RATE_LIMIT.limit} mensagens a cada ${SIM_RATE_LIMIT.windowMs / 60_000} minutos). Tente de novo em ${minutes} min.`,
+      },
+      { status: 429, headers: { 'Retry-After': String(minutes * 60) } },
+    )
+  }
+
+  const admin = supabaseAdmin()
+  const [aiConfigRes, kbRes, teamsRes] = await Promise.all([
+    admin.from('ai_config').select('*').eq('account_id', account.accountId).limit(1),
+    admin
+      .from('knowledge_base_files')
+      .select('name, content')
+      .eq('account_id', account.accountId)
+      .range(0, 199),
+    admin.from('teams').select('id, name').eq('account_id', account.accountId).range(0, 499),
+  ])
+
+  try {
+    const result = await simulateTurn(parsed, {
+      accountId: account.accountId,
+      userId: (flow.user_id as string | null) ?? account.userId,
+      flowId: flow.id as string,
+      flowName: (flow.name as string | null) ?? 'Fluxo',
+      aiConfig: (aiConfigRes.data?.[0] as Record<string, unknown> | undefined) ?? null,
+      knowledgeBase: (kbRes.data ?? []) as Array<{ name: string; content: string }>,
+      teams: (teamsRes.data ?? []) as Array<{ id: string; name: string }>,
+    })
+    return NextResponse.json({ ...result, remaining: limit.remaining })
+  } catch (err) {
+    console.error('[flows simulate] falha na simulação:', err)
+    return NextResponse.json(
+      { error: 'Falha ao simular a mensagem. Veja os logs do servidor.' },
+      { status: 500 },
+    )
+  }
+}

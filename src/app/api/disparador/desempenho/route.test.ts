@@ -21,7 +21,7 @@ vi.mock("@/lib/auth/account", () => {
 
 function chain(result: unknown): unknown {
   const proxy: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "in", "is", "not", "limit", "gte", "order"]) {
+  for (const m of ["select", "eq", "in", "is", "not", "limit", "gte", "order", "range"]) {
     proxy[m] = () => chain(result);
   }
   proxy.single = async () => result;
@@ -36,7 +36,13 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       mocks.adminFrom(table);
       if (table === "whatsapp_config") {
         return chain({
-          data: [{ id: "session-1", phone_number: "551199999999", display_name: "Principal", provider: "meta" }],
+          data: [{ id: "session-1", display_phone_number: "551199999999", phone_number_id: "pn1", waha_session: null, provider: "meta", habilitado: true }],
+          error: null,
+        });
+      }
+      if (table === "channel_health") {
+        return chain({
+          data: [{ session_id: "session-1", verified_name: "Principal", display_phone_number: "551199999999", checked_at: "2026-10-08T10:00:00Z", last_error: null }],
           error: null,
         });
       }

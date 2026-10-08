@@ -71,6 +71,14 @@ const probes = [
   { table: "intelligence_tool_calls", columns: "id,origin,api_key_id" },
   { table: "api_keys", columns: "id,user_id" },
   { table: "quick_replies", columns: "id" },
+  // Sugestão/procedência da tabulação + mapa tag de saída → tabulação
+  // (migration 157): fechamento, reabertura e automação gravam estas colunas.
+  {
+    table: "conversations",
+    columns:
+      "id,suggested_outcome_tag_id,outcome_suggestion_source,outcome_suggestion_key,outcome_source,outcome_set_by,outcome_set_at",
+  },
+  { table: "ai_exit_tag_outcome_map", columns: "id,exit_tag,outcome_tag_id,auto_close" },
 ];
 
 for (const probe of probes) {

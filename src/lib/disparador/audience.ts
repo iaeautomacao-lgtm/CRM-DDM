@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllKeyset, type KeysetPageResult } from "./keyset";
 
 // Público de uma campanha — fonte única para startCampaign (envio) e para
 // o modal de confirmação (GET /api/disparador/campaigns/[id]/audience).
@@ -68,21 +69,18 @@ export interface CampaignAudienceRow {
   audience_mode?: string | null;
 }
 
-const PAGE = 1000;
+type IdRow = Record<string, any> & { id: string | number };
 
+// Keyset (id > cursor): sem OFFSET, sem pular/repetir linhas (B9).
 async function pagedIds(
-  fetchPage: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>,
+  fetchPage: (after: string | number | null, limit: number) => KeysetPageResult<IdRow>,
   key: string,
 ): Promise<string[]> {
+  const rows = await fetchAllKeyset<IdRow>("Erro ao carregar público", fetchPage);
   const out: string[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await fetchPage(from, from + PAGE - 1);
-    if (error) throw new Error(error.message);
-    for (const row of (data ?? []) as Array<Record<string, string | null>>) {
-      const v = row[key];
-      if (v) out.push(v);
-    }
-    if (!data || data.length < PAGE) break;
+  for (const row of rows) {
+    const v = row[key] as string | null | undefined;
+    if (v) out.push(v);
   }
   return out;
 }
@@ -102,18 +100,13 @@ export async function loadCampaignAudience(
   | { ok: true; contacts: Array<Record<string, any>>; source: string; importCount: number | null }
   | { ok: false; error: string }
 > {
-  const allContacts: Array<Record<string, any>> = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await db
-      .from("contacts")
-      .select(contactColumns)
-      .eq("account_id", accountId)
-      .order("id")
-      .range(from, from + PAGE - 1);
-    if (error) throw new Error(`Erro ao carregar contatos: ${error.message}`);
-    allContacts.push(...((data ?? []) as unknown as Array<Record<string, any>>));
-    if (!data || data.length < PAGE) break;
-  }
+  // A coluna id precisa vir na seleção (cursor do keyset).
+  const columns = /(^|,\s*)id(\s*,|$)/.test(contactColumns) ? contactColumns : `id, ${contactColumns}`;
+  const allContacts = await fetchAllKeyset<IdRow>("Erro ao carregar contatos", (after, limit) => {
+    let query = db.from("contacts").select(columns).eq("account_id", accountId).order("id").limit(limit);
+    if (after != null) query = query.gt("id", after);
+    return query as unknown as KeysetPageResult<IdRow>;
+  });
 
   // Vínculo explícito do import (migration 132). O da campanha (import
   // feito ao editar) substitui o do rascunho (import feito na criação) —
@@ -121,8 +114,11 @@ export async function loadCampaignAudience(
   const importRows = new Set<string>();
   const linked = (column: "campaign_id" | "draft_id", value: string) =>
     pagedIds(
-      (from, to) =>
-        db.from("disp_import_contacts").select("contact_id").eq(column, value).order("id").range(from, to),
+      (after, limit) => {
+        let query = db.from("disp_import_contacts").select("id, contact_id").eq(column, value).order("id").limit(limit);
+        if (after != null) query = query.gt("id", after);
+        return query;
+      },
       "contact_id",
     );
   let linkedIds = await linked("campaign_id", campaign.id);
@@ -133,13 +129,16 @@ export async function loadCampaignAudience(
   // Imports anteriores à 132: só deixavam rastro quando tinham VARn.
   if (importRows.size === 0 && campaign.import_draft_id) {
     for (const id of await pagedIds(
-      (from, to) =>
-        db
+      (after, limit) => {
+        let query = db
           .from("contact_import_variables")
-          .select("contact_id")
+          .select("id, contact_id")
           .eq("draft_id", campaign.import_draft_id as string)
           .order("id")
-          .range(from, to),
+          .limit(limit);
+        if (after != null) query = query.gt("id", after);
+        return query;
+      },
       "contact_id",
     )) {
       importRows.add(id);
@@ -160,14 +159,16 @@ export async function loadCampaignAudience(
       ids.length === 0
         ? []
         : await pagedIds(
-            (from, to) =>
-              db
+            (after, limit) => {
+              let query = db
                 .from("contact_tags")
-                .select("contact_id")
+                .select("id, contact_id")
                 .in("tag_id", ids)
-                .order("contact_id")
-                .order("tag_id")
-                .range(from, to),
+                .order("id")
+                .limit(limit);
+              if (after != null) query = query.gt("id", after);
+              return query;
+            },
             "contact_id",
           ),
     );

@@ -5,6 +5,7 @@ import { fakeDb, type Tables } from "../__tests__/fake-db";
 import type { ToolCallLog } from "../audit";
 import type { IntelligenceKeyContext } from "../api-key";
 import * as tools from "../tools";
+import { METRICS } from "../metrics/registry";
 import { handleMcpRequest, mcpToolCatalog, type HandleMcpDeps } from "./server";
 
 const A = "aaaaaaaa-0000-4000-8000-000000000001";
@@ -85,8 +86,8 @@ async function call(deps: HandleMcpDeps, method: string, params: Record<string, 
 }
 
 describe("handleMcpRequest — autenticação", () => {
-  it("sem chave válida → 401 antes de tocar no protocolo", async () => {
-    const res = await handleMcpRequest(rpc("tools/list"), {
+  it.each(["tools/list", "resources/list", "resources/read"])("%s sem chave válida → 401 antes de tocar no protocolo", async (method) => {
+    const res = await handleMcpRequest(rpc(method, { uri: "ddm://metrics/conversations_total" }), {
       authenticate: async () => {
         throw unauthorized();
       },
@@ -97,14 +98,67 @@ describe("handleMcpRequest — autenticação", () => {
 });
 
 describe("handleMcpRequest — protocolo", () => {
-  it("initialize responde com o servidor e a capacidade de ferramentas", async () => {
+  it("initialize responde com o servidor e as capacidades de ferramentas e resources", async () => {
     const { deps } = setup();
     const body = await call(deps, "initialize", {
       protocolVersion: LATEST_PROTOCOL_VERSION,
       capabilities: {},
       clientInfo: { name: "test", version: "1" },
     });
-    expect(body.result).toMatchObject({ serverInfo: { name: "ddm-intelligence" }, capabilities: { tools: {} } });
+    expect(body.result).toMatchObject({ serverInfo: { name: "ddm-intelligence" }, capabilities: { tools: {}, resources: {} } });
+  });
+
+  it("resources/list expõe todas as definições do registry em JSON", async () => {
+    const { deps, log } = setup();
+    const body = await call(deps, "resources/list");
+    expect(body.result).toEqual({
+      resources: METRICS.map((metric) => ({
+        uri: `ddm://metrics/${metric.id}`,
+        name: metric.display_name,
+        description: metric.description,
+        mimeType: "application/json",
+      })),
+    });
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("resources/read devolve as definições completas sem executar ferramentas ou consultar o banco", async () => {
+    const { deps, log } = setup();
+    const db = { from: vi.fn(() => { throw new Error("não deve consultar o banco"); }) } as unknown as HandleMcpDeps["db"];
+    const spy = vi.spyOn(tools, "executeTool");
+    try {
+      for (const metric of METRICS) {
+        const uri = `ddm://metrics/${metric.id}`;
+        const body = await call({ ...deps, db }, "resources/read", { uri });
+        const { contents } = body.result as { contents: Array<{ uri: string; mimeType: string; text: string }> };
+        expect(contents).toHaveLength(1);
+        expect(contents[0]).toMatchObject({ uri, mimeType: "application/json" });
+        expect(JSON.parse(contents[0].text)).toEqual(metric);
+      }
+      expect(spy).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it.each([
+    "ddm://metrics/inexistente",
+    "https://metrics/conversations_total",
+    "ddm://metrics/conversations_total?account_id=outra",
+    "ddm://metrics/../conversations_total",
+  ])("resources/read recusa URI não catalogada: %s", async (uri) => {
+    const { deps } = setup();
+    const body = await call(deps, "resources/read", { uri });
+    expect(body.error).toMatchObject({ code: -32002, message: expect.stringContaining("Métrica não encontrada"), data: { uri } });
+    expect(body.result).toBeUndefined();
+  });
+
+  it("resources são somente leitura: resources/write não é suportado", async () => {
+    const { deps, log } = setup();
+    const body = await call(deps, "resources/write", { uri: "ddm://metrics/conversations_total", text: "{}" });
+    expect(body.error).toMatchObject({ code: -32601 });
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("tools/list devolve o catálogo 1:1 (nome, descrição, inputSchema), só leitura", async () => {

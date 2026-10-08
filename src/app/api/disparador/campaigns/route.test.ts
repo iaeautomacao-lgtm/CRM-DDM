@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   check: vi.fn(),
   insert: vi.fn(),
   update: vi.fn(),
+  planning: vi.fn(async () => ({ ok: true, metrics: { total_contatos: 0 } })),
 }));
 
 vi.mock("@/lib/auth/account", () => {
@@ -22,6 +23,9 @@ vi.mock("@/lib/auth/account", () => {
 });
 vi.mock("@/lib/disparador/campaign-config-check", () => ({
   checkCampaignConfig: mocks.check,
+}));
+vi.mock("@/lib/disparador/campaign-planning", () => ({
+  syncCampaignPlannedMetrics: mocks.planning,
 }));
 vi.mock("@/lib/disparador/admin-client", () => ({
   supabaseAdmin: () => ({
@@ -57,7 +61,6 @@ function body(overrides: Record<string, unknown> = {}) {
     audience_mode: "csv",
     agendamento: null,
     draft_id: DRAFT,
-    // Campos que o cliente NÃO decide:
     status: "em_execucao",
     account_id: "outra-conta",
     ...overrides,
@@ -96,16 +99,15 @@ describe("POST /api/disparador/campaigns", () => {
       import_draft_id: DRAFT,
       dias_envio: [1, 2, 3, 4, 5],
     });
-    // Mesmo validador do PATCH/start, com o modo de templates e o público.
     expect(mocks.check).toHaveBeenCalledWith(expect.anything(), "acc-1", ["canal-1"], expect.any(Array), {
       templateMode: "sequencia",
       audienceMode: "csv",
     });
-    // VAR1–3 e UTM do draft passam para a campanha.
     expect(mocks.update.mock.calls.map((c) => c[0]).sort()).toEqual([
       "contact_import_variables",
       "disparador_utm_links",
     ]);
+    expect(mocks.planning).toHaveBeenCalledWith(expect.anything(), "acc-1", "camp-1");
   });
 
   it("com agendamento futuro vira 'agendado'", async () => {

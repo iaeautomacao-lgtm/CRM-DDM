@@ -35,6 +35,8 @@ export type ApiErrorCode =
   | 'rate_limited' // per-key budget exhausted
   | 'bad_request' // malformed input
   | 'not_found'
+  | 'recipient_blocked' // destinatário na blacklist/opt-out (422)
+  | 'unavailable' // dependência indisponível (503)
   | 'conflict' // Idempotency-Key/external_id reutilizado com outro conteúdo, ou criação em curso
   | 'payload_too_large' // corpo/lote acima do teto
   | 'internal';
