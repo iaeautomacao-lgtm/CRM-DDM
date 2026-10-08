@@ -74,6 +74,31 @@ function supabaseAdmin() {
 }
 
 /**
+ * Papel mínimo para ALTERAR/APAGAR canais: admin (o mesmo do POST e da RLS
+ * whatsapp_config_update/delete). Antes DELETE e PATCH dependiam só da RLS —
+ * se a policy do banco divergir da migration (CLAUDE.md avisa que acontece),
+ * qualquer papel apagava ou editava canal (PRD 20, G1). O GET segue aberto a
+ * qualquer membro: o inbox o usa para saber se há canal conectado e a resposta
+ * nunca traz segredo (só has_app_secret).
+ */
+async function requireChannelAdmin(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  message: string,
+): Promise<NextResponse | null> {
+  const { data: roleRow } = await supabase
+    .from('profiles')
+    .select('account_role')
+    .eq('user_id', userId)
+    .maybeSingle()
+  const role = (roleRow as { account_role?: string } | null)?.account_role
+  if (!role || !isAccountRole(role) || !hasMinRole(role, 'admin')) {
+    return NextResponse.json({ error: message }, { status: 403 })
+  }
+  return null
+}
+
+/**
  * GET /api/whatsapp/config
  *
  * Used by the "Test API Connection" button and by the page to check
@@ -958,6 +983,9 @@ export async function DELETE(request: Request) {
       )
     }
 
+    const denied = await requireChannelAdmin(supabase, user.id, 'Only account admins can delete channels.')
+    if (denied) return denied
+
     const { searchParams } = new URL(request.url)
     const targetId = searchParams.get('id')
 
@@ -1018,6 +1046,9 @@ export async function PATCH(request: Request) {
         { status: 403 },
       )
     }
+
+    const denied = await requireChannelAdmin(supabase, user.id, 'Only account admins can change channel settings.')
+    if (denied) return denied
 
     const body = await request.json()
     const { id, flow_id, receptivo, habilitado, team_id, client_id } = body
