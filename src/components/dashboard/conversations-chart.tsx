@@ -46,23 +46,23 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
   }, [data])
 
   return (
-    <section className="flex h-full flex-col border-y border-border">
-      <header className="flex items-center justify-between gap-4 px-5 py-4">
+    <section className="flex h-full flex-col">
+      <header className="flex items-center justify-between gap-4 pb-3">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">Conversas ao Longo do Tempo</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">Volume de mensagens diárias por direção</p>
+          <h2 className="text-sm font-semibold text-foreground">Conversas</h2>
+          
         </div>
-        <div className="flex items-center gap-1 rounded-lg bg-muted/60 p-1">
+        <div className="flex items-center gap-4">
           {[7, 30, 90].map((r) => (
             <button
               key={r}
               type="button"
               onClick={() => onRangeChange(r as RangeDays)}
               className={cn(
-                'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                'border-b-2 px-0 py-1 text-xs font-medium transition-colors',
                 range === r
-                  ? 'bg-secondary text-secondary-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
             >
               {r} dias
@@ -71,7 +71,7 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
         </div>
       </header>
 
-      <div className="border-t border-border p-5">
+      <div className="pt-4">
         {loading || !data ? (
           <Skeleton className="h-[240px] w-full" />
         ) : data.every((p) => p.incoming === 0 && p.outgoing === 0) ? (
@@ -85,7 +85,7 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
         )}
       </div>
 
-      <footer className="flex items-center gap-4 border-t border-border px-5 py-3 text-xs text-muted-foreground">
+      <footer className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
         <LegendDot color="#3B82F6" label="Entrada" />
         <LegendDot color="#FF5706" label="Saída" />
       </footer>

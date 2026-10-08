@@ -11,9 +11,9 @@ interface AiPerformanceProps {
 export function AiPerformance({ data, loading }: AiPerformanceProps) {
   if (loading || !data) {
     return (
-      <div className="grid animate-pulse grid-cols-1 divide-y divide-border border-y border-border md:grid-cols-3 md:divide-x md:divide-y-0">
+      <div className="grid animate-pulse grid-cols-1 gap-8 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="p-5">
+          <div key={i} className="py-2 md:px-6 first:md:pl-0 last:md:pr-0">
             <div className="h-3 w-24 rounded bg-muted" />
             <div className="mt-3 h-7 w-20 rounded bg-muted" />
             <div className="mt-5 h-24 rounded bg-muted" />
@@ -35,7 +35,7 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
   const pctHuman = Math.round((messagesRatio.human / totalOutbound) * 100);
 
   return (
-    <div className="grid grid-cols-1 divide-y divide-border border-y border-border md:grid-cols-3 md:divide-x md:divide-y-0">
+    <div className="grid grid-cols-1 gap-8 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
       <MetricColumn eyebrow="Sentimento" value={pctPositive + "%"} description="positivo">
         <BreakdownRow label="Positivo" value={sentiment.positive + " (" + pctPositive + "%)"} percent={pctPositive} tone="success" />
         <BreakdownRow label="Neutro" value={sentiment.neutral + " (" + pctNeutral + "%)"} percent={pctNeutral} />
@@ -71,10 +71,10 @@ function MetricColumn({
   children: ReactNode;
 }) {
   return (
-    <section className="p-5">
+    <section className="py-2 md:px-6 first:md:pl-0 last:md:pr-0">
       <p className="text-xs font-medium text-muted-foreground">{eyebrow}</p>
       <div className="mt-2 flex items-baseline gap-2">
-        <strong className="text-2xl font-semibold tracking-tight tabular-nums text-foreground">{value}</strong>
+        <strong className="text-[28px] font-semibold tracking-[-0.03em] tabular-nums text-foreground">{value}</strong>
         <span className="text-xs text-muted-foreground">{description}</span>
       </div>
       <div className="mt-5 space-y-3">{children}</div>

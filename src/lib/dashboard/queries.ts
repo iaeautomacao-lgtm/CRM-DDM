@@ -143,30 +143,28 @@ export async function loadConversationsSeries(
   return keys.map((day) => ({ day, ...(buckets.get(day) ?? { incoming: 0, outgoing: 0 }) }))
 }
 
-// --- 3. Pipeline donut -------------------------------------------------
+// --- 3. Current operational conversation status -----------------------
 
 export async function loadConversationsStatusDonut(db: DB): Promise<ConversationsStatusData> {
   const { data, error } = await db.from('conversations').select('status')
   if (error) throw error
 
-  const counts = { open: 0, pending: 0, closed: 0 }
+  const counts = { open: 0, pending: 0 }
   for (const row of (data ?? []) as { status: string }[]) {
     if (row.status === 'open') counts.open += 1
     else if (row.status === 'pending') counts.pending += 1
-    else if (row.status === 'closed') counts.closed += 1
   }
 
-  // DDM chart palette: primary orange for the most actionable status,
-  // secondary blue for "waiting", success green for "done".
+  // "Situação atual" representa somente o que ainda está em operação.
+  // Conversas fechadas pertencem ao histórico e não entram neste total.
   const slices: ConversationsStatusSlice[] = [
-    { status: 'open', label: 'Em Atendimento (Abertas)', color: '#FF5706', count: counts.open },
-    { status: 'pending', label: 'Aguardando Resposta (Pendentes)', color: '#3B82F6', count: counts.pending },
-    { status: 'closed', label: 'Resolvidas (Fechadas)', color: '#10B981', count: counts.closed },
+    { status: 'open', label: 'Em atendimento', color: '#FF5706', count: counts.open },
+    { status: 'pending', label: 'Pendentes', color: '#3B82F6', count: counts.pending },
   ]
 
   return {
     slices,
-    totalCount: data?.length ?? 0,
+    totalCount: counts.open + counts.pending,
   }
 }
 

@@ -163,12 +163,11 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1600px] pb-10">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm text-muted-foreground">
-            Visão geral da operação, atendimento e resultados.
-          </p>
-          <p suppressHydrationWarning className="mt-1 text-xs capitalize text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">Visão geral da operação</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">Atendimento, volume e resultados em um só lugar.</p>
+          <p suppressHydrationWarning className="mt-2 text-xs capitalize text-muted-foreground/80">
             {new Intl.DateTimeFormat('pt-BR', {
               weekday: 'long',
               day: '2-digit',
@@ -187,10 +186,11 @@ export default function DashboardPage() {
         />
       )}
 
-      <section className="mt-8">
+      <section className="mt-7">
         <SectionHeading
           title="Operação agora"
-          description="Indicadores principais do atendimento neste momento."
+          description="O que exige atenção neste momento."
+          primary
         />
 
         {failed.has('metrics') ? (
@@ -249,11 +249,8 @@ export default function DashboardPage() {
         )}
       </section>
 
-      <section className="mt-10">
-        <SectionHeading
-          title="Movimento da operação"
-          description="Volume de conversas ao longo do tempo e distribuição atual por status."
-        />
+      <section className="mt-12">
+        <SectionHeading title="Movimento da operação" />
         <div className="mt-3 grid grid-cols-1 gap-6 lg:grid-cols-5">
           <div className="lg:col-span-3">
             <ConversationsChart
@@ -269,21 +266,15 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-10">
-        <SectionHeading
-          title="Tempo de resposta"
-          description="Velocidade da primeira resposta ao cliente e comparação semanal."
-        />
+      <section className="mt-12">
+        <SectionHeading title="Tempo de resposta" />
         <div className="mt-3">
           <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
         </div>
       </section>
 
-      <section className="mt-10">
-        <SectionHeading
-          title="Recuperação financeira"
-          description="Resultado dos acordos e desempenho dos cobradores."
-        />
+      <section className="mt-12">
+        <SectionHeading title="Recuperação financeira" />
         <div className="mt-3">
           {failed.has('ai') ? (
             <ErrorState title="Não foi possível carregar a recuperação financeira" onRetry={retryAll} />
@@ -293,11 +284,8 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-10">
-        <SectionHeading
-          title="IA e conversão"
-          description="Participação da automação, sentimento das conversas e fechamento."
-        />
+      <section className="mt-12">
+        <SectionHeading title="IA e conversão" />
         <div className="mt-3">
           {failed.has('ai') ? (
             <ErrorState title="Não foi possível carregar o desempenho da IA" onRetry={retryAll} />
@@ -307,24 +295,36 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="mt-10">
+      <section className="mt-12">
         <ActivityFeed items={activity} loading={activityLoading} />
       </section>
     </div>
   )
 }
 
-function SectionHeading({ title, description }: { title: string; description: string }) {
+function SectionHeading({
+  title,
+  description,
+  primary = false,
+}: {
+  title: string
+  description?: string
+  primary?: boolean
+}) {
   return (
     <div>
-      <h2 className="text-base font-semibold text-foreground">{title}</h2>
-      <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      <h2 className={"text-lg font-semibold tracking-[-0.02em] text-foreground"}>
+        {title}
+      </h2>
+      {description ? (
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+      ) : null}
     </div>
   )
 }
 
 function deltaLabel(delta: number, suffix: string): string {
-  if (delta === 0) return `Sem alteração ${suffix}`
+  if (delta === 0) return `Igual a ontem`
   const sign = delta > 0 ? '+' : ''
   return `${sign}${delta.toLocaleString()} ${suffix}`
 }
