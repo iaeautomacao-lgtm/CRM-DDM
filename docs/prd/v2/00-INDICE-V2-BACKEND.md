@@ -38,7 +38,7 @@ O **PRD 19** cuida disso: inventário de todas as variáveis de ambiente, com o 
 | 15 | [Plataforma e operação](15-plataforma-e-operacao.md) | Sextante | Inbox durável de **mensagens**, API pública V2, webhooks de saída, alertas e crons versionados, CI na `v2`, staging, deploy e rollback, registro de migrations |
 | 16 | [Comparativo Voll 360 × Fortics](16-comparativo-voll360-fortics.md) | Pesquisa | Onde estamos à frente e atrás; lacunas de backend |
 | 19 | [Configuração por conta e `.env` mínimo](19-config-por-conta-env-minimo.md) | Sextante | 3 camadas (`.env` essencial, `platform_config`, config por conta e cofre), resolvedor único de chave de LLM, modelo de app Meta, migração env→banco |
-| 20 | [Organizações, papéis e permissões](20-organizacoes-papeis-permissoes.md) | Sextante | Separação por organização, papéis fixos e papel personalizado criado só pelo proprietário *(em preparação)* |
+| 20 | [Organizações, papéis e permissões](20-organizacoes-papeis-permissoes.md) | Sextante | Separação por organização (já existe: 1 usuário = 1 organização), catálogo de permissões, papel personalizado criado só pelo proprietário, falhas de papel G1–G3 e P-02..P-12 |
 | — | [Inventário de variáveis de ambiente](inventario-env.md) | Prisma | Mecânico (117 variáveis). Correções no PRD 19 |
 | — | [Inventário de rotas](inventario-rotas.md) e [de tabelas](inventario-tabelas.md) | Prisma | Mecânico. ⚠️ RLS em laço `DO`/`EXECUTE` gera falso "sem RLS". Vale o banco live (PRD 14, Anexo A) |
 | — | [Modelo dos PRDs](_MODELO.md) | — | Estrutura e regras (inclui a REGRA DO DONO sobre negócio) |
