@@ -24,6 +24,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  Eye,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -267,6 +268,180 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
+
+function documentNameFromUrl(url: string): string | null {
+  try {
+    const raw = decodeURIComponent(url.split("?")[0].split("/").pop() || "");
+    if (!raw || !/\.[a-z0-9]{2,6}$/i.test(raw)) return null;
+    return raw.replace(/^\d{10,}-/, "");
+  } catch {
+    return null;
+  }
+}
+
+function canPreviewDocument(url: string, fileName: string | null): boolean {
+  if (fileName && /\.(pdf|png|jpe?g|webp|gif)$/i.test(fileName)) return true;
+  // Meta proxy não carrega extensão no path; ele normaliza Content-Type no
+  // servidor, então PDFs/imagens continuam seguros para render inline.
+  return url.startsWith("/api/whatsapp/media/");
+}
+
+function MediaDocument({
+  url,
+  label,
+}: {
+  url: string;
+  label: string | null;
+}) {
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  const fileName = documentNameFromUrl(url);
+  const title = fileName || label || "Documento";
+  const caption = label && label !== title ? label : null;
+  const previewable = canPreviewDocument(url, fileName);
+
+  const downloadDocument = useCallback(async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error("download failed");
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download =
+        fileName ||
+        `documento.${
+          blob.type === "application/pdf"
+            ? "pdf"
+            : blob.type === "image/png"
+              ? "png"
+              : blob.type === "image/webp"
+                ? "webp"
+                : blob.type === "image/jpeg"
+                  ? "jpg"
+                  : "bin"
+        }`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } finally {
+      setDownloading(false);
+    }
+  }, [downloading, fileName, url]);
+
+  return (
+    <>
+      <div className="min-w-56 max-w-72 overflow-hidden rounded-lg border border-border/50 bg-muted/35">
+        <button
+          type="button"
+          onClick={() => previewable && setViewerOpen(true)}
+          disabled={!previewable}
+          className={cn(
+            "flex w-full items-center gap-3 px-3 py-3 text-left",
+            previewable && "transition-colors hover:bg-muted/60",
+          )}
+          aria-label={previewable ? `Visualizar ${title}` : title}
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-background/55">
+            <FileText className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">{title}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              {previewable ? "Visualizar no CRM" : "Arquivo para download"}
+            </p>
+          </div>
+
+          {previewable && <Eye className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+        </button>
+
+        <div className="flex items-center gap-1 border-t border-border/50 px-2 py-1.5">
+          {previewable && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => setViewerOpen(true)}
+            >
+              <Eye className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+              Visualizar
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => void downloadDocument()}
+            disabled={downloading}
+          >
+            <Download className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            Baixar
+          </Button>
+        </div>
+      </div>
+
+      {caption && (
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm">
+          {caption}
+        </p>
+      )}
+
+      <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+        <DialogContent
+          showCloseButton
+          className="h-[92dvh] max-h-[92dvh] w-[96vw] max-w-[96vw] overflow-hidden bg-background p-0 sm:max-w-[96vw]"
+        >
+          <DialogTitle className="sr-only">Visualizar {title}</DialogTitle>
+
+          <div className="flex h-12 items-center justify-between gap-3 border-b border-border px-3 pr-12">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="truncate text-sm font-medium">{title}</span>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void downloadDocument()}
+                disabled={downloading}
+              >
+                <Download className="mr-1.5 h-4 w-4" aria-hidden="true" />
+                Baixar
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                aria-label="Abrir arquivo em nova aba"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <iframe
+            src={url}
+            title={title}
+            className="h-[calc(92dvh-3rem)] w-full border-0 bg-muted/20"
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function MessageContent({ message: originalMessage }: { message: Message }) {
   const message = { ...originalMessage, media_url: originalMessage.media_url ? privateChatMediaUrl(originalMessage.media_url) : null };
   switch (message.content_type) {
@@ -326,20 +501,13 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
 
     case "document":
       if (!message.media_url) {
-        return <MediaUnavailable label={message.content_text || "Document"} />;
+        return <MediaUnavailable label={message.content_text || "Documento"} />;
       }
       return (
-        <a
-          href={message.media_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
-        >
-          <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
-          <span className="truncate">
-            {message.content_text || "Documento"}
-          </span>
-        </a>
+        <MediaDocument
+          url={message.media_url}
+          label={message.content_text}
+        />
       );
 
     case "template":
