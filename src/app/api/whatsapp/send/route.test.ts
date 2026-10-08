@@ -43,15 +43,9 @@ function makeSupabaseMock() {
         case 'conversations':
           return { data: existingConversation, error: null }
         case 'whatsapp_config':
-          return {
-            data: {
-              id: 'cfg-1',
-              account_id: 'acct-1',
-              phone_number_id: 'PNID-1',
-              access_token: 'enc-token',
-            },
-            error: null,
-          }
+          // Migration 200b: o cliente de sessão só enxerga os ids (RLS); os
+          // segredos vêm do service role (mock abaixo).
+          return { data: [{ id: 'cfg-1' }], error: null }
         case 'message_templates':
           return { data: null, error: null }
         default:
@@ -130,12 +124,26 @@ vi.mock('@/lib/supabase/server', () => ({
 
 vi.mock('@/lib/flows/admin-client', () => ({
   supabaseAdmin: () => ({
-    from: () => {
+    from: (table: string) => {
       const b: Record<string, unknown> = {}
       const chain = () => b
-      for (const m of ['update', 'eq', 'select']) b[m] = vi.fn(chain)
+      for (const m of ['update', 'eq', 'select', 'in']) b[m] = vi.fn(chain)
       b.then = (resolve: (v: unknown) => unknown) =>
-        resolve({ data: null, error: null })
+        resolve(
+          table === 'whatsapp_config'
+            ? {
+                data: [
+                  {
+                    id: 'cfg-1',
+                    account_id: 'acct-1',
+                    phone_number_id: 'PNID-1',
+                    access_token: 'enc-token',
+                  },
+                ],
+                error: null,
+              }
+            : { data: null, error: null }
+        )
       return b
     },
   }),

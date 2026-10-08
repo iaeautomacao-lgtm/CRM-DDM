@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardRole } from '@/lib/auth/route-guard';
 import { sendReactionMessage } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
@@ -86,11 +87,15 @@ export async function POST(request: Request) {
     }
 
     // WhatsApp config + access token. Account-scoped post-multi-user.
-    const { data: config, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('phone_number_id, access_token, provider, waha_url, waha_session, waha_api_key')
-      .eq('account_id', accountId)
-      .single();
+    // Segredos só pelo servidor (migration 200b); visibilidade = RLS do usuário.
+    // Exatamente 1 canal, como o .single() anterior (vários = erro, nunca "o primeiro").
+    const { data: configRows, error: configError } = await fetchChannelConfigs(
+      supabase,
+      accountId,
+      (q) => q.eq('account_id', accountId),
+      'phone_number_id, access_token, provider, waha_url, waha_session, waha_api_key',
+    );
+    const config = configRows?.length === 1 ? (configRows[0] as any) : null;
 
     if (configError || !config) {
       return NextResponse.json(
