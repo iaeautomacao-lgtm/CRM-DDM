@@ -1,10 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-// SUPABASE_PROJECT_REF is derived from NEXT_PUBLIC_SUPABASE_URL by a
-// top-level IIFE in middleware.ts, evaluated once at module load — it
-// must be set BEFORE the dynamic import below, not in a beforeEach,
-// or the module would already have resolved to the fallback ref.
+// O nome do cookie vem de NEXT_PUBLIC_SUPABASE_URL (lido no primeiro uso, sem ref de
+// fallback); definir ANTES do import dinâmico abaixo.
 process.env.NEXT_PUBLIC_SUPABASE_URL = "https://test.supabase.co";
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "anon-key";
 
@@ -155,5 +153,21 @@ describe("documentação pública da API", () => {
 
   it("as páginas do CRM continuam protegidas", () => {
     expect(middleware(new NextRequest("https://crm.test/settings/api-docs")).status).toBe(307);
+  });
+});
+
+describe("AP-21: nome do cookie de sessão derivado de NEXT_PUBLIC_SUPABASE_URL", () => {
+  it("sem a variável falha claro, sem cair num ref antigo embutido", async () => {
+    const original = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    vi.resetModules();
+    try {
+      delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const { middleware: mw } = await import("./middleware");
+      const req = new NextRequest("http://localhost/inbox");
+      await expect(Promise.resolve().then(() => mw(req))).rejects.toThrow(/NEXT_PUBLIC_SUPABASE_URL/);
+    } finally {
+      process.env.NEXT_PUBLIC_SUPABASE_URL = original;
+      vi.resetModules();
+    }
   });
 });

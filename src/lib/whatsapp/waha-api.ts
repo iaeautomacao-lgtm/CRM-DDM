@@ -1,5 +1,5 @@
 import type { MediaKind } from './meta-api';
-import { assertPublicUrl, SsrfBlockedError } from '@/lib/security/ssrf-guard';
+import { assertPublicUrl, safeFetch, SsrfBlockedError } from '@/lib/security/ssrf-guard';
 
 interface WahaConfig {
   waha_url: string;
@@ -31,13 +31,24 @@ export async function assertWahaUrlIsSafe(rawUrl: string): Promise<void> {
   }
 }
 
-async function wahaFetch(
+/** Teto da resposta do WAHA (JSON/QR pequenos; nada aqui baixa arquivo grande). */
+const WAHA_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Chamada ao servidor WAHA do canal. `waha_url` é configuração do TENANT, então
+ * passa pelo `safeFetch` do guard SSRF (PRD 14, SW-1): o IP validado é o IP da
+ * conexão (sem janela de DNS rebinding) e redirect para OUTRA origem é erro — a
+ * requisição carrega a api key (X-Api-Key/Authorization) e não pode ir a outro
+ * host. Hosts internos legítimos seguem valendo por `SSRF_ALLOWED_HOSTS`.
+ * Só corpo texto (todas as chamadas enviam JSON).
+ *
+ * @internal exportada para teste.
+ */
+export async function wahaFetch(
   config: WahaConfig,
   path: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  await assertWahaUrlIsSafe(config.waha_url);
-
   const baseUrl = config.waha_url.replace(/\/$/, '');
   const url = `${baseUrl}${path}`;
   const headers = new Headers(options.headers || {});
@@ -56,16 +67,36 @@ async function wahaFetch(
     Number.isFinite(configuredTimeout) && configuredTimeout > 0
       ? Math.min(configuredTimeout, 120_000)
       : 15_000;
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const signal = options.signal
-    ? AbortSignal.any([options.signal, timeoutSignal])
-    : timeoutSignal;
 
-  return fetch(url, {
-    ...options,
-    headers,
-    signal,
-  });
+  const body = options.body;
+  if (body !== undefined && body !== null && typeof body !== 'string' && !(body instanceof Uint8Array)) {
+    throw new TypeError('wahaFetch aceita apenas corpo de texto');
+  }
+
+  try {
+    return await safeFetch(
+      url,
+      {
+        method: options.method,
+        headers,
+        body: (body ?? undefined) as string | Uint8Array | undefined,
+        signal: options.signal ?? undefined,
+      },
+      { timeoutMs, maxBytes: WAHA_MAX_RESPONSE_BYTES, failOnCrossOriginRedirect: true }
+    );
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      // Tempo esgotado/cancelamento seguem como erro de rede comum para quem chama.
+      if (err.reason === 'timeout') {
+        const timeout = new Error('WAHA request timed out');
+        timeout.name = 'TimeoutError';
+        throw timeout;
+      }
+      if (err.reason === 'response_too_large') throw new Error('WAHA response too large');
+      throw new WahaUrlBlockedError();
+    }
+    throw err;
+  }
 }
 
 export interface WahaSessionInfo {

@@ -102,3 +102,35 @@ describe("start → kick do cron (SG-4)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("x-internal-cron (SG-10): segredo em tempo constante, fail-closed", () => {
+  beforeEach(() => {
+    mocks.after.length = 0;
+    mocks.start.mockResolvedValue({ ok: true, enqueued: 1 });
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+  const withHeader = (value: string) =>
+    new Request("https://crm.real.example/api/disparador/campaigns/camp-1/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-internal-cron": value },
+      body: "{}",
+    });
+
+  it("segredo certo é chamada interna (não agenda o kick); errado cai no fluxo de sessão (agenda)", async () => {
+    vi.stubEnv("CRON_SECRET", "segredo-do-cron");
+    expect((await POST(withHeader("segredo-do-cron"), params)).status).toBe(200);
+    expect(mocks.after).toHaveLength(0);
+
+    expect((await POST(withHeader("segredo-do-cronX"), params)).status).toBe(200);
+    expect(mocks.after).toHaveLength(1);
+  });
+
+  it("sem CRON_SECRET configurado o header nunca vale como interno", async () => {
+    vi.stubEnv("CRON_SECRET", "");
+    expect((await POST(withHeader(""), params)).status).toBe(200);
+    expect(mocks.after).toHaveLength(1);
+  });
+});

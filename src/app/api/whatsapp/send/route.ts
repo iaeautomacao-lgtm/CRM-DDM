@@ -1,5 +1,5 @@
 import { runIdempotentSend } from '@/lib/disparador/send-ledger';
-import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { MediaUrlNotAllowedError, resolveProviderMedia } from '@/lib/storage/provider-media';
 import { NextResponse } from 'next/server'
 import type { AccountContext } from '@/lib/auth/account'
 import { guardRole } from '@/lib/auth/route-guard'
@@ -72,7 +72,17 @@ export async function POST(request: Request) {
       // - media_url: URL assinada curta, só para o provedor baixar no envio;
       // - originalMediaUrl: referência estável /api/chat-media/..., que é a que
       //   vai para o banco (a assinada expira em 10 min).
-      const media_url = originalMediaUrl ? await resolveProviderMedia(originalMediaUrl, accountId) : originalMediaUrl;
+      let media_url = originalMediaUrl;
+      if (originalMediaUrl) {
+        try {
+          media_url = await resolveProviderMedia(originalMediaUrl, accountId);
+        } catch (err) {
+          if (err instanceof MediaUrlNotAllowedError) {
+            return NextResponse.json({ error: 'media_url must be a public URL' }, { status: 400 });
+          }
+          throw err;
+        }
+      }
 
       if ((!conversationIdInput && !contact_id) || !message_type) {
         return NextResponse.json(
