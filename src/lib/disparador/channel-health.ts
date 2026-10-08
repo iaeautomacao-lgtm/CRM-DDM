@@ -51,6 +51,8 @@ export interface HealthSnapshot {
   dailyLimit: number | null;
   throughputLevel: string | null;
   displayPhone: string | null;
+  /** verified_name do Graph (nome que a tela Canais mostra). */
+  verifiedName?: string | null;
 }
 
 export function snapshotFromGraph(data: MetaPhoneHealth): HealthSnapshot {
@@ -61,6 +63,7 @@ export function snapshotFromGraph(data: MetaPhoneHealth): HealthSnapshot {
     dailyLimit: dailyLimitForTier(tier),
     throughputLevel: data.throughput?.level ?? null,
     displayPhone: data.display_phone_number ?? null,
+    verifiedName: data.verified_name?.trim() || null,
   };
 }
 
@@ -86,7 +89,7 @@ export async function recordChannelHealth(
     channel: Pick<HealthChannel, "id" | "account_id" | "display_phone_number">;
     snapshot: HealthSnapshot | null;
     error?: string | null;
-    source: "poll" | "webhook";
+    source: "poll" | "webhook" | "manual";
     detail?: Record<string, unknown> | null;
     nowMs?: number;
   },
@@ -141,12 +144,37 @@ export async function recordChannelHealth(
     last_error: lastError,
     updated_at: iso,
   };
-  const upsertHealth = await db.from("channel_health").upsert(healthRow, { onConflict: "session_id" });
+  // Migration 193: nome/telefone da Meta. Em falha do Graph preserva o último valor conhecido (nunca apaga). Sem a coluna → regrava sem elas.
+  const metaIdentity = {
+    verified_name: snapshot.verifiedName ?? (previous?.verified_name as string | null | undefined) ?? null,
+    display_phone_number: snapshot.displayPhone ?? (previous?.display_phone_number as string | null | undefined) ?? null,
+  };
+  let upsertHealth = await db.from("channel_health").upsert({ ...healthRow, ...metaIdentity }, { onConflict: "session_id" });
+  if (upsertHealth.error && /verified_name|display_phone_number/.test(upsertHealth.error.message ?? "")) {
+    upsertHealth = await db.from("channel_health").upsert(healthRow, { onConflict: "session_id" });
+  }
   if (upsertHealth.error) {
     if (isMissingTable(upsertHealth.error)) {
       return { skipped: "tables_missing", changed: false, qualityOld, qualityNew: snapshot.quality, tierOld, tierNew: snapshot.tier, rateOld: null, rateNew: 0, downgrade: false };
     }
     throw new Error(upsertHealth.error.message);
+  }
+
+  // A Meta é a fonte da verdade do número exibido (tela Canais): corrige whatsapp_config.display_phone_number quando mudou.
+  if (input.snapshot?.displayPhone && input.snapshot.displayPhone !== (channel.display_phone_number ?? null)) {
+    const fix = await db.from("whatsapp_config").update({ display_phone_number: input.snapshot.displayPhone }).eq("id", channel.id);
+    if (fix.error) {
+      console.error("[ChannelHealth] Falha ao atualizar display_phone_number:", channel.id, fix.error.message);
+    } else {
+      void writeLog({
+        account_id: channel.account_id,
+        level: "info",
+        source: "disparador",
+        event: "channel_phone_updated",
+        message: `Número do canal atualizado pela Meta: ${channel.display_phone_number ?? "(vazio)"} → ${input.snapshot.displayPhone}`,
+        payload: { session_id: channel.id, phone_old: channel.display_phone_number ?? null, phone_new: input.snapshot.displayPhone, source: input.source },
+      });
+    }
   }
 
   const target = autoTargetRate(policy, snapshot.quality);
@@ -179,7 +207,7 @@ export async function recordChannelHealth(
     await db.from("dispatch_channel_rate_history").insert({
       account_id: channel.account_id,
       session_id: channel.id,
-      source: input.source,
+      source: input.source === "manual" ? "admin" : input.source, // CHECK do histórico não tem 'manual'
       quality_old: qualityOld,
       quality_new: snapshot.quality,
       tier_old: tierOld,
@@ -215,7 +243,7 @@ export async function recordChannelHealth(
 export async function refreshChannelHealth(
   db: Db,
   channel: HealthChannel,
-  source: "poll" | "webhook",
+  source: "poll" | "webhook" | "manual",
   options: {
     detail?: Record<string, unknown> | null;
     nowMs?: number;
@@ -359,5 +387,39 @@ export async function pollChannelHealth(db: Db, options: PollOptions = {}): Prom
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, due.length) }, worker));
+  return report;
+}
+
+/** "Atualizar dados da Meta": re-consulta os números Meta habilitados de UMA conta (sem a regra de idade do poll). */
+export async function refreshAccountChannelHealth(
+  db: Db,
+  accountId: string,
+  options: { fetchHealth?: PollOptions["fetchHealth"]; nowMs?: number; concurrency?: number } = {},
+): Promise<PollReport> {
+  const report: PollReport = { considered: 0, refreshed: 0, changed: 0, failed: 0, skipped_tables_missing: false };
+  const { data, error } = await db
+    .from("whatsapp_config")
+    .select("id, account_id, phone_number_id, access_token, display_phone_number, waba_id, provider, habilitado")
+    .eq("account_id", accountId)
+    .eq("provider", "meta")
+    .eq("habilitado", true)
+    .limit(200);
+  if (error) throw new Error(error.message);
+  const channels = ((data ?? []) as HealthChannel[]).filter((c) => c.phone_number_id && c.access_token);
+  report.considered = channels.length;
+  let index = 0;
+  const worker = async () => {
+    while (index < channels.length) {
+      const channel = channels[index++];
+      const result = await refreshChannelHealth(db, channel, "manual", { fetchHealth: options.fetchHealth, nowMs: options.nowMs });
+      if (!result) report.failed++;
+      else if (result.skipped === "tables_missing") report.skipped_tables_missing = true;
+      else {
+        report.refreshed++;
+        if (result.changed) report.changed++;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, options.concurrency ?? 5), channels.length) }, worker));
   return report;
 }

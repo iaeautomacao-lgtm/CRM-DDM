@@ -253,7 +253,8 @@ function fakeDb(overrides: { rpcError?: boolean } = {}) {
   const calls: Call[] = [];
   const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const rows: Record<string, unknown[]> = {
-    whatsapp_config: [{ id: A, phone_number: "+5511", display_name: "Cobrança 1", provider: "meta", habilitado: true }],
+    whatsapp_config: [{ id: A, display_phone_number: "+5511", phone_number_id: "pn-a", waha_session: null, provider: "meta", habilitado: true }],
+    channel_health: [{ session_id: A, verified_name: "Cobrança 1", display_phone_number: "+5511", checked_at: "2026-10-08T10:00:00Z", last_error: null }],
     campaigns: [{ id: C1, nome: "Black Friday", status: "em_execucao", session_ids: [A], updated_at: iso(1) }],
     system_logs: [],
     dispatch_meta_131026_failures: [{ campaign_id: C1 }, { campaign_id: C1 }],

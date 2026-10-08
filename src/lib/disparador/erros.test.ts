@@ -281,7 +281,8 @@ describe("detalhe do item", () => {
     campaigns: { nome: "Camp", status: "em_execucao", account_id: ACC },
   };
   const handlers = (rowForQueue: unknown): Record<string, Handler> => ({
-    whatsapp_config: () => ({ data: [{ id: SESS, phone_number: "5511", display_name: "Principal" }] }),
+    whatsapp_config: () => ({ data: [{ id: SESS, display_phone_number: "5511", phone_number_id: "pn1", waha_session: null, provider: "meta", habilitado: true }] }),
+    channel_health: () => ({ data: [{ session_id: SESS, verified_name: "Principal", display_phone_number: "5511", checked_at: "2026-10-08T10:00:00Z", last_error: null }] }),
     disp_message_queue: () => ({ data: rowForQueue ? [rowForQueue] : [] }),
     webhook_status_inbox: () => ({
       data: [
@@ -296,7 +297,7 @@ describe("detalhe do item", () => {
   it("monta linha do tempo, template, recibos da conta e 131026 pendente", async () => {
     const { db, calls } = fakeDb(handlers(queueRow));
     const d = await loadErroDetail(db, ACC, ITEM);
-    expect(d.item).toMatchObject({ numero: "Principal", classe: "destinatario", entregaPendente131026: true });
+    expect(d.item).toMatchObject({ numero: "Principal · 5511", classe: "destinatario", entregaPendente131026: true });
     expect(d.template).toEqual({ name: "cobranca", language: "pt_BR", variables: ["Ana", "100"] });
     expect(d.receipts).toHaveLength(1);
     expect(d.timeline.map((e) => e.key)).toEqual(["agendado", "enviado", "entregue", "erro"]);
