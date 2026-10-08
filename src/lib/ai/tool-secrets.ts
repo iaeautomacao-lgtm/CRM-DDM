@@ -87,3 +87,86 @@ export function findInlineSecrets(url: string): string[] {
   }
   return found;
 }
+
+// ---------------------------------------------------------------------------
+// Importação de fluxo (TASK25). Um fluxo exportado carrega o token da DDM em
+// texto na URL das tools; a migration 145 só converteu o que existia na época.
+// Aqui a conversão roda em cada importação/duplicação. Módulo puro (sem
+// imports de servidor): validate.ts, que roda no navegador, importa este arquivo.
+// ---------------------------------------------------------------------------
+
+export const DDM_TOKEN_PLACEHOLDER = "{{secret.DDM_TOKEN}}";
+
+// O valor de tk= vai até `&`, `#`, aspas ou espaço — NUNCA para em `{`/`}`: um token com
+// chave no meio (limitação da migration 145) deixava o resto colado depois do marcador.
+const DDM_TK_PARAM = /(ddmacordos\.com[^\s"'#]*?[?&]tk=)([^&#\s"']*)/gi;
+// Variável do fluxo ({{cpf}}) ou marcador completo: não é credencial em texto.
+const WHOLE_PLACEHOLDER = /^\{\{\s*[\w.]+\s*\}\}$/;
+
+/** Troca tk=<literal> de URLs ddmacordos.com por {{secret.DDM_TOKEN}} dentro de um texto. */
+export function replaceDdmTokenInText(text: string): { text: string; replaced: number } {
+  let replaced = 0;
+  const out = text.replace(DDM_TK_PARAM, (match, prefix: string, value: string) => {
+    if (WHOLE_PLACEHOLDER.test(value) || value === "") return match;
+    replaced += 1;
+    return `${prefix}${DDM_TOKEN_PLACEHOLDER}`;
+  });
+  return { text: out, replaced };
+}
+
+function mapStrings(value: unknown, fn: (s: string) => string): unknown {
+  if (typeof value === "string") return fn(value);
+  if (Array.isArray(value)) return value.map((v) => mapStrings(v, fn));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, mapStrings(v, fn)]));
+  }
+  return value;
+}
+
+/** URLs onde uma credencial literal é detectada (tools do nó de IA e URL do http_fetch). */
+function credentialUrls(config: Record<string, unknown>): string[] {
+  const urls: string[] = [];
+  if (typeof config.url === "string") urls.push(config.url);
+  if (Array.isArray(config.tools)) {
+    for (const tool of config.tools as Array<{ http?: { url?: unknown } }>) {
+      if (typeof tool?.http?.url === "string") urls.push(tool.http.url);
+    }
+  }
+  return urls;
+}
+
+export interface ImportSecretNode {
+  node_key?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface ImportSecretResult<N extends ImportSecretNode> {
+  nodes: N[];
+  /** Quantas URLs da DDM tiveram o token trocado pelo marcador. */
+  replaced: number;
+  /** Credenciais literais que sobraram (outro domínio) — a importação deve ser recusada. */
+  rejected: Array<{ node_key: string; param: string }>;
+}
+
+export function sanitizeImportedSecrets<N extends ImportSecretNode>(nodes: N[]): ImportSecretResult<N> {
+  let replaced = 0;
+  const rejected: Array<{ node_key: string; param: string }> = [];
+  const clean = nodes.map((node) => {
+    if (!node.config || typeof node.config !== "object") return node;
+    const config = mapStrings(node.config, (s) => {
+      const r = replaceDdmTokenInText(s);
+      replaced += r.replaced;
+      return r.text;
+    }) as Record<string, unknown>;
+    for (const url of credentialUrls(config)) {
+      for (const param of findInlineSecrets(url)) rejected.push({ node_key: node.node_key ?? "?", param });
+    }
+    return { ...node, config };
+  });
+  return { nodes: clean, replaced, rejected };
+}
+
+/** A URL aponta para a DDM (domínio com marcador próprio)? */
+export function isDdmUrl(url: string): boolean {
+  return /^https?:\/\/(?:[^/?#@]*\.)?ddmacordos\.com(?:[:/?#]|$)/i.test(url.trim());
+}
