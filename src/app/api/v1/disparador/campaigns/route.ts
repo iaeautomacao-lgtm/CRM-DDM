@@ -1,3 +1,4 @@
+import { findRedChannels, RED_QUALITY_CODE, redBlockedMessage } from "@/lib/disparador/red-quality-gate";
 import { requireApiKey } from "@/lib/auth/api-context";
 import {
   ok,
@@ -456,6 +457,16 @@ export async function POST(request: Request) {
     }
     if (provider === "waha" && !body.message?.trim()) {
       throw badRequest("Campo 'message' é obrigatório para canais WAHA");
+    }
+    // Número Meta em qualidade vermelha: campanha nova exige confirmação do owner no painel — chave de API não confirma.
+    if (provider === "meta") {
+      const red = await findRedChannels(db, ctx.accountId, [channelId]);
+      if (red.length > 0) {
+        throw new ApiError("conflict", redBlockedMessage(red), 409, undefined, undefined, {
+          reason: RED_QUALITY_CODE,
+          channels: red,
+        });
+      }
     }
     if (media && provider !== "waha") {
       throw badRequest("'media' nesta versão é suportada apenas para canais WAHA");
