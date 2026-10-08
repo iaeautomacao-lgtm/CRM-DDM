@@ -448,3 +448,33 @@ export function serializeToolFailure(
     attempts,
   });
 }
+
+/**
+ * A tool pode ter efeito no mundo? Só contam como consulta pura as tools conhecidas de
+ * SAFE_RETRY_TOOLS chamadas por GET — o método sozinho não basta: `efetiva_acordo` da DDM
+ * é um GET com efeito (formaliza o acordo). Tool desconhecida não foi executada: não conta.
+ */
+export function isEffectfulTool(
+  tools: ReadonlyArray<{ name: string; http?: { method?: string } }> | undefined,
+  toolName: string,
+): boolean {
+  const def = tools?.find((t) => t.name === toolName);
+  if (!def) return false;
+  const method = (def.http?.method ?? "GET").toUpperCase();
+  return !(method === "GET" && SAFE_RETRY_TOOLS.has(toolName));
+}
+
+/**
+ * Retry de "resposta vazia" do modelo. Só repete a chamada ao provider se NENHUMA tool com efeito rodou
+ * no turno: repetir depois de, p.ex., `efetiva_acordo` reexecutaria a tool (acordo duplicado). Se rodou,
+ * devolve o texto vazio e o chamador segue o caminho de fallback que já existe (nenhum texto muda).
+ */
+export async function retryEmptyReply(
+  firstText: string,
+  callAgain: () => Promise<string>,
+  effectfulToolRan: boolean,
+): Promise<{ text: string; retried: boolean; skippedForEffect: boolean }> {
+  if (firstText) return { text: firstText, retried: false, skippedForEffect: false };
+  if (effectfulToolRan) return { text: firstText, retried: false, skippedForEffect: true };
+  return { text: await callAgain(), retried: true, skippedForEffect: false };
+}

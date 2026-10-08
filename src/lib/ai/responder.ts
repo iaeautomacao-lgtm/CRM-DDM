@@ -29,7 +29,9 @@ import {
   classifyHttpFailure,
   classifyToolBodyFailure,
   fullyFailedIntegrations,
+  isEffectfulTool,
   prepareToolArgs,
+  retryEmptyReply,
   retryDelayMs,
   serializeToolFailure,
   shouldRetryTool,
@@ -60,6 +62,11 @@ import {
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
 
+
+// CPF nunca vai inteiro para o log do servidor.
+function maskCpfForLog(cpf: string): string {
+  return cpf.length >= 2 ? `***${cpf.slice(-2)}` : "***";
+}
 // fetch com teto de 15s para todas as chamadas externas da IA (OpenAI,
 // Gemini, Claude, API DDM, TTS, download de mídia). Sem isso uma API lenta
 // segurava a requisição indefinidamente. Se o chamador já passar um
@@ -132,7 +139,7 @@ async function fetchDdmCpfDetails(cpf: string): Promise<DdmCpfResponse | null> {
 
     const localizaData = await resLocaliza.json();
     if (!Array.isArray(localizaData) || localizaData.length === 0) {
-      console.log(`[AI Agent] No debtor found for CPF ${cpf}`);
+      console.log(`[AI Agent] No debtor found for CPF ${maskCpfForLog(cpf)}`);
       return null;
     }
 
@@ -1134,7 +1141,7 @@ async function handleAiAutoResponseAttempt(
 
   let ddmData: DdmCpfResponse | null = null;
   if (foundCpf && foundCpf.length === 11) {
-    console.log(`[AI Agent] Found CPF ${foundCpf} in conversation. Calling DDM API...`);
+    console.log(`[AI Agent] Found CPF ${maskCpfForLog(foundCpf)} in conversation. Calling DDM API...`);
     ddmData = await fetchDdmCpfDetails(foundCpf);
   }
 
@@ -1197,6 +1204,10 @@ async function handleAiAutoResponseAttempt(
 
   // Isolado num closure pra poder chamar duas vezes (tentativa + retry
   // automático abaixo) sem duplicar o if/else de provider.
+  // Alguma tool COM EFEITO (método ≠ GET, ex.: efetiva_acordo) rodou neste turno? Então o retry de
+  // resposta vazia não pode chamar o provider de novo (reexecutaria a tool). `tracker.externalEffect`
+  // é verdadeiro para qualquer tool (inclusive consulta GET), por isso o critério aqui é o método.
+  let effectfulToolRan = false;
   const callProvider = (): Promise<string> => {
     if (tracker) tracker.trace.phase = "llm";
     if (aiConfig.api_provider === "openai") {
@@ -1208,6 +1219,7 @@ async function handleAiAutoResponseAttempt(
         async (toolName: string, toolArgs: Record<string, unknown>) => {
           // A partir daqui pode haver efeito externo (ex.: efetiva_acordo):
           // uma falha posterior não libera a reserva da mensagem.
+          if (isEffectfulTool(tools, toolName)) effectfulToolRan = true;
           if (tracker) {
             tracker.externalEffect = true;
             tracker.trace.phase = "tool";
@@ -1248,9 +1260,21 @@ async function handleAiAutoResponseAttempt(
       // antes de chegarmos aqui, então o retry precisa acontecer dentro
       // desta mesma chamada — chamar handleAiAutoResponse de novo a
       // partir do engine.ts seria descartado silenciosamente pelo claim.
+      // Só repete se nenhuma tool com efeito rodou (senão a tool seria reexecutada: ex.: acordo duplicado);
+      // nesse caso segue o fallback abaixo, que já existe.
       if (!generatedText) {
-        console.warn("[AI Agent] Resposta vazia do modelo, tentando novamente (retry automático)...");
-        generatedText = (await withAccountSecretsScope(accountId, callProvider)).trim();
+        const retry = await retryEmptyReply(
+          generatedText,
+          async () => {
+            console.warn("[AI Agent] Resposta vazia do modelo, tentando novamente (retry automático)...");
+            return (await withAccountSecretsScope(accountId, callProvider)).trim();
+          },
+          effectfulToolRan,
+        );
+        if (retry.skippedForEffect) {
+          console.warn("[AI Agent] Resposta vazia após tool com efeito — sem retry (evita reexecutar a tool).");
+        }
+        generatedText = retry.text;
       }
     } catch (err) {
       // Rethrown (not just logged + returned) so the Flow Builder's
@@ -1358,7 +1382,7 @@ async function handleAiAutoResponseAttempt(
   // CalculaDebitos.php side effect for those nodes: it can formalize a
   // second agreement and append a fabricated/placeholder payment URL.
   if (hasAgreedAcordo && foundCpf && !hasOverride) {
-    console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${foundCpf}...`);
+    console.log(`[AI Agent] Intercepted #ACORDOFORMALIZADO. Calling DDM formalization API for CPF ${maskCpfForLog(foundCpf)}...`);
     try {
       const activeKey = ddmApiToken();
       // Sem token não formaliza: o erro já foi registrado em ddmApiToken().
@@ -1397,13 +1421,13 @@ async function handleAiAutoResponseAttempt(
       // 2. Registra e formaliza o acordo na DDM enviando o CalculoID e a quantidade de parcelas solicitadas
       const installments = extractInstallmentsFromHistory(history);
       const opcaoAcordo = installments <= 1 ? 1 : installments + 1;
-      console.log(`[AI Agent] Formalizing agreement for CPF ${foundCpf} with ${installments} requested installments (sending OpcaoAcordo=${opcaoAcordo} to integration).`);
+      console.log(`[AI Agent] Formalizing agreement for CPF ${maskCpfForLog(foundCpf)} with ${installments} requested installments (sending OpcaoAcordo=${opcaoAcordo} to integration).`);
       
       const formalizeUrl = `https://www.ddmacordos.com/ws_ddm/ws/CalculaDebitos.php?tk=${activeKey}&OpcaoAcordo=${opcaoAcordo}&TipoAcordo=1&Doc=${foundCpf}${calculoId ? `&idcalc=${calculoId}` : ""}`;
       const resFormalize = await boundedFetch(formalizeUrl);
       if (resFormalize.ok) {
         const resText = await resFormalize.text();
-        console.log(`[AI Agent] DDM formalize success. Response payload: ${resText}`);
+        console.log(`[AI Agent] DDM formalize success. status=${resFormalize.status} bytes=${resText.length} failure=${classifyToolBodyFailure(resText)?.code ?? "none"}`);
         
         const match = resText.match(/https?:\/\/[^\s"']+/i);
         if (match) {
