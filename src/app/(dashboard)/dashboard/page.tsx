@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useAuth } from '@/hooks/use-auth'
 import {
   loadActivity,
   loadConversationsSeries,
@@ -169,7 +168,7 @@ export default function DashboardPage() {
           <p className="text-sm text-muted-foreground">
             Visão geral da operação, atendimento e resultados.
           </p>
-          <p className="mt-1 text-xs capitalize text-muted-foreground">
+          <p suppressHydrationWarning className="mt-1 text-xs capitalize text-muted-foreground">
             {new Intl.DateTimeFormat('pt-BR', {
               weekday: 'long',
               day: '2-digit',
@@ -322,6 +321,7 @@ function SectionHeading({ title, description }: { title: string; description: st
       <p className="mt-1 text-sm text-muted-foreground">{description}</p>
     </div>
   )
+}
 
 function deltaLabel(delta: number, suffix: string): string {
   if (delta === 0) return `Sem alteração ${suffix}`
