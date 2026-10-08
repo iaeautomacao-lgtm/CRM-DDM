@@ -31,7 +31,7 @@ function fakeDb(handlers: Record<string, Handler>) {
       const call: Call = { table, ops: [] };
       calls.push(call);
       const proxy: Record<string, unknown> = {};
-      for (const m of ["select", "eq", "in", "order", "limit", "update", "insert"]) {
+      for (const m of ["select", "eq", "in", "is", "gte", "order", "limit", "update", "insert"]) {
         proxy[m] = (...args: unknown[]) => {
           call.ops.push([m, ...args]);
           return proxy;
@@ -187,7 +187,7 @@ describe("applyLimitsChange", () => {
 });
 
 describe("loadLimitsOverview", () => {
-  it("monta números (efetivo/padrão/teto/pausa/campanhas), globais e histórico; limite/s ainda nulo", async () => {
+  it("monta números (efetivo/padrão/teto/pausa/campanhas), globais e histórico", async () => {
     const { db, calls } = fakeDb({
       whatsapp_config: () => ({ data: [cfg(WAHA, "waha", "Waha"), cfg(META, "meta", "Principal")] }),
       dispatch_channel_limits: () => ({ data: [{ session_id: META, max_in_flight: 40, hourly_limit: 9000, paused: true }] }),
@@ -203,11 +203,47 @@ describe("loadLimitsOverview", () => {
     expect(o.globals).toMatchObject({ processConcurrency: 16, batchClaimEnabled: true, tickChainEnabled: expect.any(Boolean) });
     expect(o.history[0]).toMatchObject({ numero: "Principal", userName: "Ana", reason: "manutenção" });
     expect(o.pauseSupported).toBe(true);
-    expect(o.rate).toBeNull();
+    // Sem dados de qualidade ainda: o número Meta aparece sem leitura, sem derrubar a tela.
+    expect(o.rate?.[META]).toMatchObject({ quality: null, effectivePerSecond: null, manualPerSecond: null });
     // Tudo escopado pela conta.
     for (const t of ["whatsapp_config", "campaigns", "audit_logs"]) {
       expect(has(calls.find((c) => c.table === t)!, "eq", "account_id", ACC)).toBe(true);
     }
     expect(has(calls.find((c) => c.table === "audit_logs")!, "eq", "resource_type", "dispatch_channel_limits")).toBe(true);
+  });
+
+  const rateHandlers = {
+    whatsapp_config: () => ({ data: [cfg(META, "meta", "Principal")] }),
+    channel_health: () => ({ data: [{ session_id: META, quality_rating: "YELLOW", messaging_limit_tier: "TIER_10K", daily_limit: 10000 }] }),
+    dispatch_channel_rate: () => ({
+      data: [{ session_id: META, auto_rate_per_second: 30, manual_rate_per_second: 12, manual_reason: "teste", force_above_quality: false }],
+    }),
+    dispatch_channel_rate_history: () => ({
+      data: [
+        { id: "h1", created_at: "2026-10-07T11:00:00Z", session_id: META, source: "webhook", quality_old: "GREEN", quality_new: "YELLOW", rate_old: "50.00", rate_new: "30.00", reason: null },
+      ],
+    }),
+  };
+
+  it("liga qualidade, automático/manual/efetivo e o histórico do limite/s (PR #140)", async () => {
+    const { db, calls } = fakeDb(rateHandlers);
+    const o = await loadLimitsOverview(db, ACC, ENV);
+    expect(o.rate?.[META]).toMatchObject({ quality: "YELLOW", tier: "TIER_10K", manualPerSecond: 12, manualReason: "teste" });
+    expect(o.rate?.[META].effectivePerSecond).toBe(12);
+    expect(o.rateCeiling).toBeGreaterThan(0);
+    expect(o.rateHistory[0]).toMatchObject({ numero: "Principal", source: "webhook", qualityOld: "GREEN", qualityNew: "YELLOW", rateOld: 50, rateNew: 30 });
+    expect(has(calls.find((c) => c.table === "dispatch_channel_rate_history" && c.ops.some((x) => x[0] === "order"))!, "eq", "account_id", ACC)).toBe(true);
+  });
+
+  it("sem a migration 190: limite/s indisponível (null), histórico vazio, o resto da tela segue", async () => {
+    const { db } = fakeDb({
+      ...rateHandlers,
+      dispatch_rate_policy: () => ({ data: null, error: { message: 'relation "wacrm.dispatch_rate_policy" does not exist', code: "42P01" } }),
+    });
+    const o = await loadLimitsOverview(db, ACC, ENV);
+    expect(o.rate).toBeNull();
+    expect(o.rateCeiling).toBeNull();
+    expect(o.rateHistory).toEqual([]);
+    expect(o.numbers).toHaveLength(1);
   });
 });

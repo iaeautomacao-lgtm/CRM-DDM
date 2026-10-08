@@ -21,7 +21,7 @@ vi.mock("@/lib/disparador/admin-client", () => ({
     from: (table: string) => {
       mocks.tables.push(table);
       const proxy: Record<string, unknown> = {};
-      for (const m of ["select", "eq", "in", "order", "limit"]) proxy[m] = () => proxy;
+      for (const m of ["select", "eq", "in", "is", "gte", "order", "limit"]) proxy[m] = () => proxy;
       proxy.update = (v: unknown) => {
         mocks.writes.push(v);
         return proxy;
@@ -73,7 +73,7 @@ describe("/api/disparador/limits — papel", () => {
     expect(res.headers.get("Cache-Control")).toContain("no-store");
     const body = await res.json();
     expect(body.numbers[0]).toMatchObject({ id: SESSION, maxInFlight: 4, paused: false });
-    expect(body.rate).toBeNull();
+    expect(body.rate).toHaveProperty(SESSION);
   });
 });
 

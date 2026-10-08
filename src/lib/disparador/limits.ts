@@ -5,8 +5,8 @@
 // Toda mudança exige motivo, confirmação e grava logAuditEvent com o "antes → depois". Vale no próximo tick:
 // o cron lê a linha do canal a cada tick (sem restart). Os globais (env) são só leitura.
 //
-// O limite por segundo / qualidade (P1-5, migration 190) NÃO é daqui: `loadRateInfo` é o ponto de ligação e
-// devolve null até o PR do limite/s entrar.
+// O limite por segundo / qualidade (P1-5, migration 190, PR #140) é do rate-limits-service: aqui só LEMOS
+// (`loadRateInfo`) para a tela; as escritas vão direto em /api/disparador/rate-limits.
 
 import {
   MAX_PER_NUMBER_CONCURRENCY,
@@ -16,6 +16,7 @@ import {
 } from "./throughput-config";
 import { isTickChainEnabled } from "./tick-chain";
 import { isBatchClaimEnabled } from "./batch-claim";
+import { listRateLimits } from "./rate-limits-service";
 
 export class LimitsInputError extends Error {
   constructor(
@@ -215,21 +216,108 @@ export interface LimitsOverview {
   history: HistoryEntry[];
   /** false = migration 192 ainda não aplicada: o botão de pausa fica desligado. */
   pauseSupported: boolean;
-  /** Ponto de ligação do limite/s por qualidade (P1-5), por número: null até o PR entrar. */
+  /** Limite/s por qualidade (P1-5/migration 190), por número Meta: null se a 190 não está aplicada. */
   rate: Record<string, RateInfo> | null;
+  /** Teto físico de limite/s por número (política da conta); null sem a 190. */
+  rateCeiling: number | null;
+  /** Mudanças de limite/s e de qualidade (histórico imutável da 190), mais recentes primeiro. */
+  rateHistory: RateHistoryEntry[];
 }
 
 export interface RateInfo {
   quality: string | null;
+  tier: string | null;
   autoPerSecond: number | null;
+  autoTargetPerSecond: number | null;
   manualPerSecond: number | null;
+  manualReason: string | null;
+  forceAboveQuality: boolean;
   effectivePerSecond: number | null;
+  /** "auto" | "manual" | … (effective_source da API do limite/s). */
+  source: string | null;
+  inCooldown: boolean;
+  ramping: boolean;
+  requiresOwnerConfirmation: boolean;
 }
 
-/** Limite/s por número (qualidade da Meta, automático/manual/efetivo) — ligado quando a 190 entrar. */
-// Quando a 190 entrar, passa a receber (db, accountId) e ler channel_health/dispatch_channel_rate.
-export async function loadRateInfo(): Promise<Map<string, RateInfo> | null> {
-  return null;
+export interface RateHistoryEntry {
+  id: string;
+  createdAt: string;
+  sessionId: string;
+  numero: string | null;
+  source: string;
+  qualityOld: string | null;
+  qualityNew: string | null;
+  rateOld: number | null;
+  rateNew: number | null;
+  reason: string | null;
+}
+
+/**
+ * Limite/s por número e política, direto do serviço do PR #140 (mesma regra de GET /api/disparador/rate-limits).
+ * Sem a migration 190 (ou qualquer falha de leitura), devolve null: a tela mostra "indisponível" e segue.
+ */
+export async function loadRateInfo(db: LimitsDb, accountId: string): Promise<{ byNumber: Map<string, RateInfo>; ceiling: number } | null> {
+  try {
+    const view = await listRateLimits(db as unknown as Parameters<typeof listRateLimits>[0], accountId);
+    const byNumber = new Map<string, RateInfo>();
+    for (const c of view.channels) {
+      byNumber.set(c.session_id, {
+        quality: c.health?.quality_rating ?? null,
+        tier: c.health?.messaging_limit_tier ?? null,
+        autoPerSecond: c.rate?.auto_effective ?? null,
+        autoTargetPerSecond: c.rate?.auto_target ?? null,
+        manualPerSecond: c.rate?.manual ?? null,
+        manualReason: c.rate?.manual_reason ?? null,
+        forceAboveQuality: c.rate?.force_above_quality === true,
+        effectivePerSecond: c.rate?.effective ?? null,
+        source: c.rate?.effective_source ?? null,
+        inCooldown: c.rate?.in_cooldown === true,
+        ramping: c.rate?.ramping === true,
+        requiresOwnerConfirmation: c.requires_owner_confirmation,
+      });
+    }
+    return { byNumber, ceiling: view.ceiling };
+  } catch {
+    return null;
+  }
+}
+
+export async function loadRateHistory(db: LimitsDb, accountId: string, labels: Map<string, string>): Promise<RateHistoryEntry[]> {
+  const { data, error } = await run<
+    Array<{
+      id: string;
+      created_at: string;
+      session_id: string;
+      source: string;
+      quality_old: string | null;
+      quality_new: string | null;
+      rate_old: number | string | null;
+      rate_new: number | string | null;
+      reason: string | null;
+    }>
+  >(
+    db
+      .from("dispatch_channel_rate_history")
+      .select("id, created_at, session_id, source, quality_old, quality_new, rate_old, rate_new, reason")
+      .eq("account_id", accountId)
+      .order("created_at", { ascending: false })
+      .limit(HISTORY_LIMIT),
+  );
+  if (error) return [];
+  const num = (v: number | string | null) => (v === null || v === undefined ? null : Number(v));
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    createdAt: r.created_at,
+    sessionId: r.session_id,
+    numero: labels.get(r.session_id) ?? null,
+    source: r.source,
+    qualityOld: r.quality_old,
+    qualityNew: r.quality_new,
+    rateOld: num(r.rate_old),
+    rateNew: num(r.rate_new),
+    reason: r.reason,
+  }));
 }
 
 export function readGlobals(env: Record<string, string | undefined> = process.env): GlobalSettings {
@@ -333,8 +421,17 @@ export async function loadLimitsOverview(
   numbers.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
 
   const history = await loadHistory(db, accountId, new Map(configs.map((c) => [c.id, labelOf(c)])));
-  const rate = await loadRateInfo();
-  return { numbers, globals, history, pauseSupported, rate: rate ? Object.fromEntries(rate) : null };
+  const labels = new Map(configs.map((c) => [c.id, labelOf(c)]));
+  const [rate, rateHistory] = await Promise.all([loadRateInfo(db, accountId), loadRateHistory(db, accountId, labels)]);
+  return {
+    numbers,
+    globals,
+    history,
+    pauseSupported,
+    rate: rate ? Object.fromEntries(rate.byNumber) : null,
+    rateCeiling: rate?.ceiling ?? null,
+    rateHistory: rate ? rateHistory : [],
+  };
 }
 
 export async function loadHistory(db: LimitsDb, accountId: string, labels: Map<string, string>): Promise<HistoryEntry[]> {

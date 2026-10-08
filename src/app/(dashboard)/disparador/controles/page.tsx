@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { formatInt, timeAgoPt } from "@/lib/disparador/monitor-format";
-import type { LimitsOverview, NumberLimits } from "@/lib/disparador/limits";
+import type { LimitsOverview, NumberLimits, RateInfo } from "@/lib/disparador/limits";
 
 const REASON_MIN = 5;
 const REASON_MAX = 300;
@@ -25,9 +25,15 @@ interface Draft {
   maxInFlight: string;
   hourlyLimit: string;
 }
+interface PendingRequest {
+  url: string;
+  method: "PUT" | "POST";
+  body: Record<string, unknown>;
+}
 interface Pending {
   number: NumberLimits;
-  patch: { maxInFlight?: number; hourlyLimit?: number | null; paused?: boolean };
+  /** Monta a chamada com o motivo digitado (limites do canal → /limits; limite/s → /rate-limits). */
+  request: (reason: string) => PendingRequest;
   lines: Array<{ label: string; before: string; after: string }>;
   warnings: string[];
 }
@@ -40,9 +46,162 @@ async function readJson(res: Response) {
   return body;
 }
 
+const QUALITY_LABEL: Record<string, string> = { GREEN: "Verde", YELLOW: "Amarela", RED: "Vermelha", UNKNOWN: "Sem leitura" };
+const QUALITY_CLASS: Record<string, string> = {
+  GREEN: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
+  YELLOW: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
+  RED: "border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-200",
+};
+const SOURCE_LABEL: Record<string, string> = {
+  webhook: "Aviso da Meta",
+  poll: "Consulta automática",
+  admin: "Alteração manual",
+  revert_auto: "Voltou ao automático",
+  policy: "Política da conta",
+};
+
+function RateBlock(props: {
+  number: NumberLimits;
+  info: RateInfo | null;
+  available: boolean;
+  ceiling: number | null;
+  draft: { rate: string; force: boolean };
+  onDraft: (v: { rate: string; force: boolean }) => void;
+  onReview: (n: NumberLimits, info: RateInfo) => void;
+  onRevert: (n: NumberLimits, info: RateInfo) => void;
+}) {
+  const { number: n, info, available, ceiling, draft } = props;
+  if (!available) {
+    return (
+      <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+        Limite por segundo indisponível: aplique a migration 190 (limite por qualidade da Meta).
+      </p>
+    );
+  }
+  if (!info) {
+    return <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">Sem leitura de qualidade para este número ainda.</p>;
+  }
+  const quality = info.quality ?? "UNKNOWN";
+  const above = info.autoTargetPerSecond !== null && Number(draft.rate.replace(",", ".")) > info.autoTargetPerSecond;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold">Limite por segundo</h3>
+        <Badge variant="outline" className={QUALITY_CLASS[quality]}>
+          Qualidade {QUALITY_LABEL[quality] ?? quality}
+        </Badge>
+      </div>
+      <dl className="grid grid-cols-3 gap-2 text-xs">
+        <div>
+          <dt className="text-muted-foreground">Automático</dt>
+          <dd className="font-medium tabular-nums">{info.autoPerSecond ?? "—"}/s{info.ramping ? " (subindo)" : ""}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Manual</dt>
+          <dd className="font-medium tabular-nums">{info.manualPerSecond !== null ? `${info.manualPerSecond}/s` : "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Vale agora</dt>
+          <dd className="font-bold tabular-nums">
+            {info.effectivePerSecond ?? "—"}/s{info.inCooldown ? " (freio)" : ""}
+          </dd>
+        </div>
+      </dl>
+      {info.manualReason && info.manualPerSecond !== null && <p className="text-[11px] text-muted-foreground">Motivo do manual: {info.manualReason}</p>}
+      {info.requiresOwnerConfirmation && <p className="text-[11px] text-rose-700 dark:text-rose-300">Qualidade vermelha: campanha nova neste número exige confirmação do owner.</p>}
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1 text-xs font-medium">
+          Novo limite manual (envios/s{ceiling !== null ? `, até ${ceiling}` : ""})
+          <Input
+            inputMode="decimal"
+            className="h-9 w-40"
+            placeholder="Ex.: 40"
+            value={draft.rate}
+            onChange={(e) => props.onDraft({ ...draft, rate: e.target.value })}
+          />
+        </label>
+        <Button size="sm" variant="outline" className="h-9 text-xs" disabled={draft.rate.trim() === ""} onClick={() => props.onReview(n, info)}>
+          Revisar limite/s
+        </Button>
+        {info.manualPerSecond !== null && (
+          <Button size="sm" variant="ghost" className="h-9 text-xs" onClick={() => props.onRevert(n, info)}>
+            Voltar ao automático
+          </Button>
+        )}
+      </div>
+      {above && (
+        <label className="flex items-start gap-2 text-[11px] text-muted-foreground">
+          <input type="checkbox" className="mt-0.5" checked={draft.force} onChange={(e) => props.onDraft({ ...draft, force: e.target.checked })} />
+          Manter acima do que a qualidade permite (somente o owner consegue; sem isso a API recusa).
+        </label>
+      )}
+    </div>
+  );
+}
+
+function HistoryCard({ overview }: { overview: LimitsOverview | null }) {
+  const [now] = useState(() => Date.now());
+  type Row = { id: string; at: string; numero: string | null; quem: string; mudanca: string; motivo: string | null };
+  const rows: Row[] = [];
+  for (const h of overview?.history ?? []) {
+    rows.push({ id: `l-${h.id}`, at: h.createdAt, numero: h.numero, quem: h.userName ?? "—", mudanca: h.summary?.replace(/^Número [^:]*: /, "") ?? "—", motivo: h.reason });
+  }
+  for (const r of overview?.rateHistory ?? []) {
+    const q = r.qualityOld !== r.qualityNew && r.qualityNew ? `qualidade ${QUALITY_LABEL[r.qualityOld ?? "UNKNOWN"] ?? r.qualityOld ?? "—"} → ${QUALITY_LABEL[r.qualityNew] ?? r.qualityNew}; ` : "";
+    rows.push({
+      id: `r-${r.id}`,
+      at: r.createdAt,
+      numero: r.numero,
+      quem: SOURCE_LABEL[r.source] ?? r.source,
+      mudanca: `${q}limite/s ${r.rateOld ?? "—"} → ${r.rateNew ?? "—"}`,
+      motivo: r.reason,
+    });
+  }
+  rows.sort((x, y) => Date.parse(y.at) - Date.parse(x.at));
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Histórico de mudanças</CardTitle>
+        <CardDescription className="text-xs">Vagas, limite por hora, pausa e limite por segundo (inclui quedas de qualidade da Meta), com quem fez e por quê.</CardDescription>
+      </CardHeader>
+      <CardContent className="overflow-x-auto">
+        {rows.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma mudança registrada ainda.</p>
+        ) : (
+          <table className="w-full min-w-[640px] text-sm">
+            <thead className="text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="py-2 pr-3 font-medium">Quando</th>
+                <th className="py-2 pr-3 font-medium">Número</th>
+                <th className="py-2 pr-3 font-medium">Quem</th>
+                <th className="py-2 pr-3 font-medium">Mudança</th>
+                <th className="py-2 font-medium">Motivo</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 80).map((h) => (
+                <tr key={h.id} className="border-t border-border/60 align-top">
+                  <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground" title={new Date(h.at).toLocaleString("pt-BR")}>
+                    {timeAgoPt(Math.max(0, Math.round((now - Date.parse(h.at)) / 1000)))}
+                  </td>
+                  <td className="py-2 pr-3">{h.numero ?? "—"}</td>
+                  <td className="py-2 pr-3">{h.quem}</td>
+                  <td className="py-2 pr-3 text-xs">{h.mudanca}</td>
+                  <td className="py-2 text-xs text-muted-foreground">{h.motivo ?? "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function ControlesPage() {
   const [overview, setOverview] = useState<LimitsOverview | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+  const [rateDrafts, setRateDrafts] = useState<Record<string, { rate: string; force: boolean }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,7 +239,7 @@ export default function ControlesPage() {
 
   const review = (n: NumberLimits) => {
     const d = drafts[n.id];
-    const patch: Pending["patch"] = {};
+    const patch: { maxInFlight?: number; hourlyLimit?: number | null; paused?: boolean } = {};
     const lines: Pending["lines"] = [];
     const warnings: string[] = [];
 
@@ -119,7 +278,7 @@ export default function ControlesPage() {
     setNotice(null);
     setReason("");
     setDialogError(null);
-    setPending({ number: n, patch, lines, warnings });
+    setPending({ number: n, request: limitsRequest(n, patch), lines, warnings });
   };
 
   const reviewPause = (n: NumberLimits) => {
@@ -130,11 +289,67 @@ export default function ControlesPage() {
     setDialogError(null);
     setPending({
       number: n,
-      patch: { paused },
+      request: limitsRequest(n, { paused }),
       lines: [{ label: "Número", before: n.paused ? "pausado" : "ativo", after: paused ? "pausado" : "ativo" }],
       warnings: paused
         ? ["Itens já em envio terminam normalmente; os agendados ficam esperando e saem sozinhos quando você retomar. Nada é cancelado."]
         : [],
+    });
+  };
+
+  const limitsRequest = (n: NumberLimits, patch: { maxInFlight?: number; hourlyLimit?: number | null; paused?: boolean }) =>
+    (reason: string): PendingRequest => ({
+      url: "/api/disparador/limits",
+      method: "PUT",
+      body: {
+        sessionId: n.id,
+        ...patch,
+        reason,
+        confirm: true,
+        // O "antes" que a tela mostrou: se mudou no banco, a API recusa em vez de sobrescrever.
+        expected: { maxInFlight: n.maxInFlight, hourlyLimit: n.hourlyLimit, paused: n.paused },
+      },
+    });
+
+  const reviewRate = (n: NumberLimits, info: RateInfo) => {
+    const d = rateDrafts[n.id] ?? { rate: "", force: false };
+    const rate = Number(d.rate.replace(",", "."));
+    const ceiling = overview?.rateCeiling ?? null;
+    if (!Number.isFinite(rate) || rate <= 0 || (ceiling !== null && rate > ceiling)) {
+      setError(`${n.label}: o limite por segundo deve ser maior que zero${ceiling !== null ? ` e no máximo ${ceiling}/s` : ""}.`);
+      return;
+    }
+    const before = info.manualPerSecond !== null ? `${info.manualPerSecond}/s (manual)` : `${info.autoPerSecond ?? "?"}/s (automático)`;
+    const warnings: string[] = [];
+    const above = info.autoTargetPerSecond !== null && rate > info.autoTargetPerSecond;
+    if (above) warnings.push(`Acima do que a qualidade da Meta recomenda hoje (${info.autoTargetPerSecond}/s). ${d.force ? "Você marcou manter acima da qualidade: só o owner consegue." : "Se a Meta limitar, o motor freia sozinho."}`);
+    if (info.quality === "RED") warnings.push("A qualidade deste número está VERMELHA. Subir o ritmo pode agravar o bloqueio.");
+    setError(null);
+    setNotice(null);
+    setReason("");
+    setDialogError(null);
+    setPending({
+      number: n,
+      lines: [{ label: "Limite por segundo", before, after: `${rate}/s (manual)` }],
+      warnings,
+      request: (reason) => ({
+        url: "/api/disparador/rate-limits",
+        method: "PUT",
+        body: { session_id: n.id, rate_per_second: rate, reason, force_above_quality: above && d.force },
+      }),
+    });
+  };
+
+  const reviewRevert = (n: NumberLimits, info: RateInfo) => {
+    setError(null);
+    setNotice(null);
+    setReason("");
+    setDialogError(null);
+    setPending({
+      number: n,
+      lines: [{ label: "Limite por segundo", before: `${info.manualPerSecond}/s (manual)`, after: `${info.autoPerSecond ?? "?"}/s (automático, pela qualidade)` }],
+      warnings: [],
+      request: (reason) => ({ url: `/api/disparador/rate-limits/${n.id}/revert-auto`, method: "POST", body: { reason } }),
     });
   };
 
@@ -148,24 +363,23 @@ export default function ControlesPage() {
     setSaving(true);
     setDialogError(null);
     try {
+      const call = pending.request(text);
       await readJson(
-        await apiFetch("/api/disparador/limits", {
-          method: "PUT",
+        await apiFetch(call.url, {
+          method: call.method,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: pending.number.id,
-            ...pending.patch,
-            reason: text,
-            confirm: true,
-            // O "antes" que a tela mostrou: se mudou no banco, a API recusa em vez de sobrescrever.
-            expected: { maxInFlight: pending.number.maxInFlight, hourlyLimit: pending.number.hourlyLimit, paused: pending.number.paused },
-          }),
+          body: JSON.stringify(call.body),
         }),
       );
       const id = pending.number.id;
       setPending(null);
       setNotice(`${pending.number.label}: mudança salva. Vale a partir do próximo ciclo do motor (até ~1 min), sem reiniciar.`);
       setDrafts((d) => {
+        const rest = { ...d };
+        delete rest[id];
+        return rest;
+      });
+      setRateDrafts((d) => {
         const rest = { ...d };
         delete rest[id];
         return rest;
@@ -283,6 +497,18 @@ export default function ControlesPage() {
                         {n.paused ? "Retomar número" : "Pausar número"}
                       </Button>
                     </div>
+                    {n.provider === "meta" && (
+                      <RateBlock
+                        number={n}
+                        info={overview?.rate?.[n.id] ?? null}
+                        available={overview?.rate != null}
+                        ceiling={overview?.rateCeiling ?? null}
+                        draft={rateDrafts[n.id] ?? { rate: "", force: false }}
+                        onDraft={(v) => setRateDrafts((d) => ({ ...d, [n.id]: v }))}
+                        onReview={reviewRate}
+                        onRevert={reviewRevert}
+                      />
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -330,42 +556,7 @@ export default function ControlesPage() {
             </Card>
           )}
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Histórico de mudanças</CardTitle>
-              <CardDescription className="text-xs">As últimas 50 mudanças de limites desta conta, com quem fez e por quê.</CardDescription>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-              {(overview?.history ?? []).length === 0 ? (
-                <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma mudança registrada ainda.</p>
-              ) : (
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead className="text-left text-xs text-muted-foreground">
-                    <tr>
-                      <th className="py-2 pr-3 font-medium">Quando</th>
-                      <th className="py-2 pr-3 font-medium">Número</th>
-                      <th className="py-2 pr-3 font-medium">Quem</th>
-                      <th className="py-2 pr-3 font-medium">Mudança</th>
-                      <th className="py-2 font-medium">Motivo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overview!.history.map((h) => (
-                      <tr key={h.id} className="border-t border-border/60 align-top">
-                        <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground" title={new Date(h.createdAt).toLocaleString("pt-BR")}>
-                          {timeAgoPt(Math.max(0, Math.round((Date.now() - Date.parse(h.createdAt)) / 1000)))}
-                        </td>
-                        <td className="py-2 pr-3">{h.numero ?? "—"}</td>
-                        <td className="py-2 pr-3">{h.userName ?? "—"}</td>
-                        <td className="py-2 pr-3 text-xs">{h.summary?.replace(/^Número [^:]*: /, "") ?? "—"}</td>
-                        <td className="py-2 text-xs text-muted-foreground">{h.reason ?? "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </CardContent>
-          </Card>
+          <HistoryCard overview={overview} />
         </>
       )}
 

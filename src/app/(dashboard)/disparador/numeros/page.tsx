@@ -1,8 +1,7 @@
 "use client";
 
 // /disparador/numeros — um card por número: ao vivo (snapshot do Monitor) + configuração (limites do canal).
-// Só leitura; quem edita é a aba Controles. Qualidade e limite/s entram quando o PR do limite por qualidade
-// (P1-5) for ligado: hoje mostram "em breve".
+// Só leitura; quem edita é a aba Controles. Qualidade e limite/s vêm do limite por qualidade da Meta (migration 190).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -21,6 +20,7 @@ const LIVE_MS = 3000;
 const CONFIG_MS = 15000;
 
 const PROVIDER_LABEL = { meta: "API oficial (Meta)", waha: "WAHA", unknown: "Provedor não definido" } as const;
+const QUALITY_LABEL: Record<string, string> = { GREEN: "Verde", YELLOW: "Amarela", RED: "Vermelha", UNKNOWN: "Sem leitura" };
 const STATUS_CLASS: Record<MonitorNumberRow["status"], string> = {
   ok: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
   freio: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
@@ -174,14 +174,14 @@ export default function NumerosPage() {
                     <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
                       <div>
                         <dt className="text-muted-foreground">Qualidade da Meta</dt>
-                        <dd className="font-medium">{rate?.quality ?? "em breve"}</dd>
+                        <dd className="font-medium">{rate?.quality ? (QUALITY_LABEL[rate.quality] ?? rate.quality) : overview?.rate == null ? "indisponível (migration 190)" : "sem leitura"}</dd>
                       </div>
                       <div>
                         <dt className="text-muted-foreground">Limite por segundo</dt>
                         <dd className="font-medium">
                           {rate?.effectivePerSecond != null
                             ? `${rate.effectivePerSecond}/s (${rate.manualPerSecond != null ? "manual" : "automático"})`
-                            : "em breve"}
+                            : n.provider === "meta" ? "—" : "não se aplica (WAHA)"}
                         </dd>
                       </div>
                       <div>
