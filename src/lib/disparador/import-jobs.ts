@@ -17,7 +17,8 @@ import { importContactBlock, resolveField, type ColumnMap, type ImportBlockOutco
 
 type Db = any;
 
-/** Bucket de Storage já existente (migration 055): blocos sob `<account_id>/disparador-imports/<job>/blocks/<n>.json`. */
+/** Bucket de Storage já existente (migration 055): blocos sob `<account_id>/disparador-imports/<job>/blocks/<n>.json`.
+ *  O bucket só aceita csv/xlsx/octet-stream (055): o bloco (JSON) sobe como application/octet-stream. */
 export const IMPORT_BUCKET = "relatorio-exports";
 /** Linhas por bloco (o mesmo teto da rota síncrona). */
 export const IMPORT_BLOCK_MAX_ROWS = IMPORT_SERVER_MAX_ROWS;
@@ -132,7 +133,7 @@ export async function putImportBlock(db: Db, job: ImportJob, n: number, rawRows:
   if (n === 0 && !rows.some((row) => resolveField(row, job.column_map.phone, [])?.trim())) {
     return fail("no_phone_column", "A coluna de contato selecionada não contém nenhum telefone válido.", 400);
   }
-  const { error: uploadError } = await db.storage.from(IMPORT_BUCKET).upload(blockPath(job, n), Buffer.from(JSON.stringify(rows), "utf8"), { contentType: "application/json", upsert: true });
+  const { error: uploadError } = await db.storage.from(IMPORT_BUCKET).upload(blockPath(job, n), Buffer.from(JSON.stringify(rows), "utf8"), { contentType: "application/octet-stream", upsert: true });
   if (uploadError) throw new Error(`Falha ao guardar o bloco ${n}: ${uploadError.message}`);
   const blocks = { ...job.blocks, [String(n)]: rows.length };
   const rowsTotal = Object.values(blocks).reduce((a, b) => a + b, 0);
