@@ -1645,7 +1645,7 @@ export function MessageThread({
 
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-5 sm:px-5">
-          <div className="mx-auto w-full max-w-[980px]">
+          <div className="mx-auto w-full max-w-[1120px]">
           {loading ? (
             <div className="flex items-center justify-center py-12" role="status">
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
