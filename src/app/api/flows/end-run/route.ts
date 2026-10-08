@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { hasMinRole, isAccountRole } from '@/lib/auth/roles'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { endActiveRunForConversation } from '@/lib/flows/engine'
 
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('account_id')
+      .select('account_id, account_role')
       .eq('user_id', user.id)
       .maybeSingle()
     const accountId = profile?.account_id as string | undefined
@@ -36,11 +37,31 @@ export async function POST(request: Request) {
       )
     }
 
+    // Visualizador (somente leitura) não encerra fluxo (PRD 20, G3): era só
+    // sessão + service role. Os demais papéis seguem como antes.
+    const role = (profile as { account_role?: string } | null)?.account_role
+    if (!role || !isAccountRole(role) || !hasMinRole(role, 'agent')) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
+
     const body = await request.json()
     const conversationId = body?.conversation_id as string | undefined
     const requestedReason = body?.reason as string | undefined
     if (!conversationId) {
       return NextResponse.json({ error: 'conversation_id is required' }, { status: 400 })
+    }
+
+    // A conversa precisa ser VISÍVEL para quem pede: leitura pelo cliente de
+    // sessão (RLS: o operador só enxerga as dele e a fila da equipe; supervisor,
+    // as das equipes dele). Só depois entra o service role.
+    const { data: visible } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('account_id', accountId)
+      .maybeSingle()
+    if (!visible) {
+      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
     }
 
     // Defense in depth — scoped by account_id, same rationale as every
