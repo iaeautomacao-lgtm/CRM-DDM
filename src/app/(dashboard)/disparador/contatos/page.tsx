@@ -71,7 +71,7 @@ export default function ImportarContatosPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col space-y-6 p-4 lg:p-6 overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-6 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
         {/* Link estilizado como botão (antes: <a><button> aninhados, 2 paradas de Tab) */}
@@ -173,34 +173,34 @@ export default function ImportarContatosPage() {
 
             <div className="grid grid-cols-2 gap-2 sm:gap-4" role="status">
               <div className="rounded-lg border border-border p-3.5 space-y-1.5 bg-emerald-500/5">
-                <span className="text-[10px] font-bold text-emerald-500 uppercase">Importados</span>
+                <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase">Importados</span>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold text-emerald-500">{results.importados}</span>
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  <span className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{results.importados}</span>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
                 </div>
               </div>
 
               <div className="rounded-lg border border-border p-3.5 space-y-1.5 bg-amber-500/5">
-                <span className="text-[10px] font-bold text-amber-500 uppercase">Duplicados</span>
+                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase">Duplicados</span>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold text-amber-500">{results.duplicados}</span>
-                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  <span className="text-xl font-bold text-amber-700 dark:text-amber-400">{results.duplicados}</span>
+                  <AlertTriangle className="h-4 w-4 text-amber-700 dark:text-amber-400" />
                 </div>
               </div>
 
               <div className="rounded-lg border border-border p-3.5 space-y-1.5 bg-zinc-500/5">
-                <span className="text-[10px] font-bold text-zinc-500 uppercase">Inválidos</span>
+                <span className="text-[10px] font-bold text-zinc-700 dark:text-zinc-400 uppercase">Inválidos</span>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold text-zinc-500">{results.invalidos}</span>
-                  <AlertCircle className="h-4 w-4 text-zinc-500" />
+                  <span className="text-xl font-bold text-zinc-700 dark:text-zinc-400">{results.invalidos}</span>
+                  <AlertCircle className="h-4 w-4 text-zinc-700 dark:text-zinc-400" />
                 </div>
               </div>
 
               <div className="rounded-lg border border-border p-3.5 space-y-1.5 bg-red-500/5">
-                <span className="text-[10px] font-bold text-red-500 uppercase">Na Blacklist</span>
+                <span className="text-[10px] font-bold text-red-700 dark:text-red-400 uppercase">Na Blacklist</span>
                 <div className="flex items-baseline justify-between">
-                  <span className="text-xl font-bold text-red-500">{results.blacklisted}</span>
-                  <AlertCircle className="h-4 w-4 text-red-500" />
+                  <span className="text-xl font-bold text-red-700 dark:text-red-400">{results.blacklisted}</span>
+                  <AlertCircle className="h-4 w-4 text-red-700 dark:text-red-400" />
                 </div>
               </div>
             </div>
@@ -208,7 +208,7 @@ export default function ImportarContatosPage() {
             {results.erros.length > 0 && (
               <div className="space-y-2">
                 <h4 className="text-xs font-semibold text-foreground">Erros Detalhados:</h4>
-                <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 font-mono text-[10px] space-y-1 text-red-500">
+                <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-muted/20 p-3 font-mono text-[10px] space-y-1 text-red-700 dark:text-red-400">
                   {results.erros.map((err, idx) => (
                     <div key={idx}>{err}</div>
                   ))}

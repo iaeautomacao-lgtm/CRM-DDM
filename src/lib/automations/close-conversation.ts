@@ -47,7 +47,14 @@ export async function closeConversationForAutomation(
     const outcomeTagId =
       (input.configuredOutcomeTagId ? input.configuredOutcomeTagId : null) ??
       (await resolveFallbackOutcomeTagId(db, input.accountId))
-    if (outcomeTagId) patch.outcome_tag_id = outcomeTagId
+    if (outcomeTagId) {
+      patch.outcome_tag_id = outcomeTagId
+      // Procedência (migration 157). A sugestão (suggested_*) fica para
+      // as métricas de aceite.
+      patch.outcome_source = 'automation'
+      patch.outcome_set_by = null
+      patch.outcome_set_at = patch.updated_at
+    }
   }
 
   const { error: updateError } = await db

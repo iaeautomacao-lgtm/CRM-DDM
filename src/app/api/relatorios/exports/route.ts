@@ -29,7 +29,7 @@ const CONTENT_TYPES: Record<string, string> = {
 const MAX_EXPORT_BYTES = 25 * 1024 * 1024;
 const MAX_BASE64_LENGTH = Math.ceil((MAX_EXPORT_BYTES * 4) / 3) + 4;
 
-const EXPORT_TYPES = ["conversas", "envio-em-lote", "atendimentos"] as const;
+const EXPORT_TYPES = ["conversas", "envio-em-lote", "atendimentos", "tabulacoes"] as const;
 type ExportType = (typeof EXPORT_TYPES)[number];
 
 interface ExportUploadBody {
@@ -75,7 +75,10 @@ export async function POST(request: Request) {
 
     // A extensão entra na chave do Storage: só as conhecidas (nada de "/", ".."
     // ou extensão arbitrária vinda do nome enviado pelo cliente).
-    const ext = body.fileName.split(".").pop()?.toLowerCase() ?? "";
+    const ext = /\.(xlsx|csv)$/i.exec(body.fileName)?.[1].toLowerCase();
+    if (!ext) {
+      return NextResponse.json({ error: "Formato de arquivo não suportado" }, { status: 400 });
+    }
     const contentType = CONTENT_TYPES[ext];
     if (!contentType) {
       return NextResponse.json({ error: "Formato de arquivo não suportado" }, { status: 400 });
@@ -83,6 +86,9 @@ export async function POST(request: Request) {
     const storagePath = `${ctx.accountId}/${randomUUID()}.${ext}`;
 
     const buffer = Buffer.from(body.fileBase64, "base64");
+    if (buffer.length > MAX_EXPORT_BYTES) {
+      return NextResponse.json({ error: "Arquivo muito grande" }, { status: 413 });
+    }
 
     // ctx.account is the ACCOUNT's name — the actor's own name lives on
     // their profile row, one extra lookup since AccountContext doesn't

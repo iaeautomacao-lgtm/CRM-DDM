@@ -491,6 +491,8 @@ async function logAiDecision(
   db: AdminClient,
   input: AiDecisionInput,
 ): Promise<void> {
+  // Tag de saída da IA → sugestão de tabulação (best-effort, migration 157).
+  if (input.ai_exit_code) void import("@/lib/ai/outcome-suggestion").then((m) => m.suggestOutcomeFromAiDecision(db, input)).catch(() => {});
   // Telemetria best-effort: nunca derruba o fluxo.
   let error: { message: string } | null = null;
   try {

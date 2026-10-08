@@ -54,7 +54,7 @@ export function createToolExecutor(scope: IntelligenceScope, deps: ToolExecutorD
 
     const fail = async (kind: ToolErrorKind, message: string): Promise<ToolExecution> => {
       const durationMs = now() - startedAt;
-      await log({ scope, toolName: name, args, durationMs, success: false, resultSize: null, error: `${kind}: ${message}` });
+      await log({ origin: "chat", scope, toolName: name, args, durationMs, success: false, resultSize: null, error: `${kind}: ${message}` });
       return { ok: false, kind, message, durationMs };
     };
 
@@ -77,7 +77,7 @@ export function createToolExecutor(scope: IntelligenceScope, deps: ToolExecutorD
       } catch {
         resultSize = null;
       }
-      await log({ scope, toolName: tool.name, args, durationMs, success: true, resultSize });
+      await log({ origin: "chat", scope, toolName: tool.name, args, durationMs, success: true, resultSize });
       return { ok: true, result, durationMs };
     } catch (err) {
       const { kind, message } = classify(err);

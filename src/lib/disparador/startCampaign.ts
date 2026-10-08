@@ -3,12 +3,17 @@ import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
 import { phoneKey } from "@/lib/disparador/phone-key";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
+import { fetchAllKeyset } from "@/lib/disparador/keyset";
+import { insertInBlocks } from "@/lib/disparador/queue-insert";
 import { describeEmptyTemplateVar, describeUnresolvedPlaceholder } from "@/lib/disparador/empty-vars";
 import { checkCampaignConfig } from "@/lib/disparador/campaign-config-check";
 import { formatStartFailureReason, parseTemplateMode } from "@/lib/disparador/campaign-validation";
 import { INTRA_CONTACT_MS, roundContactTimeMs, scheduleRounds } from "@/lib/disparador/window-clock";
 import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
+import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { writeLog } from "@/lib/logger";
+import { findRedChannels, RED_QUALITY_CODE, recordRedConfirmation, redBlockedMessage, type RedChannel, type RedConfirmation } from "@/lib/disparador/red-quality-gate";
+import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
 
 // campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
 // lida por este código — reaproveitada para guardar o modo de alternância
@@ -26,11 +31,16 @@ export interface StartCampaignOptions {
    * com a campanha já em execução).
    */
   startNow?: boolean;
+  /**
+   * Confirmação do OWNER para iniciar com número em qualidade vermelha (já validada pelo chamador: papel + checkbox + motivo).
+   * Ausente (cron de preparação, admin, API) = campanha com número RED não inicia.
+   */
+  redConfirmation?: RedConfirmation;
 }
 
 export type StartCampaignResult =
   | { ok: true; enqueued: number }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: typeof RED_QUALITY_CODE; channels?: RedChannel[] };
 
 // Extraído de src/app/api/disparador/campaigns/[id]/start/route.ts —
 // idêntico ao corpo de negócio daquela rota (steps 1-5), só que
@@ -53,6 +63,8 @@ export async function startCampaign(
   // 'rascunho' para não ficar presa — com o motivo gravado e visível no
   // card (antes uma campanha agendada que falhava voltava a rascunho em
   // silêncio e o agendamento simplesmente sumia).
+  const redGate = await checkRedQualityGate(campaignId, accountId, options);
+  if (redGate) return redGate;
   const state: PrepareState = { preparing: false, agendamento: null };
   const evaluationSince = new Date().toISOString();
   let result: StartCampaignResult;
@@ -64,14 +76,18 @@ export async function startCampaign(
   }
 
   if (state.preparing) {
-    // Falhou no meio da preparação: volta para 'rascunho'. Os itens
-    // parciais já inseridos não são consumidos (campanha não está em
-    // execução) e o próximo start limpa a fila antes de publicar.
-    // Crash do processo não passa por aqui: o cron devolve a 'rascunho'
-    // o que ficar preso em 'preparando' por mais de 30 min.
+    // Falhou no meio da preparação. Os itens parciais já inseridos não são
+    // consumidos (campanha não está em execução) e o próximo start limpa a
+    // fila antes de publicar. Falha transitória (5xx/exceção) de campanha
+    // COM agendamento volta para 'agendado' — o próximo tick tenta de novo,
+    // sem o agendamento sumir; erro de validação (4xx) ou campanha sem
+    // agendamento volta para 'rascunho' com o motivo visível no card.
+    // Crash do processo não passa por aqui: a recuperação (prepare-campaigns)
+    // devolve o que ficar preso em 'preparando' por mais de 30 min.
+    const retryable = !result.ok && result.status >= 500 && state.agendamento != null;
     const { error } = await supabaseAdmin()
       .from("campaigns")
-      .update({ status: "rascunho" })
+      .update({ status: retryable ? "agendado" : "rascunho" })
       .eq("id", campaignId)
       .eq("account_id", accountId)
       .eq("status", "preparando");
@@ -87,6 +103,71 @@ export async function startCampaign(
     if (error) console.error("[startCampaign] Falha ao reiniciar avaliação de pausa automática:", error.message);
   }
   return result;
+}
+
+/**
+ * Número RED na campanha: só o owner (com confirmação) inicia. Roda ANTES do claim, então a agendada que vence fica 'agendado'
+ * (com motivo_falha_inicio e aviso no feed do Monitor, uma vez) até o owner confirmar. Sem migration 190 → inerte.
+ */
+async function checkRedQualityGate(
+  campaignId: string,
+  accountId: string,
+  options: StartCampaignOptions
+): Promise<StartCampaignResult | null> {
+  try {
+    const db = supabaseAdmin();
+    const { data } = await db
+      .from("campaigns")
+      .select("status, session_ids, motivo_falha_inicio")
+      .eq("id", campaignId)
+      .eq("account_id", accountId)
+      .limit(1);
+    const row = data?.[0];
+    if (!row) return null;
+    const red = await findRedChannels(db, accountId, row.session_ids);
+    if (red.length === 0) return null;
+    if (options.redConfirmation) {
+      await recordRedConfirmation(db, { accountId, campaignId, channels: red, confirmation: options.redConfirmation });
+      return null;
+    }
+    const error = redBlockedMessage(red);
+    if (row.status === "agendado") {
+      // Idempotente: o cron de preparação passa aqui todo minuto; grava e avisa só quando o motivo muda.
+      const motivo = `Aguardando confirmação do owner: ${error}`;
+      if (row.motivo_falha_inicio !== motivo) {
+        const { error: updateError } = await db.from("campaigns").update({ motivo_falha_inicio: motivo }).eq("id", campaignId).eq("account_id", accountId);
+        if (updateError) console.error("[startCampaign] Falha ao gravar motivo_falha_inicio (RED):", updateError.message);
+        void writeLog({
+          account_id: accountId,
+          level: "warn",
+          source: "disparador",
+          event: "campaign_red_quality_blocked",
+          message: motivo,
+          payload: { campaign_id: campaignId, session_ids: red.map((c) => c.id) },
+        });
+      }
+    }
+    return { ok: false, status: 409, error, code: RED_QUALITY_CODE, channels: red };
+  } catch (err) {
+    // Falha de leitura do gate não pode travar o envio (inerte, como sem a migration).
+    console.error("[startCampaign] Gate de qualidade vermelha indisponível:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Renova campaigns.updated_at durante a preparação: a recuperação de campanhas
+ * presas (30 min sem updated_at) não pode cortar uma preparação viva. Melhor
+ * esforço — falha só é logada.
+ */
+async function touchPreparing(campaignId: string, accountId: string): Promise<void> {
+  const { error } = await supabaseAdmin()
+    .from("campaigns")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", campaignId)
+    .eq("account_id", accountId)
+    .eq("status", "preparando");
+  if (error) console.error("[startCampaign] Falha ao renovar updated_at da preparação:", error.message);
 }
 
 interface PrepareState {
@@ -151,26 +232,35 @@ async function prepareCampaign(
       .eq("id", campaignId)
       .eq("account_id", accountId)
       .in("status", ["rascunho", "agendado"])
-      .select("id");
+      .select("id, agendamento");
 
     if (claimError) {
       return { ok: false, status: 500, error: claimError.message };
     }
     const claimedFreshStart = !!claimedRows && claimedRows.length > 0;
     state.preparing = claimedFreshStart;
+    // O agendamento vem do próprio claim: se a leitura da campanha logo abaixo falhar por erro
+    // transitório, a campanha volta a 'agendado' (e não a 'rascunho', perdendo o agendamento).
+    if (claimedFreshStart) state.agendamento = claimedRows?.[0]?.agendamento ?? null;
 
     // 2. Fetch campaign configuration — necessário de todo jeito: quando
     // claimedFreshStart, pra ler mensagens/session_ids/etc; quando não,
     // pra decidir entre "retomar pausada" e um 404/409 com a mensagem
     // certa (o claim acima sozinho não diferencia esses casos).
-    const { data: campaign, error: campaignError } = await supabaseAdmin()
+    // limit(1)+[0] (nunca .single()): erro de LEITURA (rede/5xx) é 500 retentável — a campanha
+    // agendada volta a 'agendado' —, e só linha ausente é 404 "não encontrada".
+    const { data: campaignRows, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("*")
       .eq("id", campaignId)
       .eq("account_id", accountId)
-      .single();
+      .limit(1);
 
-    if (campaignError || !campaign) {
+    if (campaignError) {
+      return { ok: false, status: 500, error: `Falha ao ler a campanha: ${campaignError.message}` };
+    }
+    const campaign = campaignRows?.[0];
+    if (!campaign) {
       return { ok: false, status: 404, error: "Campanha não encontrada" };
     }
     state.agendamento = campaign.agendamento ?? null;
@@ -226,6 +316,8 @@ async function prepareCampaign(
           status: 409,
           error: "Estado da campanha mudou; atualize antes de retomar",
         };
+      // Migration 184: a RPC só trocou o status; os itens voltam a 'agendado' em lotes (o cron termina o que sobrar).
+      await drainDispatchMoves(supabaseAdmin(), campaignId, { budgetMs: 15_000 });
       return { ok: true, enqueued: count };
     }
 
@@ -304,71 +396,65 @@ async function prepareCampaign(
     const metaSessionIds = configCheck.channels.filter((c) => c.provider === "meta").map((c) => c.id);
 
     // windowMap: contact_id → Date do último inbound via canal Meta
-    // Usado para decidir template vs texto livre no loop de enfileiramento
+    // Usado para decidir template vs texto livre no loop de enfileiramento.
     const windowMap = new Map<string, Date>();
 
-    if (metaSessionIds.length > 0) {
-      // Paginado via .range() — mesmo padrão de allContacts/blacklist
-      // acima. Sem paginação, uma conta com mais de 1000 mensagens de
-      // clientes no histórico batia no cap de resposta do PostgREST: só
-      // as 1000 mais recentes (globalmente, não por contato) vinham,
-      // então contatos cujo último inbound estava fora desse corte
-      // ficavam de fora do windowMap e caíam no ramo "janela de 24h
-      // encerrada" mesmo tendo respondido há minutos.
+    // Só vale a pena consultar o histórico se alguma mensagem puder ir como
+    // texto livre num canal Meta (sem template + mapa de variáveis): quando
+    // TODAS as mensagens são template, a janela de 24h nunca é usada (B9).
+    const needsWindowLookup =
+      metaSessionIds.length > 0 &&
+      mensagens.some((m: any) => !(m?.template_name && Array.isArray(m?.template_variable_map)));
+
+    if (needsWindowLookup) {
+      // Só o que importa para a janela: inbound dos últimos 24h (antes lia o
+      // histórico inteiro da conta, custo O(H²/1000) com OFFSET), paginado
+      // por KEYSET no id — para achar o MAIS RECENTE por contato a ordem
+      // entre páginas não importa, só o máximo de received_at.
       //
-      // A ordenação DESC por received_at é preservada entre páginas — o
-      // Postgres ordena o resultado inteiro antes de paginar, não cada
-      // página isoladamente — então a primeira ocorrência de cada
-      // contact_id ao longo de TODAS as páginas continua sendo a mais
-      // recente. windowMap.has() abaixo só grava essa primeira ocorrência
-      // por contato, exatamente como antes; só precisou passar a rodar
-      // por página em vez de sobre o array inteiro de uma vez.
+      // 'contact' nunca existe em wacrm.messages.sender_type (valores reais:
+      // 'customer'/'agent'/'bot', confirmado ao vivo) — com 'contact', esta
+      // query sempre voltava vazia e todo envio Meta sem template caía no
+      // ramo "fora da janela de 24h" (erro 131026).
       //
-      // Erro aqui não aborta o início da campanha (nunca abortou, mesmo
-      // antes desta correção) — windowMap fica com o que já foi
-      // acumulado até a página que falhou, e contatos ainda não vistos
-      // degradam para "janela fechada" (mesmo comportamento de sempre
-      // pra um contato sem entrada no Map).
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await supabaseAdmin()
+      // ERRO AQUI ABORTA a preparação (a campanha volta a 'agendado' e tenta
+      // de novo). Antes um erro fazia 'break' silencioso e os contatos ainda
+      // não vistos viravam erro permanente "Janela de 24h encerrada" — de
+      // forma irreversível.
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const inbound = await fetchAllKeyset<{
+        id: string;
+        received_at: string;
+        conversations: { contact_id: string; config_id: string } | null;
+      }>("Falha ao consultar a janela de 24h (histórico de mensagens)", (after, limit) => {
+        let query = supabaseAdmin()
           .schema("wacrm")
           .from("messages")
-          .select("received_at, conversations!inner(contact_id, config_id)")
-          // 'contact' nunca existe em wacrm.messages.sender_type (valores reais:
-          // 'customer'/'agent'/'bot', confirmado ao vivo) — com 'contact', esta
-          // query sempre voltava vazia, então windowMap ficava sempre vazio e
-          // todo envio Meta sem template caía permanentemente no ramo "fora da
-          // janela de 24h" (erro 131026), mesmo pra contatos que responderam há
-          // minutos.
+          .select("id, received_at, conversations!inner(contact_id, config_id)")
           .eq("sender_type", "customer")
           .in("conversations.config_id", metaSessionIds)
-          .order("received_at", { ascending: false })
-          .range(from, from + pageSize - 1);
-
-        if (pageError) {
-          console.error(
-            "[startCampaign] Falha ao paginar histórico de mensagens (janela 24h):",
-            pageError.message
-          );
-          break;
-        }
-
-        for (const row of page ?? []) {
-          const conv = row.conversations as unknown as {
-            contact_id: string;
-            config_id: string;
-          };
-          if (conv?.contact_id && !windowMap.has(conv.contact_id)) {
-            windowMap.set(conv.contact_id, new Date(row.received_at));
-          }
-        }
-
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
+          .gt("received_at", since)
+          .order("id", { ascending: true })
+          .limit(limit);
+        if (after != null) query = query.gt("id", after);
+        return query as unknown as PromiseLike<{
+          data: Array<{
+            id: string;
+            received_at: string;
+            conversations: { contact_id: string; config_id: string } | null;
+          }> | null;
+          error: { message: string } | null;
+        }>;
+      });
+      for (const row of inbound) {
+        const contactId = row.conversations?.contact_id;
+        if (!contactId) continue;
+        const at = new Date(row.received_at);
+        const current = windowMap.get(contactId);
+        if (!current || at > current) windowMap.set(contactId, at);
       }
     }
+    await touchPreparing(campaignId, accountId);
 
     // Público da campanha (src/lib/disparador/audience.ts): CSV ∩
     // tabulações, nunca "a conta inteira" quando a campanha é de CSV.
@@ -377,6 +463,7 @@ async function prepareCampaign(
     if (!audience.ok) {
       return { ok: false, status: 400, error: audience.error };
     }
+    await touchPreparing(campaignId, accountId);
 
     // 2. Remove previously scheduled/pending items to prevent duplication.
     // 'enviando' incluído para limpar itens travados por crash/deploy
@@ -412,24 +499,22 @@ async function prepareCampaign(
     // padrão do restante do arquivo.
     const alreadySentContactIds = new Set<string>();
     {
-      const pageSize = 1000;
-      let from = 0;
-      while (true) {
-        const { data: page, error: pageError } = await supabaseAdmin()
-          .from("disp_message_queue")
-          .select("contact_id")
-          .eq("campaign_id", campaignId)
-          .in("status", ["enviado", "entregue", "lido"])
-          .range(from, from + pageSize - 1);
-        if (pageError) {
-          throw new Error(`Erro ao carregar contatos já enviados: ${pageError.message}`);
-        }
-        for (const row of page ?? []) {
-          if (row.contact_id) alreadySentContactIds.add(row.contact_id);
-        }
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
+      // Keyset por id (sem OFFSET): sem pular nem repetir linhas (B9).
+      const sent = await fetchAllKeyset<{ id: string; contact_id: string | null }>(
+        "Erro ao carregar contatos já enviados",
+        (after, limit) => {
+          let query = supabaseAdmin()
+            .from("disp_message_queue")
+            .select("id, contact_id")
+            .eq("campaign_id", campaignId)
+            .in("status", ["enviado", "entregue", "lido"])
+            .order("id", { ascending: true })
+            .limit(limit);
+          if (after != null) query = query.gt("id", after);
+          return query;
+        },
+      );
+      for (const row of sent) if (row.contact_id) alreadySentContactIds.add(row.contact_id);
     }
 
     // Links UTM personalizados por contato (telefone normalizado -> link),
@@ -447,26 +532,27 @@ async function prepareCampaign(
     const utmLinks: UtmLinkMaps = { byCpf: new Map(), byPhone: new Map() };
     if (usaUtmLink) {
       try {
-        // Paginado via .range() — mesmo padrão do restante do arquivo.
-        // Uma campanha grande com UTM pra todo mundo pode passar de 1000
-        // linhas e, sem paginação, deixar {{utm_link}} vazio pros
-        // contatos fora do corte (mesma classe de bug já corrigida em
-        // blacklist/contacts/contact_import_variables acima).
-        const pageSize = 1000;
-        let from = 0;
-        while (true) {
-          const { data: page, error: utmLinksError } = await supabaseAdmin()
+        // Paginado por keyset (id) — uma campanha grande com UTM pra todo
+        // mundo passa de 1000 linhas e, sem paginação, deixaria {{utm_link}}
+        // vazio pros contatos fora do corte.
+        const links = await fetchAllKeyset<{
+          id: number | string;
+          phone_normalized: string | null;
+          cpf: string | null;
+          link_curto: string;
+        }>("Falha ao carregar disparador_utm_links", (after, limit) => {
+          let query = supabaseAdmin()
             .from("disparador_utm_links")
-            .select("phone_normalized, cpf, link_curto")
+            .select("id, phone_normalized, cpf, link_curto")
             .eq("campaign_id", campaignId)
-            .range(from, from + pageSize - 1);
-          if (utmLinksError) throw utmLinksError;
-          for (const row of page ?? []) {
-            if (row.cpf) utmLinks.byCpf.set(row.cpf, row.link_curto);
-            if (row.phone_normalized) utmLinks.byPhone.set(row.phone_normalized, row.link_curto);
-          }
-          if (!page || page.length < pageSize) break;
-          from += pageSize;
+            .order("id", { ascending: true })
+            .limit(limit);
+          if (after != null) query = query.gt("id", after);
+          return query;
+        });
+        for (const row of links) {
+          if (row.cpf) utmLinks.byCpf.set(row.cpf, row.link_curto);
+          if (row.phone_normalized) utmLinks.byPhone.set(row.phone_normalized, row.link_curto);
         }
       } catch (err) {
         console.error("[startCampaign] Falha ao carregar disparador_utm_links:", err);
@@ -484,48 +570,33 @@ async function prepareCampaign(
     );
     const csvVarMap = new Map<string, string>();
     if (usaCsvVar) {
-      // Paginado via .range() — mesmo padrão de allContacts (acima) e do
-      // filtro por tag (abaixo). Esta tabela tem uma linha por var_index,
-      // não por contato — uma campanha com 1000 contatos usando VAR1/2/3
-      // já soma 3000 linhas, o que sem paginação batia no cap de resposta
-      // do PostgREST (1000) e truncava silenciosamente: só os primeiros
-      // ~333 contatos ficavam com entradas no csvVarMap, e os outros
-      // ~667 recebiam template_variables vazio (confirmado ao vivo,
-      // campaign_id d5aba714-a8d1-4579-8ab1-15a62e9cfcc7, 3000 linhas).
-      const csvVars: Array<{
+      // Paginado por keyset (id). Esta tabela tem uma linha por var_index,
+      // não por contato — 1000 contatos com VAR1/2/3 já são 3000 linhas
+      // (confirmado ao vivo, campanha d5aba714…, 3000 linhas). Erro aqui
+      // ABORTA a preparação (a campanha volta a 'agendado'): antes só era
+      // logado e todos os contatos saíam com variável vazia, virando erro
+      // permanente "variável vazia".
+      const csvVars = await fetchAllKeyset<{
+        id: number | string;
         contact_id: string;
         var_index: number;
         value: string;
-      }> = [];
-      const pageSize = 1000;
-      let from = 0;
-      let csvVarsError: { message: string } | null = null;
-      while (true) {
-        const { data: page, error: pageError } = await supabaseAdmin()
+      }>("Falha ao carregar contact_import_variables", (after, limit) => {
+        let query = supabaseAdmin()
           .from("contact_import_variables")
-          .select("contact_id, var_index, value")
+          .select("id, contact_id, var_index, value")
           .eq("campaign_id", campaignId)
           .not("value", "eq", "")
-          .range(from, from + pageSize - 1);
-        if (pageError) {
-          csvVarsError = pageError;
-          break;
-        }
-        csvVars.push(...(page ?? []));
-        if (!page || page.length < pageSize) break;
-        from += pageSize;
-      }
-      if (csvVarsError) {
-        console.error(
-          "[startCampaign] Falha ao carregar contact_import_variables:",
-          csvVarsError.message
-        );
-      } else {
-        for (const row of csvVars) {
-          csvVarMap.set(`${row.contact_id}:${row.var_index}`, row.value);
-        }
+          .order("id", { ascending: true })
+          .limit(limit);
+        if (after != null) query = query.gt("id", after);
+        return query;
+      });
+      for (const row of csvVars) {
+        csvVarMap.set(`${row.contact_id}:${row.var_index}`, row.value);
       }
     }
+    await touchPreparing(campaignId, accountId);
 
     // 4. Scheduling queue generation loop
     // ?? (não ||) — intervalo_min/max=0 é um valor legítimo (modo
@@ -654,6 +725,30 @@ async function prepareCampaign(
           : templateMode === "rotacao"
             ? [mensagens[i % mensagens.length]]
             : [mensagens[Math.floor(Math.random() * mensagens.length)]];
+
+      // Contato sem telefone válido não entra na fila como envio: registra UM erro permanente
+      // explicado (nunca cai no telefone "inventado" a partir do texto da mensagem).
+      if (!hasDialablePhone(contact.phone)) {
+        const firstMsg = messagesToSend[0];
+        queueRows.push({
+          campaign_id: campaignId,
+          account_id: accountId,
+          contact_id: contact.id,
+          session_id: sessionId,
+          mensagem_final: firstMsg?.conteudo || firstMsg?.prompt || "",
+          status: "erro",
+          erro_permanente: true,
+          erro: NO_VALID_PHONE_ERROR,
+          tipo: firstMsg?.tipo || "texto",
+          media_url: firstMsg?.url || null,
+          scheduled_at: new Date(baseTime + contactBaseDelay).toISOString(),
+          template_name: null,
+          template_language: null,
+          template_variables: null,
+        });
+        enqueued++;
+        continue;
+      }
 
       for (let j = 0; j < messagesToSend.length; j++) {
         const msg = messagesToSend[j];
@@ -795,6 +890,12 @@ async function prepareCampaign(
           session_id: sessionId,
           mensagem_final: resolvedText,
           status: "agendado",
+          // O bloco pode conter também linhas de erro com
+          // erro_permanente=true. Em bulk inserts heterogêneos o PostgREST
+          // pode materializar a chave ausente como NULL em vez de usar o
+          // DEFAULT da coluna. Como a coluna é NOT NULL, toda linha precisa
+          // enviar o boolean explicitamente.
+          erro_permanente: false,
           tipo: msg.tipo || "texto",
           media_url: msg.url || null,
           scheduled_at: scheduledAt,
@@ -820,15 +921,14 @@ async function prepareCampaign(
     }
 
     if (queueRows.length > 0) {
-      // Chunk insertions to prevent Supabase payload size limits (e.g. 500 items per chunk)
-      const chunkSize = 500;
-      for (let k = 0; k < queueRows.length; k += chunkSize) {
-        const chunk = queueRows.slice(k, k + chunkSize);
-        const { error: insertError } = await supabaseAdmin()
-          .from("disp_message_queue")
-          .insert(chunk);
-        if (insertError) throw insertError;
-      }
+      // Blocos de 1.000, até 3 em paralelo; cada bloco gravado renova o
+      // updated_at da campanha (a recuperação de 30 min não corta uma
+      // preparação viva). Qualquer erro aborta e sobe para startCampaign().
+      await insertInBlocks(
+        queueRows,
+        (block) => supabaseAdmin().from("disp_message_queue").insert(block),
+        { onBlockDone: () => touchPreparing(campaignId, accountId) },
+      );
     }
 
     // Update Metrics

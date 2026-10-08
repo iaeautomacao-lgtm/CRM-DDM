@@ -7,11 +7,12 @@ const dbWith = (rpc: (name: string, args: { p_keys: string[] }) => Promise<unkno
   ({ rpc: vi.fn(rpc) }) as unknown as SupabaseClient & { rpc: ReturnType<typeof vi.fn> };
 
 describe("queueItemPrimaryPhone (mesma regra do processQueueItem)", () => {
-  it("contato: telefone principal, senão mensagem_final; escada de telefones: null", () => {
+  it("contato: só o telefone do contato (mensagem_final é texto, nunca telefone); escada: null; externo: mensagem_final", () => {
     expect(queueItemPrimaryPhone({ contact_id: "c", mensagem_final: "x", contacts: { phone: "+5511999998888" } })).toBe(
       "+5511999998888"
     );
-    expect(queueItemPrimaryPhone({ contact_id: "c", mensagem_final: "5511", contacts: {} })).toBe("5511");
+    expect(queueItemPrimaryPhone({ contact_id: "c", mensagem_final: "Seu débito de R$ 1.234,56", contacts: {} })).toBeNull();
+    expect(queueItemPrimaryPhone({ contact_id: "c", mensagem_final: "5511", contacts: { phone: "" } })).toBeNull();
     expect(
       queueItemPrimaryPhone({ contact_id: "c", mensagem_final: "x", phone_attempt_order: 2, contacts: { phone: "1" } })
     ).toBeNull();

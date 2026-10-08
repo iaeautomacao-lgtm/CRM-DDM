@@ -1,3 +1,4 @@
+import { isTickChainEnabled } from "@/lib/disparador/tick-chain";
 import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency";
 
 // ============================================================
@@ -22,7 +23,8 @@ import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency"
 //   DISPARADOR_ADAPTIVE_BACKOFF            (ligado; "0"/"false" desliga)
 //   DISPARADOR_MAX_EVENT_LOOP_LAG_MS       (200)  p99 acima disso → reduz global
 //   DISPARADOR_MAX_RSS_MB                  (1024) RSS acima disso → reduz global
-//   DISPARADOR_BACKOFF_COOLDOWN_SECONDS    (300)  número fica com metade da
+//   DISPARADOR_BACKOFF_COOLDOWN_SECONDS    (300)  após RATE LIMIT explícito,
+//                                          número fica com metade da
 //                                          concorrência nos ticks seguintes
 //
 // Por número, wacrm.dispatch_channel_limits.max_in_flight (quando a linha
@@ -39,7 +41,8 @@ import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency"
 //      número é que manda).
 //   3. A cada passo, conferir no cron_tick: duration_ms perto do orçamento,
 //      event_loop_lag_p99_ms < 100, rss_mb estável, latency.*.p95_ms sem
-//      subir, provider_errors sem 429/131048/131056 e backoff_events vazio.
+//      subir e provider_errors sem 429/131048/131056. 5xx/timeout/rede
+//      isolados ficam na telemetria; só um padrão recorrente aciona freio.
 //      Se houver backoff recorrente, volte um passo.
 //   4. WAHA: manter 1–4. Só suba com DISPARADOR_PER_NUMBER_CONCURRENCY_WAHA
 //      ou max_in_flight do canal, um número de cada vez.
@@ -47,8 +50,10 @@ import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency"
 
 /** Valor que wacrm.claim_dispatch_item usa quando o canal não tem linha. */
 export const DB_DEFAULT_MAX_IN_FLIGHT = 4;
-/** Faixa aceita por dispatch_channel_limits.max_in_flight (CHECK). */
-export const MAX_PER_NUMBER_CONCURRENCY = 50;
+/** Faixa aceita por dispatch_channel_limits.max_in_flight (CHECK; migration 186: 1..150, para 80 envios/s por número com ~1 s de latência). */
+export const MAX_PER_NUMBER_CONCURRENCY = 150;
+/** WAHA mantém teto próprio baixo (risco de banimento): o aumento para 150 vale só para a Meta. */
+export const MAX_WAHA_PER_NUMBER_CONCURRENCY = 50;
 
 export type DispatchProvider = "meta" | "waha";
 
@@ -92,14 +97,15 @@ export function resolveThroughputConfig(env: Env = process.env): ThroughputConfi
     readInt(env, "DISPARADOR_PER_NUMBER_CONCURRENCY_WAHA") ??
       Math.min(generic, DB_DEFAULT_MAX_IN_FLIGHT),
     1,
-    MAX_PER_NUMBER_CONCURRENCY
+    MAX_WAHA_PER_NUMBER_CONCURRENCY
   );
   const backoffFlag = (env.DISPARADOR_ADAPTIVE_BACKOFF ?? "").trim().toLowerCase();
   return {
     // Mesmo botão do pool antigo (PR #73): DISPATCH_PROCESS_CONCURRENCY.
     globalConcurrency: resolveDispatchProcessConcurrency(env.DISPATCH_PROCESS_CONCURRENCY),
     perNumber: { meta, waha, unknown: Math.min(meta, waha) },
-    tickBudgetMs: clamp(readInt(env, "DISPARADOR_TICK_BUDGET_MS") ?? 35_000, 5_000, 50_000),
+    // Padrão 35 s; com o tick encadeado ligado (DISPARADOR_TICK_CHAIN) sobe para 50 s (duty ~95%; exige timeout do proxy ≥ 60 s).
+    tickBudgetMs: clamp(readInt(env, "DISPARADOR_TICK_BUDGET_MS") ?? (isTickChainEnabled(env) ? 50_000 : 35_000), 5_000, 50_000),
     adaptiveBackoff: !(backoffFlag === "0" || backoffFlag === "false" || backoffFlag === "off"),
     maxEventLoopLagMs: clamp(readInt(env, "DISPARADOR_MAX_EVENT_LOOP_LAG_MS") ?? 200, 20, 10_000),
     maxRssMb: clamp(readInt(env, "DISPARADOR_MAX_RSS_MB") ?? 1024, 128, 65_536),
@@ -111,7 +117,7 @@ export function resolveThroughputConfig(env: Env = process.env): ThroughputConfi
  * Concorrência inicial de um número no tick.
  * - linha em dispatch_channel_limits → max_in_flight dela;
  * - senão, o padrão do provedor (variáveis de ambiente);
- * - em cooldown (backoff recente) → metade, mínimo 1.
+ * - em cooldown por rate limit recente → metade, mínimo 1.
  */
 export function resolveChannelConcurrency(params: {
   provider: DispatchProvider | null;
@@ -121,13 +127,17 @@ export function resolveChannelConcurrency(params: {
 }): number {
   const base =
     params.rowMaxInFlight !== null && params.rowMaxInFlight !== undefined && params.rowMaxInFlight > 0
-      ? clamp(params.rowMaxInFlight, 1, MAX_PER_NUMBER_CONCURRENCY)
+      ? clamp(
+          params.rowMaxInFlight,
+          1,
+          params.provider === "waha" ? MAX_WAHA_PER_NUMBER_CONCURRENCY : MAX_PER_NUMBER_CONCURRENCY
+        )
       : params.config.perNumber[params.provider ?? "unknown"];
   return params.inCooldown ? Math.max(1, Math.floor(base / 2)) : base;
 }
 
 // ------------------------------------------------------------
-// Cooldown por número. O banco (wacrm.dispatch_channel_cooldowns,
+// Cooldown por número após rate limit. O banco (wacrm.dispatch_channel_cooldowns,
 // migration 164) vale entre processos/restarts; este Map é só um atalho
 // do mesmo processo para quando a tabela ainda não existe. Não é worker
 // em memória: nada roda em segundo plano, só é consultado no tick.

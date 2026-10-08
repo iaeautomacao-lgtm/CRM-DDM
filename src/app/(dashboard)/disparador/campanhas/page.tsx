@@ -190,12 +190,46 @@ function hhmm(value: string | null | undefined): string {
  * dispatch-forecast.ts): a partir do agendamento (ou de agora), na janela
  * e nos dias da campanha. Faixa otimista–conservadora.
  */
+function campaignMessagesPerContact(c: Campaign): number {
+  return messagesPerContact(
+    parseTemplateMode(c.dias_permitidos),
+    Array.isArray(c.mensagens) ? Math.max(1, c.mensagens.length) : 1
+  );
+}
+
+function campaignForecast(c: Campaign, contacts: number, startOverride?: Date) {
+  const start =
+    startOverride ??
+    (c.status === "agendado" && c.agendamento
+      ? new Date(c.agendamento)
+      : new Date());
+  return forecastFromCampaign(c, contacts, campaignMessagesPerContact(c), start);
+}
+
+function plannedDispatchCount(c: Campaign | undefined, contacts: number): number {
+  if (!c) return 0;
+  return Math.max(0, contacts) * campaignMessagesPerContact(c);
+}
+
 function cardForecastLabel(c: Campaign, contacts: number): string {
-  const start = c.status === "agendado" && c.agendamento ? new Date(c.agendamento) : new Date();
-  const mpc = messagesPerContact(parseTemplateMode(c.dias_permitidos), Array.isArray(c.mensagens) ? c.mensagens.length : 1);
-  const f = forecastFromCampaign(c, contacts, mpc, start);
+  const f = campaignForecast(c, contacts);
   const a = formatShortBrasilia(f.otimista.end);
   const b = formatShortBrasilia(f.conservador.end);
+  return a === b ? a : `${a} – ${b}`;
+}
+
+function campaignForecastDurationLabel(c: Campaign, contacts: number): string {
+  const f = campaignForecast(c, contacts);
+  const minSeconds = Math.max(
+    0,
+    Math.round((f.otimista.end.getTime() - f.firstSendAt.getTime()) / 1000)
+  );
+  const maxSeconds = Math.max(
+    0,
+    Math.round((f.conservador.end.getTime() - f.firstSendAt.getTime()) / 1000)
+  );
+  const a = formatCampaignDuration(minSeconds);
+  const b = formatCampaignDuration(maxSeconds);
   return a === b ? a : `${a} – ${b}`;
 }
 
@@ -213,24 +247,6 @@ function formatResponseTime(seconds: number): string {
   const days = Math.floor(hours / 24);
   const remainHours = hours % 24;
   return remainHours > 0 ? `${days}d ${remainHours}h` : `${days}d`;
-}
-
-function getCampaignDurationSeconds(campaign?: Campaign | null): number | null {
-  if (!campaign?.agendamento) return null;
-
-  const startedAt = Date.parse(campaign.agendamento);
-  if (!Number.isFinite(startedAt)) return null;
-
-  const usesStoredEnd = ["encerrada", "erro", "bloqueada_por_risco", "pausada"].includes(
-    campaign.status
-  );
-  const endedAt =
-    usesStoredEnd && campaign.updated_at
-      ? Date.parse(campaign.updated_at)
-      : Date.now();
-
-  if (!Number.isFinite(endedAt) || endedAt < startedAt) return null;
-  return Math.max(0, Math.round((endedAt - startedAt) / 1000));
 }
 
 function formatCampaignDuration(seconds: number | null): string {
@@ -255,8 +271,14 @@ function formatCampaignDuration(seconds: number | null): string {
   return `${secs}s`;
 }
 
-function campaignDurationLabel(campaign?: Campaign | null): string {
-  return formatCampaignDuration(getCampaignDurationSeconds(campaign));
+interface CampaignTiming {
+  started_at: string | null;
+  ended_at: string | null;
+  active_seconds: number | null;
+  paused_seconds: number | null;
+  wall_clock_seconds: number | null;
+  pause_count: number;
+  history_complete: boolean;
 }
 
 interface CampaignMetrics {
@@ -275,7 +297,7 @@ interface CampaignMetrics {
 // os status aceitos por /api/disparador/campaigns/[id]/queue-details
 // (ver STATUS_FILTERS naquela rota). "respondido" = enviados com
 // replied_at (migration 126), a mesma contagem do card "Respostas".
-type QueueDetailStatusKey = "total" | "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado" | "respondido";
+type QueueDetailStatusKey = "total" | "agendado" | "enviado" | "entregue" | "lido" | "erro" | "bloqueado" | "respondido" | "aguardando_confirmacao";
 
 interface QueueDetailRow {
   id: string;
@@ -320,7 +342,7 @@ function qualityLabel(rating: string | null | undefined): string {
 }
 
 export default function CampanhasPage() {
-  const { canManageMembers } = useAuth();
+  const { canManageMembers, isOwner } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [recalculatingMetrics, setRecalculatingMetrics] = useState(false);
@@ -337,6 +359,9 @@ export default function CampanhasPage() {
   const [editingCampaign, setEditingCampaign] = useState<EditableCampaign | null>(null);
   // "Iniciar agora" numa campanha agendada (fila começa agora, não no horário).
   const [startNow, setStartNow] = useState(false);
+  // Número em qualidade vermelha: só o owner inicia, confirmando e dando o motivo (TASK23).
+  const [redConfirmed, setRedConfirmed] = useState(false);
+  const [redReason, setRedReason] = useState("");
   const [unscheduleTarget, setUnscheduleTarget] = useState<Campaign | null>(null);
 
   // Campanha aguardando confirmação de início (modal de tier Meta)
@@ -355,6 +380,8 @@ export default function CampanhasPage() {
     }>;
   } | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
+  const hasRedChannel = !!campaignInfo?.channels.some((ch) => ch.quality_rating === "RED");
+  const redReady = !hasRedChannel || (isOwner && redConfirmed && redReason.trim().length >= 3);
   // Público real da campanha no modal de início (PRD-01) — mesma resolução
   // do startCampaign (GET .../audience).
   const [audienceInfo, setAudienceInfo] = useState<
@@ -373,6 +400,7 @@ export default function CampanhasPage() {
     nome: string;
   } | null>(null);
   const [metricsData, setMetricsData] = useState<CampaignMetrics | null>(null);
+  const [timingData, setTimingData] = useState<CampaignTiming | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   // Alimentado por fetchMetrics (inicial + refresh de 15s do modal) —
   // usado pelos cards da listagem pra mostrar tempo estimado sem
@@ -384,6 +412,9 @@ export default function CampanhasPage() {
   // queue-details agrega trabalho ainda não concluído:
   // agendado + pendente + pausado + enviando.
   const [agendadosCount, setAgendadosCount] = useState<number | null>(null);
+  // Resultado ainda não definitivo: aceite externo com confirmação local
+  // pendente ou Meta 131026 aguardando delivered/read antes de virar erro.
+  const [aguardandoConfirmacaoCount, setAguardandoConfirmacaoCount] = useState<number | null>(null);
 
   // Drilldown por contato de uma métrica do modal acima (segundo modal,
   // empilhado). `label` é só pro título ("Enviados — 668 mensagens").
@@ -495,16 +526,39 @@ export default function CampanhasPage() {
       // término dos cards (dispatch-forecast.ts).
       const campaignIds = (campaignList ?? []).map((c) => c.id);
       if (campaignIds.length > 0) {
-        const { data: metricsList } = await supabase
-          .from("campaign_metrics")
+        let { data: metricsList } = await supabase
+          .from("campaign_metrics_live")
           .select("*")
           .in("campaign_id", campaignIds);
+
+        // Campanhas antigas em rascunho/agendadas podem não ter a linha de
+        // volume planejado. O servidor faz um backfill limitado e a tela
+        // relê as métricas uma única vez.
+        const haveMetrics = new Set((metricsList ?? []).map((m) => m.campaign_id));
+        const needsPlanned = (campaignList ?? []).some(
+          (c) => ["rascunho", "agendado"].includes(c.status) && !haveMetrics.has(c.id)
+        );
+        if (needsPlanned) {
+          try {
+            const planned = await apiFetch("/api/disparador/campaigns/planned-metrics", {
+              method: "POST",
+            });
+            if (planned.ok) {
+              const refreshed = await supabase
+                .from("campaign_metrics_live")
+                .select("*")
+                .in("campaign_id", campaignIds);
+              metricsList = refreshed.data ?? metricsList;
+            }
+          } catch {
+            // Prévia é melhor esforço; não bloqueia a listagem.
+          }
+        }
+
         if (metricsList) {
-          setMetricsMap((prev) => {
-            const next = { ...prev };
-            for (const m of metricsList) next[m.campaign_id] = m;
-            return next;
-          });
+          const next: Record<string, CampaignMetrics> = {};
+          for (const m of metricsList) next[m.campaign_id] = m;
+          setMetricsMap(next);
         }
       }
 
@@ -600,7 +654,12 @@ export default function CampanhasPage() {
       const res = await apiFetch(`/api/disparador/campaigns/${id}/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agora: startNow }),
+        body: JSON.stringify({
+          agora: startNow,
+          ...(hasRedChannel && isOwner && redConfirmed
+            ? { confirm_red_quality: true, red_quality_reason: redReason.trim() }
+            : {}),
+        }),
       });
       if (res.ok) {
         toast.success("Campanha iniciada e disparos agendados!");
@@ -608,6 +667,8 @@ export default function CampanhasPage() {
         setStartConfirmId(null);
         setCampaignInfo(null);
         setAudienceInfo(null);
+        setRedConfirmed(false);
+        setRedReason("");
         loadData();
       } else {
         const err = await res.json().catch(() => ({}));
@@ -773,7 +834,7 @@ export default function CampanhasPage() {
     try {
       const supabase = createClient();
       const { data } = await supabase
-        .from("campaign_metrics")
+        .from("campaign_metrics_live")
         .select("*")
         .eq("campaign_id", campaignId)
         .maybeSingle();
@@ -785,19 +846,41 @@ export default function CampanhasPage() {
       if (!silent) toast.error("Erro ao carregar métricas");
     }
 
-    // "A enviar" não vem de campaign_metrics. O status lógico "agendado"
-    // da rota agrega agendado + pendente + pausado + enviando; assim a
-    // contagem não zera só porque a campanha foi pausada.
     try {
-      const res = await apiFetch(
-        `/api/disparador/campaigns/${campaignId}/queue-details?status=agendado&page=1`
+      const timingRes = await apiFetch(
+        `/api/disparador/campaigns/${campaignId}/timing`
       );
-      if (res.ok) {
-        const data = await res.json();
-        setAgendadosCount(data.total ?? 0);
+      if (timingRes.ok) {
+        const timing = await timingRes.json();
+        setTimingData(timing.data ?? null);
+      } else {
+        setTimingData(null);
       }
     } catch {
-      // silencioso — mesmo padrão do UTM abaixo, não é crítico pro modal
+      setTimingData(null);
+    }
+
+    // Contagens operacionais derivadas diretamente da fila. pageSize=1
+    // evita trazer linhas desnecessárias: só usamos o count exato da rota.
+    try {
+      const [scheduledRes, pendingRes] = await Promise.all([
+        apiFetch(
+          `/api/disparador/campaigns/${campaignId}/queue-details?status=agendado&page=1&pageSize=1`
+        ),
+        apiFetch(
+          `/api/disparador/campaigns/${campaignId}/queue-details?status=aguardando_confirmacao&page=1&pageSize=1`
+        ),
+      ]);
+      if (scheduledRes.ok) {
+        const scheduled = await scheduledRes.json();
+        setAgendadosCount(scheduled.total ?? 0);
+      }
+      if (pendingRes.ok) {
+        const pending = await pendingRes.json();
+        setAguardandoConfirmacaoCount(pending.total ?? 0);
+      }
+    } catch {
+      // silencioso — mesma política das métricas auxiliares do modal
     }
 
     setUtmMetricsLoading(true);
@@ -823,7 +906,9 @@ export default function CampanhasPage() {
   const handleMetricsClick = async (campaign: typeof campaigns[0]) => {
     setMetricsModal({ campaignId: campaign.id, nome: campaign.nome });
     setMetricsData(null);
+    setTimingData(null);
     setAgendadosCount(null);
+    setAguardandoConfirmacaoCount(null);
     setMetricsLoading(true);
     await fetchMetrics(campaign.id, campaign.nome);
     setMetricsLoading(false);
@@ -871,7 +956,10 @@ export default function CampanhasPage() {
         const res = await apiFetch(
           `/api/disparador/campaigns/${metricsModal.campaignId}/queue-details?${qs.toString()}`
         );
-        if (!res.ok) throw new Error("Erro ao carregar detalhamento");
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(payload?.error || `Erro ao carregar detalhamento (HTTP ${res.status})`);
+        }
         const data = await res.json();
         if (cancelled) return;
         setQueueDetailRows(data.rows ?? []);
@@ -923,7 +1011,9 @@ export default function CampanhasPage() {
     }
     setMetricsModal(null);
     setMetricsData(null);
+    setTimingData(null);
     setUtmMetrics(null);
+    setAguardandoConfirmacaoCount(null);
     setQueueDetailModal(null);
   };
 
@@ -934,7 +1024,7 @@ export default function CampanhasPage() {
   const queueDetailA11y = useDialogA11y(!!(queueDetailModal && metricsModal), () => setQueueDetailModal(null));
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
         <div>
@@ -1078,24 +1168,33 @@ export default function CampanhasPage() {
                   </div>
                 )}
 
-                {/* Tempo real para campanhas que já começaram. Encerradas
-                    mostram o total efetivo início→fim; enquanto executam,
-                    mostramos o decorrido. Antes do primeiro início seguimos
-                    exibindo a estimativa calculada pela configuração. */}
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  {c.status === "encerrada" && campaignDurationLabel(c) !== "—" ? (
-                    <>{campaignDurationLabel(c)} total</>
-                  ) : c.status === "em_execucao" && campaignDurationLabel(c) !== "—" ? (
-                    <>{campaignDurationLabel(c)} em execução</>
-                  ) : c.status === "pausada" && campaignDurationLabel(c) !== "—" ? (
-                    <>{campaignDurationLabel(c)} até a pausa</>
-                  ) : metricsMap[c.id]?.total_contatos ? (
-                    <>Término previsto: {cardForecastLabel(c, metricsMap[c.id].total_contatos)}</>
-                  ) : (
-                    "—"
-                  )}
-                </div>
+                {/* Planejamento operacional: quantidade de mensagens e
+                    previsão calculadas com o mesmo motor de forecast usado
+                    pelo assistente de campanha. */}
+                {metricsMap[c.id]?.total_contatos > 0 && (
+                  <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/15 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3 text-xs">
+                      <span className="text-muted-foreground">Disparos previstos</span>
+                      <span className="font-semibold text-foreground">
+                        {plannedDispatchCount(c, metricsMap[c.id].total_contatos).toLocaleString("pt-BR")}
+                      </span>
+                    </div>
+                    {!["encerrada", "erro", "bloqueada_por_risco"].includes(c.status) && (
+                      <>
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                          <span className="text-muted-foreground">Duração estimada</span>
+                          <span className="font-medium text-foreground">
+                            {campaignForecastDurationLabel(c, metricsMap[c.id].total_contatos)}
+                          </span>
+                        </div>
+                        <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span>Término previsto: {cardForecastLabel(c, metricsMap[c.id].total_contatos)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {/* Actions row */}
                 <div className="flex flex-wrap justify-between items-center gap-2 pt-3 border-t border-border/40">
@@ -1202,6 +1301,8 @@ export default function CampanhasPage() {
           if (!open) {
             setStartConfirmId(null);
             setCampaignInfo(null);
+            setRedConfirmed(false);
+            setRedReason("");
           }
         }}
       >
@@ -1315,8 +1416,10 @@ export default function CampanhasPage() {
                             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                             <span className="font-medium">
                               Qualidade VERMELHA — este número está em risco de
-                              restrição pela Meta. Avalie o conteúdo das
-                              mensagens antes de prosseguir.
+                              restrição pela Meta (envio limitado a poucas
+                              mensagens por segundo). Campanha nova nele só
+                              pode ser iniciada pelo owner.
+                              {!isOwner && " Peça ao owner para iniciar esta campanha."}
                             </span>
                           </div>
                         )}
@@ -1338,6 +1441,27 @@ export default function CampanhasPage() {
                         )}
                       </div>
                     ))}
+                        {hasRedChannel && isOwner && (
+                      <div className="space-y-2 rounded-md border border-red-500 p-3 text-sm">
+                        <label className="flex items-start gap-2">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={redConfirmed}
+                            onChange={(e) => setRedConfirmed(e.target.checked)}
+                          />
+                          <span>Confirmo iniciar mesmo com qualidade vermelha</span>
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full rounded-md border bg-background px-2 py-1 text-sm"
+                          placeholder="Motivo (obrigatório, mín. 3 caracteres)"
+                          maxLength={500}
+                          value={redReason}
+                          onChange={(e) => setRedReason(e.target.value)}
+                        />
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Se o número de contatos exceder o limite diário, os
                       disparos restantes serão agendados para os dias
@@ -1364,7 +1488,7 @@ export default function CampanhasPage() {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <Button
               onClick={handleStartConfirm}
-              disabled={infoLoading || starting || !audienceInfo || !audienceInfo.ok}
+              disabled={infoLoading || starting || !audienceInfo || !audienceInfo.ok || !redReady}
             >
               {starting ? "Iniciando…" : infoLoading ? "Consultando..." : "Iniciar campanha"}
             </Button>
@@ -1441,9 +1565,24 @@ export default function CampanhasPage() {
                       status lógico `total`, que lista toda a fila da campanha. */}
                   <div className="grid grid-cols-2 gap-3">
                     {[
+                      {
+                        label: "Disparos previstos",
+                        value: plannedDispatchCount(
+                          campaigns.find((campaign) => campaign.id === metricsModal.campaignId),
+                          metricsData.total_contatos
+                        ),
+                        color: "text-foreground",
+                        status: null,
+                      },
                       { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground", status: "total" as const },
                       { label: "A enviar", value: agendadosCount ?? 0, color: "text-cyan-500", status: "agendado" as const },
                       { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500", status: "enviado" as const },
+                      {
+                        label: "Aguardando confirmação",
+                        value: aguardandoConfirmacaoCount ?? 0,
+                        color: "text-amber-500",
+                        status: "aguardando_confirmacao" as const,
+                      },
                       { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500", status: "entregue" as const },
                       { label: "Lidos", value: metricsData.total_lidos, color: "text-purple-500", status: "lido" as const },
                       { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500", status: "respondido" as const },
@@ -1456,10 +1595,20 @@ export default function CampanhasPage() {
                         status: null,
                       },
                       {
-                        label: "Tempo Total Campanha",
-                        value: campaignDurationLabel(
-                          campaigns.find((campaign) => campaign.id === metricsModal.campaignId)
-                        ),
+                        label: "Tempo efetivo de disparo",
+                        value: formatCampaignDuration(timingData?.active_seconds ?? null),
+                        color: "text-foreground",
+                        status: null,
+                      },
+                      {
+                        label: "Tempo pausado",
+                        value: formatCampaignDuration(timingData?.paused_seconds ?? null),
+                        color: "text-foreground",
+                        status: null,
+                      },
+                      {
+                        label: "Tempo corrido",
+                        value: formatCampaignDuration(timingData?.wall_clock_seconds ?? null),
                         color: "text-foreground",
                         status: null,
                       },
@@ -1489,6 +1638,35 @@ export default function CampanhasPage() {
                       );
                     })}
                   </div>
+
+                  {(() => {
+                    const campaign = campaigns.find(
+                      (item) => item.id === metricsModal.campaignId
+                    );
+                    if (!campaign || metricsData.total_contatos <= 0) return null;
+                    if (["encerrada", "erro", "bloqueada_por_risco"].includes(campaign.status)) {
+                      return null;
+                    }
+                    return (
+                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                        <p className="text-xs font-medium text-foreground">Previsão do disparo</p>
+                        <div className="grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <p className="text-muted-foreground">Duração estimada</p>
+                            <p className="mt-0.5 font-semibold text-foreground">
+                              {campaignForecastDurationLabel(campaign, metricsData.total_contatos)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-muted-foreground">Término previsto</p>
+                            <p className="mt-0.5 font-semibold text-foreground">
+                              {cardForecastLabel(campaign, metricsData.total_contatos)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Taxas */}
                   {metricsData.total_enviados > 0 && (
@@ -1714,6 +1892,7 @@ export default function CampanhasPage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Mensagem Final</TableHead>
                       {queueDetailModal.status === "erro" && <TableHead>Tipo de Erro</TableHead>}
+                      {queueDetailModal.status === "aguardando_confirmacao" && <TableHead>Motivo</TableHead>}
                       <TableHead>Data/Hora</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -1743,6 +1922,11 @@ export default function CampanhasPage() {
                         </TableCell>
                         {queueDetailModal.status === "erro" && (
                           <TableCell>{row.tipo_erro || "Outro"}</TableCell>
+                        )}
+                        {queueDetailModal.status === "aguardando_confirmacao" && (
+                          <TableCell className="max-w-xs text-xs text-muted-foreground">
+                            {row.erro || "Aguardando confirmação final"}
+                          </TableCell>
                         )}
                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                           {row.data_hora
