@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { auditFetch } from '@/lib/audit/context'
 import { createClient } from '@/lib/supabase/server'
-import { hasMinRole, isAccountRole } from '@/lib/auth/roles'
+import { isAccountRole } from '@/lib/auth/roles'
+import { can } from '@/lib/auth/permissions'
 import { createClient as createAdminClient } from '@supabase/supabase-js'
 import {
   registerPhoneNumber,
@@ -19,6 +20,8 @@ import {
   getWahaSessionStatus,
   getWahaSessionInfo,
   startWahaSession,
+  assertWahaUrlIsSafe,
+  WahaUrlBlockedError,
 } from '@/lib/whatsapp/waha-api'
 import { wahaWebhookFor } from '@/lib/whatsapp/waha-webhook-auth'
 
@@ -92,7 +95,7 @@ async function requireChannelAdmin(
     .eq('user_id', userId)
     .maybeSingle()
   const role = (roleRow as { account_role?: string } | null)?.account_role
-  if (!role || !isAccountRole(role) || !hasMinRole(role, 'admin')) {
+  if (!role || !isAccountRole(role) || !can({ role }, 'channels.manage')) {
     return NextResponse.json({ error: message }, { status: 403 })
   }
   return null
@@ -393,7 +396,7 @@ export async function POST(request: Request) {
       .eq('user_id', user.id)
       .maybeSingle()
     const callerRole = (roleRow as { account_role?: string } | null)?.account_role
-    if (!callerRole || !isAccountRole(callerRole) || !hasMinRole(callerRole, 'admin')) {
+    if (!callerRole || !isAccountRole(callerRole) || !can({ role: callerRole }, 'channels.manage')) {
       return NextResponse.json(
         { error: 'Only account admins can change channel settings.' },
         { status: 403 },
@@ -431,6 +434,19 @@ export async function POST(request: Request) {
     }
 
     if (provider === 'waha') {
+      // waha_url é do tenant: precisa ser pública (ou estar em SSRF_ALLOWED_HOSTS). Validada
+      // aqui no cadastro E a cada chamada (wahaFetch → safeFetch). PRD 14, SW-1.
+      if (typeof waha_url === 'string' && waha_url) {
+        try {
+          await assertWahaUrlIsSafe(waha_url)
+        } catch (err) {
+          if (err instanceof WahaUrlBlockedError) {
+            return NextResponse.json({ error: 'waha_url is not allowed.' }, { status: 400 })
+          }
+          throw err
+        }
+      }
+
       if (!waha_url || !waha_session) {
         return NextResponse.json(
           { error: 'waha_url and waha_session are required' },

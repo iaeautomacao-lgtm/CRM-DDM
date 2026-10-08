@@ -9,7 +9,7 @@
 // Bulk-invite can create 'owner'-role rows (confirmed product
 // decision — an account can end up with more than one owner-role
 // profile this way). Because of that, this route is gated at
-// requireRole("owner") rather than the admin+ every other
+// requirePermission("members.bulk_invite") (owner) rather than the admin+ every other
 // account/members route uses — letting a mere admin ('Supervisor')
 // self-grant 'owner' via a spreadsheet upload would be a privilege
 // escalation, since every other path to 'owner' (Transfer Ownership)
@@ -41,7 +41,7 @@
 
 import { NextResponse } from "next/server";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { isAccountRole, type AccountRole } from "@/lib/auth/roles";
 import { supabaseAdmin } from "@/lib/account/admin-client";
 import {
@@ -125,7 +125,7 @@ interface ImportError {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole("owner");
+    const ctx = await requirePermission("members.bulk_invite");
 
     const limit = checkRateLimit(
       `admin:bulkInviteMembers:${ctx.userId}`,

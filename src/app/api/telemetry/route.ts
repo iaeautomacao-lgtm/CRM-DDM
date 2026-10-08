@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { clientIp } from "@/lib/audit/context";
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 
 // Ingestão de telemetria de frontend (navegação, ação, erro, sessão) —
@@ -24,13 +25,11 @@ function supabaseAdmin(): SupabaseClient {
   return _adminClient!;
 }
 
-// Mesmo padrão de src/app/api/invitations/[token]/redeem/route.ts.
+// IP do cliente pelo clientIp() de lib/audit/context.ts (x-real-ip do proxy; no
+// x-forwarded-for vale o ÚLTIMO item). O primeiro item vem do cliente e dava para
+// girar a chave do rate limit. PRD 14, AP-07.
 function getClientIp(request: Request): string {
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  const xri = request.headers.get("x-real-ip");
-  if (xri) return xri.trim();
-  return "unknown";
+  return clientIp(request.headers) ?? "unknown";
 }
 
 type TelemetryEventType = "page_view" | "action" | "error" | "session_start" | "session_end";

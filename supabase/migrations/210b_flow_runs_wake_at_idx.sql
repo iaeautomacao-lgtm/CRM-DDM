@@ -1,3 +1,5 @@
+-- ⚠️ RODAR SOZINHO: só a linha CREATE INDEX, numa execução própria do SQL Editor (sem outro comando junto).
+--    Junto com outro comando o Supabase abre transação e dá 25001; e desfaz TUDO o que foi junto.
 -- 210b — índice de apoio do cron de fluxos (wakeable_flow_runs, migration 210).
 -- ARQUIVO PRÓPRIO, SEM TRANSAÇÃO: CREATE INDEX CONCURRENTLY não roda dentro de BEGIN/COMMIT.
 --

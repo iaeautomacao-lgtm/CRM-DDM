@@ -3,6 +3,7 @@
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { writeLog } from '@/lib/logger'
 import { processMessage, type WhatsAppMessage } from '@/lib/whatsapp/inbound-message'
+import type { WebhookContact } from '@/lib/whatsapp/webhook-contacts'
 import {
   drainMessageInbox,
   type DrainMessageOptions,
@@ -45,7 +46,7 @@ export function createInboxProcessor(db: Db): (row: InboxRow) => Promise<RowOutc
     if (channel.account_id !== row.account_id) throw new Error('Conta do canal diverge do evento gravado')
     const { message, contact } = row.payload as {
       message: WhatsAppMessage
-      contact: { profile: { name: string }; wa_id: string }
+      contact: WebhookContact | null
     }
     return processMessage(message, contact, channel.account_id, channel.user_id, decrypt(channel.access_token), channel.id)
   }

@@ -14,8 +14,9 @@
 
 import { NextResponse } from "next/server";
 
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
-import { canManageMembers, isAccountRole } from "@/lib/auth/roles";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
+import { can } from "@/lib/auth/permissions";
+import { isAccountRole } from "@/lib/auth/roles";
 import type { AccountMember } from "@/types";
 
 interface ProfileRow {
@@ -31,7 +32,7 @@ interface ProfileRow {
 
 export async function GET() {
   try {
-    const ctx = await getCurrentAccount();
+    const ctx = await requirePermission("members.view");
 
     // RLS on profiles allows reading any row whose account matches
     // the caller's, so this query is naturally account-scoped.
@@ -51,7 +52,7 @@ export async function GET() {
       );
     }
 
-    const canSeeEmails = canManageMembers(ctx.role);
+    const canSeeEmails = can(ctx, "members.view_emails");
 
     const members: AccountMember[] = (data as ProfileRow[]).flatMap((row) => {
       // Defensive: the DB enum should never let an unknown role

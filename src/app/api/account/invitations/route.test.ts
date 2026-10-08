@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const inserts: unknown[] = [];
 vi.mock("@/lib/auth/account", () => ({
-  requireRole: async () => ({
+  requirePermission: async () => ({
     userId: "u1",
     accountId: "acc-1",
     supabase: {

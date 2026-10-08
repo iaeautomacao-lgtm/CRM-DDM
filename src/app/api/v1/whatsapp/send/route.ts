@@ -1,5 +1,5 @@
 import { runIdempotentSend } from '@/lib/disparador/send-ledger';
-import { resolveProviderMedia } from '@/lib/storage/provider-media';
+import { MediaUrlNotAllowedError, resolveProviderMedia } from '@/lib/storage/provider-media';
 // ============================================================
 // POST /api/v1/whatsapp/send — Public API route to send WhatsApp messages.
 //
@@ -114,7 +114,17 @@ export async function POST(request: Request) {
 
       // media_url (assinada, curta) vai para o provedor; originalMediaUrl
       // (referência estável) é a que fica gravada em messages.
-      const media_url = originalMediaUrl ? await resolveProviderMedia(originalMediaUrl, ctx.accountId) : originalMediaUrl;
+      let media_url = originalMediaUrl;
+      if (originalMediaUrl) {
+        try {
+          media_url = await resolveProviderMedia(originalMediaUrl, ctx.accountId);
+        } catch (err) {
+          if (err instanceof MediaUrlNotAllowedError) {
+            throw badRequest("'media_url' deve apontar para um host público");
+          }
+          throw err;
+        }
+      }
       const targetPhone = phone || to;
       const targetText = message || text;
       // true por default — omitido/true = comportamento atual (grava

@@ -90,12 +90,12 @@ export function MessageActions({
       onContextMenu={handleContextMenu}
       onBlur={() => setTouchOpen(false)}
     >
-      {/* `min-w-0` lets this flex child actually respect the 75% cap.
+      {/* `min-w-0` lets this flex child respect the message-width cap.
        *  Default `min-width: auto` lets content (a long quote preview,
        *  an unbroken URL) push past the cap and shove the row past
        *  100%, which used to bleed across into the contact-sidebar
        *  area. See issue #165. */}
-      <div className="group/actions relative min-w-0 max-w-[75%]">
+      <div className="group/actions relative min-w-0 max-w-[78%] xl:max-w-[72%]">
         {children}
       <div
         data-touch-open={touchOpen || pickerOpen ? "true" : undefined}

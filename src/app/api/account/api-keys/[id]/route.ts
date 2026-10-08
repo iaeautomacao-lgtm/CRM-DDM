@@ -18,8 +18,8 @@
 
 import { NextResponse } from 'next/server';
 
-import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
-import { hasMinRole } from '@/lib/auth/roles';
+import { requirePermission, toErrorResponse } from '@/lib/auth/account';
+import { can } from '@/lib/auth/permissions';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   checkRateLimit,
@@ -32,9 +32,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await getCurrentAccount();
-    const isAdmin = hasMinRole(ctx.role, 'admin');
-    if (!isAdmin && ctx.role !== 'supervisor') {
+    const ctx = await requirePermission('api_keys.view');
+    // Gerencia as chaves da conta (api_keys.manage) ou revoga só a pessoal (intelligence.personal_key).
+    const isAdmin = can(ctx, 'api_keys.manage');
+    if (!isAdmin && !can(ctx, 'intelligence.personal_key')) {
       return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
     }
 

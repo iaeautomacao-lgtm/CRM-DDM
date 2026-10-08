@@ -20,6 +20,7 @@
 import { NextResponse } from "next/server";
 import type { PostgrestError } from "@supabase/supabase-js";
 
+import { clientIp } from "@/lib/audit/context";
 import { hashInviteToken } from "@/lib/auth/invitations";
 import {
   checkRateLimit,
@@ -28,12 +29,11 @@ import {
 } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 
+// IP do cliente pelo clientIp() de lib/audit/context.ts (x-real-ip do proxy; no
+// x-forwarded-for vale o ÚLTIMO item). O primeiro item vem do cliente e dava para
+// girar a chave do rate limit. PRD 14, AP-07.
 function getClientIp(request: Request): string {
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  const xri = request.headers.get("x-real-ip");
-  if (xri) return xri.trim();
-  return "unknown";
+  return clientIp(request.headers) ?? "unknown";
 }
 
 function rpcErrorToResponse(err: PostgrestError): NextResponse {

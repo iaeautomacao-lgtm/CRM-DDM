@@ -295,8 +295,10 @@ export function ContactSidebar({
 
   if (!contact) {
     return (
-      <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
-        <p className="text-sm text-muted-foreground">Selecione uma conversa</p>
+      <div className="flex h-full w-[280px] items-center justify-center border-l border-border bg-background px-5">
+        <p className="text-center text-xs text-muted-foreground">
+          O contexto do contato aparecerá aqui.
+        </p>
       </div>
     );
   }
@@ -305,7 +307,7 @@ export function ContactSidebar({
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-full w-70 flex-col border-l border-border bg-card">
+    <div className="flex h-full w-[280px] flex-col border-l border-border bg-background">
       {/* `min-h-0` is load-bearing: a flex child defaults to
           min-height:auto, so without it this ScrollArea grows to fit
           all sections (Sentimento/Etiquetas/Notas) instead of
@@ -314,205 +316,193 @@ export function ContactSidebar({
           with no scrollbar, hiding whatever's below the fold. Same
           fix as conversation-list.tsx's ScrollArea. */}
       <ScrollArea className="min-h-0 flex-1">
-        <div className="p-4">
-          {/* Contact Info */}
-          <div className="flex flex-col items-center text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-lg font-semibold text-foreground">
+        <div className="p-3">
+          <div className="flex items-start gap-3 pb-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted/60 text-sm font-semibold text-foreground">
               {contact.avatar_url ? (
                 <img
-                  // Proxy por telefone só existe para WhatsApp; contato de
-                  // Instagram/Messenger (sem telefone) usa a foto do perfil.
                   src={contact.phone && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
                   alt={displayName}
-                  className="h-16 w-16 rounded-full object-cover"
+                  className="h-11 w-11 rounded-full object-cover"
                 />
               ) : (
                 initials
               )}
             </div>
-            {isEditingName ? (
-              <div className="mt-3 flex items-center gap-1">
-                <input
-                  type="text"
-                  aria-label="Nome do contato"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  onKeyDown={async (e) => {
-                    if (e.key === "Enter") {
-                      await handleSaveName();
-                    } else if (e.key === "Escape") {
-                      setIsEditingName(false);
-                      setEditName(displayName);
-                    }
-                  }}
-                  className="max-w-[160px] rounded-md border border-input bg-background px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                  autoFocus
-                />
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-7 px-2 text-xs text-primary"
-                  onClick={handleSaveName}
+
+            <div className="min-w-0 flex-1">
+              {isEditingName ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    aria-label="Nome do contato"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={async (e) => {
+                      if (e.key === "Enter") {
+                        await handleSaveName();
+                      } else if (e.key === "Escape") {
+                        setIsEditingName(false);
+                        setEditName(displayName);
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    autoFocus
+                  />
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs text-primary"
+                    onClick={handleSaveName}
+                  >
+                    Salvar
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="group flex max-w-full items-center gap-1.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                  onClick={() => setIsEditingName(true)}
+                  title="Clique para editar o nome"
+                  aria-label={`Editar nome: ${displayName}`}
                 >
-                  Salvar
-                </Button>
-              </div>
-            ) : (
-              // <button> (não <div>) para o nome ser editável pelo teclado.
-              <button
-                type="button"
-                className="group mt-3 flex w-full items-center justify-center gap-1.5 cursor-pointer rounded-md hover:opacity-80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
-                onClick={() => setIsEditingName(true)}
-                title="Clique para editar o nome"
-                aria-label={`Editar nome: ${displayName}`}
-              >
-                <span className="text-sm font-semibold text-foreground group-hover:text-primary">
-                  {displayName}
-                </span>
-                <svg
-                  className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity"
-                  fill="none"
-                  aria-hidden="true"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-              </button>
-            )}
-            {contact.company && (
-              <p className="text-xs text-muted-foreground">{contact.company}</p>
-            )}
+                  <span className="truncate text-sm font-semibold text-foreground group-hover:text-primary">
+                    {displayName}
+                  </span>
+                  <svg
+                    className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                    fill="none"
+                    aria-hidden="true"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                </button>
+              )}
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                {contact.company || "Contato"}
+              </p>
+            </div>
           </div>
 
-          {/* Phone */}
-          <div className="mt-4 space-y-2">
+          <div className="border-y border-border/70 py-1.5">
             <button
               onClick={handleCopyPhone}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted"
+              className="flex h-8 w-full items-center gap-2 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
             >
-              <Phone className="h-4 w-4 text-muted-foreground" />
-              <span className="flex-1 text-left">{contact.phone ?? "Sem telefone"}</span>
-              {copied ? (
-                <Check className="h-3 w-3 text-primary" />
-              ) : (
-                <Copy className="h-3 w-3 text-muted-foreground" />
+              <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-left">{contact.phone ?? "Sem telefone"}</span>
+              {contact.phone && (
+                copied ? (
+                  <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                )
               )}
             </button>
 
             {contact.email && (
-              <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground">
-                <Mail className="h-4 w-4 text-muted-foreground" />
+              <div className="flex h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
+                <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
           </div>
 
-          {/* Identidades por canal + vincular telefone/e-mail (une contatos). */}
           <div className="mt-3">
             <ContactChannelsCard
               key={contact.id}
               contact={contact}
               canEdit={accountRole !== "viewer"}
               onLinked={(result, merged) => {
-                // Unido: a conversa agora aponta para o contato mantido.
                 if (merged) onUpdateConversation?.({ contact_id: result.id, contact: result });
                 onUpdateContact?.(result);
               }}
             />
           </div>
 
-          {/* Sentimento (IA): linha compacta sempre visível; a orientação
-              longa fica atrás de "Ver orientação". */}
           {conversation && (
-            <div className="mt-4">
+            <div className="mt-3 border-t border-border/70 pt-3">
               {(() => {
                 const SENTIMENT_CONFIG: Record<
                   string,
-                  { emoji: string; color: string; label: string; bg: string; border: string; desc: string }
+                  { color: string; dot: string; label: string; desc: string }
                 > = {
                   positive: {
-                    emoji: "😊",
                     color: "text-emerald-700 dark:text-emerald-400",
-                    bg: "bg-emerald-500/10",
-                    border: "border-emerald-500/20",
+                    dot: "bg-emerald-500",
                     label: "Positivo",
-                    desc: "Aproveite a boa receptividade! Mantenha o atendimento ágil e conduza para o fechamento de forma objetiva."
+                    desc: "Aproveite a boa receptividade. Mantenha o atendimento ágil e conduza para o fechamento de forma objetiva."
                   },
                   neutral: {
-                    emoji: "😐",
-                    color: "text-slate-700 dark:text-slate-300",
-                    bg: "bg-slate-500/10",
-                    border: "border-slate-500/20",
+                    color: "text-muted-foreground",
+                    dot: "bg-muted-foreground",
                     label: "Neutro",
-                    desc: "Cliente direto e formal. Responda de forma clara, profissional, focada em solucionar as dúvidas sem enrolação."
+                    desc: "Cliente direto e formal. Responda de forma clara, profissional e focada na resolução."
                   },
                   negative: {
-                    emoji: "😡",
                     color: "text-rose-700 dark:text-rose-400",
-                    bg: "bg-rose-500/10",
-                    border: "border-rose-500/20",
+                    dot: "bg-rose-500",
                     label: "Negativo",
-                    desc: "Atenção: cliente insatisfeito! Aja de forma muito empática e paciente. Foque em priorizar a resolução do problema dele."
+                    desc: "Cliente insatisfeito. Priorize empatia, clareza e resolução antes de avançar na negociação."
                   },
                   mixed: {
-                    emoji: "😕",
                     color: "text-amber-700 dark:text-amber-400",
-                    bg: "bg-amber-500/10",
-                    border: "border-amber-500/20",
+                    dot: "bg-amber-500",
                     label: "Misto",
-                    desc: "Tons variados de satisfação/insatisfação. Seja paciente para desfazer mal-entendidos e reforce os pontos positivos da proposta."
+                    desc: "Há sinais variados na conversa. Esclareça dúvidas e confirme entendimento antes de avançar."
                   },
                   unknown: {
-                    emoji: "❔",
                     color: "text-muted-foreground",
-                    bg: "bg-muted",
-                    border: "border-border",
-                    label: "Não Analisado",
-                    desc: "Ainda sem mensagens suficientes do cliente para analisar. A análise roda sozinha quando ele escreve; o botão acima refaz na hora."
+                    dot: "bg-muted-foreground/50",
+                    label: "Não analisado",
+                    desc: "A análise roda automaticamente quando houver mensagens suficientes do cliente."
                   }
                 };
                 const currentSentiment = conversation.sentiment ?? "unknown";
                 const config = SENTIMENT_CONFIG[currentSentiment] ?? SENTIMENT_CONFIG.unknown;
                 const showSpinner = analyzing && currentSentiment === "unknown";
                 return (
-                  <div className="rounded-lg bg-muted/50 px-2 py-1">
-                    <div className="flex h-8 items-center gap-2 text-sm">
-                      <Brain className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                      {showSpinner ? (
-                        <span className="flex-1 text-xs text-muted-foreground">Analisando a conversa…</span>
-                      ) : (
-                        <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                          <span className="leading-none select-none" aria-hidden="true">{config.emoji}</span>
-                          <span className={cn("truncate font-medium", config.color)}>
-                            <span className="sr-only">Sentimento: </span>
-                            {config.label}
-                          </span>
-                        </span>
-                      )}
+                  <>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+                          Sentimento
+                        </p>
+                        {showSpinner ? (
+                          <p className="mt-1 text-xs text-muted-foreground">Analisando a conversa…</p>
+                        ) : (
+                          <div className="mt-1 flex items-center gap-1.5">
+                            <span className={cn("h-1.5 w-1.5 rounded-full", config.dot)} aria-hidden="true" />
+                            <span className={cn("text-xs font-medium", config.color)}>{config.label}</span>
+                          </div>
+                        )}
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
                         disabled={analyzing}
                         onClick={handleAnalyzeSentiment}
-                        title="Reanalisar conversa com IA"
-                        aria-label="Reanalisar sentimento da conversa com IA"
+                        title="Reanalisar sentimento"
+                        aria-label="Reanalisar sentimento da conversa"
                       >
-                        <RefreshCw aria-hidden="true" className={cn("h-4 w-4", analyzing && "animate-spin")} />
+                        <RefreshCw aria-hidden="true" className={cn("h-3.5 w-3.5", analyzing && "animate-spin")} />
                       </Button>
                     </div>
+
                     {!showSpinner && (
-                      <details className="group pb-1">
-                        <summary className="cursor-pointer list-none text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary">
+                      <details className="group mt-1.5">
+                        <summary className="cursor-pointer list-none text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-none">
                           <span className="group-open:hidden">Ver orientação</span>
                           <span className="hidden group-open:inline">Ocultar orientação</span>
                         </summary>
-                        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{config.desc}</p>
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{config.desc}</p>
                       </details>
                     )}
-                  </div>
+                  </>
                 );
               })()}
             </div>
@@ -664,7 +654,7 @@ type SectionsState = Record<SidebarSectionId, boolean>;
 const DEFAULT_SECTIONS: SectionsState = {
   origem: false,
   fluxo: false,
-  etiquetas: false,
+  etiquetas: true,
   notas: true,
   historico: false,
 };
@@ -725,14 +715,14 @@ function SidebarSection({
   const open = sections[id];
   const contentId = `sidebar-section-${id}`;
   return (
-    <section className="mt-4">
+    <section className="border-t border-border/70 py-1">
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={() => onToggle(id)}
           aria-expanded={open}
           aria-controls={contentId}
-          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left text-sm font-medium text-foreground hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          className="flex h-9 min-w-0 flex-1 items-center gap-2 px-1 text-left text-xs font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
         >
           <ChevronRight
             aria-hidden="true"
@@ -741,13 +731,13 @@ function SidebarSection({
           {Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
           <span className="truncate">{title}</span>
           {count !== undefined && count > 0 && (
-            <span className="rounded-full bg-muted px-2 text-xs tabular-nums text-muted-foreground">{count}</span>
+            <span className="text-[10px] tabular-nums text-muted-foreground/75">{count}</span>
           )}
         </button>
         {action}
       </div>
       {open && (
-        <div id={contentId} className="mt-2 px-1">
+        <div id={contentId} className="px-1 pb-3 pt-1">
           {children}
         </div>
       )}

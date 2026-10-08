@@ -18,6 +18,8 @@
 // Compatibilidade: sem a migration 201 (função inexistente) a ingestão devolve `missing` e o webhook cai no caminho
 // inline de sempre.
 
+import { contactForMessage, type WebhookContact } from '@/lib/whatsapp/webhook-contacts'
+
 export type MessageInboxMode = 'off' | 'shadow' | 'on'
 
 /** Padrão quando a env não está definida. Virar 'on' depois de validado (ver cabeçalho). */
@@ -58,14 +60,14 @@ interface BodyLike {
     id?: string
     changes?: Array<{
       field?: string
-      value?: { metadata?: { phone_number_id?: string }; messages?: MetaMessage[]; contacts?: unknown[] }
+      value?: { metadata?: { phone_number_id?: string }; messages?: MetaMessage[]; contacts?: WebhookContact[] }
     }>
   }>
 }
 
 /**
  * Uma entrada por mensagem das changes cujo canal validou a assinatura. Mesma regra do caminho inline:
- * só changes com `messages` E `contacts`; contato = contacts[i] ?? contacts[0]. Conta/canal vêm do canal
+ * só changes com `messages` E `contacts`; contato = o de mesmo wa_id/from (WH-04), não o do mesmo índice. Conta/canal vêm do canal
  * verificado, nunca do corpo.
  */
 export function extractMessageEvents(
@@ -93,7 +95,7 @@ export function extractMessageEvents(
           message_id: message.id,
           sender: String(message.from ?? ''),
           ts: Number.isFinite(ts) && ts > 0 ? ts : null,
-          payload: { message, contact: value.contacts[i] ?? value.contacts[0], phone_number_id: phoneNumberId },
+          payload: { message, contact: contactForMessage(value.contacts, message.from), phone_number_id: phoneNumberId },
         })
       }
     }

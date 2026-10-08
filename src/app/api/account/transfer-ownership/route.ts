@@ -21,7 +21,7 @@
 import { NextResponse } from "next/server";
 import type { PostgrestError } from "@supabase/supabase-js";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -54,10 +54,10 @@ function looksLikeUuid(v: unknown): v is string {
 
 export async function POST(request: Request) {
   try {
-    // `requireRole('owner')` is belt-and-braces — the RPC checks
+    // `requirePermission('ownership.transfer')` is belt-and-braces — the RPC checks
     // this too, but failing fast here saves a Supabase round trip
     // on the obvious "admin trying to transfer" case.
-    const ctx = await requireRole("owner");
+    const ctx = await requirePermission("ownership.transfer");
 
     // Rate-limit owner-only transfers. Legitimate use is one click
     // every few months at most; a script run in a loop would

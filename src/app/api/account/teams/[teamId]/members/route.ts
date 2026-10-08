@@ -17,7 +17,7 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { getCurrentAccount, requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -49,7 +49,7 @@ export async function GET(
   { params }: { params: Promise<{ teamId: string }> },
 ) {
   try {
-    const ctx = await getCurrentAccount();
+    const ctx = await requirePermission("teams.view");
     const { teamId } = await params;
 
     if (!(await teamBelongsToAccount(ctx.supabase, teamId, ctx.accountId))) {
@@ -82,7 +82,7 @@ export async function POST(
   { params }: { params: Promise<{ teamId: string }> },
 ) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requirePermission("teams.manage");
     const { teamId } = await params;
 
     const limit = checkRateLimit(
@@ -156,7 +156,7 @@ export async function DELETE(
   { params }: { params: Promise<{ teamId: string }> },
 ) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requirePermission("teams.manage");
     const { teamId } = await params;
 
     const limit = checkRateLimit(

@@ -9,7 +9,7 @@
 // RLS client. Listing is open to any member (viewer+) — the roster
 // is not secret; the secret (the key itself) is never in it. Minting
 // is admin+ (a key hands out capabilities), enforced by both
-// `requireRole('admin')` here and the `api_keys_insert` RLS policy.
+// `requirePermission('api_keys.manage')` here and the `api_keys_insert` RLS policy.
 //
 // IMPORTANT: the plaintext key is returned exactly ONCE, in the POST
 // response. We persist only its SHA-256 hash, so neither GET nor any
@@ -27,7 +27,8 @@
 
 import { NextResponse } from 'next/server';
 
-import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
+import { requirePermission, toErrorResponse } from '@/lib/auth/account';
+import { can } from '@/lib/auth/permissions';
 import { generateApiKey } from '@/lib/api-keys/keys';
 import { planKeyCreation } from '@/lib/api-keys/personal';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
@@ -51,7 +52,7 @@ export async function GET(request: Request) {
   try {
     // Any member can view the roster (RLS allows it); we just need a
     // resolved account context.
-    const ctx = await getCurrentAccount();
+    const ctx = await requirePermission('api_keys.view');
     const mine = new URL(request.url).searchParams.get('mine') === '1';
 
     let query = ctx.supabase
@@ -79,14 +80,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await getCurrentAccount();
-    // Pré-checagem de papel antes do rate limit/corpo; o detalhe (o que
-    // cada papel pode criar) fica em planKeyCreation abaixo.
-    if (
-      ctx.role !== 'owner' &&
-      ctx.role !== 'admin' &&
-      ctx.role !== 'supervisor'
-    ) {
+    // Pré-checagem antes do rate limit/corpo: quem gerencia as chaves da conta (api_keys.manage) ou cria a
+    // chave pessoal (intelligence.personal_key). O detalhe (o que cada um pode criar) fica em
+    // planKeyCreation abaixo. Mesmo resultado de antes: owner/admin/supervisor passam; operador e viewer não.
+    const ctx = await requirePermission('api_keys.view');
+    const canManage = can(ctx, 'api_keys.manage');
+    const canPersonal = can(ctx, 'intelligence.personal_key');
+    if (!canManage && !canPersonal) {
       return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
     }
 
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
 
     // Scopes default to none if omitted — that yields a key that can
     // only call the scope-free endpoints (e.g. GET /api/v1/me).
-    const plan = planKeyCreation(ctx.role, ctx.userId, body?.scopes ?? []);
+    const plan = planKeyCreation({ canManage, canPersonal }, ctx.userId, body?.scopes ?? []);
     if (!plan.ok) {
       return NextResponse.json({ error: plan.error }, { status: plan.status });
     }
@@ -141,7 +141,7 @@ export async function POST(request: Request) {
     // Supervisor não passa na RLS de insert (admin+): usa o service role,
     // com conta, dono e escopo já fixados pelo servidor (planKeyCreation
     // só deixa o supervisor criar a chave pessoal dele).
-    const writer = ctx.role === 'supervisor' ? supabaseAdmin() : ctx.supabase;
+    const writer = canManage ? ctx.supabase : supabaseAdmin();
     const { data, error } = await writer
       .from('api_keys')
       .insert({

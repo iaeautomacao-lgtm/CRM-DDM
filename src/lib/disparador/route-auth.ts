@@ -1,29 +1,32 @@
 import { ForbiddenError, getCurrentAccount, type AccountContext } from "@/lib/auth/account";
+import { can } from "@/lib/auth/permissions";
 import type { AccountRole } from "@/lib/auth/roles";
-import { canAccessRoute } from "@/lib/role-utils";
 
 // Quem pode criar, editar, desagendar, iniciar, pausar e encerrar campanhas:
-// os mesmos papéis que enxergam a página /disparador/campanhas
-// (ROUTE_ALLOWLIST em role-utils.ts — hoje owner e admin). Antes as rotas
+// a permissão `campaigns.manage` (PRD 20, 20.3c — hoje owner e admin, os mesmos papéis que enxergam
+// a página /disparador/campanhas). Antes as rotas
 // só exigiam sessão + conta: um viewer/agente chamando a API direto
 // conseguia criar ou disparar campanha.
 
-export const DISPARADOR_CAMPAIGNS_PATH = "/disparador/campanhas";
-
-/** Papel pode gerenciar campanhas do disparador? (puro, testável) */
+/** Papel de sistema pode gerenciar campanhas do disparador? (puro, testável; == can(papel, "campaigns.manage")) */
 export function canManageCampaigns(role: AccountRole | null | undefined): boolean {
-  return !!role && canAccessRoute(role, DISPARADOR_CAMPAIGNS_PATH);
+  return !!role && can({ role }, "campaigns.manage");
 }
 
+/** Permissões do disparador que as rotas podem exigir. */
+export type DisparadorPermission = "campaigns.manage" | "campaigns.rate_limit";
+
 /**
- * Sessão + conta + papel. Lança UnauthorizedError (401) sem sessão e
- * ForbiddenError (403) sem conta ou com papel insuficiente — use com
- * toErrorResponse.
+ * Sessão + conta + permissão (padrão `campaigns.manage`; limites por segundo usam `campaigns.rate_limit`).
+ * Lança UnauthorizedError (401) sem sessão e ForbiddenError (403) sem conta ou sem a permissão — use com
+ * toErrorResponse (o 403 traz `code: 'forbidden'` e a `permission` que faltou).
  */
-export async function requireDisparadorAccess(): Promise<AccountContext> {
+export async function requireDisparadorAccess(
+  permission: DisparadorPermission = "campaigns.manage",
+): Promise<AccountContext> {
   const ctx = await getCurrentAccount();
-  if (!canManageCampaigns(ctx.role)) {
-    throw new ForbiddenError("Seu papel não permite gerenciar campanhas do disparador.");
+  if (!can(ctx, permission)) {
+    throw new ForbiddenError("Seu papel não permite gerenciar campanhas do disparador.", permission);
   }
   return ctx;
 }

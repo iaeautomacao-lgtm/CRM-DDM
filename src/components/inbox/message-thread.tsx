@@ -199,8 +199,7 @@ const SCROLL_NEAR_BOTTOM_PX = 120;
  * Defined once at module scope so the two render paths can't drift —
  * if we ever switch the asset, both spots update together.
  */
-const DOODLE_BG_CLASSES =
-  "bg-background bg-[url('/inbox-doodle.svg')] bg-repeat";
+const DOODLE_BG_CLASSES = "bg-background";
 
 export function MessageThread({
   conversation,
@@ -1324,21 +1323,18 @@ export function MessageThread({
     [conversation, onAssignChange, profiles],
   );
 
-  // Empty state — same WhatsApp-style doodle background as the active
-  // thread below, so swapping between empty/selected doesn't change the
-  // pattern under the user's eye.
   if (!conversation || !contact) {
     return (
-      <div className={cn("flex flex-1 flex-col items-center justify-center", DOODLE_BG_CLASSES)}>
-        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
-          <MessageSquare className="h-8 w-8 text-muted-foreground" />
+      <div className="flex flex-1 items-center justify-center bg-background px-6">
+        <div className="text-center">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-muted/35">
+            <MessageSquare className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+          </div>
+          <h3 className="mt-3 text-sm font-medium text-foreground">Nenhuma conversa selecionada</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Escolha uma conversa para visualizar o atendimento.
+          </p>
         </div>
-        <h3 className="mt-4 text-sm font-medium text-muted-foreground">
-          Selecione uma conversa
-        </h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Escolha uma conversa à esquerda para começar a enviar mensagens
-        </p>
       </div>
     );
   }
@@ -1364,11 +1360,7 @@ export function MessageThread({
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
     <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
-      {/* Header — solid card surface sits on top of the doodle so the
-          name/avatar/dropdowns stay legible. */}
-      {/* flex-wrap: no celular (360px) a barra de ações desce para a linha
-          de baixo em vez de espremer o nome do contato até sumir. */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 sm:px-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-3 py-2.5 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
           {/* Back-to-list button — mobile only. Hidden on lg+ where the
               conversation list is always visible next to the thread. */}
@@ -1382,7 +1374,7 @@ export function MessageThread({
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             </button>
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground overflow-hidden" aria-hidden="true">
+          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted/60 text-sm font-medium text-foreground" aria-hidden="true">
             {contact.avatar_url ? (
               <img
                 // Proxy por telefone só existe para WhatsApp; contato de
@@ -1396,43 +1388,42 @@ export function MessageThread({
             )}
           </div>
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="truncate text-sm font-semibold text-foreground">{displayName}</h2>
-              {/* Cliente da linha: ponto colorido + nome (sem pílula). */}
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate text-[14px] font-semibold text-foreground">{displayName}</h2>
               {clientBadge && (
-                <span className="hidden shrink-0 items-center gap-1 text-xs text-muted-foreground sm:inline-flex">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: clientBadge.color }} aria-hidden="true" />
-                  {clientBadge.name}
+                <span className="hidden min-w-0 items-center gap-1 text-[11px] text-muted-foreground lg:inline-flex">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: clientBadge.color }} aria-hidden="true" />
+                  <span className="max-w-28 truncate">{clientBadge.name}</span>
                 </span>
               )}
             </div>
-            {/* Uma linha só: contato · canal · sessão/linha · janela 24h. */}
-            <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
-              <span className="truncate">{contact.phone ?? contact.email ?? ""}</span>
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
               {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"] && (
-                <span className="hidden shrink-0 sm:inline">
-                  · {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"].label}
+                <span className="shrink-0">
+                  {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"].label}
                 </span>
               )}
-              {conversation.waha_session && (
-                <span className="hidden max-w-32 truncate sm:inline" title={`Sessão: ${conversation.waha_session}`}>
-                  · {conversation.waha_session}
-                </span>
+              {(contact.phone ?? contact.email) && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className="truncate">{contact.phone ?? contact.email}</span>
+                </>
               )}
-              {/* Janela de 24h como texto discreto; vermelho só quando expirou.
-                  Sem texto (WAHA, sem janela) não renderiza. */}
               {sessionInfo.remaining && (
-                <span
-                  className={cn(
-                    "hidden shrink-0 items-center gap-1 sm:inline-flex",
-                    sessionInfo.expired && "font-medium text-destructive"
-                  )}
-                >
-                  · <Clock className="h-3 w-3" aria-hidden="true" />
-                  {sessionInfo.remaining}
-                </span>
+                <>
+                  <span className="hidden sm:inline" aria-hidden="true">·</span>
+                  <span
+                    className={cn(
+                      "hidden shrink-0 items-center gap-1 sm:inline-flex",
+                      sessionInfo.expired && "font-medium text-destructive"
+                    )}
+                  >
+                    <Clock className="h-3 w-3" aria-hidden="true" />
+                    {sessionInfo.remaining}
+                  </span>
+                </>
               )}
-            </p>
+            </div>
           </div>
         </div>
 
@@ -1444,7 +1435,7 @@ export function MessageThread({
             <DropdownMenuTrigger
                 aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
                 className={cn(
-                  "inline-flex h-8 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted",
+                  "inline-flex h-8 items-center justify-center gap-1 rounded-md bg-muted/55 px-2.5 text-xs font-medium transition-colors hover:bg-muted",
                   currentStatus?.color ?? "text-muted-foreground"
                 )}>
                 {currentStatus?.label ?? "Status"}
@@ -1480,8 +1471,8 @@ export function MessageThread({
               // continua dizendo a quem a conversa está atribuída.
               aria-label={assignedAgentId ? `Atribuída a ${assignLabel}` : "Atribuir conversa"}
               className={cn(
-                "inline-flex h-8 max-w-40 items-center justify-center gap-1 rounded-md border border-border px-2 text-xs hover:bg-muted",
-                assignedAgentId ? "text-primary" : "text-muted-foreground"
+                "inline-flex h-8 max-w-40 items-center justify-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-muted",
+                assignedAgentId ? "text-foreground" : "text-muted-foreground"
               )}
             >
               <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -1652,19 +1643,19 @@ export function MessageThread({
       {/* De onde veio a conversa: ativo/receptivo, campanha, linha (PRD-02). */}
       <ConversationOriginBanner key={conversation.id} conversationId={conversation.id} />
 
-      {/* Messages Area */}
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-4 sm:px-4">
+        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-5 sm:px-5">
+          <div className="mx-auto w-full max-w-[1120px]">
           {loading ? (
             <div className="flex items-center justify-center py-12" role="status">
               <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
               <span className="sr-only">Carregando mensagens…</span>
             </div>
           ) : messages.length === 0 && pendingSends.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
-              <p className="text-xs text-muted-foreground">
-                Envie um template para iniciar a conversa
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <p className="text-sm font-medium text-foreground">Nenhuma mensagem ainda</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Envie uma mensagem para iniciar o atendimento.
               </p>
             </div>
           ) : (
@@ -1672,10 +1663,12 @@ export function MessageThread({
               {messageGroups.map((group) => (
                 <div key={group.date}>
                   {/* Date separator */}
-                  <div className="mb-4 flex items-center justify-center">
-                    <span className="rounded-full border border-border bg-card/90 px-3 py-0.5 text-xs font-medium text-muted-foreground shadow-sm">
+                  <div className="mb-4 flex items-center gap-3">
+                    <span className="h-px flex-1 bg-border/60" />
+                    <span className="text-[10px] font-medium text-muted-foreground">
                       {formatDateSeparator(group.date)}
                     </span>
+                    <span className="h-px flex-1 bg-border/60" />
                   </div>
                   {/* Messages */}
                   <div className="space-y-2">
@@ -1739,6 +1732,7 @@ export function MessageThread({
               )}
             </div>
           )}
+          </div>
         </div>
         {showNewMessages && (
           <button

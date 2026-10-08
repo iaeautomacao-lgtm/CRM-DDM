@@ -1,5 +1,7 @@
 import { chatMediaReference } from '@/lib/storage/chat-media';
-import { auditFetch, registerAuditActor } from '@/lib/audit/context'
+import { auditFetch, clientIp, registerAuditActor } from '@/lib/audit/context'
+import { timingSafeEqual } from 'node:crypto'
+import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
@@ -20,6 +22,7 @@ import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
+import { contactForMessage } from '@/lib/whatsapp/webhook-contacts'
 import {
   drainStatusInbox,
   extractStatusEvents,
@@ -81,10 +84,12 @@ interface WhatsAppWebhookEntry {
         phone_number_id: string
       }
       contacts?: Array<{
-        profile: { name: string }
-        wa_id: string
+        profile?: { name?: string }
+        wa_id?: string
       }>
       messages?: WhatsAppMessage[]
+      /** Erros do nível do value (ex.: tipo de mensagem não suportado, número restrito). */
+      errors?: Array<{ code?: number; title?: string; message?: string; error_data?: { details?: string } }>
       statuses?: Array<{
         id: string
         status: string
@@ -97,8 +102,19 @@ interface WhatsAppWebhookEntry {
 }
 
 // GET - Webhook verification
+/** Comparação em tempo constante; tamanhos diferentes já são "não bate" (timingSafeEqual lançaria). */
+function verifyTokenMatches(stored: string, supplied: string): boolean {
+  const a = Buffer.from(stored)
+  const b = Buffer.from(supplied)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
 export async function GET(request: Request) {
   try {
+    // Teto por IP no processo (sem infra nova): barra quem testa verify_token em laço.
+    const limit = checkRateLimit(`webhook-verify:${clientIp(request.headers) ?? 'unknown'}`, RATE_LIMITS.webhookVerify)
+    if (!limit.success) return rateLimitResponse(limit)
+
     const { searchParams } = new URL(request.url)
     const mode = searchParams.get('hub.mode')
     const challenge = searchParams.get('hub.challenge')
@@ -133,8 +149,10 @@ export async function GET(request: Request) {
       if (!config.verify_token) continue
       try {
         if (
-          decryptStoredSecret(config.verify_token, 'whatsapp_config.verify_token') ===
-          verifyToken
+          verifyTokenMatches(
+            decryptStoredSecret(config.verify_token, 'whatsapp_config.verify_token'),
+            verifyToken
+          )
         ) {
           matchedConfig = config
           break
@@ -490,12 +508,32 @@ async function verifyChannelKey(
     : { ok: false, row: result.row, noSecret: result.noSecret }
 }
 
+/** Colunas que o processamento de mensagem usa do canal (sem select('*'): app_secret/verify_token ficam de fora). */
+const CHANNEL_PROCESS_COLUMNS = 'id, account_id, user_id, access_token'
+
 async function processWebhook(
   body: { entry?: WhatsAppWebhookEntry[] },
   verifiedChannels: Map<string, ChannelRow>,
   options: { statusesIngested?: boolean; messagesIngested?: boolean } = {},
 ) {
   if (!body.entry) return
+
+  // WH-14: a linha do canal é lida UMA vez por phone_number_id neste POST (antes: select('*') por change).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const configLookups = new Map<string, Promise<{ rows: any[] | null; error: unknown }>>()
+  const lookupConfigRows = (phoneNumberId: string) => {
+    let lookup = configLookups.get(phoneNumberId)
+    if (!lookup) {
+      lookup = Promise.resolve(
+        supabaseAdmin()
+          .from('whatsapp_config')
+          .select(CHANNEL_PROCESS_COLUMNS)
+          .eq('phone_number_id', phoneNumberId),
+      ).then(({ data, error }: { data: unknown; error: unknown }) => ({ rows: (data as any[] | null) ?? null, error })) // eslint-disable-line @typescript-eslint/no-explicit-any
+      configLookups.set(phoneNumberId, lookup)
+    }
+    return lookup
+  }
 
   for (const entry of body.entry) {
     for (const change of entry.changes) {
@@ -532,15 +570,41 @@ async function processWebhook(
       // dedicated handler. Skip the messaging branches below so we
       // don't try to read message-shaped fields off a template event.
       if (isTemplate) {
-        await handleTemplateWebhookChange(
-          { field: change.field, value: change.value as unknown },
-          supabaseAdmin(),
-          { accountId: channel.account_id }
-        )
+        // WH-03: um evento de template que falha não derruba as demais changes do POST.
+        try {
+          await handleTemplateWebhookChange(
+            { field: change.field, value: change.value as unknown },
+            supabaseAdmin(),
+            { accountId: channel.account_id }
+          )
+        } catch (error) {
+          console.error('[webhook] falha ao tratar evento de template:', change.field, error)
+        }
         continue
       }
 
       const value = change.value
+
+      // WH-06: erros reportados pela Meta no value (tipo não suportado, restrição do número…) ficam no log.
+      if (Array.isArray(value.errors) && value.errors.length > 0) {
+        console.warn('[webhook] value.errors da Meta:', JSON.stringify(value.errors))
+        void writeLog({
+          account_id: channel.account_id,
+          level: 'warn',
+          source: 'webhook_meta',
+          event: 'meta_value_errors',
+          message: 'A Meta reportou erros no evento recebido',
+          payload: {
+            phone_number_id: value.metadata?.phone_number_id ?? null,
+            errors: value.errors.slice(0, 5).map((e) => ({
+              code: e?.code ?? null,
+              title: e?.title ?? null,
+              message: e?.message ?? null,
+              details: e?.error_data?.details ?? null,
+            })),
+          },
+        })
+      }
 
       // Handle status updates
       // (statusesIngested: delivered/read/failed já estão no inbox durável e são aplicados em lote.)
@@ -578,10 +642,7 @@ async function processWebhook(
       // operators see the real cause in logs. ≥2 rows shouldn't happen
       // post-migration 013 (UNIQUE constraint), but a row created
       // before the constraint, or a race, would still surface here.
-      const { data: configRows, error: configError } = await supabaseAdmin()
-        .from('whatsapp_config')
-        .select('*')
-        .eq('phone_number_id', phoneNumberId)
+      const { rows: configRows, error: configError } = await lookupConfigRows(phoneNumberId)
 
       if (configError) {
         console.error(
@@ -620,11 +681,26 @@ async function processWebhook(
         continue
       }
 
-      const decryptedAccessToken = decrypt(config.access_token)
+      // WH-03: token ilegível (chave errada, linha corrompida) derruba só ESTA change, não as demais do POST.
+      let decryptedAccessToken: string
+      try {
+        decryptedAccessToken = decrypt(config.access_token)
+      } catch (error) {
+        console.error('[webhook] falha ao decifrar o access_token do canal:', config.id, error)
+        void writeLog({
+          account_id: config.account_id,
+          level: 'error',
+          source: 'webhook_meta',
+          event: 'access_token_decrypt_failed',
+          message: 'Não foi possível decifrar o token do canal; mensagens desta change não foram processadas (caminho inline)',
+          payload: { channel_id: config.id, erro: error instanceof Error ? error.message : String(error) },
+        })
+        continue
+      }
 
-      for (let i = 0; i < value.messages.length; i++) {
-        const message = value.messages[i]
-        const contact = value.contacts[i] || value.contacts[0]
+      for (const message of value.messages) {
+        // WH-04: o contato é o de mesmo wa_id/from, nunca o do mesmo índice.
+        const contact = contactForMessage(value.contacts, message.from)
 
         // Uma mensagem que falha não derruba as demais do mesmo POST (a Meta não reenvia: já recebeu 200).
         try {

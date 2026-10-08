@@ -69,6 +69,8 @@ vi.mock("@/lib/supabase/server", () => ({
 const { getCurrentAccount, UnauthorizedError, ForbiddenError } = await import(
   "./account"
 );
+const { ACCOUNT_ROLES } = await import("./roles");
+const { PERMISSIONS, SYSTEM_ROLE_PERMISSIONS, can } = await import("./permissions");
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -104,6 +106,25 @@ describe("getCurrentAccount", () => {
     expect(calls[0].eqArgs).toEqual([["user_id", "user-1"]]);
     expect(calls[1].columns).not.toMatch(/accounts!/);
     expect(calls[1].eqArgs).toEqual([["id", "acct-1"]]);
+  });
+
+  // PRD 20, 20.2: o contexto carrega as permissões (compat: derivadas do papel de sistema).
+  it.each(ACCOUNT_ROLES)("carrega as permissões do papel de sistema %s (compat)", async (role) => {
+    const { client } = makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: { data: { account_id: "acct-1", account_role: role }, error: null },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+      },
+    });
+    createClient.mockReturnValue(client);
+
+    const ctx = await getCurrentAccount();
+
+    expect([...ctx.permissions].sort()).toEqual([...SYSTEM_ROLE_PERMISSIONS[role]].sort());
+    for (const permission of PERMISSIONS) {
+      expect(can(ctx, permission), `${role} ${permission}`).toBe(can({ role }, permission));
+    }
   });
 
   it("throws UnauthorizedError when there is no session", async () => {
@@ -172,5 +193,65 @@ describe("getCurrentAccount", () => {
     await expect(getCurrentAccount()).rejects.toThrow(
       "Profile is not linked to an account",
     );
+  });
+});
+
+// PRD 20, 20.3: requirePermission substitui requireRole com o MESMO resultado para os 5 papéis de sistema.
+describe("requirePermission", () => {
+  const clientFor = (role: string) =>
+    makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: { data: { account_id: "acct-1", account_role: role }, error: null },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+      },
+    }).client;
+
+  const CASES = [
+    ["settings.account", "admin"],
+    ["members.invite", "admin"],
+    ["members.manage", "admin"],
+    ["audit.view", "admin"],
+    ["members.reset_password", "owner"],
+    ["ownership.transfer", "owner"],
+    ["members.view", "viewer"],
+  ] as const;
+
+  it.each(CASES)("%s == requireRole('%s') para os 5 papéis", async (permission, min) => {
+    const { requirePermission, requireRole } = await import("./account");
+    for (const role of ACCOUNT_ROLES) {
+      createClient.mockReturnValue(clientFor(role));
+      const byPermission = await requirePermission(permission).then(() => true, () => false);
+      createClient.mockReturnValue(clientFor(role));
+      const byRole = await requireRole(min).then(() => true, () => false);
+      expect(byPermission, `${role} ${permission}`).toBe(byRole);
+    }
+  });
+
+  it("403 carrega a permissão que faltou (corpo aditivo: error continua string)", async () => {
+    const { requirePermission, toErrorResponse } = await import("./account");
+    createClient.mockReturnValue(clientFor("agent"));
+    const err = await requirePermission("members.manage").catch((e) => e);
+    expect(err).toBeInstanceOf(ForbiddenError);
+    expect(err.permission).toBe("members.manage");
+    const res = toErrorResponse(err);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({
+      error: "This action requires the 'members.manage' permission",
+      code: "forbidden",
+      permission: "members.manage",
+    });
+  });
+
+  it("papel de sistema sem a permissão não passa; chave fora do catálogo nega (fail-closed)", async () => {
+    const { requirePermission } = await import("./account");
+    createClient.mockReturnValue(clientFor("owner"));
+    await expect(requirePermission("nao.existe" as never)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("sem sessão: 401", async () => {
+    const { requirePermission } = await import("./account");
+    createClient.mockReturnValue(makeClient({ user: null, byTable: {} }).client);
+    await expect(requirePermission("members.view")).rejects.toBeInstanceOf(UnauthorizedError);
   });
 });

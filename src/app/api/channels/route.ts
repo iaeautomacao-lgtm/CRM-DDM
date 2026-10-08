@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { PUBLIC_CHANNEL_COLUMNS } from '@/lib/channels/store'
 import { socialConnectMissingEnv } from '@/lib/channels/oauth'
@@ -9,7 +9,7 @@ import { socialConnectMissingEnv } from '@/lib/channels/oauth'
 
 export async function GET() {
   try {
-    const { accountId } = await getCurrentAccount()
+    const { accountId } = await requirePermission('channels.view')
     const { data, error } = await supabaseAdmin()
       .from('channels')
       .select(PUBLIC_CHANNEL_COLUMNS)

@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
+import type { WebhookContact } from '@/lib/whatsapp/webhook-contacts'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
@@ -58,6 +59,18 @@ export interface WhatsAppMessage {
     address?: string
   }
   reaction?: { message_id: string; emoji: string }
+  /** Resposta rápida (quick-reply) de template — ex.: botão de uma campanha. */
+  button?: { text?: string; payload?: string }
+  order?: {
+    catalog_id?: string
+    text?: string
+    product_items?: Array<{ product_retailer_id?: string; quantity?: number }>
+  }
+  contacts?: Array<{
+    name?: { formatted_name?: string }
+    phones?: Array<{ phone?: string; wa_id?: string }>
+  }>
+  system?: { body?: string; type?: string; new_wa_id?: string }
   /**
    * Set when the customer taps a button or list row on an interactive
    * message we sent. `button_reply.id` / `list_reply.id` is whatever id
@@ -155,11 +168,28 @@ async function handleReaction(
   }
 }
 
+/**
+ * WH-21: o wamid já está em `messages`? Consulta barata (índice único idx_messages_message_id_unique) feita ANTES do
+ * trabalho pesado (contato, conversa, download de mídia na Meta, upload ao Storage). Reentrega da Meta e retry do
+ * drenador de uma mensagem já gravada viram `duplicate` sem refazer nada. Erro na consulta = "não sei": segue o
+ * caminho normal (o 23505 do insert continua sendo a garantia final contra a corrida).
+ */
+async function messageAlreadyStored(wamid: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin()
+    .from('messages')
+    .select('id')
+    .eq('message_id', wamid)
+    .limit(1)
+  if (error) return false
+  return Array.isArray(data) && data.length > 0
+}
+
 export type ProcessMessageOutcome = "processed" | "duplicate" | "reaction"
 
 export async function processMessage(
   message: WhatsAppMessage,
-  contact: { profile: { name: string }; wa_id: string },
+  // Pode faltar (WH-03/WH-04): sem contato correspondente o nome fica vazio (contato novo = telefone).
+  contact: WebhookContact | null | undefined,
   // Tenancy. Resolved from the matched whatsapp_config row; every
   // contact / conversation / message row created downstream is
   // stamped with this so any member of the account can see it.
@@ -176,8 +206,14 @@ export async function processMessage(
   // account-wide keyword/first-inbound scan instead.
   configId: string
 ): Promise<ProcessMessageOutcome> {
+  // Reação não vira linha em `messages` (o wamid dela nunca está lá): só as demais passam pelo dedupe.
+  if (message.type !== 'reaction' && message.id && (await messageAlreadyStored(message.id))) {
+    console.log('[webhook] Mensagem duplicada ignorada (já gravada):', message.id)
+    return "duplicate"
+  }
+
   const senderPhone = normalizePhone(message.from)
-  const contactName = contact.profile.name
+  const contactName = String(contact?.profile?.name ?? '').trim()
 
   // Find or create contact
   const contactOutcome = await findOrCreateContact(
@@ -795,6 +831,44 @@ async function parseMessageContent(
         }
       }
       return { ...empty, contentText: '[Interactive reply]' }
+    }
+
+    // WH-06 (PRD 15): antes estes tipos viravam "[Unsupported message type: …]". Agora o conteúdo é legível.
+    // EFEITO A JUSANTE (decisão do dono): este texto alimenta fluxos (coleta e keyword), automações
+    // (keyword_match), IA, sentimento e last_message_text, exatamente como um texto digitado.
+    case 'button': {
+      // Quick-reply de template: o texto do botão que o cliente tocou.
+      const text = message.button?.text?.trim() || message.button?.payload?.trim()
+      return { ...empty, contentText: text || '[Unsupported message type: button]' }
+    }
+
+    case 'order': {
+      const order = message.order
+      const items = order?.product_items ?? []
+      const total = items.reduce((sum, i) => sum + (Number(i?.quantity) > 0 ? Number(i.quantity) : 1), 0)
+      const head = items.length > 0 ? `Pedido com ${total} ${total === 1 ? 'item' : 'itens'}` : 'Pedido'
+      const note = order?.text?.trim()
+      return { ...empty, contentText: note ? `${head}: ${note}` : head }
+    }
+
+    case 'contacts': {
+      const shared = (message.contacts ?? [])
+        .map((c) => {
+          const name = c?.name?.formatted_name?.trim()
+          const phone = c?.phones?.find((p) => p?.phone || p?.wa_id)
+          const number = phone?.phone?.trim() || phone?.wa_id?.trim()
+          return [name, number ? `(${number})` : null].filter(Boolean).join(' ')
+        })
+        .filter(Boolean)
+      return {
+        ...empty,
+        contentText: shared.length > 0 ? `Contato compartilhado: ${shared.join('; ')}` : 'Contato compartilhado',
+      }
+    }
+
+    case 'system': {
+      const body = message.system?.body?.trim()
+      return { ...empty, contentText: body ? `Mensagem do sistema: ${body}` : 'Mensagem do sistema' }
     }
 
     default:

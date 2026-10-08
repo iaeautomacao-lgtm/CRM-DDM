@@ -29,6 +29,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
+import { can, permissionsForRole, type Permission } from "./permissions";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 
 // ------------------------------------------------------------
@@ -48,9 +49,12 @@ export class UnauthorizedError extends Error {
 
 export class ForbiddenError extends Error {
   readonly status = 403 as const;
-  constructor(message = "Forbidden") {
+  /** Permissão que faltou (PRD 20): o front pode mostrar "sem permissão para …". */
+  readonly permission?: Permission;
+  constructor(message = "Forbidden", permission?: Permission) {
     super(message);
     this.name = "ForbiddenError";
+    this.permission = permission;
   }
 }
 
@@ -67,6 +71,13 @@ export class ForbiddenError extends Error {
  * server internals out of the wire.
  */
 export function toErrorResponse(err: unknown): NextResponse {
+  if (err instanceof ForbiddenError && err.permission) {
+    // Campos extras são aditivos: quem lê só `error` (string) continua funcionando.
+    return NextResponse.json(
+      { error: err.message, code: "forbidden", permission: err.permission },
+      { status: err.status },
+    );
+  }
   if (err instanceof UnauthorizedError || err instanceof ForbiddenError) {
     return NextResponse.json({ error: err.message }, { status: err.status });
   }
@@ -87,6 +98,13 @@ export interface AccountContext {
   accountId: string;
   /** Caller's role within their account. */
   role: AccountRole;
+  /**
+   * Permissões efetivas do chamador (PRD 20, fase 20.2). COMPAT: derivadas do papel de sistema
+   * (permissionsForRole) — o papel personalizado ainda não existe, então é exatamente o conjunto que
+   * as checagens por papel já decidem. Nenhuma rota usa isto para decidir ainda (fase 20.3).
+   * Quando o personalizado existir, vem de profiles.role_id ⨝ role_permissions (migration 240).
+   */
+  permissions: ReadonlySet<Permission>;
   /** Lightweight account meta — id + name. */
   account: { id: string; name: string };
 }
@@ -168,8 +186,23 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     userId: user.id,
     accountId: data.account_id,
     role: data.account_role,
+    permissions: permissionsForRole(data.account_role),
     account: { id: account.id, name: account.name },
   };
+}
+
+/**
+ * Resolve o contexto da conta e exige uma PERMISSÃO do catálogo (PRD 20, fase 20.3).
+ * Substitui `requireRole(min)` rota a rota, com o mesmo resultado para os 5 papéis de
+ * sistema (matriz dourada: src/lib/auth/permissions-matrix.ts). Fail-closed: chave fora
+ * do catálogo nega. 401 sem sessão; 403 `{error, code:'forbidden', permission}`.
+ */
+export async function requirePermission(permission: Permission): Promise<AccountContext> {
+  const ctx = await getCurrentAccount();
+  if (!can(ctx, permission)) {
+    throw new ForbiddenError(`This action requires the '${permission}' permission`, permission);
+  }
+  return ctx;
 }
 
 /**

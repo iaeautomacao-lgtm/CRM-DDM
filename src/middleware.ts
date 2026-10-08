@@ -1,16 +1,23 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
-// Derived from the Supabase URL rather than hardcoded, so a different
-// project ref per environment (or a future project move) doesn't silently
-// break auth. Falls back to the current production ref if the env var is
-// somehow unset at request time.
-const SUPABASE_PROJECT_REF = (() => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+// Derivado de NEXT_PUBLIC_SUPABASE_URL, sem ref de fallback: um ref antigo
+// embutido faria o middleware procurar o cookie de OUTRO projeto e deslogar todo
+// mundo sem aviso. Sem a variável (ou com URL inválida) falha claro (PRD 14, AP-21).
+// Lazy: só quando uma requisição precisa do cookie, para não derrubar o build.
+let authCookieName: string | null = null
+function getAuthCookieName(): string {
+  if (authCookieName) return authCookieName
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''
   const match = url.match(/^https?:\/\/([^.]+)\./)
-  return match ? match[1] : 'mkrkkvbseobdqsalrorl'
-})()
+  if (!match) {
+    throw new Error(
+      'NEXT_PUBLIC_SUPABASE_URL ausente ou inválida: não dá para derivar o nome do cookie de sessão do Supabase.'
+    )
+  }
+  authCookieName = `sb-${match[1]}-auth-token`
+  return authCookieName
+}
 
-const AUTH_COOKIE_NAME = `sb-${SUPABASE_PROJECT_REF}-auth-token`
 const BASE64_PREFIX = 'base64-'
 
 function noStore<T extends NextResponse>(response: T): T {
@@ -28,12 +35,12 @@ function noStore<T extends NextResponse>(response: T): T {
 // real session object here routinely crosses that size, so the plain
 // unchunked name alone is not enough.
 function readAuthCookieRaw(request: NextRequest): string | null {
-  const direct = request.cookies.get(AUTH_COOKIE_NAME)?.value
+  const direct = request.cookies.get(getAuthCookieName())?.value
   if (direct) return direct
 
   const parts: string[] = []
   for (let i = 0; ; i += 1) {
-    const chunk = request.cookies.get(`${AUTH_COOKIE_NAME}.${i}`)?.value
+    const chunk = request.cookies.get(`${getAuthCookieName()}.${i}`)?.value
     if (!chunk) break
     parts.push(chunk)
   }
