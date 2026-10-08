@@ -506,7 +506,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
       return (
         <MediaDocument
           url={message.media_url}
-          label={message.content_text}
+          label={message.content_text ?? null}
         />
       );
 
