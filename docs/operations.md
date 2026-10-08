@@ -7,7 +7,7 @@ O CRM principal roda como aplicação Node/Next.js. O deploy atual versionado em
 ```bash
 nvm use 20.19.0
 npm install --no-audit --no-fund
-npm run schema:check
+npm run schema:readiness
 npm run build
 touch tmp/restart.txt
 ```

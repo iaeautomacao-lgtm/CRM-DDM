@@ -33,7 +33,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "schema:check": "node scripts/check-schema-readiness.mjs",
+    "schema:check": "node scripts/schema-check.mjs",
+    "schema:readiness": "node scripts/check-schema-readiness.mjs",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

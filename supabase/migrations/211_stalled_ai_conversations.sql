@@ -100,6 +100,13 @@ $$;
 REVOKE ALL ON FUNCTION wacrm.stalled_ai_conversations(timestamptz, timestamptz, timestamptz, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION wacrm.stalled_ai_conversations(timestamptz, timestamptz, timestamptz, integer) TO service_role;
 
+-- Registro (202): tolera banco sem a 202 ainda; idempotente.
+DO $$ BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('211_stalled_ai_conversations') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';

@@ -50,6 +50,13 @@ REVOKE ALL ON TABLE wacrm.flow_run_tool_results FROM PUBLIC, anon, authenticated
 GRANT ALL ON TABLE wacrm.flow_run_tool_results TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE wacrm.flow_run_tool_results_id_seq TO service_role;
 
+-- Registro (202): tolera banco sem a 202 ainda; idempotente.
+DO $$ BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('212_flow_run_tool_results') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';

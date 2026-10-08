@@ -92,6 +92,14 @@ BEGIN
   END IF;
 END $$;
 
+-- Registro (migration 202). Tolerante a banco sem a 202.
+DO $$
+BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('194_dispatch_inflight_lease') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';

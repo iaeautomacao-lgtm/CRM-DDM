@@ -47,7 +47,7 @@ Para um banco novo, aplique as migrations de `supabase/migrations/` em ordem lex
 Depois execute:
 
 ```bash
-npm run schema:check
+npm run schema:readiness
 ```
 
 O comando consulta o banco e falha se objetos críticos esperados pelo build estiverem ausentes.

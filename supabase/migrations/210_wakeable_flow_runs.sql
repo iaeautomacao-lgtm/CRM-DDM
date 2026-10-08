@@ -94,6 +94,13 @@ $$;
 REVOKE ALL ON FUNCTION wacrm.wakeable_flow_runs(integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION wacrm.wakeable_flow_runs(integer) TO service_role;
 
+-- Registro (202): tolera banco sem a 202 ainda; idempotente.
+DO $$ BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('210_wakeable_flow_runs') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';
