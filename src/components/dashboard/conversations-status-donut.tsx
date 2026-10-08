@@ -12,13 +12,13 @@ interface ConversationsStatusDonutProps {
 
 export function ConversationsStatusDonut({ data, loading }: ConversationsStatusDonutProps) {
   return (
-    <section className="h-full border-y border-border">
-      <header className="px-5 py-4">
+    <section className="h-full">
+      <header className="px-0 pb-3">
         <h2 className="text-sm font-semibold text-foreground">Situação atual</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">Conversas ativas por status</p>
+        
       </header>
 
-      <div className="border-t border-border p-5">
+      <div className="pt-4">
         {loading || !data ? (
           <Skeleton className="h-56 w-full" />
         ) : data.slices.length === 0 || data.totalCount === 0 ? (
@@ -30,10 +30,10 @@ export function ConversationsStatusDonut({ data, loading }: ConversationsStatusD
         ) : (
           <>
             <div className="mb-5">
-              <p className="text-3xl font-semibold tracking-tight tabular-nums text-foreground">
+              <p className="text-[32px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
                 {data.totalCount.toLocaleString("pt-BR")}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">conversas ativas</p>
+              <p className="mt-2 text-xs text-muted-foreground">conversas em operação</p>
             </div>
 
             <ul className="space-y-4">
