@@ -1,0 +1,115 @@
+{
+  "minVersion": 183,
+  "migrations": [
+    {
+      "version": "183_campaign_metric_deltas",
+      "kind": "registry"
+    },
+    {
+      "version": "184_dispatch_lock_pausa",
+      "kind": "registry"
+    },
+    {
+      "version": "185_webhook_status_inbox",
+      "kind": "registry"
+    },
+    {
+      "version": "186_dispatch_max_in_flight_150",
+      "kind": "registry"
+    },
+    {
+      "version": "187_disp_queue_erro_codigo",
+      "kind": "registry"
+    },
+    {
+      "version": "187b_disp_queue_erro_codigo_index",
+      "kind": "index",
+      "index": "idx_dmq_erro_codigo"
+    },
+    {
+      "version": "188_dispatch_batch_claim_confirm",
+      "kind": "registry"
+    },
+    {
+      "version": "189_dispatch_monitor_counts",
+      "kind": "registry"
+    },
+    {
+      "version": "189b_disp_queue_session_agendado_index",
+      "kind": "index",
+      "index": "idx_dmq_session_agendado"
+    },
+    {
+      "version": "190_dispatch_rate_by_quality",
+      "kind": "registry"
+    },
+    {
+      "version": "191_dispatch_errors_summary",
+      "kind": "registry"
+    },
+    {
+      "version": "191b_disp_queue_erro_updated_index",
+      "kind": "index",
+      "index": "idx_dmq_erro_updated"
+    },
+    {
+      "version": "192_dispatch_channel_paused",
+      "kind": "registry"
+    },
+    {
+      "version": "193_channel_health_name_phone",
+      "kind": "registry"
+    },
+    {
+      "version": "200_ai_config_secret_columns",
+      "kind": "registry"
+    },
+    {
+      "version": "200b_whatsapp_config_select_columns",
+      "kind": "registry"
+    },
+    {
+      "version": "201_webhook_message_inbox",
+      "kind": "registry"
+    },
+    {
+      "version": "202_schema_migrations_registry",
+      "kind": "registry"
+    },
+    {
+      "version": "210_wakeable_flow_runs",
+      "kind": "registry"
+    },
+    {
+      "version": "210b_flow_runs_wake_at_idx",
+      "kind": "index",
+      "index": "flow_runs_delayed_wake"
+    },
+    {
+      "version": "211_stalled_ai_conversations",
+      "kind": "registry"
+    },
+    {
+      "version": "211b_conversations_stalled_idx",
+      "kind": "index",
+      "index": "idx_conversations_open_unassigned_customer_msg"
+    },
+    {
+      "version": "212_flow_run_tool_results",
+      "kind": "registry"
+    },
+    {
+      "version": "240_roles_foundation",
+      "kind": "registry"
+    },
+    {
+      "version": "241_roles_functions",
+      "kind": "registry"
+    },
+    {
+      "version": "241b_profiles_role_id_idx",
+      "kind": "index",
+      "index": "idx_profiles_role_id"
+    }
+  ]
+}

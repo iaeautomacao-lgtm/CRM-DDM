@@ -5,6 +5,6 @@ deployment:
     - source $NVM_DIR/nvm.sh
     - nvm use 20.19.0
     - npm install --no-audit --no-fund
-    - npm run schema:check
+    - npm run schema:readiness
     - npm run build
     - mkdir -p $HOME/apps/omnichannel-v2-desenvolvimento/tmp && touch $HOME/apps/omnichannel-v2-desenvolvimento/tmp/restart.txt

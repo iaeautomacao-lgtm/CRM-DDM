@@ -1,3 +1,5 @@
+-- ⚠️ RODAR SOZINHO: só a linha CREATE INDEX, numa execução própria do SQL Editor (sem outro comando junto).
+--    Junto com outro comando o Supabase abre transação e dá 25001; e desfaz TUDO o que foi junto.
 -- ============================================================
 -- 189b_disp_queue_session_agendado_index.sql
 --

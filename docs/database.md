@@ -67,8 +67,29 @@ Para banco existente:
 O script `scripts/check-schema-readiness.mjs` impede deploy quando o banco configurado não atende o contrato mínimo esperado pelo build.
 
 ```bash
+npm run schema:readiness
+```
+
+## Registro de migrations (`schema:check`)
+
+A migration **202** cria `wacrm.schema_migrations` (versão = nome do arquivo sem `.sql`, `applied_at`, `applied_by`,
+`source`) fechada ao service_role, e a RPC `wacrm.schema_check_report()`. O banco passa a dizer o que foi aplicado:
+
+```bash
 npm run schema:check
 ```
+
+Lê `scripts/required-migrations.json` (gerado dos arquivos de `supabase/migrations`, a partir da 183) e imprime cada migration
+como **aplicada**, **faltando** ou **índice inválido** (`CREATE INDEX CONCURRENTLY` interrompido deixa `indisvalid = false`).
+Sai com código ≠ 0 se faltar algo (2 = erro: sem env, 202 não aplicada).
+
+Regras:
+
+- Toda migration nova com `BEGIN/COMMIT` termina registrando-se (modelo em `supabase/migrations/_MODELO.md`).
+- Migration `NNNb` com `CREATE INDEX CONCURRENTLY` roda **sozinha** e NÃO se registra: o `schema:check` a detecta pelo índice.
+- Ao criar uma migration, regenere a lista: `node scripts/schema-check.mjs --generate` e commite (o CI confere).
+- O CI também falha se dois arquivos tiverem o mesmo número (`scripts/ci/check-migration-numbers.mjs`).
+- A 202 registra por **detecção** o que já estava aplicado (cada migration ≥ 183 tem uma verificação objetiva no cabeçalho dela).
 
 Ele não substitui migrations nem valida toda a semântica do banco. É um gate de compatibilidade.
 

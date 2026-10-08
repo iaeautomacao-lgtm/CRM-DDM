@@ -431,5 +431,12 @@ BEGIN
   END IF;
 END $$;
 
+-- Registro (202): tolera banco sem a 202 ainda; idempotente.
+DO $$ BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('240_roles_foundation') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 NOTIFY pgrst, 'reload schema';
