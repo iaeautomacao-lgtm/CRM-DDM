@@ -101,3 +101,12 @@ export function openAiUrl(path: string): string {
   openAiBaseCache ??= resolveOpenAiBaseUrl()
   return `${openAiBaseCache}/v1${path}`
 }
+
+/**
+ * baseURL EXPLÍCITO para `new OpenAI({ baseURL })` (SDK oficial, inclui `/v1`). Sem isso o SDK lê OPENAI_BASE_URL
+ * sozinho e contorna o gate: uma variável esquecida no .env de produção redirecionaria chamadas (e a chave) para
+ * outro host. Aqui a variável só vale com DISPATCH_LOAD_TEST=1 (ENV-04).
+ */
+export function openAiSdkBaseUrl(env: Env = process.env): string {
+  return `${resolveOpenAiBaseUrl(env)}/v1`
+}

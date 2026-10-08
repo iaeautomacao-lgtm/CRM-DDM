@@ -17,8 +17,7 @@ A referência operacional é [`.env.local.example`](../.env.local.example). Este
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | sim | chave pública para cliente/SSR |
 | `SUPABASE_SERVICE_ROLE_KEY` | sim | operações server-side privilegiadas |
 | `ENCRYPTION_KEY` | sim | AES-256-GCM para segredos persistidos |
-| `NEXT_PUBLIC_SITE_URL` | recomendada | URL canônica do CRM |
-| `NEXT_PUBLIC_APP_URL` | recomendada em omnichannel | redirects e links públicos |
+| `NEXT_PUBLIC_APP_URL` | recomendada | URL canônica do CRM; única origem do host dos links de convite (ver docs/env.md) |
 
 `ENCRYPTION_KEY` deve ter 32 bytes representados por 64 caracteres hexadecimais.
 
@@ -82,11 +81,9 @@ Todo endpoint de cron exposto publicamente deve usar segredo forte, diferente de
 
 ```env
 AUDIT_HEADER_SECRET=
-DDM_LOGS_USER=
-DDM_LOGS_PASSWORD=
 ```
 
-`AUDIT_HEADER_SECRET` assina contexto de auditoria em escritas SSR. As credenciais de logs são suporte administrativo e não substituem autorização account-scoped.
+`AUDIT_HEADER_SECRET` assina contexto de auditoria em escritas SSR.
 
 ## VoIP
 

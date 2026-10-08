@@ -1,3 +1,4 @@
+import { templatesDryRunEnabled } from '@/lib/whatsapp/templates-dry-run'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardRole } from '@/lib/auth/route-guard'
@@ -39,10 +40,7 @@ const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function isDryRun(): boolean {
-  return (
-    process.env.WHATSAPP_TEMPLATES_DRY_RUN === 'true' ||
-    process.env.WHATSAPP_TEMPLATES_DRY_RUN === '1'
-  )
+  return templatesDryRunEnabled()
 }
 
 // Local-only organizational fields (folder placement, channel tags) —

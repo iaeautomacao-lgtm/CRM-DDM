@@ -69,3 +69,15 @@ describe('gate da bancada de carga — OPENAI_BASE_URL e boot', () => {
     expect(() => assertLoadTestGate({ DISPATCH_LOAD_TEST: '1', SUPABASE_URL: 'https://cyftbffhgjmsfogxawrl.supabase.co' }, { warn })).toThrow(/PRODUÇÃO/);
   });
 });
+
+describe('openAiSdkBaseUrl (ENV-04)', () => {
+  it('sem DISPATCH_LOAD_TEST a variável é ignorada: base real com /v1', async () => {
+    const { openAiSdkBaseUrl } = await import('./gate')
+    expect(openAiSdkBaseUrl({ OPENAI_BASE_URL: 'http://evil.example:9999' })).toBe('https://api.openai.com/v1')
+    expect(openAiSdkBaseUrl({})).toBe('https://api.openai.com/v1')
+  })
+  it('com a bancada ligada usa o simulador (com /v1)', async () => {
+    const { openAiSdkBaseUrl } = await import('./gate')
+    expect(openAiSdkBaseUrl({ DISPATCH_LOAD_TEST: '1', OPENAI_BASE_URL: 'http://mock-openai:4020' })).toBe('http://mock-openai:4020/v1')
+  })
+})
