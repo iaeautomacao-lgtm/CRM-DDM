@@ -129,11 +129,11 @@ export function ConnectWahaDialog({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to request pairing code");
+      if (!res.ok) throw new Error(data.error || "Erro ao solicitar código de pareamento");
       setPairingCode(data.code);
       toast.success("Código de pareamento gerado!");
     } catch (err) {
-      setPairingError(err instanceof Error ? err.message : "Failed to generate code");
+      setPairingError(err instanceof Error ? err.message : "Erro ao gerar código");
       toast.error(err instanceof Error ? err.message : "Erro ao gerar código");
     } finally {
       setPairingLoading(false);
