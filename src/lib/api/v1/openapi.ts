@@ -369,9 +369,9 @@ export const openApiSpec = {
         description: [
           'Cria uma campanha do Disparador e a coloca na fila imediatamente (status `em_execucao`; não há rascunho/revisão por esta rota). Exige `campaigns:write`.',
           '',
-          '**Canal.** `channel` aceita o UUID do canal ou o número de telefone de um canal **Meta**. Omita apenas se a conta tiver exatamente um canal habilitado. Canais **WAHA** só por UUID.',
+          '**Canal.** `channel` aceita UUID, nome da sessão **WAHA** (`waha_session`) ou número de telefone de um canal **Meta**. Omita apenas se a conta tiver exatamente um canal habilitado. UUIDs WAHA antigos de uma linha excluída/recriada podem ser remapeados com segurança pelo histórico da própria conta.',
           '',
-          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato.',
+          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato. Opcionalmente, envie uma imagem em `media` por URL HTTPS ou Base64; `message` vira a legenda.',
           '',
           '**Validação e deduplicação (antes de enfileirar).**',
           '- `duplicates`: mesmo número repetido (com/sem `+55`, com/sem o 9º dígito) — o primeiro vale.',
@@ -423,8 +423,12 @@ export const openApiSpec = {
                   summary: 'Canal WAHA com texto livre',
                   value: {
                     campaign_name: 'Lembrete de acordo',
-                    channel: '2f0a4c9e-0000-4000-8000-000000000010',
+                    channel: 'brdid_2139551698',
                     message: 'Olá, {{1}}! Sua parcela de {{2}} vence em {{3}}.',
+                    media: {
+                      type: 'image',
+                      url: 'https://cdn.exemplo.com/cobranca/lembrete.jpg',
+                    },
                     dias_envio: [1, 2, 3, 4, 5],
                     contacts: [{ phone: '27999991212', variables: ['Ana', 'R$ 150,00', '10/10'] }],
                   },
@@ -466,7 +470,7 @@ export const openApiSpec = {
           },
           '400': {
             description:
-              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
+              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), `media` inválida/não HTTPS/não suportada pelo provedor, janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
             content: {
               'application/json': {
                 schema: ref('ErrorEnvelope'),
@@ -492,7 +496,7 @@ export const openApiSpec = {
           '403': resp('Forbidden'),
           '409': {
             description:
-              'Conflito de idempotência: `Idempotency-Key`/`external_id` já usado com outro conteúdo, ou a criação anterior com a mesma chave ainda está em andamento.',
+              'Conflito de idempotência (`Idempotency-Key`/`external_id` já usado com outro conteúdo, ou criação anterior ainda em andamento) **ou** número Meta com qualidade vermelha: nesse caso o objeto `error` traz `reason: "red_quality_owner_required"` e `channels` (números afetados). Campanha nova em número vermelho só pode ser iniciada pelo owner no painel; a chave de API não confirma. Aguarde a qualidade se recuperar ou peça ao owner.',
             content: {
               'application/json': {
                 schema: ref('ErrorEnvelope'),
@@ -837,6 +841,15 @@ export const openApiSpec = {
               message: { type: 'string', description: 'Texto para humanos; pode mudar. Ramifique pelo `code`.' },
               campaign_id: { type: 'string', format: 'uuid', description: 'Só em 500 de criação de campanha interrompida.' },
               provider_outcome_unknown: { type: 'boolean', description: 'Só em 409 de envio com resultado desconhecido.' },
+              reason: { type: 'string', description: 'Só em 409 de campanha: `red_quality_owner_required` (número Meta com qualidade vermelha).' },
+              channels: {
+                type: 'array',
+                description: 'Só em 409 `red_quality_owner_required`: números em qualidade vermelha.',
+                items: {
+                  type: 'object',
+                  properties: { id: { type: 'string', format: 'uuid' }, display_phone_number: { type: ['string', 'null'] } },
+                },
+              },
               invalid: { type: 'integer', description: 'Só em 400 "nenhum contato válido".' },
               duplicates: { type: 'integer' },
               skipped: { type: 'integer' },
@@ -909,10 +922,26 @@ export const openApiSpec = {
             pattern: '^[A-Za-z0-9._:\\-/]{1,128}$',
             description: 'Id do seu sistema. Torna a criação idempotente (vence o header `Idempotency-Key`).',
           },
-          channel: { type: 'string', description: 'UUID do canal ou número de um canal Meta. Omita só se houver um único canal habilitado.' },
+          channel: { type: 'string', description: 'UUID do canal, waha_session de um canal WAHA ou número de um canal Meta. Omita só se houver um único canal habilitado.' },
           template_name: { type: 'string', description: '**Meta**: obrigatório; template aprovado na WABA do canal.' },
           template_language: { type: 'string', default: 'pt_BR' },
-          message: { type: 'string', description: '**WAHA**: obrigatório; texto livre com `{{1}}`, `{{2}}`…' },
+          message: { type: 'string', description: '**WAHA**: obrigatório; texto livre com `{{1}}`, `{{2}}`…; quando `media` é enviado, vira a legenda da imagem.' },
+          media: {
+            type: 'object',
+            description: 'Fase 1 — opcional e somente para WAHA. Envia imagem por URL HTTPS ou Base64; `message` é a legenda. Informe exatamente um de `url` ou `base64`.',
+            required: ['type'],
+            additionalProperties: false,
+            properties: {
+              type: { type: 'string', enum: ['image'] },
+              url: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 4096 },
+              base64: { type: 'string', description: 'Base64 puro, sem prefixo data:. Máximo 5 MB decodificado.' },
+              mime_type: { type: 'string', enum: ['image/jpeg', 'image/png', 'image/webp'], description: 'Obrigatório quando `base64` é usado.' },
+            },
+            oneOf: [
+              { required: ['url'], not: { required: ['base64'] } },
+              { required: ['base64', 'mime_type'], not: { required: ['url'] } },
+            ],
+          },
           contacts: {
             type: 'array',
             minItems: 1,
@@ -951,6 +980,8 @@ export const openApiSpec = {
         required: ['campaign_id', 'enqueued', 'skipped', 'duplicates', 'invalid'],
         properties: {
           campaign_id: { type: 'string', format: 'uuid' },
+          provider: { type: 'string', enum: ['meta', 'waha'] },
+          message_type: { type: 'string', enum: ['text', 'image'] },
           enqueued: { type: 'integer', description: 'Contatos enfileirados.' },
           skipped: { type: 'integer', description: 'Na blacklist.' },
           duplicates: { type: 'integer', description: 'Repetidos no payload (phoneKey).' },

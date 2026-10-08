@@ -6,6 +6,7 @@ import { startCampaign } from "@/lib/disparador/startCampaign";
 import { canManageCampaigns } from "@/lib/disparador/route-auth";
 import { kickDispatchCron } from "@/lib/disparador/dispatch-kick";
 import { writeLog } from "@/lib/logger";
+import { parseRedConfirmation } from "@/lib/disparador/red-quality-gate";
 
 export const maxDuration = 60;
 
@@ -39,6 +40,8 @@ export async function POST(
     }
 
     let accountId: string;
+    let callerRole: string | null = null;
+    let callerId: string | null = null;
     if (isInternalCall) {
       // Sem sessão de usuário — resolve a conta via created_by ->
       // profiles.account_id. wacrm.campaigns não tem account_id
@@ -96,6 +99,8 @@ export async function POST(
         );
       }
       accountId = profile.account_id;
+      callerRole = profile.account_role ?? null;
+      callerId = user.id;
 
       // wacrm.campaigns has no account_id column (only created_by), so
       // "mesma conta" é resolvido via o profile do criador. Donos/admins
@@ -128,10 +133,19 @@ export async function POST(
 
     // "Iniciar agora" numa campanha agendada ({ agora: true }): a fila começa
     // agora, não no horário agendado. Corpo vazio/inválido = início normal.
-    const body = (await request.json().catch(() => null)) as { agora?: unknown } | null;
-    const result = await startCampaign(campaignId, accountId, { startNow: body?.agora === true });
+    // Número em qualidade vermelha: só o owner inicia, com confirm_red_quality: true + red_quality_reason.
+    const body = (await request.json().catch(() => null)) as
+      | { agora?: unknown; confirm_red_quality?: unknown; red_quality_reason?: unknown }
+      | null;
+    const result = await startCampaign(campaignId, accountId, {
+      startNow: body?.agora === true,
+      redConfirmation: parseRedConfirmation(callerRole, callerId, body),
+    });
     if (!result.ok) {
-      return NextResponse.json({ error: result.error }, { status: result.status });
+      return NextResponse.json(
+        { error: result.error, ...(result.code ? { code: result.code, channels: result.channels ?? [] } : {}) },
+        { status: result.status }
+      );
     }
 
     // Campanha manual acabava dependendo do próximo cron de 1 minuto.

@@ -47,8 +47,7 @@ export async function logToolCall(entry: ToolCallLog, db?: SupabaseClient): Prom
       success: entry.success,
       result_size: entry.resultSize,
       error: entry.error ? entry.error.slice(0, MAX_ERROR_CHARS) : null,
-      // Só envia as colunas da 154 quando informadas: os caminhos antigos
-      // (rota de ferramentas e chat) gravam exatamente como antes.
+      // Só envia as colunas da 154 quando informadas pelo chamador.
       ...(entry.origin ? { origin: entry.origin } : {}),
       ...(entry.apiKeyId ? { api_key_id: entry.apiKeyId } : {}),
     });

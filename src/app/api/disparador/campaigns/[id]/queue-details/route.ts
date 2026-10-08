@@ -7,6 +7,8 @@ import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
 import {
+  PENDING_CONFIRMATION_OR_FILTER,
+  PENDING_CONFIRMATION_QUEUE_DETAIL_KEY,
   QUEUE_DETAIL_STATUS_FILTERS,
   REPLIED_QUEUE_DETAIL_KEY,
 } from "@/lib/disparador/queue-status-filters";
@@ -25,6 +27,7 @@ import {
 // bata com o número exibido no card.
 const STATUS_FILTERS = QUEUE_DETAIL_STATUS_FILTERS;
 const REPLIED_KEY = REPLIED_QUEUE_DETAIL_KEY;
+const PENDING_CONFIRMATION_KEY = PENDING_CONFIRMATION_QUEUE_DETAIL_KEY;
 
 // Itens por página escolhidos no modal (20 por padrão, teto de 200).
 // Exportação xlsx: lê em páginas de 1000 até este teto.
@@ -181,6 +184,7 @@ export async function GET(
     );
 
     const isTotal = statusKey === "total";
+    const isPendingConfirmation = statusKey === PENDING_CONFIRMATION_KEY;
     const statuses = isTotal ? null : STATUS_FILTERS[statusKey];
     if (!isTotal && !statuses) {
       return NextResponse.json(
@@ -273,6 +277,7 @@ export async function GET(
           .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS)
           .eq("campaign_id", campaignId);
         if (statuses) query = query.in("status", statuses);
+        if (isPendingConfirmation) query = query.or(PENDING_CONFIRMATION_OR_FILTER);
         query = replied
           ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
           : query.order("sent_at", { ascending: false, nullsFirst: false }).order("scheduled_at", { ascending: false });
@@ -313,6 +318,7 @@ export async function GET(
       .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS, { count: "exact" })
       .eq("campaign_id", campaignId);
     if (statuses) query = query.in("status", statuses);
+    if (isPendingConfirmation) query = query.or(PENDING_CONFIRMATION_OR_FILTER);
     query = (
       replied
         ? query.not("replied_at", "is", null).order("replied_at", { ascending: false })
@@ -355,10 +361,12 @@ const STATUS_FILE_LABELS: Record<string, string> = {
   erro: "erros",
   respondido: "respostas",
   bloqueado: "blacklist",
+  aguardando_confirmacao: "aguardando-confirmacao",
 };
 
 function buildXlsxResponse(rows: QueueDetailRow[], statusKey: string): NextResponse {
   const hasErrorColumn = statusKey === "erro";
+  const isPendingConfirmation = statusKey === PENDING_CONFIRMATION_KEY;
   const sheetRows = rows.map((r) => {
     const base: Record<string, unknown> = {
       Contato: r.contact_name ?? "-",
@@ -367,6 +375,7 @@ function buildXlsxResponse(rows: QueueDetailRow[], statusKey: string): NextRespo
       "Mensagem Final": r.mensagem_final ?? "",
     };
     if (hasErrorColumn) base["Tipo de Erro"] = r.tipo_erro ?? "Outro";
+    if (isPendingConfirmation) base["Motivo"] = r.erro ?? "Aguardando confirmação final";
     base["Data/Hora"] = r.data_hora
       ? new Date(r.data_hora).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
       : "-";

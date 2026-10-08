@@ -72,6 +72,7 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   // continuam só owner/admin.
   "/relatorios/atendimentos": ["owner", "admin", "supervisor"],
   "/relatorios/conversas": ["owner", "admin", "supervisor"],
+  "/relatorios/tabulacoes": ["owner", "admin", "supervisor"],
   "/relatorios/agentes": ["owner", "admin", "supervisor"],
   "/relatorios": ["owner", "admin"],
 

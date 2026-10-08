@@ -1,3 +1,4 @@
+import { openAiUrl } from '@/lib/loadtest/gate';
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { safeFetch, SsrfBlockedError } from "@/lib/security/ssrf-guard";
 import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
@@ -949,7 +950,7 @@ async function handleAiAutoResponseAttempt(
           formData.append("model", "whisper-1");
           formData.append("language", "pt");
 
-          const whisperRes = await boundedFetch("https://api.openai.com/v1/audio/transcriptions", {
+          const whisperRes = await boundedFetch(openAiUrl("/audio/transcriptions"), {
             method: "POST",
             headers: {
               "Authorization": `Bearer ${whisperKey}`,
@@ -1947,7 +1948,7 @@ export async function generateOpenAiResponse(
     real?: () => Promise<ToolRealRequest>,
   ) => Promise<Response>,
 ): Promise<string> {
-  const url = "https://api.openai.com/v1/chat/completions";
+  const url = openAiUrl("/chat/completions");
 
   // Build base messages array
   const baseMessages: any[] = [];

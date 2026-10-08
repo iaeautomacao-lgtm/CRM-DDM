@@ -496,8 +496,8 @@ export function ImportModal({
                     <span className="inline-flex items-center gap-1 rounded-md bg-muted/90 px-2 py-0.5 text-[11px] text-muted-foreground">
                       <Tag className="text-primary/80 size-3" />
                       {tagStats.unique} tag{tagStats.unique !== 1 ? 's' : ''} ·{' '}
-                      {tagStats.rowsWithTags} contact
-                      {tagStats.rowsWithTags !== 1 ? 's' : ''}
+                      {tagStats.rowsWithTags}{' '}
+                      {tagStats.rowsWithTags === 1 ? 'contato' : 'contatos'}
                     </span>
                   )}
                 </div>

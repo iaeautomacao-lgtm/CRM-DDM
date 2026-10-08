@@ -67,6 +67,7 @@ export const reportNavItems: NavItem[] = [
   { href: "/relatorios/atendimentos", label: "Atendimentos", icon: Headphones },
   { href: "/relatorios/agentes", label: "Agentes", icon: UserCheck },
   { href: "/relatorios/conversas", label: "Conversas", icon: MessageSquare },
+  { href: "/relatorios/tabulacoes", label: "Tabulações", icon: MessageSquare },
   { href: "/relatorios/envio-em-lote", label: "Envio em lote", icon: Send },
   { href: "/relatorios/exportacoes", label: "Exportações", icon: Download },
 ];
