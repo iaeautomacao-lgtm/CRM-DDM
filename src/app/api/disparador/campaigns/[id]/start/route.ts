@@ -111,7 +111,7 @@ export async function POST(
       // só a que eles mesmos criaram.
       if (campaign.created_by !== user.id) {
         const isPrivilegedRole =
-          profile.account_role === "owner" || profile.account_role === "admin";
+          canManageCampaigns(profile.account_role);
 
         let sameAccountAsCreator = false;
         if (isPrivilegedRole && campaign.created_by) {

@@ -65,6 +65,8 @@ describe("guard declarado ainda existe no código-fonte da rota (anti-drift)", (
         }
         case "disparador":
           expect(src).toMatch(/requireDisparadorAccess|canManageCampaigns/);
+          // 20.3c: limites por segundo pedem campaigns.rate_limit explicitamente (mesmo conjunto: owner/admin)
+          if (e.permission === "campaigns.rate_limit") expect(src).toMatch(/requireDisparadorAccess\(\s*["']campaigns\.rate_limit["']/);
           break;
         case "flow":
           expect(src).toMatch(/guardFlow(Access)?\b/);
