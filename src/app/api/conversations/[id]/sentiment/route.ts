@@ -13,7 +13,7 @@ export async function POST(
     if (!auth.ok) return auth.response
     const { supabase, accountId, userId } = auth.ctx
     // A análise usa a chave de IA da conta: conter loops por usuário.
-    const limit = checkRateLimit(`sentiment:${userId}`, { limit: 10, windowMs: 60_000 })
+    const limit = await checkRateLimit(`sentiment:${userId}`, { limit: 10, windowMs: 60_000 })
     if (!limit.success) return rateLimitResponse(limit)
 
     // 3. Fetch conversation to get contact_id and verify ownership

@@ -101,7 +101,7 @@ export async function POST(
     return NextResponse.json({ error: parsed }, { status: 400 })
   }
 
-  const limit = checkRateLimit(`flows:simulate:${account.userId}`, SIM_RATE_LIMIT)
+  const limit = await checkRateLimit(`flows:simulate:${account.userId}`, SIM_RATE_LIMIT)
   if (!limit.success) {
     const minutes = Math.max(1, Math.ceil((limit.reset - Date.now()) / 60_000))
     return NextResponse.json(

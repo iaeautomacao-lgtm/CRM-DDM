@@ -92,7 +92,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
     }
 
-    const limit = checkRateLimit(
+    const limit = await checkRateLimit(
       `admin:apiKeyCreate:${ctx.userId}`,
       RATE_LIMITS.adminAction
     );

@@ -42,7 +42,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
     }
 
-    const limit = checkRateLimit(
+    const limit = await checkRateLimit(
       `admin:apiKeyRevoke:${ctx.userId}`,
       RATE_LIMITS.adminAction
     );

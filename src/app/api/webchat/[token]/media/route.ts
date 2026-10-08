@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { chatMediaPath, chatMediaReference } from '@/lib/storage/chat-media'
-import { requireActiveSession, webchatError } from '@/lib/webchat/api'
+import { requireActiveSession, webchatError, webchatRateLimit } from '@/lib/webchat/api'
 
 // GET /api/webchat/[token]/media?ref=<referência chat-media>
 //
@@ -14,6 +14,8 @@ import { requireActiveSession, webchatError } from '@/lib/webchat/api'
 
 export async function GET(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  const limited = await webchatRateLimit(request, token, 'read')
+  if (limited) return limited
   const result = await requireActiveSession(token)
   if ('response' in result) return result.response
   const { session } = result

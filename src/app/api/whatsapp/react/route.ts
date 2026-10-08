@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     if (!auth.ok) return auth.response;
     const { supabase, accountId, userId } = auth.ctx;
 
-    const limit = checkRateLimit(`react:${userId}`, RATE_LIMITS.react);
+    const limit = await checkRateLimit(`react:${userId}`, RATE_LIMITS.react);
     if (!limit.success) return rateLimitResponse(limit);
 
     const body = await request.json();

@@ -23,7 +23,7 @@ export async function POST(
     const tool = getTool(name)
     if (!tool) return NextResponse.json({ error: `Ferramenta desconhecida: ${name}` }, { status: 404 })
 
-    const limit = checkIntelligenceToolRate(scope.userId)
+    const limit = await checkIntelligenceToolRate(scope.userId)
     if (!limit.success) return rateLimitResponse(limit)
 
     let body: unknown = {}

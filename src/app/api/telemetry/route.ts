@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { clientIp } from "@/lib/audit/context";
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from "@/lib/rate-limit";
 
 // Ingestão de telemetria de frontend (navegação, ação, erro, sessão) —
 // ver migrations 092/093/094. Autenticada via sessão CRM normal
@@ -55,13 +56,31 @@ interface TelemetryBody {
   error_stack?: unknown;
 }
 
-function str(value: unknown): string | null {
-  return typeof value === "string" && value.length > 0 ? value : null;
+/** Texto não vazio, cortado em `max` caracteres (AP-08: nada de campo ilimitado em system_logs/page_views). */
+function str(value: unknown, max = 500): string | null {
+  return typeof value === "string" && value.length > 0 ? value.slice(0, max) : null;
+}
+
+const MAX_PAYLOAD_JSON = 8_000;
+
+/** Payload livre do cliente: se passar do teto, grava só um resumo. */
+function capPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  let size = 0;
+  try {
+    size = JSON.stringify(payload).length;
+  } catch {
+    return { truncated: true };
+  }
+  return size > MAX_PAYLOAD_JSON ? { truncated: true, original_size: size } : payload;
 }
 
 export async function POST(request: Request) {
   try {
     const ctx = await getCurrentAccount();
+
+    // AP-08: 60/min por usuário (compartilhado entre processos); excesso não grava nada.
+    const limit = await checkRateLimit(`telemetry:${ctx.userId}`, RATE_LIMITS.telemetry);
+    if (!limit.success) return rateLimitResponse(limit);
 
     const body = (await request.json().catch(() => null)) as TelemetryBody | null;
     const type = str(body?.type);
@@ -158,10 +177,10 @@ export async function POST(request: Request) {
     // action | error → wacrm.system_logs (com user_id/page/action —
     // migration 092; source='frontend' — migration 092b).
     const isError = type === "error";
-    const actionName = str(body?.action);
+    const actionName = str(body?.action, 100);
     const event = isError ? "frontend_error" : actionName ?? "frontend_action";
     const message = isError
-      ? str(body?.error_message) ?? "Erro de frontend"
+      ? str(body?.error_message, 2_000) ?? "Erro de frontend"
       : actionName
         ? `Ação: ${actionName}`
         : "Ação de frontend";
@@ -171,7 +190,7 @@ export async function POST(request: Request) {
         ? { ...(body.payload as Record<string, unknown>) }
         : {};
     if (isError) {
-      const stack = str(body?.error_stack);
+      const stack = str(body?.error_stack, 4_000);
       if (stack) payload.error_stack = stack;
     }
 
@@ -184,7 +203,7 @@ export async function POST(request: Request) {
       message,
       page: str(body?.path),
       action: actionName,
-      payload,
+      payload: capPayload(payload),
     });
     if (error) throw error;
     return NextResponse.json({ ok: true });

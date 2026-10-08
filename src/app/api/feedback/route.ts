@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from "@/lib/rate-limit";
 
 // Recebe reports de bug/problema do botão de feedback flutuante
 // (src/components/feedback-button.tsx), gravados em wacrm.system_logs
@@ -25,13 +26,18 @@ function supabaseAdmin(): SupabaseClient {
   return _adminClient!;
 }
 
-function str(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+/** Texto aparado, não vazio e cortado em `max` caracteres (AP-08). */
+function str(value: unknown, max = 500): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim().slice(0, max) : null;
 }
 
 export async function POST(request: Request) {
   try {
     const ctx = await getCurrentAccount();
+
+    // AP-08: 60/min por usuário (compartilhado entre processos).
+    const limit = await checkRateLimit(`feedback:${ctx.userId}`, RATE_LIMITS.feedback);
+    if (!limit.success) return rateLimitResponse(limit);
 
     const body = (await request.json().catch(() => null)) as {
       message?: unknown;
@@ -39,12 +45,12 @@ export async function POST(request: Request) {
       user_agent?: unknown;
     } | null;
 
-    const message = str(body?.message);
+    const message = str(body?.message, 4_000);
     if (!message) {
       return NextResponse.json({ error: "'message' é obrigatório" }, { status: 400 });
     }
     const page = str(body?.page);
-    const userAgent = str(body?.user_agent);
+    const userAgent = str(body?.user_agent, 300);
 
     const { error } = await supabaseAdmin().from("system_logs").insert({
       account_id: ctx.accountId,

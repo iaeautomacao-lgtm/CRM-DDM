@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     if (!auth.ok) return auth.response
     const { supabase, accountId, userId } = auth.ctx
 
-    const limit = checkRateLimit(`send:${userId}`, RATE_LIMITS.send)
+    const limit = await checkRateLimit(`send:${userId}`, RATE_LIMITS.send)
     if (!limit.success) return rateLimitResponse(limit)
 
     // Todo o envio roda dentro do controle de idempotência: o composer

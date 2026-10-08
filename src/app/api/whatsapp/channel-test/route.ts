@@ -26,7 +26,7 @@ export async function POST(request: Request) {
     const { supabase, accountId } = auth.ctx
 
     // O orçamento é compartilhado por todos os administradores da conta.
-    const limit = checkRateLimit(`channel-test:${accountId}`, { limit: 10, windowMs: 60_000 })
+    const limit = await checkRateLimit(`channel-test:${accountId}`, { limit: 10, windowMs: 60_000 })
     if (!limit.success) return rateLimitResponse(limit)
 
     const body = await request.json().catch(() => ({}))

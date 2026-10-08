@@ -21,7 +21,7 @@ export interface ToolExecutorDeps {
   /** Auditoria (padrão: logToolCall). */
   log?: (entry: ToolCallLog) => Promise<void>;
   /** Limite por usuário (padrão: o balde compartilhado de rate.ts). */
-  allowCall?: (userId: string) => boolean;
+  allowCall?: (userId: string) => boolean | Promise<boolean>;
 }
 
 function classify(err: unknown): { kind: ToolErrorKind; message: string } {
@@ -45,7 +45,7 @@ export function parseToolArguments(raw: string): { ok: true; value: unknown } | 
 export function createToolExecutor(scope: IntelligenceScope, deps: ToolExecutorDeps = {}): ToolExecutor {
   const now = deps.now ?? Date.now;
   const log = deps.log ?? ((entry: ToolCallLog) => logToolCall(entry));
-  const allowCall = deps.allowCall ?? ((userId: string) => checkIntelligenceToolRate(userId).success);
+  const allowCall = deps.allowCall ?? (async (userId: string) => (await checkIntelligenceToolRate(userId)).success);
 
   return async (name, rawArguments): Promise<ToolExecution> => {
     const startedAt = now();
@@ -58,7 +58,7 @@ export function createToolExecutor(scope: IntelligenceScope, deps: ToolExecutorD
       return { ok: false, kind, message, durationMs };
     };
 
-    if (!allowCall(scope.userId)) {
+    if (!(await allowCall(scope.userId))) {
       return fail("rate_limited", "Limite de consultas por minuto atingido");
     }
     const tool = getTool(name);
