@@ -1,3 +1,4 @@
+import { templatesDryRunEnabled } from '@/lib/whatsapp/templates-dry-run'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -159,9 +160,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const dryRun =
-      process.env.WHATSAPP_TEMPLATES_DRY_RUN === 'true' ||
-      process.env.WHATSAPP_TEMPLATES_DRY_RUN === '1'
+    const dryRun = templatesDryRunEnabled()
 
     let metaTemplateId: string
     let metaStatus: string

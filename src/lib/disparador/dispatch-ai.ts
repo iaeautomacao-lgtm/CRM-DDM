@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { openAiSdkBaseUrl } from "@/lib/loadtest/gate";
 
 // Geração de texto das campanhas `tipo=ia`. REGRA: se a IA falhar (429, timeout, sem chave ou
 // resposta vazia) NADA é enviado — o `mensagem_final` de um item `ia` é o PROMPT de instrução, e
@@ -17,7 +18,7 @@ let cached: { key: string; timeout: number; client: OpenAI } | null = null;
 
 export function getDispatchOpenAiClient(apiKey: string, timeout = aiTimeoutMs()): OpenAI {
   if (!cached || cached.key !== apiKey || cached.timeout !== timeout) {
-    cached = { key: apiKey, timeout, client: new OpenAI({ apiKey, timeout, maxRetries: 0 }) };
+    cached = { key: apiKey, timeout, client: new OpenAI({ apiKey, baseURL: openAiSdkBaseUrl(), timeout, maxRetries: 0 }) };
   }
   return cached.client;
 }

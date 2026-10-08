@@ -3,6 +3,7 @@
 // as chamadas de ferramenta são remontadas a partir dos deltas.
 
 import OpenAI from "openai";
+import { openAiSdkBaseUrl } from "@/lib/loadtest/gate";
 import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
@@ -50,7 +51,7 @@ export interface OpenAiChatClientOptions {
 }
 
 export function createOpenAiChatClient(opts: OpenAiChatClientOptions): ChatLlmClient {
-  const client = new OpenAI({ apiKey: opts.apiKey, timeout: opts.timeoutMs ?? 60_000, maxRetries: 1 });
+  const client = new OpenAI({ apiKey: opts.apiKey, baseURL: openAiSdkBaseUrl(), timeout: opts.timeoutMs ?? 60_000, maxRetries: 1 });
 
   return {
     async complete(req: LlmCompletionRequest): Promise<LlmCompletion> {
