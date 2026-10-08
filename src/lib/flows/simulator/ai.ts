@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
   AI_INSTABILITY_TEXT,
@@ -7,7 +8,11 @@ import {
   generateHermesResponse,
   generateOpenAiResponse,
   type AiAutoResponseResult,
+  buildPromptVersion,
+  type ToolRealRequest,
 } from "@/lib/ai/responder";
+import { composeAgentPromptDetailed } from "@/lib/ai/agents/compose";
+import { currentAgentRuntime, filterPriorityIntent, protectionEnabled } from "@/lib/ai/agents/scope";
 import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
 import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
 import { BOT_LOOP_MIN_MESSAGES, BOT_LOOP_WINDOW_SECONDS, detectBotLoop } from "@/lib/ai/loop-guard";
@@ -17,6 +22,8 @@ import { isModelCompatibleWithProvider, resolveAiModel } from "@/lib/ai/models";
 import { tallyToolResult, type ToolExecutionMeta, type ToolRoundTally } from "@/lib/ai/tool-recovery";
 import { buildKnowledgeBaseContext } from "@/lib/ai/kb-context";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
+import { loadAccountSecrets, loadAccountSecretsFrom, withAccountSecretsScope } from "@/lib/ai/account-secrets";
+import { sanitizeResponseBody } from "@/lib/ai-tools/tool-request";
 import type { FlowEffects } from "../effects";
 import { captureOutbound, simNote, type SimContext } from "./context";
 import { effectiveSimToolMode } from "./types";
@@ -37,22 +44,69 @@ const DEFAULT_TOOL_MOCK = (toolName: string) =>
     mensagem: "Resposta simulada — defina a resposta desta tool no painel Testar fluxo.",
   });
 
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stableJson(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * Nomes das ferramentas do turno que são do CATÁLOGO salvo (ligadas) e cuja definição HTTP é
+ * idêntica à salva. Só estas podem fazer leitura real no simulador; definição inline ou alterada
+ * no rascunho fica sempre em mock.
+ */
+export async function savedCatalogToolNames(
+  db: SupabaseClient,
+  accountId: string,
+  tools: ReadonlyArray<{ name: string; http: unknown }> | undefined,
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!tools?.length) return out;
+  const { data } = await db.from("ai_tools").select("name, http, enabled").eq("account_id", accountId);
+  const saved = new Map(((data ?? []) as Array<{ name: string; http: unknown; enabled: boolean }>).filter((r) => r.enabled).map((r) => [r.name, stableJson(r.http)]));
+  for (const tool of tools) if (saved.get(tool.name) === stableJson(tool.http)) out.add(tool.name);
+  return out;
+}
+
 /**
  * Executa a chamada HTTP de UMA tool no simulador. Real só para tools
  * somente-leitura liberadas no painel (effectiveSimToolMode); o resto —
  * inclusive efetiva_acordo e qualquer método que não seja GET — recebe a
  * resposta mockada e nunca sai do servidor.
  */
-export function simulatedToolFetch(ctx: SimContext, nodeKey: string | null) {
-  return async (toolName: string, _url: string, init: RequestInit): Promise<Response> => {
-    const mode = effectiveSimToolMode(toolName, init.method, ctx.realReadOnlyTools);
+export function simulatedToolFetch(ctx: SimContext, nodeKey: string | null, savedCatalogTools: ReadonlySet<string> = new Set()) {
+  return async (toolName: string, maskedUrl: string, init: RequestInit, real?: () => Promise<ToolRealRequest>): Promise<Response> => {
+    let mode = effectiveSimToolMode(toolName, init.method, ctx.realReadOnlyTools);
+    // Leitura real só para ferramenta do CATÁLOGO (versão salva), idêntica ao que está no rascunho:
+    // uma definição inline/alterada no rascunho nunca recebe credencial.
+    if (mode === "real_readonly" && !savedCatalogTools.has(toolName)) {
+      simNote(ctx, `Tool ${toolName}: leitura real recusada — só ferramentas salvas no catálogo (Configurações → Ferramentas) podem consultar de verdade; usando resposta simulada`, nodeKey);
+      mode = "mock";
+    }
     if (mode === "real_readonly") {
-      // A URL pode ter segredo ({{secret.X}}) já resolvido — não vai para o painel.
-      simNote(ctx, `Tool ${toolName}: consulta REAL somente leitura`, nodeKey);
-      return ctx.realFetch(_url, init);
+      // maskedUrl/init chegam com "***" no lugar de {{cred}}/{{secret}}: o painel nunca vê
+      // credencial. A resolução REAL só acontece aqui, para esta consulta GET liberada, e
+      // segue a mesma regra da produção (host final permitido; senão a tool já falhou antes).
+      simNote(ctx, `Tool ${toolName}: consulta REAL somente leitura`, nodeKey, { url: maskedUrl });
+      const resolved = await real?.();
+      if (!resolved) return new Response(ctx.toolMocks[toolName] ?? DEFAULT_TOOL_MOCK(toolName), { status: 200, headers: { "Content-Type": "application/json" } });
+      if (resolved.missing?.length) {
+        // Credencial da conta ausente (ou host não permitido): a chamada real NÃO acontece.
+        simNote(ctx, `Tool ${toolName}: sem credencial da conta para a chamada real (${[...new Set(resolved.missing)].join(", ")}) — usando resposta simulada`, nodeKey);
+        return new Response(ctx.toolMocks[toolName] ?? DEFAULT_TOOL_MOCK(toolName), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      const res = await ctx.realFetch(resolved.url, resolved.init, {
+        failOnCrossOriginRedirect: resolved.credentialInjected,
+      });
+      // A resposta volta ao modelo simulado e ao painel: nenhum eco de credencial.
+      const text = sanitizeResponseBody(await res.text(), resolved.secretValues, Number.MAX_SAFE_INTEGER);
+      return new Response(text, { status: res.status, headers: res.headers });
     }
     const body = ctx.toolMocks[toolName] ?? DEFAULT_TOOL_MOCK(toolName);
-    simNote(ctx, `Tool ${toolName}: resposta simulada (nenhuma chamada real)`, nodeKey);
+    simNote(ctx, `Tool ${toolName}: resposta simulada (nenhuma chamada real)`, nodeKey, { url: maskedUrl });
     return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
   };
 }
@@ -120,12 +174,26 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
     const { data: messages } = await query.order("created_at", { ascending: false }).limit(10);
     const history = ((messages ?? []) as HistoryRow[]).reverse();
 
-    const priorityIntent = classifyPriorityIntent(incomingText);
+    // Agente (perfil) do nó, quando houver: o motor abriu o escopo (withAgentRuntime) com a versão
+    // PUBLICADA seedada no banco em memória. Mesmas travas/toggles da produção; opt-out sempre vale.
+    const agentRuntime = currentAgentRuntime();
+    if (agentRuntime) {
+      const { data: agentRows } = await db.from("ai_agents").select("name").eq("id", agentRuntime.agentId).limit(1);
+      const { data: versionRows } = await db.from("ai_agent_versions").select("version").eq("id", agentRuntime.versionId).limit(1);
+      const agentName = (agentRows?.[0] as { name?: string } | undefined)?.name ?? "agente";
+      const versionNumber = (versionRows?.[0] as { version?: number } | undefined)?.version;
+      simNote(ctx, `Agente: ${agentName}${versionNumber ? ` v${versionNumber}` : ""} (versão publicada)`, node, {
+        agent_id: agentRuntime.agentId,
+        version_id: agentRuntime.versionId,
+        composition: agentRuntime.composition,
+      });
+    }
+    const priorityIntent = filterPriorityIntent(classifyPriorityIntent(incomingText), agentRuntime);
     if (priorityIntent?.kind === "opt_out" || priorityIntent?.kind === "wrong_person") {
       simNote(ctx, "O responder real gravaria o telefone na blacklist — não executado na simulação", node);
     }
 
-    const abuse = priorityIntent ? null : detectAbusiveInput(incomingText || "");
+    const abuse = priorityIntent || !protectionEnabled("anti_xingamento", agentRuntime) ? null : detectAbusiveInput(incomingText || "");
     if (abuse) {
       simNote(ctx, "Trava anti-abuso: iria para a fila humana da equipe (não executado)", node, abuse);
       return {
@@ -136,8 +204,11 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
         guard: { subreason: abuse.kind === "jailbreak" ? "JAILBREAK" : "OFENSA", term: abuse.term, team_id: null, assigned_to: null },
       };
     }
-    if (!priorityIntent) {
-      const since = new Date(Date.now() - BOT_LOOP_WINDOW_SECONDS * 1000).toISOString();
+    const antiLoopCfg = agentRuntime?.config.protections?.anti_loop;
+    const loopWindowSeconds = antiLoopCfg?.window_seconds ?? BOT_LOOP_WINDOW_SECONDS;
+    const loopMinMessages = antiLoopCfg?.min_messages ?? BOT_LOOP_MIN_MESSAGES;
+    if (!priorityIntent && protectionEnabled("anti_loop", agentRuntime)) {
+      const since = new Date(Date.now() - loopWindowSeconds * 1000).toISOString();
       const { data: botRows } = await db
         .from("messages")
         .select("received_at")
@@ -145,8 +216,12 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
         .eq("sender_type", "bot")
         .gte("received_at", since)
         .order("received_at", { ascending: false })
-        .limit(BOT_LOOP_MIN_MESSAGES);
-      const loop = detectBotLoop(((botRows ?? []) as Array<{ received_at: string | null }>).map((r) => r.received_at));
+        .limit(loopMinMessages);
+      const loop = detectBotLoop(
+        ((botRows ?? []) as Array<{ received_at: string | null }>).map((r) => r.received_at),
+        new Date(),
+        { minMessages: loopMinMessages, windowSeconds: loopWindowSeconds, futureToleranceMs: antiLoopCfg?.future_tolerance_ms },
+      );
       if (loop) {
         simNote(ctx, "Trava anti-loop: iria para a fila humana da equipe (não executado)", node, loop);
         return {
@@ -189,11 +264,42 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
       return { outcome: "failed", reason: "missing_provider_api_key", detectedTag: null, modelUsed: responseModel };
     }
 
-    const { data: kbFiles } = await db.from("knowledge_base_files").select("name, content").eq("account_id", accountId);
+    const { data: kbFiles } = await db.from("knowledge_base_files").select("id, name, content").eq("account_id", accountId);
     let systemPrompt = hasOverride
       ? systemPromptOverride!
       : (aiConfig.system_prompt as string | null) || "Você é um assistente virtual. Aguarde um momento.";
-    if (kbFiles && kbFiles.length > 0) {
+    if (agentRuntime) {
+      // Mesmo caminho da produção (responder.ts): seleção de KB do perfil + compose.ts como fonte única.
+      const all = (kbFiles ?? []) as Array<{ id?: string; name: string; content: string | null }>;
+      const knowledge = agentRuntime.config.knowledge;
+      const kbForPrompt =
+        knowledge.selection_mode === "explicit" ? all.filter((f) => f.id !== undefined && new Set(knowledge.file_ids ?? []).has(f.id)) : all;
+      let kbContext: string | undefined;
+      if (kbForPrompt.length > 0) {
+        const recentCustomerText = history
+          .filter((m) => m.sender_type === "customer")
+          .slice(-3)
+          .map((m) => m.content_text || "")
+          .join("\n");
+        kbContext = buildKnowledgeBaseContext(kbForPrompt, recentCustomerText, knowledge.max_chars);
+      }
+      systemPrompt = composeAgentPromptDetailed(
+        buildPromptVersion(aiConfig.system_prompt as string | null, systemPromptOverride ?? "", hasOverride, agentRuntime),
+        {
+          kb_files: kbForPrompt.length > 0 ? kbForPrompt.map((f) => ({ name: f.name, content: f.content ?? "" })) : undefined,
+          kb_context: kbContext,
+          rules: agentRuntime.composition === "sections_v1" ? agentRuntime.rules : undefined,
+          ddm_data: null,
+          found_cpf: null,
+          today_utc: new Date().toISOString().split("T")[0],
+          current_date: new Date().toLocaleDateString("pt-BR"),
+          prompt_interpolated: true,
+        },
+      ).systemPrompt;
+      if (agentRuntime.config.knowledge.rag_external.enabled) {
+        simNote(ctx, "RAG externo do agente não é consultado na simulação", node);
+      }
+    } else if (kbFiles && kbFiles.length > 0) {
       // Mesma dieta de tokens da produção (kb-context.ts, #91).
       const recentCustomerText = history
         .filter((m) => m.sender_type === "customer")
@@ -212,16 +318,27 @@ ${kbContext}
 
 Use as informações da base de conhecimento acima para responder às dúvidas do cliente com a maior precisão possível. Se a informação não estiver na base, aja de acordo com suas instruções normais.`;
     }
-    if (!hasOverride) {
+    if (!hasOverride && !agentRuntime) {
       simNote(ctx, "Nó sem prompt próprio: o orquestrador legado de CPF/API DDM do prompt global não é simulado", node);
     }
 
+    // Ferramentas do catálogo SALVO (iguais ao rascunho): só elas podem ter leitura real liberada.
+    const savedTools = await savedCatalogToolNames(db, accountId, tools);
     const toolTally = new Map<string, ToolRoundTally>();
     const trackedOnToolResult = async (toolName: string, result: string, durationMs: number, meta?: ToolExecutionMeta) => {
       tallyToolResult(toolTally, toolName, meta?.failureCode);
       if (onToolResult) await onToolResult(toolName, result, durationMs, meta);
     };
-    const callProvider = (): Promise<string> => {
+    // O escopo da conta vale também aqui: as ferramentas resolvem {{var}}/{{cred}} só para a conta
+    // da simulação (e, no modo simulador, com "***" no lugar do valor — ver simulatedToolFetch).
+    const callProvider = (): Promise<string> =>
+      withAccountSecretsScope(accountId, () => callProviderInner(), {
+        // Variáveis/nomes/hosts vêm do banco em memória (seed); credenciais SEM valor (viram ***).
+        load: (id) => loadAccountSecretsFrom(db, id, { decryptCredentials: false }),
+        // Valores reais só para a consulta GET liberada (leitura somente-leitura, mesma regra de host).
+        loadReal: loadAccountSecrets,
+      });
+    const callProviderInner = (): Promise<string> => {
       if (aiConfig.api_provider === "openai") {
         return generateOpenAiResponse(
           activeKey,
@@ -235,7 +352,7 @@ Use as informações da base de conhecimento acima para responder às dúvidas d
           nodeKey,
           responseModel,
           undefined, // onWaiting (heartbeat do vigia): sem efeito no simulador
-          simulatedToolFetch(ctx, node),
+          simulatedToolFetch(ctx, node, savedTools),
         );
       }
       if (tools?.length) simNote(ctx, `Provedor ${aiConfig.api_provider} não usa tools (igual à produção)`, node);

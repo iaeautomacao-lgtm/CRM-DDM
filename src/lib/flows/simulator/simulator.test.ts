@@ -83,6 +83,7 @@ vi.mock("@/lib/ai/team-handoff", () => ({ handOffToTeamQueue: real.handOffToTeam
 import { simulateTurn, type SimulationSeed } from "./run";
 import { effectiveSimToolMode, type SimulateRequest, type SimState } from "./types";
 import type { AiAgentTool } from "../types";
+import { convertAiAgentNode } from "@/lib/ai/agents/convert";
 
 // ------------------------------------------------------------
 // Fixture: fluxo oficial (mesma forma do exit-tag-routing.test.ts),
@@ -205,6 +206,7 @@ type OpenAiStep = { content?: string | null; tool?: { name: string; args: Record
 function stubOpenAi(steps: OpenAiStep[]) {
   const systemPrompts: string[] = [];
   const otherUrls: string[] = [];
+  const toolsSent: string[][] = [];
   let i = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -212,7 +214,11 @@ function stubOpenAi(steps: OpenAiStep[]) {
       otherUrls.push(url);
       throw new Error(`fetch real inesperado na simulação: ${url}`);
     }
-    const body = JSON.parse(String(init?.body ?? "{}")) as { messages: Array<{ role: string; content: string }> };
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      messages: Array<{ role: string; content: string }>;
+      tools?: Array<{ function: { name: string } }>;
+    };
+    toolsSent.push((body.tools ?? []).map((t) => t.function.name));
     systemPrompts.push(body.messages.find((m) => m.role === "system")?.content ?? "");
     const step = steps[i++];
     if (!step) throw new Error("OpenAI chamada mais vezes que o roteiro");
@@ -225,7 +231,7 @@ function stubOpenAi(steps: OpenAiStep[]) {
     return new Response(JSON.stringify({ choices: [{ message }] }), { status: 200 });
   });
   vi.stubGlobal("fetch", fetchMock);
-  return { fetchMock, systemPrompts, otherUrls, used: () => i };
+  return { fetchMock, systemPrompts, otherUrls, toolsSent, used: () => i };
 }
 
 function expectNoRealEffects() {
@@ -373,5 +379,173 @@ describe("effectiveSimToolMode", () => {
     expect(effectiveSimToolMode("localizar_devedor", "POST", ["localizar_devedor"])).toBe("mock");
     expect(effectiveSimToolMode("localizar_devedor", undefined, ["localizar_devedor"])).toBe("mock");
     expect(effectiveSimToolMode("outra_tool", "GET", ["outra_tool"])).toBe("mock");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// Catálogo de ferramentas (tool_refs) e credenciais no simulador.
+// ---------------------------------------------------------------------------
+describe("simulador de fluxo — catálogo de ferramentas e credenciais", () => {
+  const CRED_VALUE = "SEGREDO-NUNCA-NA-SIMULACAO-123";
+  const catalogTool = (id: string, name: string, enabled: boolean) => ({
+    id,
+    name,
+    display_name: name,
+    description: `d-${name}`,
+    parameters: { type: "object", properties: { cpf: { type: "string", description: "cpf" } }, required: [] },
+    http: {
+      url: "https://api.exemplo.com/consulta?cpf={{cpf}}&k={{cred.API}}",
+      method: "POST",
+      headers: { Authorization: "Bearer {{cred.API}}", "X-Base": "{{var.BASE}}" },
+      body: '{"token":"{{cred.API}}"}',
+    },
+    timeout_ms: 5000,
+    enabled,
+  });
+  const seedWithCatalog: SimulationSeed = {
+    ...SEED,
+    aiTools: [catalogTool("tool-on", "consulta_cadastro", true), catalogTool("tool-off", "enviar_boleto", false)],
+    accountSecrets: [
+      { name: "API", kind: "credential", value_plain: null, allowed_hosts: ["exemplo.com"] },
+      { name: "BASE", kind: "variable", value_plain: "valor-da-variavel", allowed_hosts: null },
+    ],
+  };
+  const nodesWithRefs = [
+    { node_key: "start", node_type: "start", config: { next_node_key: "ia" } },
+    {
+      node_key: "ia",
+      node_type: "ai_agent",
+      config: { mode: "takeover", system_prompt_override: "RASCUNHO", tool_refs: ["tool-on", "tool-off"] },
+    },
+  ];
+  const draftRequest = (text: string, state: SimState | null) =>
+    request(text, state, {
+      draft: { entry_node_id: "start", trigger_type: "first_inbound_message", trigger_config: {}, fallback_policy: null, nodes: nodesWithRefs },
+      toolMocks: { consulta_cadastro: '{"ok":true}' },
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    // Se o simulador tentasse ler credenciais reais do banco, explodiria aqui.
+    real.supabaseAdmin.mockClear();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("tool do catálogo com {{cred.X}}: o valor nunca aparece no resultado/log da simulação (vira ***), sem chamada real", async () => {
+    const ai = stubOpenAi([
+      { tool: { name: "consulta_cadastro", args: { cpf: "529.982.247-25" } } },
+      { content: "Encontrei seu cadastro." },
+    ]);
+    const realFetch = vi.fn(async () => {
+      throw new Error("chamada real na simulação");
+    });
+    const turn = await simulateTurn(draftRequest("Oi", null), seedWithCatalog, { realFetch });
+
+    const dump = JSON.stringify(turn);
+    expect(dump).not.toContain(CRED_VALUE);
+    expect(dump).not.toContain("Bearer SEGREDO");
+    // O log mostra a URL com *** no lugar da credencial e a variável (não secreta) resolvida.
+    const note = turn.timeline.find((e) => e.label.includes("consulta_cadastro: resposta simulada"));
+    expect(note).toBeTruthy();
+    expect(JSON.stringify(note?.detail)).toContain("k=***");
+    expect(JSON.stringify(note?.detail)).not.toContain("{{cred.API}}");
+    expect(turn.outbound.map((o) => o.text)).toEqual(["Encontrei seu cadastro."]);
+    // Mesma lista efetiva da produção: o catálogo ligado foi entregue ao modelo.
+    expect(ai.toolsSent[0]).toEqual(["consulta_cadastro"]);
+    expect(realFetch).not.toHaveBeenCalled();
+    expect(ai.otherUrls).toEqual([]);
+    // Nenhum acesso ao banco real para credenciais/catálogo.
+    expect(real.supabaseAdmin).not.toHaveBeenCalled();
+    expectNoRealEffects();
+  });
+
+  it("ferramenta DESLIGADA do catálogo não vai ao LLM simulado (só a ligada)", async () => {
+    const ai = stubOpenAi([{ content: "Olá!" }]);
+    await simulateTurn(draftRequest("Oi", null), seedWithCatalog);
+    expect(ai.toolsSent).toHaveLength(1);
+    expect(ai.toolsSent[0]).toContain("consulta_cadastro");
+    expect(ai.toolsSent[0]).not.toContain("enviar_boleto");
+  });
+});
+
+describe("simulador de fluxo — nós com agent_id", () => {
+  const UUID = "11111111-1111-4111-8111-111111111111";
+  const CRED_VALUE = "SEGREDO-DO-AGENTE-999";
+  const agentConfig = () =>
+    convertAiAgentNode(
+      { mode: "takeover", system_prompt_override: "PROMPT DO AGENTE PUBLICADO" } as never,
+      { account_id: UUID, enabled: true, api_provider: "openai", api_model: "gpt-4o-mini" },
+      { node_key: "ia" },
+    ).config;
+  const agentSeed = (over: { enabled?: boolean; protections?: Record<string, unknown> } = {}): SimulationSeed => {
+    const config = structuredClone(agentConfig()) as Record<string, unknown>;
+    if (over.protections) config.protections = { ...(config.protections as object), ...over.protections };
+    return {
+      ...SEED,
+      agents: {
+        agents: [{ id: "ag1", name: "Agente Cobrança", enabled: over.enabled ?? true, published_version_id: "v3" }],
+        versions: [
+          { id: "v3", agent_id: "ag1", version: 3, config, prompt_content: "PROMPT DO AGENTE PUBLICADO", composition: "legacy_v1", config_hash: "h" },
+        ],
+        ruleVersions: [],
+      },
+    };
+  };
+  const nodes = (extra: Record<string, unknown> = {}) => [
+    { node_key: "start", node_type: "start", config: { next_node_key: "ia" } },
+    { node_key: "ia", node_type: "ai_agent", config: { agent_id: "ag1", system_prompt_override: "RASCUNHO IGNORADO", ...extra } },
+    handoff("fila", "AGENTE_FORA"),
+  ];
+  const req = (text: string, ns: unknown[], state: SimState | null = null) =>
+    request(text, state, {
+      draft: { entry_node_id: "start", trigger_type: "first_inbound_message", trigger_config: {}, fallback_policy: null, nodes: ns as never },
+    });
+
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("usa o prompt composto do agente (versão publicada) e mostra o rótulo", async () => {
+    const ai = stubOpenAi([{ content: "Olá!" }]);
+    const turn = await simulateTurn(req("Oi", nodes()), agentSeed());
+    expect(ai.systemPrompts[0]).toContain("PROMPT DO AGENTE PUBLICADO");
+    expect(ai.systemPrompts[0]).not.toContain("RASCUNHO IGNORADO");
+    expect(turn.timeline.some((e) => e.label.startsWith("Agente: Agente Cobrança v3"))).toBe(true);
+    expect(turn.outbound.map((o) => o.text)).toEqual(["Olá!"]);
+    expect(JSON.stringify(turn)).not.toContain(CRED_VALUE);
+    expectNoRealEffects();
+  });
+
+  it("agente desligado segue pela saída de falha, sem chamar o modelo", async () => {
+    const ai = stubOpenAi([]);
+    const turn = await simulateTurn(req("Oi", nodes({ failure_next_node_key: "fila" })), agentSeed({ enabled: false }));
+    expect(ai.used()).toBe(0);
+    expect(turn.timeline.some((e) => e.type === "handoff")).toBe(true);
+    expectNoRealEffects();
+  });
+
+  it("toggle de proteção do agente vale na simulação; opt-out continua sempre ligado", async () => {
+    const off = { enabled: false };
+    const seed = agentSeed({ protections: { pedido_humano_contestacao: off, pessoa_errada: off } });
+    const ai = stubOpenAi([{ content: "Posso ajudar com isso mesmo." }]);
+    const humano = await simulateTurn(req("quero falar com um atendente humano", nodes()), seed);
+    expect(ai.used()).toBe(1); // o modelo respondeu: a trava de pedido de humano estava desligada
+    expect(humano.timeline.some((e) => e.label.includes("CLIENTE_PEDIU_HUMANO"))).toBe(false);
+    const optOut = await simulateTurn(req("não quero mais receber mensagens, pare", nodes()), seed);
+    expect(optOut.timeline.some((e) => e.label.includes("blacklist"))).toBe(true);
+  });
+
+  it("agente que não existe nesta conta cai na saída de falha", async () => {
+    stubOpenAi([]);
+    const turn = await simulateTurn(req("Oi", nodes({ failure_next_node_key: "fila" })), { ...SEED });
+    expect(turn.timeline.some((e) => e.type === "handoff")).toBe(true);
   });
 });

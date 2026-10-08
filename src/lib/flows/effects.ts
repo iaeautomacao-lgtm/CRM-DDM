@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { handleAiAutoResponse } from "@/lib/ai/responder";
 import { writeLog } from "@/lib/logger";
+import { resolveEffectiveTools } from "@/lib/ai-tools/runtime";
 import { safeFetch } from "@/lib/security/ssrf-guard";
 import { sendSocialMessage } from "@/lib/channels/social";
 import { resolveProviderMedia } from "@/lib/storage/provider-media";
@@ -69,13 +70,15 @@ export interface FlowEffects {
   sendWebchatInvite: typeof sendWebchatInvite;
   resolveProviderMedia: typeof resolveProviderMedia;
 
+  /** Ferramentas efetivas do nó de IA (catálogo habilitado + inline). Leitura somente SELECT, igual em produção e simulador. */
+  resolveEffectiveTools: typeof resolveEffectiveTools;
   /** IA do nó ai_agent (modelo + tools + envio da resposta). */
   handleAiAutoResponse: typeof handleAiAutoResponse;
   /**
    * HTTP do nó http_fetch. `nodeKey` só é usado pelo simulador (mocks por nó).
    * Produção passa pelo guard anti-SSRF (safeFetch, #98) com `options.timeoutMs`.
    */
-  httpFetch(nodeKey: string, url: string, init: RequestInit, options?: { timeoutMs?: number }): Promise<Response>;
+  httpFetch(nodeKey: string, url: string, init: RequestInit, options?: { timeoutMs?: number; failOnCrossOriginRedirect?: boolean }): Promise<Response>;
   /** system_logs (best-effort, nunca lança). */
   writeLog: typeof writeLog;
   /** Espera do debounce do ai_agent. */
@@ -112,8 +115,9 @@ export const liveFlowEffects: FlowEffects = {
         body: typeof init.body === "string" ? init.body : undefined,
         signal: init.signal ?? undefined,
       },
-      { timeoutMs: options?.timeoutMs },
+      { timeoutMs: options?.timeoutMs, failOnCrossOriginRedirect: options?.failOnCrossOriginRedirect },
     ),
+  resolveEffectiveTools: (accountId, inline, refs) => resolveEffectiveTools(accountId, inline, refs),
   writeLog: (params) => writeLog(params),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };

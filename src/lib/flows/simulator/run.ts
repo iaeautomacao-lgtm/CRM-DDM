@@ -30,13 +30,27 @@ export interface SimulationSeed {
   flowName: string;
   /** Linha de ai_config da conta (fica só no servidor, nunca volta ao cliente). */
   aiConfig: Record<string, unknown> | null;
-  knowledgeBase: Array<{ name: string; content: string }>;
+  knowledgeBase: Array<{ id?: string; name: string; content: string }>;
   teams: Array<{ id: string; name: string }>;
+  /** Catálogo de ferramentas da conta (somente SELECT; sem credenciais — a tabela guarda só marcadores). */
+  aiTools?: Array<Record<string, unknown>>;
+  /** Variáveis (valor) e credenciais (SÓ nome e hosts — nunca value_encrypted) da conta. */
+  accountSecrets?: Array<{ name: string; kind: string; value_plain: string | null; allowed_hosts: string[] | null }>;
+  /**
+   * Agentes (perfis) usados pelos nós do rascunho: o agente, a versão PUBLICADA agora (o simulador
+   * nunca fixa versão — não há run real) e as versões de regra dessa versão. Só marcadores de
+   * credencial ({{cred.X}}) — nenhum valor.
+   */
+  agents?: {
+    agents: Array<Record<string, unknown>>;
+    versions: Array<Record<string, unknown>>;
+    ruleVersions: Array<Record<string, unknown>>;
+  };
 }
 
 export interface SimulateDeps {
   /** fetch real para tools somente-leitura liberadas. Padrão: globalThis.fetch. */
-  realFetch?: typeof fetch;
+  realFetch?: SimContext["realFetch"];
 }
 
 function emptyState(): SimState {
@@ -86,6 +100,24 @@ function buildTables(req: SimulateRequest, seed: SimulationSeed, state: SimState
   tables.ai_config = seed.aiConfig ? [JSON.parse(JSON.stringify(seed.aiConfig)) as SimRow] : [];
   tables.knowledge_base_files = seed.knowledgeBase.map((f) => ({ ...f, account_id: seed.accountId }));
   tables.teams = seed.teams.map((t) => ({ ...t, account_id: seed.accountId }));
+  tables.ai_tools = (seed.aiTools ?? []).map((t) => ({ ...(JSON.parse(JSON.stringify(t)) as SimRow), account_id: seed.accountId }));
+  const withAccount = (r: Record<string, unknown>) => ({
+    ...(JSON.parse(JSON.stringify(r)) as SimRow),
+    account_id: seed.accountId,
+  });
+  tables.ai_agents = (seed.agents?.agents ?? []).map(withAccount);
+  tables.ai_agent_versions = (seed.agents?.versions ?? []).map(withAccount);
+  tables.ai_rule_versions = (seed.agents?.ruleVersions ?? []).map(withAccount);
+  // Vínculos por run: sempre vazios (stateless) — o motor fixa a publicada na própria simulação.
+  tables.flow_run_agent_bindings = [];
+  tables.account_secrets = (seed.accountSecrets ?? []).map((r) => ({
+    name: r.name,
+    kind: r.kind,
+    value_plain: r.kind === "variable" ? r.value_plain : null,
+    value_encrypted: null,
+    allowed_hosts: r.allowed_hosts,
+    account_id: seed.accountId,
+  }));
   if (!tables.contacts.some((c) => c.id === SIM_IDS.contactId)) {
     tables.contacts.push({
       id: SIM_IDS.contactId,
@@ -281,7 +313,7 @@ export async function simulateTurn(
     realFetch:
       deps.realFetch ??
       // Leitura real das tools liberadas também passa pelo guard anti-SSRF (#98).
-      ((input, init) =>
+      ((input, init, options) =>
         safeFetch(
           String(input),
           {
@@ -289,7 +321,7 @@ export async function simulateTurn(
             headers: init?.headers,
             body: typeof init?.body === "string" ? init.body : undefined,
           },
-          { timeoutMs: 30_000, maxBytes: 1024 * 1024 },
+          { timeoutMs: 30_000, maxBytes: 1024 * 1024, failOnCrossOriginRedirect: options?.failOnCrossOriginRedirect },
         )),
     seq,
   };

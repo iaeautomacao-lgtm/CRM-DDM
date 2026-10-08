@@ -23,7 +23,7 @@ export interface SimContext {
    * liberou (ver effectiveSimToolMode). O provedor de IA usa o fetch do
    * próprio responder.
    */
-  realFetch: typeof fetch;
+  realFetch: (input: string, init?: RequestInit, options?: { failOnCrossOriginRedirect?: boolean }) => Promise<Response>;
   /** Contador de ids sintéticos (vai no estado). */
   seq: { value: number };
 }

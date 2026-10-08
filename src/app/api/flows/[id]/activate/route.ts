@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server'
 import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { validateFlowForActivation } from '@/lib/flows/validate'
+import { listAccountSecretNames } from '@/lib/ai/account-secrets'
+import { listAccountTools } from '@/lib/ai-tools/runtime'
+import { listAccountAgents } from '@/lib/ai/agents/runtime'
 import { recordFlowNodePromptVersions } from '@/lib/ai/prompt-versions'
 
 /**
@@ -79,7 +82,12 @@ export async function POST(
         node_type: string
         config: Record<string, unknown>
       }>,
-      { aiProvider: aiConfig?.api_provider ?? null },
+      {
+        aiProvider: aiConfig?.api_provider ?? null,
+        accountSecrets: await listAccountSecretNames(flow.account_id),
+        aiTools: await listAccountTools(flow.account_id),
+        agents: await listAccountAgents(admin, flow.account_id),
+      },
     )
     const blockers = issues.filter((i) => i.severity === 'error')
     if (blockers.length > 0) {

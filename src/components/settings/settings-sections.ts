@@ -5,6 +5,9 @@ import {
   Shield,
   User,
   Bot,
+  LockKeyhole,
+  Wrench,
+  Sparkles,
   BookOpen,
   type LucideIcon,
 } from 'lucide-react';
@@ -33,6 +36,9 @@ export const SETTINGS_SECTIONS = [
   'security',
   'appearance',
   'api',
+  'secrets',
+  'tools',
+  'agents',
   'api-docs',
   'ai',
 ] as const;
@@ -60,6 +66,27 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace' },
+  secrets: {
+    id: 'secrets',
+    label: 'Variáveis e credenciais',
+    icon: LockKeyhole,
+    group: 'workspace',
+    minRole: 'supervisor',
+  },
+  tools: {
+    id: 'tools',
+    label: 'Ferramentas',
+    icon: Wrench,
+    group: 'workspace',
+    minRole: 'supervisor',
+  },
+  agents: {
+    id: 'agents',
+    label: 'Agentes',
+    icon: Sparkles,
+    group: 'workspace',
+    minRole: 'supervisor',
+  },
   'api-docs': { id: 'api-docs', label: 'Documentação da API', icon: BookOpen, group: 'workspace', minRole: 'supervisor' },
   ai: { id: 'ai', label: 'Agente de IA', icon: Bot, group: 'workspace', ownerOnly: true },
 };

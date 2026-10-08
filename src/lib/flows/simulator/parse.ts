@@ -1,3 +1,4 @@
+import { hasMinRole, type AccountRole } from "@/lib/auth/roles";
 import {
   SIM_STATE_TABLES,
   type SimDraftNode,
@@ -92,4 +93,16 @@ export function parseSimulateRequest(raw: unknown): SimulateRequest | string {
       : [],
     httpMocks: stringRecord(raw.httpMocks, MAX_MOCK),
   };
+}
+
+/**
+ * Leitura REAL com credencial no simulador: só admin/owner. Supervisor simula normalmente, mas
+ * qualquer pedido de leitura real é descartado (tudo mockado).
+ */
+export function applyRealReadPolicy<T extends { realReadOnlyTools: string[] }>(
+  role: AccountRole,
+  req: T,
+): { request: T; denied: boolean } {
+  if (hasMinRole(role, "admin")) return { request: req, denied: false };
+  return { request: { ...req, realReadOnlyTools: [] }, denied: req.realReadOnlyTools.length > 0 };
 }

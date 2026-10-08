@@ -1,3 +1,4 @@
+import { resolveEffectiveTools } from "@/lib/ai-tools/runtime";
 import type { FlowEffects } from "../effects";
 import type { WebchatSessionRow } from "@/lib/webchat/sessions";
 import { createSimulatedAi } from "./ai";
@@ -87,6 +88,9 @@ export function createSimulationEffects(ctx: SimContext): FlowEffects {
       captureOutbound(ctx, { kind: "webchat_invite", text: `${input.text}\n[${input.buttonText}]`, source: "flow" }),
     resolveProviderMedia: async (url) => url,
 
+    // Catálogo: mesma lista efetiva da produção (desligada não entra), lida do banco em memória
+    // (a rota carrega ai_tools da conta no seed; nada de leitura/escrita no banco real aqui).
+    resolveEffectiveTools: (accountId, inline, refs) => resolveEffectiveTools(accountId, inline, refs, ctx.db),
     handleAiAutoResponse: createSimulatedAi(ctx),
 
     httpFetch: async (nodeKey, url, init) => {
