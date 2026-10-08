@@ -79,16 +79,19 @@ export function ConversationOriginBanner({ conversationId }: { conversationId: s
   const { origin } = data;
   const ativo = origin.direction === "ativo";
   const Icon = origin.initiator === "campaign" ? Megaphone : ativo ? ArrowUpRight : ArrowDownLeft;
-  const detail = origin.headline.replace(/^(Ativo|Receptivo) · /, "");
+  const summary =
+    origin.direction === "receptivo"
+      ? "cliente iniciou"
+      : origin.initiator === "campaign"
+        ? "iniciada por campanha"
+        : "iniciada pela operação";
 
   return (
-    <div className="flex items-center gap-1 overflow-hidden border-b border-border bg-card/80 px-4 py-1 text-xs text-muted-foreground">
+    <div className="flex items-center gap-1.5 overflow-hidden border-b border-border/70 bg-background px-4 py-1.5 text-[11px] text-muted-foreground">
       <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span className="truncate" title={origin.headline}>
-        <span className="font-medium text-foreground/80">{ativo ? "Ativo" : "Receptivo"}</span>
-        {detail && <> · {detail}</>}
-        {origin.opened_at && <> · {format(new Date(origin.opened_at), "dd/MM HH:mm")}</>}
-        {data.line && <> · {data.channel} {data.line}</>}
+      <span className="truncate">
+        <span className="font-medium text-foreground/85">{ativo ? "Ativo" : "Receptivo"}</span>
+        <span> · {summary}</span>
       </span>
     </div>
   );
