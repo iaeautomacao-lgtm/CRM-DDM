@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearMemoryCooldowns,
   isInCooldown,
@@ -21,7 +21,9 @@ describe('resolveThroughputConfig', () => {
 
   it('reaproveita DISPATCH_PROCESS_CONCURRENCY como teto global (produção = 8)', () => {
     expect(resolveThroughputConfig({ DISPATCH_PROCESS_CONCURRENCY: '8' }).globalConcurrency).toBe(8);
-    expect(resolveThroughputConfig({ DISPATCH_PROCESS_CONCURRENCY: '999' }).globalConcurrency).toBe(4);
+    // Fora da faixa: clamp em 150 (antes voltava para 4 em silêncio — REVISAO F15).
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveThroughputConfig({ DISPATCH_PROCESS_CONCURRENCY: '999' }).globalConcurrency).toBe(150);
   });
 
   it('WAHA não herda aumento do genérico; só com a variável própria', () => {
@@ -36,6 +38,19 @@ describe('resolveThroughputConfig', () => {
     expect(explicit.perNumber).toEqual({ meta: 12, waha: 1, unknown: 1 });
   });
 
+  it('teto 150 só para a Meta: WAHA continua limitado a 50 (risco de banimento)', () => {
+    const config = resolveThroughputConfig({
+      DISPARADOR_PER_NUMBER_CONCURRENCY_META: '150',
+      DISPARADOR_PER_NUMBER_CONCURRENCY_WAHA: '150',
+    });
+    expect(config.perNumber.meta).toBe(150);
+    expect(config.perNumber.waha).toBe(50);
+    const waha = resolveChannelConcurrency({ provider: 'waha', rowMaxInFlight: 150, inCooldown: false, config });
+    const meta = resolveChannelConcurrency({ provider: 'meta', rowMaxInFlight: 150, inCooldown: false, config });
+    expect([waha, meta]).toEqual([50, 150]);
+    expect(resolveChannelConcurrency({ provider: 'meta', rowMaxInFlight: 999, inCooldown: false, config })).toBe(150);
+  });
+
   it('limita valores fora da faixa e ignora lixo', () => {
     const config = resolveThroughputConfig({
       DISPARADOR_PER_NUMBER_CONCURRENCY_META: '500',
@@ -43,7 +58,7 @@ describe('resolveThroughputConfig', () => {
       DISPARADOR_ADAPTIVE_BACKOFF: '0',
       DISPARADOR_MAX_RSS_MB: 'abc',
     });
-    expect(config.perNumber.meta).toBe(50);
+    expect(config.perNumber.meta).toBe(150);
     expect(config.tickBudgetMs).toBe(50_000);
     expect(config.adaptiveBackoff).toBe(false);
     expect(config.maxRssMb).toBe(1024);

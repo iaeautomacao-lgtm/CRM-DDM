@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { HEALTH_STALE_AFTER_MS, refreshChannelHealth } from "@/lib/disparador/channel-health";
 import { decrypt } from "@/lib/whatsapp/encryption";
+import { getPhoneNumberHealth } from "@/lib/whatsapp/meta-api";
 
 const TIER_LIMITS: Record<string, number> = {
   TIER_50:    250,
+  TIER_250:   250,
   TIER_1K:    1000,
   TIER_10K:   10000,
   TIER_100K:  100000,
@@ -42,7 +45,7 @@ export async function GET(
     // Buscar configs dos canais
     const { data: channels } = await supabaseAdmin()
       .from("whatsapp_config")
-      .select("id, provider, phone_number_id, access_token")
+      .select("id, provider, phone_number_id, access_token, display_phone_number")
       .eq("account_id", accountId)
       .in("id", sessionIds);
 
@@ -62,69 +65,64 @@ export async function GET(
       });
     }
 
-    // Para cada canal Meta, buscar tier na Meta API
+    // Saúde dos números: snapshot do banco (webhook + poll, migration 190). Faltando ou velho, consulta a Meta e grava.
+    // Falha NUNCA vira TIER_1K/1000: tier e dailyLimit ficam null e o erro vai junto (a UI não deve assumir verde).
+    const db = supabaseAdmin();
+    const readSnapshots = async () => {
+      const { data, error } = await db
+        .from("channel_health")
+        .select("session_id, quality_rating, messaging_limit_tier, daily_limit, checked_at, last_error")
+        .in("session_id", metaChannels.map((c) => c.id));
+      return error ? null : new Map((data ?? []).map((r) => [String(r.session_id), r]));
+    };
+    let snapshots = await readSnapshots();
+    const nowMs = Date.now();
+    const isFresh = (id: string) => {
+      const row = snapshots?.get(id);
+      return !!row?.checked_at && !row.last_error && nowMs - new Date(String(row.checked_at)).getTime() < HEALTH_STALE_AFTER_MS;
+    };
+    if (snapshots) {
+      const stale = metaChannels.filter((c) => !isFresh(c.id));
+      await Promise.all(
+        stale.map((c) =>
+          refreshChannelHealth(db, { id: c.id, account_id: accountId, phone_number_id: c.phone_number_id, access_token: c.access_token, display_phone_number: c.display_phone_number }, "poll"),
+        ),
+      );
+      if (stale.length) snapshots = (await readSnapshots()) ?? snapshots;
+    }
+
     const channelInfos = await Promise.all(
       metaChannels.map(async (channel) => {
-        try {
-          const accessToken = channel.access_token
-            ? decrypt(channel.access_token)
-            : null;
-
-          if (!accessToken || !channel.phone_number_id) {
-            return {
-              id: channel.id,
-              provider: "meta",
-              phone_number_id: channel.phone_number_id,
-              tier: "TIER_1K",
-              dailyLimit: 1000,
-              quality_rating: null,
-              error: "Token ou phone_number_id ausente",
-            };
-          }
-
-          const res = await fetch(
-            `https://graph.facebook.com/v21.0/${channel.phone_number_id}` +
-            `?fields=messaging_limit_tier,quality_rating,display_phone_number` +
-            `&access_token=${accessToken}`
-          );
-
-          if (!res.ok) {
-            return {
-              id: channel.id,
-              provider: "meta",
-              phone_number_id: channel.phone_number_id,
-              tier: "TIER_1K",
-              dailyLimit: 1000,
-              quality_rating: null,
-              error: `Meta API error: ${res.status}`,
-            };
-          }
-
-          const data = await res.json();
-          const tier = data.messaging_limit_tier || "TIER_1K";
-          const dailyLimit = TIER_LIMITS[tier] ?? 1000;
-
+        const base = { id: channel.id, provider: "meta", phone_number_id: channel.phone_number_id };
+        const row = snapshots?.get(channel.id);
+        if (row) {
+          const tier = (row.messaging_limit_tier as string | null) ?? null;
+          const daily = row.daily_limit == null ? (tier ? (TIER_LIMITS[tier] ?? null) : null) : Number(row.daily_limit);
           return {
-            id: channel.id,
-            provider: "meta",
-            phone_number_id: channel.phone_number_id,
-            display_phone_number: data.display_phone_number,
+            ...base,
+            display_phone_number: channel.display_phone_number ?? undefined,
             tier,
-            dailyLimit,
-            quality_rating: data.quality_rating,
-          };
-        } catch {
-          return {
-            id: channel.id,
-            provider: "meta",
-            phone_number_id: channel.phone_number_id,
-            tier: "TIER_1K",
-            dailyLimit: 1000,
-            quality_rating: null,
-            error: "Falha ao consultar Meta API",
+            dailyLimit: daily,
+            quality_rating: (row.quality_rating as string | null) ?? null,
+            ...(row.last_error ? { error: String(row.last_error) } : {}),
           };
         }
-      })
+        // Migration 190 ausente: consulta direta, sem esconder a falha.
+        try {
+          if (!channel.access_token || !channel.phone_number_id) throw new Error("Token ou phone_number_id ausente");
+          const data = await getPhoneNumberHealth({ phoneNumberId: channel.phone_number_id, accessToken: decrypt(channel.access_token) });
+          const tier = data.messaging_limit_tier ?? null;
+          return {
+            ...base,
+            display_phone_number: data.display_phone_number,
+            tier,
+            dailyLimit: tier ? (TIER_LIMITS[tier] ?? null) : null,
+            quality_rating: data.quality_rating ?? null,
+          };
+        } catch (err) {
+          return { ...base, tier: null, dailyLimit: null, quality_rating: null, error: err instanceof Error ? err.message : "Falha ao consultar Meta API" };
+        }
+      }),
     );
 
     return NextResponse.json({
