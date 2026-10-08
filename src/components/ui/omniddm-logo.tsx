@@ -28,12 +28,12 @@ export function OmniDdmLogo({
         aria-label="OmniDDM"
       >
         <Image
-          src={src}
+          src="/brand/omniddm-symbol.svg"
           alt=""
-          width={545}
+          width={125}
           height={122}
           priority={priority}
-          className="h-[30px] w-[134px] max-w-none translate-x-[51px] object-contain"
+          className="h-[28px] w-[28px] object-contain"
         />
       </span>
     );
