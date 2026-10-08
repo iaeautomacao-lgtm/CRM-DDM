@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
+import type { WebhookContact } from '@/lib/whatsapp/webhook-contacts'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
 import { maybeScheduleSentiment } from '@/lib/ai/sentiment-trigger'
@@ -155,11 +156,28 @@ async function handleReaction(
   }
 }
 
+/**
+ * WH-21: o wamid já está em `messages`? Consulta barata (índice único idx_messages_message_id_unique) feita ANTES do
+ * trabalho pesado (contato, conversa, download de mídia na Meta, upload ao Storage). Reentrega da Meta e retry do
+ * drenador de uma mensagem já gravada viram `duplicate` sem refazer nada. Erro na consulta = "não sei": segue o
+ * caminho normal (o 23505 do insert continua sendo a garantia final contra a corrida).
+ */
+async function messageAlreadyStored(wamid: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin()
+    .from('messages')
+    .select('id')
+    .eq('message_id', wamid)
+    .limit(1)
+  if (error) return false
+  return Array.isArray(data) && data.length > 0
+}
+
 export type ProcessMessageOutcome = "processed" | "duplicate" | "reaction"
 
 export async function processMessage(
   message: WhatsAppMessage,
-  contact: { profile: { name: string }; wa_id: string },
+  // Pode faltar (WH-03/WH-04): sem contato correspondente o nome fica vazio (contato novo = telefone).
+  contact: WebhookContact | null | undefined,
   // Tenancy. Resolved from the matched whatsapp_config row; every
   // contact / conversation / message row created downstream is
   // stamped with this so any member of the account can see it.
@@ -176,8 +194,14 @@ export async function processMessage(
   // account-wide keyword/first-inbound scan instead.
   configId: string
 ): Promise<ProcessMessageOutcome> {
+  // Reação não vira linha em `messages` (o wamid dela nunca está lá): só as demais passam pelo dedupe.
+  if (message.type !== 'reaction' && message.id && (await messageAlreadyStored(message.id))) {
+    console.log('[webhook] Mensagem duplicada ignorada (já gravada):', message.id)
+    return "duplicate"
+  }
+
   const senderPhone = normalizePhone(message.from)
-  const contactName = contact.profile.name
+  const contactName = String(contact?.profile?.name ?? '').trim()
 
   // Find or create contact
   const contactOutcome = await findOrCreateContact(
