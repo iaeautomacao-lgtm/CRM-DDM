@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { parseLineIds } from '@/lib/automations/line-ids'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { validateAutomationRefs } from '@/lib/automations/step-refs'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 import {
@@ -19,7 +19,7 @@ export async function GET(
 ) {
   const { id } = await params
   // Consulta para agent+; a automação precisa ser da conta do chamador.
-  const auth = await guardRole('agent')
+  const auth = await guardPermission('automations.view')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
 
@@ -44,7 +44,7 @@ export async function PATCH(
 ) {
   const { id } = await params
   // Owner/admin; a automação precisa ser da conta do chamador (outra conta → 404).
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('automations.edit')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
 
@@ -141,7 +141,7 @@ export async function DELETE(
 ) {
   const { id } = await params
   // Owner/admin; a automação precisa ser da conta do chamador (outra conta → 404).
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('automations.edit')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
 

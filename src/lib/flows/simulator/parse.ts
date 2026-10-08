@@ -1,4 +1,4 @@
-import { hasMinRole, type AccountRole } from "@/lib/auth/roles";
+import { can, type PermissionSubject } from "@/lib/auth/permissions";
 import {
   SIM_STATE_TABLES,
   type SimDraftNode,
@@ -96,13 +96,13 @@ export function parseSimulateRequest(raw: unknown): SimulateRequest | string {
 }
 
 /**
- * Leitura REAL com credencial no simulador: só admin/owner. Supervisor simula normalmente, mas
- * qualquer pedido de leitura real é descartado (tudo mockado).
+ * Leitura REAL com credencial no simulador: exige `secrets.write` (admin/owner hoje). Supervisor simula
+ * normalmente (`flows.simulate`), mas qualquer pedido de leitura real é descartado (tudo mockado).
  */
 export function applyRealReadPolicy<T extends { realReadOnlyTools: string[] }>(
-  role: AccountRole,
+  subject: PermissionSubject,
   req: T,
 ): { request: T; denied: boolean } {
-  if (hasMinRole(role, "admin")) return { request: req, denied: false };
+  if (can(subject, "secrets.write")) return { request: req, denied: false };
   return { request: { ...req, realReadOnlyTools: [] }, denied: req.realReadOnlyTools.length > 0 };
 }

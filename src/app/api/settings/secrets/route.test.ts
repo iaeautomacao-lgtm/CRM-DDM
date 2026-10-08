@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { decryptStoredSecret } from '@/lib/whatsapp/encryption'
 import { hasMinRole, type AccountRole } from '@/lib/auth/roles'
+import { can, type Permission } from '@/lib/auth/permissions'
 
 // ---------------------------------------------------------------------------
 // /api/settings/secrets: papéis, máscara (a resposta NUNCA contém o valor da
@@ -60,8 +61,8 @@ function builder() {
 
 vi.mock('@/lib/flows/admin-client', () => ({ supabaseAdmin: () => ({ from: () => builder() }) }))
 vi.mock('@/lib/auth/route-guard', () => ({
-  guardRole: async (min: AccountRole) =>
-    hasMinRole(state.role as AccountRole, min)
+  guardPermission: async (permission: Permission) =>
+    can({ role: state.role as AccountRole }, permission)
       ? { ok: true, ctx: { accountId: state.accountId, userId: 'USER-1', role: state.role } }
       : { ok: false, response: Response.json({ error: 'Forbidden' }, { status: 403 }) },
 }))

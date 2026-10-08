@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
-import { guardRole } from '@/lib/auth/route-guard';
+import { guardPermission } from '@/lib/auth/route-guard';
+import type { Permission } from '@/lib/auth/permissions';
 import type { AccountContext } from '@/lib/auth/account';
 import { AgentServiceError } from '@/lib/ai/agents/service';
 export async function agentRoute(
-  role: 'supervisor' | 'admin',
+  permission: Extract<Permission, 'ai.agents.view' | 'ai.agents.edit'>,
   action: (ctx: AccountContext) => Promise<unknown>,
   status = 200
 ) {
-  const auth = await guardRole(role);
+  const auth = await guardPermission(permission);
   if (!auth.ok) return auth.response;
   try {
     return NextResponse.json(await action(auth.ctx), { status });

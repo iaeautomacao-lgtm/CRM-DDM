@@ -48,7 +48,7 @@ export async function GET(
   const dateTo = params.get('date_to')
 
   // Owner/admin + fluxo da conta (outra conta → 404) antes da consulta de runs.
-  const guard = await guardFlow(id)
+  const guard = await guardFlow(id, 'flows.view_runs')
   if (!guard.ok) return guard.response
   const { supabase, accountId } = guard.ctx
   const { data: flow } = await supabase
@@ -167,7 +167,7 @@ export async function DELETE(
 ) {
   const { id } = await context.params
 
-  const guard = await guardFlow(id)
+  const guard = await guardFlow(id, 'flows.view_runs')
   if (!guard.ok) return guard.response
   const { accountId } = guard.ctx
 
