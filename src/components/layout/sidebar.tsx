@@ -93,7 +93,7 @@ interface SidebarProps {
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { user, profileLoading, accountRole } = useAuth();
+  const { profileLoading, accountRole } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadInternalMessages = useUnreadInternalMessages(true);
 
