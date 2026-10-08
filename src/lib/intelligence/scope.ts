@@ -3,15 +3,18 @@
 // do modelo. Toda consulta de data.ts filtra explicitamente por
 // scope.accountId e, quando teamIds != null, pelas equipes.
 //
-//   owner/admin  → conta toda (teamIds = null)
-//   supervisor   → só as equipes de que participa (wacrm.team_members)
-//   demais       → sem acesso
+//   intelligence.scope_account (owner/admin) → conta toda (teamIds = null)
+//   intelligence.use (supervisor)            → só as equipes de que participa (wacrm.team_members)
+//   demais                                   → sem acesso
+// (PRD 20, 20.3e: por permissão; mesmo resultado dos 5 papéis de sistema.)
 //
 // `role` é string porque "supervisor" entra no AccountRole em outra
 // mudança (migration 139); aqui não dependemos disso.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ForbiddenError } from "@/lib/auth/account";
+import { can } from "@/lib/auth/permissions";
+import type { AccountRole } from "@/lib/auth/roles";
 
 export interface IntelligenceScope {
   accountId: string;
@@ -22,15 +25,17 @@ export interface IntelligenceScope {
 }
 
 export async function resolveIntelligenceScope(
-  ctx: { accountId: string; userId: string; role: string },
+  ctx: { accountId: string; userId: string; role: string; permissions?: ReadonlySet<string> },
   db: SupabaseClient,
 ): Promise<IntelligenceScope> {
   if (!ctx.accountId || !ctx.userId) throw new ForbiddenError("Contexto de conta inválido");
 
-  if (ctx.role === "owner" || ctx.role === "admin") {
+  // Papel desconhecido nega (can é fail-closed); `permissions` (papel personalizado) vale sobre o papel.
+  const subject = { role: ctx.role as AccountRole, permissions: ctx.permissions };
+  if (can(subject, "intelligence.scope_account")) {
     return { accountId: ctx.accountId, userId: ctx.userId, role: ctx.role, teamIds: null };
   }
-  if (ctx.role !== "supervisor") {
+  if (!can(subject, "intelligence.use")) {
     throw new ForbiddenError("O DDM Intelligence é restrito a owner, admin e supervisor");
   }
 

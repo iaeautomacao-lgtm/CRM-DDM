@@ -2,7 +2,7 @@ import { runIdempotentSend } from '@/lib/disparador/send-ledger';
 import { MediaUrlNotAllowedError, resolveProviderMedia } from '@/lib/storage/provider-media';
 import { NextResponse } from 'next/server'
 import type { AccountContext } from '@/lib/auth/account'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import {
   sendTextMessage,
   sendTemplateMessage,
@@ -37,7 +37,7 @@ import { templateRowsForWaba } from '@/lib/disparador/template-validation'
 
 export async function POST(request: Request) {
   try {
-    const auth = await guardRole('agent')
+    const auth = await guardPermission('inbox.reply')
     if (!auth.ok) return auth.response
     const { supabase, accountId, userId } = auth.ctx
 

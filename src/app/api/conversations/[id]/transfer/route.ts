@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { registerAuditActor } from '@/lib/audit/context'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 
 // POST /api/conversations/[id]/transfer  { agent_id?, team_id?, reason? }
@@ -32,7 +32,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { supabase, accountId, userId } = await requireRole('agent')
+    const { supabase, accountId, userId } = await requirePermission('inbox.transfer')
     const { id: conversationId } = await params
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
 

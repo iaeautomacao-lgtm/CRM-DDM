@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit'
 import { analyzeConversationSentimentAndTags } from '@/lib/ai/sentiment'
 
@@ -9,7 +9,7 @@ export async function POST(
 ) {
   try {
     const { id: conversationId } = await params
-    const auth = await guardRole('agent')
+    const auth = await guardPermission('inbox.ai_assist')
     if (!auth.ok) return auth.response
     const { supabase, accountId, userId } = auth.ctx
     // A análise usa a chave de IA da conta: conter loops por usuário.

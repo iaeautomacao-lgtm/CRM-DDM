@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import {
   computeDayView,
   dayBounds,
@@ -21,7 +21,7 @@ const COLUMNS =
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('supervisor')
+    const { supabase, accountId } = await requirePermission('monitoring.view_team')
     const param = new URL(request.url).searchParams.get('date')
     const today = todayInBrazil()
     const date = isValidDay(param) ? param : today

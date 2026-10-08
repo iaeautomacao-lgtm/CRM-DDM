@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
-import { guardRole } from '@/lib/auth/route-guard';
+import { guardPermission } from '@/lib/auth/route-guard';
 import { sendReactionMessage } from '@/lib/whatsapp/meta-api';
 import { decrypt } from '@/lib/whatsapp/encryption';
 import { sanitizePhoneForMeta } from '@/lib/whatsapp/phone-utils';
@@ -22,7 +22,7 @@ import {
  */
 export async function POST(request: Request) {
   try {
-    const auth = await guardRole('agent');
+    const auth = await guardPermission('inbox.reply');
     if (!auth.ok) return auth.response;
     const { supabase, accountId, userId } = auth.ctx;
 

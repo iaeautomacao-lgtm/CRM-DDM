@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 
 // GET /api/monitoramento/conversations — as conversas por trás de um número
 // das abas Hoje e SLA (clicar num KPI ou numa célula da tabela).
@@ -21,7 +21,7 @@ function iso(v: string | null): string | null {
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('supervisor')
+    const { supabase, accountId } = await requirePermission('monitoring.view_team')
     const p = new URL(request.url).searchParams
     const metric = p.get('metric') as Metric | null
     if (!metric || !METRICS.includes(metric)) {
