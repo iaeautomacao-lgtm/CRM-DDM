@@ -1,4 +1,4 @@
-import { MetaApiError } from "@/lib/whatsapp/meta-api";
+import { MetaApiError, MetaUncertainResponseError } from "@/lib/whatsapp/meta-api";
 import { metaCodesWhere } from "./meta-error-catalog";
 
 // Sinais do provedor que pedem para o número desacelerar (backoff
@@ -28,6 +28,8 @@ export function classifyProviderError(err: unknown): ProviderErrorClass {
     if (err.httpStatus >= 500) return { reason: "server_error", code };
     return { reason: null, code };
   }
+  // 2xx sem messages[0].id (F13): resultado incerto, sem freio no número.
+  if (err instanceof MetaUncertainResponseError) return { reason: null, code: "meta:uncertain_body" };
   const name = err instanceof Error ? err.name : "";
   const message = err instanceof Error ? err.message : String(err);
   if (name === "TimeoutError" || name === "AbortError" || /timed? ?out|aborted/i.test(message))

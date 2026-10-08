@@ -77,6 +77,33 @@ export class MetaApiError extends Error {
   }
 }
 
+/**
+ * A Meta respondeu 2xx, mas o corpo não traz `messages[0].id` (corpo truncado, timeout no meio da resposta, formato
+ * inesperado). O POST pode TER saído: o resultado é INCERTO — o chamador nunca reenvia (F13, PRD 11). Não estende
+ * MetaApiError de propósito: MetaApiError com HTTP < 500 é "rejeição definitiva" (retenta); isto não é.
+ */
+export class MetaUncertainResponseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'MetaUncertainResponseError'
+  }
+}
+
+/** Lê o id da mensagem enviada de uma resposta 2xx da Meta; corpo sem id/ilegível = resultado incerto. */
+export async function readSentMessageId(response: Response): Promise<string> {
+  let data: unknown
+  try {
+    data = await response.json()
+  } catch {
+    throw new MetaUncertainResponseError('Resposta da Meta ilegível (corpo truncado ou inválido); envio não confirmado')
+  }
+  const id = (data as { messages?: Array<{ id?: unknown }> } | null)?.messages?.[0]?.id
+  if (typeof id !== 'string' || id === '') {
+    throw new MetaUncertainResponseError('Resposta da Meta sem messages[0].id; envio não confirmado')
+  }
+  return id
+}
+
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
   let code: number | null = null
@@ -341,8 +368,7 @@ export async function sendTextMessage(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return { messageId: await readSentMessageId(response) }
 }
 
 export type MediaKind = 'image' | 'video' | 'document' | 'audio'
@@ -410,8 +436,7 @@ export async function sendMediaMessage(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return { messageId: await readSentMessageId(response) }
 }
 
 export interface UploadMediaArgs {
@@ -565,8 +590,7 @@ export async function sendTemplateMessage(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return { messageId: await readSentMessageId(response) }
 }
 
 // ============================================================
@@ -825,8 +849,7 @@ export async function sendReactionMessage(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return { messageId: await readSentMessageId(response) }
 }
 
 // ============================================================
@@ -938,8 +961,7 @@ export async function sendInteractiveButtons(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return { messageId: await readSentMessageId(response) }
 }
 
 /** Limite da Meta para o rótulo do botão de URL (cta_url display_text). */
@@ -1000,8 +1022,7 @@ export async function sendInteractiveCtaUrl(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return { messageId: await readSentMessageId(response) }
 }
 
 export interface InteractiveListRow {
@@ -1132,8 +1153,7 @@ export async function sendInteractiveList(
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
-  const data = await response.json()
-  return { messageId: data.messages[0].id }
+  return { messageId: await readSentMessageId(response) }
 }
 
 function validateInteractiveBody(bodyText: string): void {

@@ -1,7 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
-import { ConversationOriginBanner } from "./conversation-origin";
+import { ConversationOriginBanner, useConversationOrigin } from "./conversation-origin";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -25,6 +25,7 @@ import {
   MessageSquare,
   ChevronDown,
   Check,
+  Clock,
   ArrowLeft,
   RefreshCw,
   PanelRightOpen,
@@ -343,6 +344,12 @@ export function MessageThread({
         : null,
     [transferConvId, transferAgentId, transferTeamId],
   );
+
+  // Reaproveita o mesmo cache da faixa de origem para recuperar o cliente
+  // sem abrir uma segunda consulta no cabeçalho. Esse contexto existia no
+  // refinamento anterior do Inbox e foi perdido quando o header foi simplificado.
+  const originData = useConversationOrigin(conversation?.id ?? null);
+  const clientBadge = originData?.client ?? null;
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
@@ -1367,7 +1374,22 @@ export function MessageThread({
             )}
           </div>
           <div className="min-w-0">
-            <h2 className="truncate text-[14px] font-semibold text-foreground">{displayName}</h2>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate text-[14px] font-semibold text-foreground">{displayName}</h2>
+              {clientBadge && (
+                <span
+                  className="hidden min-w-0 items-center gap-1 text-[11px] text-muted-foreground xl:inline-flex"
+                  title={`Cliente: ${clientBadge.name}`}
+                >
+                  <span
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: clientBadge.color }}
+                    aria-hidden="true"
+                  />
+                  <span className="max-w-28 truncate">{clientBadge.name}</span>
+                </span>
+              )}
+            </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
               {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"] && (
                 <span className="shrink-0">
@@ -1378,6 +1400,21 @@ export function MessageThread({
                 <>
                   <span aria-hidden="true">·</span>
                   <span className="truncate">{contact.phone ?? contact.email}</span>
+                </>
+              )}
+              {conversation.channel_type !== "webchat" && sessionInfo.remaining && (
+                <>
+                  <span className="hidden md:inline" aria-hidden="true">·</span>
+                  <span
+                    className={cn(
+                      "hidden shrink-0 items-center gap-1 md:inline-flex",
+                      sessionInfo.expired && "font-medium text-destructive",
+                    )}
+                    title="Janela de atendimento"
+                  >
+                    <Clock className="h-3 w-3" aria-hidden="true" />
+                    {sessionInfo.remaining}
+                  </span>
                 </>
               )}
             </div>

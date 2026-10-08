@@ -13,16 +13,43 @@ type Row = {
   erro: string | null;
   sent_at: string | null;
   updated_at: string | null;
+  /** Lease do item em voo (migration 194). Ausente/nulo = item sem lease. */
+  inflight_until?: string | null;
 };
 
-function database(rows: Row[], confirmFails = false) {
+// Avalia o filtro PostgREST do lease ("inflight_until.is.null,inflight_until.lt.<iso>") sobre as linhas em memória.
+function matchesLeaseFilter(expr: string, row: Row): boolean {
+  return expr.split(",").some((part) => {
+    if (part === "inflight_until.is.null") return row.inflight_until == null;
+    const lt = part.match(/^inflight_until.lt.(.+)$/);
+    return !!lt && row.inflight_until != null && row.inflight_until < lt[1];
+  });
+}
+
+function database(rows: Row[], confirmFails = false, options: { leaseColumnMissing?: boolean } = {}) {
   const updates: Record<string, unknown>[] = [];
+  const queries: string[] = [];
   const from = vi.fn(() => ({
     select: () => ({
       eq: () => ({
-        lt: () => ({
-          limit: vi.fn().mockResolvedValue({ data: rows, error: null }),
-        }),
+        lt: () => {
+          let visible = rows;
+          let usesLease = false;
+          const chain: any = {
+            or: (expr: string) => {
+              usesLease = true;
+              queries.push(expr);
+              visible = visible.filter((r) => matchesLeaseFilter(expr, r));
+              return chain;
+            },
+            limit: vi.fn(async () =>
+              usesLease && options.leaseColumnMissing
+                ? { data: null, error: { code: "42703", message: "column disp_message_queue.inflight_until does not exist" } }
+                : { data: visible, error: null },
+            ),
+          };
+          return chain;
+        },
       }),
     }),
     update: (values: Record<string, unknown>) => {
@@ -39,7 +66,7 @@ function database(rows: Row[], confirmFails = false) {
       return { data: null, error: confirmFails ? { message: "rpc failed" } : null };
     return { data: null, error: null };
   });
-  return { db: { from, rpc } as unknown as SupabaseClient, updates, rpc };
+  return { db: { from, rpc } as unknown as SupabaseClient, updates, rpc, queries };
 }
 
 const base = (overrides: Partial<Row> = {}): Row => ({
@@ -99,5 +126,55 @@ describe("recoverStaleSendingReservations", () => {
       expect.objectContaining({ status: "enviado", erro_permanente: false })
     );
     expect(result.recoveredAccepted).toBe(1);
+  });
+});
+
+describe("recoverStaleSendingReservations — lease do item em voo (F14, migration 194)", () => {
+  const NOW = new Date("2026-10-07T18:30:00.000Z");
+  const future = "2026-10-07T18:31:30.000Z"; // lease renovado: vence depois de agora
+  const past = "2026-10-07T18:29:00.000Z"; // lease vencido
+
+  it("lease renovado (envio lento mas vivo): NÃO é varrido nem marcado como incerto", async () => {
+    const { db, updates } = database([base({ inflight_until: future })]);
+    const result = await recoverStaleSendingReservations(db, NOW);
+    expect(result).toEqual({ recoveredAccepted: 0, finalizedUnknown: 0, failed: 0, campaignIds: [] });
+    expect(updates).toHaveLength(0);
+  });
+
+  it("lease vencido: o watchdog age (encerra como incerto, sem reenvio)", async () => {
+    const { db, updates } = database([base({ inflight_until: past })]);
+    const result = await recoverStaleSendingReservations(db, NOW);
+    expect(result.finalizedUnknown).toBe(1);
+    expect(updates).toContainEqual(expect.objectContaining({ status: "erro", erro_permanente: true }));
+  });
+
+  it("lease nulo (item de antes da migration): comportamento de sempre", async () => {
+    const { db } = database([base({ inflight_until: null })]);
+    expect((await recoverStaleSendingReservations(db, NOW)).finalizedUnknown).toBe(1);
+  });
+
+  it("mistura: só o vencido/nulo é tratado; o vivo segue", async () => {
+    const { db } = database([base({ id: "vivo", inflight_until: future }), base({ id: "morto", inflight_until: past }), base({ id: "antigo" })]);
+    const result = await recoverStaleSendingReservations(db, NOW);
+    expect(result.finalizedUnknown).toBe(2);
+  });
+
+  it("item incerto NÃO volta para a fila: nunca vira 'agendado' nem recebe novo POST", async () => {
+    const { db, updates } = database([base({ inflight_until: past })]);
+    await recoverStaleSendingReservations(db, NOW);
+    expect(updates.every((u) => u.status !== "agendado")).toBe(true);
+  });
+
+  it("o filtro do lease usa o horário atual do watchdog", async () => {
+    const { db, queries } = database([]);
+    await recoverStaleSendingReservations(db, NOW);
+    expect(queries[0]).toBe(`inflight_until.is.null,inflight_until.lt.${NOW.toISOString()}`);
+  });
+
+  it("sem a coluna (migration 194 ausente: 42703): refaz a consulta sem o lease e segue como antes", async () => {
+    const { db, updates } = database([base()], false, { leaseColumnMissing: true });
+    const result = await recoverStaleSendingReservations(db, NOW);
+    expect(result.finalizedUnknown).toBe(1);
+    expect(updates).toContainEqual(expect.objectContaining({ status: "erro" }));
   });
 });
