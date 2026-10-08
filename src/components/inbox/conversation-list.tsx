@@ -388,9 +388,9 @@ export function ConversationList({
 
   return (
     // A lista é a superfície de triagem do Inbox: um pouco mais larga no
-    // desktop para nome, contexto e última mensagem respirarem sem roubar
-    // espaço demais da conversa.
-    <div className="flex h-full w-full flex-col border-r border-border bg-background lg:w-[352px]">
+    // desktop com largura suficiente para triagem, priorizando a área central
+    // de mensagens como superfície principal do atendimento.
+    <div className="flex h-full w-full flex-col border-r border-border bg-background lg:w-[320px]">
       <div className="border-b border-border">
         <div className="flex items-center justify-between px-3 pb-2 pt-3">
           <div>

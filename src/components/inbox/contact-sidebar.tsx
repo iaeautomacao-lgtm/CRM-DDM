@@ -295,7 +295,7 @@ export function ContactSidebar({
 
   if (!contact) {
     return (
-      <div className="flex h-full w-[304px] items-center justify-center border-l border-border bg-background px-5">
+      <div className="flex h-full w-[280px] items-center justify-center border-l border-border bg-background px-5">
         <p className="text-center text-xs text-muted-foreground">
           O contexto do contato aparecerá aqui.
         </p>
@@ -307,7 +307,7 @@ export function ContactSidebar({
   const initials = displayName.charAt(0).toUpperCase();
 
   return (
-    <div className="flex h-full w-[304px] flex-col border-l border-border bg-background">
+    <div className="flex h-full w-[280px] flex-col border-l border-border bg-background">
       {/* `min-h-0` is load-bearing: a flex child defaults to
           min-height:auto, so without it this ScrollArea grows to fit
           all sections (Sentimento/Etiquetas/Notas) instead of
