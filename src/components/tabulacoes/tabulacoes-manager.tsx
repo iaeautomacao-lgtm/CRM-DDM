@@ -43,6 +43,9 @@ import {
 import { SettingsPanelHead } from '@/components/settings/settings-panel-head';
 import type { Tag, Team } from '@/types';
 import { codigoInUseBy, codigoTabulacaoBloqueado, parseCodigoTabulacao } from '@/lib/tabulacoes/codigo';
+import { AiOutcomeMapSection } from './ai-outcome-map-table';
+
+export { AiOutcomeMapSection } from './ai-outcome-map-table';
 
 const TABULACAO_COLORS = [
   { name: 'Red', value: '#ef4444' },
@@ -291,8 +294,9 @@ export function TabulacoesManager() {
   }
 
   return (
-    <section className="space-y-4">
-      <SettingsPanelHead
+    <div className="space-y-8">
+      <section className="space-y-4">
+        <SettingsPanelHead
         title="Tabulações"
         description="Tags de encerramento de conversa (kind=&quot;outcome&quot;) usadas para classificar o motivo do fechamento. O vínculo com uma equipe específica é feito na tela de cada equipe."
         action={
@@ -568,5 +572,9 @@ export function TabulacoesManager() {
         </DialogContent>
       </Dialog>
     </section>
+
+      {/* Seção: Tabulação automática pela IA */}
+      <AiOutcomeMapSection tabulacoes={tabulacoes} />
+    </div>
   );
 }
