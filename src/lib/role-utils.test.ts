@@ -13,7 +13,7 @@ describe("supervisor (migrations 139/140)", () => {
     }
   });
   it("vê os relatórios de atendimento (escopados pela 143)", () => {
-    for (const path of ["/relatorios/atendimentos", "/relatorios/conversas", "/relatorios/agentes"]) {
+    for (const path of ["/relatorios/atendimentos", "/relatorios/conversas", "/relatorios/agentes", "/relatorios/tabulacoes"]) {
       expect(canAccessRoute("supervisor", path)).toBe(true);
     }
     expect(canAccessRoute("agent", "/relatorios/atendimentos")).toBe(false);
