@@ -23,7 +23,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeLog } from "@/lib/logger";
-import { isAiHeartbeatFresh } from "@/lib/ai/heartbeat";
+import { AI_HEARTBEAT_FRESH_MS, isAiHeartbeatFresh } from "@/lib/ai/heartbeat";
 
 type Db = SupabaseClient<any, any, any>;
 
@@ -72,7 +72,7 @@ async function loadCandidates(db: Db, win: StallWindow) {
       .lt("last_customer_message_at", win.stalledBefore)
       .gt("last_customer_message_at", win.notOlderThan)
       .order("last_customer_message_at", { ascending: true })
-      .limit(50);
+      .limit(STALL_SCAN_LIMIT);
   const withHeartbeat = await query(`${CANDIDATE_COLUMNS}, ai_in_progress_at`);
   // Migration 152 ainda não aplicada: segue sem o heartbeat (comportamento
   // anterior) em vez de parar o vigia.
@@ -88,11 +88,133 @@ interface ActiveRun {
   current_node_key: string | null;
 }
 
+const STALL_SCAN_LIMIT = 50;
+
+interface StalledRow {
+  conversation_id: string;
+  account_id: string;
+  last_customer_message_at: string;
+  ai_in_progress_at: string | null;
+  run_id: string;
+  flow_id: string;
+  current_node_key: string | null;
+}
+
+function isMissingFunction(error: { code?: string; message?: string } | null | undefined): boolean {
+  return error?.code === "PGRST202" || error?.code === "42883" || /could not find the function|does not exist/i.test(error?.message ?? "");
+}
+
+/**
+ * Migration 211: o banco já devolve SÓ as conversas que o vigia trata (heartbeat, resposta, run ativo e nó de IA
+ * resolvidos num JOIN), ordenadas e limitadas DEPOIS dos filtros. `null` = função ausente (usa o caminho antigo).
+ */
+async function loadStalledViaRpc(db: Db, win: StallWindow, now: Date): Promise<StalledRow[] | null> {
+  if (typeof (db as { rpc?: unknown }).rpc !== "function") return null;
+  const { data, error } = await db.rpc("stalled_ai_conversations", {
+    p_stalled_before: win.stalledBefore,
+    p_not_older_than: win.notOlderThan,
+    p_heartbeat_after: new Date(now.getTime() - AI_HEARTBEAT_FRESH_MS).toISOString(),
+    p_limit: STALL_SCAN_LIMIT,
+  });
+  if (error) {
+    if (isMissingFunction(error)) return null;
+    throw new Error(`stalled_ai_conversations: ${error.message}`);
+  }
+  return (data ?? []) as StalledRow[];
+}
+
+/** Encerra a execução presa e leva a conversa para a fila humana. `true` se transferiu. */
+async function handOff(db: Db, conv: CandidateConversation, run: ActiveRun, now: Date): Promise<boolean> {
+  // Encerra a execução primeiro (guardado por status='active'): se o
+  // fluxo avançou nesse meio-tempo, não mexe na conversa.
+  const endedAt = new Date().toISOString();
+  const { data: ended, error: endErr } = await db
+    .from("flow_runs")
+    .update({ status: "handed_off", ended_at: endedAt, end_reason: AI_STALL_REASON })
+    .eq("id", run.id)
+    .eq("status", "active")
+    .select("id");
+  if (endErr || !ended?.length) return false;
+
+  await db
+    .from("conversations")
+    .update({ status: "pending", updated_at: endedAt })
+    .eq("id", conv.id)
+    .eq("status", "open");
+
+  const waitedSeconds = Math.round(
+    (now.getTime() - new Date(conv.last_customer_message_at).getTime()) / 1000,
+  );
+  await db.from("flow_run_events").insert({
+    flow_run_id: run.id,
+    event_type: "handoff",
+    node_key: run.current_node_key,
+    payload: { reason: AI_STALL_REASON, waited_seconds: waitedSeconds },
+  });
+  // Telemetria do handoff (uma linha por transferência). Best-effort:
+  // falha aqui não desfaz a transferência.
+  try {
+    const { error: decisionErr } = await db.from("ai_decisions").insert({
+      account_id: conv.account_id,
+      conversation_id: conv.id,
+      flow_run_id: run.id,
+      flow_id: run.flow_id,
+      node_key: run.current_node_key,
+      decision_type: "handoff",
+      decision: { waited_seconds: waitedSeconds, end_reason: AI_STALL_REASON },
+      reason: AI_STALL_REASON,
+      needs_human: true,
+      handoff_reason: AI_STALL_HANDOFF_REASON,
+      handoff_subreason: "WATCHDOG_SEM_RESPOSTA",
+      ai_node: run.current_node_key,
+    });
+    if (decisionErr) {
+      console.error("[ai-watchdog] falha ao gravar ai_decisions:", decisionErr.message);
+    }
+  } catch (err) {
+    console.error("[ai-watchdog] falha ao gravar ai_decisions:", err);
+  }
+  void writeLog({
+    account_id: conv.account_id,
+    level: "warn",
+    source: "flows",
+    event: AI_STALL_REASON,
+    message: "IA sem resposta ao cliente — conversa enviada para a fila humana",
+    payload: {
+      conversation_id: conv.id,
+      flow_run_id: run.id,
+      flow_id: run.flow_id,
+      node_key: run.current_node_key,
+      waited_seconds: waitedSeconds,
+    },
+  });
+  return true;
+}
+
 /** Varre e transfere para humano as conversas com IA travada. Nunca lança. */
 export async function sweepStalledAiConversations(db: Db, now: Date = new Date()): Promise<number> {
   const win = stallWindow(now);
   let handed = 0;
   try {
+    // Caminho novo (migration 211): filtros no banco, uma consulta.
+    const stalled = await loadStalledViaRpc(db, win, now);
+    if (stalled) {
+      for (const row of stalled) {
+        const conv: CandidateConversation = {
+          id: row.conversation_id,
+          account_id: row.account_id,
+          last_customer_message_at: row.last_customer_message_at,
+          ai_in_progress_at: row.ai_in_progress_at,
+        };
+        // Mesma checagem de antes (defesa: o heartbeat pode ter sido renovado entre a consulta e agora).
+        if (isAiHeartbeatFresh(conv.ai_in_progress_at, now)) continue;
+        const run: ActiveRun = { id: row.run_id, flow_id: row.flow_id, current_node_key: row.current_node_key };
+        if (await handOff(db, conv, run, now)) handed += 1;
+      }
+      return handed;
+    }
+
+    // Caminho antigo (sem a função): limit(50) das mais antigas e filtros em código.
     const { data: convs, error } = await loadCandidates(db, win);
     if (error) {
       console.error("[ai-watchdog] busca de conversas falhou:", error.message);
@@ -134,70 +256,7 @@ export async function sweepStalledAiConversations(db: Db, now: Date = new Date()
       const nodeType = (nodeRows?.[0] as { node_type?: string } | undefined)?.node_type ?? null;
       if (nodeType !== "ai_agent") continue;
 
-      // Encerra a execução primeiro (guardado por status='active'): se o
-      // fluxo avançou nesse meio-tempo, não mexe na conversa.
-      const endedAt = new Date().toISOString();
-      const { data: ended, error: endErr } = await db
-        .from("flow_runs")
-        .update({ status: "handed_off", ended_at: endedAt, end_reason: AI_STALL_REASON })
-        .eq("id", run.id)
-        .eq("status", "active")
-        .select("id");
-      if (endErr || !ended?.length) continue;
-
-      await db
-        .from("conversations")
-        .update({ status: "pending", updated_at: endedAt })
-        .eq("id", conv.id)
-        .eq("status", "open");
-
-      const waitedSeconds = Math.round(
-        (now.getTime() - new Date(conv.last_customer_message_at).getTime()) / 1000,
-      );
-      await db.from("flow_run_events").insert({
-        flow_run_id: run.id,
-        event_type: "handoff",
-        node_key: run.current_node_key,
-        payload: { reason: AI_STALL_REASON, waited_seconds: waitedSeconds },
-      });
-      // Telemetria do handoff (uma linha por transferência). Best-effort:
-      // falha aqui não desfaz a transferência.
-      try {
-        const { error: decisionErr } = await db.from("ai_decisions").insert({
-          account_id: conv.account_id,
-          conversation_id: conv.id,
-          flow_run_id: run.id,
-          flow_id: run.flow_id,
-          node_key: run.current_node_key,
-          decision_type: "handoff",
-          decision: { waited_seconds: waitedSeconds, end_reason: AI_STALL_REASON },
-          reason: AI_STALL_REASON,
-          needs_human: true,
-          handoff_reason: AI_STALL_HANDOFF_REASON,
-          handoff_subreason: "WATCHDOG_SEM_RESPOSTA",
-          ai_node: run.current_node_key,
-        });
-        if (decisionErr) {
-          console.error("[ai-watchdog] falha ao gravar ai_decisions:", decisionErr.message);
-        }
-      } catch (err) {
-        console.error("[ai-watchdog] falha ao gravar ai_decisions:", err);
-      }
-      void writeLog({
-        account_id: conv.account_id,
-        level: "warn",
-        source: "flows",
-        event: AI_STALL_REASON,
-        message: "IA sem resposta ao cliente — conversa enviada para a fila humana",
-        payload: {
-          conversation_id: conv.id,
-          flow_run_id: run.id,
-          flow_id: run.flow_id,
-          node_key: run.current_node_key,
-          waited_seconds: waitedSeconds,
-        },
-      });
-      handed += 1;
+      if (await handOff(db, conv, run, now)) handed += 1;
     }
   } catch (err) {
     console.error("[ai-watchdog] varredura falhou:", err);
