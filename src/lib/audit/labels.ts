@@ -35,6 +35,10 @@ export const RESOURCE_LABEL: Record<string, string> = {
   tag: "Etiqueta",
   template: "Template",
   member: "Membro",
+  account: "Organização",
+  invitation: "Convite",
+  role: "Papel",
+  access: "Acesso",
   audit: "Auditoria",
 };
 
@@ -101,6 +105,21 @@ export const ACTION_LABEL: Record<string, string> = {
   "member.created": "Membro criado",
   "member.updated": "Membro alterado",
   "member.deleted": "Membro removido",
+  "member.role_changed": "Papel do membro alterado",
+  "member.removed": "Membro saiu da organização",
+  "member.joined": "Membro entrou na organização",
+  "member.deactivated": "Membro desativado",
+  "member.reactivated": "Membro reativado",
+  "ownership.transferred": "Propriedade transferida",
+  "account.renamed": "Organização renomeada",
+  "invitation.created": "Convite criado",
+  "invitation.revoked": "Convite revogado",
+  "invitation.accepted": "Convite aceito",
+  "role.created": "Papel criado",
+  "role.updated": "Papel alterado",
+  "role.deleted": "Papel excluído",
+  "role.permissions_changed": "Permissões do papel alteradas",
+  "access.denied": "Acesso negado",
   "audit.exported": "Exportação da auditoria",
 };
 

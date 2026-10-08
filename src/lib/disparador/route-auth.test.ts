@@ -6,7 +6,8 @@ import { ACCOUNT_ROLES, hasMinRole } from "@/lib/auth/roles";
 // PRD 20, 20.3c: o gate do disparador é permissão (campaigns.manage / campaigns.rate_limit), com o MESMO
 // resultado do papel de antes (owner/admin).
 
-const mocks = vi.hoisted(() => ({ getCurrentAccount: vi.fn() }));
+const mocks = vi.hoisted(() => ({ getCurrentAccount: vi.fn(), recordAccessDenied: vi.fn() }));
+vi.mock("@/lib/audit/access-denied", () => ({ recordAccessDenied: mocks.recordAccessDenied }));
 vi.mock("@/lib/auth/account", async () => {
   class ForbiddenError extends Error {
     readonly status = 403 as const;
@@ -42,6 +43,16 @@ describe("canManageCampaigns / requireDisparadorAccess", () => {
   it("papel nulo/indefinido não gerencia", () => {
     expect(canManageCampaigns(null)).toBe(false);
     expect(canManageCampaigns(undefined)).toBe(false);
+  });
+
+  it("PRD 20.8: o 403 do disparador grava access.denied com a permissão", async () => {
+    mocks.getCurrentAccount.mockResolvedValue(ctx("agent"));
+    await requireDisparadorAccess("campaigns.manage").catch(() => undefined);
+    expect(mocks.recordAccessDenied).toHaveBeenCalledWith(expect.objectContaining({ accountId: "a1", userId: "u1" }), "campaigns.manage");
+    mocks.recordAccessDenied.mockClear();
+    mocks.getCurrentAccount.mockResolvedValue(ctx("admin"));
+    await requireDisparadorAccess("campaigns.manage");
+    expect(mocks.recordAccessDenied).not.toHaveBeenCalled();
   });
 
   it("403 informa a permissão que faltou; a lista efetiva vale sobre o papel", async () => {
