@@ -23,7 +23,7 @@
  * `node_key`; trigger-scoped use `scope: 'trigger'`.
  */
 
-import { findAccountSecretRefs, findInlineSecrets, inlineSecretAdvice } from "@/lib/ai/tool-secrets";
+import { findAccountSecretRefs, findInlineSecrets, inlineSecretAdvice, isDdmUrl } from "@/lib/ai/tool-secrets";
 import { findLiteralHeaderCredential } from "@/lib/ai-tools/tool-input";
 import {
   aiProviderLabel,
@@ -1248,8 +1248,10 @@ function validateNode(
       for (const tool of tools) {
         const inline = findInlineSecrets(tool.http?.url ?? "");
         if (inline.length > 0) {
+          // A DDM tem marcador próprio ({{secret.DDM_TOKEN}}): token em texto bloqueia a ativação.
+          // Outros domínios não têm marcador → continua aviso.
           issues.push({
-            severity: "warning",
+            severity: isDdmUrl(tool.http?.url ?? "") ? "error" : "warning",
             scope: "node",
             node_key: node.node_key,
             field: "tools",

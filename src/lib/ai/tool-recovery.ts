@@ -8,6 +8,9 @@ export type ToolFailureCode =
   | "TOOL_SCHEMA_ERROR"
   | "TOOL_INVALID_CLIENT"
   | "TOOL_PROVIDER_ERROR"
+  // A integração recusou a credencial ("TOKEN INVALIDO"). É configuração,
+  // não instabilidade passageira: repetir a chamada não resolve.
+  | "TOOL_AUTH_ERROR"
   // Resposta de NEGÓCIO da integração (HTTP 404, {"error":"CPF não
   // encontrado"}, "sem débito"…): a API está no ar e respondeu. Não é
   // instabilidade — o resultado vai ao modelo, que decide (ex.: pedir o
@@ -211,6 +214,46 @@ function classifyTextBodyFailure(body: string): ToolFailure | null {
   return null;
 }
 
+/**
+ * Texto de erro de um corpo JSON no formato da DDM — {"ERRO":"..."},
+ * [{"ERRO":{"ERRO":"TOKEN INVALIDO"}}] — também aninhado e em array de 1
+ * elemento. Chave ERRO/erro/error (qualquer caixa) com texto.
+ */
+function extractNestedError(value: unknown, depth = 0): string | null {
+  if (depth > 4 || value === null || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    return value.length === 1 ? extractNestedError(value[0], depth + 1) : null;
+  }
+  for (const [key, inner] of Object.entries(value)) {
+    const k = key.toLowerCase();
+    if (k !== "erro" && k !== "error") continue;
+    if (typeof inner === "string" && inner.trim()) return inner.trim();
+    const nested = extractNestedError(inner, depth + 1);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+const AUTH_ERROR_PATTERN =
+  /\btoken\s+(?:invalido|expirado|ausente)\b|\binvalid[_ ]token\b|\bnao autorizado\b|\bunauthorized\b/i;
+
+function classifyNestedErrorText(raw: string): ToolFailure {
+  const normalized = raw.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  // Mensagem genérica para a IA: nunca repete o texto do provedor (pode citar o token).
+  if (AUTH_ERROR_PATTERN.test(normalized)) {
+    return {
+      code: "TOOL_AUTH_ERROR",
+      message: "A integração recusou a autenticação. A equipe responsável precisa corrigir a configuração; repetir a consulta não resolve.",
+      retryable: false,
+    };
+  }
+  if (isBusinessErrorMessage(raw)) {
+    return { code: "TOOL_BUSINESS_ERROR", message: `A integração respondeu: ${raw.slice(0, 200)}`, retryable: false };
+  }
+  // "Erro ao executar a query" e demais: erro do provedor, retentável como no corpo em texto.
+  return { code: "TOOL_SERVER_ERROR", message: "A integração retornou um erro ao processar a consulta.", retryable: true };
+}
+
 export function classifyToolBodyFailure(body: string): ToolFailure | null {
   let parsed: unknown;
   try {
@@ -225,6 +268,13 @@ export function classifyToolBodyFailure(body: string): ToolFailure | null {
   }
   if (typeof parsed === "string") {
     return classifyTextBodyFailure(parsed);
+  }
+  const topLevelText =
+    !Array.isArray(parsed) && typeof parsed === "object" && parsed !== null && typeof (parsed as { error?: unknown }).error === "string";
+  if (!topLevelText) {
+    // {"ERRO":{"ERRO":"..."}} / [{"ERRO":"..."}] — formato da DDM (HTTP 200).
+    const nestedError = extractNestedError(parsed);
+    if (nestedError) return classifyNestedErrorText(nestedError);
   }
   if (!parsed || typeof parsed !== "object" || !("error" in parsed)) {
     return null;
@@ -337,6 +387,7 @@ export function isIntegrationOutage(code: ToolFailureCode | undefined | null): b
     code === "TOOL_HTTP_ERROR" ||
     code === "TOOL_NETWORK_ERROR" ||
     code === "TOOL_INVALID_CLIENT" ||
+    code === "TOOL_AUTH_ERROR" ||
     code === "TOOL_PROVIDER_ERROR"
   );
 }

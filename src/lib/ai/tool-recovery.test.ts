@@ -236,3 +236,37 @@ describe("instabilidade forçada — contagem por chamada", () => {
     expect(fullyFailedIntegrations(tally)).toEqual({});
   });
 });
+
+describe("classifyToolBodyFailure — erro aninhado da DDM (TASK25)", () => {
+  it("TOKEN INVALIDO: falha de autenticação, não retentável, mensagem sem texto do provedor", () => {
+    const f = classifyToolBodyFailure('[{"ERRO":{"ERRO":"TOKEN INVALIDO"}}]');
+    expect(f?.code).toBe("TOOL_AUTH_ERROR");
+    expect(f?.retryable).toBe(false);
+    expect(f?.message).not.toMatch(/TOKEN INVALIDO/i);
+    expect(isIntegrationOutage(f?.code)).toBe(true);
+    expect(shouldRetryTool("localizar_devedor", "GET", f!, 1)).toBe(false);
+  });
+
+  it("variações: objeto, caixa baixa, texto direto", () => {
+    expect(classifyToolBodyFailure('{"ERRO":{"ERRO":"TOKEN INVALIDO"}}')?.code).toBe("TOOL_AUTH_ERROR");
+    expect(classifyToolBodyFailure('[{"erro":"Token inválido"}]')?.code).toBe("TOOL_AUTH_ERROR");
+    expect(classifyToolBodyFailure('{"ERRO":"TOKEN INVALIDO"}')?.code).toBe("TOOL_AUTH_ERROR");
+  });
+
+  it("Erro ao executar a query: erro do provedor retentável", () => {
+    const f = classifyToolBodyFailure('[{"ERRO":{"ERRO":"Erro ao executar a query: syntax"}}]');
+    expect(f?.code).toBe("TOOL_SERVER_ERROR");
+    expect(f?.retryable).toBe(true);
+    expect(shouldRetryTool("consultar_debitos", "GET", f!, 1)).toBe(true);
+  });
+
+  it("CPF não encontrado em ERRO continua resultado de negócio", () => {
+    expect(classifyToolBodyFailure('[{"ERRO":"CPF não encontrado"}]')?.code).toBe("TOOL_BUSINESS_ERROR");
+  });
+
+  it("dados válidos e erro vazio não viram falha", () => {
+    expect(classifyToolBodyFailure('[{"nome":"Maria","cpf":"123"}]')).toBeNull();
+    expect(classifyToolBodyFailure('[{"ERRO":""}]')).toBeNull();
+    expect(classifyToolBodyFailure('[{"ERRO":"x"},{"nome":"a"}]')).toBeNull();
+  });
+});

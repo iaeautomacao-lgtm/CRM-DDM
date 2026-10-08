@@ -626,13 +626,18 @@ describe("validateFlowForActivation — token em texto nas ferramentas", () => {
     node_type: "ai_agent",
     config: { mode: "takeover", tools: [{ name: "localizar_devedor", http: { url } }] },
   });
-  it("avisa token em texto", () => {
+  it("token da DDM em texto é ERRO (bloqueia a ativação)", () => {
     const issues = validateFlowForActivation(flow, [aiNode("https://www.ddmacordos.com/calc/localiza_dev.php?tk=a1b2c3d4e5f6g7h8&cpf={{cpf}}")]);
-    expect(issues.some((i) => i.severity === "warning" && i.message.includes("{{cred.NOME}}") && i.message.includes("Variáveis e credenciais"))).toBe(true);
+    expect(issues.some((i) => i.severity === "error" && i.message.includes("{{cred.NOME}}") && i.message.includes("Variáveis e credenciais"))).toBe(true);
   });
   it("não avisa com o marcador", () => {
     const issues = validateFlowForActivation(flow, [aiNode("https://www.ddmacordos.com/calc/localiza_dev.php?tk={{secret.DDM_TOKEN}}&cpf={{cpf}}")]);
     expect(issues.some((i) => i.message.includes("token em texto"))).toBe(false);
+  });
+  it("outro domínio com token em texto segue só aviso", () => {
+    const issues = validateFlowForActivation(flow, [aiNode("https://outra-api.com/x?api_key=a1b2c3d4e5f6g7h8")]);
+    expect(issues.some((i) => i.severity === "warning" && i.message.includes("token em texto"))).toBe(true);
+    expect(issues.some((i) => i.severity === "error" && i.message.includes("token em texto"))).toBe(false);
   });
 });
 
