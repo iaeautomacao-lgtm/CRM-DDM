@@ -554,7 +554,7 @@ export async function loadMonitorInput(db: Db, accountId: string, now: Date = ne
   const since24h = new Date(now.getTime() - 24 * 3_600_000).toISOString();
 
   const [identities, campaignsRes, ticksRes, logsRes, pendingRes] = await Promise.all([
-    loadChannelIdentities(db, accountId),
+    loadChannelIdentities(db, accountId).then((items) => items.filter((item) => item.enabled)),
     db
       .from("campaigns")
       .select("*")
@@ -593,7 +593,8 @@ export async function loadMonitorInput(db: Db, accountId: string, now: Date = ne
   if (logsRes.error) degraded.push("eventos recentes");
   if (pendingRes.error) degraded.push("131026 pendentes");
 
-  // Nome/telefone iguais à tela Canais (channel-label.ts): habilitados primeiro.
+  // Monitor é operacional: canais desabilitados ficam somente em /canais
+  // para administração e não entram em contagens, limites ou RPC do motor.
   const channels: RawChannel[] = identities.map((i) => ({
     id: i.id,
     label: i.name,

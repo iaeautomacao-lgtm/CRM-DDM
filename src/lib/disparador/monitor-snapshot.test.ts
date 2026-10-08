@@ -19,6 +19,7 @@ const iso = (minutesAgo: number) => new Date(NOW.getTime() - minutesAgo * 60_000
 const A = "00000000-0000-0000-0000-00000000000a"; // número da conta
 const B = "00000000-0000-0000-0000-00000000000b"; // WAHA da conta
 const FOREIGN = "00000000-0000-0000-0000-0000000000ff"; // número de OUTRA conta (aparece no cron_tick global)
+const DISABLED = "00000000-0000-0000-0000-0000000000dd"; // configuração antiga/desabilitada da conta
 const C1 = "00000000-0000-0000-0000-0000000000c1";
 const C2 = "00000000-0000-0000-0000-0000000000c2";
 const FOREIGN_CAMPAIGN = "00000000-0000-0000-0000-0000000000cf";
@@ -253,7 +254,10 @@ function fakeDb(overrides: { rpcError?: boolean } = {}) {
   const calls: Call[] = [];
   const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const rows: Record<string, unknown[]> = {
-    whatsapp_config: [{ id: A, display_phone_number: "+5511", phone_number_id: "pn-a", waha_session: null, provider: "meta", habilitado: true }],
+    whatsapp_config: [
+      { id: A, display_phone_number: "+5511", phone_number_id: "pn-a", waha_session: null, provider: "meta", habilitado: true },
+      { id: DISABLED, display_phone_number: "+5511", phone_number_id: "pn-old", waha_session: null, provider: "meta", habilitado: false },
+    ],
     channel_health: [{ session_id: A, verified_name: "Cobrança 1", display_phone_number: "+5511", checked_at: "2026-10-08T10:00:00Z", last_error: null }],
     campaigns: [{ id: C1, nome: "Black Friday", status: "em_execucao", session_ids: [A], updated_at: iso(1) }],
     system_logs: [],
@@ -292,6 +296,8 @@ describe("loadMonitorInput / getMonitorSnapshot", () => {
     const accountLogs = calls.filter((c) => c.table === "system_logs" && c.filters.some(([k]) => k === "in:event"));
     expect(accountLogs[0].filters).toContainEqual(["eq:account_id", "ACC-1"]);
     expect(rpcCalls).toEqual([{ fn: "dispatch_monitor_counts", args: { p_account_id: "ACC-1", p_sessions: [A], p_campaigns: [C1], p_errors_minutes: 15 } }]);
+    expect(input.channels.map((c) => c.id)).toEqual([A]);
+    expect(JSON.stringify(input)).not.toContain(DISABLED);
     // Limites e cooldowns só dos números da conta.
     expect(calls.find((c) => c.table === "dispatch_channel_limits")!.filters).toContainEqual(["in:session_id", [A]]);
     expect(input.pending131026.get(C1)).toBe(2);

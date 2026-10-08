@@ -137,6 +137,19 @@ describe("applyLimitsChange", () => {
     expect(has(calls[0], "eq", "account_id", "00000000-0000-0000-0000-0000000000ff")).toBe(true);
   });
 
+  it("canal desabilitado: 404 e não permite alterar limite por chamada direta", async () => {
+    const h = baseHandlers(null);
+    const { db, calls } = fakeDb({
+      ...h,
+      whatsapp_config: (call) => {
+        const id = call.ops.find((o) => o[0] === "eq" && o[1] === "id")?.[2];
+        return { data: id === META ? [{ ...cfg(META, "meta", "Antigo"), habilitado: false }] : [] };
+      },
+    });
+    await expect(applyLimitsChange(db, ACC, req({ maxInFlight: 10 }), ENV)).rejects.toMatchObject({ status: 404 });
+    expect(calls.some((c) => c.ops.some((o) => o[0] === "update" || o[0] === "insert"))).toBe(false);
+  });
+
   it("faixa por provedor vale na gravação (WAHA ≤ 50)", async () => {
     const { db, calls } = fakeDb(baseHandlers(null));
     await expect(applyLimitsChange(db, ACC, req({ sessionId: WAHA, maxInFlight: 60 }), ENV)).rejects.toThrow(/WAHA/);
@@ -196,9 +209,16 @@ describe("applyLimitsChange", () => {
 });
 
 describe("loadLimitsOverview", () => {
-  it("monta números (efetivo/padrão/teto/pausa/campanhas), globais e histórico", async () => {
+  it("monta somente canais habilitados (efetivo/padrão/teto/pausa/campanhas), globais e histórico", async () => {
+    const DISABLED = "00000000-0000-0000-0000-0000000000d3";
     const { db, calls } = fakeDb({
-      whatsapp_config: () => ({ data: [cfg(WAHA, "waha", "Waha"), cfg(META, "meta", "Principal")] }),
+      whatsapp_config: () => ({
+        data: [
+          cfg(WAHA, "waha", "Waha"),
+          cfg(META, "meta", "Principal"),
+          { ...cfg(DISABLED, "meta", "Meta antigo"), habilitado: false },
+        ],
+      }),
       channel_health: (call) => ({ data: call.ops.some((o) => String(o[1] ?? "").includes("verified_name")) ? [healthName(META, "Principal")] : [] }),
       dispatch_channel_limits: () => ({ data: [{ session_id: META, max_in_flight: 40, hourly_limit: 9000, paused: true }] }),
       campaigns: () => ({ data: [{ id: "c1", nome: "Camp", session_ids: [META] }] }),
@@ -208,6 +228,7 @@ describe("loadLimitsOverview", () => {
     });
     const o = await loadLimitsOverview(db, ACC, { DISPATCH_PROCESS_CONCURRENCY: "16", DISPARADOR_BATCH_CLAIM: "1" });
     expect(o.numbers.map((n) => n.label)).toEqual(["Principal", "Waha"]);
+    expect(o.numbers.every((n) => n.enabled)).toBe(true);
     expect(o.numbers[0]).toMatchObject({ maxInFlight: 40, effectiveMaxInFlight: 40, maxAllowed: 150, hourlyLimit: 9000, paused: true, hasRow: true, activeCampaigns: [{ id: "c1", nome: "Camp" }] });
     expect(o.numbers[1]).toMatchObject({ maxInFlight: null, effectiveMaxInFlight: 4, maxAllowed: 50, paused: false, hasRow: false });
     expect(o.globals).toMatchObject({ processConcurrency: 16, batchClaimEnabled: true, tickChainEnabled: expect.any(Boolean) });
