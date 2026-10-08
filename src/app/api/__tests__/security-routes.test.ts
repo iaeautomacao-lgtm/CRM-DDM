@@ -41,6 +41,12 @@ vi.mock("@/lib/auth/account", async () => {
       if (!hasMinRole(state.role as Parameters<typeof hasMinRole>[0], min)) throw new ForbiddenError();
       return getCurrentAccount();
     },
+    // 20.3: as rotas pedem PERMISSÃO; o mock usa o can() REAL do catálogo (não reimplementa a regra).
+    requirePermission: async (permission: import("@/lib/auth/permissions").Permission) => {
+      const { can } = await import("@/lib/auth/permissions");
+      if (!can({ role: state.role as import("@/lib/auth/roles").AccountRole }, permission)) throw new ForbiddenError();
+      return getCurrentAccount();
+    },
     toErrorResponse: (err: unknown) => new Response(JSON.stringify({ error: "Falha" }), {
       status: err instanceof ForbiddenError ? 403 : 500,
     }),

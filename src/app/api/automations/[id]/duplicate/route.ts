@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
 
 export async function POST(
@@ -7,7 +7,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('automations.edit')
   if (!auth.ok) return auth.response
   const { userId, accountId } = auth.ctx
 

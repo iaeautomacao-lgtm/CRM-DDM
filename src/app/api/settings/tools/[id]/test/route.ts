@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { loadAccountSecrets } from '@/lib/ai/account-secrets'
 import { safeFetch, SsrfBlockedError } from '@/lib/security/ssrf-guard'
@@ -20,7 +20,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('ai.tools.edit')
   if (!auth.ok) return auth.response
   const { accountId, userId } = auth.ctx
   if (!UUID.test(id)) return NextResponse.json({ error: 'Não encontrada.' }, { status: 404 })

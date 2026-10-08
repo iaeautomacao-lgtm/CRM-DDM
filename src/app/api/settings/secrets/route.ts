@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveSecretForWrite } from '@/lib/whatsapp/secret-write'
 import {
@@ -26,7 +26,7 @@ import {
 // ============================================================
 
 export async function GET() {
-  const auth = await guardRole('supervisor')
+  const auth = await guardPermission('secrets.view_meta')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
 
@@ -43,7 +43,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('secrets.write')
   if (!auth.ok) return auth.response
   const { accountId, userId } = auth.ctx
 

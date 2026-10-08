@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { listAccountSecretNames } from '@/lib/ai/account-secrets'
 import { loadToolUsage } from '@/lib/ai-tools/usage'
@@ -23,7 +23,7 @@ import {
 // ============================================================
 
 export async function GET() {
-  const auth = await guardRole('supervisor')
+  const auth = await guardPermission('ai.tools.view')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
 
@@ -52,7 +52,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('ai.tools.edit')
   if (!auth.ok) return auth.response
   const { accountId, userId } = auth.ctx
 

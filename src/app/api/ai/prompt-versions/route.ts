@@ -13,7 +13,7 @@
 
 import { NextResponse } from "next/server";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import {
   listPromptVersions,
   shortPromptVersion,
@@ -24,7 +24,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export async function GET(request: Request) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requirePermission("ai.config");
     const params = new URL(request.url).searchParams;
     const scope = params.get("scope");
 

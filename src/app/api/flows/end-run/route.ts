@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { hasMinRole, isAccountRole } from '@/lib/auth/roles'
+import { isAccountRole } from '@/lib/auth/roles'
+import { can } from '@/lib/auth/permissions'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { endActiveRunForConversation } from '@/lib/flows/engine'
 
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
     // Visualizador (somente leitura) não encerra fluxo (PRD 20, G3): era só
     // sessão + service role. Os demais papéis seguem como antes.
     const role = (profile as { account_role?: string } | null)?.account_role
-    if (!role || !isAccountRole(role) || !hasMinRole(role, 'agent')) {
+    if (!role || !isAccountRole(role) || !can({ role }, 'inbox.reply')) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 

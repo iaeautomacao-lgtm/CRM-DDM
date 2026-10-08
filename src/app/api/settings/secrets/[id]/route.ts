@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { resolveSecretForWrite } from '@/lib/whatsapp/secret-write'
 import {
@@ -32,7 +32,7 @@ async function loadOwn(id: string, accountId: string): Promise<SecretRow | null>
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('secrets.write')
   if (!auth.ok) return auth.response
   const { accountId, userId } = auth.ctx
   if (!UUID.test(id)) return NextResponse.json({ error: 'Não encontrado.' }, { status: 404 })
@@ -115,7 +115,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const auth = await guardRole('admin')
+  const auth = await guardPermission('secrets.write')
   if (!auth.ok) return auth.response
   const { accountId } = auth.ctx
   if (!UUID.test(id)) return NextResponse.json({ error: 'Não encontrado.' }, { status: 404 })

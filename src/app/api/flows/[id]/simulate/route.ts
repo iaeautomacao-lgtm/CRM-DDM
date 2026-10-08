@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
-import { hasMinRole } from '@/lib/auth/roles'
+import { can } from '@/lib/auth/permissions'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { applyRealReadPolicy, parseSimulateRequest, SIM_MAX_BODY_CHARS } from '@/lib/flows/simulator/parse'
@@ -67,7 +67,7 @@ export async function POST(
   } catch (err) {
     return toErrorResponse(err)
   }
-  if (!hasMinRole(account.role, 'supervisor')) {
+  if (!can(account, 'flows.simulate')) {
     return NextResponse.json(
       { error: 'O simulador de fluxo é restrito a supervisor ou acima.' },
       { status: 403 },
@@ -143,7 +143,7 @@ export async function POST(
 
   // Leitura REAL com credencial (consulta somente-leitura) é só para admin/owner: supervisor
   // continua simulando, mas tudo mockado (nunca usa credencial da conta nem da plataforma).
-  const { request: simRequest, denied: realReadDenied } = applyRealReadPolicy(account.role, parsed)
+  const { request: simRequest, denied: realReadDenied } = applyRealReadPolicy(account, parsed)
 
   try {
     const result = await simulateTurn(simRequest, {
