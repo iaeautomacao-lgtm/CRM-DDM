@@ -99,6 +99,14 @@ $$;
 REVOKE ALL ON FUNCTION wacrm.dispatch_live_counts(uuid, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION wacrm.dispatch_live_counts(uuid, integer) TO service_role;
 
+-- Registro (migration 202). Tolerante a banco sem a 202.
+DO $$
+BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('198_dispatch_live_counts') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';
