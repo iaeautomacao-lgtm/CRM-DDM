@@ -253,6 +253,20 @@ describe("IA-03 — retry de resposta vazia × tool com efeito", () => {
     expect(isEffectfulTool(undefined, "x")).toBe(false);
   });
 
+  it("efetiva_acordo da DDM é GET com efeito: também bloqueia o retry", async () => {
+    const acordoGet: AiAgentTool = { ...efetivaAcordo, http: { url: "https://api.ddm.test/CalculaDebitos.php", method: "GET" } };
+    expect(isEffectfulTool([acordoGet], "efetiva_acordo")).toBe(true);
+    const api = mockEmptyReplyApis("efetiva_acordo", ["", "texto do retry"]);
+    const result = await turn([acordoGet]);
+    expect(result).toMatchObject({ text: "", retried: false, skippedForEffect: true });
+    expect(api.toolHits()).toBe(1);
+  });
+
+  it("tool GET fora da lista de consultas conhecidas conta como efeito (conservador)", () => {
+    const custom: AiAgentTool = { ...efetivaAcordo, name: "tool_do_cliente", http: { url: "https://api.cliente.test/x", method: "GET" } };
+    expect(isEffectfulTool([custom], "tool_do_cliente")).toBe(true);
+  });
+
   it("log sem corpo da DDM e sem CPF inteiro (só status, tamanho e código de falha)", () => {
     const src = readFileSync(`${process.cwd()}/src/lib/ai/responder.ts`, "utf8");
     const logs = src.split("\n").filter((l) => /console\.(log|warn|info)\(/.test(l));

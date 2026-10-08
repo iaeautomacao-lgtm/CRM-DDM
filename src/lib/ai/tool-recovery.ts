@@ -398,13 +398,19 @@ export function serializeToolFailure(
   });
 }
 
-/** A tool pode ter efeito no mundo (método diferente de GET)? Tool desconhecida não conta. */
+/**
+ * A tool pode ter efeito no mundo? Só contam como consulta pura as tools conhecidas de
+ * SAFE_RETRY_TOOLS chamadas por GET — o método sozinho não basta: `efetiva_acordo` da DDM
+ * é um GET com efeito (formaliza o acordo). Tool desconhecida não foi executada: não conta.
+ */
 export function isEffectfulTool(
   tools: ReadonlyArray<{ name: string; http?: { method?: string } }> | undefined,
   toolName: string,
 ): boolean {
   const def = tools?.find((t) => t.name === toolName);
-  return !!def && (def.http?.method ?? "GET").toUpperCase() !== "GET";
+  if (!def) return false;
+  const method = (def.http?.method ?? "GET").toUpperCase();
+  return !(method === "GET" && SAFE_RETRY_TOOLS.has(toolName));
 }
 
 /**
