@@ -11,8 +11,8 @@
 
 import { shouldProcessStatus } from './webhook-fast-path'
 
-/** Teto de corpo do POST da Meta (statuses/mensagens são pequenos; 1 MB é folgado). */
-export const MAX_WEBHOOK_BODY_BYTES = 1_048_576
+/** Teto de corpo do POST da Meta (statuses/mensagens são pequenos; 1 MB é folgado) — definido em lib/security/webhook-body (SW-5). */
+export { MAX_WEBHOOK_BODY_BYTES } from '@/lib/security/webhook-body'
 
 export interface StatusEventInput {
   message_id: string
