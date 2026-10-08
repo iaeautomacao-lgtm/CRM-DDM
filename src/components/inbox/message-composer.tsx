@@ -571,7 +571,7 @@ export function MessageComposer({
 
   return (
     <div className="border-t border-border bg-background px-3 py-3 sm:px-5">
-      <div className="mx-auto w-full max-w-[980px]">
+      <div className="mx-auto w-full max-w-[1120px]">
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
