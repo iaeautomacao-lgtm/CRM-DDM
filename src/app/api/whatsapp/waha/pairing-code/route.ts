@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardRole } from '@/lib/auth/route-guard'
 import { requestWahaPairingCode } from '@/lib/whatsapp/waha-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -18,18 +19,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Phone number is required.' }, { status: 400 })
     }
 
-    let query = supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
-
-    if (targetId) {
-      query = query.eq('id', targetId)
-    } else if (targetSession) {
-      query = query.eq('waha_session', targetSession)
-    }
-
-    const { data: configs, error: configError } = await query
+    // Segredos (waha_api_key) só pelo servidor (migration 200b); visibilidade = RLS.
+    const { data: configs, error: configError } = await fetchChannelConfigs(
+      supabase,
+      accountId,
+      (q) => {
+        let query = q.eq('account_id', accountId)
+        if (targetId) {
+          query = query.eq('id', targetId)
+        } else if (targetSession) {
+          query = query.eq('waha_session', targetSession)
+        }
+        return query
+      }
+    )
 
     if (configError || !configs || configs.length === 0 || configs[0].provider !== 'waha') {
       return NextResponse.json({ error: 'WAHA is not configured.' }, { status: 400 })

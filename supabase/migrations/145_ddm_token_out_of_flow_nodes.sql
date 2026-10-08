@@ -12,6 +12,12 @@
 --   2. atualizar DDM_ACORDOS_API_TOKEN no .env do servidor e reiniciar.
 --
 -- Idempotente: nós já com o marcador não mudam.
+--
+-- Limitação conhecida (incidente 08/10): a classe [^&"{}]+ para em `{`/`}`. Um token com
+-- chave no meio é cortado ali e o resto fica colado depois do marcador (a DDM responde
+-- TOKEN INVALIDO). O SQL abaixo já foi aplicado e não muda; fluxos importados depois são
+-- tratados no código (sanitizeImportedSecrets em src/lib/ai/tool-secrets.ts, usado por
+-- /api/flows/import), cuja regex vai até `&`, `#` ou o fim e não para em chaves.
 
 BEGIN;
 

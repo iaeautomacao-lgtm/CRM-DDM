@@ -12,6 +12,16 @@ vi.mock('@/lib/whatsapp/waha-api', () => ({
 }))
 vi.mock('@/lib/whatsapp/encryption', () => ({ decrypt: (v: string) => v }))
 vi.mock('@/lib/whatsapp/meta-api', () => ({ getMediaUrl: vi.fn(), downloadMedia: vi.fn() }))
+// Migration 200b: segredos (waha_api_key) vêm do service role; o cliente de sessão só vê ids (RLS).
+vi.mock('@/lib/flows/admin-client', () => ({
+  supabaseAdmin: () => {
+    const chain: Record<string, unknown> = {}
+    for (const m of ['from', 'select', 'eq', 'in']) chain[m] = () => chain
+    chain.then = (resolve: (v: unknown) => unknown) =>
+      resolve({ data: [{ id: 'cfg-1', waha_url: 'https://waha.example.com/', waha_api_key: 'k' }], error: null })
+    return chain
+  },
+}))
 vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({
     auth: { getUser: async () => ({ data: { user: { id: 'u1' } }, error: null }) },
@@ -20,13 +30,10 @@ vi.mock('@/lib/supabase/server', () => ({
       chain.select = () => chain
       chain.eq = () => chain
       chain.limit = () => chain
-      chain.maybeSingle = async () => ({
-        data:
-          table === 'profiles'
-            ? { account_id: 'a1' }
-            : { waha_url: 'https://waha.example.com/', waha_api_key: 'k' },
-        error: null,
-      })
+      chain.maybeSingle = async () => ({ data: { account_id: 'a1' }, error: null })
+      // whatsapp_config: só os ids visíveis pela RLS (etapa 1 de fetchChannelConfigs).
+      chain.then = (resolve: (v: unknown) => unknown) =>
+        resolve({ data: table === 'whatsapp_config' ? [{ id: 'cfg-1' }] : null, error: null })
       return chain
     },
   }),

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { auditFetch } from '@/lib/audit/context'
 import { createClient } from '@/lib/supabase/server'
 import { hasMinRole, isAccountRole } from '@/lib/auth/roles'
@@ -104,10 +105,13 @@ export async function GET() {
       )
     }
 
-    const { data: configs, error: configError } = await supabase
-      .from('whatsapp_config')
-      .select('*')
-      .eq('account_id', accountId)
+    // Segredos só pelo servidor (migration 200b): a visibilidade segue a RLS
+    // do usuário e a resposta (abaixo) nunca devolve o valor dos segredos.
+    const { data: configs, error: configError } = await fetchChannelConfigs(
+      supabase,
+      accountId,
+      (q) => q.eq('account_id', accountId)
+    )
 
     if (configError) {
       console.error('Error fetching whatsapp_config:', configError)
@@ -477,7 +481,7 @@ export async function POST(request: Request) {
 
       let existing = null
       if (configId) {
-        const { data } = await supabase
+        const { data } = await supabaseAdmin()
           .from('whatsapp_config')
           .select('id, waha_api_key')
           .eq('id', configId)
@@ -485,7 +489,7 @@ export async function POST(request: Request) {
           .maybeSingle()
         existing = data
       } else {
-        const { data } = await supabase
+        const { data } = await supabaseAdmin()
           .from('whatsapp_config')
           .select('id, waha_api_key')
           .eq('account_id', accountId)
@@ -630,7 +634,7 @@ export async function POST(request: Request) {
     // and whether there's a stored access_token to fall back on below.
     let existing = null
     if (configId) {
-      const { data } = await supabase
+      const { data } = await supabaseAdmin()
         .from('whatsapp_config')
         .select('id, registered_at, phone_number_id, access_token, app_secret, verify_token')
         .eq('id', configId)
@@ -638,7 +642,7 @@ export async function POST(request: Request) {
         .maybeSingle()
       existing = data
     } else {
-      const { data } = await supabase
+      const { data } = await supabaseAdmin()
         .from('whatsapp_config')
         .select('id, registered_at, phone_number_id, access_token, app_secret, verify_token')
         .eq('account_id', accountId)

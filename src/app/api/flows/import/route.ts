@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { guardFlowAccess } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { sanitizeImportedSecrets } from '@/lib/ai/tool-secrets'
 
 /**
  * POST /api/flows/import — recreate a flow from an exported JSON file
@@ -124,6 +125,20 @@ export async function POST(request: Request) {
 
   const trigger_type = body.flow.trigger_type as string
 
+  // Token da DDM em texto na URL das ferramentas vira {{secret.DDM_TOKEN}}; credencial
+  // literal em outro domínio recusa a importação (não grava segredo em texto no banco).
+  const secrets = sanitizeImportedSecrets(body.nodes)
+  if (secrets.rejected.length > 0) {
+    const where = secrets.rejected.map((r) => `nó "${r.node_key}" (${r.param}=…)`).join(', ')
+    return NextResponse.json(
+      {
+        error: `Importação recusada: há credencial em texto na URL de ferramenta/requisição — ${where}. Só o token da DDM é convertido automaticamente. Remova o valor do arquivo e configure o segredo no servidor antes de importar.`,
+      },
+      { status: 400 },
+    )
+  }
+  const nodes = secrets.nodes
+
   const admin = supabaseAdmin()
 
   // Avoid "X (importado) (importado)" when re-importing a flow that
@@ -152,9 +167,9 @@ export async function POST(request: Request) {
     )
   }
 
-  if (body.nodes.length > 0) {
+  if (nodes.length > 0) {
     const { error: nodesErr } = await admin.from('flow_nodes').insert(
-      body.nodes.map((n) => ({
+      nodes.map((n) => ({
         flow_id: flow.id,
         node_key: n.node_key,
         node_type: n.node_type,
