@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
@@ -19,7 +20,9 @@ const LABEL: Record<string, string> = {
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { accountId } = await getCurrentAccount();
+    // Mesmo papel do restante do disparador (owner/admin; PRD 20, G2): devolve
+    // contagens da audiência (contatos) da campanha.
+    const { accountId } = await requireDisparadorAccess();
     const { id } = await params;
     const db = supabaseAdmin();
 

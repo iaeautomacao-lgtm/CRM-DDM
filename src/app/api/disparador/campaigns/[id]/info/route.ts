@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCurrentAccount, toErrorResponse } from "@/lib/auth/account";
+import { toErrorResponse } from "@/lib/auth/account";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { HEALTH_STALE_AFTER_MS, refreshChannelHealth } from "@/lib/disparador/channel-health";
 import { decrypt } from "@/lib/whatsapp/encryption";
@@ -19,9 +20,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    // Campanha e canais só da conta de quem pede (antes qualquer usuário
-    // logado consultava qualquer campanha pelo id).
-    const { accountId } = await getCurrentAccount();
+    // Mesmo papel do restante do disparador (owner/admin; PRD 20, G2): esta rota
+    // decifra o token dos canais e consulta a Meta. Campanha e canais só da
+    // conta de quem pede.
+    const { accountId } = await requireDisparadorAccess();
 
     const { id: campaignId } = await params;
 
@@ -130,7 +132,7 @@ export async function GET(
       channels: channelInfos,
     });
   } catch (err) {
-    // 401/403 do getCurrentAccount; o resto vira 500 sem vazar detalhe.
+    // 401/403 do requireDisparadorAccess; o resto vira 500 sem vazar detalhe.
     return toErrorResponse(err);
   }
 }
