@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { logAuditEvent } from '@/lib/audit/log-event'
+import { safeRows } from '@/lib/security/csv-safe'
 import {
   actionLabel,
   actorLabel,
@@ -98,7 +99,7 @@ export async function GET(request: Request) {
       })
 
       const sheet = XLSX.utils.json_to_sheet(
-        rows.map((r) => ({
+        safeRows(rows.map((r) => ({
           'Data/hora': new Date(r.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }),
           Ação: actionLabel(r),
           Resumo: r.summary ?? '',
@@ -116,7 +117,7 @@ export async function GET(request: Request) {
                 .join(' | ')
             : '',
           Detalhes: r.metadata ? JSON.stringify(r.metadata) : '',
-        }))
+        })))
       )
       const book = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(book, sheet, 'Auditoria')
