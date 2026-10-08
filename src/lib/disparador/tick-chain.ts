@@ -55,13 +55,22 @@ function originOf(raw: string | undefined): string | null {
   }
 }
 
+/**
+ * Origem (https://host) do próprio app para chamadas internas ao cron: variável da PLATAFORMA
+ * (DISPARADOR_CHAIN_URL, senão NEXT_PUBLIC_APP_URL — as mesmas do tick encadeado), nunca o Host/URL
+ * da requisição de um usuário. null = não configurada (quem chama não deve enviar o segredo a lugar nenhum).
+ */
+export function resolveCronBaseUrl(env: Env = process.env): string | null {
+  return originOf(env.DISPARADOR_CHAIN_URL) ?? originOf(env.NEXT_PUBLIC_APP_URL);
+}
+
 export function resolveTickChainConfig(env: Env = process.env): TickChainConfig {
   return {
     enabled: isTickChainEnabled(env),
     maxHopsPerMinute: intIn(env.DISPARADOR_TICK_CHAIN_MAX_PER_MIN, 6, 1, 60),
     maxHops: intIn(env.DISPARADOR_TICK_CHAIN_MAX_HOPS, 90, 1, 1000),
     maintenanceEvery: intIn(env.DISPARADOR_TICK_CHAIN_MAINTENANCE_EVERY, 5, 1, 100),
-    baseUrl: originOf(env.DISPARADOR_CHAIN_URL) ?? originOf(env.NEXT_PUBLIC_APP_URL),
+    baseUrl: resolveCronBaseUrl(env),
   };
 }
 
