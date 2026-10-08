@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, AlertTriangle, Gauge, Megaphone, Phone, SlidersHorizontal } from "lucide-react";
+import { Activity, AlertTriangle, Gauge, Megaphone, Phone, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Abas fixas do Disparador (todas as telas de /disparador/*). Altura fixa (2,75 rem): as telas que usam
@@ -15,6 +15,7 @@ export const DISPARADOR_TABS = [
   { href: "/disparador/controles", label: "Controles", icon: SlidersHorizontal },
   { href: "/disparador/desempenho", label: "Desempenho", icon: Gauge },
   { href: "/disparador/erros", label: "Erros", icon: AlertTriangle },
+  { href: "/disparador/blacklist", label: "Blacklist", icon: ShieldAlert },
 ] as const;
 
 export function isTabActive(pathname: string | null | undefined, href: string): boolean {
