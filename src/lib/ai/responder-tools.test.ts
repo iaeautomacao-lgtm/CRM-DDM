@@ -161,3 +161,103 @@ describe("tools da IA de ponta a ponta (API DDM simulada)", () => {
     expect(forced).toBeNull();
   }, 15_000);
 });
+
+// ---------------------------------------------------------------------------
+// IA-03: retry de "resposta vazia" não pode reexecutar tool com efeito (ex.: acordo duplicado).
+// ---------------------------------------------------------------------------
+import { readFileSync } from "node:fs";
+import { isEffectfulTool, retryEmptyReply } from "./tool-recovery";
+
+const efetivaAcordo: AiAgentTool = {
+  name: "efetiva_acordo",
+  description: "Formaliza o acordo",
+  parameters: { type: "object", properties: {} },
+  http: { url: "https://api.ddm.test/acordo", method: "POST" },
+};
+
+/** OpenAI simulada: a 1ª chamada pede `toolName` (se houver); depois devolve as respostas de `replies` em ordem. */
+function mockEmptyReplyApis(toolName: string | null, replies: string[]) {
+  let openAiCalls = 0;
+  let toolHits = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("https://api.openai.com/")) {
+        openAiCalls += 1;
+        if (toolName && openAiCalls === 1) {
+          return new Response(
+            JSON.stringify({ choices: [{ message: { content: null, tool_calls: [{ id: "c1", type: "function", function: { name: toolName, arguments: "{}" } }] } }] }),
+            { status: 200 },
+          );
+        }
+        const reply = replies.shift() ?? "";
+        return new Response(JSON.stringify({ choices: [{ message: { content: reply } }] }), { status: 200 });
+      }
+      if (url.startsWith("https://api.ddm.test/")) {
+        toolHits += 1;
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+      throw new Error(`fetch inesperado: ${url}`);
+    }),
+  );
+  return { openAiCalls: () => openAiCalls, toolHits: () => toolHits };
+}
+
+/** Reproduz o trecho de handleAiAutoResponseAttempt: provider + retry de vazio com o mesmo critério. */
+async function turn(tools: AiAgentTool[]) {
+  let effectfulToolRan = false;
+  const call = () =>
+    generateOpenAiResponse(
+      "sk-test",
+      "Você é o agente.",
+      [{ sender_type: "customer", content_type: "text", content_text: "fecha o acordo" }],
+      tools,
+      async (toolName: string) => {
+        if (isEffectfulTool(tools, toolName)) effectfulToolRan = true;
+      },
+      undefined,
+      "agente_ddm",
+    );
+  const first = (await call()).trim();
+  return retryEmptyReply(first, async () => (await call()).trim(), effectfulToolRan);
+}
+
+describe("IA-03 — retry de resposta vazia × tool com efeito", () => {
+  it("tool com efeito (POST) + resposta vazia: o provider NÃO é chamado de novo e a tool roda uma vez só", async () => {
+    const api = mockEmptyReplyApis("efetiva_acordo", ["", "texto do retry"]);
+    const result = await turn([efetivaAcordo]);
+    expect(result).toMatchObject({ text: "", retried: false, skippedForEffect: true });
+    expect(api.toolHits()).toBe(1);
+    expect(api.openAiCalls()).toBe(2); // pedido da tool + resposta final vazia; nenhuma terceira chamada
+  });
+
+  it("sem tool: resposta vazia continua com o retry de hoje", async () => {
+    const api = mockEmptyReplyApis(null, ["", "Olá, em que posso ajudar?"]);
+    const result = await turn([consultarDebitos]);
+    expect(result).toMatchObject({ text: "Olá, em que posso ajudar?", retried: true, skippedForEffect: false });
+    expect(api.openAiCalls()).toBe(2);
+  });
+
+  it("tool só de consulta (GET) + resposta vazia: o retry continua valendo", async () => {
+    mockEmptyReplyApis("consultar_debitos", ["", "Achei 1 débito."]);
+    const result = await turn([consultarDebitos]);
+    expect(result.retried).toBe(true);
+    expect(result.text).toBe("Achei 1 débito.");
+  });
+
+  it("resposta preenchida nunca dispara retry; isEffectfulTool ignora tool desconhecida", () => {
+    expect(isEffectfulTool([efetivaAcordo, consultarDebitos], "efetiva_acordo")).toBe(true);
+    expect(isEffectfulTool([efetivaAcordo, consultarDebitos], "consultar_debitos")).toBe(false);
+    expect(isEffectfulTool([efetivaAcordo], "desconhecida")).toBe(false);
+    expect(isEffectfulTool(undefined, "x")).toBe(false);
+  });
+
+  it("log sem corpo da DDM e sem CPF inteiro (só status, tamanho e código de falha)", () => {
+    const src = readFileSync(`${process.cwd()}/src/lib/ai/responder.ts`, "utf8");
+    const logs = src.split("\n").filter((l) => /console\.(log|warn|info)\(/.test(l));
+    expect(logs.filter((l) => /\$\{resText\}/.test(l))).toEqual([]);
+    expect(logs.filter((l) => /\$\{(foundCpf|cpf)\}/.test(l))).toEqual([]);
+    expect(src).toContain("bytes=${resText.length}");
+  });
+});

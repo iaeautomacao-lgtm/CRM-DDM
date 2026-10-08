@@ -397,3 +397,27 @@ export function serializeToolFailure(
     attempts,
   });
 }
+
+/** A tool pode ter efeito no mundo (método diferente de GET)? Tool desconhecida não conta. */
+export function isEffectfulTool(
+  tools: ReadonlyArray<{ name: string; http?: { method?: string } }> | undefined,
+  toolName: string,
+): boolean {
+  const def = tools?.find((t) => t.name === toolName);
+  return !!def && (def.http?.method ?? "GET").toUpperCase() !== "GET";
+}
+
+/**
+ * Retry de "resposta vazia" do modelo. Só repete a chamada ao provider se NENHUMA tool com efeito rodou
+ * no turno: repetir depois de, p.ex., `efetiva_acordo` reexecutaria a tool (acordo duplicado). Se rodou,
+ * devolve o texto vazio e o chamador segue o caminho de fallback que já existe (nenhum texto muda).
+ */
+export async function retryEmptyReply(
+  firstText: string,
+  callAgain: () => Promise<string>,
+  effectfulToolRan: boolean,
+): Promise<{ text: string; retried: boolean; skippedForEffect: boolean }> {
+  if (firstText) return { text: firstText, retried: false, skippedForEffect: false };
+  if (effectfulToolRan) return { text: firstText, retried: false, skippedForEffect: true };
+  return { text: await callAgain(), retried: true, skippedForEffect: false };
+}
