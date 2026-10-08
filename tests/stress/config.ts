@@ -25,13 +25,17 @@ function required(name: string): string {
 // cai de volta na env var de sempre.
 const SESSION_TOKEN_FILE = path.join(__dirname, ".session-token");
 
-// Projeto Supabase de produção (ver contexto do task) — usado só para
-// montar o nome do cookie que @supabase/ssr espera, não para nenhuma
-// chamada de rede. Hardcoded (em vez de derivado de STRESS_SUPABASE_URL)
-// porque test-import.ts precisa normalizar o cookie sem exigir
-// STRESS_SUPABASE_URL, que só é usada por scripts que tocam o banco
-// direto (queue, webhook, cleanup, report).
-const SUPABASE_PROJECT_REF = "mkrkkvbseobdqsalrorl";
+// Ref do projeto Supabase, derivado da URL (STRESS_SUPABASE_URL ou NEXT_PUBLIC_SUPABASE_URL),
+// sem ref embutido: usado só para montar o nome do cookie que @supabase/ssr espera (nenhuma
+// chamada de rede). Sem nenhuma das duas variáveis falha claro (PRD 15).
+function supabaseProjectRef(): string {
+  const url = process.env.STRESS_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const match = url.match(/^https?:\/\/([^.]+)\./);
+  if (!match) {
+    throw new Error("Defina STRESS_SUPABASE_URL (ou NEXT_PUBLIC_SUPABASE_URL): o ref do projeto vem dela.");
+  }
+  return match[1];
+}
 
 // DevTools mostra só o VALOR do cookie de sessão (o que fica depois do
 // "="), não o par "nome=valor" completo — na prática, todo mundo que
@@ -43,6 +47,7 @@ const SUPABASE_PROJECT_REF = "mkrkkvbseobdqsalrorl";
 // automaticamente.
 function normalizeSessionCookie(raw: string): string {
   const trimmed = raw.trim();
+  const SUPABASE_PROJECT_REF = supabaseProjectRef();
   if (trimmed.startsWith(`sb-${SUPABASE_PROJECT_REF}-auth-token=`)) {
     return trimmed;
   }
