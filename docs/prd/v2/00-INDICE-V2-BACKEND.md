@@ -16,6 +16,17 @@
   - opt-out é obrigatório;
   - `limite_por_hora` não muda.
 
+## Princípio: plataforma self-service, com `.env` mínimo (dono, 08/10)
+
+O CRM é uma **plataforma para outras empresas usarem**. Tudo o que é configuração de cliente é feito **pelo próprio cliente, na tela**: número de WhatsApp, Instagram/Messenger, agentes de IA, credenciais de parceiros, limites. Essas configurações ficam no banco, por conta, com papel e auditoria. Nós fornecemos a estrutura.
+
+| Pode ficar no `.env` | Não pode ficar no `.env` |
+|---|---|
+| Só o **essencial da plataforma**: banco/Supabase, `ENCRYPTION_KEY`, `CRON_SECRET`, URL do app | Configuração ou credencial de cliente: vai para o **cofre por conta** (175) e para as telas |
+| Flags de implantação (shadow/on, claim em lote, tick encadeado), **temporárias**. Depois de estabilizar, são removidas ou viram configuração de plataforma no banco. | — |
+
+O **PRD 19** vai cuidar disso: inventário de todas as variáveis de ambiente, com o que migra para configuração por conta. Ele está em preparação a partir do inventário mecânico.
+
 ## Documentos
 
 | # | PRD | Autor | Conteúdo |
