@@ -112,5 +112,5 @@ Antes do deploy:
 - [ ] chaves de IA necessárias estão presentes.
 - [ ] `DDM_ACORDOS_API_TOKEN` existe se a cobrança por IA estiver ativa.
 - [ ] segredos de cron são aleatórios e exclusivos.
-- [ ] `npm run schema:check` passa.
+- [ ] `npm run schema:readiness` e `npm run schema:check` passam.
 - [ ] nenhuma credencial está em arquivos versionados.

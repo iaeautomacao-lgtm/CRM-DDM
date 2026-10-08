@@ -336,6 +336,13 @@ GRANT EXECUTE ON FUNCTION wacrm.shadow_reconcile_message_inbox(integer, integer)
 REVOKE ALL ON FUNCTION wacrm.message_inbox_stats() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION wacrm.message_inbox_stats() TO service_role;
 
+-- Registro (202): tolera banco sem a 202 ainda; idempotente.
+DO $$ BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('201_webhook_message_inbox') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';

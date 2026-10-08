@@ -46,7 +46,8 @@ Antes de escrever migration:
 2. identifique dependências;
 3. considere dados existentes;
 4. prefira mudanças compatíveis e idempotentes;
-5. atualize `schema:check` se o objeto virar requisito de deploy.
+5. atualize `schema:readiness` (`scripts/check-schema-readiness.mjs`) se o objeto virar requisito de deploy;
+6. registre a migration em `wacrm.schema_migrations` (modelo em `supabase/migrations/_MODELO.md`) e rode `node scripts/schema-check.mjs --generate`.
 
 Nunca altere migration aplicada como forma de corrigir produção.
 

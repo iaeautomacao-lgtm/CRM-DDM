@@ -80,6 +80,13 @@ END $$;
 -- O servidor segue com tudo.
 GRANT ALL ON TABLE wacrm.whatsapp_config TO service_role;
 
+-- Registro (202): tolera banco sem a 202 ainda; idempotente.
+DO $$ BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('200b_whatsapp_config_select_columns') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';

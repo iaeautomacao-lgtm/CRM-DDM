@@ -86,6 +86,13 @@ GRANT SELECT (id, account_id, enabled) ON wacrm.ai_config TO authenticated;
 -- O servidor segue com tudo.
 GRANT ALL ON TABLE wacrm.ai_config TO service_role;
 
+-- Registro (202): tolera banco sem a 202 ainda; idempotente.
+DO $$ BEGIN
+  IF to_regclass('wacrm.schema_migrations') IS NOT NULL THEN
+    INSERT INTO wacrm.schema_migrations (version) VALUES ('200_ai_config_secret_columns') ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';
