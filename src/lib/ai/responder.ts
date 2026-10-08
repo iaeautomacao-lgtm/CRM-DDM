@@ -2082,7 +2082,7 @@ Você NÃO deve passar nenhuma informação sobre dívidas, simulações ou acor
   };
 }
 
-async function generateGeminiResponse(
+export async function generateGeminiResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
@@ -2183,6 +2183,10 @@ export async function generateOpenAiResponse(
   nodeKey?: string,
   model = "gpt-4o-mini",
   onWaiting?: () => void | Promise<void>,
+  // Simulador de fluxo (PRD 05): executa a chamada HTTP da tool no lugar
+  // do safeFetch real (mock / leitura real controlada). Ausente — produção —
+  // segue o safeFetch (guard anti-SSRF) de sempre.
+  toolFetch?: (toolName: string, url: string, init: RequestInit) => Promise<Response>,
 ): Promise<string> {
   const url = openAiUrl("/chat/completions");
 
@@ -2397,19 +2401,27 @@ export async function generateOpenAiResponse(
             attempt += 1;
 
             try {
-              // URL de tool é configurável por tenant → guard anti-SSRF.
-              const httpRes = await safeFetch(
-                resolvedUrl,
-                {
-                  method: toolDef.http.method,
-                  headers: {
-                    "Content-Type": "application/json",
-                    ...resolvedHeaders,
-                  },
-                  ...(resolvedBody ? { body: resolvedBody } : {}),
+              // URL de tool é configurável por tenant → guard anti-SSRF (produção).
+              // Simulador: toolFetch decide (mock ou leitura real somente-leitura).
+              const httpInit: RequestInit = {
+                method: toolDef.http.method,
+                headers: {
+                  "Content-Type": "application/json",
+                  ...resolvedHeaders,
                 },
-                { timeoutMs: 30_000, maxBytes: 1024 * 1024 },
-              );
+                ...(resolvedBody ? { body: resolvedBody } : {}),
+              };
+              const httpRes = toolFetch
+                ? await toolFetch(toolName, resolvedUrl, httpInit)
+                : await safeFetch(
+                    resolvedUrl,
+                    {
+                      method: toolDef.http.method,
+                      headers: httpInit.headers,
+                      ...(resolvedBody ? { body: resolvedBody } : {}),
+                    },
+                    { timeoutMs: 30_000, maxBytes: 1024 * 1024 },
+                  );
 
               const httpText = await httpRes.text();
               const failure =
@@ -2510,7 +2522,7 @@ export async function generateOpenAiResponse(
   return ""; // Fallback if max iterations reached
 }
 
-async function generateClaudeResponse(
+export async function generateClaudeResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
@@ -2554,7 +2566,7 @@ async function generateClaudeResponse(
   return textBlock?.text || "";
 }
 
-async function generateHermesResponse(
+export async function generateHermesResponse(
   apiKey: string,
   systemPrompt: string,
   history: any[],
