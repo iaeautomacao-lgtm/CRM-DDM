@@ -132,6 +132,10 @@
       "version": "241b_profiles_role_id_idx",
       "kind": "index",
       "index": "idx_profiles_role_id"
+    },
+    {
+      "version": "248_audit_roles",
+      "kind": "registry"
     }
   ]
 }

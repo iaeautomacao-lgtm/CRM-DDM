@@ -1,3 +1,4 @@
+import { recordAccessDenied } from "@/lib/audit/access-denied";
 import { ForbiddenError, getCurrentAccount, type AccountContext } from "@/lib/auth/account";
 import { can } from "@/lib/auth/permissions";
 import type { AccountRole } from "@/lib/auth/roles";
@@ -26,6 +27,7 @@ export async function requireDisparadorAccess(
 ): Promise<AccountContext> {
   const ctx = await getCurrentAccount();
   if (!can(ctx, permission)) {
+    recordAccessDenied(ctx, permission); // 20.8 (amostrado; fire-and-forget)
     throw new ForbiddenError("Seu papel não permite gerenciar campanhas do disparador.", permission);
   }
   return ctx;

@@ -62,6 +62,8 @@ function makeClient(opts: {
 }
 
 const createClient = vi.fn();
+const recordAccessDenied = vi.fn();
+vi.mock("@/lib/audit/access-denied", () => ({ recordAccessDenied: (...a: unknown[]) => recordAccessDenied(...a) }));
 vi.mock("@/lib/supabase/server", () => ({
   createClient: () => createClient(),
 }));
@@ -241,6 +243,20 @@ describe("requirePermission", () => {
       code: "forbidden",
       permission: "members.manage",
     });
+  });
+
+  it("PRD 20.8: o 403 grava access.denied (uma vez, com a permissão); o sucesso não grava; a resposta não muda", async () => {
+    const { requirePermission, toErrorResponse } = await import("./account");
+    createClient.mockReturnValue(clientFor("agent"));
+    const err = await requirePermission("members.manage").catch((e) => e);
+    expect(recordAccessDenied).toHaveBeenCalledTimes(1);
+    expect(recordAccessDenied).toHaveBeenCalledWith(expect.objectContaining({ accountId: "acct-1", userId: "user-1", role: "agent" }), "members.manage");
+    expect(toErrorResponse(err).status).toBe(403);
+
+    recordAccessDenied.mockClear();
+    createClient.mockReturnValue(clientFor("admin"));
+    await expect(requirePermission("members.manage")).resolves.toBeTruthy();
+    expect(recordAccessDenied).not.toHaveBeenCalled();
   });
 
   it("papel de sistema sem a permissão não passa; chave fora do catálogo nega (fail-closed)", async () => {

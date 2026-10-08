@@ -29,6 +29,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
+import { recordAccessDenied } from "@/lib/audit/access-denied";
 import { can, permissionsForRole, type Permission } from "./permissions";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 
@@ -200,6 +201,8 @@ export async function getCurrentAccount(): Promise<AccountContext> {
 export async function requirePermission(permission: Permission): Promise<AccountContext> {
   const ctx = await getCurrentAccount();
   if (!can(ctx, permission)) {
+    // 20.8: o 403 vira evento `access.denied` (amostrado; fire-and-forget — não muda a resposta)
+    recordAccessDenied(ctx, permission);
     throw new ForbiddenError(`This action requires the '${permission}' permission`, permission);
   }
   return ctx;
