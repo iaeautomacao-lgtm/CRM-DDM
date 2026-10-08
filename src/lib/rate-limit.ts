@@ -154,6 +154,10 @@ export const RATE_LIMITS = {
    *  instance deploy needs the Redis swap described at the top of
    *  this file (the per-key call sites don't change). */
   publicApi: { limit: 120, windowMs: 60_000 },
+  /** GET de verificação do webhook Meta (público, por IP). A Meta só chama ao
+   *  (re)assinar; 30/min por IP cobre tentativas legítimas e barra quem testa
+   *  verify_token em laço (PRD 14, SG-9). */
+  webhookVerify: { limit: 30, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

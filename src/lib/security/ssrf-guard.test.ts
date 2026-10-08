@@ -114,6 +114,9 @@ describe('safeFetch', () => {
       if (url === '/ok') {
         res.setHeader('content-type', 'application/json')
         res.end(JSON.stringify({ method: req.method, auth: req.headers.authorization ?? null }))
+      } else if (url === '/echo-headers') {
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ host: req.headers.host, te: req.headers['transfer-encoding'] ?? null, upgrade: req.headers.upgrade ?? null, custom: req.headers['x-custom'] ?? null }))
       } else if (url === '/big') {
         res.end(Buffer.alloc(5000, 1))
       } else if (url === '/redir-ok') {
@@ -211,6 +214,30 @@ describe('safeFetch', () => {
     // coberto por construção; valida apenas que o fluxo http→http mesma origem preserva
     const res = await safeFetch(`${base}/redir-ok`, { headers: { authorization: 'Bearer y' } }, { env })
     expect(await res.json()).toMatchObject({ auth: 'Bearer y' })
+  })
+
+  it('SW-10: ignora host/content-length/transfer-encoding/connection/upgrade vindos do usuário', async () => {
+    const res = await safeFetch(
+      `${base}/echo-headers`,
+      {
+        method: 'POST',
+        body: 'abc',
+        headers: {
+          host: 'interno.vhost.example',
+          'content-length': '999',
+          'transfer-encoding': 'chunked',
+          connection: 'upgrade',
+          upgrade: 'websocket',
+          'x-custom': 'ok',
+        },
+      },
+      { env },
+    )
+    const body = await res.json()
+    expect(body.host).toBe(new URL(base).host)
+    expect(body.te).toBeNull()
+    expect(body.upgrade).toBeNull()
+    expect(body.custom).toBe('ok')
   })
 
   it('usa o resolver público sem allowlist e falha na conexão (sem vazar para interno)', async () => {

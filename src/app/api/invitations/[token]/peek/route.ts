@@ -23,6 +23,7 @@
 
 import { NextResponse } from "next/server";
 
+import { clientIp } from "@/lib/audit/context";
 import { hashInviteToken } from "@/lib/auth/invitations";
 import {
   checkRateLimit,
@@ -31,23 +32,11 @@ import {
 } from "@/lib/rate-limit";
 import { createClient } from "@/lib/supabase/server";
 
-/**
- * Best-effort client IP. The `x-forwarded-for` header is what
- * every reverse proxy (Vercel, Hostinger, Cloudflare) sets when
- * forwarding a request; we take the leftmost entry, which is
- * the original client.
- *
- * Falls back to a constant when no proxy is in front (e.g.
- * `localhost` during development) so rate-limit keys still
- * exist — the limit then effectively applies "globally," which
- * is fine for dev.
- */
+// IP do cliente pelo clientIp() de lib/audit/context.ts (x-real-ip do proxy; no
+// x-forwarded-for vale o ÚLTIMO item). O primeiro item vem do cliente e dava para
+// girar a chave do rate limit. PRD 14, AP-07.
 function getClientIp(request: Request): string {
-  const xff = request.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  const xri = request.headers.get("x-real-ip");
-  if (xri) return xri.trim();
-  return "unknown";
+  return clientIp(request.headers) ?? "unknown";
 }
 
 export async function GET(

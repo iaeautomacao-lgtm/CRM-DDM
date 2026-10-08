@@ -1,5 +1,7 @@
 import { chatMediaReference } from '@/lib/storage/chat-media';
-import { auditFetch, registerAuditActor } from '@/lib/audit/context'
+import { auditFetch, clientIp, registerAuditActor } from '@/lib/audit/context'
+import { timingSafeEqual } from 'node:crypto'
+import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from '@/lib/rate-limit'
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import {
@@ -97,8 +99,19 @@ interface WhatsAppWebhookEntry {
 }
 
 // GET - Webhook verification
+/** Comparação em tempo constante; tamanhos diferentes já são "não bate" (timingSafeEqual lançaria). */
+function verifyTokenMatches(stored: string, supplied: string): boolean {
+  const a = Buffer.from(stored)
+  const b = Buffer.from(supplied)
+  return a.length === b.length && timingSafeEqual(a, b)
+}
+
 export async function GET(request: Request) {
   try {
+    // Teto por IP no processo (sem infra nova): barra quem testa verify_token em laço.
+    const limit = checkRateLimit(`webhook-verify:${clientIp(request.headers) ?? 'unknown'}`, RATE_LIMITS.webhookVerify)
+    if (!limit.success) return rateLimitResponse(limit)
+
     const { searchParams } = new URL(request.url)
     const mode = searchParams.get('hub.mode')
     const challenge = searchParams.get('hub.challenge')
@@ -133,8 +146,10 @@ export async function GET(request: Request) {
       if (!config.verify_token) continue
       try {
         if (
-          decryptStoredSecret(config.verify_token, 'whatsapp_config.verify_token') ===
-          verifyToken
+          verifyTokenMatches(
+            decryptStoredSecret(config.verify_token, 'whatsapp_config.verify_token'),
+            verifyToken
+          )
         ) {
           matchedConfig = config
           break

@@ -8,6 +8,7 @@ import { kickDispatchCron } from "@/lib/disparador/dispatch-kick";
 import { resolveCronBaseUrl } from "@/lib/disparador/tick-chain";
 import { writeLog } from "@/lib/logger";
 import { parseRedConfirmation } from "@/lib/disparador/red-quality-gate";
+import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
 
 export const maxDuration = 60;
 
@@ -21,8 +22,9 @@ export async function POST(
     // Permite chamada interna do cron (sem sessão de usuário) para
     // disparar campanhas agendadas — ver /api/disparador/cron.
     const internalCronSecret = request.headers.get("x-internal-cron");
-    const isInternalCall =
-      internalCronSecret === process.env.CRON_SECRET && !!process.env.CRON_SECRET;
+    // Tempo constante e fail-closed (PRD 14, SG-10). Nenhum código do repositório envia este
+    // header hoje (o cron chama startCampaign() direto): o ramo está efetivamente morto.
+    const isInternalCall = matchesOperationalSecret(process.env.CRON_SECRET, internalCronSecret);
 
     // Fetch apenas o necessário pra resolver a conta (buscado uma única
     // vez, antes de ramificar a autenticação — a chamada interna do cron

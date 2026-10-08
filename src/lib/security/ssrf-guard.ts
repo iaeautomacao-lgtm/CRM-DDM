@@ -293,6 +293,21 @@ type SafeFetchInit = {
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304])
+// Headers que o chamador não controla: o Node calcula host/content-length e o
+// framing da conexão. Vindos do usuário permitiriam trocar o vhost (Host) ou
+// desincronizar o corpo (smuggling). PRD 14, SW-10.
+const UNSAFE_REQUEST_HEADERS = [
+  'host',
+  'content-length',
+  'transfer-encoding',
+  'connection',
+  'keep-alive',
+  'proxy-connection',
+  'te',
+  'trailer',
+  'upgrade',
+]
+
 const CROSS_ORIGIN_STRIP = ['authorization', 'cookie', 'x-api-key', 'proxy-authorization']
 
 function requestOnce(
@@ -310,6 +325,10 @@ function requestOnce(
     headers.forEach((v, k) => {
       flat[k] = v
     })
+
+    // content-length é calculado aqui (o do usuário foi descartado): corpo com tamanho
+    // conhecido não precisa de transfer-encoding: chunked.
+    if (body !== undefined) flat['content-length'] = String(Buffer.byteLength(body))
 
     let settled = false
     const done = (fn: () => void) => {
@@ -395,6 +414,7 @@ export async function safeFetch(
   let method = (init.method ?? 'GET').toUpperCase()
   let body: string | Uint8Array | undefined = init.body ?? undefined
   const headers = new Headers(init.headers)
+  for (const h of UNSAFE_REQUEST_HEADERS) headers.delete(h)
   if (method === 'GET' || method === 'HEAD') body = undefined
   if (!headers.has('accept-encoding')) headers.set('accept-encoding', 'identity')
   const deadline = Date.now() + timeoutMs

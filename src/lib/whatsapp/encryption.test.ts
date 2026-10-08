@@ -211,3 +211,20 @@ describe("ensureEncryptedSecret", () => {
     expect(decrypt(upgraded)).toBe("plain-secret");
   });
 });
+
+describe("ENCRYPTION_KEY (PRD 14, SG-13): validada no primeiro uso, não no import", () => {
+  it.each([
+    ["ausente", undefined],
+    ["curta", "abcd"],
+    ["não hexadecimal", "z".repeat(64)],
+  ])("chave %s falha com mensagem clara", (_nome, valor) => {
+    const original = process.env.ENCRYPTION_KEY;
+    try {
+      if (valor === undefined) delete process.env.ENCRYPTION_KEY;
+      else process.env.ENCRYPTION_KEY = valor;
+      expect(() => encrypt("x")).toThrow(/ENCRYPTION_KEY ausente ou inválida/);
+    } finally {
+      process.env.ENCRYPTION_KEY = original;
+    }
+  });
+});

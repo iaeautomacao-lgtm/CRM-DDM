@@ -19,6 +19,8 @@ import {
   getWahaSessionStatus,
   getWahaSessionInfo,
   startWahaSession,
+  assertWahaUrlIsSafe,
+  WahaUrlBlockedError,
 } from '@/lib/whatsapp/waha-api'
 import { wahaWebhookFor } from '@/lib/whatsapp/waha-webhook-auth'
 
@@ -431,6 +433,19 @@ export async function POST(request: Request) {
     }
 
     if (provider === 'waha') {
+      // waha_url é do tenant: precisa ser pública (ou estar em SSRF_ALLOWED_HOSTS). Validada
+      // aqui no cadastro E a cada chamada (wahaFetch → safeFetch). PRD 14, SW-1.
+      if (typeof waha_url === 'string' && waha_url) {
+        try {
+          await assertWahaUrlIsSafe(waha_url)
+        } catch (err) {
+          if (err instanceof WahaUrlBlockedError) {
+            return NextResponse.json({ error: 'waha_url is not allowed.' }, { status: 400 })
+          }
+          throw err
+        }
+      }
+
       if (!waha_url || !waha_session) {
         return NextResponse.json(
           { error: 'waha_url and waha_session are required' },
