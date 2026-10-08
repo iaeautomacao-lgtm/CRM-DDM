@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit'
 import { sendWahaTextMessage } from '@/lib/whatsapp/waha-api'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   try {
     // Templates/canais mexem no WABA da conta (Meta) ou no número conectado: só admin
     // (mesmo papel das páginas /templates e /canais).
-    const auth = await guardRole('admin')
+    const auth = await guardPermission('channels.manage')
     if (!auth.ok) return auth.response
     const { supabase, accountId } = auth.ctx
 

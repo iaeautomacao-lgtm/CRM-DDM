@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole } from '@/lib/auth/account'
+import { requirePermission } from '@/lib/auth/account'
 import {
   instagramAuthorizeUrl,
   messengerAuthorizeUrl,
@@ -28,7 +28,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ type
   }
   const label = type === 'instagram' ? 'Instagram' : 'Messenger'
   try {
-    const { accountId, userId } = await requireRole('admin')
+    const { accountId, userId } = await requirePermission('channels.manage')
     const missing = socialConnectMissingEnv(type)
     if (missing.length > 0) {
       return backToChannels(request, `${label} ainda não está configurado no servidor (faltam: ${missing.join(', ')}).`)

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { startWahaSession } from '@/lib/whatsapp/waha-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { wahaWebhookFor } from '@/lib/whatsapp/waha-webhook-auth'
@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   try {
     // Conectar/derrubar/parear o número é decisão de admin: um papel baixo
     // poderia vincular o próprio WhatsApp ao canal e receber as conversas.
-    const auth = await guardRole('admin')
+    const auth = await guardPermission('channels.manage')
     if (!auth.ok) return auth.response
     const { supabase, accountId } = auth.ctx
 
