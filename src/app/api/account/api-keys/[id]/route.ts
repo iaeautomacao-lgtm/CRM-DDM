@@ -20,6 +20,9 @@ import { NextResponse } from 'next/server';
 
 import { requirePermission, toErrorResponse } from '@/lib/auth/account';
 import { can } from '@/lib/auth/permissions';
+import { logAuditEvent } from '@/lib/audit/log-event';
+import { apiKeyRevokedEvent } from '@/lib/audit/security-events';
+import { isPersonalKeyScopes } from '@/lib/api-keys/personal';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   checkRateLimit,
@@ -59,7 +62,7 @@ export async function DELETE(
       .eq('account_id', ctx.accountId)
       .is('revoked_at', null);
     if (!isAdmin) query = query.eq('user_id', ctx.userId);
-    const { data, error } = await query.select('id').maybeSingle();
+    const { data, error } = await query.select('id, name, scopes, user_id').maybeSingle();
 
     if (error) {
       console.error('[DELETE /api/account/api-keys/[id]] error:', error);
@@ -75,6 +78,19 @@ export async function DELETE(
         { status: 404 }
       );
     }
+
+    // 20.8: revogação auditada (sem segredo/hash).
+    const scopes = Array.isArray(data.scopes) ? (data.scopes as string[]) : [];
+    await logAuditEvent(
+      apiKeyRevokedEvent({
+        accountId: ctx.accountId,
+        keyId: data.id as string,
+        name: (data.name as string | null) ?? 'chave',
+        scopes,
+        personal: isPersonalKeyScopes(scopes),
+        ownerUserId: (data.user_id as string | null) ?? null,
+      }),
+    );
 
     return NextResponse.json({ success: true });
   } catch (err) {

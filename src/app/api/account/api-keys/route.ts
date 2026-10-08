@@ -31,6 +31,8 @@ import { requirePermission, toErrorResponse } from '@/lib/auth/account';
 import { can } from '@/lib/auth/permissions';
 import { generateApiKey } from '@/lib/api-keys/keys';
 import { planKeyCreation } from '@/lib/api-keys/personal';
+import { logAuditEvent } from '@/lib/audit/log-event';
+import { apiKeyCreatedEvent } from '@/lib/audit/security-events';
 import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   checkRateLimit,
@@ -165,6 +167,19 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    // 20.8: criação da chave auditada (id, nome, escopos, pessoal) — nunca o texto da chave nem o hash.
+    await logAuditEvent(
+      apiKeyCreatedEvent({
+        accountId: ctx.accountId,
+        keyId: data.id as string,
+        name: rawName,
+        scopes: plan.scopes,
+        personal: plan.personal,
+        ownerUserId: plan.userId,
+        expiresAt,
+      }),
+    );
 
     return NextResponse.json(
       {
