@@ -46,7 +46,7 @@ export async function GET(request: Request) {
     // 1. Busca os canais vinculados à conta para rotular e filtrar
     const { data: channelRows, error: channelError } = await db
       .from("whatsapp_config")
-      .select("id, phone_number, display_name, provider")
+      .select("id, phone_number:display_phone_number, display_name:waha_session, provider")
       .eq("account_id", accountId);
 
     if (channelError) {
