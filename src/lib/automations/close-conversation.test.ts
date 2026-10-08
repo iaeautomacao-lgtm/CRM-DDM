@@ -37,7 +37,13 @@ describe("closeConversationForAutomation", () => {
       configuredOutcomeTagId: "tag-cfg",
     });
     expect(res).toBe("closed");
-    expect(byId(tables, "c-open")).toMatchObject({ status: "closed", outcome_tag_id: "tag-cfg" });
+    expect(byId(tables, "c-open")).toMatchObject({
+      status: "closed",
+      outcome_tag_id: "tag-cfg",
+      outcome_source: "automation",
+      outcome_set_by: null,
+    });
+    expect(byId(tables, "c-open").outcome_set_at).toEqual(expect.any(String));
     expect(byId(tables, "c-closed")).toMatchObject({ status: "closed", outcome_tag_id: "tag-human" });
     expect(byId(tables, "c-other")).toMatchObject({ status: "open", outcome_tag_id: null });
     expect(byId(tables, "c-foreign")).toMatchObject({ status: "open", outcome_tag_id: null });
@@ -63,6 +69,8 @@ describe("closeConversationForAutomation", () => {
       configuredOutcomeTagId: "tag-cfg",
     });
     expect(byId(tables, "c-tagged")).toMatchObject({ status: "closed", outcome_tag_id: "tag-prev" });
+    // Não reivindica a procedência de uma tabulação que não definiu.
+    expect(byId(tables, "c-tagged").outcome_source).toBeUndefined();
   });
 
   it("sem tag configurada usa o fallback 'Sem Tabulação' da própria conta", async () => {

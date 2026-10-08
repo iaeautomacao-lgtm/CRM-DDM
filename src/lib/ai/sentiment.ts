@@ -29,15 +29,7 @@ export async function analyzeConversationSentimentAndTags(
   if (!activeConfig) return;
   const { provider, apiKey: activeKey, model } = activeConfig;
 
-  // 2. Fetch existing tags for the account
-  const { data: existingTags, error: tagsErr } = await db
-    .from("tags")
-    .select("id, name")
-    .eq("account_id", accountId);
-
-  const tagsList = existingTags || [];
-
-  // 3. Load recent conversation history (last 15 messages)
+  // 2. Load recent conversation history (last 15 messages)
   const historyText = await fetchRecentHistoryText(db, conversationId);
   if (!historyText) return;
 

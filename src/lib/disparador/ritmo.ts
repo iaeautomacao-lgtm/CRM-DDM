@@ -36,6 +36,8 @@ export interface RitmoResponse {
     waha: ProviderLatencySummary;
   };
   refreshed_at: string;
+  /** Menor limite/s efetivo entre os números Meta da conta (P1-4). Ausente/null = sem limite por segundo configurado. */
+  meta_rate_per_second?: number | null;
 }
 
 export interface RawSystemLogTick {
@@ -206,6 +208,8 @@ export function resolveProviderThroughput(
   slots: number;
   budgetSeconds: number;
   latency: { otimista: number; conservador: number };
+  /** Limite/s efetivo (só Meta; WAHA fica fora da regra). Ausente = sem limite por segundo. */
+  ratePerSecond?: number;
 } {
   const p = provider === "waha" ? "waha" : "meta";
   const perNumber = ritmo.limites.per_number[p] ?? 4;
@@ -220,5 +224,8 @@ export function resolveProviderThroughput(
       otimista: lat.avg_s,
       conservador: Math.max(lat.avg_s, lat.p95_s),
     },
+    ...(p === "meta" && typeof ritmo.meta_rate_per_second === "number" && ritmo.meta_rate_per_second > 0
+      ? { ratePerSecond: ritmo.meta_rate_per_second }
+      : {}),
   };
 }

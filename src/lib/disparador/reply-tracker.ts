@@ -179,7 +179,7 @@ async function countFirstReply(item: SentQueueItem): Promise<void> {
   if (elapsed <= 0) return; // sent_at no futuro ou igual a agora — dado inválido
 
   const { data: metricsRows, error: metricsError } = await supabaseAdmin()
-    .from("campaign_metrics")
+    .from("campaign_metrics_live")
     .select("total_respostas, tempo_medio_resposta")
     .eq("campaign_id", item.campaign_id)
     .limit(1);

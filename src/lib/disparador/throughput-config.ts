@@ -1,3 +1,4 @@
+import { isTickChainEnabled } from "@/lib/disparador/tick-chain";
 import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency";
 
 // ============================================================
@@ -49,8 +50,10 @@ import { resolveDispatchProcessConcurrency } from "@/lib/disparador/concurrency"
 
 /** Valor que wacrm.claim_dispatch_item usa quando o canal não tem linha. */
 export const DB_DEFAULT_MAX_IN_FLIGHT = 4;
-/** Faixa aceita por dispatch_channel_limits.max_in_flight (CHECK). */
-export const MAX_PER_NUMBER_CONCURRENCY = 50;
+/** Faixa aceita por dispatch_channel_limits.max_in_flight (CHECK; migration 186: 1..150, para 80 envios/s por número com ~1 s de latência). */
+export const MAX_PER_NUMBER_CONCURRENCY = 150;
+/** WAHA mantém teto próprio baixo (risco de banimento): o aumento para 150 vale só para a Meta. */
+export const MAX_WAHA_PER_NUMBER_CONCURRENCY = 50;
 
 export type DispatchProvider = "meta" | "waha";
 
@@ -94,14 +97,15 @@ export function resolveThroughputConfig(env: Env = process.env): ThroughputConfi
     readInt(env, "DISPARADOR_PER_NUMBER_CONCURRENCY_WAHA") ??
       Math.min(generic, DB_DEFAULT_MAX_IN_FLIGHT),
     1,
-    MAX_PER_NUMBER_CONCURRENCY
+    MAX_WAHA_PER_NUMBER_CONCURRENCY
   );
   const backoffFlag = (env.DISPARADOR_ADAPTIVE_BACKOFF ?? "").trim().toLowerCase();
   return {
     // Mesmo botão do pool antigo (PR #73): DISPATCH_PROCESS_CONCURRENCY.
     globalConcurrency: resolveDispatchProcessConcurrency(env.DISPATCH_PROCESS_CONCURRENCY),
     perNumber: { meta, waha, unknown: Math.min(meta, waha) },
-    tickBudgetMs: clamp(readInt(env, "DISPARADOR_TICK_BUDGET_MS") ?? 35_000, 5_000, 50_000),
+    // Padrão 35 s; com o tick encadeado ligado (DISPARADOR_TICK_CHAIN) sobe para 50 s (duty ~95%; exige timeout do proxy ≥ 60 s).
+    tickBudgetMs: clamp(readInt(env, "DISPARADOR_TICK_BUDGET_MS") ?? (isTickChainEnabled(env) ? 50_000 : 35_000), 5_000, 50_000),
     adaptiveBackoff: !(backoffFlag === "0" || backoffFlag === "false" || backoffFlag === "off"),
     maxEventLoopLagMs: clamp(readInt(env, "DISPARADOR_MAX_EVENT_LOOP_LAG_MS") ?? 200, 20, 10_000),
     maxRssMb: clamp(readInt(env, "DISPARADOR_MAX_RSS_MB") ?? 1024, 128, 65_536),
@@ -123,7 +127,11 @@ export function resolveChannelConcurrency(params: {
 }): number {
   const base =
     params.rowMaxInFlight !== null && params.rowMaxInFlight !== undefined && params.rowMaxInFlight > 0
-      ? clamp(params.rowMaxInFlight, 1, MAX_PER_NUMBER_CONCURRENCY)
+      ? clamp(
+          params.rowMaxInFlight,
+          1,
+          params.provider === "waha" ? MAX_WAHA_PER_NUMBER_CONCURRENCY : MAX_PER_NUMBER_CONCURRENCY
+        )
       : params.config.perNumber[params.provider ?? "unknown"];
   return params.inCooldown ? Math.max(1, Math.floor(base / 2)) : base;
 }
