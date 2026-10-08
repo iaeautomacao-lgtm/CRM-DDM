@@ -23,7 +23,8 @@
  * `node_key`; trigger-scoped use `scope: 'trigger'`.
  */
 
-import { findInlineSecrets, isDdmUrl } from "@/lib/ai/tool-secrets";
+import { findAccountSecretRefs, findInlineSecrets, inlineSecretAdvice, isDdmUrl } from "@/lib/ai/tool-secrets";
+import { findLiteralHeaderCredential } from "@/lib/ai-tools/tool-input";
 import {
   aiProviderLabel,
   getProviderForModel,
@@ -68,7 +69,15 @@ interface NodeInput {
 export function validateFlowForActivation(
   flow: FlowInput,
   nodes: NodeInput[],
-  context: { aiProvider?: string | null } = {},
+  context: {
+    aiProvider?: string | null;
+    /** Nomes cadastrados na conta (Configurações → Variáveis e credenciais). Sem isso, {{cred.X}}/{{var.X}} não são conferidos. */
+    accountSecrets?: { credentials: string[]; variables: string[] } | null;
+    /** Catálogo de ferramentas da conta (id, nome, ligada). Sem isso, tool_refs não são conferidos. */
+    aiTools?: Array<{ id: string; name: string; enabled: boolean }> | null;
+    /** Agentes (perfis) da conta. Sem isso, agent_id não é conferido. */
+    agents?: Array<{ id: string; name: string; enabled: boolean }> | null;
+  } = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -252,7 +261,12 @@ function validateNextNodeKey(
 function validateNode(
   node: NodeInput,
   knownKeys: Set<string>,
-  context: { aiProvider?: string | null },
+  context: {
+    aiProvider?: string | null;
+    accountSecrets?: { credentials: string[]; variables: string[] } | null;
+    aiTools?: Array<{ id: string; name: string; enabled: boolean }> | null;
+    agents?: Array<{ id: string; name: string; enabled: boolean }> | null;
+  },
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -1102,7 +1116,9 @@ function validateNode(
         next_node_key?: string;
         max_turns?: number;
       };
-      if (!cfg.mode || !["once", "loop", "takeover"].includes(cfg.mode)) {
+      // Com agent_id o modo vem do agente (versão fixada no run): o nó não precisa guardá-lo.
+      const boundToAgent = typeof (node.config as { agent_id?: unknown }).agent_id === "string" && Boolean((node.config as { agent_id?: string }).agent_id);
+      if (!boundToAgent && (!cfg.mode || !["once", "loop", "takeover"].includes(cfg.mode))) {
         issues.push({
           severity: "error",
           scope: "node",
@@ -1152,10 +1168,82 @@ function validateNode(
           message: "O limite de turnos do loop precisa ser um número maior que zero.",
         });
       }
+      // Agente (perfil): agent_id inexistente/de outra conta é erro; desligado é aviso (o nó segue
+      // pela saída de falha/handoff em vez de responder).
+      const agentId = (node.config as { agent_id?: unknown }).agent_id;
+      if (typeof agentId === "string" && agentId && context.agents) {
+        const agent = context.agents.find((a) => a.id === agentId);
+        if (!agent) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "agent_id",
+            message: "O nó usa um agente que não existe nesta conta (foi apagado ou é de outra conta). Escolha outro agente.",
+          });
+        } else if (!agent.enabled) {
+          issues.push({
+            severity: "warning",
+            scope: "node",
+            node_key: node.node_key,
+            field: "agent_id",
+            message: `O agente "${agent.name}" está desligado: o nó não vai responder e seguirá pela saída de falha (ou irá para a fila humana). Ligue em Configurações → Agentes.`,
+          });
+        }
+      }
+      // Ferramentas do catálogo (tool_refs): referência inexistente/de outra conta
+      // é erro; ferramenta desligada é aviso (não vai ao modelo); nome repetido
+      // (catálogo × inline) é erro — o runtime usaria só a primeira.
+      const toolRefs = Array.isArray((node.config as { tool_refs?: unknown }).tool_refs)
+        ? ((node.config as { tool_refs: unknown[] }).tool_refs.filter((r) => typeof r === "string") as string[])
+        : [];
+      if (toolRefs.length > 0 && context.aiTools) {
+        const catalog = new Map(context.aiTools.map((t) => [t.id, t]));
+        const names = new Set<string>();
+        for (const ref of toolRefs) {
+          const found = catalog.get(ref);
+          if (!found) {
+            issues.push({
+              severity: "error",
+              scope: "node",
+              node_key: node.node_key,
+              field: "tool_refs",
+              message: "O nó usa uma ferramenta do catálogo que não existe nesta conta (foi apagada ou é de outra conta). Remova-a do nó.",
+            });
+            continue;
+          }
+          if (!found.enabled) {
+            issues.push({
+              severity: "warning",
+              scope: "node",
+              node_key: node.node_key,
+              field: "tool_refs",
+              message: `A ferramenta "${found.name}" está desligada no catálogo: o agente não vai usá-la até ser ligada em Configurações → Ferramentas.`,
+            });
+            continue;
+          }
+          names.add(found.name);
+        }
+        const inlineNames = Array.isArray((node.config as { tools?: unknown }).tools)
+          ? ((node.config as { tools: Array<{ name?: string }> }).tools.map((t) => t?.name).filter(Boolean) as string[])
+          : [];
+        const dup = inlineNames.find((n) => names.has(n));
+        if (dup) {
+          issues.push({
+            severity: "error",
+            scope: "node",
+            node_key: node.node_key,
+            field: "tools",
+            message: `Já existe a ferramenta "${dup}" no catálogo deste nó; renomeie ou remova a inline (o agente usaria só a primeira).`,
+          });
+        }
+      }
       // Token em texto na URL de uma ferramenta: fica gravado no banco e
       // visível no editor — usar o marcador resolvido no servidor.
       const tools = Array.isArray((node.config as { tools?: unknown }).tools)
-        ? (node.config as { tools: Array<{ name?: string; http?: { url?: string } }> }).tools
+        ? (node.config as {
+            tools: Array<{ name?: string; http?: { url?: string; body?: string; headers?: Record<string, string> } }>;
+          }).tools
         : [];
       for (const tool of tools) {
         const inline = findInlineSecrets(tool.http?.url ?? "");
@@ -1167,8 +1255,42 @@ function validateNode(
             scope: "node",
             node_key: node.node_key,
             field: "tools",
-            message: `A ferramenta "${tool.name ?? "sem nome"}" tem um token em texto na URL (${inline.join(", ")}=…). Troque o valor por {{secret.DDM_TOKEN}} — o token fica só no servidor.`,
+            message: inlineSecretAdvice(tool.name ?? "sem nome", inline),
           });
+        }
+        // Header de credencial (nome com key/token/secret/auth) com valor em texto.
+        const literalHeader = findLiteralHeaderCredential(tool.http?.headers);
+        if (literalHeader) {
+          issues.push({
+            severity: "warning",
+            scope: "node",
+            node_key: node.node_key,
+            field: "tools",
+            message: `A ferramenta "${tool.name ?? "sem nome"}" tem o header ${literalHeader} com um valor em texto. Cadastre em Configurações → Variáveis e credenciais e use {{cred.NOME}}.`,
+          });
+        }
+        // {{cred.X}} / {{var.X}} que não existe na conta: a ferramenta falharia
+        // em tempo de execução ("variável/credencial não configurada").
+        const known = context.accountSecrets;
+        if (known) {
+          const refs = findAccountSecretRefs([
+            tool.http?.url,
+            tool.http?.body,
+            ...Object.values(tool.http?.headers ?? {}),
+          ]);
+          const missing = [
+            ...refs.creds.filter((n) => !known.credentials.includes(n)).map((n) => `{{cred.${n}}}`),
+            ...refs.vars.filter((n) => !known.variables.includes(n)).map((n) => `{{var.${n}}}`),
+          ];
+          if (missing.length > 0) {
+            issues.push({
+              severity: "warning",
+              scope: "node",
+              node_key: node.node_key,
+              field: "tools",
+              message: `A ferramenta "${tool.name ?? "sem nome"}" usa ${missing.join(", ")}, que não existe nesta conta. Cadastre em Configurações → Variáveis e credenciais.`,
+            });
+          }
         }
       }
       break;

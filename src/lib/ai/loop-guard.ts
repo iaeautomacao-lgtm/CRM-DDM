@@ -34,13 +34,18 @@ export interface BotLoopMatch {
 export function detectBotLoop(
   botReceivedAt: Array<string | null | undefined>,
   now: Date = new Date(),
+  // Perfil de agente (Fase 4) pode ajustar a trava; sem opções valem as constantes de sempre.
+  options: { minMessages?: number; windowSeconds?: number; futureToleranceMs?: number } = {},
 ): BotLoopMatch | null {
-  const since = now.getTime() - BOT_LOOP_WINDOW_SECONDS * 1000;
+  const minMessages = options.minMessages ?? BOT_LOOP_MIN_MESSAGES;
+  const windowSeconds = options.windowSeconds ?? BOT_LOOP_WINDOW_SECONDS;
+  const futureToleranceMs = options.futureToleranceMs ?? 5_000;
+  const since = now.getTime() - windowSeconds * 1000;
   const times = botReceivedAt
     .map((v) => (v ? new Date(v).getTime() : Number.NaN))
-    .filter((t) => Number.isFinite(t) && t >= since && t <= now.getTime() + 5_000)
+    .filter((t) => Number.isFinite(t) && t >= since && t <= now.getTime() + futureToleranceMs)
     .sort((a, b) => a - b);
-  if (times.length < BOT_LOOP_MIN_MESSAGES) return null;
+  if (times.length < minMessages) return null;
   return {
     botMessages: times.length,
     windowSeconds: Math.round((times[times.length - 1] - times[0]) / 1000),

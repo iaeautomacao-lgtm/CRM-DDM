@@ -32,6 +32,7 @@ export type SsrfBlockReason =
   | 'too_many_redirects'
   | 'response_too_large'
   | 'timeout'
+  | 'cross_origin_redirect'
 
 export class SsrfBlockedError extends Error {
   readonly reason: SsrfBlockReason
@@ -271,6 +272,12 @@ export interface SafeFetchOptions {
   timeoutMs?: number
   maxBytes?: number
   maxRedirects?: number
+  /**
+   * Redirect para OUTRA origem vira erro (em vez de seguir): usado quando a
+   * requisição carrega credencial (header custom, query ou body) — o guard só
+   * remove 4 headers conhecidos no cross-origin e não sabe qual campo é segredo.
+   */
+  failOnCrossOriginRedirect?: boolean
   /** Só para testes. */
   env?: NodeJS.ProcessEnv
   /** Só para testes. */
@@ -403,6 +410,7 @@ export async function safeFetch(
       if (hop >= maxRedirects) throw new SsrfBlockedError('too_many_redirects')
       const next = parseHttpUrl(new URL(location, url))
       if (next.origin !== url.origin) {
+        if (options.failOnCrossOriginRedirect) throw new SsrfBlockedError('cross_origin_redirect')
         for (const h of CROSS_ORIGIN_STRIP) headers.delete(h)
       }
       if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === 'POST')) {

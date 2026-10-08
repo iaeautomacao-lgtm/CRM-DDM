@@ -145,7 +145,7 @@ export default function FlowsPage() {
           trigger_config: { keywords: [] },
         }),
       });
-      if (!res.ok) throw new Error(`Create failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Falha ao criar: ${res.status}`);
       const json = (await res.json()) as { flow: FlowRow };
       setCreateOpen(false);
       setNewName("");
@@ -168,7 +168,7 @@ export default function FlowsPage() {
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        throw new Error(json.error ?? `Clone failed: ${res.status}`);
+        throw new Error(json.error ?? `Falha ao clonar: ${res.status}`);
       }
       const json = (await res.json()) as { flow: FlowRow };
       setCreateOpen(false);
@@ -188,7 +188,7 @@ export default function FlowsPage() {
     if (!yes) return;
     try {
       const res = await apiFetch(`/api/flows/${flow.id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`Delete failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Falha ao excluir: ${res.status}`);
       setFlows((prev) => prev.filter((f) => f.id !== flow.id));
       toast.success("Fluxo excluído.");
     } catch (err) {
@@ -200,7 +200,7 @@ export default function FlowsPage() {
   async function handleExport(flow: FlowRow) {
     try {
       const res = await apiFetch(`/api/flows/${flow.id}/export`);
-      if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+      if (!res.ok) throw new Error(`Falha ao exportar: ${res.status}`);
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition");
       const match = disposition?.match(/filename="([^"]+)"/);

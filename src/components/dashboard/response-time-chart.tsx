@@ -44,40 +44,34 @@ export function ResponseTimeChart({
     })) ?? []
 
   return (
-    <section className="rounded-xl border border-border bg-card">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+    <section className="">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-foreground">
             Tempo Médio de Primeira Resposta
           </h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Minutos para responder à primeira mensagem não respondida do cliente, por dia da semana
-          </p>
+          
         </div>
-        <div className="flex items-center gap-3 text-right text-xs">
-          {thresholdMinutes > 0 && (
-            <span className="rounded-full border border-border bg-muted px-2 py-0.5 font-medium text-muted-foreground tabular-nums">
-              meta {thresholdMinutes}m
-            </span>
-          )}
-          {data && (data.thisWeekAvg != null || data.lastWeekAvg != null) && (
+        {data && (data.thisWeekAvg != null || data.lastWeekAvg != null) ? (
+          <div className="flex items-center gap-4 rounded-lg border border-border/80 bg-card/25 px-4 py-3">
             <div>
-              <div className="text-muted-foreground">
-                Esta semana:{' '}
-                <span className="font-medium text-foreground tabular-nums">
-                  {fmt(data.thisWeekAvg)}
-                </span>
-              </div>
-              <div className="text-muted-foreground">
-                Semana passada:{' '}
-                <span className="tabular-nums">{fmt(data.lastWeekAvg)}</span>
-              </div>
+              <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Média atual
+              </p>
+              <p className="mt-1 text-xl font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
+                {fmt(data.thisWeekAvg)}
+              </p>
             </div>
-          )}
-        </div>
+            <div className="h-8 w-px bg-border" />
+            <div className="text-[11px] text-muted-foreground">
+              <p>Meta <span className="font-medium tabular-nums text-foreground">{thresholdMinutes}m</span></p>
+              <p className="mt-1">Anterior <span className="tabular-nums">{fmt(data.lastWeekAvg)}</span></p>
+            </div>
+          </div>
+        ) : null}
       </header>
 
-      <div className="p-5">
+      <div className="mt-4">
         {loading || !data ? (
           <Skeleton className="h-[260px] w-full" />
         ) : !hasData ? (
@@ -96,7 +90,7 @@ export function ResponseTimeChart({
             colors={['ddmOrange']}
             valueFormatter={(value) => `${value.toFixed(1)}m`}
             showLegend={false}
-            borderRadius={6}
+            borderRadius={2}
             // Explicit floor at 0 + no fixed yAxisWidth override — let
             // Tremor size the axis to whatever tick labels it computes,
             // instead of a width tuned for a narrower label that could

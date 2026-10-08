@@ -280,7 +280,7 @@ export default function CanaisPage() {
         body: JSON.stringify({ session: c.waha_session, id: c.id }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to stop session");
+      if (!res.ok) throw new Error(data.error || "Falha ao parar sessão");
       toast.success("Sessão desconectada.");
       await fetchConfigs();
     } catch (err) {

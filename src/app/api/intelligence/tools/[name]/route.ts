@@ -41,6 +41,7 @@ export async function POST(
       const result = await executeTool(tool, scope, body)
       const json = JSON.stringify(result)
       await logToolCall({
+        origin: 'api',
         scope,
         toolName: tool.name,
         args: body,
@@ -51,6 +52,7 @@ export async function POST(
       return NextResponse.json({ result, scope: describeScope(scope) })
     } catch (err) {
       await logToolCall({
+        origin: 'api',
         scope,
         toolName: tool.name,
         args: body,

@@ -1,13 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { OutcomeSuggestionSource } from "@/types";
 import {
   callLlmForAnalysis,
   fetchRecentHistoryText,
   resolveActiveApiKey,
   stripJsonFences,
 } from "./llm-shared";
+import {
+  loadOutcomeTagsForConversation,
+  type OutcomeSuggestionView,
+} from "@/lib/conversations/outcome-tags";
 
 /**
- * Sugestão de tabulação (tag de encerramento) pela IA — usada pelo
+ * Sugestão de tabulação (tag de encerramento) — usada pelo
  * OutcomeTagPicker via GET /api/conversations/[id]/suggest-tag.
  *
  * Regras de acesso (antes a rota lia tags/mensagens com service role e
@@ -18,11 +23,18 @@ import {
  *     conta da conversa; se a equipe da conversa tem tabulações mapeadas
  *     (team_outcome_tags, migration 107), só essas entram na lista;
  *   - service role só para resolver a chave/modelo de IA da conta
- *     (ai_config guarda a chave criptografada — dado de servidor).
+ *     (ai_config guarda a chave criptografada) e para gravar o cache da
+ *     sugestão na conversa já verificada.
  *
- * O modelo é o da conta (provider + modelo + chave, como as demais
- * análises em llm-shared.ts) — antes era gpt-4o-mini fixo na OpenAI, o que
- * quebrava contas Claude/Gemini/Hermes.
+ * Ordem (migration 157):
+ *   1. sugestão vinda do fluxo (tag de saída da IA, source 'exit_tag') —
+ *      devolvida sem chamar o LLM;
+ *   2. cache: sugestão do LLM já calculada para a MESMA última mensagem
+ *      (outcome_suggestion_key) — reabrir o picker não chama a IA de novo;
+ *   3. LLM da conta (provider + modelo + chave, como as demais análises
+ *      em llm-shared.ts), resposta JSON {codigo_tabulacao, confidence,
+ *      reason} com opção "incerto"; o resultado (inclusive "incerto") é
+ *      gravado como cache.
  */
 
 /** Quantas mensagens recentes entram no prompt. */
@@ -34,7 +46,7 @@ export const UNCERTAIN_CODE = "incerto";
 export interface OutcomeTagOption {
   id: string;
   name: string;
-  codigo_tabulacao: number | null;
+  codigo_tabulacao?: number | null;
 }
 
 export interface SuggestableConversation {
@@ -42,6 +54,11 @@ export interface SuggestableConversation {
   account_id: string;
   team_id: string | null;
   status: string;
+  suggested_outcome_tag_id: string | null;
+  outcome_suggestion_source: OutcomeSuggestionSource | null;
+  outcome_suggestion_confidence: number | string | null;
+  outcome_suggestion_reason: string | null;
+  outcome_suggestion_key: string | null;
 }
 
 export interface ParsedOutcomeSuggestion {
@@ -50,14 +67,7 @@ export interface ParsedOutcomeSuggestion {
   reason: string;
 }
 
-export interface OutcomeSuggestionPayload {
-  tag_id: string;
-  tag_name: string;
-  codigo_tabulacao: number | null;
-  /** 0..1 */
-  confidence: number;
-  motivo: string;
-}
+export type OutcomeSuggestionPayload = OutcomeSuggestionView;
 
 export type LlmCaller = (
   provider: string,
@@ -153,7 +163,9 @@ export async function loadVisibleConversation(
 ): Promise<SuggestableConversation | null> {
   const { data, error } = await userDb
     .from("conversations")
-    .select("id, account_id, team_id, status")
+    .select(
+      "id, account_id, team_id, status, suggested_outcome_tag_id, outcome_suggestion_source, outcome_suggestion_confidence, outcome_suggestion_reason, outcome_suggestion_key",
+    )
     .eq("id", conversationId)
     .eq("account_id", accountId)
     .maybeSingle();
@@ -161,43 +173,44 @@ export async function loadVisibleConversation(
   return data as SuggestableConversation;
 }
 
-/**
- * Tabulações disponíveis para a conversa: as tags de desfecho da conta;
- * se a equipe da conversa tem mapeamento em team_outcome_tags, só as
- * mapeadas (mesma regra para a sugestão e para o picker).
- */
-export async function loadOutcomeTagsForConversation(
-  userDb: SupabaseClient,
-  accountId: string,
-  teamId: string | null,
-): Promise<OutcomeTagOption[]> {
-  const { data, error } = await userDb
-    .from("tags")
-    .select("id, name, codigo_tabulacao")
-    .eq("account_id", accountId)
-    .eq("kind", "outcome")
-    .order("name");
-  if (error || !data) return [];
-  const tags = (data as OutcomeTagOption[]).map((t) => ({
-    id: t.id,
-    name: t.name,
-    codigo_tabulacao: t.codigo_tabulacao ?? null,
-  }));
+/** Id da última mensagem — chave do cache da sugestão. */
+export async function latestMessageKey(
+  db: SupabaseClient,
+  conversationId: string,
+): Promise<string | null> {
+  const { data, error } = await db
+    .from("messages")
+    .select("id, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const row = (data as { id: string }[] | null)?.[0];
+  if (error || !row) return null;
+  return String(row.id);
+}
 
-  if (!teamId) return tags;
-  const { data: mapped, error: mapError } = await userDb
-    .from("team_outcome_tags")
-    .select("tag_id")
-    .eq("team_id", teamId);
-  if (mapError || !mapped || mapped.length === 0) return tags;
-  const allowed = new Set((mapped as { tag_id: string }[]).map((m) => m.tag_id));
-  return tags.filter((t) => allowed.has(t.id));
+/** Sugestão gravada na conversa → payload, se a tag ainda está na lista. */
+function storedSuggestion(
+  conv: SuggestableConversation,
+  tags: OutcomeTagOption[],
+): OutcomeSuggestionPayload | null {
+  if (!conv.suggested_outcome_tag_id || !conv.outcome_suggestion_source) return null;
+  const tag = tags.find((t) => t.id === conv.suggested_outcome_tag_id);
+  if (!tag) return null;
+  return {
+    tag_id: tag.id,
+    tag_name: tag.name,
+    codigo_tabulacao: tag.codigo_tabulacao ?? null,
+    confidence: normalizeConfidence(conv.outcome_suggestion_confidence),
+    motivo: conv.outcome_suggestion_reason ?? "",
+    source: conv.outcome_suggestion_source,
+  };
 }
 
 export interface SuggestOutcomeDeps {
   /** Client do usuário (RLS). Toda leitura de dado de atendimento sai daqui. */
   userDb: SupabaseClient;
-  /** Service role — só para resolver a chave/modelo de IA da conta. */
+  /** Service role — chave/modelo de IA da conta e escrita do cache. */
   adminDb: SupabaseClient;
   accountId: string;
   conversationId: string;
@@ -225,6 +238,24 @@ export async function suggestOutcomeTag(
   );
   if (tags.length === 0) return { status: "ok", suggestion: null };
 
+  // 1. Fluxo já decidiu (tag de saída da IA): sem LLM.
+  if (conversation.outcome_suggestion_source === "exit_tag") {
+    const fromFlow = storedSuggestion(conversation, tags);
+    if (fromFlow) return { status: "ok", suggestion: fromFlow };
+  }
+
+  // 2. Cache por última mensagem.
+  const key = await latestMessageKey(deps.userDb, conversation.id);
+  if (!key) return { status: "ok", suggestion: null };
+  if (
+    conversation.outcome_suggestion_key === key &&
+    (conversation.outcome_suggestion_source === "llm" ||
+      conversation.outcome_suggestion_source === "rule")
+  ) {
+    return { status: "ok", suggestion: storedSuggestion(conversation, tags) };
+  }
+
+  // 3. LLM da conta.
   const historyText = await fetchRecentHistoryText(
     deps.userDb,
     conversation.id,
@@ -245,11 +276,13 @@ export async function suggestOutcomeTag(
       active.model,
     );
   } catch (err) {
+    // Falha não entra no cache: a próxima abertura tenta de novo.
     console.error("[suggest-tag] LLM call failed:", err);
     return { status: "ok", suggestion: null };
   }
 
   const parsed = parseOutcomeSuggestResponse(raw, tags);
+  await cacheLlmSuggestion(deps.adminDb, conversation, key, parsed);
   if (!parsed) return { status: "ok", suggestion: null };
 
   return {
@@ -257,9 +290,43 @@ export async function suggestOutcomeTag(
     suggestion: {
       tag_id: parsed.tag.id,
       tag_name: parsed.tag.name,
-      codigo_tabulacao: parsed.tag.codigo_tabulacao,
+      codigo_tabulacao: parsed.tag.codigo_tabulacao ?? null,
       confidence: parsed.confidence,
       motivo: parsed.reason,
+      source: "llm",
     },
   };
+}
+
+/**
+ * Grava a sugestão do LLM (ou "incerto", tag nula) como cache na conversa.
+ * Nunca sobrescreve a sugestão do fluxo ('exit_tag') nem mexe em conversa
+ * fechada (lá a sugestão fica congelada para a métrica de aceite).
+ * Best-effort: erro de escrita não derruba a resposta.
+ */
+async function cacheLlmSuggestion(
+  adminDb: SupabaseClient,
+  conversation: SuggestableConversation,
+  key: string,
+  parsed: ParsedOutcomeSuggestion | null,
+): Promise<void> {
+  try {
+    const { error } = await adminDb
+      .from("conversations")
+      .update({
+        suggested_outcome_tag_id: parsed?.tag.id ?? null,
+        outcome_suggestion_source: "llm",
+        outcome_suggestion_confidence: parsed?.confidence ?? null,
+        outcome_suggestion_reason: parsed?.reason ?? null,
+        outcome_suggested_at: new Date().toISOString(),
+        outcome_suggestion_key: key,
+      })
+      .eq("id", conversation.id)
+      .eq("account_id", conversation.account_id)
+      .neq("status", "closed")
+      .or("outcome_suggestion_source.is.null,outcome_suggestion_source.neq.exit_tag");
+    if (error) console.error("[suggest-tag] cache write failed:", error.message);
+  } catch (err) {
+    console.error("[suggest-tag] cache write failed:", err);
+  }
 }

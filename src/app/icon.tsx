@@ -1,13 +1,5 @@
 import { ImageResponse } from "next/og";
 
-// Replaces the default Next.js favicon with the brand mark — Hostinger
-// violet rounded square + white chat-square glyph — matching the
-// sidebar logo in `src/components/layout/sidebar.tsx`. Next.js renders
-// this at build time and auto-injects <link rel="icon"> into <head>.
-//
-// This route takes precedence over src/app/favicon.ico, which is the
-// Next.js default and can stay on disk harmlessly (or be removed).
-
 export const runtime = "edge";
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
@@ -22,68 +14,13 @@ export default function Icon() {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#FF5C00", // DDM brand orange
-          borderRadius: 6,
+          background: "transparent",
         }}
       >
-        <svg
-          width="20"
-          height="18"
-          viewBox="0 0 110 100"
-          fill="none"
-        >
-          {/* Background divider outlines */}
+        <svg width="30" height="30" viewBox="0 0 125 122" fill="none">
           <path
-            d="M 34,43 V 79 H 45 C 56,79 56,43 45,43 H 34 Z"
-            stroke="#FF5C00"
-            strokeWidth="13"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-          />
-          <path
-            d="M 56,61 V 25 L 72,56 L 88,25 V 61"
-            stroke="#FF5C00"
-            strokeWidth="13"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-          />
-
-          {/* Foreground DDM letters */}
-          <path
-            d="M 22,25 V 61 H 33 C 44,61 44,25 33,25 H 22 Z"
-            stroke="#ffffff"
-            strokeWidth="7"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-          />
-          <path
-            d="M 34,43 V 79 H 45 C 56,79 56,43 45,43 H 34 Z"
-            stroke="#ffffff"
-            strokeWidth="7"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-          />
-          <path
-            d="M 56,61 V 25 L 72,56 L 88,25 V 61"
-            stroke="#ffffff"
-            strokeWidth="7"
-            strokeLinecap="square"
-            strokeLinejoin="miter"
-          />
-
-          {/* Copyright badge */}
-          <circle
-            cx="99"
-            cy="21"
-            r="4.5"
-            stroke="#ffffff"
-            strokeWidth="1.2"
-          />
-          <path
-            d="M 100.8,20 C 100.5,19.2 99.8,18.7 99,18.7 C 97.7,18.7 96.7,19.7 96.7,21 C 96.7,22.3 97.7,23.3 99,23.3 C 99.8,23.3 100.5,22.8 100.8,22"
-            stroke="#ffffff"
-            strokeWidth="1.2"
-            strokeLinecap="round"
+            d="M61.4864 0.163393C70.2884 -0.885441 75.3754 3.28498 82.1824 7.81049L95.7925 16.8844L108.64 25.339C111.609 27.2805 114.877 29.1703 117.534 31.5165C125.992 38.9782 124.62 49.9127 124.626 60.1969L124.632 82.1674L124.63 100.503C124.628 103.965 124.99 109.02 124.397 112.308C122.271 124.062 112.03 121.023 104.67 119.046L93.8906 116.116C86.87 114.208 87.1784 115.027 80.2172 116.907L68.5307 120.011C63.8372 121.393 57.2802 121.521 52.7174 119.6C49.2361 118.133 45.5519 115.353 42.3832 113.243L27.9091 103.653L15.3516 95.342C13.04 93.8246 9.86481 91.8487 7.79265 90.2426C3.59652 86.9897 0.618263 80.534 0.305491 75.2499C-0.0302148 69.581 -0.0203235 63.1696 0.0694354 57.4033C0.289681 43.2603 -1.89637 32.5569 7.70664 20.856C10.8047 17.0343 14.675 13.9099 19.0643 11.6875C23.2723 9.56613 34.4504 6.94928 39.5586 5.57839C44.5736 4.2326 56.7239 0.624445 61.4864 0.163393ZM63.7205 109.619L84.6438 104.037C89.9384 102.638 96.7811 101.316 101.583 98.8634C106.708 96.2449 112.163 88.8711 112.934 83.1395C113.691 77.5261 113.234 71.5166 113.369 65.8453C113.294 60.511 113.62 53.6144 113.292 48.4479C113.218 47.0901 113.007 45.7433 112.659 44.4286C111.267 39.1512 105.994 36.6561 100.832 37.5094C95.6818 38.6711 89.6775 40.4711 84.4679 41.8428L73.5703 44.7111C69.9424 45.6658 66.1741 46.4337 62.8467 48.2277C59.284 50.1494 56.4248 53.0377 54.2537 56.4377C52.7972 58.7184 51.6041 61.3936 51.1525 64.0695C50.4837 68.0332 50.383 98.7309 51.1365 102.038C51.7284 104.637 53.229 106.909 55.5098 108.328C58.0464 109.908 60.8419 109.918 63.7205 109.619Z"
+            fill="#FF5C00"
           />
         </svg>
       </div>

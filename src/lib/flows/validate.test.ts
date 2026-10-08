@@ -628,7 +628,7 @@ describe("validateFlowForActivation — token em texto nas ferramentas", () => {
   });
   it("token da DDM em texto é ERRO (bloqueia a ativação)", () => {
     const issues = validateFlowForActivation(flow, [aiNode("https://www.ddmacordos.com/calc/localiza_dev.php?tk=a1b2c3d4e5f6g7h8&cpf={{cpf}}")]);
-    expect(issues.some((i) => i.severity === "error" && i.message.includes("{{secret.DDM_TOKEN}}"))).toBe(true);
+    expect(issues.some((i) => i.severity === "error" && i.message.includes("{{cred.NOME}}") && i.message.includes("Variáveis e credenciais"))).toBe(true);
   });
   it("não avisa com o marcador", () => {
     const issues = validateFlowForActivation(flow, [aiNode("https://www.ddmacordos.com/calc/localiza_dev.php?tk={{secret.DDM_TOKEN}}&cpf={{cpf}}")]);

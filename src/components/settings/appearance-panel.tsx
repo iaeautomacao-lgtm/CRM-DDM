@@ -24,19 +24,19 @@ export function AppearancePanel() {
   return (
     <section className="max-w-3xl animate-in fade-in-50 duration-200">
       <SettingsPanelHead
-        title="Appearance"
-        description="Set the mode and accent colour used across the app. Saved to this device — try it, it changes live."
+        title="Aparência"
+        description="Defina o modo e a cor de destaque usados em todo o aplicativo. Salvo neste dispositivo — as alterações são aplicadas em tempo real."
       />
 
       <div className="space-y-4">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <SunMoon className="size-4 text-muted-foreground" />
-          Mode
+          Modo
         </h3>
 
         <div
           role="radiogroup"
-          aria-label="Color mode"
+          aria-label="Modo de cor"
           className="grid max-w-md grid-cols-2 gap-3"
         >
           {MODES.map((m) => (
@@ -53,7 +53,7 @@ export function AppearancePanel() {
       <div className="mt-8 space-y-4">
         <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <Palette className="size-4 text-muted-foreground" />
-          Accent color
+          Cor de destaque
         </h3>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -91,7 +91,7 @@ function ModeCard({
       role="radio"
       onClick={onPick}
       aria-checked={isActive}
-      aria-label={`Use ${mode} mode`}
+      aria-label={`Usar modo ${mode === "light" ? "claro" : "escuro"}`}
       className={cn(
         "flex items-center gap-3 rounded-lg border bg-card p-4 text-left transition-colors",
         isActive
@@ -105,13 +105,13 @@ function ModeCard({
       >
         <Icon className="h-4 w-4" />
       </span>
-      <span className="flex-1 text-sm font-semibold capitalize text-foreground">
-        {mode}
+      <span className="flex-1 text-sm font-semibold text-foreground">
+        {mode === "light" ? "Claro" : "Escuro"}
       </span>
       {isActive && (
         <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
           <Check className="h-3 w-3" />
-          Active
+          Ativo
         </span>
       )}
     </button>
@@ -138,7 +138,7 @@ function ThemeCard({
       type="button"
       onClick={onPick}
       aria-pressed={isActive}
-      aria-label={`Use ${name} theme`}
+      aria-label={`Usar tema ${name}`}
       className={cn(
         "flex flex-col gap-3 rounded-lg border bg-card p-4 text-left transition-colors",
         isActive
@@ -158,7 +158,7 @@ function ThemeCard({
         {isActive && (
           <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
             <Check className="h-3 w-3" />
-            Active
+            Ativo
           </span>
         )}
       </div>
@@ -177,7 +177,7 @@ function ThemeCard({
         <span className="w-3 bg-muted" />
         <span className="w-3 bg-card" />
       </div>
-      <span className="sr-only">Theme id: {id}</span>
+      <span className="sr-only">ID do tema: {id}</span>
     </button>
   );
 }

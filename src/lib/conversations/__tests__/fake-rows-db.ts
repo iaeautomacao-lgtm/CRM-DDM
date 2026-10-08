@@ -46,9 +46,25 @@ export function fakeRowsDb(tables: Tables): { db: SupabaseClient; log: OpLog[]; 
       op.payload = p;
     });
     chain("eq", (c, v) => preds.push((r) => r[c as string] === v));
-    chain("neq", (c, v) => preds.push((r) => r[c as string] !== v));
+    // Como no SQL: NULL <> x não é verdadeiro.
+    chain("neq", (c, v) => preds.push((r) => (r[c as string] ?? null) !== null && r[c as string] !== v));
     chain("is", (c, v) => preds.push((r) => (r[c as string] ?? null) === v));
     chain("in", (c, vs) => preds.push((r) => (vs as unknown[]).includes(r[c as string])));
+    // `.or("col.is.null,col.neq.x")` — só is/eq/neq, como o código usa.
+    chain("or", (expr) => {
+      const parts = String(expr).split(",").map((p) => {
+        const [col, opName, ...rest] = p.split(".");
+        const val = rest.join(".");
+        return (r: Row) => {
+          const v = r[col] ?? null;
+          if (opName === "is") return val === "null" ? v === null : String(v) === val;
+          if (opName === "eq") return v !== null && String(v) === val;
+          if (opName === "neq") return v !== null && String(v) !== val;
+          return false;
+        };
+      });
+      preds.push((r) => parts.some((p) => p(r)));
+    });
     chain("order", (c, o) =>
       orders.push({ col: c as string, asc: (o as { ascending?: boolean } | undefined)?.ascending ?? true }),
     );

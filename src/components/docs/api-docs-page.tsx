@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { BookOpen, ListTree, Menu, Moon, Sun, X } from 'lucide-react';
 
-import { DdmLogo } from '@/components/ui/ddm-logo';
+import { OmniDdmLogo } from '@/components/ui/omniddm-logo';
 import { useTheme } from '@/hooks/use-theme';
 import { cn } from '@/lib/utils';
 import type { GuideExamples } from '@/lib/api/v1/docs-guide';
@@ -42,14 +42,10 @@ export function ApiDocsPage({ examples }: { examples: GuideExamples }) {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <div className="size-8">
-              <DdmLogo />
-            </div>
-            <div className="leading-tight">
-              <p className="text-sm font-semibold">CRM DDM</p>
-              <p className="text-xs text-muted-foreground">Documentação da API</p>
-            </div>
+          <div className="flex items-center gap-3">
+            <OmniDdmLogo className="w-[128px]" priority />
+            <div className="hidden h-5 w-px bg-border sm:block" />
+            <p className="hidden text-xs text-muted-foreground sm:block">Documentação da API</p>
           </div>
 
           <div role="tablist" aria-label="Seções da documentação" className="ml-auto flex items-center gap-1 rounded-lg border border-border bg-muted/40 p-1">

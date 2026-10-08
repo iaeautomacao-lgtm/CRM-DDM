@@ -70,27 +70,27 @@ export function RedeemInviteCodeCard() {
         if (res.status === 409) {
           setConflictMessage(
             payload.error ||
-              'You are already in another account. Sign in with a different email to use this code.',
+              'Você já está em outra conta. Entre com um e-mail diferente para usar este código.',
           );
         } else if (res.status === 429) {
           toast.error(
-            payload.error || 'Too many attempts — wait a few minutes and try again',
+            payload.error || 'Muitas tentativas — aguarde alguns minutos e tente novamente',
           );
         } else {
-          toast.error(payload.error || 'Invalid or expired code');
+          toast.error(payload.error || 'Código inválido ou expirado');
         }
         setSubmitting(false);
         return;
       }
 
-      toast.success('Welcome to the team');
+      toast.success('Bem-vindo à equipe');
       // Full reload (not router.push) so AuthProvider re-fetches the
       // profile with the new account_id and account_role — same
       // reasoning as /join/[token]/page.tsx's handleAccept.
       window.location.href = '/dashboard';
     } catch (err) {
       console.error('[RedeemInviteCodeCard] redeem error:', err);
-      toast.error('Could not reach the server. Try again?');
+      toast.error('Não foi possível conectar ao servidor. Tentar novamente?');
       setSubmitting(false);
     }
   }
@@ -103,7 +103,7 @@ export function RedeemInviteCodeCard() {
       window.location.href = '/login';
     } catch (err) {
       console.error('[RedeemInviteCodeCard] sign-out error:', err);
-      toast.error('Could not sign out. Try refreshing the page.');
+      toast.error('Não foi possível sair. Tente atualizar a página.');
       setSigningOut(false);
     }
   }
@@ -114,12 +114,12 @@ export function RedeemInviteCodeCard() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-foreground">
             <Ticket className="size-4 text-primary" />
-            I have an invite code
+            Tenho um código de convite
           </CardTitle>
           <CardDescription className="text-muted-foreground">
-            Someone invited you to their team with a short code instead of a
-            link? Enter it below to join. This moves your login into their
-            account — your empty personal account is cleaned up.
+            Alguém convidou você para a equipe com um código em vez de um
+            link? Digite-o abaixo para entrar. Isso move seu login para a
+            conta da equipe — sua conta pessoal anterior será removida.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -129,7 +129,7 @@ export function RedeemInviteCodeCard() {
           >
             <div className="flex-1 space-y-2">
               <Label htmlFor="invite-code" className="text-muted-foreground">
-                Invite code
+                Código de convite
               </Label>
               <Input
                 id="invite-code"
@@ -144,10 +144,10 @@ export function RedeemInviteCodeCard() {
               {submitting ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  Checking…
+                  Verificando…
                 </>
               ) : (
-                'Redeem code'
+                'Resgatar código'
               )}
             </Button>
           </form>
@@ -164,16 +164,16 @@ export function RedeemInviteCodeCard() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-popover-foreground">
               <AlertTriangle className="size-4 text-amber-400" />
-              Can&apos;t redeem this code
+              Não é possível resgatar este código
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
               {conflictMessage}
             </DialogDescription>
           </DialogHeader>
           <div className="py-2 text-xs text-muted-foreground">
-            To use this code, sign out and sign up again with a different
-            email address. The code stays valid as long as it hasn&apos;t
-            expired.
+            Para usar este código, saia da conta e faça login novamente com um
+            endereço de e-mail diferente. O código continuará válido desde que não
+            tenha expirado.
           </div>
           <DialogFooter className="bg-popover border-border">
             <Button
@@ -181,7 +181,7 @@ export function RedeemInviteCodeCard() {
               onClick={() => setConflictMessage(null)}
               className="border-border text-popover-foreground hover:bg-muted"
             >
-              Stay signed in
+              Continuar conectado
             </Button>
             <Button
               onClick={handleSignOutAndRetry}
@@ -191,10 +191,10 @@ export function RedeemInviteCodeCard() {
               {signingOut ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
-                  Signing out…
+                  Saindo…
                 </>
               ) : (
-                'Sign out & use a different email'
+                'Sair e usar outro e-mail'
               )}
             </Button>
           </DialogFooter>
