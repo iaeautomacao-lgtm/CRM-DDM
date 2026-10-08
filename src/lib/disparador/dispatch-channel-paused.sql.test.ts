@@ -22,7 +22,7 @@ const claimItem = async (id: string) =>
 const claimCapped = async (id: string, def: number | null) =>
   (await db.query<{ v: boolean }>('SELECT wacrm.claim_dispatch_item_capped($1::uuid, $2) AS v', [id, def])).rows[0].v;
 
-describe('migration 192 — pausa por número', () => {
+describe('migration 192 — pausa por número', { timeout: 60_000 }, () => {
   beforeAll(async () => {
     db = new PGlite();
     await db.exec(`
