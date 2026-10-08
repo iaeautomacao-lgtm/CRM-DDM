@@ -46,8 +46,8 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
   }, [data])
 
   return (
-    <section className="flex h-full flex-col rounded-xl border border-border bg-card">
-      <header className="flex items-center justify-between border-b border-border px-5 py-4">
+    <section className="flex h-full flex-col border-y border-border">
+      <header className="flex items-center justify-between gap-4 px-5 py-4">
         <div>
           <h2 className="text-sm font-semibold text-foreground">Conversas ao Longo do Tempo</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">Volume de mensagens diárias por direção</p>
@@ -71,7 +71,7 @@ export function ConversationsChart({ series, loading, range, onRangeChange }: Co
         </div>
       </header>
 
-      <div className="p-5">
+      <div className="border-t border-border p-5">
         {loading || !data ? (
           <Skeleton className="h-[240px] w-full" />
         ) : data.every((p) => p.incoming === 0 && p.outgoing === 0) ? (
@@ -204,11 +204,11 @@ function LineSvg({
       >
         <defs>
           <linearGradient id="gradEntrada" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} />
+            <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.08} />
             <stop offset="100%" stopColor="#3B82F6" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="gradSaida" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#FF5706" stopOpacity={0.3} />
+            <stop offset="0%" stopColor="#FF5706" stopOpacity={0.08} />
             <stop offset="100%" stopColor="#FF5706" stopOpacity={0} />
           </linearGradient>
         </defs>
