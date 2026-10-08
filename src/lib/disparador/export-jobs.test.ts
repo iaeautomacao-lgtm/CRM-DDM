@@ -235,7 +235,7 @@ describe("processExportJob — blocos, keyset e arquivo final", () => {
     const second = await processExportJob(split.db, { ...(saved as ExportJob) }, { owner: "test-owner" });
     expect(second).toBe("done");
     expect(text(finalFile(split)?.[1])).toBe(text(finalFile(continuous)?.[1]));
-  }, 30_000); // processa 3 blocos duas vezes: ~4 s isolado, estourava os 5 s padrão com a suíte completa em paralelo
+  }, 30_000);
 
   it("queda ENTRE gravar a parte e avançar o cursor repete a mesma parte (sobrescreve): sem linha duplicada nem perdida", async () => {
     const env = fakeEnv(queueOf(EXPORT_BLOCK_ROWS + 50));

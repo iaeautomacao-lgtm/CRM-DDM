@@ -70,6 +70,10 @@
       "index": "idx_dmq_enviando_inflight"
     },
     {
+      "version": "197_dispatch_import_jobs",
+      "kind": "registry"
+    },
+    {
       "version": "198_dispatch_live_counts",
       "kind": "registry"
     },
