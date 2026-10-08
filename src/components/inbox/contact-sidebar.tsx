@@ -387,7 +387,7 @@ export function ContactSidebar({
             </div>
           </div>
 
-          <div className="border-y border-border/70 py-1.5">
+          <div className="border-t border-border/70 py-1.5">
             <button
               onClick={handleCopyPhone}
               className="flex h-8 w-full items-center gap-2 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -424,7 +424,30 @@ export function ContactSidebar({
           </div>
 
           {conversation && (
-            <div className="mt-3 border-t border-border/70 pt-3">
+            <SidebarSection
+              id="sentimento"
+              title="Análise da IA"
+              icon={Brain}
+              sections={sections}
+              onToggle={toggleSection}
+              emphasis
+              action={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+                  disabled={analyzing}
+                  onClick={handleAnalyzeSentiment}
+                  title="Reanalisar sentimento"
+                  aria-label="Reanalisar sentimento da conversa"
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={cn("h-3.5 w-3.5", analyzing && "animate-spin")}
+                  />
+                </Button>
+              }
+            >
               {(() => {
                 const SENTIMENT_CONFIG: Record<
                   string,
@@ -464,48 +487,33 @@ export function ContactSidebar({
                 const currentSentiment = conversation.sentiment ?? "unknown";
                 const config = SENTIMENT_CONFIG[currentSentiment] ?? SENTIMENT_CONFIG.unknown;
                 const showSpinner = analyzing && currentSentiment === "unknown";
-                return (
-                  <>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
-                          Sentimento
-                        </p>
-                        {showSpinner ? (
-                          <p className="mt-1 text-xs text-muted-foreground">Analisando a conversa…</p>
-                        ) : (
-                          <div className="mt-1 flex items-center gap-1.5">
-                            <span className={cn("h-1.5 w-1.5 rounded-full", config.dot)} aria-hidden="true" />
-                            <span className={cn("text-xs font-medium", config.color)}>{config.label}</span>
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-                        disabled={analyzing}
-                        onClick={handleAnalyzeSentiment}
-                        title="Reanalisar sentimento"
-                        aria-label="Reanalisar sentimento da conversa"
-                      >
-                        <RefreshCw aria-hidden="true" className={cn("h-3.5 w-3.5", analyzing && "animate-spin")} />
-                      </Button>
-                    </div>
 
-                    {!showSpinner && (
-                      <details className="group mt-1.5">
-                        <summary className="cursor-pointer list-none text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-none">
-                          <span className="group-open:hidden">Ver orientação</span>
-                          <span className="hidden group-open:inline">Ocultar orientação</span>
-                        </summary>
-                        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{config.desc}</p>
-                      </details>
+                return (
+                  <div className="rounded-md bg-background/55 px-2.5 py-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
+                      Sentimento atual
+                    </p>
+
+                    {showSpinner ? (
+                      <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                        Analisando a conversa…
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mt-1.5 flex items-center gap-1.5">
+                          <span className={cn("h-2 w-2 rounded-full", config.dot)} aria-hidden="true" />
+                          <span className={cn("text-sm font-semibold", config.color)}>{config.label}</span>
+                        </div>
+                        <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+                          {config.desc}
+                        </p>
+                      </>
                     )}
-                  </>
+                  </div>
                 );
               })()}
-            </div>
+            </SidebarSection>
           )}
 
           {/* Quem iniciou a conversa e o que foi enviado (PRD-02). */}
@@ -648,11 +656,12 @@ export function ContactSidebar({
 // ── Seções recolhíveis do painel ─────────────────────────────────────
 // Aberto/fechado por seção fica no localStorage (por navegador). Padrão:
 // Notas aberta; Origem, Fluxo, Etiquetas e Histórico fechadas.
-const SIDEBAR_SECTIONS_KEY = "wacrm:inbox:sidebar-sections";
-type SidebarSectionId = "origem" | "fluxo" | "etiquetas" | "notas" | "historico";
+const SIDEBAR_SECTIONS_KEY = "wacrm:inbox:sidebar-sections:v2";
+type SidebarSectionId = "sentimento" | "origem" | "fluxo" | "etiquetas" | "notas" | "historico";
 type SectionsState = Record<SidebarSectionId, boolean>;
 const DEFAULT_SECTIONS: SectionsState = {
-  origem: false,
+  sentimento: true,
+  origem: true,
   fluxo: false,
   etiquetas: true,
   notas: true,
@@ -661,7 +670,10 @@ const DEFAULT_SECTIONS: SectionsState = {
 
 function useSidebarSections() {
   const [sections, setSections] = useState<SectionsState>(DEFAULT_SECTIONS);
-  // Lê no mount (não no initializer) para não divergir da renderização do servidor.
+
+  // Preferências v2 são overrides explícitos. Assim "Análise da IA" e
+  // "Origem" nascem abertas e só ficam fechadas em próximos acessos se o
+  // próprio usuário tiver fechado essas seções.
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(SIDEBAR_SECTIONS_KEY);
@@ -669,9 +681,7 @@ function useSidebarSections() {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       const valid: Partial<SectionsState> = {};
       (Object.keys(DEFAULT_SECTIONS) as SidebarSectionId[]).forEach((key) => {
-        if (typeof parsed[key] === "boolean") {
-          valid[key] = parsed[key];
-        }
+        if (typeof parsed[key] === "boolean") valid[key] = parsed[key];
       });
       // eslint-disable-next-line react-hooks/set-state-in-effect -- hidrata preferência local uma vez
       setSections((prev) => ({ ...prev, ...valid }));
@@ -679,17 +689,27 @@ function useSidebarSections() {
       // Preferência é opcional; ignora storage indisponível/corrompido.
     }
   }, []);
+
   const toggleSection = useCallback((id: SidebarSectionId) => {
     setSections((prev) => {
-      const next = { ...prev, [id]: !prev[id] };
+      const value = !prev[id];
+      const next = { ...prev, [id]: value };
+
       try {
-        window.localStorage.setItem(SIDEBAR_SECTIONS_KEY, JSON.stringify(next));
+        const raw = window.localStorage.getItem(SIDEBAR_SECTIONS_KEY);
+        const stored = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        window.localStorage.setItem(
+          SIDEBAR_SECTIONS_KEY,
+          JSON.stringify({ ...stored, [id]: value }),
+        );
       } catch {
         // best-effort
       }
+
       return next;
     });
   }, []);
+
   return { sections, toggleSection };
 }
 
@@ -702,6 +722,7 @@ function SidebarSection({
   sections,
   onToggle,
   children,
+  emphasis = false,
 }: {
   id: SidebarSectionId;
   title: string;
@@ -711,24 +732,40 @@ function SidebarSection({
   sections: SectionsState;
   onToggle: (id: SidebarSectionId) => void;
   children: ReactNode;
+  emphasis?: boolean;
 }) {
   const open = sections[id];
   const contentId = `sidebar-section-${id}`;
   return (
-    <section className="border-t border-border/70 py-1">
+    <section
+      className={cn(
+        "py-1",
+        emphasis
+          ? "my-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-2"
+          : "border-t border-border/70",
+      )}
+    >
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
           onClick={() => onToggle(id)}
           aria-expanded={open}
           aria-controls={contentId}
-          className="flex h-9 min-w-0 flex-1 items-center gap-2 px-1 text-left text-xs font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+          className={cn(
+            "flex h-9 min-w-0 flex-1 items-center gap-2 px-1 text-left text-xs font-medium transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary",
+            emphasis ? "text-foreground" : "text-foreground",
+          )}
         >
           <ChevronRight
             aria-hidden="true"
             className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
           />
-          {Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+          {Icon && (
+            <Icon
+              className={cn("h-4 w-4 shrink-0", emphasis ? "text-primary" : "text-muted-foreground")}
+              aria-hidden="true"
+            />
+          )}
           <span className="truncate">{title}</span>
           {count !== undefined && count > 0 && (
             <span className="text-[10px] tabular-nums text-muted-foreground/75">{count}</span>

@@ -24,6 +24,7 @@ import type {
 import {
   MessageSquare,
   ChevronDown,
+  UserPlus,
   Check,
   Clock,
   ArrowLeft,
@@ -1421,7 +1422,7 @@ export function MessageThread({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
+        <div className="flex flex-wrap items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
           <DropdownMenu>
             <DropdownMenuTrigger
               aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
@@ -1473,16 +1474,28 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {conversation.status === "closed" && conversation.outcome_tag && (
+            <span className="inline-flex h-6 items-center gap-1 rounded-full border border-border px-2 text-xs text-foreground">
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: conversation.outcome_tag.color }}
+                aria-hidden="true"
+              />
+              {conversation.outcome_tag.name}
+            </span>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger
-              aria-label={assignedAgentId ? `Responsável: ${assignLabel}` : "Definir responsável"}
+              aria-label={assignedAgentId ? `Atribuída a ${assignLabel}` : "Atribuir conversa"}
               className={cn(
-                "inline-flex h-8 max-w-32 items-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-muted",
+                "inline-flex h-8 max-w-40 items-center justify-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-muted",
                 assignedAgentId ? "text-foreground" : "text-muted-foreground",
               )}
             >
-              <span className="truncate">{assignedAgentId ? assignLabel : "Sem responsável"}</span>
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <UserPlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="hidden truncate sm:inline">{assignLabel}</span>
+              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-52 border-border bg-popover">
               {profiles.length === 0 ? (
@@ -1531,13 +1544,43 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {accountRole !== "viewer" && (
+            <button
+              type="button"
+              onClick={() => setTransferOpen(true)}
+              aria-label="Transferir conversa"
+              title="Transferir (atendente/equipe, com motivo)"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+
+          {onToggleContactPanel && (
+            <button
+              type="button"
+              onClick={onToggleContactPanel}
+              aria-label={contactPanelOpen ? "Ocultar painel de contato" : "Exibir painel de contato"}
+              aria-pressed={contactPanelOpen}
+              title={contactPanelOpen ? "Ocultar contato" : "Exibir contato"}
+              className={cn(
+                "hidden h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground lg:inline-flex",
+                contactPanelOpen ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              {contactPanelOpen ? (
+                <PanelRightClose className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          )}
+
           {(() => {
             const canCall =
               whatsappProvider === "waha" && !!contact?.phone && conversation.channel_type !== "webchat";
             const canDelete = !!onDeleteConversation && accountRole !== "agent";
-            const canTransfer = accountRole !== "viewer";
-            const canTogglePanel = !!onToggleContactPanel;
-            if (!onRefresh && !canCall && !canDelete && !canTransfer && !canTogglePanel) return null;
+            if (!onRefresh && !canCall && !canDelete) return null;
 
             return (
               <DropdownMenu>
@@ -1552,29 +1595,7 @@ export function MessageThread({
                     <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
                   )}
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-52 border-border bg-popover">
-                  {canTransfer && (
-                    <DropdownMenuItem onClick={() => setTransferOpen(true)} className="text-sm">
-                      <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
-                      Transferir atendimento
-                    </DropdownMenuItem>
-                  )}
-
-                  {canTogglePanel && (
-                    <DropdownMenuItem onClick={onToggleContactPanel} className="text-sm">
-                      {contactPanelOpen ? (
-                        <PanelRightClose className="h-4 w-4" aria-hidden="true" />
-                      ) : (
-                        <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
-                      )}
-                      {contactPanelOpen ? "Ocultar contexto" : "Exibir contexto"}
-                    </DropdownMenuItem>
-                  )}
-
-                  {(canTransfer || canTogglePanel) && (onRefresh || canCall || canDelete) && (
-                    <DropdownMenuSeparator />
-                  )}
-
+                <DropdownMenuContent align="end" className="min-w-48 border-border bg-popover">
                   {onRefresh && (
                     <DropdownMenuItem onClick={handleRefreshClick} disabled={isRefreshing} className="text-sm">
                       <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} aria-hidden="true" />

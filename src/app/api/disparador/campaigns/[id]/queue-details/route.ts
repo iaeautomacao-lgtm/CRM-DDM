@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { toErrorResponse } from "@/lib/auth/account";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
+import { totalFromStatusCounts } from "@/lib/disparador/queue-total";
 import { classificarTipoErro } from "@/lib/disparador/normalize-meta-error";
 import {
   PENDING_CONFIRMATION_OR_FILTER,
@@ -313,9 +314,12 @@ export async function GET(
     const to = from + PAGE_SIZE - 1;
 
     const replied = statusKey === REPLIED_KEY;
+    // Filtro só por status: o total vem de UMA agregação por status (queue-total.ts), não de `count: exact` junto
+    // da página. Busca por contato, "respondidos" e "aguardando confirmação" têm filtros próprios: seguem contando exato.
+    const totalFromCounts = !contactIdFilter && !replied && !isPendingConfirmation;
     let query = supabaseAdmin()
       .from("disp_message_queue")
-      .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS, { count: "exact" })
+      .select(replied ? SELECT_COLUMNS_REPLIED : SELECT_COLUMNS, totalFromCounts ? undefined : { count: "exact" })
       .eq("campaign_id", campaignId);
     if (statuses) query = query.in("status", statuses);
     if (isPendingConfirmation) query = query.or(PENDING_CONFIRMATION_OR_FILTER);
@@ -327,7 +331,10 @@ export async function GET(
 
     if (contactIdFilter) query = query.in("contact_id", contactIdFilter);
 
-    const { data, error, count } = await query;
+    const [{ data, error, count }, statusTotal] = await Promise.all([
+      query,
+      totalFromCounts ? totalFromStatusCounts(supabaseAdmin(), campaignId, statuses) : Promise.resolve(null),
+    ]);
     if (error?.code === "42703" && replied) {
       return NextResponse.json(
         { error: "O detalhamento de respostas precisa da migration 126 aplicada." },
@@ -346,7 +353,14 @@ export async function GET(
       ctx.accountId,
       campaignId,
     );
-    return NextResponse.json({ rows, total: count ?? 0, page, pageSize: PAGE_SIZE });
+    let total = count ?? statusTotal ?? 0;
+    if (totalFromCounts && statusTotal === null) {
+      // Sem a agregação (RPC e contagens por status falharam): último recurso, o count exato de antes.
+      let countQuery = supabaseAdmin().from("disp_message_queue").select("id", { count: "exact", head: true }).eq("campaign_id", campaignId);
+      if (statuses) countQuery = countQuery.in("status", statuses);
+      total = (await countQuery).count ?? 0;
+    }
+    return NextResponse.json({ rows, total, page, pageSize: PAGE_SIZE });
   } catch (err) {
     return toErrorResponse(err);
   }

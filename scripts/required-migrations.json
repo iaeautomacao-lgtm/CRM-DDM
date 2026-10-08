@@ -70,6 +70,15 @@
       "index": "idx_dmq_enviando_inflight"
     },
     {
+      "version": "198_dispatch_live_counts",
+      "kind": "registry"
+    },
+    {
+      "version": "198b_dispatch_queue_page_idx",
+      "kind": "index",
+      "index": "idx_dmq_campaign_page"
+    },
+    {
       "version": "200_ai_config_secret_columns",
       "kind": "registry"
     },
