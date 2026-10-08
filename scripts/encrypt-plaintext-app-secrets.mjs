@@ -90,7 +90,16 @@ function classify(value) {
   return "plaintext";
 }
 
+// O supabase-js 2.10x cria o cliente de realtime no construtor e, no Node 20 (sem
+// WebSocket nativo), aborta. Este script nunca usa realtime (mesma correção do #147).
+class NoRealtimeTransport {
+  constructor() {
+    throw new Error("realtime não é usado neste script");
+  }
+}
+
 const db = createClient(url, serviceRoleKey, {
+  realtime: { transport: NoRealtimeTransport },
   auth: { persistSession: false, autoRefreshToken: false },
   db: { schema: "wacrm" },
 });
