@@ -9,83 +9,92 @@ import {
   LayoutDashboard,
   Megaphone,
   MessageSquare,
-  Send,
   Settings,
   Shield,
-  ShieldAlert,
-  Sparkles,
   Tags,
   UserCheck,
   Users,
   UsersRound,
   Wifi,
   Workflow,
-  Zap,
 } from "lucide-react";
 
-// ============================================================
-// Fonte única dos itens de navegação do dashboard.
-//
-// A sidebar renderiza estas listas e o header deriva o título da
-// página a partir delas (getPageTitle) — assim um item novo no menu
-// já ganha título sem precisar lembrar de editar dois arquivos.
-// ============================================================
+export type NavGroup =
+  | "overview"
+  | "operation"
+  | "relationship"
+  | "campaigns"
+  | "automation"
+  | "intelligence"
+  | "administration";
 
 export interface NavItem {
   href: string;
   label: string;
   icon: typeof LayoutDashboard;
-  /**
-   * Quando true, a linha do menu mostra um chip "Beta" depois do rótulo.
-   * Puramente informativo — não afeta rota nem acesso.
-   */
+  group?: NavGroup;
   beta?: boolean;
 }
 
-export const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/monitoramento", label: "Monitoramento", icon: Activity },
-  { href: "/inteligencia", label: "DDM Intelligence", icon: Sparkles, beta: true },
-  { href: "/canais", label: "Canais", icon: Wifi },
-  { href: "/inbox", label: "Conversas", icon: MessageSquare },
-  { href: "/contacts", label: "Contatos", icon: Users },
-  { href: "/flows", label: "Fluxos", icon: Workflow, beta: true },
-  { href: "/disparador", label: "Disparador", icon: Megaphone },
-  { href: "/disparador/blacklist", label: "Blacklist", icon: ShieldAlert },
-  { href: "/disparador/desempenho", label: "Desempenho", icon: Gauge },
-  { href: "/equipes", label: "Equipes", icon: Users },
-  { href: "/templates", label: "Templates", icon: FileText },
-  { href: "/tabulacoes", label: "Tabulações", icon: Tags },
-  { href: "/respostas-rapidas", label: "Respostas rápidas", icon: Zap },
-  { href: "/usuarios", label: "Usuários", icon: UsersRound },
-  { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot },
+export const NAV_GROUPS: Array<{ id: NavGroup; label: string }> = [
+  { id: "overview", label: "Visão geral" },
+  { id: "operation", label: "Operação" },
+  { id: "relationship", label: "Relacionamento" },
+  { id: "campaigns", label: "Campanhas" },
+  { id: "automation", label: "Automação" },
+  { id: "intelligence", label: "Inteligência" },
+  { id: "administration", label: "Administração" },
 ];
 
-// Sub-itens do grupo recolhível "Relatórios".
+export const navItems: NavItem[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, group: "overview" },
+
+  { href: "/inbox", label: "Conversas", icon: MessageSquare, group: "operation" },
+  { href: "/monitoramento", label: "Monitoramento", icon: Activity, group: "operation" },
+
+  { href: "/contacts", label: "Contatos", icon: Users, group: "relationship" },
+  { href: "/canais", label: "Canais", icon: Wifi, group: "relationship" },
+
+  { href: "/disparador", label: "Disparador", icon: Megaphone, group: "campaigns" },
+
+  { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation", beta: true },
+  { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot, group: "automation" },
+
+  { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "intelligence", beta: true },
+  { href: "/relatorios/atendimentos", label: "Relatórios", icon: FileText, group: "intelligence" },
+
+  { href: "/equipes", label: "Equipes", icon: Users, group: "administration" },
+  { href: "/usuarios", label: "Usuários", icon: UsersRound, group: "administration" },
+];
+
 export const reportNavItems: NavItem[] = [
   { href: "/relatorios/auditoria", label: "Auditoria", icon: Shield },
   { href: "/relatorios/atendimentos", label: "Atendimentos", icon: Headphones },
   { href: "/relatorios/agentes", label: "Agentes", icon: UserCheck },
   { href: "/relatorios/conversas", label: "Conversas", icon: MessageSquare },
-  { href: "/relatorios/tabulacoes", label: "Tabulações", icon: MessageSquare },
-  { href: "/relatorios/envio-em-lote", label: "Envio em lote", icon: Send },
+  { href: "/relatorios/tabulacoes", label: "Tabulações", icon: Tags },
+  { href: "/relatorios/envio-em-lote", label: "Envio em lote", icon: Megaphone },
   { href: "/relatorios/exportacoes", label: "Exportações", icon: Download },
 ];
 
 export const bottomNavItems: NavItem[] = [
-  { href: "/ajuda", label: "Central de Ajuda", icon: HelpCircle },
+  { href: "/ajuda", label: "Central de ajuda", icon: HelpCircle },
   { href: "/settings", label: "Configurações", icon: Settings },
 ];
 
-// Rotas que existem mas não estão no menu (acessadas pelo dropdown do
-// usuário, por links internos ou por URL direta) e subpáginas cujo
-// título difere do item-pai.
 const extraTitles: Record<string, string> = {
   "/relatorios": "Relatórios",
   "/disparador/campanhas": "Disparador · Campanhas",
   "/disparador/contatos": "Disparador · Contatos",
   "/disparador/monitor": "Disparador · Monitor",
+  "/disparador/numeros": "Disparador · Números",
+  "/disparador/controles": "Disparador · Controles",
   "/disparador/desempenho": "Disparador · Desempenho",
+  "/disparador/erros": "Disparador · Erros",
+  "/disparador/blacklist": "Disparador · Blacklist",
+  "/templates": "Templates",
+  "/tabulacoes": "Tabulações",
+  "/respostas-rapidas": "Respostas rápidas",
   "/perfil": "Meu Perfil",
   "/seguranca": "Senha e sessões",
   "/historico": "Histórico",
@@ -96,23 +105,14 @@ const extraTitles: Record<string, string> = {
   "/unauthorized": "Acesso negado",
 };
 
-/** Caminho sem query string (ex.: "/settings?tab=ai" → "/settings"). */
 export function navPath(href: string): string {
   return href.split("?")[0];
 }
 
-/** True se `pathname` é `prefix` ou uma subrota dele (por segmento —
- *  "/flowsx" não casa com "/flows"). */
 export function matchesPrefix(pathname: string, prefix: string): boolean {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
-/**
- * Entre `hrefs`, o de prefixo mais longo que casa com `pathname`
- * (comparando só o caminho, sem query). Usado para destacar um único
- * item ativo quando há itens aninhados (/disparador vs
- * /disparador/blacklist). Retorna null se nenhum casar.
- */
 export function longestMatchingHref(
   pathname: string,
   hrefs: string[],
@@ -126,25 +126,18 @@ export function longestMatchingHref(
   return best;
 }
 
-// Mapa caminho → título. Itens com query string (Agente de IA) não
-// entram: o título deriva só do pathname, e "/settings" já é
-// "Configurações".
 const titleMap: Record<string, string> = (() => {
   const map: Record<string, string> = {};
   for (const item of [...navItems, ...reportNavItems, ...bottomNavItems]) {
     if (item.href.includes("?")) continue;
     map[item.href] = item.label;
   }
-  // Relatórios: prefixa o grupo para não confundir "Conversas" do
-  // relatório com a inbox.
   for (const item of reportNavItems) {
     map[item.href] = `Relatórios · ${item.label}`;
   }
   return { ...map, ...extraTitles };
 })();
 
-/** Título da página para o header — prefixo mais longo que casar;
- *  string vazia (neutra) quando a rota não é conhecida. */
 export function getPageTitle(pathname: string): string {
   const match = longestMatchingHref(pathname, Object.keys(titleMap));
   return match ? titleMap[match] : "";

@@ -18,7 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { UsersRound } from "lucide-react";
-import { DdmLogo } from "@/components/ui/ddm-logo";
+import { OmniDdmLogo } from "@/components/ui/omniddm-logo";
 import {
   logAuthFx,
   summarizeSession,
@@ -97,15 +97,11 @@ function LoginPageInner() {
     <div className="bg-background flex min-h-screen items-center justify-center px-4">
       <Card className="border-border bg-card w-full max-w-md">
         <CardHeader className="items-center text-center">
-          <div className="bg-primary/10 mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
+          <div className="mb-3 flex h-12 min-w-[148px] items-center justify-center">
             {inviteToken ? (
               <UsersRound className="text-primary h-6 w-6" aria-hidden="true" />
             ) : (
-              <DdmLogo
-                className="text-primary h-7 w-7"
-                aria-hidden="true"
-                outlineColor="oklch(from var(--primary) l c h / 0.1)"
-              />
+              <OmniDdmLogo className="w-[132px]" priority />
             )}
           </div>
           <CardTitle className="text-foreground text-xl">
