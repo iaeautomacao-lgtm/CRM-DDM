@@ -4,6 +4,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { CHANNEL_CONFIG_COLUMNS, CHANNEL_HEALTH_COLUMNS, CHANNEL_HEALTH_COLUMNS_LEGACY } from './channel-label';
+import { INBOX_CHANNEL_COLUMNS } from '../whatsapp/message-inbox-runner';
 
 const ROOT = process.cwd();
 const MIGRATIONS = resolve(ROOT, 'supabase/migrations');
@@ -71,6 +72,8 @@ describe('colunas reais (migrations)', () => {
     for (const c of selectColumns(CHANNEL_CONFIG_COLUMNS)) expect(whatsappConfig.has(c), `whatsapp_config.${c}`).toBe(true);
     for (const c of selectColumns(CHANNEL_HEALTH_COLUMNS)) expect(channelHealth.has(c), `channel_health.${c}`).toBe(true);
     for (const c of selectColumns(CHANNEL_HEALTH_COLUMNS_LEGACY)) expect(channelHealth.has(c), `channel_health.${c}`).toBe(true);
+    // Inbox de mensagens da Meta (migration 201): o drenador lê estas colunas de whatsapp_config.
+    for (const c of selectColumns(INBOX_CHANNEL_COLUMNS)) expect(whatsappConfig.has(c), `whatsapp_config.${c}`).toBe(true);
   });
 
   it('todo select de whatsapp_config / channel_health no disparador usa colunas reais', () => {

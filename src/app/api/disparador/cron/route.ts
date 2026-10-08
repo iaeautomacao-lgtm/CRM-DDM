@@ -48,6 +48,8 @@ import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/li
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
+import { drainMessageInboxLive } from "@/lib/whatsapp/message-inbox-runner";
+import { reconcileShadowInbox } from "@/lib/whatsapp/message-inbox";
 
 // ============================================================
 // /api/disparador/cron — motor stateless do disparador.
@@ -385,6 +387,31 @@ async function runTick(request: Request, chain: ChainContext) {
       maxBatches: 5,
       shouldStop: () => outOfTime() || Date.now() > drainDeadline,
     });
+    // Rede de segurança do inbox de MENSAGENS da Meta (migration 201): processa o que o after() do webhook não
+    // concluiu (processo caiu entre o 200 e o processamento, lease expirado, retry com backoff) e, no modo shadow,
+    // só compara com `messages`. Só com sobra de tempo, lock próprio e espera limitada (~6 s) para nunca atrasar os
+    // envios; trabalho que passar do limite segue no processo com a reserva (lease) e fecha sozinho. Sem a migration, no-op.
+    if (!outOfTime()) {
+      try {
+        const { data: inboxTurn } = await db.rpc("try_acquire_cron_lock", {
+          p_name: "webhook_message_inbox_cron", p_owner_id: owner, p_ttl_seconds: 60,
+        });
+        if (inboxTurn) {
+          try {
+            const inboxDeadline = Date.now() + Math.min(6_000, Math.floor(config.tickBudgetMs / 6));
+            const work = Promise.all([
+              drainMessageInboxLive(db, { limit: 20, maxBatches: 2, shouldStop: () => outOfTime() || Date.now() > inboxDeadline }),
+              reconcileShadowInbox(db),
+            ]);
+            await Promise.race([work, new Promise((resolve) => setTimeout(resolve, Math.max(inboxDeadline - Date.now(), 0)))]);
+          } finally {
+            await db.rpc("release_cron_lock", { p_name: "webhook_message_inbox_cron", p_owner_id: owner });
+          }
+        }
+      } catch (error) {
+        console.error("[Cron] Falha na rede de segurança do inbox de mensagens:", error instanceof Error ? error.message : error);
+      }
+    }
     await drainCallbackOutbox(1);
     // Watchdog anti-deadlock. É manutenção best-effort: falha aqui nunca
     // derruba o tick nem impede novos envios.
