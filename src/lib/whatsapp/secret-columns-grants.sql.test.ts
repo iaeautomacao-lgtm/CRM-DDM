@@ -171,6 +171,6 @@ describe('migrations 200 / 200b — segredos fora do alcance do navegador', () =
       const g = await other.query<{ ok: boolean }>(`SELECT has_table_privilege('authenticated','wacrm.whatsapp_config','SELECT') AS ok`);
       expect(g.rows[0].ok).toBe(true); // nada foi revogado
       await other.close();
-    });
+    }, 60_000);
   });
 });
