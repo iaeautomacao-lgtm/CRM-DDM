@@ -654,7 +654,7 @@ const MAX_META_IMAGE_BYTES = 5 * 1024 * 1024
 const MAX_META_AUDIO_BYTES = 25 * 1024 * 1024
 
 // Baixa mídia da Meta (URL de CDN curta e autenticada, só resolvível com
-// o access_token do canal) e reenvia pro bucket público `chat-media` do
+// o access_token do canal) e reenvia pro bucket privado `chat-media` do
 // Supabase Storage, no mesmo padrão já usado pelo webhook WAHA. Sem isso,
 // `messages.media_url` fica só com a rota /api/whatsapp/media/[mediaId]
 // (protegida por sessão de usuário) — inacessível pra qualquer coisa que
@@ -667,6 +667,7 @@ const MAX_META_AUDIO_BYTES = 25 * 1024 * 1024
 async function downloadAndStoreMetaMedia(
   mediaId: string,
   accessToken: string,
+  accountId: string,
   maxBytes: number,
   fallbackExt: string,
   onBuffer?: (buffer: Buffer, contentType: string) => void
@@ -689,7 +690,7 @@ async function downloadAndStoreMetaMedia(
       contentType || mediaInfo.mimeType || 'application/octet-stream'
     onBuffer?.(buffer, finalContentType)
     const ext = extensionForMimeType(finalContentType, fallbackExt)
-    const storagePath = `meta/${mediaId}.${ext}`
+    const storagePath = `account-${accountId}/meta/${mediaId}.${ext}`
 
     const { error: uploadError } = await supabaseAdmin()
       .storage.from('chat-media')
@@ -736,7 +737,7 @@ async function downloadAndStoreMetaMedia(
 async function parseMessageContent(
   message: WhatsAppMessage,
   accessToken: string,
-  accountId?: string
+  accountId: string
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -789,12 +790,13 @@ async function parseMessageContent(
     case 'image':
       if (message.image?.id) {
         const mediaId = message.image.id
-        // Tenta baixar + reenviar pro Storage público primeiro (necessário
+        // Tenta baixar + reenviar pro Storage privado primeiro (necessário
         // pro agente de IA conseguir ver a imagem); cai pro proxy
         // autenticado de sempre se falhar por qualquer motivo.
         const storedUrl = await downloadAndStoreMetaMedia(
           mediaId,
           accessToken,
+          accountId,
           MAX_META_IMAGE_BYTES,
           'jpg'
         )
@@ -840,6 +842,7 @@ async function parseMessageContent(
         const storedUrl = await downloadAndStoreMetaMedia(
           mediaId,
           accessToken,
+          accountId,
           MAX_META_AUDIO_BYTES,
           'ogg',
           (buffer) => {
