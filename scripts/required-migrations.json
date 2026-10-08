@@ -125,6 +125,10 @@
       "kind": "registry"
     },
     {
+      "version": "220_export_history_policy",
+      "kind": "registry"
+    },
+    {
       "version": "221_rate_limit_shared",
       "kind": "registry"
     },

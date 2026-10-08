@@ -8,6 +8,7 @@
 import { describeMetaError, lookupMetaError, META_ERROR_CATALOG, type MetaErrorClass } from "./meta-error-catalog";
 import { loadChannelIdentities } from "./channel-label";
 import { phoneKey, phoneVariants } from "./phone-key";
+import { csvCell } from "@/lib/security/csv-safe";
 
 export class ErrosInputError extends Error {
   constructor(
@@ -537,12 +538,8 @@ export async function loadErroDetail(db: ErrosDb, accountId: string, itemId: str
 }
 
 // ── CSV ──────────────────────────────────────────────────────────────────
-/** Neutraliza fórmula de planilha (=, +, -, @, tab, CR) e escapa aspas/separadores. */
-export function csvCell(value: unknown): string {
-  let s = value === null || value === undefined ? "" : String(value);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-  return /[";\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
+/** Neutraliza fórmula de planilha (=, +, -, @, tab, CR) e escapa aspas/separadores — helper único (PRD 14.6). */
+export { csvCell };
 
 export const CSV_HEADER = ["Data/hora", "Campanha", "Número", "Contato", "Telefone", "Código", "Classe", "O que significa", "O que fazer", "Erro original", "Tentativas"];
 

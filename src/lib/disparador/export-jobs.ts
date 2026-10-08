@@ -24,6 +24,7 @@ import {
   QUEUE_DETAIL_STATUS_FILTERS,
   REPLIED_QUEUE_DETAIL_KEY,
 } from "@/lib/disparador/queue-status-filters";
+import { csvCell, csvLine, csvSafe } from "@/lib/security/csv-safe";
 
 type Db = any;
 
@@ -74,20 +75,8 @@ export function isValidExportStatusKey(key: string): boolean {
 
 // ── CSV ────────────────────────────────────────────────────────────────────
 
-/** Evita injeção de fórmula ao abrir no Excel (=, @, tab/CR e +/- que não são número). */
-export function csvSafe(value: string): string {
-  if (/^[=@\t\r]/.test(value) || /^[+-](?!\d)/.test(value)) return `'${value}`;
-  return value;
-}
-
-export function csvCell(value: unknown): string {
-  const text = csvSafe(String(value ?? ""));
-  return /[";\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-}
-
-export function csvLine(cells: unknown[]): string {
-  return `${cells.map(csvCell).join(";")}\r\n`;
-}
+// Helper ÚNICO de CSV seguro (PRD 14, 14.6): src/lib/security/csv-safe.ts. Reexportado aqui só para quem já importava daqui.
+export { csvCell, csvLine, csvSafe };
 
 /** Cabeçalho = as colunas do XLSX do detalhamento. */
 export function exportColumns(statusKey: string): string[] {
