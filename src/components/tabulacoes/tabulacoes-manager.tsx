@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/select';
 import { SettingsPanelHead } from '@/components/settings/settings-panel-head';
 import type { Tag, Team } from '@/types';
+import { codigoInUseBy, parseCodigoTabulacao } from '@/lib/tabulacoes/codigo';
 
 const TABULACAO_COLORS = [
   { name: 'Red', value: '#ef4444' },
@@ -59,9 +60,11 @@ const ALL_TEAMS = '__all__';
 interface TabulacaoFormState {
   name: string;
   color: string;
+  /** codigo_tabulacao como digitado ('' = sem código). */
+  codigo: string;
 }
 
-const EMPTY_FORM: TabulacaoFormState = { name: '', color: TABULACAO_COLORS[0].value };
+const EMPTY_FORM: TabulacaoFormState = { name: '', color: TABULACAO_COLORS[0].value, codigo: '' };
 
 export function TabulacoesManager() {
   const supabase = createClient();
@@ -166,7 +169,11 @@ export function TabulacoesManager() {
 
   function openEdit(tag: Tag) {
     setEditingTag(tag);
-    setForm({ name: tag.name, color: tag.color });
+    setForm({
+      name: tag.name,
+      color: tag.color,
+      codigo: tag.codigo_tabulacao !== undefined && tag.codigo_tabulacao !== null ? String(tag.codigo_tabulacao) : '',
+    });
     setFormOpen(true);
   }
 
@@ -185,6 +192,16 @@ export function TabulacoesManager() {
       toast.error('Nome da tabulação é obrigatório');
       return;
     }
+    const codigo = parseCodigoTabulacao(form.codigo);
+    if (!codigo.ok) {
+      toast.error(codigo.error);
+      return;
+    }
+    const usedBy = codigoInUseBy(tabulacoes, codigo.value, editingTag?.id);
+    if (usedBy) {
+      toast.error(`O código ${codigo.value} já é usado pela tabulação "${usedBy}"`);
+      return;
+    }
     if (!accountId || !user) return;
 
     setSaving(true);
@@ -192,7 +209,7 @@ export function TabulacoesManager() {
       if (editingTag) {
         const { error } = await supabase
           .from('tags')
-          .update({ name: trimmed, color: form.color })
+          .update({ name: trimmed, color: form.color, codigo_tabulacao: codigo.value })
           .eq('id', editingTag.id);
         if (error) throw error;
         toast.success('Tabulação atualizada');
@@ -205,6 +222,7 @@ export function TabulacoesManager() {
             name: trimmed,
             color: form.color,
             kind: 'outcome',
+            codigo_tabulacao: codigo.value,
           })
           .select('id')
           .single();
@@ -327,6 +345,11 @@ export function TabulacoesManager() {
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                       {tag.name}
                     </span>
+                    {tag.codigo_tabulacao !== undefined && tag.codigo_tabulacao !== null && (
+                      <span className="shrink-0 font-mono text-xs text-muted-foreground" title="Código da tabulação">
+                        Cód. {tag.codigo_tabulacao}
+                      </span>
+                    )}
                     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                       {teamIds.length === 0 ? (
                         <span className="text-xs text-muted-foreground">
@@ -389,6 +412,25 @@ export function TabulacoesManager() {
                 maxLength={40}
                 disabled={saving}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tabulacao-codigo">
+                Código{' '}
+                <span className="text-xs text-muted-foreground">(opcional)</span>
+              </Label>
+              <Input
+                id="tabulacao-codigo"
+                value={form.codigo}
+                onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
+                placeholder="ex.: 142"
+                inputMode="numeric"
+                maxLength={5}
+                disabled={saving}
+              />
+              <p className="text-xs text-muted-foreground">
+                Código de negócio da tabulação. A IA usa este código para sugerir a tabulação
+                a partir das tags de saída do fluxo.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Cor</Label>

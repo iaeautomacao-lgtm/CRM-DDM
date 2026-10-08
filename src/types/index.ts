@@ -181,6 +181,12 @@ export interface ContactNote {
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
+/** Quem definiu a tabulação efetiva (conversations.outcome_source, 157). */
+export type OutcomeSource = 'human' | 'ai_auto' | 'automation';
+
+/** Origem da sugestão de tabulação (conversations.outcome_suggestion_source, 157). */
+export type OutcomeSuggestionSource = 'exit_tag' | 'llm' | 'rule';
+
 export interface Conversation {
   id: string;
   user_id: string;
@@ -197,6 +203,17 @@ export interface Conversation {
   /** Outcome tag applied when the conversation is closed (tabulação). */
   outcome_tag_id?: string;
   outcome_tag?: Tag;
+  /** Procedência da tabulação (migration 157). */
+  outcome_source?: OutcomeSource | null;
+  outcome_set_by?: string | null;
+  outcome_set_at?: string | null;
+  /** Sugestão de tabulação da IA/fluxo — não é a tabulação efetiva (157). */
+  suggested_outcome_tag_id?: string | null;
+  outcome_suggestion_source?: OutcomeSuggestionSource | null;
+  outcome_suggestion_confidence?: number | null;
+  outcome_suggestion_reason?: string | null;
+  outcome_suggested_at?: string | null;
+  outcome_suggestion_key?: string | null;
   created_at: string;
   updated_at: string;
   contact?: Contact;
