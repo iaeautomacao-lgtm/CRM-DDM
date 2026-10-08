@@ -1421,7 +1421,7 @@ export function MessageThread({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
+        <div className="flex flex-wrap items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
           <DropdownMenu>
             <DropdownMenuTrigger
               aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
@@ -1531,13 +1531,43 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {accountRole !== "viewer" && (
+            <button
+              type="button"
+              onClick={() => setTransferOpen(true)}
+              aria-label="Transferir atendimento"
+              title="Transferir atendimento"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+
+          {onToggleContactPanel && (
+            <button
+              type="button"
+              onClick={onToggleContactPanel}
+              aria-label={contactPanelOpen ? "Ocultar painel de contexto" : "Exibir painel de contexto"}
+              aria-pressed={contactPanelOpen}
+              title={contactPanelOpen ? "Ocultar contexto" : "Exibir contexto"}
+              className={cn(
+                "hidden h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-muted hover:text-foreground lg:inline-flex",
+                contactPanelOpen ? "text-primary" : "text-muted-foreground",
+              )}
+            >
+              {contactPanelOpen ? (
+                <PanelRightClose className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+          )}
+
           {(() => {
             const canCall =
               whatsappProvider === "waha" && !!contact?.phone && conversation.channel_type !== "webchat";
             const canDelete = !!onDeleteConversation && accountRole !== "agent";
-            const canTransfer = accountRole !== "viewer";
-            const canTogglePanel = !!onToggleContactPanel;
-            if (!onRefresh && !canCall && !canDelete && !canTransfer && !canTogglePanel) return null;
+            if (!onRefresh && !canCall && !canDelete) return null;
 
             return (
               <DropdownMenu>
@@ -1553,28 +1583,6 @@ export function MessageThread({
                   )}
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-52 border-border bg-popover">
-                  {canTransfer && (
-                    <DropdownMenuItem onClick={() => setTransferOpen(true)} className="text-sm">
-                      <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
-                      Transferir atendimento
-                    </DropdownMenuItem>
-                  )}
-
-                  {canTogglePanel && (
-                    <DropdownMenuItem onClick={onToggleContactPanel} className="text-sm">
-                      {contactPanelOpen ? (
-                        <PanelRightClose className="h-4 w-4" aria-hidden="true" />
-                      ) : (
-                        <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
-                      )}
-                      {contactPanelOpen ? "Ocultar contexto" : "Exibir contexto"}
-                    </DropdownMenuItem>
-                  )}
-
-                  {(canTransfer || canTogglePanel) && (onRefresh || canCall || canDelete) && (
-                    <DropdownMenuSeparator />
-                  )}
-
                   {onRefresh && (
                     <DropdownMenuItem onClick={handleRefreshClick} disabled={isRefreshing} className="text-sm">
                       <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} aria-hidden="true" />
