@@ -306,7 +306,7 @@ export default function BlacklistPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
         <div>

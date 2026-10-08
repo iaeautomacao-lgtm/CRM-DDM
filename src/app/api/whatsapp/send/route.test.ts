@@ -35,7 +35,9 @@ function makeSupabaseMock() {
     const selectResult = () => {
       switch (table) {
         case 'profiles':
-          return { data: { account_id: 'acct-1' }, error: null }
+          return { data: { account_id: 'acct-1', account_role: 'agent' }, error: null }
+        case 'accounts':
+          return { data: { id: 'acct-1', name: 'Conta' }, error: null }
         case 'contacts':
           return { data: contactRow, error: null }
         case 'conversations':
@@ -234,6 +236,7 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
       content_type: 'template',
       template_name: 'order_update',
       sender_type: 'agent',
+      sender_id: 'user-1',
     })
   })
 

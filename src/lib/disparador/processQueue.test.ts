@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   send: vi.fn(),
   autoBlacklist: vi.fn(),
+  ai: vi.fn(),
+  log: vi.fn(),
 }));
 vi.mock('@/lib/disparador/admin-client', () => ({
   supabaseAdmin: () => ({
@@ -47,9 +49,12 @@ vi.mock('@/lib/disparador/admin-client', () => ({
     },
   }),
 }));
-vi.mock('@/lib/whatsapp/encryption', () => ({ decrypt: () => 'test-token' }));
+vi.mock('@/lib/whatsapp/encryption', () => ({
+  decryptStoredSecret: (value: string) =>
+    value === 'legacy-plaintext-token' ? value : 'test-token',
+}));
 vi.mock('@/lib/logger', () => ({
-  writeLog: vi.fn(),
+  writeLog: mocks.log,
   maskPhone: () => 'masked',
 }));
 vi.mock('@/lib/disparador/auto-blacklist', () => ({
@@ -59,8 +64,11 @@ vi.mock('@/lib/whatsapp/meta-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/whatsapp/meta-api')>()),
   sendTextMessage: mocks.send,
 }));
+vi.mock('@/lib/disparador/dispatch-ai', () => ({ generateDispatchAiText: mocks.ai }));
 import { MetaApiError } from '@/lib/whatsapp/meta-api';
 import { PreSendError, isDefinitiveRejection, processQueueItem, type QueueItem } from './processQueue';
+import { UNCERTAIN_OUTCOME_ERROR } from './provider-outcome';
+import { resetUnknownMetaCodes } from './meta-error-catalog';
 
 const item: QueueItem = {
   id: 'item',
@@ -85,6 +93,96 @@ describe('queue provider outcomes', () => {
       error: name === 'confirm_dispatch_item_sent' || name === 'mark_queue_item_sent' ? mocks.confirmationError : null,
     }));
   });
+  it('contato do CRM sem telefone NUNCA usa o texto da mensagem como número (REVISAO A1)', async () => {
+    const contactItem: QueueItem = {
+      ...item,
+      contact_id: 'contact',
+      mensagem_final: 'Seu debito de R$ 1.234,56 vence 10/10',
+      contacts: { phone: '' },
+    };
+    const result = await processQueueItem(contactItem, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'error', error: 'Contato sem telefone válido' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true)).toBe(true);
+  });
+  it('item externo (API v1, contact_id nulo) continua usando mensagem_final como telefone', async () => {
+    const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ to: '5511999999999' }));
+  });
+  it('falha de CONEXÃO (ECONNREFUSED/ENOTFOUND/EAI_AGAIN/connect timeout): a mensagem não saiu → transitório com retry (P0-3)', async () => {
+    for (const code of ['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT']) {
+      mocks.updates.length = 0;
+      mocks.send.mockReset().mockRejectedValue(new TypeError('fetch failed', { cause: { code } }));
+      const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+      expect(result).toMatchObject({ outcome: 'error', error: expect.stringMatching(/não saiu/) });
+      expect(mocks.send).toHaveBeenCalledTimes(1);
+      expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === 1)).toBe(true);
+      expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+    }
+  });
+  it('502/503/504 da Meta e timeout de resposta: INCERTO — terminal, sem reenvio e com a mensagem que o auto-pause conta', async () => {
+    const uncertain = [
+      new MetaApiError('Bad Gateway', null, 502),
+      new MetaApiError('Service Unavailable', null, 503),
+      new MetaApiError('Gateway Timeout', null, 504),
+      Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }),
+    ];
+    for (const err of uncertain) {
+      mocks.updates.length = 0;
+      mocks.send.mockReset().mockRejectedValue(err);
+      const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+      expect(result).toMatchObject({ outcome: 'error', error: UNCERTAIN_OUTCOME_ERROR });
+      expect(mocks.send).toHaveBeenCalledTimes(1); // at-most-once
+      expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true && u.erro === UNCERTAIN_OUTCOME_ERROR)).toBe(true);
+    }
+  });
+  it('tipo=ia: IA falhou → NADA é enviado (nunca o prompt), item volta como erro retentável sem consumir tentativa (P0-2)', async () => {
+    mocks.ai.mockReset().mockResolvedValue(null);
+    const iaItem: QueueItem = { ...item, tipo: 'ia', mensagem_final: 'PROMPT: gere uma cobrança para o cliente', tentativas: 2 };
+    const result = await processQueueItem(iaItem, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toEqual({ outcome: 'deferred', reason: 'ai_unavailable' });
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === 2 && /IA indisponível/.test(String(u.erro)))).toBe(true);
+    expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+  });
+  it('tipo=ia: IA ok → envia o texto GERADO, não o prompt', async () => {
+    mocks.ai.mockReset().mockResolvedValue('Olá! Seu débito vence hoje.');
+    const iaItem: QueueItem = { ...item, tipo: 'ia', mensagem_final: 'PROMPT: gere uma cobrança' };
+    expect(await processQueueItem(iaItem, { id: 'campaign', status: 'em_execucao' })).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ text: 'Olá! Seu débito vence hoje.' }));
+  });
+  it('erro permanente de envio: o log traz queue_id (para abrir o item na tela de erros)', async () => {
+    mocks.log.mockClear();
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('Meta: Template (code 132001)', 132001, 400));
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    const entry = mocks.log.mock.calls.map(([c]) => c).find((c) => c.event === 'message_permanent_error');
+    expect(entry.payload).toMatchObject({ campaign_id: 'campaign', queue_id: 'item', metaCode: 132001 });
+  });
+  it('131026: os logs de strike e de bloqueio também trazem queue_id', async () => {
+    mocks.log.mockClear();
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('Meta: undeliverable (code 131026)', 131026, 400));
+    mocks.autoBlacklist.mockResolvedValue({ campaignCount: 1, blacklisted: false });
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    mocks.autoBlacklist.mockResolvedValue({ campaignCount: 3, blacklisted: true });
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    const events = mocks.log.mock.calls.map(([c]) => c);
+    expect(events.find((c) => c.event === 'message_meta_131026_strike').payload.queue_id).toBe('item');
+    expect(events.find((c) => c.event === 'message_blocked_meta_131026').payload.queue_id).toBe('item');
+  });
+  it('código da Meta fora do catálogo: comportamento atual (retenta) + log "código novo" 1× por código', async () => {
+    mocks.log.mockClear();
+    resetUnknownMetaCodes();
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('Meta: novo (code 139999)', 139999, 400));
+    const first = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
+    expect(first).toMatchObject({ outcome: 'error' });
+    // Não é permanente: continua retentável como antes (sem flags de catálogo).
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false)).toBe(true);
+    const unknown = mocks.log.mock.calls.map(([c]) => c).filter((c) => c.event === 'meta_error_code_unknown');
+    expect(unknown).toHaveLength(1);
+    expect(unknown[0].payload).toMatchObject({ metaCode: 139999, queue_id: 'item', campaign_id: 'campaign' });
+  });
   it('never calls the provider after losing the guarded claim', async () => {
     mocks.claimed = false;
     expect(
@@ -96,6 +194,24 @@ describe('queue provider outcomes', () => {
     expect(
       await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
     ).toEqual({ outcome: 'sent', messageId: 'wamid.test' });
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('aceita segredo legado em texto puro antes de chamar o provedor', async () => {
+    const result = await processQueueItem(
+      item,
+      { id: 'campaign', status: 'em_execucao' },
+      {
+        channelConfig: {
+          provider: 'meta',
+          access_token: 'legacy-plaintext-token',
+          phone_number_id: 'phone-id',
+        },
+        blacklistLookup: () => false,
+      }
+    );
+
+    expect(result).toMatchObject({ outcome: 'sent' });
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });
   it('keeps the 1st/2nd Meta 131026 out of the definitive blacklist', async () => {
@@ -169,22 +285,23 @@ describe('queue provider outcomes', () => {
       )
     ).toBe(false);
   });
-  it('quarantines an unknown transport outcome instead of scheduling another POST', async () => {
+  it('terminaliza resultado de transporte desconhecido sem reenviar nem prender a vaga', async () => {
     mocks.send.mockRejectedValue(new TypeError('connection lost after POST'));
     expect(
       await processQueueItem(item, { id: 'campaign', status: 'em_execucao' })
     ).toMatchObject({
-      outcome: 'pending_confirmation',
-      reason: 'provider_outcome_unknown',
+      outcome: 'error',
+      error: expect.stringMatching(/sem reenvio/),
     });
     expect(
       mocks.updates.some(
-        (update) => update.status === 'agendado' || update.status === 'erro'
+        (update) => update.status === 'erro' && update.erro_permanente === true
       )
-    ).toBe(false);
+    ).toBe(true);
     expect(
       mocks.rpc.mock.calls.some(([name]) => name === 'mark_queue_item_sent' || name === 'confirm_dispatch_item_sent')
     ).toBe(false);
+    expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -309,6 +426,47 @@ describe('opções do agendador do cron', () => {
       p_default_max_in_flight: 8,
     });
     expect(mocks.rpc).not.toHaveBeenCalledWith('claim_dispatch_item', expect.anything());
+  });
+
+  it('P1-3b: item já reivindicado em lote NÃO passa pelo claim por item e confirma pelo micro-lote', async () => {
+    const submit = vi.fn(async () => ({ error: null, replayed: true }));
+    const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' }, { alreadyClaimed: true, confirmBatcher: { submit } });
+    expect(result).toMatchObject({ outcome: 'sent', messageId: 'wamid.test' });
+    const names = mocks.rpc.mock.calls.map(([name]) => name);
+    expect(names).not.toContain('claim_dispatch_item');
+    expect(names).not.toContain('claim_dispatch_item_capped');
+    expect(names).not.toContain('confirm_dispatch_item_sent'); // a confirmação foi para o lote
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ p_item_id: 'item', p_waha_message_id: 'wamid.test', p_tentativas: 1 }));
+  });
+
+  it('P1-3b: confirmação em lote com erro vira pending_confirmation (envio aceito, nunca reenviado)', async () => {
+    const submit = vi.fn(async () => ({ error: { message: 'lote falhou' }, replayed: false }));
+    const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' }, { alreadyClaimed: true, confirmBatcher: { submit } });
+    expect(result).toMatchObject({ outcome: 'pending_confirmation', messageId: 'wamid.test' });
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('F8: limite de taxa da Meta (130429/131048/131056) reagenda SEM consumir tentativa — nem vira permanente na última', async () => {
+    for (const code of [130429, 131048, 131056]) {
+      for (const tentativas of [0, 2, 4]) {
+        mocks.updates.length = 0;
+        mocks.send.mockReset().mockRejectedValue(new MetaApiError('rate limit (code ' + code + ')', code, code === 130429 ? 429 : 400));
+        const result = await processQueueItem({ ...item, tentativas }, campaign);
+        expect(result).toMatchObject({ outcome: 'error' });
+        expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === false && u.tentativas === tentativas)).toBe(true);
+        expect(mocks.updates.some((u) => u.erro_permanente === true)).toBe(false);
+      }
+    }
+  });
+
+  it('F8: outro erro transitório continua consumindo tentativa e vira permanente no limite', async () => {
+    mocks.updates.length = 0;
+    mocks.send.mockReset().mockRejectedValue(new MetaApiError('param (code 99999)', 99999, 400));
+    await processQueueItem({ ...item, tentativas: 1 }, campaign);
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.tentativas === 2)).toBe(true);
+    mocks.updates.length = 0;
+    await processQueueItem({ ...item, tentativas: 4 }, campaign);
+    expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true && u.tentativas === 5)).toBe(true);
   });
 
   it('observa latência e sinal do provedor sem mudar o resultado', async () => {

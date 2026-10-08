@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { guardRole } from '@/lib/auth/route-guard'
+import { checkRateLimit, rateLimitResponse } from '@/lib/rate-limit'
 import { analyzeConversationSentimentAndTags } from '@/lib/ai/sentiment'
 
 export async function POST(
@@ -8,35 +9,12 @@ export async function POST(
 ) {
   try {
     const { id: conversationId } = await params
-    const supabase = await createClient()
-
-    // 1. Get authenticated user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // 2. Fetch profile to get account_id
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('account_id, account_role')
-      .eq('user_id', user.id)
-      .maybeSingle()
-
-    if (profileError || !profile?.account_id) {
-      return NextResponse.json({ error: 'Account not found' }, { status: 404 })
-    }
-
-    // Visualizador é somente leitura: a análise grava na conversa.
-    if (profile.account_role === 'viewer') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-    }
-
-    const accountId = profile.account_id
+    const auth = await guardRole('agent')
+    if (!auth.ok) return auth.response
+    const { supabase, accountId, userId } = auth.ctx
+    // A análise usa a chave de IA da conta: conter loops por usuário.
+    const limit = checkRateLimit(`sentiment:${userId}`, { limit: 10, windowMs: 60_000 })
+    if (!limit.success) return rateLimitResponse(limit)
 
     // 3. Fetch conversation to get contact_id and verify ownership
     const { data: conversation, error: convError } = await supabase
@@ -58,11 +36,12 @@ export async function POST(
       .from('conversations')
       .select('sentiment')
       .eq('id', conversationId)
+      .eq('account_id', accountId)
       .maybeSingle()
 
     return NextResponse.json({ success: true, sentiment: updatedConv?.sentiment ?? 'unknown' })
-  } catch (err: any) {
+  } catch (err) {
     console.error('[API Sentiment] Error:', err)
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 })
+    return NextResponse.json({ error: 'Falha ao analisar o sentimento da conversa.' }, { status: 500 })
   }
 }

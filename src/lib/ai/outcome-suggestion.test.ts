@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   applyExitTagOutcomeSuggestion,
   exitTagSuggestionReason,
+  suggestOutcomeFromAiDecision,
 } from "./outcome-suggestion";
 import { fakeRowsDb } from "@/lib/conversations/__tests__/fake-rows-db";
+
+const realAdmin = vi.hoisted(() => vi.fn(() => { throw new Error("Client real não deve ser aberto"); }));
+vi.mock("@/lib/flows/admin-client", () => ({ supabaseAdmin: realAdmin }));
 
 const ACC = "acc-1";
 
@@ -38,6 +42,19 @@ describe("exitTagSuggestionReason", () => {
 });
 
 describe("applyExitTagOutcomeSuggestion", () => {
+  it("gancho da decisão usa apenas o db recebido (também serve ao simulador)", async () => {
+    const { db, tables } = setup();
+    await suggestOutcomeFromAiDecision(db, { account_id: ACC, conversation_id: "conv-1", ai_exit_code: "#ACORDOFORMALIZADO" });
+    expect(conv(tables).suggested_outcome_tag_id).toBe("tag-142");
+    expect(realAdmin).not.toHaveBeenCalled();
+  });
+  it("gancho ignora decisão sem tag ou conversa e não consulta nenhum banco", async () => {
+    const { db, log } = setup();
+    await suggestOutcomeFromAiDecision(db, { account_id: ACC, conversation_id: "conv-1" });
+    await suggestOutcomeFromAiDecision(db, { account_id: ACC, ai_exit_code: "#ACORDOFORMALIZADO" });
+    expect(log).toHaveLength(0);
+    expect(realAdmin).not.toHaveBeenCalled();
+  });
   it("tag mapeada vira sugestão 'exit_tag' com confiança 1 (sem fechar)", async () => {
     const { db, tables } = setup();
     const res = await applyExitTagOutcomeSuggestion(db, {

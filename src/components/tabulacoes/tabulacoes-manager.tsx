@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/select';
 import { SettingsPanelHead } from '@/components/settings/settings-panel-head';
 import type { Tag, Team } from '@/types';
-import { codigoInUseBy, parseCodigoTabulacao } from '@/lib/tabulacoes/codigo';
+import { codigoInUseBy, codigoTabulacaoBloqueado, parseCodigoTabulacao } from '@/lib/tabulacoes/codigo';
 
 const TABULACAO_COLORS = [
   { name: 'Red', value: '#ef4444' },
@@ -56,6 +56,7 @@ const TABULACAO_COLORS = [
 // Sentinel for Base UI Select, which needs a real string value — same
 // pattern as NO_OVERFLOW in team-form-dialog.tsx.
 const ALL_TEAMS = '__all__';
+const CODIGO_BLOQUEADO_TOOLTIP = 'Código protegido: esta tabulação padrão está vinculada às tags de saída da IA. Alterá-lo pode quebrar as sugestões de tabulação.';
 
 interface TabulacaoFormState {
   name: string;
@@ -72,6 +73,8 @@ export function TabulacoesManager() {
 
   const [loading, setLoading] = useState(true);
   const [tabulacoes, setTabulacoes] = useState<Tag[]>([]);
+  const [aiMappedTagIds, setAiMappedTagIds] = useState<Set<string>>(new Set());
+  const [aiMapReady, setAiMapReady] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);
   // tag_id -> team_id[], derived from every team_outcome_tags row this
   // account's RLS lets us see (see header comment — no explicit
@@ -98,8 +101,9 @@ export function TabulacoesManager() {
   const fetchData = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setAiMapReady(false);
     try {
-      const [tagsRes, teamsRes, assignmentsRes] = await Promise.all([
+      const [tagsRes, teamsRes, assignmentsRes, aiMapRes] = await Promise.all([
         supabase
           .from('tags')
           .select('*')
@@ -112,9 +116,13 @@ export function TabulacoesManager() {
           .eq('account_id', accountId)
           .order('name', { ascending: true }),
         supabase.from('team_outcome_tags').select('team_id, tag_id'),
+        supabase.from('ai_exit_tag_outcome_map').select('outcome_tag_id').eq('account_id', accountId),
       ]);
       if (tagsRes.error) throw tagsRes.error;
       setTabulacoes((tagsRes.data ?? []) as Tag[]);
+      if (aiMapRes.error) throw aiMapRes.error;
+      setAiMappedTagIds(new Set((aiMapRes.data ?? []).map((row) => row.outcome_tag_id)));
+      setAiMapReady(true);
 
       if (!teamsRes.error) setTeams((teamsRes.data ?? []) as Team[]);
 
@@ -187,12 +195,19 @@ export function TabulacoesManager() {
   }
 
   async function handleSave() {
+    if (editingTag && !aiMapReady) {
+      toast.error('Não foi possível verificar o vínculo com a IA. Recarregue as tabulações antes de editar.');
+      return;
+    }
     const trimmed = form.name.trim();
     if (!trimmed) {
       toast.error('Nome da tabulação é obrigatório');
       return;
     }
-    const codigo = parseCodigoTabulacao(form.codigo);
+    // A trava também vale no save: não depender só do input desabilitado.
+    const codigo = codigoTabulacaoBloqueado(editingTag, aiMappedTagIds)
+      ? { ok: true as const, value: editingTag?.codigo_tabulacao ?? null }
+      : parseCodigoTabulacao(form.codigo);
     if (!codigo.ok) {
       toast.error(codigo.error);
       return;
@@ -371,6 +386,7 @@ export function TabulacoesManager() {
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => openEdit(tag)}
+                        disabled={!aiMapReady}
                         title="Editar tabulação"
                         aria-label="Editar tabulação"
                       >
@@ -418,15 +434,21 @@ export function TabulacoesManager() {
                 Código{' '}
                 <span className="text-xs text-muted-foreground">(opcional)</span>
               </Label>
-              <Input
-                id="tabulacao-codigo"
-                value={form.codigo}
-                onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
-                placeholder="ex.: 142"
-                inputMode="numeric"
-                maxLength={5}
-                disabled={saving}
-              />
+              <div title={codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) ? CODIGO_BLOQUEADO_TOOLTIP : undefined}>
+                <Input
+                  id="tabulacao-codigo"
+                  value={form.codigo}
+                  onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
+                  placeholder="ex.: 142"
+                  inputMode="numeric"
+                  maxLength={5}
+                  disabled={saving || (editingTag !== null && !aiMapReady) || codigoTabulacaoBloqueado(editingTag, aiMappedTagIds)}
+                  aria-describedby={codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) ? 'tabulacao-codigo-protegido' : undefined}
+                />
+              </div>
+              {codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) && (
+                <p id="tabulacao-codigo-protegido" className="text-xs text-muted-foreground">{CODIGO_BLOQUEADO_TOOLTIP}</p>
+              )}
               <p className="text-xs text-muted-foreground">
                 Código de negócio da tabulação. A IA usa este código para sugerir a tabulação
                 a partir das tags de saída do fluxo.

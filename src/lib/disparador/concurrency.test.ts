@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_DISPATCH_PROCESS_CONCURRENCY,
   processWithConcurrency,
@@ -43,10 +43,25 @@ describe('dispatch process concurrency config', () => {
     expect(resolveDispatchProcessConcurrency('10')).toBe(10);
   });
 
-  it('falls back to 8 for invalid or unsafe values', () => {
-    expect(resolveDispatchProcessConcurrency('0')).toBe(4);
-    expect(resolveDispatchProcessConcurrency('51')).toBe(4);
-    expect(resolveDispatchProcessConcurrency('abc')).toBe(4);
-    expect(resolveDispatchProcessConcurrency('2.5')).toBe(4);
+  it('número fora da faixa faz clamp em [1, 150] com aviso — nunca cai para 4 (REVISAO F15)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveDispatchProcessConcurrency('151')).toBe(150);
+    expect(resolveDispatchProcessConcurrency('999')).toBe(150);
+    expect(resolveDispatchProcessConcurrency('64')).toBe(64);
+    expect(resolveDispatchProcessConcurrency('150')).toBe(150);
+    expect(resolveDispatchProcessConcurrency('0')).toBe(1);
+    expect(resolveDispatchProcessConcurrency('-3')).toBe(1);
+    expect(resolveDispatchProcessConcurrency('12.5')).toBe(12);
+    expect(resolveDispatchProcessConcurrency(' 48 ')).toBe(48);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('texto que não é número usa o padrão seguro, com aviso', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(resolveDispatchProcessConcurrency('abc')).toBe(DEFAULT_DISPATCH_PROCESS_CONCURRENCY);
+    expect(resolveDispatchProcessConcurrency('Infinity')).toBe(DEFAULT_DISPATCH_PROCESS_CONCURRENCY);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

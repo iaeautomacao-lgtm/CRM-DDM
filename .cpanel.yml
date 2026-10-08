@@ -7,4 +7,4 @@ deployment:
     - npm install --no-audit --no-fund
     - npm run schema:check
     - npm run build
-    - mkdir -p $HOME/apps/omnichannel/tmp && touch $HOME/apps/omnichannel/tmp/restart.txt
+    - mkdir -p $HOME/apps/omnichannel-v2-desenvolvimento/tmp && touch $HOME/apps/omnichannel-v2-desenvolvimento/tmp/restart.txt

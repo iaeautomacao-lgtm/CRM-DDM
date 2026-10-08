@@ -48,6 +48,28 @@ export function invalidateChannel(key: string): void {
 
 export function clearAppSecretCache(): void {
   channelCache.clear()
+  rejectionGate.clear()
+}
+
+// Assinatura inválida é tráfego SEM autenticação: cada POST falho não pode custar 1 leitura no banco +
+// 1 INSERT em system_logs (W4). Cache negativo curto: o trabalho caro (reler o canal, gravar log) acontece
+// no máximo 1× por janela e por chave; os demais POSTs inválidos são rejeitados só com HMAC em memória.
+export const REJECTION_GATE_WINDOW_MS = 30_000
+const rejectionGate = new Map<string, number>()
+
+/** true na PRIMEIRA ocorrência da chave dentro da janela (faça o trabalho caro); false depois. */
+export function allowExpensiveRejection(
+  key: string,
+  now: number = Date.now(),
+  windowMs: number = REJECTION_GATE_WINDOW_MS,
+): boolean {
+  const last = rejectionGate.get(key)
+  if (last !== undefined && now - last < windowMs) return false
+  rejectionGate.set(key, now)
+  if (rejectionGate.size > 1000) {
+    for (const [k, t] of rejectionGate) if (now - t >= windowMs) rejectionGate.delete(k)
+  }
+  return true
 }
 
 /**

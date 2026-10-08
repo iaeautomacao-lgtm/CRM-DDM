@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { codigoInUseBy, parseCodigoTabulacao } from "./codigo";
+import { codigoInUseBy, codigoTabulacaoBloqueado, parseCodigoTabulacao } from "./codigo";
+
+describe("codigoTabulacaoBloqueado", () => {
+  it.each([142, 220, 178, 156, 227, 376, 208])("protege código padrão %i apenas quando a própria tag está no mapa", (codigo) => {
+    const tag = { id: "padrao", codigo_tabulacao: codigo };
+    expect(codigoTabulacaoBloqueado(tag, new Set(["padrao"]))).toBe(true);
+    expect(codigoTabulacaoBloqueado(tag, new Set(["outra"]))).toBe(false);
+  });
+  it("permite criar e editar códigos personalizados/sem código mesmo mapeados", () => {
+    const mapped = new Set(["custom"]);
+    expect(codigoTabulacaoBloqueado(null, mapped)).toBe(false);
+    expect(codigoTabulacaoBloqueado({ id: "custom", codigo_tabulacao: 900 }, mapped)).toBe(false);
+    expect(codigoTabulacaoBloqueado({ id: "custom", codigo_tabulacao: null }, mapped)).toBe(false);
+  });
+});
 
 describe("parseCodigoTabulacao", () => {
   it("vazio = sem código", () => {

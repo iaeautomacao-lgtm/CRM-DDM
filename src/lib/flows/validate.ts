@@ -29,7 +29,8 @@ import {
   getProviderForModel,
   isModelCompatibleWithProvider,
 } from "@/lib/ai/models";
-import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
+// Módulo puro: validate.ts roda no navegador (não importar meta-api.ts, que puxa o undici).
+import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/interactive-limits";
 import { WEBCHAT_BUTTON_TEXT_MAX } from "@/lib/flows/types";
 import {
   extractPromptExitTags,

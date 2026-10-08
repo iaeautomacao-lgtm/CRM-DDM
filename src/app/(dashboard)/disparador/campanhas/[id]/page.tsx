@@ -16,6 +16,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { use } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
@@ -53,6 +54,7 @@ interface QueueRow {
   erro: string | null;
   scheduled_at: string;
   sent_at: string | null;
+  entrega_pendente_131026?: boolean | null;
   contacts?: { name: string | null; phone: string | null } | null;
 }
 
@@ -99,7 +101,16 @@ export default function CampanhaContatosPage({
   const [campaignName, setCampaignName] = useState<string>("");
   const [rows, setRows] = useState<QueueRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState("__all__");
+  // Links do Monitor/Erros chegam com ?status=erro&codigo=131049 (lista filtrada por código de erro).
+  const searchParams = useSearchParams();
+  const initialStatus = searchParams.get("status");
+  const initialCodigo = Number(searchParams.get("codigo"));
+  const [statusFilter, setStatusFilter] = useState(
+    initialStatus && initialStatus in STATUS_LABEL ? initialStatus : "__all__",
+  );
+  const [codigoFilter, setCodigoFilter] = useState<number | null>(
+    Number.isInteger(initialCodigo) && initialCodigo > 0 ? initialCodigo : null,
+  );
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
@@ -140,7 +151,7 @@ export default function CampanhaContatosPage({
 
       let query = supabase
         .from("disp_message_queue")
-        .select("id, status, erro, scheduled_at, sent_at, contacts:contact_id ( name, phone )", {
+        .select("id, status, erro, scheduled_at, sent_at, entrega_pendente_131026, contacts:contact_id ( name, phone )", {
           count: "exact",
         })
         .eq("campaign_id", campaignId)
@@ -149,6 +160,10 @@ export default function CampanhaContatosPage({
 
       if (statusFilter !== "__all__") {
         query = query.eq("status", statusFilter);
+      }
+      // erro_codigo (migration 187): filtra os itens pelo código de erro da Meta.
+      if (codigoFilter !== null) {
+        query = query.eq("erro_codigo", codigoFilter);
       }
 
       const { data, count, error } = await query;
@@ -163,7 +178,7 @@ export default function CampanhaContatosPage({
     return () => {
       cancelled = true;
     };
-  }, [allowed, campaignId, statusFilter, page]);
+  }, [allowed, campaignId, statusFilter, codigoFilter, page]);
 
   // Troca de filtro de status reseta a paginação direto no handler (não
   // num useEffect derivado) — senão uma página > 0 de um filtro anterior
@@ -175,7 +190,7 @@ export default function CampanhaContatosPage({
 
   if (allowed === false) {
     return (
-      <div className="flex h-[calc(100vh-4rem)] flex-col items-center justify-center gap-3 p-6 text-center">
+      <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col items-center justify-center gap-3 p-6 text-center">
         <AlertCircle className="h-10 w-10 text-red-500" />
         <p className="text-sm text-muted-foreground">
           Campanha não encontrada ou fora da sua conta.
@@ -191,7 +206,7 @@ export default function CampanhaContatosPage({
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
+    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
       {/* Header */}
       <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
         <div className="min-w-0">
@@ -233,6 +248,25 @@ export default function CampanhaContatosPage({
         </Select>
       </div>
 
+      {codigoFilter !== null && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/50 px-3 py-1">
+            Filtrando pelo código de erro <strong>{codigoFilter}</strong>
+            <button
+              type="button"
+              onClick={() => {
+                setCodigoFilter(null);
+                setPage(0);
+              }}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Limpar filtro de código"
+            >
+              ✕
+            </button>
+          </span>
+        </div>
+      )}
+
       {/* Table */}
       <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card">
         {loading ? (
@@ -262,19 +296,28 @@ export default function CampanhaContatosPage({
             </TableHeader>
             <TableBody>
               {rows.map((r) => {
-                const Icon = STATUS_ICON[r.status] ?? Clock;
+                const isPending131026 = r.entrega_pendente_131026 === true;
+                const Icon = isPending131026 ? Clock : (STATUS_ICON[r.status] ?? Clock);
+                const badgeClass = isPending131026
+                  ? "bg-amber-500/10 text-amber-600"
+                  : (STATUS_BADGE[r.status] || STATUS_BADGE.agendado);
+                const badgeLabel = isPending131026
+                  ? "Aguardando confirmação"
+                  : (STATUS_LABEL[r.status] || r.status);
+                const badgeTitle = isPending131026
+                  ? "A Meta informou 131026; pode ser aparelho offline. Confirmamos em até 24h."
+                  : undefined;
                 return (
                   <TableRow key={r.id}>
                     <TableCell>{r.contacts?.phone || "—"}</TableCell>
                     <TableCell>{r.contacts?.name || "—"}</TableCell>
                     <TableCell>
                       <span
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                          STATUS_BADGE[r.status] || STATUS_BADGE.agendado
-                        }`}
+                        title={badgeTitle}
+                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass}`}
                       >
-                        <Icon aria-hidden="true" className={`h-3 w-3 ${r.status === "enviando" ? "animate-spin" : ""}`} />
-                        {STATUS_LABEL[r.status] || r.status}
+                        <Icon aria-hidden="true" className={`h-3 w-3 ${!isPending131026 && r.status === "enviando" ? "animate-spin" : ""}`} />
+                        {badgeLabel}
                       </span>
                     </TableCell>
                     <TableCell className="max-w-[280px] truncate text-xs text-red-500">

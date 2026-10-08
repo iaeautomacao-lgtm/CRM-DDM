@@ -9,8 +9,13 @@
  * instead of a runtime rejection from Meta.
  */
 
+import { resolveMetaApiBaseUrl } from '../loadtest/gate'
+import { getMetaDispatcher } from './meta-dispatcher'
+
 const META_API_VERSION = 'v21.0'
-const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+// Base da Graph API, lida UMA vez. Só a bancada de carga muda isto (META_API_BASE_URL, exige DISPATCH_LOAD_TEST=1;
+// recusa o endereço real; ver src/lib/loadtest/gate.ts). Gate falho = throw no carregamento (o app não envia).
+const META_API_BASE = `${resolveMetaApiBaseUrl()}/${META_API_VERSION}`
 
 const DEFAULT_META_TIMEOUT_MS = 30_000
 
@@ -29,10 +34,12 @@ async function metaFetch(
     ? AbortSignal.any([init.signal, timeoutSignal])
     : timeoutSignal
 
+  // Conexões reaproveitadas (keep-alive) só para a Meta — ver meta-dispatcher.ts. Vale também para META_API_BASE_URL (bancada).
   return globalThis.fetch(input, {
     ...init,
     signal,
-  })
+    dispatcher: getMetaDispatcher(),
+  } as RequestInit)
 }
 
 export interface MetaSendResult {
@@ -105,6 +112,36 @@ export async function verifyPhoneNumber(
 ): Promise<MetaPhoneInfo> {
   const { phoneNumberId, accessToken } = args
   const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating`
+  const response = await metaFetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+export interface MetaPhoneHealth {
+  id?: string
+  display_phone_number?: string
+  /** Nome verificado do número na Meta (o mesmo que a tela Canais mostra). */
+  verified_name?: string
+  /** GREEN | YELLOW | RED | NA (a Meta devolve NA para número novo). */
+  quality_rating?: string
+  /** TIER_50 | TIER_250 | TIER_1K | TIER_10K | TIER_100K | TIER_UNLIMITED. */
+  messaging_limit_tier?: string
+  /** { level: 'STANDARD' | 'HIGH' | 'NOT_APPLICABLE' } — nível de throughput da Cloud API. */
+  throughput?: { level?: string }
+}
+
+/**
+ * Saúde do número (qualidade, tier de mensagens, throughput) — usada pelo poll e pelo webhook de qualidade do disparador
+ * (limite por segundo por número). Mesma chamada da tela da campanha, mas com os campos de saúde e SEM mascarar falha:
+ * qualquer erro HTTP lança MetaApiError (quem chama decide o que fazer — nunca assumir "verde").
+ */
+export async function getPhoneNumberHealth(args: VerifyPhoneNumberArgs): Promise<MetaPhoneHealth> {
+  const { phoneNumberId, accessToken } = args
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,messaging_limit_tier,throughput`
   const response = await metaFetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -809,17 +846,8 @@ export async function sendReactionMessage(
  *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages
  *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-list-messages
  */
-export const INTERACTIVE_LIMITS = {
-  maxButtons: 3,
-  buttonTitleMaxLength: 20,
-  maxListSections: 10,
-  maxListRowsTotal: 10,
-  listRowTitleMaxLength: 24,
-  listRowDescriptionMaxLength: 72,
-  bodyMaxLength: 1024,
-  footerMaxLength: 60,
-  headerTextMaxLength: 60,
-} as const
+export { INTERACTIVE_LIMITS } from './interactive-limits'
+import { INTERACTIVE_LIMITS } from './interactive-limits'
 
 export interface InteractiveButton {
   /** Stable id sent back in the webhook when tapped (≤ 256 chars). */

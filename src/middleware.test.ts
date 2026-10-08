@@ -145,3 +145,15 @@ describe("middleware auth", () => {
     });
   });
 });
+
+describe("documentação pública da API", () => {
+  it.each(["/docs/api", "/api/v1/openapi.json"])("%s abre sem sessão (sem redirecionar nem 401)", (path) => {
+    const res = middleware(new NextRequest(`https://crm.test${path}`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("as páginas do CRM continuam protegidas", () => {
+    expect(middleware(new NextRequest("https://crm.test/settings/api-docs")).status).toBe(307);
+  });
+});

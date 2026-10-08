@@ -1,4 +1,5 @@
 import { MetaApiError } from "@/lib/whatsapp/meta-api";
+import { metaCodesWhere } from "./meta-error-catalog";
 
 // Sinais do provedor que pedem para o número desacelerar (backoff
 // adaptativo do cron). Só observação: nada aqui muda o destino do item —
@@ -10,7 +11,8 @@ export type BackoffReason = "rate_limit" | "server_error" | "timeout" | "network
 // 4 (limite da aplicação), 80007 (limite da WABA), 130429 (throughput do
 // número), 131048 (limite por spam), 131056 (limite por par
 // remetente/destinatário).
-export const META_RATE_LIMIT_CODES = new Set([4, 80007, 130429, 131048, 131056]);
+// Derivado do catálogo único (meta-error-catalog.ts): flag `freio`.
+export const META_RATE_LIMIT_CODES = metaCodesWhere((e) => e.freio === true);
 
 export interface ProviderErrorClass {
   reason: BackoffReason | null;
