@@ -1,0 +1,29 @@
+# Exemplo de crontab para o CRM-DDM. NÃO é a configuração real de produção:
+# frequência real em produção: A CONFIRMAR com o dono (crontab/EasyPanel). Ver docs/crons.md.
+#
+# Segredos: guardar em ~/.crm-cron.env (fora do repositório, chmod 600), com:
+#   CRON_SECRET=...
+#   AUTOMATION_CRON_SECRET=...
+#   APP=https://<host>
+# Cada linha carrega o arquivo e chama a rota por POST com o segredo no header.
+
+SHELL=/bin/bash
+
+# Disparador — tick de envio (1 min) e preparo de campanhas agendadas (1 min)
+* * * * *     . ~/.crm-cron.env; curl -fsS -m 120 -X POST -H "x-cron-secret: $CRON_SECRET" "$APP/api/disparador/cron" >/dev/null
+* * * * *     . ~/.crm-cron.env; curl -fsS -m 310 -X POST -H "x-cron-secret: $CRON_SECRET" "$APP/api/disparador/prepare/cron" >/dev/null
+
+# Disparador — saúde dos números Meta (a cada 5 min)
+*/5 * * * *   . ~/.crm-cron.env; curl -fsS -m 130 -X POST -H "x-cron-secret: $CRON_SECRET" "$APP/api/disparador/health/cron" >/dev/null
+
+# Automações com espera (1 min)
+* * * * *     . ~/.crm-cron.env; curl -fsS -m 60 -X POST -H "x-cron-secret: $AUTOMATION_CRON_SECRET" "$APP/api/automations/cron" >/dev/null
+
+# Fluxos: sweep de runs abandonados, smart_delay, vigia de IA travada (5 min)
+*/5 * * * *   . ~/.crm-cron.env; curl -fsS -m 120 -X POST -H "x-cron-secret: $AUTOMATION_CRON_SECRET" "$APP/api/flows/cron" >/dev/null
+
+# Redistribuição de conversas sem agente (5 min)
+*/5 * * * *   . ~/.crm-cron.env; curl -fsS -m 60 -X POST -H "x-cron-secret: $AUTOMATION_CRON_SECRET" "$APP/api/conversations/retry-assignment" >/dev/null
+
+# Renovação de tokens do Instagram (diário, 03:10)
+10 3 * * *    . ~/.crm-cron.env; curl -fsS -m 120 -X POST -H "x-cron-secret: $AUTOMATION_CRON_SECRET" "$APP/api/channels/refresh-tokens" >/dev/null

@@ -65,7 +65,7 @@ rodar. Nada aqui é lido de `.env.local` do Next.
 |---|---|---|
 | `STRESS_TARGET_URL` | import, queue | Opcional — default `https://omnicrm.grupoddm.ia.br` |
 | `STRESS_LOCAL_URL` | webhook | Opcional — default `http://localhost:3000` |
-| `STRESS_SUPABASE_URL` | queue, webhook, report*, cleanup | URL do projeto Supabase (`mkrkkvbseobdqsalrorl`) |
+| `STRESS_SUPABASE_URL` | queue, webhook, report*, cleanup | URL do projeto Supabase (`<ref-do-projeto>`) |
 | `STRESS_SERVICE_KEY` | queue, webhook, cleanup | Service role key do projeto Supabase (Settings → API) |
 | `STRESS_SESSION_TOKEN` | import, queue | Cookie de sessão — ver abaixo |
 | `STRESS_ACCOUNT_ID` | queue | Ver query SQL abaixo |
@@ -80,12 +80,12 @@ precisa de nenhuma variável.
 
 1. Abra `https://omnicrm.grupoddm.ia.br` logado no navegador.
 2. Abra o DevTools → aba **Application/Storage** → **Cookies** → selecione
-   o domínio → copie o **valor** do cookie `sb-mkrkkvbseobdqsalrorl-auth-token`
+   o domínio → copie o **valor** do cookie `sb-<ref-do-projeto>-auth-token`
    (começa com `base64-eyJ...`). Copiar da aba **Network** → header
    `Cookie:` também funciona, mas ali vem junto com outros cookies do
    domínio — pegar direto da aba de cookies evita ter que separar.
 3. Não precisa montar `nome=valor` manualmente — `config.ts` detecta se
-   falta o prefixo `sb-mkrkkvbseobdqsalrorl-auth-token=` e completa
+   falta o prefixo `sb-<ref-do-projeto>-auth-token=` e completa
    sozinho.
 
 **Recomendado: grave num arquivo, não numa env var.** O cookie costuma

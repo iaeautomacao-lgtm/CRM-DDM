@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, v2, 'release/**']
   push:
-    branches: [main]
+    branches: [main, v2, 'release/**']
 
 # Cancel older CI runs for the same branch when a new commit arrives —
 # saves minutes when someone pushes a stack of fixes to one PR.
@@ -34,7 +34,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
@@ -46,8 +46,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Componente "use client" não pode alcançar código só de servidor (falha o job se achar).
+      - name: Client/server boundary scan
+        run: node scripts/ci/client-scan.mjs
+
       - name: Test
-        run: npm test
+        run: npm test -- --maxWorkers=2
 
       - name: Build
         run: npm run build
