@@ -39,10 +39,20 @@ Não gera célula de dado: `relatorios/exports/route.ts` só grava o arquivo já
 
 ## 2. Quem lê a exportação (SG-17) — migration 220
 
-Gerar e listar exportações exige `reports.export` (supervisor+), mas `export_history` e o Storage do bucket
-`relatorio-exports` estavam abertos a **qualquer membro**. A migration **220** alinha as três portas à mesma permissão
-(`wacrm.has_perm('reports.export')`, da 241): policy de `export_history`, policy do Storage (`supervisors read exports`) e a
-RPC `get_export_history` (vazia, sem `storage_path`, para quem não tem a permissão). Supervisor, admin e proprietário não mudam.
+`export_history` e o Storage do bucket `relatorio-exports` estavam abertos a **qualquer membro** (operador e visualizador baixavam
+planilhas com telefone, nome e CPF de todos os contatos). **Decisão do dono:** o histórico e os arquivos são só de **admin e
+proprietário**. A migration **220** alinha as três portas à permissão `exports.manage` (`wacrm.has_perm`, da 241): policy de
+`export_history`, policy do Storage (`export managers read exports`) e a RPC `get_export_history` (vazia, sem `storage_path`, para quem não
+tem a permissão). Admin e proprietário não mudam.
+
+| Papel | Gera relatório (`reports.export`, POST `relatorios/exports`) | Lista/baixa o histórico, tela `/relatorios/exportacoes`, apaga (`exports.manage`) |
+|---|---|---|
+| proprietário, admin | sim | sim |
+| supervisor | **sim** (gera no navegador; o arquivo é gravado pelo servidor) | **não** — a tela não abre (rota só admin/owner), o histórico volta vazio e o DELETE responde 403 `{code:'forbidden', permission:'exports.manage'}` |
+| operador, visualizador | não | não |
+
+O teste `src/lib/export/export-policy.sql.test.ts` (PGlite, migrations 240/241/220 reais) confere o banco para os 5 papéis e que o
+critério do banco, o da API e o da tela são o mesmo.
 
 ## 3. O que ainda NÃO está no servidor (para a exportação assíncrona / fase de RLS)
 

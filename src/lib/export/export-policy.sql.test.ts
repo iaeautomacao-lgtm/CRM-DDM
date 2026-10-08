@@ -1,4 +1,4 @@
-// Migration 220 (PRD 14, 14.6 — SG-17): exportações só para quem tem reports.export (supervisor+).
+// Migration 220 (PRD 14, 14.6 — SG-17): histórico e arquivos de exportação só para admin e proprietário (exports.manage).
 // PGlite com as migrations REAIS 240/241/220 sobre um schema mínimo (export_history, storage.objects e a policy ANTIGA da 055).
 
 import { readFileSync } from "node:fs";
@@ -13,7 +13,7 @@ const A = "00000000-0000-0000-0000-00000000000a";
 const B = "00000000-0000-0000-0000-00000000000b";
 const uid = (n: number) => `00000000-0000-0000-0000-0000000001${String(n).padStart(2, "0")}`;
 const ROLES = ["owner", "admin", "supervisor", "agent", "viewer"] as const;
-const ALLOWED = new Set(["owner", "admin", "supervisor"]);
+const ALLOWED = new Set(["owner", "admin"]); // decisão do dono: supervisor gera relatório (reports.export) mas não lista/baixa o histórico
 
 const BOOTSTRAP = `
   CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN BYPASSRLS;
@@ -54,7 +54,7 @@ const BOOTSTRAP = `
   INSERT INTO wacrm.accounts (id, name) VALUES ('${A}', 'A'), ('${B}', 'B');
 `;
 
-describe("migration 220 — exportações só para supervisor+", { timeout: 60_000 }, () => {
+describe("migration 220 — exportações só para admin e proprietário", { timeout: 60_000 }, () => {
   let db: PGlite;
 
   const asUser = (n: number) => db.query(`SELECT set_config('test.uid', $1, false)`, [uid(n)]);
@@ -96,7 +96,7 @@ describe("migration 220 — exportações só para supervisor+", { timeout: 60_0
     await db.exec(migration("220_export_history_policy.sql"));
   });
 
-  it.each(ROLES.map((r, i) => [r, i + 1] as const))("%s: export_history, Storage e get_export_history só para supervisor+", async (role, n) => {
+  it.each(ROLES.map((r, i) => [r, i + 1] as const))("%s: export_history, Storage e get_export_history só para admin e proprietário", async (role, n) => {
     await asUser(n);
     const allowed = ALLOWED.has(role);
     expect(await count(`SELECT count(*)::int AS c FROM wacrm.export_history`), `${role} export_history`).toBe(allowed ? 1 : 0);
@@ -104,8 +104,8 @@ describe("migration 220 — exportações só para supervisor+", { timeout: 60_0
     expect(await count(`SELECT count(*)::int AS c FROM wacrm.get_export_history('${A}')`), `${role} rpc`).toBe(allowed ? 1 : 0);
   });
 
-  it("supervisor+ continua vendo SÓ a própria conta e só a pasta dela; outros buckets não são afetados pela regra de exportação", async () => {
-    await asUser(3); // supervisor
+  it("admin continua vendo SÓ a própria conta e só a pasta dela; outros buckets não são afetados pela regra de exportação", async () => {
+    await asUser(2); // admin
     expect(await count(`SELECT count(*)::int AS c FROM wacrm.export_history WHERE account_id = '${B}'`)).toBe(0);
     expect(await count(`SELECT count(*)::int AS c FROM wacrm.get_export_history('${B}')`)).toBe(0);
     expect(await count(`SELECT count(*)::int AS c FROM storage.objects WHERE name LIKE '${B}/%'`)).toBe(0);
@@ -113,22 +113,37 @@ describe("migration 220 — exportações só para supervisor+", { timeout: 60_0
     expect(await count(`SELECT count(*)::int AS c FROM storage.objects WHERE bucket_id = 'chat-media'`)).toBe(0);
   });
 
-  it("get_export_history devolve o storage_path ao supervisor+ (o download segue funcionando) e nada ao operador", async () => {
-    await asUser(3);
+  it("get_export_history devolve o storage_path ao admin (o download segue funcionando) e nada ao supervisor nem ao operador", async () => {
+    await asUser(2);
     await db.exec("SET ROLE authenticated");
     const ok = await db.query<{ storage_path: string }>(`SELECT storage_path FROM wacrm.get_export_history('${A}')`);
     await asUser(4);
     const none = await db.query(`SELECT storage_path FROM wacrm.get_export_history('${A}')`);
+    await asUser(3); // supervisor: gera relatório, mas não lista/baixa o histórico
+    const supervisor = await db.query(`SELECT storage_path FROM wacrm.get_export_history('${A}')`);
     await db.exec("RESET ROLE");
     expect(ok.rows).toEqual([{ storage_path: `${A}/e1.xlsx` }]);
     expect(none.rows).toEqual([]);
+    expect(supervisor.rows).toEqual([]);
+  });
+
+  it("app × banco no mesmo critério: exports.manage = admin/owner; supervisor GERA (reports.export) mas não lista, baixa nem apaga; a tela é admin/owner", async () => {
+    const { can } = await import("@/lib/auth/permissions");
+    const { canAccessRoute } = await import("@/lib/role-utils");
+    for (const role of ROLES) {
+      expect(can({ role }, "exports.manage"), `${role} exports.manage`).toBe(ALLOWED.has(role));
+      // a tela /relatorios/exportacoes (e o DELETE da API) seguem a MESMA regra do banco
+      expect(canAccessRoute(role, "/relatorios/exportacoes"), `${role} página`).toBe(ALLOWED.has(role));
+    }
+    expect(can({ role: "supervisor" }, "reports.export")).toBe(true); // gerar continua valendo
+    expect(can({ role: "agent" }, "reports.export")).toBe(false);
   });
 
   it("não sobrou a policy antiga; é idempotente", async () => {
     const names = async () =>
       (await db.query<{ policyname: string }>(`SELECT policyname FROM pg_policies WHERE tablename IN ('export_history','objects') ORDER BY 1`)).rows.map((r) => r.policyname);
     const before = await names();
-    expect(before).toContain("supervisors read exports");
+    expect(before).toContain("export managers read exports");
     expect(before).not.toContain("account members read exports");
     await db.exec(migration("220_export_history_policy.sql"));
     expect(await names()).toEqual(before);
