@@ -341,7 +341,8 @@ describe("buildTimeline", () => {
 describe("CSV", () => {
   it("neutraliza fórmulas e escapa separador/aspas/quebra de linha", () => {
     expect(csvCell("=HYPERLINK(1)")).toBe("'=HYPERLINK(1)");
-    expect(csvCell("+55")).toBe("'+55");
+    expect(csvCell("+cmd|x")).toBe("'+cmd|x");
+    expect(csvCell("+5511999990000")).toBe("+5511999990000"); // telefone não é fórmula (regra única de csv-safe)
     expect(csvCell("a;b")).toBe('"a;b"');
     expect(csvCell('diz "oi"')).toBe('"diz ""oi"""');
     expect(csvCell(null)).toBe("");
@@ -364,6 +365,6 @@ describe("CSV", () => {
     const csv = errosToCsv([item]);
     expect(csv.startsWith("﻿Data/hora;Campanha")).toBe(true);
     expect(csv.trim().split("\r\n")).toHaveLength(2);
-    expect(csv).toContain("'+5511999998888");
+    expect(csv).toContain(";+5511999998888;"); // telefone: regra única de csv-safe (número/telefone em texto não vira fórmula)
   });
 });

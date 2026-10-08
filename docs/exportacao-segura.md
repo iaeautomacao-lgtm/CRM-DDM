@@ -16,6 +16,8 @@ Uma célula de texto que começa com `=`, `+`, `-`, `@`, TAB ou CR é lida como 
 | `csvSafe(valor)` | só neutraliza, devolvendo texto (sem escapar) |
 | `csvLine(valores, sep = ";")` | linha de CSV: `csvCell` em cada valor, juntos por `sep` |
 
+**Regra:** texto que começa com `=`, `@`, TAB, CR, `+` ou `-` ganha o prefixo `'`. **Única exceção:** `+`/`-` seguido de dígito e só de dígitos, espaço, `()`, `.` e `-` (telefone `+5511999990000`, número `-5`): não é fórmula executável e continua legível. `+1+cmd|…` e `-2+3` não cabem na exceção e são neutralizados.
+
 Este é o **único** módulo de CSV seguro do projeto (`src/lib/security/csv-safe.ts`); a exportação assíncrona do disparador
 (`lib/disparador/export-jobs.ts`) importa daqui em vez de ter cópia própria.
 

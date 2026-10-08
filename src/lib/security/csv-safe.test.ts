@@ -10,14 +10,22 @@ describe("neutralizeFormula / safeCell", () => {
   it.each([
     ["=HYPERLINK(\"http://x\",\"a\")", "'=HYPERLINK(\"http://x\",\"a\")"],
     ["=cmd|' /C calc'!A0", "'=cmd|' /C calc'!A0"],
-    ["+5511999990001", "'+5511999990001"],
+    ["+cmd|' /C calc'!A0", "'+cmd|' /C calc'!A0"],
+    ["+1+cmd|' /C calc'!A0", "'+1+cmd|' /C calc'!A0"],
     ["-2+3", "'-2+3"],
+    ["-texto", "'-texto"],
     ["@SUM(A1)", "'@SUM(A1)"],
     ["\t=1+1", "'\t=1+1"],
     ["\r=1+1", "'\r=1+1"],
   ])("neutraliza %j", (input, expected) => {
     expect(neutralizeFormula(input)).toBe(expected);
     expect(safeCell(input)).toBe(expected);
+  });
+
+  it("exceção única: +/- seguido de dígito e só de dígitos/espaço/()/./- (telefone, número em texto) não vira fórmula e fica legível", () => {
+    for (const ok of ["+5511999990001", "+55 (11) 99999-0000", "-5", "-12.50", "+1"]) expect(neutralizeFormula(ok), ok).toBe(ok);
+    // …mas basta um operador/letra/função para voltar a ser neutralizado
+    for (const bad of ["+55+1", "-1|2", "+5a", "+1!A1", "=5511"]) expect(neutralizeFormula(bad), bad).toBe(`'${bad}`);
   });
 
   it("não mexe em texto normal, vazio, nem em quem tem o gatilho DEPOIS do primeiro caractere", () => {
@@ -35,9 +43,9 @@ describe("neutralizeFormula / safeCell", () => {
   });
 
   it("safeRow/safeRows tratam todas as células e não mutam a entrada", () => {
-    const input = [{ Nome: "=evil()", Qtd: -3, Tel: "+55" }, { Nome: "ok", Qtd: 1, Tel: "" }];
+    const input = [{ Nome: "=evil()", Qtd: -3, Tel: "+cmd" }, { Nome: "ok", Qtd: 1, Tel: "+5511999990001" }];
     const out = safeRows(input);
-    expect(out).toEqual([{ Nome: "'=evil()", Qtd: -3, Tel: "'+55" }, { Nome: "ok", Qtd: 1, Tel: "" }]);
+    expect(out).toEqual([{ Nome: "'=evil()", Qtd: -3, Tel: "'+cmd" }, { Nome: "ok", Qtd: 1, Tel: "+5511999990001" }]);
     expect(input[0].Nome).toBe("=evil()");
     expect(safeRow({ a: "@x" })).toEqual({ a: "'@x" });
   });
@@ -53,7 +61,7 @@ describe("csvCell", () => {
     expect(csvCell(null)).toBe("");
     expect(csvCell(undefined)).toBe("");
     expect(csvCell(131026)).toBe("131026");
-    expect(csvCell(-1)).toBe("'-1"); // número já virado texto no CSV: o sinal vira "-1" literal na célula, sem fórmula
+    expect(csvCell(-1)).toBe("-1"); // número puro (padrão numérico) não é neutralizado
   });
 });
 
@@ -62,9 +70,10 @@ describe("csvSafe / csvLine", () => {
     expect(csvSafe("=1+1")).toBe("'=1+1");
     expect(csvSafe("a;b")).toBe("a;b");
     expect(csvSafe(null)).toBe("");
-    expect(csvSafe(-3)).toBe("'-3");
-    expect(csvLine(["Maria", "=x", "a;b", 2, null])).toBe("Maria;'=x;\"a;b\";2;");
-    expect(csvLine(["a", "b"], ",")).toBe("a,b");
+    expect(csvSafe(-3)).toBe("-3");
+    expect(csvLine(["Maria", "=x", "a;b", 2, null])).toBe("Maria;'=x;\"a;b\";2;\r\n");
+    expect(csvLine(["a", "b"], ",")).toBe("a,b\r\n");
+    expect(csvLine(["a", 1, null])).toBe("a;1;\r\n");
   });
 });
 
@@ -84,7 +93,7 @@ describe("exportWithHistory (navegador): o arquivo baixado E o enviado ao histó
     vi.doMock("@/lib/api-fetch", () => ({ apiFetch: async () => new Response("{}") }));
     const { exportWithHistory } = await import("@/lib/relatorios/export-with-history");
     await exportWithHistory({
-      data: [{ nome: "=HYPERLINK(\"http://evil\")", fone: "+5511999990001", total: -4 }],
+      data: [{ nome: "=HYPERLINK(\"http://evil\")", fone: "+cmd|x", total: -4 }],
       columns: [
         { key: "nome", label: "Nome" },
         { key: "fone", label: "Telefone" },
@@ -94,7 +103,7 @@ describe("exportWithHistory (navegador): o arquivo baixado E o enviado ao histó
       description: "teste",
       format: "csv",
     });
-    expect(captured[0]).toEqual([{ Nome: "'=HYPERLINK(\"http://evil\")", Telefone: "'+5511999990001", Total: -4 }]);
+    expect(captured[0]).toEqual([{ Nome: "'=HYPERLINK(\"http://evil\")", Telefone: "'+cmd|x", Total: -4 }]);
     vi.doUnmock("xlsx");
     vi.doUnmock("@/lib/api-fetch");
   });
