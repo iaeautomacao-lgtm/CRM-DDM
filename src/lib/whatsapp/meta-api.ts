@@ -844,17 +844,8 @@ export async function sendReactionMessage(
  *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-reply-buttons-messages
  *   https://developers.facebook.com/docs/whatsapp/cloud-api/messages/interactive-list-messages
  */
-export const INTERACTIVE_LIMITS = {
-  maxButtons: 3,
-  buttonTitleMaxLength: 20,
-  maxListSections: 10,
-  maxListRowsTotal: 10,
-  listRowTitleMaxLength: 24,
-  listRowDescriptionMaxLength: 72,
-  bodyMaxLength: 1024,
-  footerMaxLength: 60,
-  headerTextMaxLength: 60,
-} as const
+export { INTERACTIVE_LIMITS } from './interactive-limits'
+import { INTERACTIVE_LIMITS } from './interactive-limits'
 
 export interface InteractiveButton {
   /** Stable id sent back in the webhook when tapped (≤ 256 chars). */
