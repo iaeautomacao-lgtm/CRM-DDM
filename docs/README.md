@@ -14,6 +14,7 @@ Este diretório é o ponto de entrada para arquitetura, desenvolvimento, operaç
 | [Operações](./operations.md) | deploy, crons, health checks, observabilidade e rollback |
 | [Troubleshooting](./troubleshooting.md) | investigar falhas comuns de mensagens, IA, flows e filas |
 | [API pública](./public-api.md) | integrar sistemas externos via `/api/v1` |
+| [API de permissões](./permissions-api.md) | contrato interno de permissões para o front (`/api/me/permissions`, catálogo) |
 | [VoIP](../voip/README.md) | trabalhar no serviço de voz em Go |
 | [Disparador auxiliar](../disparador/README.md) | trabalhar nos serviços auxiliares do disparador |
 
