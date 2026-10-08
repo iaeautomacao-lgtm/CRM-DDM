@@ -6,6 +6,7 @@
 // se pertencerem à conta; telefone vira contact_id da conta antes de tocar a fila.
 
 import { describeMetaError, lookupMetaError, META_ERROR_CATALOG, type MetaErrorClass } from "./meta-error-catalog";
+import { loadChannelIdentities } from "./channel-label";
 import { phoneKey, phoneVariants } from "./phone-key";
 
 export class ErrosInputError extends Error {
@@ -155,14 +156,13 @@ async function run<T>(q: unknown): Promise<DbResult<T>> {
 export interface NumberInfo {
   id: string;
   label: string;
+  connected?: boolean | null;
 }
 
 export async function loadNumbers(db: ErrosDb, accountId: string): Promise<NumberInfo[]> {
-  const { data, error } = await run<Array<{ id: string; phone_number: string | null; display_name: string | null }>>(
-    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session").eq("account_id", accountId).limit(500),
-  );
-  if (error) throw new Error(`Falha ao ler números: ${error.message}`);
-  return (data ?? []).map((n) => ({ id: n.id, label: n.display_name?.trim() || n.phone_number?.trim() || n.id.slice(0, 8) }));
+  // Nome/telefone iguais à tela Canais (channel-label.ts): habilitados primeiro.
+  const identities = await loadChannelIdentities(db, accountId);
+  return identities.map((n) => ({ id: n.id, label: n.label, connected: n.connected }));
 }
 
 export interface CampaignInfo {

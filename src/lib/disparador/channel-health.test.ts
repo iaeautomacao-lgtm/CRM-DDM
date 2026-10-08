@@ -110,3 +110,41 @@ describe("previsão com limite por segundo", () => {
     expect(typeof forecastCampaign).toBe("function");
   });
 });
+
+describe("nome e telefone da Meta (migration 193)", () => {
+  it("grava verified_name/display_phone_number e corrige whatsapp_config quando a Meta devolve outro número", async () => {
+    const { db, tables } = seed();
+    const fetchHealth = async () => ({ quality_rating: "GREEN", messaging_limit_tier: "TIER_10K", display_phone_number: "+55 11 99999-7777", verified_name: "Grupo DDM Assessoria" });
+    const { refreshChannelHealth } = await import("./channel-health");
+    await refreshChannelHealth(db, A, "poll", { fetchHealth });
+    expect(tables.channel_health[0]).toMatchObject({ verified_name: "Grupo DDM Assessoria", display_phone_number: "+55 11 99999-7777" });
+    expect(tables.whatsapp_config.find((c) => c.id === A.id)?.display_phone_number).toBe("+55 11 99999-7777");
+    expect(writeLog.mock.calls.some((c) => (c[0] as { event: string }).event === "channel_phone_updated")).toBe(true);
+  });
+
+  it("número igual ao gravado não gera atualização nem log", async () => {
+    const { db } = seed();
+    const fetchHealth = async () => ({ quality_rating: "GREEN", display_phone_number: A.display_phone_number, verified_name: "X" });
+    const { refreshChannelHealth } = await import("./channel-health");
+    await refreshChannelHealth(db, A, "poll", { fetchHealth });
+    expect(writeLog.mock.calls.some((c) => (c[0] as { event: string }).event === "channel_phone_updated")).toBe(false);
+  });
+
+  it("falha do Graph preserva nome e telefone já conhecidos", async () => {
+    const { db, tables } = seed();
+    const { refreshChannelHealth } = await import("./channel-health");
+    await refreshChannelHealth(db, A, "poll", { fetchHealth: async () => ({ quality_rating: "GREEN", display_phone_number: "+55 1", verified_name: "Nome Bom" }) });
+    await refreshChannelHealth(db, A, "poll", { fetchHealth: async () => { throw new Error("timeout"); } });
+    expect(tables.channel_health[0]).toMatchObject({ verified_name: "Nome Bom", last_error: "timeout" });
+  });
+
+  it("atualização manual da conta usa source 'manual' (histórico como 'admin') e só os números da conta", async () => {
+    const { db, tables } = seed();
+    tables.whatsapp_config.push({ id: "cccccccc-0000-0000-0000-000000000003", account_id: "outra", provider: "meta", habilitado: true, phone_number_id: "pnC", access_token: "t" });
+    const { refreshAccountChannelHealth } = await import("./channel-health");
+    const report = await refreshAccountChannelHealth(db, ACCOUNT, { fetchHealth: graph("RED") });
+    expect(report).toMatchObject({ considered: 2, refreshed: 2 });
+    expect(tables.channel_health.every((h) => h.source === "manual")).toBe(true);
+    expect(tables.dispatch_channel_rate_history.every((h) => h.source === "admin")).toBe(true);
+  });
+});
