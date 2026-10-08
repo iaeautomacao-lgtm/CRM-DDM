@@ -108,15 +108,15 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("whatsapp/templates/folders/[id]", "DELETE", "admin", "templates.manage"),
 
   // ── Inbox e conversas ───────────────────────────────────
-  r("whatsapp/send", "POST", "agent", "inbox.reply"),
-  r("whatsapp/react", "POST", "agent", "inbox.reply"),
-  r("conversations/[id]/transfer", "POST", "agent", "inbox.transfer"),
-  r("conversations/[id]/close", "POST", "agent", "inbox.close"),
-  r("conversations/[id]/sentiment", "POST", "agent", "inbox.ai_assist"),
-  r("conversations/[id]/suggest-tag", "GET", "agent", "inbox.ai_assist"),
-  r("conversations/[id]/flow-runs", "GET", "admin", "flows.view_runs"),
-  r("contacts/[id]/link", "POST", "agent", "contacts.edit"),
-  { route: "calls/[...path]", method: "*", guard: "viewer", min: "agent", permission: "calls.use" },
+  pg("whatsapp/send", "POST", "agent", "inbox.reply"),
+  pg("whatsapp/react", "POST", "agent", "inbox.reply"),
+  pg("conversations/[id]/transfer", "POST", "agent", "inbox.transfer"),
+  pg("conversations/[id]/close", "POST", "agent", "inbox.close"),
+  pg("conversations/[id]/sentiment", "POST", "agent", "inbox.ai_assist"),
+  pg("conversations/[id]/suggest-tag", "GET", "agent", "inbox.ai_assist"),
+  pg("conversations/[id]/flow-runs", "GET", "admin", "flows.view_runs"),
+  pg("contacts/[id]/link", "POST", "agent", "contacts.edit"),
+  pg("calls/[...path]", "*", "agent", "calls.use"),
   r("flows/end-run", "POST", "agent", "inbox.reply"),
 
   // ── Disparador (owner/admin) ────────────────────────────
@@ -190,11 +190,11 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   r("settings/secrets/[id]", "DELETE", "admin", "secrets.write"),
 
   // ── Monitoramento, relatórios, Intelligence ─────────────
-  r("monitoramento/dia", "GET", "supervisor", "monitoring.view_team"),
-  r("monitoramento/conversations", "GET", "supervisor", "monitoring.view_team"),
-  r("monitoramento/sla", "GET", "supervisor", "monitoring.view_team"),
-  r("relatorios/exports", "POST", "supervisor", "reports.export"),
-  r("relatorios/exports", "DELETE", "admin", "exports.manage"),
+  pg("monitoramento/dia", "GET", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/conversations", "GET", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/sla", "GET", "supervisor", "monitoring.view_team"),
+  pg("relatorios/exports", "POST", "supervisor", "reports.export"),
+  pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
   { route: "intelligence/chat", method: "POST", guard: "scope", min: "supervisor", permission: "intelligence.use" },
   { route: "intelligence/chats", method: "GET", guard: "scope", min: "supervisor", permission: "intelligence.use" },
   { route: "intelligence/chats/[id]", method: "GET", guard: "scope", min: "supervisor", permission: "intelligence.use" },

@@ -11,7 +11,7 @@ import { resolveIntelligenceScope, type IntelligenceScope } from "./scope";
 export async function currentIntelligenceScope(): Promise<IntelligenceScope> {
   const ctx = await getCurrentAccount();
   return resolveIntelligenceScope(
-    { accountId: ctx.accountId, userId: ctx.userId, role: ctx.role },
+    { accountId: ctx.accountId, userId: ctx.userId, role: ctx.role, permissions: ctx.permissions },
     supabaseAdmin(),
   );
 }

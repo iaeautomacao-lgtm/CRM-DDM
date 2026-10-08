@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { computeSla, SLA_TARGET_MINUTES, type SlaConversationRow } from '@/lib/monitoramento/sla'
 
 // GET /api/monitoramento/sla?days=7 — painel de SLA (owner/admin, como
@@ -14,7 +14,7 @@ const COLUMNS =
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('supervisor')
+    const { supabase, accountId } = await requirePermission('monitoring.view_team')
     const daysParam = Number(new URL(request.url).searchParams.get('days') ?? 7)
     const days = Number.isFinite(daysParam) ? Math.min(Math.max(Math.trunc(daysParam), 1), 90) : 7
     const nowMs = Date.now()

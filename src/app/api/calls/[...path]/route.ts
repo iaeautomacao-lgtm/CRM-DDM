@@ -1,4 +1,5 @@
 import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account';
+import { can } from '@/lib/auth/permissions';
 import { NextResponse } from 'next/server';
 
 // /api/calls/* — proxy autenticado do navegador para o servidor VoIP (Go).
@@ -11,8 +12,10 @@ import { NextResponse } from 'next/server';
 // segredo confere e filtra sessões/eventos pela conta.
 async function proxy(request: Request, context: { params: Promise<{ path: string[] }> }) {
   try {
-    const { accountId, role } = await getCurrentAccount();
-    if (role === 'viewer') return NextResponse.json({ error: 'Sem permissão para chamadas' }, { status: 403 });
+    const ctx = await getCurrentAccount();
+    const { accountId, role } = ctx;
+    // VoIP: calls.use (todos menos o visualizador, como antes)
+    if (!can(ctx, 'calls.use')) return NextResponse.json({ error: 'Sem permissão para chamadas' }, { status: 403 });
     const secret = process.env.VOIP_SERVICE_SECRET;
     if (!secret || !process.env.VOIP_URL) return NextResponse.json({ error: 'VoIP indisponível' }, { status: 503 });
     let { path } = await context.params;

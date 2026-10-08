@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { suggestOutcomeTag } from "@/lib/ai/tabulacao-suggest";
 
@@ -20,7 +20,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { supabase, accountId } = await requireRole("agent");
+    const { supabase, accountId } = await requirePermission("inbox.ai_assist");
     const { id: conversationId } = await params;
     if (!UUID_RE.test(conversationId)) {
       return NextResponse.json({ error: "Conversa inválida" }, { status: 400 });
