@@ -11,12 +11,12 @@ interface AiPerformanceProps {
 export function AiPerformance({ data, loading }: AiPerformanceProps) {
   if (loading || !data) {
     return (
-      <div className="grid animate-pulse grid-cols-1 gap-8 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
+      <div className="grid animate-pulse grid-cols-1 gap-3 md:grid-cols-3">
         {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="py-2 md:px-6 first:md:pl-0 last:md:pr-0">
-            <div className="h-3 w-24 rounded bg-muted" />
-            <div className="mt-3 h-7 w-20 rounded bg-muted" />
-            <div className="mt-5 h-24 rounded bg-muted" />
+          <div key={i} className="rounded-lg border border-border/80 bg-card/25 p-4">
+            <div className="h-3 w-20 rounded bg-muted" />
+            <div className="mt-4 h-7 w-16 rounded bg-muted" />
+            <div className="mt-5 h-20 rounded bg-muted" />
           </div>
         ))}
       </div>
@@ -35,7 +35,7 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
   const pctHuman = Math.round((messagesRatio.human / totalOutbound) * 100);
 
   return (
-    <div className="grid grid-cols-1 gap-8 md:grid-cols-3 md:gap-0 md:divide-x md:divide-border">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       <MetricColumn eyebrow="Sentimento" value={pctPositive + "%"} description="positivo">
         <BreakdownRow label="Positivo" value={sentiment.positive + " (" + pctPositive + "%)"} percent={pctPositive} tone="success" />
         <BreakdownRow label="Neutro" value={sentiment.neutral + " (" + pctNeutral + "%)"} percent={pctNeutral} />
@@ -45,12 +45,12 @@ export function AiPerformance({ data, loading }: AiPerformanceProps) {
         ) : null}
       </MetricColumn>
 
-      <MetricColumn eyebrow="Automação" value={pctBot + "%"} description="das mensagens pela IA">
+      <MetricColumn eyebrow="Automação" value={pctBot + "%"} description="pela IA">
         <BreakdownRow label="IA" value={messagesRatio.bot.toLocaleString("pt-BR")} percent={pctBot} />
         <BreakdownRow label="Humano" value={messagesRatio.human.toLocaleString("pt-BR")} percent={pctHuman} />
       </MetricColumn>
 
-      <MetricColumn eyebrow="Conversão" value={conversion.rate + "%"} description="de fechamento">
+      <MetricColumn eyebrow="Conversão" value={conversion.rate + "%"} description="fechamento">
         <SimpleRow label="Ganhos" value={conversion.won} tone="success" />
         <SimpleRow label="Perdidos" value={conversion.lost} tone="danger" />
         <SimpleRow label="Em aberto" value={conversion.open} />
@@ -71,12 +71,16 @@ function MetricColumn({
   children: ReactNode;
 }) {
   return (
-    <section className="py-2 md:px-6 first:md:pl-0 last:md:pr-0">
+    <section className="rounded-lg border border-border/80 bg-card/25 p-4">
       <p className="text-xs font-medium text-muted-foreground">{eyebrow}</p>
-      <div className="mt-2 flex items-baseline gap-2">
-        <strong className="text-[28px] font-semibold tracking-[-0.03em] tabular-nums text-foreground">{value}</strong>
-        <span className="text-xs text-muted-foreground">{description}</span>
+
+      <div className="mt-3 flex items-end gap-2">
+        <strong className="text-[28px] font-semibold leading-none tracking-[-0.035em] tabular-nums text-foreground">
+          {value}
+        </strong>
+        <span className="pb-0.5 text-[11px] text-muted-foreground">{description}</span>
       </div>
+
       <div className="mt-5 space-y-3">{children}</div>
     </section>
   );
@@ -108,9 +112,9 @@ function BreakdownRow({
         <span className="text-muted-foreground">{label}</span>
         <span className="font-medium tabular-nums text-foreground">{value}</span>
       </div>
-      <div className="mt-1.5 h-1 overflow-hidden bg-muted">
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
         <div
-          className={"h-full " + barClass}
+          className={"h-full rounded-full " + barClass}
           style={{ width: String(Math.max(0, Math.min(100, percent))) + "%" }}
         />
       </div>
@@ -129,15 +133,17 @@ function SimpleRow({
 }) {
   const toneClass =
     tone === "success"
-      ? "text-emerald-600 dark:text-emerald-400"
+      ? "text-emerald-500"
       : tone === "danger"
-        ? "text-rose-600 dark:text-rose-400"
+        ? "text-rose-500"
         : "text-foreground";
 
   return (
-    <div className="flex items-center justify-between border-b border-border pb-2 text-xs last:border-b-0">
+    <div className="flex items-center justify-between border-b border-border/70 pb-2.5 text-xs last:border-b-0 last:pb-0">
       <span className="text-muted-foreground">{label}</span>
-      <span className={"font-medium tabular-nums " + toneClass}>{value.toLocaleString("pt-BR")}</span>
+      <span className={"font-semibold tabular-nums " + toneClass}>
+        {value.toLocaleString("pt-BR")}
+      </span>
     </div>
   );
 }
