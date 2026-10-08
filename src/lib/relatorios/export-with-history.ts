@@ -1,4 +1,5 @@
 import * as XLSX from "xlsx";
+import { safeRows } from "@/lib/security/csv-safe";
 
 export interface ExportColumn {
   key: string;
@@ -22,8 +23,9 @@ export interface ExportOptions {
 // /relatorios/exportacoes. The download always happens; the history
 // write is best-effort and never blocks it (see the catch below).
 export async function exportWithHistory(options: ExportOptions): Promise<void> {
-  const sheetRows = options.data.map((row) =>
-    Object.fromEntries(options.columns.map((c) => [c.label, row[c.key]])),
+  // PRD 14.6 (SG-18): célula de texto que começa com = + - @ TAB CR é neutralizada ('), no arquivo baixado E no enviado ao histórico.
+  const sheetRows = safeRows(
+    options.data.map((row) => Object.fromEntries(options.columns.map((c) => [c.label, row[c.key]]))),
   );
   const ws = XLSX.utils.json_to_sheet(sheetRows);
   const wb = XLSX.utils.book_new();

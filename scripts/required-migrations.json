@@ -117,6 +117,10 @@
       "kind": "registry"
     },
     {
+      "version": "220_export_history_policy",
+      "kind": "registry"
+    },
+    {
       "version": "240_roles_foundation",
       "kind": "registry"
     },

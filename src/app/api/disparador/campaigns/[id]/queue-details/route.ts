@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { logAuditEvent } from "@/lib/audit/log-event";
+import { safeRows } from "@/lib/security/csv-safe";
 import * as XLSX from "xlsx";
 
 import { toErrorResponse } from "@/lib/auth/account";
@@ -396,7 +397,7 @@ function buildXlsxResponse(rows: QueueDetailRow[], statusKey: string): NextRespo
     return base;
   });
 
-  const ws = XLSX.utils.json_to_sheet(sheetRows);
+  const ws = XLSX.utils.json_to_sheet(safeRows(sheetRows));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Detalhamento");
 
