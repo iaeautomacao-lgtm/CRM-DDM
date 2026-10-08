@@ -2,6 +2,7 @@ import { NextResponse, after } from 'next/server'
 import { registerAuditActor } from '@/lib/audit/context'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
+import { isWellFormedHubSignature, readCappedBody } from '@/lib/security/webhook-body'
 import { parseSocialWebhook } from '@/lib/channels/inbound'
 import { ingestSocialEvent } from '@/lib/channels/ingest'
 
@@ -34,8 +35,21 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   // Auditoria: escritas desta requisição saem como "webhook" (webhook_meta_social).
   await registerAuditActor({ actorType: 'webhook', source: 'webhook_meta_social' })
-  const rawBody = await request.text()
+  // SW-5: teto de corpo (Content-Length e leitura do stream).
+  const capped = await readCappedBody(request)
+  if (!capped.ok) return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
+  const rawBody = capped.text
   const signature = request.headers.get('x-hub-signature-256')
+
+  // 14.10: o HMAC sobre o BRUTO vem ANTES do JSON.parse. O segredo depende do tipo do evento (Instagram × Messenger), que só se
+  // sabe no corpo; por isso confere contra os segredos configurados e só depois parseia e exige o segredo CERTO para o objeto.
+  const candidates = [process.env.INSTAGRAM_APP_SECRET, process.env.META_APP_SECRET].filter((s): s is string => !!s)
+  const authentic =
+    isWellFormedHubSignature(signature) &&
+    candidates.some((candidate) => verifyMetaWebhookSignature(rawBody, signature, candidate))
+  if (!authentic) {
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
 
   let body: { object?: string }
   try {
@@ -44,6 +58,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  // Mesma regra de antes: Instagram assina com o segredo do Instagram (ou o do app); Messenger só com o do app.
   const secret =
     body.object === 'instagram'
       ? process.env.INSTAGRAM_APP_SECRET ?? process.env.META_APP_SECRET

@@ -46,6 +46,7 @@ const BOOTSTRAP = `
   -- Auditoria da 131 (stand-ins, mesmas assinaturas)
   CREATE TABLE wacrm.audit_logs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    seq bigserial, -- ordem de inserção estável (clock_timestamp pode repetir sob carga)
     account_id uuid NOT NULL REFERENCES wacrm.accounts(id) ON DELETE CASCADE,
     event_type text NOT NULL CHECK (event_type IN ('created','updated','deleted','action')),
     resource_type text NOT NULL, resource_id uuid NOT NULL, resource_label text,
@@ -111,7 +112,7 @@ describe("migration 248 — auditoria de papéis", { timeout: 60_000 }, () => {
   });
 
   const logs = async (where = "true") =>
-    (await db.query<Log>(`SELECT action, event_type, resource_type, account_id, summary, changes, metadata, user_id, ip_address FROM wacrm.audit_logs WHERE ${where} ORDER BY created_at, id`)).rows;
+    (await db.query<Log>(`SELECT action, event_type, resource_type, account_id, summary, changes, metadata, user_id, ip_address FROM wacrm.audit_logs WHERE ${where} ORDER BY seq`)).rows;
   const addProfile = (n: number, role: string, account = A, name = `Pessoa ${n}`) =>
     db.query(`INSERT INTO wacrm.profiles (user_id, account_id, account_role, full_name) VALUES ($1, $2, $3::wacrm.account_role_enum, $4)`, [uid(n), account, role, name]);
   const roleId = async (key: string) => (await db.query<{ id: string }>(`SELECT id FROM wacrm.account_roles WHERE key = $1 AND account_id IS NULL`, [key])).rows[0].id;

@@ -156,3 +156,31 @@ describe('POST /api/whatsapp/webhook — quickfixes (inline)', () => {
     expect(processMessage).toHaveBeenCalledTimes(2)
   })
 })
+
+// PRD 14, 14.10 (SW-5 + HMAC antes do parse): sem assinatura bem formada nada é parseado; corpo em stream tem teto.
+describe('POST /api/whatsapp/webhook — corpo e assinatura antes do parse', () => {
+  const raw = (body: string, signature?: string) =>
+    new Request('http://localhost/api/whatsapp/webhook', {
+      method: 'POST',
+      body,
+      headers: signature ? { 'x-hub-signature-256': signature } : {},
+    })
+
+  it('sem assinatura ou malformada: 401 mesmo com corpo que não é JSON (antes era 400 depois de parsear)', async () => {
+    for (const signature of [undefined, 'lixo', 'sha256=curta', 'sha256=' + 'g'.repeat(64)]) {
+      const res = await POST(raw('isto não é json', signature))
+      expect(res.status, String(signature)).toBe(401)
+    }
+    expect(afterCallbacks).toHaveLength(0)
+  })
+
+  it('assinatura bem formada com JSON inválido: 400 (o parse só acontece depois)', async () => {
+    const res = await POST(raw('{"entry": [', 'sha256=' + 'a'.repeat(64)))
+    expect(res.status).toBe(400)
+  })
+
+  it('corpo acima de 1 MB (sem Content-Length declarado): 413 sem parsear', async () => {
+    const res = await POST(raw('a'.repeat(1_100_000), 'sha256=' + 'a'.repeat(64)))
+    expect(res.status).toBe(413)
+  })
+})
