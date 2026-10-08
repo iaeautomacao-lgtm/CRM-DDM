@@ -1,0 +1,143 @@
+# V2 do CRM-DDM: PRDs de backend (índice)
+
+**Data:** 08/10/2026 · **Base:** branch `v2` (= `main` + PRs da V2 já mergeados)
+
+**Escopo:** só lógica e código: robustez, desempenho, segurança, observabilidade, bugs técnicos e contratos de API.
+- **Fora do escopo:**
+  - frontend, que fica com outra pessoa (cada PRD traz o **contrato de API** que ela vai consumir);
+  - **regras de negócio** (prompt, textos e personas da IA, encerramento, tratamento de ofensa, acordo, mensagens e régua de cobrança). Aparecem só como "Decisão da operação";
+  - **retenção de dados**.
+- **Decisões do dono que valem para todos os PRDs:**
+  - o worker dedicado de envio (F2) **entra** na V2;
+  - Meta e WAHA nunca são unificados;
+  - migrations são manuais e idempotentes, com pré-check;
+  - nada de worker em memória dentro do Passenger;
+  - não mexer na truncagem do engine nem em `hasRunLeftNodeSnapshot`;
+  - opt-out é obrigatório;
+  - `limite_por_hora` não muda.
+
+## Princípio: plataforma self-service, com `.env` mínimo (dono, 08/10)
+
+O CRM é uma **plataforma para outras empresas usarem**. Tudo o que é configuração de cliente é feito **pelo próprio cliente, na tela**: número de WhatsApp, Instagram/Messenger, agentes de IA, credenciais de parceiros, limites. Essas configurações ficam no banco, por conta, com papel e auditoria. Nós fornecemos a estrutura.
+
+| Pode ficar no `.env` | Não pode ficar no `.env` |
+|---|---|
+| Só o **essencial da plataforma**: banco/Supabase, `ENCRYPTION_KEY`, `CRON_SECRET`, URL do app | Configuração ou credencial de cliente: vai para o **cofre por conta** (175) e para as telas |
+| Flags de implantação (shadow/on, claim em lote, tick encadeado), **temporárias**. Depois de estabilizar, são removidas ou viram configuração de plataforma no banco. | — |
+
+O **PRD 19** cuida disso: inventário de todas as variáveis de ambiente, com o que migra para configuração por conta.
+
+## Documentos
+
+| # | PRD | Autor | Conteúdo |
+|---|---|---|---|
+| 11 | [Disparador e filas](11-disparador-e-filas.md) | Orquestrador | Ligar o claim em lote e o tick encadeado com segurança, heartbeat de itens em voo, painéis sem varrer a fila, import sem travar, operações de fila em lote seguras, dívidas F/A/W da auditoria |
+| 12 | [Worker dedicado de envio (F2)](12-worker-envio-f2.md) | Âncora | Extrair o motor da rota do cron, lease por número, limite/s no banco, pooler, SIGTERM, ingestão de webhook separada, roteiro no EasyPanel (Anexo A) |
+| 13 | [IA, fluxos e agentes](13-ia-fluxos-agentes.md) | Âncora | Motor de fluxos, cron de fluxos e watchdog, responder e tools, perfis de agente, KB/RAG, simulador. Seção 14 = decisões da operação |
+| 14 | [Segurança e dados](14-seguranca-e-dados.md) | Sextante | RLS e grants, segredos e rotação de chave, papéis por rota, SSRF, LGPD, tipos gerados do banco e drift de schema (causa do #143/#144) |
+| 15 | [Plataforma e operação](15-plataforma-e-operacao.md) | Sextante | Inbox durável de **mensagens**, API pública V2, webhooks de saída, alertas e crons versionados, CI na `v2`, staging, deploy e rollback, registro de migrations |
+| 16 | [Comparativo Voll 360 × Fortics](16-comparativo-voll360-fortics.md) | Pesquisa | Onde estamos à frente e atrás; lacunas de backend |
+| 19 | [Configuração por conta e `.env` mínimo](19-config-por-conta-env-minimo.md) | Sextante | 3 camadas (`.env` essencial, `platform_config`, config por conta e cofre), resolvedor único de chave de LLM, modelo de app Meta, migração env→banco |
+| 20 | [Organizações, papéis e permissões](20-organizacoes-papeis-permissoes.md) | Sextante | Separação por organização, papéis fixos e papel personalizado criado só pelo proprietário *(em preparação)* |
+| — | [Inventário de variáveis de ambiente](inventario-env.md) | Prisma | Mecânico (117 variáveis). Correções no PRD 19 |
+| — | [Inventário de rotas](inventario-rotas.md) e [de tabelas](inventario-tabelas.md) | Prisma | Mecânico. ⚠️ RLS em laço `DO`/`EXECUTE` gera falso "sem RLS". Vale o banco live (PRD 14, Anexo A) |
+| — | [Modelo dos PRDs](_MODELO.md) | — | Estrutura e regras (inclui a REGRA DO DONO sobre negócio) |
+
+## Regra de entrega (dono, 08/10): nada vai para a V1
+
+Tudo, inclusive segurança e perda de dados, entra só na `v2` (branch nova a partir de `origin/v2`, PR com base `v2`). Os antigos itens "urgentes na V1" viraram PRs da V2:
+
+| Item | PRD | PR (base `v2`) |
+|---|---|---|
+| WH-01/WH-02: inbox durável de mensagens (`WHATSAPP_MESSAGE_INBOX`, padrão `off`) | 15 | #154, migration 201 |
+| R-1/R-2 + SG-4: segredos fora do navegador; kick sem `CRON_SECRET` no `Host` | 14 | #155, migrations 200 e 200b (**deploy do código antes ou junto da 200b**) |
+| Token DDM em texto e erro da DDM tratado como sucesso | 13/14 | #150 (= PR-0 do PRD 13 e 14.1) |
+| P-01/P-02: alertas e crons versionados | 15 | pendente (depende do canal de alerta e do crontab) |
+
+## Ordem de implementação recomendada (V2)
+
+1. **Bases que destravam o resto** (PRDs 14 e 15):
+   - tipos gerados do banco, checagem de drift e registro de migrations;
+   - CI rodando nos PRs da `v2`;
+   - staging oficial.
+2. **Durabilidade e segurança:**
+   - inbox de mensagens (15) e webhooks de saída (15);
+   - RLS e segredos (14);
+   - alertas (15).
+3. **Disparador** (11): bancada em staging → ligar o claim em lote e o tick encadeado → heartbeat → operações em lote.
+4. **Worker F2** (12), depois de 3 e com a bancada S3/S7/S9 aprovada.
+5. **IA e fluxos** (13): cron de fluxos, watchdog, KB sem leitura total, providers, PII em eventos.
+6. **API V2** (15): template e janela de 24 h, canal, erros estáveis, rate limit compartilhado.
+
+## Numeração de migrations (reserva)
+
+| Faixa | Uso |
+|---|---|
+| ≤ 193 | já em produção (V1) ou na V2 (175–182) |
+| 194–198 | PRD 11 |
+| 199 | PRD 12 (leases e bucket do worker; pode ocupar 199a/b) |
+| 200, 200b | PRD 14: R-1/R-2 (**ocupados**, #155) |
+| 201 | PRD 15: inbox de mensagens (**ocupado**, #154) |
+| 202–209 | PRD 15: webhooks de saída, registro de migrations, demais |
+| 210–219 | PRD 13 (210/210b = cron de fluxos, em andamento) |
+| 220–229 | PRD 14 (demais) |
+| 230–239 | PRD 19 (config por conta) |
+| 240–249 | PRD 20 (organizações e permissões) |
+
+⚠️ Os números citados **dentro** dos PRDs 12–15 (ex.: 194/195/197/199 no PRD 15, 199/200/201 no PRD 12) foram escritos antes desta reserva e **não valem**. Quem vale é esta tabela. O orquestrador confirma o número no momento do PR, conferindo a `v2`.
+
+## Perguntas ao dono (consolidadas)
+
+**Prioritárias** (destravam a V1 urgente):
+1. ~~Corrigir já na V1?~~ **Respondida (08/10): não. Tudo vai só para a V2** (#150, #154, #155).
+2. ~~Alguém lê `whatsapp_config` ou `ai_config` direto pelo Supabase?~~ **Respondida: ninguém lê essas tabelas direto.**
+3. O **token DDM antigo** já foi revogado na DDM? (#150)
+4. **Canal de alerta e plantão:** Slack, grupo de WhatsApp ou e-mail? Quem fica de plantão e em que horário? (PRD 15)
+5. Acesso ao **crontab real**, ou print do agendador do EasyPanel, para versionar os crons. (PRD 15)
+
+**Infra e worker** (PRDs 12 e 15):
+
+6. Como o app é construído no EasyPanel (Dockerfile, Nixpacks, Passenger)? Dá para sobrescrever o comando e o *grace period* por serviço? Qual o timeout do proxy?
+7. Quantos números a 80/s **ao mesmo tempo** no pico?
+8. Um Supabase de staging com o compute do alvo, só para a bancada (custo mensal), está autorizado?
+9. **Failover** automático cron ↔ worker ligado por padrão (recomendado)?
+10. Aceita a perda máxima de ~80 a 100 itens em voo, que viram "incertos" e **nunca são reenviados**, num crash do worker?
+11. Usamos o `omnichannel-v2-desenvolvimento` como **staging oficial**?
+12. Aceita rodar o inbox de mensagens em modo **sombra** por 3 a 7 dias antes de ligar?
+
+**Segurança e LGPD** (PRD 14):
+
+13. **Blacklist global entre contas** (M-6/A6/IA-23): manter global ou separar por conta?
+14. Papéis: viewer pode enviar mensagem? Quem baixa exportações? `GET api-keys` só para admin ou acima?
+15. LGPD: anonimizar contato mantendo o hash na blacklist? Quem é o encarregado? Há contrato de operador com os provedores de LLM?
+16. Rotação da `ENCRYPTION_KEY`: janela de manutenção aceitável? Onde guardar a chave aposentada?
+17. Rate limit compartilhado no **Postgres** (recomendado) ou no Redis?
+18. CSP: aceita 1 semana só em modo report antes de bloquear?
+19. Credenciais do projeto antigo (`rpjyrs…`): ainda ativas?
+
+**Disparador e API** (PRDs 11 e 15):
+
+20. Reenvio e cancelamento em lote: só owner ou admin também? Teto por operação (sugestão: 20.000)?
+21. Itens "incertos": permitir reprocesso humano, com risco de duplicar, ou só reportar?
+22. API v1 fora da janela de 24 h: recusar com `outside_window` e exigir template explícito (proposto)?
+23. Escopos sem rota (`messages:read`, `contacts:*`, `conversations:read`): implementar ou esconder?
+24. Eventos de webhook de saída que os integradores precisam?
+25. Copiar a mídia recebida para o Storage, para não depender dos ~30 dias da Meta?
+
+**IA** (PRD 13):
+
+26. Versão do agente × KB: fixar o **conteúdo** dos arquivos ou só o hash?
+27. RAG vetorial agora, ou KB com teto mais RAG externo opcional?
+28. Claude, Gemini e Hermes sem ferramentas: manter ou restringir agentes com ferramentas à OpenAI?
+
+**Produto** (PRD 16; só entram se o dono decidir):
+
+29. **Régua de cobrança contínua** (PRD 17) e **voz/WhatsApp Calling** (PRD 18) entram na V2?
+30. O objetivo é **substituir** o Voll 360 e/ou a Fortics?
+
+**Decisões da operação** (negócio: registradas como risco técnico, sem PR). Ver PRD 13 §14 e a seção 4.1 dos PRDs 14 e 15.
+- Acordo efetivado por frase do texto da IA (IA-02).
+- Fallback "Ben".
+- Encerramento automático por tabulação.
+- Handoff do cliente que xinga.
+- Conversa nova × reutilizada (Meta × WAHA).
