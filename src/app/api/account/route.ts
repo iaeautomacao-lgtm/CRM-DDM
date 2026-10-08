@@ -6,18 +6,14 @@
 //
 // Why both verbs share a route file
 //   They speak about the same singular resource (the caller's
-//   account) and reuse the same `requireRole` plumbing. Splitting
+//   account) and reuse the same `requirePermission` plumbing. Splitting
 //   them across files would duplicate the `account_id` lookup
 //   without buying anything.
 // ============================================================
 
 import { NextResponse } from "next/server";
 
-import {
-  requireRole,
-  getCurrentAccount,
-  toErrorResponse,
-} from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -26,7 +22,7 @@ import {
 
 export async function GET() {
   try {
-    const ctx = await getCurrentAccount();
+    const ctx = await requirePermission("account.view");
     return NextResponse.json({
       account: ctx.account,
       role: ctx.role,
@@ -40,7 +36,7 @@ const MAX_NAME_LEN = 80;
 
 export async function PATCH(request: Request) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requirePermission("settings.account");
 
     // Per-user limit on admin-class mutations. Bounds accidental
     // abuse (script run in a loop) and a compromised admin session
@@ -79,7 +75,7 @@ export async function PATCH(request: Request) {
     }
 
     // RLS allows this UPDATE because accounts_update requires
-    // `is_account_member(id, 'admin')`, and requireRole already
+    // `is_account_member(id, 'admin')`, and requirePermission already
     // guaranteed the caller is admin+.
     const { data, error } = await ctx.supabase
       .from("accounts")

@@ -26,8 +26,8 @@ export interface RouteEntry {
   /** Caminho em src/app/api (sem /route.ts). */
   route: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "*";
-  guard: "role" | "disparador" | "flow" | "viewer" | "scope" | "session";
-  /** Papel mínimo atual (guard = role | viewer(agent) | disparador/flow(admin)). */
+  guard: "role" | "permission" | "disparador" | "flow" | "viewer" | "scope" | "session";
+  /** Papel mínimo que o guard ANTIGO exigia (guard = role | permission | viewer(agent) | disparador/flow(admin)); a equivalência prova can(papel, permission) == hasMinRole(papel, min). */
   min?: AccountRole;
   permission: Permission;
   pending?: "G1" | "G2" | "G3";
@@ -35,6 +35,10 @@ export interface RouteEntry {
 
 const r = (route: string, method: RouteEntry["method"], min: AccountRole, permission: Permission, pending?: RouteEntry["pending"]): RouteEntry => ({
   route, method, guard: "role", min, permission, ...(pending ? { pending } : {}),
+});
+// Rota já migrada para requirePermission/guardPermission (PRD 20, 20.3): `min` guarda o que o guard antigo exigia.
+const pg = (route: string, method: RouteEntry["method"], min: AccountRole, permission: Permission): RouteEntry => ({
+  route, method, guard: "permission", min, permission,
 });
 const disp = (route: string, method: RouteEntry["method"], permission: Permission = "campaigns.manage", pending?: RouteEntry["pending"]): RouteEntry => ({
   route, method, guard: "disparador", min: "admin", permission, ...(pending ? { pending } : {}),
@@ -48,31 +52,31 @@ const session = (route: string, method: RouteEntry["method"], permission: Permis
 
 export const ROUTE_MATRIX: readonly RouteEntry[] = [
   // ── Conta, membros, convites, chaves ────────────────────
-  session("account", "GET", "account.view"),
-  r("account", "PATCH", "admin", "settings.account"),
-  r("account/ai-config", "GET", "admin", "ai.config"),
-  r("account/ai-config", "POST", "admin", "ai.config"),
-  session("account/api-keys", "GET", "api_keys.view"),
-  r("account/api-keys", "POST", "admin", "api_keys.manage"),
-  r("account/api-keys/[id]", "DELETE", "admin", "api_keys.manage"),
-  r("account/invitations", "GET", "admin", "members.invite"),
-  r("account/invitations", "POST", "admin", "members.invite"),
-  r("account/invitations/[id]", "DELETE", "admin", "members.invite"),
-  session("account/members", "GET", "members.view"),
+  pg("account", "GET", "viewer", "account.view"),
+  pg("account", "PATCH", "admin", "settings.account"),
+  pg("account/ai-config", "GET", "admin", "ai.config"),
+  pg("account/ai-config", "POST", "admin", "ai.config"),
+  pg("account/api-keys", "GET", "viewer", "api_keys.view"),
+  pg("account/api-keys", "POST", "admin", "api_keys.manage"),
+  pg("account/api-keys/[id]", "DELETE", "admin", "api_keys.manage"),
+  pg("account/invitations", "GET", "admin", "members.invite"),
+  pg("account/invitations", "POST", "admin", "members.invite"),
+  pg("account/invitations/[id]", "DELETE", "admin", "members.invite"),
+  pg("account/members", "GET", "viewer", "members.view"),
   // PRD 20, 20.10: contrato de permissões para o front (derivado do que o servidor já decide)
   session("me/permissions", "GET", "account.view"),
   session("account/permission-catalog", "GET", "members.view"),
-  r("account/members/[userId]", "PATCH", "admin", "members.manage"),
-  r("account/members/[userId]", "DELETE", "admin", "members.manage"),
-  r("account/members/[userId]/reset-password", "POST", "owner", "members.reset_password"),
-  r("account/members/bulk-invite", "POST", "owner", "members.bulk_invite"),
-  r("account/transfer-ownership", "POST", "owner", "ownership.transfer"),
-  session("account/teams/[teamId]/members", "GET", "teams.view"),
-  r("account/teams/[teamId]/members", "POST", "admin", "teams.manage"),
-  r("account/teams/[teamId]/members", "DELETE", "admin", "teams.manage"),
+  pg("account/members/[userId]", "PATCH", "admin", "members.manage"),
+  pg("account/members/[userId]", "DELETE", "admin", "members.manage"),
+  pg("account/members/[userId]/reset-password", "POST", "owner", "members.reset_password"),
+  pg("account/members/bulk-invite", "POST", "owner", "members.bulk_invite"),
+  pg("account/transfer-ownership", "POST", "owner", "ownership.transfer"),
+  pg("account/teams/[teamId]/members", "GET", "viewer", "teams.view"),
+  pg("account/teams/[teamId]/members", "POST", "admin", "teams.manage"),
+  pg("account/teams/[teamId]/members", "DELETE", "admin", "teams.manage"),
   r("ai/prompt-versions", "GET", "admin", "ai.config"),
-  r("audit-logs", "GET", "admin", "audit.view"),
-  r("ddm-logs", "GET", "admin", "audit.view"),
+  pg("audit-logs", "GET", "admin", "audit.view"),
+  pg("ddm-logs", "GET", "admin", "audit.view"),
 
   // ── Canais, WhatsApp, templates, webchat ─────────────────
   session("channels", "GET", "channels.view"),

@@ -54,6 +54,15 @@ describe("guard declarado ainda existe no código-fonte da rota (anti-drift)", (
         case "role":
           expect(src, `${e.route} deveria ter guard de papel ${e.min}`).toMatch(ROLE_RE(e.min as string));
           break;
+        case "permission": {
+          // Rota migrada (20.3): o código pede a PERMISSÃO declarada (requirePermission/guardPermission/can)
+          // e não usa mais guard de papel.
+          const perm = e.permission.replace(/\./g, "\\.");
+          const asksPermission = new RegExp(`(?:requirePermission|guardPermission)\\(\\s*['"]${perm}['"]|can\\([^)]*['"]${perm}['"]`);
+          expect(src, `${e.route} deveria pedir a permissão ${e.permission}`).toMatch(asksPermission);
+          expect(src, `${e.route} não deveria mais usar guard de papel`).not.toMatch(/(?:guardRole|requireRole)\(/);
+          break;
+        }
         case "disparador":
           expect(src).toMatch(/requireDisparadorAccess|canManageCampaigns/);
           break;
@@ -79,7 +88,7 @@ describe("guard declarado ainda existe no código-fonte da rota (anti-drift)", (
         if (statSync(p).isDirectory()) walk(p);
         else if (name === "route.ts") {
           const src = readFileSync(p, "utf8");
-          if (/(?:guardRole|requireRole|agentRoute)\(\s*['"](?:owner|admin|supervisor|agent)['"]|requireDisparadorAccess|guardFlow(Access)?\b|resolveIntelligenceScope/.test(src)) {
+          if (/(?:guardRole|requireRole|agentRoute)\(\s*['"](?:owner|admin|supervisor|agent)['"]|requirePermission\(|guardPermission\(|requireDisparadorAccess|guardFlow(Access)?\b|resolveIntelligenceScope/.test(src)) {
             const route = relative(API_ROOT, join(p, "..")).split("\\").join("/");
             if (!inMatrix.has(route)) missing.push(route);
           }

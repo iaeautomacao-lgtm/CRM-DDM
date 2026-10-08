@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { logAuditEvent } from '@/lib/audit/log-event'
 import {
   actionLabel,
@@ -30,7 +30,7 @@ function isoOrNull(v: string | null): string | null {
 
 export async function GET(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requirePermission('audit.view')
     const p = new URL(request.url).searchParams
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- builder do PostgREST sem tipos gerados

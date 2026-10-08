@@ -21,7 +21,7 @@
 import { NextResponse } from "next/server";
 import type { PostgrestError } from "@supabase/supabase-js";
 
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { isAccountRole } from "@/lib/auth/roles";
 import {
   checkRateLimit,
@@ -51,7 +51,7 @@ export async function PATCH(
   { params }: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requirePermission("members.manage");
 
     const limit = checkRateLimit(
       `admin:memberRole:${ctx.userId}`,
@@ -136,7 +136,7 @@ export async function DELETE(
   { params }: { params: Promise<{ userId: string }> },
 ) {
   try {
-    const ctx = await requireRole("admin");
+    const ctx = await requirePermission("members.manage");
 
     const limit = checkRateLimit(
       `admin:memberRemove:${ctx.userId}`,

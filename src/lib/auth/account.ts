@@ -29,7 +29,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
-import { permissionsForRole, type Permission } from "./permissions";
+import { can, permissionsForRole, type Permission } from "./permissions";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 
 // ------------------------------------------------------------
@@ -49,9 +49,12 @@ export class UnauthorizedError extends Error {
 
 export class ForbiddenError extends Error {
   readonly status = 403 as const;
-  constructor(message = "Forbidden") {
+  /** Permissão que faltou (PRD 20): o front pode mostrar "sem permissão para …". */
+  readonly permission?: Permission;
+  constructor(message = "Forbidden", permission?: Permission) {
     super(message);
     this.name = "ForbiddenError";
+    this.permission = permission;
   }
 }
 
@@ -68,6 +71,13 @@ export class ForbiddenError extends Error {
  * server internals out of the wire.
  */
 export function toErrorResponse(err: unknown): NextResponse {
+  if (err instanceof ForbiddenError && err.permission) {
+    // Campos extras são aditivos: quem lê só `error` (string) continua funcionando.
+    return NextResponse.json(
+      { error: err.message, code: "forbidden", permission: err.permission },
+      { status: err.status },
+    );
+  }
   if (err instanceof UnauthorizedError || err instanceof ForbiddenError) {
     return NextResponse.json({ error: err.message }, { status: err.status });
   }
@@ -179,6 +189,20 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     permissions: permissionsForRole(data.account_role),
     account: { id: account.id, name: account.name },
   };
+}
+
+/**
+ * Resolve o contexto da conta e exige uma PERMISSÃO do catálogo (PRD 20, fase 20.3).
+ * Substitui `requireRole(min)` rota a rota, com o mesmo resultado para os 5 papéis de
+ * sistema (matriz dourada: src/lib/auth/permissions-matrix.ts). Fail-closed: chave fora
+ * do catálogo nega. 401 sem sessão; 403 `{error, code:'forbidden', permission}`.
+ */
+export async function requirePermission(permission: Permission): Promise<AccountContext> {
+  const ctx = await getCurrentAccount();
+  if (!can(ctx, permission)) {
+    throw new ForbiddenError(`This action requires the '${permission}' permission`, permission);
+  }
+  return ctx;
 }
 
 /**

@@ -13,7 +13,6 @@
 //     agente e viewer não criam chave.
 // ============================================================
 
-import { hasMinRole, type AccountRole } from '@/lib/auth/roles';
 import { normalizeScopes, type ApiScope } from './scopes';
 
 /** Escopos que exigem dono (user_id). */
@@ -32,12 +31,20 @@ export type KeyCreationPlan =
   | { ok: true; scopes: ApiScope[]; userId: string | null; personal: boolean }
   | { ok: false; status: 400 | 403; error: string };
 
+/** O que o criador pode (PRD 20): gerir as chaves da conta e/ou criar a própria chave pessoal. */
+export interface KeyCreatorCaps {
+  /** `api_keys.manage` (owner/admin hoje). */
+  canManage: boolean;
+  /** `intelligence.personal_key` (supervisor+ hoje). */
+  canPersonal: boolean;
+}
+
 /**
- * Decide se `role` pode criar uma chave com `rawScopes` e, se puder, com
+ * Decide se o criador (`caps`) pode criar uma chave com `rawScopes` e, se puder, com
  * qual dono. O dono da chave pessoal é sempre o próprio criador.
  */
 export function planKeyCreation(
-  role: AccountRole,
+  caps: KeyCreatorCaps,
   creatorId: string,
   rawScopes: unknown
 ): KeyCreationPlan {
@@ -60,10 +67,10 @@ export function planKeyCreation(
     };
   }
 
-  if (hasMinRole(role, 'admin')) {
+  if (caps.canManage) {
     return { ok: true, scopes, userId: personal ? creatorId : null, personal };
   }
-  if (role === 'supervisor') {
+  if (caps.canPersonal) {
     if (!personal) {
       return {
         ok: false,

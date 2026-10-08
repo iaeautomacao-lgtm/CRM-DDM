@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { requireRole, toErrorResponse } from "@/lib/auth/account";
+import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 
 let _adminClient: SupabaseClient | null = null;
 function supabaseAdmin(): SupabaseClient {
@@ -55,7 +55,7 @@ const MAX_LIMIT = 500;
 
 export async function GET(request: Request) {
   try {
-    const { accountId } = await requireRole("admin");
+    const { accountId } = await requirePermission("audit.view");
     const { searchParams } = new URL(request.url);
 
     const tabParam = searchParams.get("tab");
