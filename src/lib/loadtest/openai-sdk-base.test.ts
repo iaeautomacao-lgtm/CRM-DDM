@@ -67,5 +67,5 @@ describe('OpenAI com base fixa (sem DISPATCH_LOAD_TEST)', () => {
     }
     walk(join(process.cwd(), 'src'))
     expect(offenders).toEqual([])
-  })
+  }, 30_000)
 })

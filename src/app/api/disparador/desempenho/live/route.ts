@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { toErrorResponse } from "@/lib/auth/account";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
-import { buildLivePerformanceSnapshot } from "@/lib/disparador/live-performance";
+import { buildLivePerformanceSnapshot, loadLiveCountsViaRpc } from "@/lib/disparador/live-performance";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,6 +42,14 @@ export async function GET() {
     const { accountId } = await requireDisparadorAccess();
     const db = supabaseAdmin();
     const sampledAt = new Date();
+
+    // Migration 198: tudo numa ida só, cada contagem com teto de custo (sem a função: contagens de antes, abaixo).
+    const fast = await loadLiveCountsViaRpc(db, accountId);
+    if (fast) {
+      const live = buildLivePerformanceSnapshot({ sampledAt: sampledAt.toISOString(), ...fast.counts, capped: fast.capped });
+      return NextResponse.json({ ok: true, live }, { headers: NO_STORE_HEADERS });
+    }
+
     const sentCutoff = new Date(sampledAt.getTime() - 60_000).toISOString();
 
     const [campaignResult, channelResult] = await Promise.all([
