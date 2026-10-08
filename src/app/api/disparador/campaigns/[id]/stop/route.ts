@@ -57,7 +57,7 @@ export async function POST(
     // já foi escopada à conta acima). Antes só o criador — um admin não
     // conseguia frear em emergência a campanha de um colega.
     const isPrivilegedRole =
-      profile.account_role === "owner" || profile.account_role === "admin";
+      canManageCampaigns(profile.account_role);
     if (campaign.created_by !== user.id && !isPrivilegedRole) {
       return NextResponse.json(
         { error: "Você não tem permissão para executar esta campanha." },
