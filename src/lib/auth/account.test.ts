@@ -69,6 +69,8 @@ vi.mock("@/lib/supabase/server", () => ({
 const { getCurrentAccount, UnauthorizedError, ForbiddenError } = await import(
   "./account"
 );
+const { ACCOUNT_ROLES } = await import("./roles");
+const { PERMISSIONS, SYSTEM_ROLE_PERMISSIONS, can } = await import("./permissions");
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -104,6 +106,25 @@ describe("getCurrentAccount", () => {
     expect(calls[0].eqArgs).toEqual([["user_id", "user-1"]]);
     expect(calls[1].columns).not.toMatch(/accounts!/);
     expect(calls[1].eqArgs).toEqual([["id", "acct-1"]]);
+  });
+
+  // PRD 20, 20.2: o contexto carrega as permissões (compat: derivadas do papel de sistema).
+  it.each(ACCOUNT_ROLES)("carrega as permissões do papel de sistema %s (compat)", async (role) => {
+    const { client } = makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: { data: { account_id: "acct-1", account_role: role }, error: null },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+      },
+    });
+    createClient.mockReturnValue(client);
+
+    const ctx = await getCurrentAccount();
+
+    expect([...ctx.permissions].sort()).toEqual([...SYSTEM_ROLE_PERMISSIONS[role]].sort());
+    for (const permission of PERMISSIONS) {
+      expect(can(ctx, permission), `${role} ${permission}`).toBe(can({ role }, permission));
+    }
   });
 
   it("throws UnauthorizedError when there is no session", async () => {

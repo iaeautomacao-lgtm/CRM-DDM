@@ -29,6 +29,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
+import { permissionsForRole, type Permission } from "./permissions";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 
 // ------------------------------------------------------------
@@ -87,6 +88,13 @@ export interface AccountContext {
   accountId: string;
   /** Caller's role within their account. */
   role: AccountRole;
+  /**
+   * Permissões efetivas do chamador (PRD 20, fase 20.2). COMPAT: derivadas do papel de sistema
+   * (permissionsForRole) — o papel personalizado ainda não existe, então é exatamente o conjunto que
+   * as checagens por papel já decidem. Nenhuma rota usa isto para decidir ainda (fase 20.3).
+   * Quando o personalizado existir, vem de profiles.role_id ⨝ role_permissions (migration 240).
+   */
+  permissions: ReadonlySet<Permission>;
   /** Lightweight account meta — id + name. */
   account: { id: string; name: string };
 }
@@ -168,6 +176,7 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     userId: user.id,
     accountId: data.account_id,
     role: data.account_role,
+    permissions: permissionsForRole(data.account_role),
     account: { id: account.id, name: account.name },
   };
 }
