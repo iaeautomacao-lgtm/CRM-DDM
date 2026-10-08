@@ -14,12 +14,6 @@ import {
   Plus,
   Loader2,
   SlidersHorizontal,
-  Inbox,
-  MessageCircle,
-  Globe,
-  Camera,
-  MessagesSquare,
-  type LucideIcon,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow } from "date-fns";
@@ -69,12 +63,6 @@ interface ConversationListProps {
   onCreateConversation?: () => void;
 }
 
-const QUEUE_COLORS = {
-  attending: "bg-primary",
-  waiting: "bg-amber-500",
-  closed: "bg-muted-foreground",
-} as const;
-
 const STATUS_OPTIONS: { label: string; value: InboxStatus }[] = [
   { label: "Em andamento", value: "active" },
   { label: "Não lidas", value: "unread" },
@@ -83,12 +71,12 @@ const STATUS_OPTIONS: { label: string; value: InboxStatus }[] = [
   { label: CONVERSATION_STATUS_LABELS_PLURAL.closed, value: "closed" },
 ];
 
-const CHANNEL_TABS: { label: string; value: InboxChannel | null; icon: LucideIcon }[] = [
-  { label: "Todos os canais", value: null, icon: Inbox },
-  { label: "WhatsApp", value: "whatsapp", icon: MessageCircle },
-  { label: "Webchat", value: "webchat", icon: Globe },
-  { label: "Instagram", value: "instagram", icon: Camera },
-  { label: "Messenger", value: "messenger", icon: MessagesSquare },
+const CHANNEL_TABS: { label: string; value: InboxChannel | null }[] = [
+  { label: "Todos", value: null },
+  { label: "WhatsApp", value: "whatsapp" },
+  { label: "Webchat", value: "webchat" },
+  { label: "Instagram", value: "instagram" },
+  { label: "Messenger", value: "messenger" },
 ];
 
 export const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
@@ -399,12 +387,32 @@ export function ConversationList({
     ));
 
   return (
-    // w-full on mobile so the list occupies the whole viewport when it's
-    // the single pane showing; fixed 320px on desktop where it shares the
-    // row with the thread + contact sidebar.
-    <div className="flex h-full w-full flex-col border-r border-border bg-card lg:w-80">
-      <div className="space-y-2 border-b border-border p-3">
-        <div className="flex items-center gap-2">
+    // A lista é a superfície de triagem do Inbox: um pouco mais larga no
+    // desktop para nome, contexto e última mensagem respirarem sem roubar
+    // espaço demais da conversa.
+    <div className="flex h-full w-full flex-col border-r border-border bg-background lg:w-[352px]">
+      <div className="border-b border-border">
+        <div className="flex items-center justify-between px-3 pb-2 pt-3">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Atendimentos</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">Priorize e encontre conversas rapidamente</p>
+          </div>
+          {onCreateConversation && accountRole !== "viewer" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={onCreateConversation}
+              className="h-8 w-8 shrink-0"
+              aria-label="Nova conversa"
+              title="Nova conversa"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 px-3 pb-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input
@@ -412,11 +420,10 @@ export function ConversationList({
               aria-label="Buscar conversas por nome ou telefone"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              placeholder="Buscar nome ou telefone…"
-              className="h-8 border-border bg-muted pl-9 text-sm text-foreground placeholder-muted-foreground focus:border-primary/50"
+              placeholder="Buscar conversas…"
+              className="h-9 border-border/80 bg-muted/45 pl-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/50"
             />
           </div>
-          {/* Os 6 filtros ficam num único popover para a barra caber numa linha. */}
           <Popover>
             <PopoverTrigger
               render={
@@ -424,15 +431,18 @@ export function ConversationList({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className={cn("h-8 shrink-0 gap-1 px-2", activeFilterCount > 0 && "border-primary/40 text-primary")}
+                  className={cn(
+                    "h-9 shrink-0 gap-1.5 border-border/80 px-2.5 text-xs",
+                    activeFilterCount > 0 && "border-primary/40 text-primary",
+                  )}
                   aria-label={activeFilterCount > 0 ? `Filtros (${activeFilterCount} ativos)` : "Filtros"}
                 />
               }
             >
               <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-              <span className="text-xs">Filtros</span>
+              <span>Filtros</span>
               {activeFilterCount > 0 && (
-                <span className="rounded-full bg-primary px-1.5 text-xs font-medium leading-4 text-primary-foreground" aria-hidden="true">
+                <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-4 text-primary-foreground" aria-hidden="true">
                   {activeFilterCount}
                 </span>
               )}
@@ -510,28 +520,16 @@ export function ConversationList({
               </div>
             </PopoverContent>
           </Popover>
-          {onCreateConversation && accountRole !== "viewer" && (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={onCreateConversation}
-              className="h-8 w-8 shrink-0"
-              aria-label="Nova conversa"
-              title="Nova conversa"
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          )}
         </div>
 
-        {/* Abas de canal como controle segmentado numa linha só: ícone +
-            não lidas; o nome do canal fica no title e no aria-label. */}
-        <div className="flex gap-0.5 overflow-x-auto rounded-md bg-muted p-0.5" role="group" aria-label="Filtrar por canal">
+        <div
+          className="flex gap-4 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          role="group"
+          aria-label="Filtrar por canal"
+        >
           {CHANNEL_TABS.map((tab) => {
             const count = unread[tab.value ?? "all"] ?? 0;
             const active = filters.canal === tab.value;
-            const Icon = tab.icon;
             return (
               <button
                 key={tab.label}
@@ -539,15 +537,22 @@ export function ConversationList({
                 onClick={() => setFilters({ canal: tab.value, linha: null })}
                 aria-pressed={active}
                 aria-label={count > 0 ? `${tab.label} (${count} não lidas)` : tab.label}
-                title={tab.label}
                 className={cn(
-                  "flex h-8 min-w-12 flex-1 shrink-0 items-center justify-center gap-1 rounded px-2 text-xs font-medium transition-colors",
-                  active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  "flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-0 text-xs font-medium transition-colors",
+                  active
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{tab.label}</span>
                 {count > 0 && (
-                  <span className={cn("tabular-nums", active && "text-primary")} aria-hidden="true">
+                  <span
+                    className={cn(
+                      "text-[10px] tabular-nums",
+                      active ? "font-semibold text-primary" : "text-muted-foreground",
+                    )}
+                    aria-hidden="true"
+                  >
                     {count > 99 ? "99+" : count}
                   </span>
                 )}
@@ -555,7 +560,6 @@ export function ConversationList({
             );
           })}
         </div>
-
       </div>
 
       {/* `min-h-0` is load-bearing: a flex child defaults to
@@ -697,12 +701,12 @@ function SectionHeader({
     <button
       type="button"
       onClick={onToggle}
-      className="flex w-full items-center justify-between px-3 py-2 text-left transition-colors hover:bg-muted/40"
+      className="sticky top-0 z-10 flex w-full items-center justify-between border-b border-border/50 bg-background/95 px-3 py-2.5 text-left backdrop-blur transition-colors hover:bg-muted/35"
       aria-expanded={expanded}
     >
-      <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+      <span className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">
         {label}
-        <span className="rounded-full bg-muted px-2 text-xs tabular-nums text-muted-foreground">{count}</span>
+        <span className="text-[10px] font-medium tabular-nums text-muted-foreground/80">{count}</span>
       </span>
       <ChevronDown
         aria-hidden="true"
@@ -774,8 +778,8 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
       onClick={() => onSelect(conversation)}
       aria-current={isActive ? "true" : undefined}
       className={cn(
-        "flex w-full items-center gap-3 border-b border-l-2 border-b-border/50 border-l-transparent px-3 py-2 text-left transition-colors hover:bg-muted/50",
-        isActive && "border-l-primary bg-primary-soft hover:bg-primary-soft"
+        "flex w-full items-center gap-2.5 border-b border-l-2 border-b-border/45 border-l-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted/40",
+        isActive && "border-l-primary bg-muted/65 hover:bg-muted/65"
       )}
     >
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground" aria-hidden="true">
@@ -798,11 +802,11 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+          <span className="truncate text-[13px] font-semibold text-foreground">{displayName}</span>
           {/* O horário vira "aguardando X" (âmbar) quando o cliente espera
               ≥ 5 min sem atendente — mesmo espaço, sem linha extra. */}
           <span
-            className={cn("shrink-0 text-xs", waiting ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground")}
+            className={cn("shrink-0 text-[11px]", waiting ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground/80")}
             title={timeAgoTitle}
           >
             {waiting ?? timeAgo}
@@ -810,10 +814,10 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
         </div>
 
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+          <p className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
             {/* Cliente da linha: ponto com a cor dele + nome (sem pílula colorida). */}
             {client && (
-              <span className="flex max-w-[40%] shrink-0 items-center gap-1 text-xs text-foreground/80" title={`Cliente: ${client.name}`}>
+              <span className="flex max-w-[42%] shrink-0 items-center gap-1 text-[11px] text-foreground/70" title={`Cliente: ${client.name}`}>
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: client.color }} aria-hidden="true" />
                 <span className="truncate">{client.name}</span>
                 <span aria-hidden="true" className="text-muted-foreground">·</span>
@@ -838,11 +842,7 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
                 <span className="sr-only"> não lidas</span>
               </span>
             ) : (
-              <span
-                className={cn("h-2 w-2 rounded-full", QUEUE_COLORS[queueSection])}
-                title={queueLabel}
-                aria-hidden="true"
-              />
+              null
             )}
             <span className="sr-only">Status: {queueLabel}</span>
           </div>
