@@ -39,6 +39,7 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import { handleChannelHealthChange, isChannelHealthField } from '@/lib/disparador/channel-health'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -251,7 +252,8 @@ export async function POST(request: Request) {
       const key = channelKeyForChange(
         entry,
         change,
-        isTemplateWebhookField(change?.field),
+        // Eventos de WABA (template e saúde do número) não trazem metadata.phone_number_id: chave "waba:<entry.id>".
+        isTemplateWebhookField(change?.field) || isChannelHealthField(change?.field),
       )
       if (key) channelKeys.add(key)
     }
@@ -498,12 +500,29 @@ async function processWebhook(
   for (const entry of body.entry) {
     for (const change of entry.changes) {
       const isTemplate = isTemplateWebhookField(change.field)
+      const isHealth = isChannelHealthField(change.field)
       // Só processa o que pertence a um canal cuja assinatura validou; a
       // conta usada em tudo abaixo vem DESSE canal, nunca do conteúdo do corpo.
-      const channelKey = channelKeyForChange(entry, change, isTemplate)
+      const channelKey = channelKeyForChange(entry, change, isTemplate || isHealth)
       const channel = channelKey ? verifiedChannels.get(channelKey) : undefined
       if (!channel) {
         console.warn('[webhook] change ignorada: canal não validado:', channelKey)
+        continue
+      }
+
+      // Saúde do número (phone_number_quality_update / account_update): re-consulta o Graph e recalcula o limite/s (P1-5).
+      // Falha aqui nunca derruba o restante do POST (a Meta não reenvia: já recebeu 200).
+      if (isHealth) {
+        try {
+          await handleChannelHealthChange(supabaseAdmin(), {
+            wabaId: String(entry.id),
+            accountId: channel.account_id,
+            field: change.field,
+            value: change.value as unknown as Record<string, unknown>,
+          })
+        } catch (error) {
+          console.error('[webhook] falha ao tratar evento de saúde do número:', change.field, error)
+        }
         continue
       }
 

@@ -121,6 +121,34 @@ export async function verifyPhoneNumber(
   return response.json()
 }
 
+export interface MetaPhoneHealth {
+  id?: string
+  display_phone_number?: string
+  /** GREEN | YELLOW | RED | NA (a Meta devolve NA para número novo). */
+  quality_rating?: string
+  /** TIER_50 | TIER_250 | TIER_1K | TIER_10K | TIER_100K | TIER_UNLIMITED. */
+  messaging_limit_tier?: string
+  /** { level: 'STANDARD' | 'HIGH' | 'NOT_APPLICABLE' } — nível de throughput da Cloud API. */
+  throughput?: { level?: string }
+}
+
+/**
+ * Saúde do número (qualidade, tier de mensagens, throughput) — usada pelo poll e pelo webhook de qualidade do disparador
+ * (limite por segundo por número). Mesma chamada da tela da campanha, mas com os campos de saúde e SEM mascarar falha:
+ * qualquer erro HTTP lança MetaApiError (quem chama decide o que fazer — nunca assumir "verde").
+ */
+export async function getPhoneNumberHealth(args: VerifyPhoneNumberArgs): Promise<MetaPhoneHealth> {
+  const { phoneNumberId, accessToken } = args
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,quality_rating,messaging_limit_tier,throughput`
+  const response = await metaFetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
 // ============================================================
 // Cloud API registration (subscription for inbound webhooks)
 // ============================================================

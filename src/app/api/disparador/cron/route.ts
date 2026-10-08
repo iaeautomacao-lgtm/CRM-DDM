@@ -15,6 +15,7 @@ import { TickTelemetry, startHealthMonitor } from "@/lib/disparador/dispatch-tel
 import type { BackoffReason } from "@/lib/disparador/provider-signals";
 import {
   isInCooldown,
+  MAX_PER_NUMBER_CONCURRENCY,
   rememberCooldown,
   resolveChannelConcurrency,
   resolveThroughputConfig,
@@ -43,6 +44,7 @@ import {
   type ChainContext,
 } from "@/lib/disparador/tick-chain";
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
+import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
@@ -75,6 +77,12 @@ interface PlannedCampaign {
 // (mais atrasadas primeiro) e, dentro de cada uma, na ordem do SELECT.
 // Resolve a concorrência de cada número: linha de dispatch_channel_limits
 // > padrão do provedor (env); cooldown recente → metade.
+// P1-4: p95 da latência da Meta usado para derivar as vagas do limite/s (vagas = ceil(rate × p95 × 1,2)).
+function assumedP95Seconds(): number {
+  const parsed = Number(process.env.DISPARADOR_ASSUMED_P95_S);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 30) : 1;
+}
+
 async function buildChannelWork(
   db: AdminDb,
   planned: PlannedCampaign[],
@@ -87,6 +95,7 @@ async function buildChannelWork(
   configs: Map<string, Record<string, any>> | null;
 }> {
   const byChannel = new Map<string, Map<string, QueueItem[]>>();
+  const rateRows = new Map<string, Record<string, any>>();
   for (const entry of planned) {
     for (const item of entry.items) {
       const channelId = item.session_id ?? "";
@@ -98,35 +107,55 @@ async function buildChannelWork(
     }
   }
   const ids = [...byChannel.keys()].filter(Boolean);
-  const info = new Map<string, { provider: DispatchProvider | null; maxInFlight: number | null; cooldownUntil: string | null }>();
+  const info = new Map<string, { provider: DispatchProvider | null; maxInFlight: number | null; cooldownUntil: string | null; paused: boolean }>();
   let configs: Map<string, Record<string, any>> | null = new Map();
   if (ids.length) {
-    const [providers, limits, cooldowns] = await Promise.all([
+    const [providers, limits, cooldowns, rates] = await Promise.all([
       // Linha inteira: o envio usa esta leitura (uma por tick) em vez de
       // ler o canal a cada item.
       db.from("whatsapp_config").select("*").in("id", ids),
       db.from("dispatch_channel_limits").select("*").in("session_id", ids),
       // Tabela da migration 164; sem ela, só vale o cooldown em memória.
       db.from("dispatch_channel_cooldowns").select("session_id, cooldown_until").in("session_id", ids),
+      // Migration 190 (P1-4): limite por segundo por número. Sem a tabela/linha, o número segue só com as vagas (comportamento antigo).
+      db.from("dispatch_channel_rate").select("*").in("session_id", ids),
     ]);
+    if (rates.error) {
+      console.warn("[Cron] dispatch_channel_rate indisponível; sem limite por segundo:", rates.error.message);
+    } else {
+      for (const row of (rates.data ?? []) as Array<Record<string, any> & { session_id: string }>) rateRows.set(row.session_id, row);
+    }
     if (providers.error) {
       console.error("[Cron] Falha ao ler provedores dos canais:", providers.error.message);
       configs = null;
     }
     if (limits.error) console.error("[Cron] Falha ao ler limites dos canais:", limits.error.message);
-    for (const id of ids) info.set(id, { provider: null, maxInFlight: null, cooldownUntil: null });
+    for (const id of ids) info.set(id, { provider: null, maxInFlight: null, cooldownUntil: null, paused: false });
     for (const row of (providers.data ?? []) as Array<Record<string, any> & { id: string; provider: string | null }>) {
       configs?.set(row.id, row);
       const entry = info.get(row.id);
       if (entry && (row.provider === "meta" || row.provider === "waha")) entry.provider = row.provider;
     }
-    for (const row of (limits.data ?? []) as Array<{ session_id: string; max_in_flight: number | null }>) {
+    for (const row of (limits.data ?? []) as Array<{ session_id: string; max_in_flight: number | null; paused?: boolean | null }>) {
       const entry = info.get(row.session_id);
-      if (entry) entry.maxInFlight = row.max_in_flight ?? null;
+      if (entry) {
+        entry.maxInFlight = row.max_in_flight ?? null;
+        // Migration 192: número pausado no front não recebe trabalho (o claim também recusa no banco).
+        entry.paused = row.paused === true;
+      }
     }
     for (const row of (cooldowns.data ?? []) as Array<{ session_id: string; cooldown_until: string | null }>) {
       const entry = info.get(row.session_id);
       if (entry) entry.cooldownUntil = row.cooldown_until;
+    }
+  }
+  // Política (% por cor, rampa, teto) por conta dos canais deste tick; ausente = padrão do dono.
+  const policyByAccount = new Map<string, Record<string, unknown>>();
+  if (rateRows.size && configs) {
+    const accountIds = [...new Set([...rateRows.keys()].map((id) => configs?.get(id)?.account_id).filter(Boolean))] as string[];
+    if (accountIds.length) {
+      const policies = await db.from("dispatch_rate_policy").select("*").in("account_id", accountIds);
+      if (!policies.error) for (const row of (policies.data ?? []) as Array<Record<string, unknown> & { account_id: string }>) policyByAccount.set(row.account_id, row);
     }
   }
   const now = Date.now();
@@ -134,24 +163,37 @@ async function buildChannelWork(
   const defaultMaxInFlight = new Map<string, number | undefined>();
   for (const [channelId, campaigns] of byChannel) {
     const channelInfo = info.get(channelId);
+    if (channelInfo?.paused) continue;
     const provider = channelInfo?.provider ?? null;
     const inCooldown = isInCooldown(channelId, now, channelInfo?.cooldownUntil);
-    const maxConcurrency = resolveChannelConcurrency({
+    let maxConcurrency = resolveChannelConcurrency({
       provider,
       rowMaxInFlight: channelInfo?.maxInFlight,
       inCooldown,
       config,
     });
+    // Limite por segundo (P1-4): só Meta e só com linha em dispatch_channel_rate; efetivo = manual ?? auto (rampa, trava, cooldown).
+    // As vagas passam a ser DERIVADAS do limite/s (ceil(rate × p95 × 1,2)), limitadas ao teto do número.
+    let ratePerSecond: number | undefined;
+    const rateRow = provider === "waha" ? undefined : rateRows.get(channelId);
+    if (rateRow) {
+      const accountId = configs?.get(channelId)?.account_id as string | undefined;
+      const policy = policyFromRow(accountId ? policyByAccount.get(accountId) : null);
+      const effective = effectiveRate(rateRow as RateState, policy, now, { inCooldown });
+      ratePerSecond = effective.rate;
+      maxConcurrency = derivedSlots(effective.rate, assumedP95Seconds(), channelInfo?.maxInFlight ?? MAX_PER_NUMBER_CONCURRENCY);
+    }
     // Sem linha no banco, o claim usa o padrão do provedor como teto
     // atômico (claim_dispatch_item_capped); com linha, vale a linha.
     defaultMaxInFlight.set(
       channelId,
-      channelInfo?.maxInFlight ? undefined : config.perNumber[provider ?? "unknown"]
+      channelInfo?.maxInFlight ? undefined : ratePerSecond !== undefined ? maxConcurrency : config.perNumber[provider ?? "unknown"]
     );
     telemetry.channel(channelId, provider, inCooldown);
     channels.push({
       channelId,
       maxConcurrency,
+      ratePerSecond,
       campaigns: [...campaigns].map(([campaignId, items]) => ({ campaignId, items })),
     });
   }

@@ -31,6 +31,11 @@ export interface ChannelWork<T> {
   channelId: string;
   /** Concorrência inicial do número (já resolvida, >= 1). */
   maxConcurrency: number;
+  /**
+   * Limite de inícios por segundo do número (P1-4, token bucket com rajada de 1 s). Ausente/0 = sem limite por segundo (comportamento
+   * antigo: só as vagas). As vagas continuam sendo o teto de paralelismo. Estado só dentro do tick.
+   */
+  ratePerSecond?: number;
   campaigns: Array<{ campaignId: string; items: readonly T[] }>;
 }
 
@@ -90,6 +95,8 @@ export interface ChannelReport {
   peakInFlight: number;
   capStart: number;
   capEnd: number;
+  /** Limite por segundo aplicado ao número neste tick (null = sem limite). */
+  ratePerSecond?: number | null;
 }
 
 export interface SchedulerReport {
@@ -119,6 +126,8 @@ interface ChannelState<T> {
   started: number;
   cursor: number;
   queues: CampaignQueue<T>[];
+  /** Token bucket do número (null = sem limite por segundo). */
+  bucket: { rate: number; capacity: number; tokens: number; lastMs: number } | null;
   /** Uma redução por número/tick evita 24→12→6 por dois erros quase simultâneos. */
   backoffApplied: boolean;
   /** Janela móvel das conclusões recentes: true = 5xx/timeout/rede. */
@@ -175,6 +184,10 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
       peak: 0,
       started: 0,
       cursor: 0,
+      bucket:
+        typeof channel.ratePerSecond === "number" && Number.isFinite(channel.ratePerSecond) && channel.ratePerSecond > 0
+          ? { rate: channel.ratePerSecond, capacity: Math.max(1, channel.ratePerSecond), tokens: Math.max(1, channel.ratePerSecond), lastMs: now() }
+          : null,
       backoffApplied: false,
       transientWindow: [],
       transientCount: 0,
@@ -195,12 +208,35 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
     }
   };
 
+  // Token bucket por número: tokens = min(capacidade, tokens + Δt·rate). Sem token, o número espera (o pump reagenda um timer curto).
+  const hasToken = (channel: ChannelState<T>): boolean => {
+    const bucket = channel.bucket;
+    if (!bucket) return true;
+    const at = now();
+    bucket.tokens = Math.min(bucket.capacity, bucket.tokens + Math.max(0, at - bucket.lastMs) * (bucket.rate / 1000));
+    bucket.lastMs = at;
+    return bucket.tokens >= 1;
+  };
+  const hasWork = (channel: ChannelState<T>) =>
+    channel.queues.some((queue) => !pausedCampaigns.has(queue.campaignId) && queue.next < queue.items.length);
+  // Quanto falta (ms) para o próximo token do número que tem trabalho e vaga mas está sem token; teto de 1 s para o shouldStop ser reavaliado.
+  const nextTokenWaitMs = (): number | null => {
+    let wait: number | null = null;
+    for (const channel of channels) {
+      const bucket = channel.bucket;
+      if (!bucket || channel.inFlight >= channel.cap || !hasWork(channel) || bucket.tokens >= 1) continue;
+      const ms = Math.ceil(((1 - bucket.tokens) / bucket.rate) * 1000);
+      wait = wait === null ? ms : Math.min(wait, ms);
+    }
+    return wait === null ? null : Math.min(1000, Math.max(1, wait));
+  };
+
   // Próximo número com vaga e trabalho, a partir do cursor (round-robin).
   const pickChannel = (): ChannelState<T> | null => {
     for (let offset = 0; offset < channels.length; offset++) {
       const index = (channelCursor + offset) % channels.length;
       const channel = channels[index];
-      if (channel.inFlight < channel.cap && channel.queues.some(
+      if (channel.inFlight < channel.cap && hasToken(channel) && channel.queues.some(
         (queue) => !pausedCampaigns.has(queue.campaignId) && queue.next < queue.items.length
       )) {
         channelCursor = (index + 1) % channels.length;
@@ -319,12 +355,14 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
           peakInFlight: channel.peak,
           capStart: channel.capStart,
           capEnd: channel.cap,
+          ratePerSecond: channel.bucket ? channel.bucket.rate : null,
         };
       }
       report.stoppedEarly = (stopped || pausedCampaigns.size > 0) && report.notStarted > 0;
       resolve(report);
     };
 
+    let wakeTimer: ReturnType<typeof setTimeout> | null = null;
     const pump = () => {
       if (!stopped && options.shouldStop()) stopped = true;
       while (!stopped && globalInFlight < globalCap) {
@@ -334,7 +372,22 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
         if (!next) break;
         start(channel, next.campaignId, next.item);
       }
-      if (globalInFlight === 0) finish();
+      // Sem token em algum número com trabalho: acorda quando o próximo token cair (vive só durante o tick).
+      if (!stopped && !wakeTimer) {
+        const wait = nextTokenWaitMs();
+        if (wait !== null) {
+          wakeTimer = setTimeout(() => {
+            wakeTimer = null;
+            pump();
+          }, wait);
+          wakeTimer.unref?.();
+        }
+      }
+      if (stopped && wakeTimer) {
+        clearTimeout(wakeTimer);
+        wakeTimer = null;
+      }
+      if (globalInFlight === 0 && !wakeTimer) finish();
     };
 
     const start = (channel: ChannelState<T>, campaignId: string, item: T) => {
@@ -344,7 +397,14 @@ export function runDispatchSchedule<T>(options: SchedulerOptions<T>): Promise<Sc
       globalInFlight++;
       globalPeak = Math.max(globalPeak, globalInFlight);
       started++;
-      const slotsFree = Math.max(1, Math.min(channel.cap - channel.inFlight + 1, globalCap - globalInFlight + 1));
+      if (channel.bucket) channel.bucket.tokens -= 1;
+      // Vagas livres para o claim em lote (#137), limitadas também pelos tokens do limite/s do número:
+      // não reservar mais itens do que o número pode iniciar agora.
+      const slotsFree = Math.max(1, Math.min(
+        channel.cap - channel.inFlight + 1,
+        globalCap - globalInFlight + 1,
+        channel.bucket ? Math.floor(channel.bucket.tokens) + 1 : Number.POSITIVE_INFINITY,
+      ));
       let outcome: TaskOutcome | void = undefined;
       Promise.resolve()
         .then(() => options.run(item, { channelId: channel.channelId, campaignId, slotsFree }))

@@ -12,6 +12,7 @@ import { INTRA_CONTACT_MS, roundContactTimeMs, scheduleRounds } from "@/lib/disp
 import { resumeBatchedCampaign } from "@/lib/disparador/queue-reflow";
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { writeLog } from "@/lib/logger";
+import { findRedChannels, RED_QUALITY_CODE, recordRedConfirmation, redBlockedMessage, type RedChannel, type RedConfirmation } from "@/lib/disparador/red-quality-gate";
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
 
 // campaigns.dias_permitidos (jsonb "dias da semana permitidos") nunca foi
@@ -30,11 +31,16 @@ export interface StartCampaignOptions {
    * com a campanha já em execução).
    */
   startNow?: boolean;
+  /**
+   * Confirmação do OWNER para iniciar com número em qualidade vermelha (já validada pelo chamador: papel + checkbox + motivo).
+   * Ausente (cron de preparação, admin, API) = campanha com número RED não inicia.
+   */
+  redConfirmation?: RedConfirmation;
 }
 
 export type StartCampaignResult =
   | { ok: true; enqueued: number }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: typeof RED_QUALITY_CODE; channels?: RedChannel[] };
 
 // Extraído de src/app/api/disparador/campaigns/[id]/start/route.ts —
 // idêntico ao corpo de negócio daquela rota (steps 1-5), só que
@@ -57,6 +63,8 @@ export async function startCampaign(
   // 'rascunho' para não ficar presa — com o motivo gravado e visível no
   // card (antes uma campanha agendada que falhava voltava a rascunho em
   // silêncio e o agendamento simplesmente sumia).
+  const redGate = await checkRedQualityGate(campaignId, accountId, options);
+  if (redGate) return redGate;
   const state: PrepareState = { preparing: false, agendamento: null };
   const evaluationSince = new Date().toISOString();
   let result: StartCampaignResult;
@@ -95,6 +103,56 @@ export async function startCampaign(
     if (error) console.error("[startCampaign] Falha ao reiniciar avaliação de pausa automática:", error.message);
   }
   return result;
+}
+
+/**
+ * Número RED na campanha: só o owner (com confirmação) inicia. Roda ANTES do claim, então a agendada que vence fica 'agendado'
+ * (com motivo_falha_inicio e aviso no feed do Monitor, uma vez) até o owner confirmar. Sem migration 190 → inerte.
+ */
+async function checkRedQualityGate(
+  campaignId: string,
+  accountId: string,
+  options: StartCampaignOptions
+): Promise<StartCampaignResult | null> {
+  try {
+    const db = supabaseAdmin();
+    const { data } = await db
+      .from("campaigns")
+      .select("status, session_ids, motivo_falha_inicio")
+      .eq("id", campaignId)
+      .eq("account_id", accountId)
+      .limit(1);
+    const row = data?.[0];
+    if (!row) return null;
+    const red = await findRedChannels(db, accountId, row.session_ids);
+    if (red.length === 0) return null;
+    if (options.redConfirmation) {
+      await recordRedConfirmation(db, { accountId, campaignId, channels: red, confirmation: options.redConfirmation });
+      return null;
+    }
+    const error = redBlockedMessage(red);
+    if (row.status === "agendado") {
+      // Idempotente: o cron de preparação passa aqui todo minuto; grava e avisa só quando o motivo muda.
+      const motivo = `Aguardando confirmação do owner: ${error}`;
+      if (row.motivo_falha_inicio !== motivo) {
+        const { error: updateError } = await db.from("campaigns").update({ motivo_falha_inicio: motivo }).eq("id", campaignId).eq("account_id", accountId);
+        if (updateError) console.error("[startCampaign] Falha ao gravar motivo_falha_inicio (RED):", updateError.message);
+        void writeLog({
+          account_id: accountId,
+          level: "warn",
+          source: "disparador",
+          event: "campaign_red_quality_blocked",
+          message: motivo,
+          payload: { campaign_id: campaignId, session_ids: red.map((c) => c.id) },
+        });
+      }
+    }
+    return { ok: false, status: 409, error, code: RED_QUALITY_CODE, channels: red };
+  } catch (err) {
+    // Falha de leitura do gate não pode travar o envio (inerte, como sem a migration).
+    console.error("[startCampaign] Gate de qualidade vermelha indisponível:", err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 /**

@@ -342,7 +342,7 @@ function qualityLabel(rating: string | null | undefined): string {
 }
 
 export default function CampanhasPage() {
-  const { canManageMembers } = useAuth();
+  const { canManageMembers, isOwner } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [recalculatingMetrics, setRecalculatingMetrics] = useState(false);
@@ -359,6 +359,9 @@ export default function CampanhasPage() {
   const [editingCampaign, setEditingCampaign] = useState<EditableCampaign | null>(null);
   // "Iniciar agora" numa campanha agendada (fila começa agora, não no horário).
   const [startNow, setStartNow] = useState(false);
+  // Número em qualidade vermelha: só o owner inicia, confirmando e dando o motivo (TASK23).
+  const [redConfirmed, setRedConfirmed] = useState(false);
+  const [redReason, setRedReason] = useState("");
   const [unscheduleTarget, setUnscheduleTarget] = useState<Campaign | null>(null);
 
   // Campanha aguardando confirmação de início (modal de tier Meta)
@@ -377,6 +380,8 @@ export default function CampanhasPage() {
     }>;
   } | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
+  const hasRedChannel = !!campaignInfo?.channels.some((ch) => ch.quality_rating === "RED");
+  const redReady = !hasRedChannel || (isOwner && redConfirmed && redReason.trim().length >= 3);
   // Público real da campanha no modal de início (PRD-01) — mesma resolução
   // do startCampaign (GET .../audience).
   const [audienceInfo, setAudienceInfo] = useState<
@@ -649,7 +654,12 @@ export default function CampanhasPage() {
       const res = await apiFetch(`/api/disparador/campaigns/${id}/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agora: startNow }),
+        body: JSON.stringify({
+          agora: startNow,
+          ...(hasRedChannel && isOwner && redConfirmed
+            ? { confirm_red_quality: true, red_quality_reason: redReason.trim() }
+            : {}),
+        }),
       });
       if (res.ok) {
         toast.success("Campanha iniciada e disparos agendados!");
@@ -657,6 +667,8 @@ export default function CampanhasPage() {
         setStartConfirmId(null);
         setCampaignInfo(null);
         setAudienceInfo(null);
+        setRedConfirmed(false);
+        setRedReason("");
         loadData();
       } else {
         const err = await res.json().catch(() => ({}));
@@ -1289,6 +1301,8 @@ export default function CampanhasPage() {
           if (!open) {
             setStartConfirmId(null);
             setCampaignInfo(null);
+            setRedConfirmed(false);
+            setRedReason("");
           }
         }}
       >
@@ -1402,8 +1416,10 @@ export default function CampanhasPage() {
                             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
                             <span className="font-medium">
                               Qualidade VERMELHA — este número está em risco de
-                              restrição pela Meta. Avalie o conteúdo das
-                              mensagens antes de prosseguir.
+                              restrição pela Meta (envio limitado a poucas
+                              mensagens por segundo). Campanha nova nele só
+                              pode ser iniciada pelo owner.
+                              {!isOwner && " Peça ao owner para iniciar esta campanha."}
                             </span>
                           </div>
                         )}
@@ -1425,6 +1441,27 @@ export default function CampanhasPage() {
                         )}
                       </div>
                     ))}
+                        {hasRedChannel && isOwner && (
+                      <div className="space-y-2 rounded-md border border-red-500 p-3 text-sm">
+                        <label className="flex items-start gap-2">
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={redConfirmed}
+                            onChange={(e) => setRedConfirmed(e.target.checked)}
+                          />
+                          <span>Confirmo iniciar mesmo com qualidade vermelha</span>
+                        </label>
+                        <input
+                          type="text"
+                          className="w-full rounded-md border bg-background px-2 py-1 text-sm"
+                          placeholder="Motivo (obrigatório, mín. 3 caracteres)"
+                          maxLength={500}
+                          value={redReason}
+                          onChange={(e) => setRedReason(e.target.value)}
+                        />
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Se o número de contatos exceder o limite diário, os
                       disparos restantes serão agendados para os dias
@@ -1451,7 +1488,7 @@ export default function CampanhasPage() {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <Button
               onClick={handleStartConfirm}
-              disabled={infoLoading || starting || !audienceInfo || !audienceInfo.ok}
+              disabled={infoLoading || starting || !audienceInfo || !audienceInfo.ok || !redReady}
             >
               {starting ? "Iniciando…" : infoLoading ? "Consultando..." : "Iniciar campanha"}
             </Button>

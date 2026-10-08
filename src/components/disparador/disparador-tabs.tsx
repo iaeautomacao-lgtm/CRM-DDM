@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, AlertTriangle, Gauge, Megaphone } from "lucide-react";
+import { Activity, AlertTriangle, Gauge, Megaphone, Phone, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // Abas fixas do Disparador (todas as telas de /disparador/*). Altura fixa (2,75 rem): as telas que usam
-// h-[calc(100vh-4rem)] descontam esta altura (h-[calc(100vh-4rem-2.75rem)]). Números e Controles entram
-// aqui quando existirem (P1-5/P1-6).
+// h-[calc(100vh-4rem)] descontam esta altura (h-[calc(100vh-4rem-2.75rem)]). O acesso a /disparador/* (e às
+// APIs) já é só de owner/admin.
 export const DISPARADOR_TABS = [
   { href: "/disparador/campanhas", label: "Campanhas", icon: Megaphone },
   { href: "/disparador/monitor", label: "Monitor", icon: Activity },
+  { href: "/disparador/numeros", label: "Números", icon: Phone },
+  { href: "/disparador/controles", label: "Controles", icon: SlidersHorizontal },
   { href: "/disparador/desempenho", label: "Desempenho", icon: Gauge },
   { href: "/disparador/erros", label: "Erros", icon: AlertTriangle },
 ] as const;

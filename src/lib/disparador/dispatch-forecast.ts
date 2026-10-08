@@ -37,6 +37,8 @@ export const IMEDIATO_BATCH_SIZE = 999_999;
 export interface ThroughputRateConfig {
   slots?: number;
   budgetSeconds?: number;
+  /** Limite efetivo de inícios por segundo do número (P1-4). Ausente/≤0 = sem limite por segundo (só vagas). */
+  ratePerSecond?: number;
 }
 
 /**
@@ -65,7 +67,9 @@ export function cronItemsPerMinute(
 ): number {
   const slots = throughput?.slots ?? CRON_SEND_CONCURRENCY;
   const budget = throughput?.budgetSeconds ?? CRON_SEND_BUDGET_SECONDS;
-  const byTime = Math.floor(calculateThroughputPerMinute(slots, Math.max(0.05, secondsPerItem), budget));
+  let byTime = Math.floor(calculateThroughputPerMinute(slots, Math.max(0.05, secondsPerItem), budget));
+  const rate = throughput?.ratePerSecond;
+  if (rate !== undefined && Number.isFinite(rate) && rate > 0) byTime = Math.min(byTime, Math.floor(rate * 60));
   let perMinute = Math.max(1, Math.min(Math.max(1, candidateLimit), byTime));
   if (hourlyLimit != null && hourlyLimit > 0) perMinute = Math.min(perMinute, hourlyLimit / 60);
   return perMinute;
@@ -80,6 +84,8 @@ export type ForecastDispatch =
 export interface ForecastThroughputInput {
   /** Slots por número: min(per_number, global). Padrão = 4. */
   slots?: number;
+  /** Limite efetivo por segundo do número (qualidade da Meta / ajuste do admin). Ausente = sem limite por segundo. */
+  ratePerSecond?: number;
   /** Orçamento de envio por tick em segundos. Padrão = 35. */
   budgetSeconds?: number;
   /** Latência em segundos por envio: otimista (ex: avg) e conservador (ex: p95). */
@@ -204,11 +210,12 @@ export function forecastCampaign(input: ForecastInput): ForecastResult {
 
   const slots = input.throughput?.slots ?? CRON_SEND_CONCURRENCY;
   const budgetSeconds = input.throughput?.budgetSeconds ?? CRON_SEND_BUDGET_SECONDS;
+  const ratePerSecond = input.throughput?.ratePerSecond;
   const secOtimista = input.throughput?.latency?.otimista ?? SEND_SECONDS_PER_ITEM.otimista;
   const secConservador = input.throughput?.latency?.conservador ?? SEND_SECONDS_PER_ITEM.conservador;
 
-  const perMinOtimista = cronItemsPerMinute(p.candidateLimit, secOtimista, input.hourlyLimit, { slots, budgetSeconds });
-  const perMinConservador = cronItemsPerMinute(p.candidateLimit, secConservador, input.hourlyLimit, { slots, budgetSeconds });
+  const perMinOtimista = cronItemsPerMinute(p.candidateLimit, secOtimista, input.hourlyLimit, { slots, budgetSeconds, ratePerSecond });
+  const perMinConservador = cronItemsPerMinute(p.candidateLimit, secConservador, input.hourlyLimit, { slots, budgetSeconds, ratePerSecond });
   const fullRound = p.itemsPerRound(0);
   const drainMin = Math.ceil(fullRound / perMinOtimista);
   const drainMax = Math.ceil(fullRound / perMinConservador);
@@ -231,7 +238,12 @@ export function forecastCampaign(input: ForecastInput): ForecastResult {
     roundDrainMinutes: { min: drainMin, max: drainMax },
     roundsOverlap: p.rounds > 1 && p.pauseSeconds > 0 && drainMax * 60 > p.pauseSeconds,
     sequentialFallback: p.sequentialFallback,
-    ratePerMinute: Math.round(calculateThroughputPerMinute(slots, secOtimista, budgetSeconds)),
+    ratePerMinute: Math.round(
+      Math.min(
+        calculateThroughputPerMinute(slots, secOtimista, budgetSeconds),
+        ratePerSecond !== undefined && ratePerSecond > 0 ? ratePerSecond * budgetSeconds : Infinity,
+      ),
+    ),
   };
 }
 

@@ -496,7 +496,7 @@ export const openApiSpec = {
           '403': resp('Forbidden'),
           '409': {
             description:
-              'Conflito de idempotência: `Idempotency-Key`/`external_id` já usado com outro conteúdo, ou a criação anterior com a mesma chave ainda está em andamento.',
+              'Conflito de idempotência (`Idempotency-Key`/`external_id` já usado com outro conteúdo, ou criação anterior ainda em andamento) **ou** número Meta com qualidade vermelha: nesse caso o objeto `error` traz `reason: "red_quality_owner_required"` e `channels` (números afetados). Campanha nova em número vermelho só pode ser iniciada pelo owner no painel; a chave de API não confirma. Aguarde a qualidade se recuperar ou peça ao owner.',
             content: {
               'application/json': {
                 schema: ref('ErrorEnvelope'),
@@ -841,6 +841,15 @@ export const openApiSpec = {
               message: { type: 'string', description: 'Texto para humanos; pode mudar. Ramifique pelo `code`.' },
               campaign_id: { type: 'string', format: 'uuid', description: 'Só em 500 de criação de campanha interrompida.' },
               provider_outcome_unknown: { type: 'boolean', description: 'Só em 409 de envio com resultado desconhecido.' },
+              reason: { type: 'string', description: 'Só em 409 de campanha: `red_quality_owner_required` (número Meta com qualidade vermelha).' },
+              channels: {
+                type: 'array',
+                description: 'Só em 409 `red_quality_owner_required`: números em qualidade vermelha.',
+                items: {
+                  type: 'object',
+                  properties: { id: { type: 'string', format: 'uuid' }, display_phone_number: { type: ['string', 'null'] } },
+                },
+              },
               invalid: { type: 'integer', description: 'Só em 400 "nenhum contato válido".' },
               duplicates: { type: 'integer' },
               skipped: { type: 'integer' },
