@@ -165,8 +165,8 @@ export default function DashboardPage() {
     <div className="mx-auto w-full max-w-[1600px] pb-10">
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">Dashboard</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">Visão geral da operação.</p>
+          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">Visão geral da operação</h1>
+          <p className="mt-1.5 text-sm text-muted-foreground">Atendimento, volume e resultados em um só lugar.</p>
           <p suppressHydrationWarning className="mt-2 text-xs capitalize text-muted-foreground/80">
             {new Intl.DateTimeFormat('pt-BR', {
               weekday: 'long',
