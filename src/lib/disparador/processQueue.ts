@@ -12,6 +12,7 @@ import {
   sendTextMessage,
   sendMediaMessage,
   MetaApiError,
+  MetaUncertainResponseError,
 } from "@/lib/whatsapp/meta-api";
 import { decryptStoredSecret } from "@/lib/whatsapp/encryption";
 import { safeFetch } from "@/lib/security/ssrf-guard";
@@ -31,6 +32,7 @@ import { classifyProviderError, type BackoffReason } from "@/lib/disparador/prov
 import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
+import { startInflightLease } from "@/lib/disparador/inflight-lease";
 import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
 import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
 import { metaCodesWhere, reportUnknownMetaCode } from "@/lib/disparador/meta-error-catalog";
@@ -262,6 +264,8 @@ export function isMetaRateLimitNoAttempt(err: unknown): boolean {
 // permanente. Agora usa err.metaCode (estruturado) quando disponível.
 function isPermanentSendError(err: unknown): boolean {
   if (err instanceof PreSendError) return true;
+  // 2xx da Meta sem messages[0].id: pode ter saído → incerto, nunca definitivo (F13).
+  if (err instanceof MetaUncertainResponseError) return false;
   if (err instanceof MetaApiError) {
     if (err.metaCode === null) return false;
     return META_INVALID_PHONE_CODES.has(err.metaCode) || META_PERMANENT_CODES.has(err.metaCode);
@@ -737,13 +741,17 @@ export async function processQueueItem(
 
   let externalMessageId: string;
   const providerStartedAt = Date.now();
+  // F14: enquanto espera o provedor, renova o lease do item em voo (o watchdog só age em lease vencido).
+  const lease = startInflightLease(supabaseAdmin(), item.id);
   try {
     externalMessageId =
       provider === "meta"
         ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
         : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
+    lease.stop();
     observe(options, { provider, latencyMs: Date.now() - providerStartedAt, ok: true, signal: null, code: null });
   } catch (sendErr: any) {
+    lease.stop();
     // Falha antes de falar com o provedor não entra na latência nem no
     // backoff do número.
     if (!(sendErr instanceof PreSendError)) {

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isMissingInflightColumn } from "@/lib/disparador/inflight-lease";
 
 export const STALE_SENDING_MINUTES = 2;
 
@@ -37,14 +38,22 @@ export async function recoverStaleSendingReservations(
 ): Promise<StaleSendingRecovery> {
   const cutoff = new Date(now.getTime() - Math.max(1, minAgeMinutes) * 60_000).toISOString();
 
-  const { data, error } = await db
-    .from("disp_message_queue")
-    .select(
-      "id,campaign_id,contact_id,session_id,mensagem_final,waha_message_id,tentativas,erro,sent_at,updated_at"
-    )
-    .eq("status", "enviando")
-    .lt("updated_at", cutoff)
-    .limit(200);
+  const staleQuery = (withLease: boolean) => {
+    let q = db
+      .from("disp_message_queue")
+      .select(
+        "id,campaign_id,contact_id,session_id,mensagem_final,waha_message_id,tentativas,erro,sent_at,updated_at"
+      )
+      .eq("status", "enviando")
+      .lt("updated_at", cutoff);
+    // F14 (migration 194): item com lease VIVO (inflight_until no futuro) está sendo enviado agora — não é incerto.
+    // Lease nulo = item sem lease (antigo/anterior à migration): tratado como sempre.
+    if (withLease) q = q.or(`inflight_until.is.null,inflight_until.lt.${now.toISOString()}`);
+    return q.limit(200);
+  };
+  let { data, error } = await staleQuery(true);
+  // Sem a coluna (migration 194 ausente): comportamento anterior.
+  if (error && isMissingInflightColumn(error)) ({ data, error } = await staleQuery(false));
 
   if (error) throw error;
 
