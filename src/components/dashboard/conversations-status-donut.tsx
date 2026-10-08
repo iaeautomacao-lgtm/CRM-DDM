@@ -12,44 +12,44 @@ interface ConversationsStatusDonutProps {
 
 export function ConversationsStatusDonut({ data, loading }: ConversationsStatusDonutProps) {
   return (
-    <section className="h-full">
-      <header className="px-0 pb-3">
+    <section className="h-full rounded-lg border border-border/80 bg-card/25 p-4">
+      <header>
         <h2 className="text-sm font-semibold text-foreground">Situação atual</h2>
-        
       </header>
 
-      <div className="pt-4">
+      <div className="mt-5">
         {loading || !data ? (
-          <Skeleton className="h-56 w-full" />
+          <Skeleton className="h-44 w-full" />
         ) : data.slices.length === 0 || data.totalCount === 0 ? (
           <EmptyState
             icon={MessageSquare}
             title="Nenhuma conversa registrada"
-            hint="Mensagens recebidas e enviadas começarão a preencher esta visão."
+            hint="As conversas em operação aparecerão aqui."
           />
         ) : (
           <>
-            <div className="mb-5">
-              <p className="text-[32px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
+            <div>
+              <p className="text-[30px] font-semibold leading-none tracking-[-0.035em] tabular-nums text-foreground">
                 {data.totalCount.toLocaleString("pt-BR")}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">conversas em operação</p>
             </div>
 
-            <ul className="space-y-4">
+            <ul className="mt-6 space-y-4">
               {data.slices.map((slice) => {
                 const percent = Math.round((slice.count / (data.totalCount || 1)) * 100)
                 return (
                   <li key={slice.status}>
-                    <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="truncate text-muted-foreground">{slice.label}</span>
-                      <span className="shrink-0 font-medium tabular-nums text-foreground">
-                        {slice.count.toLocaleString("pt-BR")} · {percent}%
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-xs text-muted-foreground">{slice.label}</span>
+                      <span className="text-xs font-medium tabular-nums text-foreground">
+                        {slice.count.toLocaleString("pt-BR")}
+                        <span className="ml-1.5 text-muted-foreground">· {percent}%</span>
                       </span>
                     </div>
-                    <div className="mt-1.5 h-1 overflow-hidden bg-muted">
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full bg-primary"
+                        className="h-full rounded-full bg-primary"
                         style={{ width: String(Math.max(2, percent)) + "%" }}
                       />
                     </div>

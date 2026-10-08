@@ -163,18 +163,14 @@ export default function DashboardPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1600px] pb-10">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.03em] text-foreground">Visão geral da operação</h1>
-          <p className="mt-1.5 text-sm text-muted-foreground">Atendimento, volume e resultados em um só lugar.</p>
-          <p suppressHydrationWarning className="mt-2 text-xs capitalize text-muted-foreground/80">
-            {new Intl.DateTimeFormat('pt-BR', {
-              weekday: 'long',
-              day: '2-digit',
-              month: 'long',
-            }).format(new Date())}
-          </p>
-        </div>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <p suppressHydrationWarning className="text-xs capitalize text-muted-foreground/80">
+          {new Intl.DateTimeFormat('pt-BR', {
+            weekday: 'long',
+            day: '2-digit',
+            month: 'long',
+          }).format(new Date())}
+        </p>
         <QuickActions />
       </div>
 
@@ -187,11 +183,7 @@ export default function DashboardPage() {
       )}
 
       <section className="mt-7">
-        <SectionHeading
-          title="Operação agora"
-          description="O que exige atenção neste momento."
-          primary
-        />
+        <SectionHeading title="Operação agora" primary />
 
         {failed.has('metrics') ? (
           <ErrorState
@@ -200,13 +192,13 @@ export default function DashboardPage() {
             onRetry={retryAll}
           />
         ) : metricsLoading || !metrics ? (
-          <div className="mt-3 grid grid-cols-1 gap-px overflow-hidden border-y border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <SkeletonCard key={i} className="min-h-[112px] rounded-none border-0" />
+              <SkeletonCard key={i} className="min-h-[112px] rounded-lg" />
             ))}
           </div>
         ) : (
-          <div className="mt-3 grid grid-cols-1 divide-y divide-border border-y border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <MetricCard
               title="Conversas ativas"
               value={metrics.activeConversations.current.toLocaleString('pt-BR')}
