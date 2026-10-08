@@ -44,8 +44,8 @@ export function ResponseTimeChart({
     })) ?? []
 
   return (
-    <section className="rounded-xl border border-border bg-card">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+    <section className="border-y border-border">
+      <header className="flex items-center justify-between gap-4 px-5 py-4">
         <div>
           <h2 className="text-sm font-semibold text-foreground">
             Tempo Médio de Primeira Resposta
@@ -77,7 +77,7 @@ export function ResponseTimeChart({
         </div>
       </header>
 
-      <div className="p-5">
+      <div className="border-t border-border p-5">
         {loading || !data ? (
           <Skeleton className="h-[260px] w-full" />
         ) : !hasData ? (
@@ -96,7 +96,7 @@ export function ResponseTimeChart({
             colors={['ddmOrange']}
             valueFormatter={(value) => `${value.toFixed(1)}m`}
             showLegend={false}
-            borderRadius={6}
+            borderRadius={2}
             // Explicit floor at 0 + no fixed yAxisWidth override — let
             // Tremor size the axis to whatever tick labels it computes,
             // instead of a width tuned for a narrower label that could
