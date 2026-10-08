@@ -348,7 +348,7 @@ interface RawLimit {
 
 async function loadConfigs(db: LimitsDb, accountId: string): Promise<RawConfig[]> {
   const { data, error } = await run<RawConfig[]>(
-    db.from("whatsapp_config").select("id, phone_number, display_name, provider, habilitado").eq("account_id", accountId).limit(500),
+    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session, provider, habilitado").eq("account_id", accountId).limit(500),
   );
   if (error) throw new Error(`Falha ao ler números: ${error.message}`);
   return data ?? [];
@@ -486,7 +486,7 @@ export async function applyLimitsChange(
   env: Record<string, string | undefined> = process.env,
 ): Promise<ApplyResult> {
   const { data: cfgRows, error: cfgErr } = await run<RawConfig[]>(
-    db.from("whatsapp_config").select("id, phone_number, display_name, provider, habilitado").eq("id", req.sessionId).eq("account_id", accountId).limit(1),
+    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session, provider, habilitado").eq("id", req.sessionId).eq("account_id", accountId).limit(1),
   );
   if (cfgErr) throw new Error(`Falha ao ler o número: ${cfgErr.message}`);
   const cfg = (cfgRows ?? [])[0];

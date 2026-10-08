@@ -546,7 +546,7 @@ export async function loadMonitorInput(db: Db, accountId: string, now: Date = ne
   const since24h = new Date(now.getTime() - 24 * 3_600_000).toISOString();
 
   const [channelsRes, campaignsRes, ticksRes, logsRes, pendingRes] = await Promise.all([
-    db.from("whatsapp_config").select("id, phone_number, display_name, provider, habilitado").eq("account_id", accountId),
+    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session, provider, habilitado").eq("account_id", accountId),
     db
       .from("campaigns")
       .select("*")

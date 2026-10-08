@@ -159,7 +159,7 @@ export interface NumberInfo {
 
 export async function loadNumbers(db: ErrosDb, accountId: string): Promise<NumberInfo[]> {
   const { data, error } = await run<Array<{ id: string; phone_number: string | null; display_name: string | null }>>(
-    db.from("whatsapp_config").select("id, phone_number, display_name").eq("account_id", accountId).limit(500),
+    db.from("whatsapp_config").select("id, phone_number:display_phone_number, display_name:waha_session").eq("account_id", accountId).limit(500),
   );
   if (error) throw new Error(`Falha ao ler números: ${error.message}`);
   return (data ?? []).map((n) => ({ id: n.id, label: n.display_name?.trim() || n.phone_number?.trim() || n.id.slice(0, 8) }));
