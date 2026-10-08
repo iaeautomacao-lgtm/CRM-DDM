@@ -33,7 +33,7 @@ describe("migration 210 — wakeable_flow_runs", { timeout: 60_000 }, () => {
       "INSERT INTO wacrm.flow_nodes VALUES ($1,'espera','smart_delay',$2::jsonb), ($1,'sem_next','smart_delay','{}'::jsonb)",
       [FLOW, JSON.stringify({ next_node_key: "proximo" })],
     );
-  });
+  }, 60_000);
   afterAll(async () => {
     await db.close();
   });
