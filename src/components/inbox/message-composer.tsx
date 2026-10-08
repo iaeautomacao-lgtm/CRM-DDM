@@ -570,7 +570,8 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-t border-border bg-card p-3">
+    <div className="border-t border-border bg-background px-3 py-3 sm:px-5">
+      <div className="mx-auto w-full max-w-[980px]">
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -581,7 +582,7 @@ export function MessageComposer({
         </div>
       )}
       {sessionExpired && (
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 py-1 pl-3 pr-1" role="status">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/25 bg-amber-500/8 px-3 py-2" role="status">
           {/* amber-400 sobre fundo claro dava ~1,7:1 — no tema claro usa
               amber-700 (≥ 4,5:1); no escuro mantém o tom original. */}
           <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -631,6 +632,7 @@ export function MessageComposer({
         }}
       />
 
+      <div className="rounded-xl border border-border/80 bg-card/35 p-2">
       {draft ? (
         <MediaDraftPreview
           draft={draft}
@@ -642,7 +644,7 @@ export function MessageComposer({
         />
       ) : recording ? (
         // Recording bar — replaces the composer while the mic is live.
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-muted px-4 py-2.5">
+        <div className="flex items-center gap-3 rounded-lg bg-muted/55 px-3 py-2.5">
           <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" aria-hidden="true" />
           <span className="flex-1 text-sm text-foreground">
             Gravando… {formatDuration(recordSeconds)} /{" "}
@@ -666,7 +668,7 @@ export function MessageComposer({
           </Button>
         </div>
       ) : (
-        <div className="relative flex items-end gap-1">
+        <div className="relative">
           {qr && !inputsDisabled && (
             <QuickReplyMenu
               items={qrItems}
@@ -678,138 +680,146 @@ export function MessageComposer({
               onHover={setQrIndex}
             />
           )}
-          {/* Attach menu — photo / video / document / voice. */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              disabled={inputsDisabled || busy}
+
+          <div className="rounded-lg bg-muted/45 px-3 py-2.5 focus-within:ring-1 focus-within:ring-ring/60">
+            <textarea
+              ref={textareaRef}
+              aria-label="Mensagem"
+              aria-controls={qr ? QUICK_REPLY_MENU_ID : undefined}
+              aria-activedescendant={qr && qrItems.length > 0 ? `${QUICK_REPLY_MENU_ID}-${Math.min(qrIndex, qrItems.length - 1)}` : undefined}
+              onBlur={() => {
+                if (qr) closeQuickReplies();
+              }}
+              value={text}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                readOnly
+                  ? "Somente leitura — visualizadores podem navegar mas não responder"
+                  : sessionExpired
+                    ? "Sessão expirada - use um template"
+                    : "Digite uma mensagem…"
+              }
+              disabled={sessionExpired || readOnly}
+              rows={1}
               title={
                 readOnly
                   ? "Somente leitura — seu perfil não pode enviar mensagens"
-                  : inputsDisabled
-                    ? undefined
-                    : "Anexar mídia"
+                  : "/ para respostas rápidas · Shift+Enter para nova linha"
               }
-              aria-label={busy ? "Enviando anexo…" : "Anexar mídia"}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 lg:h-8 lg:w-8"
-            >
-              {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              ) : (
-                <Paperclip className="h-4 w-4" aria-hidden="true" />
+              className={cn(
+                "block w-full min-w-0 resize-none border-0 bg-transparent px-0 py-0 text-sm leading-6 text-foreground placeholder:text-muted-foreground outline-none focus:ring-0",
+                (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
               )}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="border-border bg-popover">
-              <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
-                <ImageIcon className="mr-2 h-4 w-4" />
-                Foto
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
-                <Video className="mr-2 h-4 w-4" />
-                Vídeo
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
-                <FileText className="mr-2 h-4 w-4" />
-                Documento
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void startRecording()}>
-                <Mic className="mr-2 h-4 w-4" />
-                Nota de voz
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            />
 
-          {onOpenTemplates && (
-            <GatedButton
-              variant="ghost"
-              size="sm"
-              canAct={!readOnly}
-              gateReason="send messages"
-              title={readOnly ? undefined : "Enviar template"}
-              aria-label="Enviar template"
-              className="h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground lg:h-8 lg:w-8"
-              onClick={onOpenTemplates}
-            >
-              <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
-            </GatedButton>
-          )}
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+              <div className="flex min-w-0 items-center gap-0.5">
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    disabled={inputsDisabled || busy}
+                    title={
+                      readOnly
+                        ? "Somente leitura — seu perfil não pode enviar mensagens"
+                        : inputsDisabled
+                          ? undefined
+                          : "Anexar mídia"
+                    }
+                    aria-label={busy ? "Enviando anexo…" : "Anexar mídia"}
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Paperclip className="h-4 w-4" aria-hidden="true" />
+                    )}
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="border-border bg-popover">
+                    <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
+                      <ImageIcon className="mr-2 h-4 w-4" />
+                      Foto
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
+                      <Video className="mr-2 h-4 w-4" />
+                      Vídeo
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
+                      <FileText className="mr-2 h-4 w-4" />
+                      Documento
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => void startRecording()}>
+                      <Mic className="mr-2 h-4 w-4" />
+                      Nota de voz
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={inputsDisabled}
-            title='Respostas rápidas (ou digite "/")'
-            aria-label="Respostas rápidas"
-            aria-expanded={Boolean(qr)}
-            className={cn(
-              "h-9 w-9 shrink-0 p-0 text-muted-foreground hover:text-foreground lg:h-8 lg:w-8",
-              qr && "text-primary",
-            )}
-            // Mantém o cursor do campo para inserir no lugar certo.
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => {
-              if (qr) closeQuickReplies();
-              else {
-                setQrIndex(0);
-                setQr({ start: null, query: "" });
-                textareaRef.current?.focus();
-              }
-            }}
-          >
-            <Zap className="h-4 w-4" aria-hidden="true" />
-          </Button>
+                {onOpenTemplates && (
+                  <GatedButton
+                    variant="ghost"
+                    size="sm"
+                    canAct={!readOnly}
+                    gateReason="send messages"
+                    title={readOnly ? undefined : "Enviar template"}
+                    aria-label="Enviar template"
+                    className="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={onOpenTemplates}
+                  >
+                    <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
+                  </GatedButton>
+                )}
 
-          <textarea
-            ref={textareaRef}
-            aria-label="Mensagem"
-            aria-controls={qr ? QUICK_REPLY_MENU_ID : undefined}
-            aria-activedescendant={qr && qrItems.length > 0 ? `${QUICK_REPLY_MENU_ID}-${Math.min(qrIndex, qrItems.length - 1)}` : undefined}
-            onBlur={() => {
-              // Clique fora fecha (o clique no menu não tira o foco).
-              if (qr) closeQuickReplies();
-            }}
-            value={text}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              readOnly
-                ? "Somente leitura — visualizadores podem navegar mas não responder"
-                : sessionExpired
-                  ? "Sessão expirada - use um template"
-                  : "Digite uma mensagem…"
-            }
-            disabled={sessionExpired || readOnly}
-            rows={1}
-            // Textarea keeps its own inline title — the GatedButton
-            // wrapping pattern doesn't apply to non-button inputs.
-            // The placeholder text also surfaces the read-only state.
-            // Fora do modo leitura, a dica de atalhos (antes no placeholder) vai no title.
-            title={
-              readOnly
-                ? "Somente leitura — seu perfil não pode enviar mensagens"
-                : "/ para respostas rápidas · Shift+Enter para nova linha"
-            }
-            className={cn(
-              // min-w-0: sem ele o textarea mantém a largura intrínseca
-              // (~20 colunas) e estoura a linha em telas de 320px.
-              "min-w-0 flex-1 resize-none rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/50 sm:px-4",
-              (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
-            )}
-          />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={inputsDisabled}
+                  title='Respostas rápidas (ou digite "/")'
+                  aria-label="Respostas rápidas"
+                  aria-expanded={Boolean(qr)}
+                  className={cn(
+                    "h-8 w-8 shrink-0 p-0 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    qr && "text-primary",
+                  )}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    if (qr) closeQuickReplies();
+                    else {
+                      setQrIndex(0);
+                      setQr({ start: null, query: "" });
+                      textareaRef.current?.focus();
+                    }
+                  }}
+                >
+                  <Zap className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </div>
 
-          <GatedButton
-            size="sm"
-            canAct={!readOnly}
-            gateReason="send messages"
-            disabled={!text.trim() || sessionExpired || sending}
-            aria-label="Enviar mensagem"
-            onClick={handleSend}
-            className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90 disabled:opacity-40"
-          >
-            <Send className="h-4 w-4" aria-hidden="true" />
-          </GatedButton>
+              <div className="flex items-center gap-2">
+                {!readOnly && !sessionExpired && (
+                  <span className="hidden text-[10px] text-muted-foreground/75 xl:inline">
+                    Enter envia · Shift+Enter quebra linha
+                  </span>
+                )}
+                <GatedButton
+                  size="sm"
+                  canAct={!readOnly}
+                  gateReason="send messages"
+                  disabled={!text.trim() || sessionExpired || sending}
+                  aria-label="Enviar mensagem"
+                  onClick={handleSend}
+                  className="h-8 shrink-0 gap-1.5 rounded-md bg-primary px-3 text-xs font-medium hover:bg-primary/90 disabled:opacity-40"
+                >
+                  <Send className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="hidden sm:inline">Enviar</span>
+                </GatedButton>
+              </div>
+            </div>
+          </div>
         </div>
       )}
+      </div>
+      </div>
     </div>
   );
 }
@@ -836,7 +846,7 @@ function MediaDraftPreview({
   onSend: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-muted/40 p-3">
+    <div className="rounded-lg bg-muted/45 p-3">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           {draft.kind === "image" && (
@@ -884,7 +894,7 @@ function MediaDraftPreview({
             }}
             placeholder="Adicionar legenda…"
             aria-label="Legenda do anexo"
-            className="min-w-0 flex-1 rounded-xl border border-border bg-muted px-4 py-2.5 text-sm text-foreground placeholder-muted-foreground outline-none transition-colors focus:border-primary/50 focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="min-w-0 flex-1 rounded-md border border-border/80 bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none transition-colors focus:border-primary/50 focus-visible:ring-1 focus-visible:ring-ring/50"
           />
         )}
         <GatedButton
