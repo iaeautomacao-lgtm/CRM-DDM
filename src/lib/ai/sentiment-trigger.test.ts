@@ -26,8 +26,21 @@ describe("shouldAnalyzeSentiment", () => {
   });
 
   it("marcadores de tipo não vão à IA", () => {
-    expect(shouldAnalyzeSentiment({ text: "[Unsupported message type: button]", flowConsumed: true })).toBe(false);
+    expect(shouldAnalyzeSentiment({ text: "[Unsupported message type: hologram]", flowConsumed: true })).toBe(false);
     expect(shouldAnalyzeSentiment({ text: "[image]", flowConsumed: false })).toBe(false);
+  });
+
+  // WH-06 (decisão do dono): o clique em botão de template (quick-reply) agora é gravado com o texto do
+  // botão, e não mais como "[Unsupported message type: button]". Logo ele passa a ser analisado como
+  // qualquer texto: fora de fluxo roda; com fluxo consumindo, texto curto de menu continua ignorado.
+  it("texto de botão (quick-reply) deixou de ser marcador: fora de fluxo a IA analisa", () => {
+    expect(shouldAnalyzeSentiment({ text: "Quero negociar", flowConsumed: false })).toBe(true);
+    expect(shouldAnalyzeSentiment({ text: "Sim", flowConsumed: false })).toBe(true);
+  });
+
+  it("texto curto de botão com fluxo consumindo continua ignorado", () => {
+    expect(shouldAnalyzeSentiment({ text: "Sim", flowConsumed: true })).toBe(false);
+    expect(shouldAnalyzeSentiment({ text: "Não tenho interesse", flowConsumed: true })).toBe(true);
   });
 
   it("com fluxo, analisa texto de conversa", () => {
