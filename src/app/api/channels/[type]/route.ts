@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { PUBLIC_CHANNEL_COLUMNS } from '@/lib/channels/store'
 
@@ -12,7 +12,7 @@ const EDITABLE = ['name', 'team_id', 'flow_id', 'client_id', 'habilitado'] as co
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ type: string }> }) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requirePermission('channels.manage')
     const { type: id } = await params
     if (!UUID_RE.test(id)) return NextResponse.json({ error: 'Canal inválido' }, { status: 404 })
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>
@@ -55,7 +55,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ty
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ type: string }> }) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requirePermission('channels.manage')
     const { type: id } = await params
     if (!UUID_RE.test(id)) return NextResponse.json({ error: 'Canal inválido' }, { status: 404 })
     // Conversas ficam (channel_id vira NULL pela FK); só não chegam mais

@@ -30,7 +30,7 @@ function fail(err: unknown): Response {
 // GET /api/disparador/limits — números da conta com vagas/limite por hora/pausa, globais (só leitura) e histórico.
 export async function GET() {
   try {
-    const { accountId } = await requireDisparadorAccess();
+    const { accountId } = await requireDisparadorAccess("campaigns.rate_limit");
     const overview = await loadLimitsOverview(supabaseAdmin() as unknown as LimitsDb, accountId);
     return NextResponse.json({ ok: true, ...overview }, { headers: NO_STORE });
   } catch (err) {
@@ -43,7 +43,7 @@ export async function GET() {
 // explícita, recusa se o "antes" mudou (409), audita o "antes → depois". Vale no próximo tick.
 export async function PUT(request: Request) {
   try {
-    const { accountId } = await requireDisparadorAccess();
+    const { accountId } = await requireDisparadorAccess("campaigns.rate_limit");
     const body = await request.json().catch(() => null);
     const req = parseLimitsRequest(body);
     const db = supabaseAdmin() as unknown as LimitsDb;

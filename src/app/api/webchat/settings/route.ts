@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { loadWebchatSettings, normalizeWebchatSettings } from '@/lib/webchat/settings'
 
@@ -10,7 +10,7 @@ import { loadWebchatSettings, normalizeWebchatSettings } from '@/lib/webchat/set
 
 export async function GET() {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requirePermission('channels.manage')
     const settings = await loadWebchatSettings(supabaseAdmin(), accountId)
     return NextResponse.json({
       settings,
@@ -24,7 +24,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
-    const { accountId, userId } = await requireRole('admin')
+    const { accountId, userId } = await requirePermission('channels.manage')
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
     if (!body) return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
     const settings = normalizeWebchatSettings(body)

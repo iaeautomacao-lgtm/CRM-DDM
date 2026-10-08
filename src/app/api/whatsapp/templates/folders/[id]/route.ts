@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 
 const NAME_MAX_LENGTH = 50
 
@@ -18,7 +18,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Invalid folder id.' }, { status: 400 })
     }
 
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requirePermission('templates.manage')
 
     let body: { name?: string; position?: number }
     try {
@@ -88,7 +88,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Invalid folder id.' }, { status: 400 })
     }
 
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requirePermission('templates.manage')
 
     const { data: existing, error: lookupErr } = await supabase
       .from('template_folders')

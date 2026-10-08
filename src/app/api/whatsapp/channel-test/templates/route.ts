@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 
 /**
  * GET /api/whatsapp/channel-test/templates?configId=...
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   try {
     // Templates/canais mexem no WABA da conta (Meta) ou no número conectado: só admin
     // (mesmo papel das páginas /templates e /canais).
-    const auth = await guardRole('admin')
+    const auth = await guardPermission('channels.manage')
     if (!auth.ok) return auth.response
     const { supabase, accountId } = auth.ctx
 

@@ -7,10 +7,10 @@ import { RateLimitError, revertToAuto } from "@/lib/disparador/rate-limits-servi
 // POST /api/disparador/rate-limits/[session]/revert-auto — "voltar ao automático" (admin/owner). Corpo opcional: { reason }.
 export async function POST(request: Request, { params }: { params: Promise<{ session: string }> }) {
   try {
-    const ctx = await requireDisparadorAccess();
+    const ctx = await requireDisparadorAccess("campaigns.rate_limit");
     const { session } = await params;
     const body = (await request.json().catch(() => null)) as { reason?: unknown } | null;
-    const actor = { accountId: ctx.accountId, userId: ctx.userId, role: ctx.role };
+    const actor = { accountId: ctx.accountId, userId: ctx.userId, role: ctx.role, permissions: ctx.permissions };
     return NextResponse.json(await revertToAuto(supabaseAdmin(), actor, session, body?.reason));
   } catch (err) {
     if (err instanceof RateLimitError) return NextResponse.json({ error: err.message }, { status: err.status });

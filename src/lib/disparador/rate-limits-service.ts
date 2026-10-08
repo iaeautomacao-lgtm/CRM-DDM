@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { logAuditEvent } from "@/lib/audit/log-event";
+import { can } from "@/lib/auth/permissions";
 import type { AccountRole } from "@/lib/auth/roles";
 import {
   autoTargetRate,
@@ -34,10 +35,15 @@ export interface RateActor {
   accountId: string;
   userId: string;
   role: AccountRole;
+  /** Permissões efetivas (ctx.permissions). Sem elas, vale o papel de sistema (compat). */
+  permissions?: ReadonlySet<string>;
 }
 
-const isOwner = (role: AccountRole) => role === "owner";
-const isAdminOrOwner = (role: AccountRole) => role === "owner" || role === "admin";
+// PRD 20, 20.3c: por permissão do catálogo, mesmo resultado de antes (owner/admin; owner).
+//   admin ou owner      -> campaigns.rate_limit
+//   só owner (política de qualidade, manter o limite acima da qualidade) -> campaigns.red_quality_override
+const canRateLimit = (actor: RateActor) => can(actor, "campaigns.rate_limit");
+const canOverrideQuality = (actor: RateActor) => can(actor, "campaigns.red_quality_override");
 const missingTable = (e: { code?: string; message?: string } | null | undefined) =>
   !!e && (e.code === "42P01" || e.code === "PGRST205" || /does not exist|schema cache/i.test(e.message ?? ""));
 
@@ -234,13 +240,13 @@ export interface SetManualInput {
 
 /** Sobrescreve o limite/s de um número (manual). */
 export async function setManualRate(db: Db, actor: RateActor, input: SetManualInput, nowMs: number = Date.now()) {
-  if (!isAdminOrOwner(actor.role)) throw new RateLimitError("Apenas admin ou owner alteram o limite por segundo.", 403);
+  if (!canRateLimit(actor)) throw new RateLimitError("Apenas admin ou owner alteram o limite por segundo.", 403);
   const sessionId = typeof input.session_id === "string" ? input.session_id : "";
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new RateLimitError("session_id inválido.", 400);
   const reason = cleanReason(input.reason);
   const rate = typeof input.rate_per_second === "number" ? input.rate_per_second : Number(input.rate_per_second);
   const force = input.force_above_quality === true;
-  if (force && !isOwner(actor.role)) throw new RateLimitError("Somente o owner pode manter o limite acima da qualidade (force_above_quality).", 403);
+  if (force && !canOverrideQuality(actor)) throw new RateLimitError("Somente o owner pode manter o limite acima da qualidade (force_above_quality).", 403);
 
   const channel = await loadMetaChannel(db, actor.accountId, sessionId);
   const { policy } = await loadPolicy(db, actor.accountId);
@@ -304,7 +310,7 @@ export async function setManualRate(db: Db, actor: RateActor, input: SetManualIn
 
 /** "Voltar ao automático": remove o manual e a trava force_above_quality. */
 export async function revertToAuto(db: Db, actor: RateActor, sessionId: string, reasonRaw?: unknown, nowMs: number = Date.now()) {
-  if (!isAdminOrOwner(actor.role)) throw new RateLimitError("Apenas admin ou owner alteram o limite por segundo.", 403);
+  if (!canRateLimit(actor)) throw new RateLimitError("Apenas admin ou owner alteram o limite por segundo.", 403);
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) throw new RateLimitError("session_id inválido.", 400);
   const reason = reasonRaw == null || reasonRaw === "" ? "Voltar ao automático" : cleanReason(reasonRaw);
   const channel = await loadMetaChannel(db, actor.accountId, sessionId);
@@ -375,7 +381,7 @@ const POLICY_NUMBER_FIELDS: Array<[keyof PolicyInput, number, number, boolean]> 
 
 /** Política da conta (% por cor, teto, rampa, confirmação do vermelho) — só OWNER. */
 export async function updatePolicy(db: Db, actor: RateActor, input: PolicyInput, reasonRaw: unknown, nowMs: number = Date.now()) {
-  if (!isOwner(actor.role)) throw new RateLimitError("Somente o owner edita a política de limites por qualidade.", 403);
+  if (!canOverrideQuality(actor)) throw new RateLimitError("Somente o owner edita a política de limites por qualidade.", 403);
   const reason = cleanReason(reasonRaw);
   const { row: existing } = await loadPolicy(db, actor.accountId);
   const patch: Record<string, unknown> = {};
@@ -425,7 +431,7 @@ export async function updatePolicy(db: Db, actor: RateActor, input: PolicyInput,
 
 /** "Reconhecer" nos avisos de queda de qualidade (admin ou owner). */
 export async function acknowledgeHistory(db: Db, actor: RateActor, ids: unknown, nowMs: number = Date.now()) {
-  if (!isAdminOrOwner(actor.role)) throw new RateLimitError("Apenas admin ou owner reconhecem avisos.", 403);
+  if (!canRateLimit(actor)) throw new RateLimitError("Apenas admin ou owner reconhecem avisos.", 403);
   if (!Array.isArray(ids) || ids.length === 0 || ids.length > 100 || ids.some((id) => typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id))) {
     throw new RateLimitError("Informe de 1 a 100 ids de aviso (UUID).", 400);
   }

@@ -1,4 +1,4 @@
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { getWahaQrCode } from '@/lib/whatsapp/waha-api'
 import { safeInlineContentType, mediaResponseHeaders } from '@/lib/security/media-proxy'
@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   try {
     // Conectar/derrubar/parear o número é decisão de admin: um papel baixo
     // poderia vincular o próprio WhatsApp ao canal e receber as conversas.
-    const auth = await guardRole('admin')
+    const auth = await guardPermission('channels.manage')
     if (!auth.ok) return auth.response
     const { supabase, accountId } = auth.ctx
 

@@ -1,7 +1,7 @@
 import { templatesDryRunEnabled } from '@/lib/whatsapp/templates-dry-run'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
-import { guardRole } from '@/lib/auth/route-guard'
+import { guardPermission } from '@/lib/auth/route-guard'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   deleteMessageTemplate,
@@ -143,7 +143,7 @@ export async function PATCH(
     }
     // Templates/canais mexem no WABA da conta (Meta) ou no número conectado: só admin
     // (mesmo papel das páginas /templates e /canais).
-    const auth = await guardRole('admin')
+    const auth = await guardPermission('templates.manage')
     if (!auth.ok) return auth.response
     const { supabase, accountId } = auth.ctx
 
@@ -327,7 +327,7 @@ export async function DELETE(
     }
     // Templates/canais mexem no WABA da conta (Meta) ou no número conectado: só admin
     // (mesmo papel das páginas /templates e /canais).
-    const auth = await guardRole('admin')
+    const auth = await guardPermission('templates.manage')
     if (!auth.ok) return auth.response
     const { supabase, accountId } = auth.ctx
 
