@@ -89,9 +89,11 @@ export function ConversationOriginBanner({ conversationId }: { conversationId: s
   return (
     <div className="flex items-center gap-1.5 overflow-hidden border-b border-border/70 bg-background px-4 py-1.5 text-[11px] text-muted-foreground">
       <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span className="truncate">
+      <span className="truncate" title={origin.headline}>
         <span className="font-medium text-foreground/85">{ativo ? "Ativo" : "Receptivo"}</span>
         <span> · {summary}</span>
+        {origin.opened_at && <span> · {format(new Date(origin.opened_at), "dd/MM HH:mm")}</span>}
+        {data.line && <span> · {data.channel} {data.line}</span>}
       </span>
     </div>
   );
