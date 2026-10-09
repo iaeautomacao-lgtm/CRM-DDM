@@ -3,6 +3,7 @@
 import { apiFetch } from "@/lib/api-fetch";
 
 import { createElement, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -559,14 +560,14 @@ export default function FlowRunsPage() {
   return (
     <PageBody>
       <div className="flex flex-col gap-1.5 pt-1">
-        <button
-          type="button"
-          onClick={() => router.push(`/flows/${flow.id}`)}
+        <Link
+          href={`/flows/${flow.id}`}
+          aria-label={`Voltar para o fluxo ${flow.name}`}
           className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="size-3" />
+          <ArrowLeft className="size-3" aria-hidden="true" />
           {flow.name}
-        </button>
+        </Link>
         <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Execuções</h2>
         <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
           As 50 execuções mais recentes deste fluxo (após os filtros abaixo).
