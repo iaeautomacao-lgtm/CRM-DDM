@@ -166,7 +166,7 @@ export async function resumePendingExecution(pending: {
 
   if (error || !automation) {
     console.error('[automations] resume: missing automation', pending.automation_id, error)
-    await markPending(pending.id, 'failed')
+    await markPending(pending.id, 'failed', 'Automação não encontrada.')
     return
   }
 
@@ -184,7 +184,7 @@ export async function resumePendingExecution(pending: {
     await markPending(pending.id, 'done')
   } catch (err) {
     console.error('[automations] resume failed:', err)
-    await markPending(pending.id, 'failed')
+    await markPending(pending.id, 'failed', err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -868,11 +868,21 @@ async function finalizeLog(
     .eq('id', logId)
 }
 
-async function markPending(id: string, status: 'done' | 'failed') {
-  await supabaseAdmin()
-    .from('automation_pending_executions')
-    .update({ status })
-    .eq('id', id)
+async function markPending(id: string, status: 'done' | 'failed', errorMessage?: string) {
+  const db = supabaseAdmin()
+  // Migration 317: fecha só se ainda estiver 'running' (o reaper não é desfeito por uma execução que voltou depois do
+  // lease) e limpa o lease. Sem a 317, o UPDATE antigo.
+  const { error } = await db.rpc('finish_automation_pending', {
+    p_id: id,
+    p_status: status,
+    p_error: errorMessage ?? null,
+  })
+  if (!error) return
+  if (error.code !== '42883' && error.code !== 'PGRST202') {
+    console.error('[automations] finish pending failed:', error.message)
+    return
+  }
+  await db.from('automation_pending_executions').update({ status }).eq('id', id)
 }
 
 /**

@@ -346,7 +346,15 @@
       "index": "idx_conversations_account_created"
     },
     {
+      "version": "317_automation_pending_lease",
+      "kind": "registry"
+    },
+    {
       "version": "320_billing_reports",
+      "kind": "registry"
+    },
+    {
+      "version": "322_report_rpcs_has_perm",
       "kind": "registry"
     },
     {
@@ -354,7 +362,7 @@
       "kind": "registry"
     },
     {
-      "version": "326_teams_templates_channels_rls_has_perm",
+      "version": "324_conversations_rls_has_perm",
       "kind": "registry"
     }
   ]
