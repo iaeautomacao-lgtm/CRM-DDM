@@ -16,6 +16,9 @@ import {
   Loader2,
   SlidersHorizontal,
   X,
+  Bell,
+  BellOff,
+  PanelLeftClose,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow } from "date-fns";
@@ -63,6 +66,11 @@ interface ConversationListProps {
   /** Opens the "Nova conversa" contact picker — omitted call sites just
    *  don't get the "+ Nova" button (it's also gated on role, see render). */
   onCreateConversation?: () => void;
+  /** Recolhe a lista no desktop (item 9 do PRD 23). */
+  onCollapse?: () => void;
+  /** Avisos de conversa em espera ligados (item 14 do PRD 23). */
+  alertsEnabled?: boolean;
+  onToggleAlerts?: () => void;
 }
 
 const STATUS_OPTIONS: { label: string; value: InboxStatus }[] = [
@@ -177,6 +185,9 @@ export function ConversationList({
   onConversationsLoaded,
   resyncToken = 0,
   onCreateConversation,
+  onCollapse,
+  alertsEnabled,
+  onToggleAlerts,
 }: ConversationListProps) {
   const { accountRole, accountId, user } = useAuth();
   const isAgent = accountRole === "agent";
@@ -487,7 +498,8 @@ export function ConversationList({
     // três linhas (contato · prévia · cliente/canal/atendente).
     <section aria-label="Lista de conversas" className="flex h-full w-full flex-col border-r border-border bg-card lg:w-[288px] xl:w-[320px]">
       <div className="flex flex-col gap-2.5 border-b border-border px-3.5 pb-2.5 pt-3.5">
-        <div className="flex gap-0.5 rounded-lg bg-card-2 p-[3px]" role="tablist" aria-label="Fila">
+        <div className="flex items-center gap-1.5">
+        <div className="flex flex-1 gap-0.5 rounded-lg bg-card-2 p-[3px]" role="tablist" aria-label="Fila">
           {tabs.map((tab) => {
             const on = activeTab === tab.id;
             const count = tabTotals[tab.id];
@@ -520,6 +532,33 @@ export function ConversationList({
               </button>
             );
           })}
+        </div>
+          {onToggleAlerts && (
+            <button
+              type="button"
+              onClick={onToggleAlerts}
+              aria-pressed={!!alertsEnabled}
+              aria-label={alertsEnabled ? "Desligar avisos de conversa em espera" : "Ligar avisos de conversa em espera"}
+              title={alertsEnabled ? "Avisos de conversa em espera: ligados" : "Avisos de conversa em espera: desligados"}
+              className={cn(
+                "flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-surface-hover",
+                alertsEnabled ? "text-primary-text" : "text-muted-foreground",
+              )}
+            >
+              {alertsEnabled ? <Bell className="size-4" aria-hidden="true" /> : <BellOff className="size-4" aria-hidden="true" />}
+            </button>
+          )}
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-label="Recolher lista de conversas"
+              title="Recolher lista (mais espaço para a conversa)"
+              className="hidden size-[30px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground lg:flex"
+            >
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            </button>
+          )}
         </div>
 
         <div className="flex gap-2">
