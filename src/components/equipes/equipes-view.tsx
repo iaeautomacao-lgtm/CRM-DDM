@@ -231,7 +231,7 @@ export function EquipesView() {
                 />
               </div>
             ) : (
-              <DenseTable minWidth={820}>
+              <DenseTable>
                 <thead>
                   <tr>
                     <Th>Equipe</Th>

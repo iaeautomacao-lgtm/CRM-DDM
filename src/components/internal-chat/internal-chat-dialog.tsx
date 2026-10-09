@@ -771,7 +771,7 @@ export function InternalChatDialog({
                                 <MessageMedia url={m.media_url} type={m.media_type} />
                               </div>
                             )}
-                            {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
+                            {m.content && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.content}</p>}
                             <p
                               className={`mt-1 text-[10px] ${
                                 "text-muted-foreground"
