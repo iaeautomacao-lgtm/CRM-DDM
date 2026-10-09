@@ -29,7 +29,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useCan } from "@/hooks/use-can";
+import { usePermissions } from "@/hooks/use-permission";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -41,7 +41,6 @@ import { ReplyQuote } from "./reply-quote";
 import { QuickReplyMenu, QUICK_REPLY_MENU_ID } from "./quick-reply-menu";
 import { useQuickReplies } from "@/hooks/use-quick-replies";
 import { useAuth } from "@/hooks/use-auth";
-import { canAccessRoute } from "@/lib/role-utils";
 import {
   filterQuickReplies,
   matchSlashQuery,
@@ -189,7 +188,8 @@ export function MessageComposer({
   // Viewers (read-only role) can browse the inbox but never send.
   // For solo users this is always true — single-owner accounts pass
   // every capability — so the disabled branch is a no-op there.
-  const canSend = useCan("send-messages");
+  const { can, canOpen } = usePermissions();
+  const canSend = can("inbox.reply");
   const readOnly = !canSend;
   // Media (like free-form text) is only allowed inside the 24h window.
   const inputsDisabled = readOnly || sessionExpired;
@@ -242,9 +242,9 @@ export function MessageComposer({
   }, [text, sending, sessionExpired, onSend, replyTo?.id, conversationId]);
 
   // ---- Respostas rápidas ("/atalho" ou botão ⚡) ----------------------
-  const { profile, accountRole } = useAuth();
+  const { profile } = useAuth();
   const { replies: quickReplies, loading: quickRepliesLoading } = useQuickReplies();
-  const canManageQuickReplies = accountRole ? canAccessRoute(accountRole, "/respostas-rapidas") : false;
+  const canManageQuickReplies = canOpen("/respostas-rapidas");
   // start = posição da "/" no texto; null = aberto pelo botão (insere no
   // cursor). Menu fechado = qr null.
   const [qr, setQr] = useState<{ start: number | null; query: string } | null>(null);

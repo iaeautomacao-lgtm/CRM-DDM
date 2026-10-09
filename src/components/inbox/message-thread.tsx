@@ -6,6 +6,7 @@ import { ConversationOriginBanner } from "./conversation-origin";
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
 import { trackAction } from "@/hooks/use-telemetry";
 import { usePresence } from "@/hooks/use-presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
@@ -65,7 +66,6 @@ import {
 import { TemplatePicker } from "./template-picker";
 import { OutcomeTagPicker } from "./outcome-tag-picker";
 import { buildReplyPreview } from "./reply-quote";
-import { canAccessRoute } from "@/lib/role-utils";
 import { socialWindow } from "@/lib/channels/graph";
 import { TransferDialog } from "@/components/monitoramento/transfer-dialog";
 import { CHANNEL_BADGE } from "./conversation-list";
@@ -216,7 +216,8 @@ export function MessageThread({
   whatsappProvider = "meta",
   onDeleteConversation,
 }: MessageThreadProps) {
-  const { user, accountId, accountRole } = useAuth();
+  const { user, accountId } = useAuth();
+  const { can, canOpen } = usePermissions();
   const [voipSession, setVoipSession] = useState<string>("default");
 
   useEffect(() => {
@@ -938,7 +939,7 @@ export function MessageThread({
     };
   }, [campaignIdsKey]);
   // Link para a campanha só para quem pode abrir /disparador.
-  const canOpenCampaigns = !!accountRole && canAccessRoute(accountRole, "/disparador");
+  const canOpenCampaigns = canOpen("/disparador");
   const campaignFor = useCallback(
     (msg: Message) => {
       if (!msg.campaign_id) return null;
@@ -1495,8 +1496,8 @@ export function MessageThread({
           {(() => {
             const canCall =
               whatsappProvider === "waha" && !!contact?.phone && conversation.channel_type !== "webchat";
-            const canDelete = !!onDeleteConversation && accountRole !== "agent";
-            const canTransfer = accountRole !== "viewer";
+            const canDelete = !!onDeleteConversation && can("inbox.delete_conversation");
+            const canTransfer = can("inbox.transfer");
             const canTogglePanel = !!onToggleContactPanel;
             if (!onRefresh && !canCall && !canDelete && !canTransfer && !canTogglePanel) return null;
 

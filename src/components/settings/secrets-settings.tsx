@@ -14,8 +14,7 @@ import { toast } from 'sonner';
 import { Loader2, LockKeyhole, Pencil, Plus, Trash2 } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
-import { hasMinRole } from '@/lib/auth/roles';
-import { useAuth } from '@/hooks/use-auth';
+import { usePermission } from '@/hooks/use-permission';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -55,8 +54,7 @@ function parseHosts(text: string): string[] {
 }
 
 export function SecretsSettings() {
-  const { accountRole } = useAuth();
-  const canEdit = !!accountRole && hasMinRole(accountRole, 'admin');
+  const canEdit = usePermission('secrets.write');
 
   const [items, setItems] = useState<SecretItem[]>([]);
   const [loading, setLoading] = useState(true);

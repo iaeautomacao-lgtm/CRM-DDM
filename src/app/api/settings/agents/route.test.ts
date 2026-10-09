@@ -367,6 +367,38 @@ describe('API perfis e RPC 180 — integração PGlite', () => {
       fetch.mockRestore();
     }
   });
+  it('Testar agente: monta o rascunho como a publicação, sem gravar nada (TASK1-C)', async () => {
+    const { buildSimulationAgent, SIM_NEW_AGENT_ID } = await import('@/lib/ai/agents/service');
+    const counts = async () =>
+      (
+        await state.db!.query<{ v: number; r: number; k: number }>(
+          `SELECT (SELECT count(*)::int FROM wacrm.ai_agent_versions) v, (SELECT count(*)::int FROM wacrm.ai_rule_versions) r,
+                  (SELECT count(*)::int FROM wacrm.ai_agent_knowledge) k`
+        )
+      ).rows[0];
+    const before = await counts();
+    const detail = await (await DETAIL(req(undefined, 'GET'), ctx(agentId))).json();
+    const draft = versionBody();
+    draft.prompt_content = 'RASCUNHO NÃO PUBLICADO';
+    const built = await buildSimulationAgent(A, agentId, draft);
+    expect(await counts()).toEqual(before);
+    expect(built.agentId).toBe(agentId);
+    expect(built.version).toBe(detail.published.version + 1);
+    expect(built.seed.agents).toEqual([
+      { id: agentId, name: expect.any(String), enabled: true, published_version_id: built.seed.versions[0].id },
+    ]);
+    expect(built.seed.versions[0]).toMatchObject({ agent_id: agentId, prompt_content: 'RASCUNHO NÃO PUBLICADO', composition: 'sections_v1' });
+    expect(built.seed.ruleVersions.map((r) => r.content)).toEqual(['Regra obrigatória', 'omitida']);
+    // Mesmas travas da publicação: arquivo de outra conta e agente de outra conta são recusados.
+    await expect(
+      buildSimulationAgent(A, agentId, { ...draft, knowledge: { selection_mode: 'explicit', file_ids: [OTHER_FILE] } })
+    ).rejects.toThrow(/Arquivo inexistente ou fora da conta/);
+    await expect(buildSimulationAgent(B, agentId, draft)).rejects.toMatchObject({ status: 404 });
+    // Agente novo (ainda não salvo): id sintético, v1.
+    const fresh = await buildSimulationAgent(A, null, draft);
+    expect(fresh).toMatchObject({ agentId: SIM_NEW_AGENT_ID, version: 1, disabled: false });
+    expect(await counts()).toEqual(before);
+  });
   it('uso distinto por fluxo, DELETE 409 sem force e exclusão segura', async () => {
     await state.db!
       .exec(`INSERT INTO wacrm.flows VALUES('${FILE}','${A}','Fluxo');

@@ -26,13 +26,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { GitBranch, Plus, ChevronDown, Settings } from "lucide-react";
 import { toast } from "sonner";
-import { useCan } from "@/hooks/use-can";
+import { usePermission } from "@/hooks/use-permission";
 import { useAuth } from "@/hooks/use-auth";
 import { GatedButton } from "@/components/ui/gated-button";
 
 // Pipeline creation is admin-class (settings-tier write under
 // the new RLS); deal creation is operational and only requires
-// agent+. The two CTAs gate on different `useCan` capabilities,
+// agent+. The two CTAs gate on different permissions (pipelines.manage
+// x contacts.edit, via usePermission),
 // not on different copy.
 
 // Spec-defined seed — name and color per the product spec.
@@ -46,8 +47,8 @@ const SPEC_DEFAULT_STAGES = [
 
 export default function PipelinesPage() {
   const supabase = createClient();
-  const canEditSettings = useCan("edit-settings");
-  const canCreateDeals = useCan("send-messages");
+  const canEditSettings = usePermission("pipelines.manage");
+  const canCreateDeals = usePermission("contacts.edit");
   const { accountId } = useAuth();
 
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);

@@ -3,19 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { useAuth } from "@/hooks/use-auth";
-import { canAccessRoute } from "@/lib/role-utils";
+import { usePermissions } from "@/hooks/use-permission";
 import { reportNavItems } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 
 export function ReportTabs() {
   const pathname = usePathname();
-  const { accountRole, profileLoading } = useAuth();
+  const { canOpen } = usePermissions();
 
-  const visible = reportNavItems.filter((item) => {
-    if (profileLoading || !accountRole) return false;
-    return canAccessRoute(accountRole, item.href);
-  });
+  // Abas que o servidor libera (GET /api/me/permissions, campo pages).
+  const visible = reportNavItems.filter((item) => canOpen(item.href));
 
   if (visible.length === 0) return null;
 
