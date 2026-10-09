@@ -1,5 +1,6 @@
 'use client';
 
+import { PanelHeadingLevel } from "@/components/settings/settings-panel-head";
 import { Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -92,9 +93,9 @@ function SettingsContent() {
   return (
     <div>
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">
+        <h2 className="text-2xl font-bold tracking-tight text-foreground">
           Configurações
-        </h1>
+        </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Tudo em um só lugar — sua conta e seu espaço de trabalho. Escolha uma
           seção para gerenciá-la.
@@ -110,11 +111,13 @@ function SettingsContent() {
           aria-label={SECTION_META[panelKey].label}
           className="min-w-0 outline-none"
         >
-          {isIntegrationTab(section) ? (
-            <IntegrationsSettings active={section} tabs={integrationTabs} onSelect={go} />
-          ) : (
-            panel[section] ?? null
-          )}
+          <PanelHeadingLevel level={3}>
+            {isIntegrationTab(section) ? (
+              <IntegrationsSettings active={section} tabs={integrationTabs} onSelect={go} />
+            ) : (
+              panel[section] ?? null
+            )}
+          </PanelHeadingLevel>
         </div>
       </div>
     </div>

@@ -55,12 +55,17 @@ export function matchPreset(range: PeriodRange, now: Date = new Date()): PeriodP
   return null;
 }
 
-/** "De" depois de "Até": troca as pontas em vez de buscar um período vazio. */
-export function normalizeRange(range: PeriodRange): PeriodRange {
-  if (range.dateFrom && range.dateTo && range.dateFrom > range.dateTo) {
-    return { dateFrom: range.dateTo, dateTo: range.dateFrom };
-  }
-  return range;
+/**
+ * Motivo pelo qual o período não pode ser pesquisado (null = válido): data vazia/inválida ou "De" depois de "Até".
+ * Não troca as pontas em silêncio: a tela mostra o erro e desabilita o Pesquisar.
+ */
+export function rangeError(range: PeriodRange): string | null {
+  if (!range.dateFrom) return "Informe a data inicial.";
+  if (!range.dateTo) return "Informe a data final.";
+  if (!DATE_RE.test(range.dateFrom) || Number.isNaN(Date.parse(range.dateFrom))) return "Data inicial inválida.";
+  if (!DATE_RE.test(range.dateTo) || Number.isNaN(Date.parse(range.dateTo))) return "Data final inválida.";
+  if (range.dateFrom > range.dateTo) return "A data inicial deve ser igual ou anterior à final.";
+  return null;
 }
 
 const STORAGE_KEY = "relatorios:periodo";

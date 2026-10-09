@@ -476,6 +476,7 @@ export async function processMessage(
       contactId: contactRecord.id,
       vars: flowResponseVars(flowResponse),
       flowToken: flowResponse.data?.flow_token,
+      flowName: flowResponse.flowName,
     })
     void writeLog({
       account_id: accountId,

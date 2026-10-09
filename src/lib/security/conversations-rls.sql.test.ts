@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 
-import { ACC, ACC_B, SYSTEM, T1, T2, U, asUser, createRolesDb, id, migration } from "./rls-fixture";
+import { ACC, ACC_B, SYSTEM, T1, T2, U, asUser, createRolesDb, headerRollback, id, migration } from "./rls-fixture";
 
 const C = { c1: id(301), c2: id(302), c3: id(303), c4: id(304), c5: id(305), c6: id(306), c7: id(307), c8: id(308), c9: id(309), c10: id(310), c11: id(311), cb: id(312) };
 const W = { w1: id(401), w2: id(402), w3: id(403), wb: id(404) };
@@ -103,6 +103,14 @@ describe("migration 324 — conversas e whatsapp_config por permissão", { timeo
     expect(before.nada.conv).toEqual(["c2"]);
     expect(after.nada.conv).toEqual([]);
     expect(after.nada.cfg).toEqual([]);
+  });
+
+  it("ROLLBACK do cabeçalho é SQL executável: devolve EXATAMENTE a regra da 140 (papéis de sistema iguais; o personalizado volta a valer pelo compat_role) e remove o registro", async () => {
+    await db.exec(headerRollback("324_conversations_rls_has_perm.sql"));
+    for (const who of everyone()) expect(await read(who), `${who} depois do rollback`).toEqual(before[who]);
+    expect((await db.query(`SELECT version FROM wacrm.schema_migrations WHERE version LIKE '324%'`)).rows).toEqual([]);
+    await db.exec(migration("324_conversations_rls_has_perm.sql")); // reaplica sem erro
+    expect(await read("nada")).toEqual(after.nada);
   });
 
   it("idempotente (uma policy por tabela) e registra a versão", async () => {
