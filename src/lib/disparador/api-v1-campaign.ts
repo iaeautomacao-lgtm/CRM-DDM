@@ -119,7 +119,7 @@ function normalizeVariables(raw: unknown): string[] {
  */
 export function normalizeApiContacts(
   contacts: readonly unknown[],
-  options: { blacklist: ReadonlySet<string>; wahaMessage?: string | null }
+  options: { blacklist: ReadonlySet<string>; wahaMessage?: string | null; metaBodyVariables?: number }
 ): NormalizeResult {
   const out: NormalizedContact[] = [];
   const seen = new Set<string>();
@@ -127,7 +127,10 @@ export function normalizeApiContacts(
   let invalid = 0;
   let duplicates = 0;
   let skipped = 0;
-  const required = options.wahaMessage != null ? placeholderIndexes(options.wahaMessage) : [];
+  const required =
+    options.wahaMessage != null
+      ? placeholderIndexes(options.wahaMessage)
+      : Array.from({ length: Math.max(0, options.metaBodyVariables ?? 0) }, (_, k) => k + 1);
 
   const reject = (index: number, phone: string | null, reason: InvalidReason) => {
     invalid++;
