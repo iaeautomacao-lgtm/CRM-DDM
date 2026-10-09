@@ -3,6 +3,8 @@
 
 import { normalizeForSearch } from "@/lib/utils";
 
+export type QuickReplyVisibility = "personal" | "team" | "account";
+
 export interface QuickReply {
   id: string;
   account_id: string;
@@ -11,6 +13,9 @@ export interface QuickReply {
   content: string;
   /** Quem cadastrou (coluna da 142); a tela usa para o filtro "Minhas". */
   created_by?: string | null;
+  /** Migration 301: pessoal (só o dono), equipe (membros de team_id) ou conta (todos). */
+  visibility?: QuickReplyVisibility;
+  team_id?: string | null;
   created_at: string;
   updated_at: string;
 }
