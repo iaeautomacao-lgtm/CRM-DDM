@@ -47,11 +47,11 @@ export function PhaseColumn({
   return (
     <section
       className={cn(
-        "flex min-h-0 flex-col rounded-xl border border-border bg-card",
+        "flex min-h-0 flex-col rounded-[10px] bg-surface-3/50",
         collapsed && "self-start",
       )}
     >
-      <header className="flex items-center gap-2 border-b border-border px-4 py-3">
+      <header className="flex items-center gap-2 px-4 pb-1 pt-3">
         <span
           className={cn(
             "flex h-7 w-7 items-center justify-center rounded-full",
@@ -69,7 +69,7 @@ export function PhaseColumn({
             aria-label={`Selecionar todas as conversas em ${meta.label}`}
           />
         )}
-        <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">
+        <span className="ml-auto text-[12.5px] font-medium tabular-nums text-muted-foreground">
           {conversations.length}
         </span>
       </header>
