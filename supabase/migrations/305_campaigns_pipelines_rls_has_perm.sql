@@ -14,6 +14,10 @@
 -- SEGURANÇA DA TROCA: has_perm é fail-closed (perfil sem role_id = false). Se houver QUALQUER perfil sem role_id, ABORTA sem alterar nada. Se uma das chaves
 -- da 304 faltar no catálogo, ABORTA (aplique a 304 antes). Se a expressão VIVA de alguma policy não mencionar is_account_member (schema editado à mão), ABORTA.
 --
+-- DICA (aborta com "perfil(is) sem role_id"?): rode ANTES o SQL de conferência do Sextante, prd-v2/rls-p0.sql — [1] conta os perfis sem role_id (esperado 0) e
+-- [2] lista os perfis cujo role_id não bate com o account_role. Para listar quem é: SELECT user_id, account_id, account_role FROM wacrm.profiles WHERE role_id IS NULL;
+-- Corrija pelo backfill da 240: a trigger profiles_sync_role (BEFORE INSERT OR UPDATE) preenche o role_id a partir do account_role — um UPDATE sem mudança de valor (UPDATE wacrm.profiles SET account_role = account_role WHERE role_id IS NULL;) a dispara. Rode a 305 de novo.
+--
 -- PRÉ-CHECK:  SELECT count(*) FROM wacrm.profiles WHERE role_id IS NULL;                                                         -- 0
 --             SELECT key FROM wacrm.permission_catalog WHERE key IN ('campaigns.view', 'pipelines.view');                          -- 2 linhas (304)
 --             SELECT tablename, policyname, qual FROM pg_policies WHERE schemaname = 'wacrm' AND policyname IN
