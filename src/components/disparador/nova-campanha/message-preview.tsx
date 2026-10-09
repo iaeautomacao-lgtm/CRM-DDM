@@ -69,14 +69,14 @@ export function MessagePreview({
         <div
           className={cn(
             "whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-xs text-foreground",
-            preview.willSkip ? "border border-red-500/40 bg-red-500/5" : "bg-emerald-500/10"
+            preview.willSkip ? "bg-danger-soft" : "bg-success-soft"
           )}
         >
           {preview.segments.map((seg, si) =>
             seg.kind === "text" ? (
               <span key={si}>{seg.text}</span>
             ) : seg.empty ? (
-              <span key={si} className="rounded bg-red-500/15 px-1 font-medium text-red-600 dark:text-red-400">
+              <span key={si} className="rounded bg-danger-soft px-1 font-medium text-danger">
                 {seg.token} (vazio)
               </span>
             ) : seg.pending ? (
@@ -92,7 +92,7 @@ export function MessagePreview({
         </div>
       )}
       {preview.willSkip && (
-        <p className="text-xs font-medium text-red-600 dark:text-red-400">
+        <p className="text-xs font-medium text-danger">
           Este contato não será enviado: {preview.emptyVars.map((n) => `{{${n}}}`).join(", ")} sem valor.
         </p>
       )}

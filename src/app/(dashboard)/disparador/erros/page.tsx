@@ -11,11 +11,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, Download, Loader2, RefreshCw, Search, X } from "lucide-react";
 
 import { apiFetch } from "@/lib/api-fetch";
-import { Badge } from "@/components/ui/badge";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
+import { DetailDrawer } from "@/components/ddm/list-with-drawer";
+import { EmptyState, Skeleton } from "@/components/ddm/states";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { classeLabelPt, formatInt } from "@/lib/disparador/monitor-format";
 import { META_ERROR_CATALOG } from "@/lib/disparador/meta-error-catalog";
@@ -51,7 +52,7 @@ interface Filters {
 
 const EMPTY: Filters = { campaign: "", session: "", code: "", classe: "", periodo: "24h", phone: "" };
 const SELECT_CLASS =
-  "h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground shadow-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  "h-8 w-full rounded-[6px] border border-input bg-background px-2 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 function toQuery(f: Filters): URLSearchParams {
   const p = new URLSearchParams();
@@ -178,171 +179,176 @@ function ErrosContent() {
   const codeKey = (c: number | null) => (c === null ? "sem_codigo" : String(c));
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 p-4 lg:p-6">
-      <div className="flex flex-col justify-between gap-3 border-b border-border/60 pb-4 sm:flex-row sm:items-center">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight sm:text-2xl">
-            <AlertTriangle className="h-6 w-6 text-primary" aria-hidden="true" />
-            Erros do disparador
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Itens que terminaram em erro, com a explicação do código da Meta. Esta tela é só de consulta: não reenvia nem cancela itens.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => void load(filters)} disabled={loading}>
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
-            Atualizar
-          </Button>
-          <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => void exportCsv()} disabled={exporting || items.length === 0}>
-            {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Download className="h-3.5 w-3.5" aria-hidden="true" />}
-            Exportar CSV
-          </Button>
-        </div>
-      </div>
+    <PageBody>
+      <PageToolbar
+        actions={
+          <>
+            <Button variant="outline" onClick={() => void load(filters)} disabled={loading}>
+              <RefreshCw className={cn("size-3.5", loading && "animate-spin")} aria-hidden="true" />
+              Atualizar
+            </Button>
+            <Button variant="outline" onClick={() => void exportCsv()} disabled={exporting || items.length === 0}>
+              {exporting ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Download className="size-3.5" aria-hidden="true" />}
+              Exportar CSV
+            </Button>
+          </>
+        }
+      >
+        <p className="m-0 max-w-3xl text-[12.5px] text-muted-foreground">
+          Itens que terminaram em erro, com a explicação do código da Meta. Esta tela é só de consulta: não reenvia nem
+          cancela itens.
+        </p>
+      </PageToolbar>
 
       {/* Filtros */}
-      <Card>
-        <CardContent className="grid grid-cols-1 gap-3 py-4 sm:grid-cols-2 lg:grid-cols-6">
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Campanha
-            <select className={SELECT_CLASS} value={filters.campaign} onChange={(e) => set({ campaign: e.target.value })}>
-              <option value="">Todas</option>
-              {campaigns.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nome}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Número
-            <select className={SELECT_CLASS} value={filters.session} onChange={(e) => set({ session: e.target.value })}>
-              <option value="">Todos</option>
-              {numbers.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Código
-            <Input
-              list="erros-codigos"
-              inputMode="numeric"
-              className="h-9"
-              placeholder="Ex.: 131026"
-              value={filters.code === "sem_codigo" ? "sem código" : filters.code}
-              onChange={(e) => {
-                const v = e.target.value.trim();
-                set({ code: /^\d{0,9}$/.test(v) ? v : v === "sem código" ? "sem_codigo" : filters.code });
-              }}
-            />
-            <datalist id="erros-codigos">
-              {META_ERROR_CATALOG.map((e) => (
-                <option key={e.code} value={String(e.code)}>
-                  {classeLabelPt(e.classe)}
-                </option>
-              ))}
-            </datalist>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Tipo de erro
-            <select className={SELECT_CLASS} value={filters.classe} onChange={(e) => set({ classe: e.target.value })}>
-              <option value="">Todos</option>
-              {CLASSES.map((c) => (
-                <option key={c} value={c}>
-                  {classeLabelPt(c)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
-            Período
-            <select className={SELECT_CLASS} value={filters.periodo} onChange={(e) => set({ periodo: e.target.value })}>
-              {PERIODOS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <form
-            className="flex flex-col gap-1 text-xs font-medium"
-            onSubmit={(e) => {
-              e.preventDefault();
-              set({ phone: phoneDraft.trim() });
+      <section
+        aria-label="Filtros"
+        className="grid grid-cols-1 gap-3 rounded-[10px] border border-border bg-card px-[18px] py-4 sm:grid-cols-2 lg:grid-cols-6"
+      >
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+          Campanha
+          <select className={SELECT_CLASS} value={filters.campaign} onChange={(e) => set({ campaign: e.target.value })}>
+            <option value="">Todas</option>
+            {campaigns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nome}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+          Número
+          <select className={SELECT_CLASS} value={filters.session} onChange={(e) => set({ session: e.target.value })}>
+            <option value="">Todos</option>
+            {numbers.map((n) => (
+              <option key={n.id} value={n.id}>
+                {n.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+          Código
+          <Input
+            list="erros-codigos"
+            inputMode="numeric"
+            className="h-8"
+            placeholder="Ex.: 131026"
+            value={filters.code === "sem_codigo" ? "sem código" : filters.code}
+            onChange={(e) => {
+              const v = e.target.value.trim();
+              set({ code: /^\d{0,9}$/.test(v) ? v : v === "sem código" ? "sem_codigo" : filters.code });
             }}
-          >
-            <label htmlFor="erros-telefone">Telefone (número completo)</label>
-            <div className="flex gap-1">
-              <Input id="erros-telefone" className="h-9" inputMode="tel" placeholder="DDD + número" value={phoneDraft} onChange={(e) => setPhoneDraft(e.target.value)} />
-              <Button type="submit" size="icon" variant="outline" className="h-9 w-9 shrink-0" aria-label="Buscar telefone">
-                <Search className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </div>
-          </form>
-          {hasFilters && (
-            <div className="sm:col-span-2 lg:col-span-6">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 gap-1 text-xs"
-                onClick={() => {
-                  setFilters(EMPTY);
-                  setPhoneDraft("");
-                }}
-              >
-                <X className="h-3.5 w-3.5" aria-hidden="true" /> Limpar filtros
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          />
+          <datalist id="erros-codigos">
+            {META_ERROR_CATALOG.map((e) => (
+              <option key={e.code} value={String(e.code)}>
+                {classeLabelPt(e.classe)}
+              </option>
+            ))}
+          </datalist>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+          Tipo de erro
+          <select className={SELECT_CLASS} value={filters.classe} onChange={(e) => set({ classe: e.target.value })}>
+            <option value="">Todos</option>
+            {CLASSES.map((c) => (
+              <option key={c} value={c}>
+                {classeLabelPt(c)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+          Período
+          <select className={SELECT_CLASS} value={filters.periodo} onChange={(e) => set({ periodo: e.target.value })}>
+            {PERIODOS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <form
+          className="flex flex-col gap-1 text-xs font-medium text-foreground-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            set({ phone: phoneDraft.trim() });
+          }}
+        >
+          <label htmlFor="erros-telefone">Telefone (número completo)</label>
+          <div className="flex gap-1">
+            <Input
+              id="erros-telefone"
+              className="h-8"
+              inputMode="tel"
+              placeholder="DDD + número"
+              value={phoneDraft}
+              onChange={(e) => setPhoneDraft(e.target.value)}
+            />
+            <Button type="submit" size="icon" variant="outline" className="shrink-0" aria-label="Buscar telefone">
+              <Search className="size-3.5" aria-hidden="true" />
+            </Button>
+          </div>
+        </form>
+        {hasFilters && (
+          <div className="sm:col-span-2 lg:col-span-6">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setFilters(EMPTY);
+                setPhoneDraft("");
+              }}
+            >
+              <X className="size-3.5" aria-hidden="true" /> Limpar filtros
+            </Button>
+          </div>
+        )}
+      </section>
 
       {error && (
-        <div role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
+        <div role="alert" className="flex animate-ddm-fade items-start gap-2.5 rounded-lg bg-danger-soft px-3.5 py-2.5 text-[13px] text-foreground">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
           {error}
         </div>
       )}
 
-      {/* Resumo por código */}
+      {/* Resumo por código: cada célula filtra a lista. */}
       {summary && summary.rows.length > 0 && (
         <section aria-label="Resumo por código" className="flex flex-col gap-2">
-          <div className="flex items-baseline justify-between">
-            <h2 className="text-sm font-semibold">Resumo por código</h2>
-            <p className="text-xs text-muted-foreground">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="m-0 text-sm font-semibold text-foreground">Resumo por código</h2>
+            <p className="m-0 text-xs text-muted-foreground">
               {formatInt(summary.total)} {summary.total === 1 ? "item" : "itens"}
-              {summary.truncated && (summary.source === "rpc" ? " (a partir de 20.000, contando os mais recentes)" : " (amostra dos 5.000 mais recentes)")}
+              {summary.truncated &&
+                (summary.source === "rpc" ? " (a partir de 20.000, contando os mais recentes)" : " (amostra dos 5.000 mais recentes)")}
             </p>
           </div>
-          <ul className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+          <ul className="m-0 grid list-none grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-px overflow-hidden rounded-[10px] border border-border bg-border p-0">
             {summary.rows.map((r) => {
               const key = codeKey(r.code);
               const active = filters.code === key;
               return (
-                <li key={key}>
+                <li key={key} className="bg-card">
                   <button
                     type="button"
                     aria-pressed={active}
                     onClick={() => set({ code: active ? "" : key, classe: "" })}
                     className={cn(
-                      "flex h-full w-full flex-col gap-1 rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                      active ? "border-primary ring-1 ring-primary" : "border-border",
+                      "flex h-full w-full flex-col gap-1 px-4 py-3 text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
+                      active && "bg-selected shadow-[inset_0_-2px_0_var(--primary)]",
                     )}
                   >
                     <span className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-2">
-                        <Badge variant="outline" className="font-mono">
-                          {r.code ?? "sem código"}
-                        </Badge>
-                        <span className="text-[11px] text-muted-foreground">{classeLabelPt(r.classe)}</span>
+                        <CodeTag code={r.code} />
+                        <span className="text-[11.5px] text-muted-foreground">{classeLabelPt(r.classe)}</span>
                       </span>
-                      <span className="text-sm font-bold tabular-nums">{formatInt(r.count)}</span>
+                      <span className="text-lg font-semibold tabular-nums text-foreground">{formatInt(r.count)}</span>
                     </span>
                     {r.significado && <span className="line-clamp-2 text-xs text-muted-foreground">{r.significado}</span>}
-                    {r.acao && <span className="line-clamp-2 text-xs">{r.acao}</span>}
+                    {r.acao && <span className="line-clamp-2 text-xs text-foreground-2">{r.acao}</span>}
                   </button>
                 </li>
               );
@@ -352,69 +358,75 @@ function ErrosContent() {
       )}
 
       {/* Lista */}
-      {loading && items.length === 0 ? (
-        <div className="flex h-40 items-center justify-center text-muted-foreground">
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden="true" /> Carregando…
-        </div>
-      ) : items.length === 0 ? (
-        <Card>
-          <CardContent className="py-10 text-center text-sm text-muted-foreground">Nenhum erro encontrado com estes filtros.</CardContent>
-        </Card>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
+      <TableCard title="Itens com erro" hint="Clique no erro para ver a explicação, a linha do tempo e a origem.">
+        {loading && items.length === 0 ? (
+          <div className="flex flex-col gap-2 px-[18px] pb-4" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 w-full" />
+            ))}
+          </div>
+        ) : items.length === 0 ? (
+          <EmptyState className="m-4 mt-0" title="Nenhum erro encontrado com estes filtros" />
+        ) : (
+          <DenseTable minWidth={760}>
+            <thead>
               <tr>
-                <th className="px-3 py-2 font-medium">Quando</th>
-                <th className="px-3 py-2 font-medium">Contato</th>
-                <th className="px-3 py-2 font-medium">Campanha</th>
-                <th className="px-3 py-2 font-medium">Número</th>
-                <th className="px-3 py-2 font-medium">Erro</th>
+                <Th>Quando</Th>
+                <Th>Contato</Th>
+                <Th>Campanha</Th>
+                <Th>Número</Th>
+                <Th>Erro</Th>
               </tr>
             </thead>
             <tbody>
               {items.map((i) => (
-                <tr key={i.id} className="border-t border-border/60 hover:bg-muted/40">
-                  <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{fmtDate(i.updatedAt)}</td>
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{i.contactName || "—"}</div>
-                    <div className="text-xs text-muted-foreground">{i.phone ?? "—"}</div>
-                  </td>
-                  <td className="px-3 py-2">{i.campaignNome}</td>
-                  <td className="px-3 py-2">{i.numero}</td>
-                  <td className="px-3 py-2">
+                <Tr key={i.id} className={cn(selected === i.id && "bg-selected")}>
+                  <Td className="whitespace-nowrap text-xs text-muted-foreground">{fmtDate(i.updatedAt)}</Td>
+                  <Td>
+                    <CellMain title={i.contactName || "—"} sub={i.phone ?? "—"} />
+                  </Td>
+                  <Td className="max-w-[14rem] truncate">{i.campaignNome}</Td>
+                  <Td>{i.numero}</Td>
+                  <Td>
                     <button
                       type="button"
                       onClick={() => setSelected(i.id)}
-                      className="flex flex-col items-start gap-0.5 text-left text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex flex-col items-start gap-0.5 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       <span className="flex items-center gap-2">
-                        <Badge variant="outline" className="font-mono">
-                          {i.erroCodigo ?? "sem código"}
-                        </Badge>
+                        <CodeTag code={i.erroCodigo} />
                         <span className="text-xs text-muted-foreground">{classeLabelPt(i.classe)}</span>
                       </span>
-                      <span className="line-clamp-1 max-w-md text-xs text-foreground">{i.significado ?? i.erro ?? "—"}</span>
+                      <span className="line-clamp-1 max-w-md text-xs font-medium text-primary-text hover:underline">
+                        {i.significado ?? i.erro ?? "—"}
+                      </span>
                     </button>
-                  </td>
-                </tr>
+                  </Td>
+                </Tr>
               ))}
             </tbody>
-          </table>
-        </div>
-      )}
+          </DenseTable>
+        )}
+      </TableCard>
 
       {nextCursor && (
         <div className="flex justify-center">
-          <Button variant="outline" size="sm" onClick={() => void loadMore()} disabled={loadingMore} className="gap-2">
-            {loadingMore && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+          <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
+            {loadingMore && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
             Carregar mais 50
           </Button>
         </div>
       )}
 
       <DetailSheet itemId={selected} onClose={() => setSelected(null)} />
-    </div>
+    </PageBody>
+  );
+}
+
+/** Código da Meta em fonte mono (ou "sem código"). */
+function CodeTag({ code }: { code: number | null }) {
+  return (
+    <span className="rounded-[4px] bg-surface-3 px-1.5 py-0.5 font-mono text-xs text-foreground">{code ?? "sem código"}</span>
   );
 }
 
@@ -448,106 +460,116 @@ function DetailSheet({ itemId, onClose }: { itemId: string | null; onClose: () =
 
   const item = detail?.item;
   return (
-    <Sheet open={itemId !== null} onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-lg">
-        <SheetHeader>
-          <SheetTitle>Detalhe do erro</SheetTitle>
-          <SheetDescription>{item ? `${item.contactName || "Contato"} — ${item.phone ?? "sem telefone"}` : "Carregando o item…"}</SheetDescription>
-        </SheetHeader>
-        <div className="flex flex-col gap-4 px-4 pb-6 text-sm">
-          {loading && (
-            <div className="flex items-center text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> Carregando…
-            </div>
-          )}
-          {error && (
-            <div role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-rose-800 dark:text-rose-200">
-              {error}
-            </div>
-          )}
-          {detail && item && (
-            <>
-              <section className="rounded-lg border border-border p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <Badge variant="outline" className="font-mono">
-                    {item.erroCodigo ?? "sem código"}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">{classeLabelPt(item.classe)}</span>
-                </div>
-                {item.significado ? (
-                  <>
-                    <p className="text-xs font-semibold">O que significa</p>
-                    <p className="mb-2 text-muted-foreground">{item.significado}</p>
-                    <p className="text-xs font-semibold">O que fazer</p>
-                    <p className="text-muted-foreground">{item.acao}</p>
-                  </>
-                ) : (
-                  <p className="text-muted-foreground">Este erro não trouxe código da Meta (falha local ou do provedor). Veja o texto original abaixo.</p>
-                )}
-                <p className="mt-2 break-words rounded bg-muted/60 p-2 font-mono text-[11px] text-muted-foreground">{item.erro ?? "—"}</p>
-              </section>
-
-              {(item.entregaPendente131026 || detail.campanhas131026 !== null) && (
-                <section className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-amber-900 dark:text-amber-200">
-                  <p className="text-xs font-semibold">131026 (não entregável)</p>
-                  {item.entregaPendente131026 && <p>Aguardando a janela de confirmação de 24 h: se a Meta confirmar a entrega depois, o item deixa de ser erro.</p>}
-                  {detail.campanhas131026 !== null && (
-                    <p>
-                      Este telefone já teve 131026 em {detail.campanhas131026} {detail.campanhas131026 === 1 ? "campanha" : "campanhas"} (a lista de bloqueio
-                      entra a partir de 3).
-                    </p>
-                  )}
-                </section>
+    <DetailDrawer
+      open={itemId !== null}
+      onOpenChange={(open) => !open && onClose()}
+      title="Detalhe do erro"
+      description={item ? `${item.contactName || "Contato"} — ${item.phone ?? "sem telefone"}` : "Carregando o item…"}
+      headerExtra={item ? <CodeTag code={item.erroCodigo} /> : null}
+      size="lg"
+    >
+      <div className="flex flex-col gap-5 text-[13px]">
+        {loading && (
+          <div className="flex flex-col gap-2" aria-busy="true">
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        )}
+        {error && (
+          <div role="alert" className="flex items-start gap-2 rounded-lg bg-danger-soft px-3 py-2 text-foreground">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
+            {error}
+          </div>
+        )}
+        {detail && item && (
+          <>
+            <section className="flex flex-col gap-2 rounded-lg bg-surface-3 p-3">
+              <span className="text-xs text-muted-foreground">{classeLabelPt(item.classe)}</span>
+              {item.significado ? (
+                <>
+                  <div>
+                    <p className="m-0 text-xs font-semibold text-foreground">O que significa</p>
+                    <p className="m-0 text-foreground-2">{item.significado}</p>
+                  </div>
+                  <div>
+                    <p className="m-0 text-xs font-semibold text-foreground">O que fazer</p>
+                    <p className="m-0 text-foreground-2">{item.acao}</p>
+                  </div>
+                </>
+              ) : (
+                <p className="m-0 text-foreground-2">
+                  Este erro não trouxe código da Meta (falha local ou do provedor). Veja o texto original abaixo.
+                </p>
               )}
+              <p className="m-0 break-words rounded-[6px] bg-card p-2 font-mono text-[11px] text-muted-foreground">{item.erro ?? "—"}</p>
+            </section>
 
-              <section>
-                <h3 className="mb-2 text-xs font-semibold">Linha do tempo</h3>
-                <ol className="flex flex-col gap-2 border-l border-border pl-4">
-                  {detail.timeline.map((e, idx) => (
-                    <li key={`${e.key}-${idx}`} className="relative">
-                      <span
-                        aria-hidden="true"
-                        className={cn("absolute -left-[21px] top-1.5 h-2 w-2 rounded-full", e.key === "erro" ? "bg-rose-500" : "bg-primary")}
-                      />
-                      <div className="flex justify-between gap-2">
-                        <span className="font-medium">{e.label}</span>
-                        <span className="text-xs text-muted-foreground">{fmtDate(e.at)}</span>
-                      </div>
-                      {e.detail && <p className="break-words text-xs text-muted-foreground">{e.detail}</p>}
-                    </li>
-                  ))}
-                </ol>
-                <p className="mt-2 text-[11px] text-muted-foreground">{detail.receiptsRetentionNote}</p>
+            {(item.entregaPendente131026 || detail.campanhas131026 !== null) && (
+              <section className="flex flex-col gap-1 rounded-lg bg-warning-soft p-3 text-foreground">
+                <p className="m-0 text-xs font-semibold">131026 (não entregável)</p>
+                {item.entregaPendente131026 && (
+                  <p className="m-0">
+                    Aguardando a janela de confirmação de 24 h: se a Meta confirmar a entrega depois, o item deixa de ser erro.
+                  </p>
+                )}
+                {detail.campanhas131026 !== null && (
+                  <p className="m-0">
+                    Este telefone já teve 131026 em {detail.campanhas131026} {detail.campanhas131026 === 1 ? "campanha" : "campanhas"} (a lista
+                    de bloqueio entra a partir de 3).
+                  </p>
+                )}
               </section>
+            )}
 
-              <section>
-                <h3 className="mb-2 text-xs font-semibold">Origem</h3>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                  <dt className="text-muted-foreground">Campanha</dt>
-                  <dd>
-                    <Link href={`/disparador/campanhas/${detail.campaign.id}`} className="text-primary hover:underline">
-                      {detail.campaign.nome}
-                    </Link>
-                  </dd>
-                  <dt className="text-muted-foreground">Número</dt>
-                  <dd>{item.numero}</dd>
-                  <dt className="text-muted-foreground">Template</dt>
-                  <dd>{detail.template.name ? `${detail.template.name} (${detail.template.language ?? "—"})` : "Texto livre (WAHA)"}</dd>
-                  {detail.template.variables && (
-                    <>
-                      <dt className="text-muted-foreground">Variáveis</dt>
-                      <dd className="break-words">{detail.template.variables.join(" · ")}</dd>
-                    </>
-                  )}
-                  <dt className="text-muted-foreground">Tentativas</dt>
-                  <dd>{item.tentativas ?? "—"}</dd>
-                </dl>
-              </section>
-            </>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+            <section>
+              <h3 className="m-0 mb-2 font-sans text-[13px] font-semibold text-foreground">Linha do tempo</h3>
+              <ol className="m-0 flex list-none flex-col gap-2.5 border-l border-border pl-4">
+                {detail.timeline.map((e, idx) => (
+                  <li key={`${e.key}-${idx}`} className="relative animate-ddm-row" style={{ animationDelay: `${Math.min(idx, 10) * 30}ms` }}>
+                    <span
+                      aria-hidden="true"
+                      className={cn("absolute -left-[21px] top-1.5 size-2 rounded-full", e.key === "erro" ? "bg-danger" : "bg-primary")}
+                    />
+                    <div className="flex justify-between gap-2">
+                      <span className="font-medium text-foreground">{e.label}</span>
+                      <span className="text-xs tabular-nums text-muted-foreground">{fmtDate(e.at)}</span>
+                    </div>
+                    {e.detail && <p className="m-0 break-words text-xs text-muted-foreground">{e.detail}</p>}
+                  </li>
+                ))}
+              </ol>
+              <p className="m-0 mt-2 text-[11px] text-muted-foreground">{detail.receiptsRetentionNote}</p>
+            </section>
+
+            <section>
+              <h3 className="m-0 mb-2 font-sans text-[13px] font-semibold text-foreground">Origem</h3>
+              <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5">
+                <dt className="text-muted-foreground">Campanha</dt>
+                <dd className="m-0">
+                  <Link href={`/disparador/campanhas/${detail.campaign.id}`} className="font-semibold text-primary-text hover:underline">
+                    {detail.campaign.nome}
+                  </Link>
+                </dd>
+                <dt className="text-muted-foreground">Número</dt>
+                <dd className="m-0">{item.numero}</dd>
+                <dt className="text-muted-foreground">Template</dt>
+                <dd className="m-0">
+                  {detail.template.name ? `${detail.template.name} (${detail.template.language ?? "—"})` : "Texto livre (WAHA)"}
+                </dd>
+                {detail.template.variables && (
+                  <>
+                    <dt className="text-muted-foreground">Variáveis</dt>
+                    <dd className="m-0 break-words">{detail.template.variables.join(" · ")}</dd>
+                  </>
+                )}
+                <dt className="text-muted-foreground">Tentativas</dt>
+                <dd className="m-0 tabular-nums">{item.tentativas ?? "—"}</dd>
+              </dl>
+            </section>
+          </>
+        )}
+      </div>
+    </DetailDrawer>
   );
 }
 

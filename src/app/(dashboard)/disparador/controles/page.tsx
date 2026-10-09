@@ -3,20 +3,24 @@
 // /disparador/controles — editar por número: vagas (max_in_flight), limite por hora e pausar/retomar.
 // Toda mudança mostra o "antes → depois", pede o MOTIVO e confirmação, é auditada e vale no próximo tick
 // (sem restart). Os ajustes globais (variáveis de ambiente) aparecem só para leitura, com explicação.
+// Visual do redesenho DDM; o modelo continua por número (o protótipo global foi descartado — PRD 22, 3.4).
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, PauseCircle, PlayCircle, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
 
 import { apiFetch } from "@/lib/api-fetch";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
+import { DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
+import { EmptyState, Skeleton } from "@/components/ddm/states";
 import { formatInt, timeAgoPt } from "@/lib/disparador/monitor-format";
 import type { LimitsOverview, NumberLimits, RateInfo } from "@/lib/disparador/limits";
+
 
 const REASON_MIN = 5;
 const REASON_MAX = 300;
@@ -46,12 +50,6 @@ async function readJson(res: Response) {
   return body;
 }
 
-const QUALITY_LABEL: Record<string, string> = { GREEN: "Verde", YELLOW: "Amarela", RED: "Vermelha", UNKNOWN: "Sem leitura" };
-const QUALITY_CLASS: Record<string, string> = {
-  GREEN: "border-emerald-500/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200",
-  YELLOW: "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200",
-  RED: "border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-200",
-};
 const SOURCE_LABEL: Record<string, string> = {
   webhook: "Aviso da Meta",
   poll: "Consulta automática",
@@ -59,6 +57,10 @@ const SOURCE_LABEL: Record<string, string> = {
   revert_auto: "Voltou ao automático",
   policy: "Política da conta",
 };
+
+
+const QUALITY_LABEL: Record<string, string> = { GREEN: "Verde", YELLOW: "Amarela", RED: "Vermelha", UNKNOWN: "Sem leitura" };
+const QUALITY_TONE: Record<string, StatusTone> = { GREEN: "ok", YELLOW: "warn", RED: "bad", UNKNOWN: "mute" };
 
 function RateBlock(props: {
   number: NumberLimits;
@@ -73,65 +75,79 @@ function RateBlock(props: {
   const { number: n, info, available, ceiling, draft } = props;
   if (!available) {
     return (
-      <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+      <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-muted-foreground">
         Limite por segundo indisponível: aplique a migration 190 (limite por qualidade da Meta).
       </p>
     );
   }
   if (!info) {
-    return <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">Sem leitura de qualidade para este número ainda.</p>;
+    return <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-muted-foreground">Sem leitura de qualidade para este número ainda.</p>;
   }
   const quality = info.quality ?? "UNKNOWN";
   const above = info.autoTargetPerSecond !== null && Number(draft.rate.replace(",", ".")) > info.autoTargetPerSecond;
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+    <div className="flex flex-col gap-2.5 rounded-lg border border-border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold">Limite por segundo</h3>
-        <Badge variant="outline" className={QUALITY_CLASS[quality]}>
-          Qualidade {QUALITY_LABEL[quality] ?? quality}
-        </Badge>
+        <h4 className="m-0 font-sans text-[13px] font-semibold text-foreground">Limite por segundo</h4>
+        <StatusChip tone={QUALITY_TONE[quality] ?? "mute"}>Qualidade {QUALITY_LABEL[quality] ?? quality}</StatusChip>
       </div>
-      <dl className="grid grid-cols-3 gap-2 text-xs">
-        <div>
+      <dl className="m-0 grid grid-cols-3 gap-px overflow-hidden rounded-lg border border-border bg-border text-xs">
+        <div className="bg-card px-3 py-2">
           <dt className="text-muted-foreground">Automático</dt>
-          <dd className="font-medium tabular-nums">{info.autoPerSecond ?? "—"}/s{info.ramping ? " (subindo)" : ""}</dd>
+          <dd className="m-0 font-semibold tabular-nums text-foreground">
+            {info.autoPerSecond ?? "—"}/s{info.ramping ? " (subindo)" : ""}
+          </dd>
         </div>
-        <div>
+        <div className="bg-card px-3 py-2">
           <dt className="text-muted-foreground">Manual</dt>
-          <dd className="font-medium tabular-nums">{info.manualPerSecond !== null ? `${info.manualPerSecond}/s` : "—"}</dd>
+          <dd className="m-0 font-semibold tabular-nums text-foreground">
+            {info.manualPerSecond !== null ? `${info.manualPerSecond}/s` : "—"}
+          </dd>
         </div>
-        <div>
+        <div className="bg-card px-3 py-2">
           <dt className="text-muted-foreground">Vale agora</dt>
-          <dd className="font-bold tabular-nums">
+          <dd className="m-0 text-sm font-semibold tabular-nums text-foreground">
             {info.effectivePerSecond ?? "—"}/s{info.inCooldown ? " (freio)" : ""}
           </dd>
         </div>
       </dl>
-      {info.manualReason && info.manualPerSecond !== null && <p className="text-[11px] text-muted-foreground">Motivo do manual: {info.manualReason}</p>}
-      {info.requiresOwnerConfirmation && <p className="text-[11px] text-rose-700 dark:text-rose-300">Qualidade vermelha: campanha nova neste número exige confirmação do owner.</p>}
+      {info.manualReason && info.manualPerSecond !== null && (
+        <p className="m-0 text-[11.5px] text-muted-foreground">Motivo do manual: {info.manualReason}</p>
+      )}
+      {info.requiresOwnerConfirmation && (
+        <p className="m-0 flex items-start gap-1.5 text-[11.5px] font-medium text-danger">
+          <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+          Qualidade vermelha: campanha nova neste número exige confirmação do owner.
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-xs font-medium">
+        <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
           Novo limite manual (envios/s{ceiling !== null ? `, até ${ceiling}` : ""})
           <Input
             inputMode="decimal"
-            className="h-9 w-40"
+            className="h-8 w-40"
             placeholder="Ex.: 40"
             value={draft.rate}
             onChange={(e) => props.onDraft({ ...draft, rate: e.target.value })}
           />
         </label>
-        <Button size="sm" variant="outline" className="h-9 text-xs" disabled={draft.rate.trim() === ""} onClick={() => props.onReview(n, info)}>
+        <Button variant="outline" disabled={draft.rate.trim() === ""} onClick={() => props.onReview(n, info)}>
           Revisar limite/s
         </Button>
         {info.manualPerSecond !== null && (
-          <Button size="sm" variant="ghost" className="h-9 text-xs" onClick={() => props.onRevert(n, info)}>
+          <Button variant="ghost" onClick={() => props.onRevert(n, info)}>
             Voltar ao automático
           </Button>
         )}
       </div>
       {above && (
-        <label className="flex items-start gap-2 text-[11px] text-muted-foreground">
-          <input type="checkbox" className="mt-0.5" checked={draft.force} onChange={(e) => props.onDraft({ ...draft, force: e.target.checked })} />
+        <label className="flex items-start gap-2 text-[11.5px] text-muted-foreground">
+          <input
+            type="checkbox"
+            className="mt-0.5 accent-[var(--primary)]"
+            checked={draft.force}
+            onChange={(e) => props.onDraft({ ...draft, force: e.target.checked })}
+          />
           Manter acima do que a qualidade permite (somente o owner consegue; sem isso a API recusa).
         </label>
       )}
@@ -159,42 +175,39 @@ function HistoryCard({ overview }: { overview: LimitsOverview | null }) {
   }
   rows.sort((x, y) => Date.parse(y.at) - Date.parse(x.at));
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">Histórico de mudanças</CardTitle>
-        <CardDescription className="text-xs">Vagas, limite por hora, pausa e limite por segundo (inclui quedas de qualidade da Meta), com quem fez e por quê.</CardDescription>
-      </CardHeader>
-      <CardContent className="overflow-x-auto">
-        {rows.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma mudança registrada ainda.</p>
-        ) : (
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="text-left text-xs text-muted-foreground">
-              <tr>
-                <th className="py-2 pr-3 font-medium">Quando</th>
-                <th className="py-2 pr-3 font-medium">Número</th>
-                <th className="py-2 pr-3 font-medium">Quem</th>
-                <th className="py-2 pr-3 font-medium">Mudança</th>
-                <th className="py-2 font-medium">Motivo</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 80).map((h) => (
-                <tr key={h.id} className="border-t border-border/60 align-top">
-                  <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground" title={new Date(h.at).toLocaleString("pt-BR")}>
-                    {timeAgoPt(Math.max(0, Math.round((now - Date.parse(h.at)) / 1000)))}
-                  </td>
-                  <td className="py-2 pr-3">{h.numero ?? "—"}</td>
-                  <td className="py-2 pr-3">{h.quem}</td>
-                  <td className="py-2 pr-3 text-xs">{h.mudanca}</td>
-                  <td className="py-2 text-xs text-muted-foreground">{h.motivo ?? "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </CardContent>
-    </Card>
+    <TableCard
+      title="Histórico de mudanças"
+      hint="Vagas, limite por hora, pausa e limite por segundo (inclui quedas de qualidade da Meta), com quem fez e por quê."
+    >
+      {rows.length === 0 ? (
+        <EmptyState className="m-4 mt-0" title="Nenhuma mudança registrada ainda" />
+      ) : (
+        <DenseTable minWidth={680}>
+          <thead>
+            <tr>
+              <Th>Quando</Th>
+              <Th>Número</Th>
+              <Th>Quem</Th>
+              <Th>Mudança</Th>
+              <Th>Motivo</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 80).map((h) => (
+              <Tr key={h.id} className="align-top">
+                <Td className="whitespace-nowrap text-xs text-muted-foreground" title={new Date(h.at).toLocaleString("pt-BR")}>
+                  {timeAgoPt(Math.max(0, Math.round((now - Date.parse(h.at)) / 1000)))}
+                </Td>
+                <Td className="font-semibold text-foreground">{h.numero ?? "—"}</Td>
+                <Td>{h.quem}</Td>
+                <Td className="text-xs">{h.mudanca}</Td>
+                <Td className="text-xs text-muted-foreground">{h.motivo ?? "—"}</Td>
+              </Tr>
+            ))}
+          </tbody>
+        </DenseTable>
+      )}
+    </TableCard>
   );
 }
 
@@ -396,72 +409,82 @@ export default function ControlesPage() {
   const sim = (v: boolean) => (v ? "Ligado" : "Desligado");
 
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-4 p-4 lg:p-6">
-      <div className="flex flex-col justify-between gap-3 border-b border-border/60 pb-4 sm:flex-row sm:items-center">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight sm:text-2xl">
-            <SlidersHorizontal className="h-6 w-6 text-primary" aria-hidden="true" />
-            Controles do disparador
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Ajuste cada número sem mexer em banco ou servidor. Toda mudança pede motivo, fica registrada e vale no próximo ciclo do motor.
-          </p>
-        </div>
-        <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => void load()}>
-          <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} aria-hidden="true" />
-          Atualizar
-        </Button>
-      </div>
+    <PageBody>
+      <PageToolbar
+        actions={
+          <Button variant="outline" onClick={() => void load()}>
+            <RefreshCw className={cn("size-3.5", loading && "animate-spin")} aria-hidden="true" />
+            Atualizar
+          </Button>
+        }
+      >
+        <p className="m-0 max-w-3xl text-[12.5px] text-muted-foreground">
+          Ajuste cada número sem mexer em banco ou servidor. Toda mudança pede motivo, fica registrada e vale no próximo
+          ciclo do motor.
+        </p>
+      </PageToolbar>
 
       {error && (
-        <div role="alert" className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-800 dark:text-rose-200">
+        <div role="alert" className="flex animate-ddm-fade items-start gap-2.5 rounded-lg bg-danger-soft px-3.5 py-2.5 text-[13px] text-foreground">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
           {error}
         </div>
       )}
       {notice && (
-        <div role="status" className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200">
+        <div role="status" className="flex animate-ddm-fade items-start gap-2.5 rounded-lg bg-success-soft px-3.5 py-2.5 text-[13px] text-foreground">
+          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-hidden="true" />
           {notice}
         </div>
       )}
       {overview && !overview.pauseSupported && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+        <div className="flex items-start gap-2.5 rounded-lg bg-warning-soft px-3.5 py-2.5 text-[13px] text-foreground">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
           Pausar número exige a migration 192, que ainda não foi aplicada neste banco. Vagas e limite por hora já funcionam.
         </div>
       )}
 
       {loading && !overview ? (
-        <div className="flex h-40 items-center justify-center text-muted-foreground">
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden="true" /> Carregando…
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2" aria-busy="true" aria-label="Carregando controles">
+          <Skeleton className="h-64 w-full rounded-[10px]" />
+          <Skeleton className="h-64 w-full rounded-[10px]" />
         </div>
       ) : (
         <>
-          <section aria-label="Controles por número" className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {(overview?.numbers ?? []).map((n) => {
-              const d = drafts[n.id] ?? { maxInFlight: String(n.effectiveMaxInFlight), hourlyLimit: n.hourlyLimit === null ? "" : String(n.hourlyLimit) };
-              return (
-                <Card key={n.id} className={cn("shadow-sm", n.paused && "border-amber-500/50")}>
-                  <CardHeader className="pb-2">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <CardTitle className="text-base">{n.label}</CardTitle>
-                        <CardDescription className="text-xs">
-                          {n.phone ?? "sem telefone"} · {n.provider === "meta" ? "API oficial (Meta)" : n.provider === "waha" ? "WAHA" : "provedor não definido"}
-                        </CardDescription>
+          {(overview?.numbers ?? []).length === 0 ? (
+            <EmptyState title="Nenhum número cadastrado nesta conta" />
+          ) : (
+            <section aria-label="Controles por número" className="ddm-stagger-blocks grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {(overview?.numbers ?? []).map((n) => {
+                const d = drafts[n.id] ?? { maxInFlight: String(n.effectiveMaxInFlight), hourlyLimit: n.hourlyLimit === null ? "" : String(n.hourlyLimit) };
+                return (
+                  <section
+                    key={n.id}
+                    aria-label={n.label}
+                    className={cn(
+                      "flex flex-col gap-4 rounded-[10px] border bg-card px-5 py-[18px]",
+                      n.paused ? "border-warning-border" : "border-border",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="m-0 truncate font-sans text-sm font-semibold text-foreground">{n.label}</h3>
+                        <p className="m-0 text-[12.5px] text-muted-foreground">
+                          {n.phone ?? "sem telefone"} ·{" "}
+                          {n.provider === "meta" ? "API oficial (Meta)" : n.provider === "waha" ? "WAHA" : "provedor não definido"}
+                        </p>
                       </div>
                       {n.paused && (
-                        <Badge variant="outline" className="gap-1 border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200">
-                          <PauseCircle className="h-3 w-3" aria-hidden="true" /> Pausado
-                        </Badge>
+                        <StatusChip tone="warn">
+                          <PauseCircle className="size-3" aria-hidden="true" /> Pausado
+                        </StatusChip>
                       )}
                     </div>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-3">
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <label className="flex flex-col gap-1 text-xs font-medium">
+                      <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
                         Vagas simultâneas (1 a {n.maxAllowed})
                         <Input
                           inputMode="numeric"
-                          className="h-9"
+                          className="h-8"
                           value={d.maxInFlight}
                           onChange={(e) => setDraft(n.id, { maxInFlight: e.target.value })}
                         />
@@ -470,30 +493,24 @@ export default function ControlesPage() {
                           {n.provider !== "meta" && " WAHA tem teto próprio, menor que o da Meta."}
                         </span>
                       </label>
-                      <label className="flex flex-col gap-1 text-xs font-medium">
+                      <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
                         Limite por hora do número
                         <Input
                           inputMode="numeric"
-                          className="h-9"
+                          className="h-8"
                           placeholder="vazio = sem limite"
                           value={d.hourlyLimit}
                           onChange={(e) => setDraft(n.id, { hourlyLimit: e.target.value })}
                         />
-                        <span className="font-normal text-muted-foreground">Hoje: {show(n.hourlyLimit)}. Conta envios + em voo na última hora.</span>
+                        <span className="font-normal text-muted-foreground">
+                          Hoje: {show(n.hourlyLimit)}. Conta envios + em voo na última hora.
+                        </span>
                       </label>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button size="sm" className="h-9 text-xs" onClick={() => review(n)}>
-                        Revisar mudança
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-9 gap-1.5 text-xs"
-                        disabled={!overview?.pauseSupported}
-                        onClick={() => reviewPause(n)}
-                      >
-                        {n.paused ? <PlayCircle className="h-4 w-4" aria-hidden="true" /> : <PauseCircle className="h-4 w-4" aria-hidden="true" />}
+                      <Button onClick={() => review(n)}>Revisar mudança</Button>
+                      <Button variant="outline" disabled={!overview?.pauseSupported} onClick={() => reviewPause(n)}>
+                        {n.paused ? <PlayCircle className="size-3.5" aria-hidden="true" /> : <PauseCircle className="size-3.5" aria-hidden="true" />}
                         {n.paused ? "Retomar número" : "Pausar número"}
                       </Button>
                     </div>
@@ -509,51 +526,33 @@ export default function ControlesPage() {
                         onRevert={reviewRevert}
                       />
                     )}
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </section>
+                  </section>
+                );
+              })}
+            </section>
+          )}
 
           {g && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Ajustes globais (somente leitura)</CardTitle>
-                <CardDescription className="text-xs">
-                  Vêm de variáveis de ambiente do servidor; mudar exige acesso à infraestrutura. Os controles acima já valem sem isso.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <dl className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-                  <div>
-                    <dt className="font-medium">Concorrência global: {g.processConcurrency}</dt>
-                    <dd className="text-xs text-muted-foreground">Quantos envios o servidor mantém em andamento ao mesmo tempo, somando todos os números. Com vários números ativos, é este limite que manda.</dd>
+            <TableCard
+              title="Ajustes globais (somente leitura)"
+              hint="Vêm de variáveis de ambiente do servidor; mudar exige acesso à infraestrutura. Os controles acima já valem sem isso."
+            >
+              <dl className="m-0 grid grid-cols-1 gap-px border-t border-border bg-border md:grid-cols-2">
+                {[
+                  { k: `Concorrência global: ${g.processConcurrency}`, v: "Quantos envios o servidor mantém em andamento ao mesmo tempo, somando todos os números. Com vários números ativos, é este limite que manda." },
+                  { k: `Orçamento do ciclo: ${g.tickBudgetSeconds} s`, v: "Tempo que cada ciclo do motor usa para iniciar envios; depois disso, só termina o que já começou." },
+                  { k: `Ciclo encadeado: ${sim(g.tickChainEnabled)}`, v: "Ligado, um ciclo chama o próximo logo que termina, em vez de esperar o minuto seguinte." },
+                  { k: `Claim em lote: ${sim(g.batchClaimEnabled)}`, v: "Ligado, o motor reserva vários itens de uma vez no banco (menos idas e vindas em volumes altos)." },
+                  { k: `Freio automático: ${sim(g.adaptiveBackoff)}`, v: "Reduz sozinho a velocidade quando a Meta limita ou o servidor sofre." },
+                  { k: `Vagas padrão sem ajuste: Meta ${g.perNumberDefaults.meta} · WAHA ${g.perNumberDefaults.waha}`, v: "Valem para o número que não tem vagas definidas aqui." },
+                ].map((item) => (
+                  <div key={item.k} className="bg-card px-[18px] py-3">
+                    <dt className="text-[13px] font-semibold text-foreground">{item.k}</dt>
+                    <dd className="m-0 mt-0.5 text-xs text-muted-foreground">{item.v}</dd>
                   </div>
-                  <div>
-                    <dt className="font-medium">Orçamento do ciclo: {g.tickBudgetSeconds} s</dt>
-                    <dd className="text-xs text-muted-foreground">Tempo que cada ciclo do motor usa para iniciar envios; depois disso, só termina o que já começou.</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium">Ciclo encadeado: {sim(g.tickChainEnabled)}</dt>
-                    <dd className="text-xs text-muted-foreground">Ligado, um ciclo chama o próximo logo que termina, em vez de esperar o minuto seguinte.</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium">Claim em lote: {sim(g.batchClaimEnabled)}</dt>
-                    <dd className="text-xs text-muted-foreground">Ligado, o motor reserva vários itens de uma vez no banco (menos idas e vindas em volumes altos).</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium">Freio automático: {sim(g.adaptiveBackoff)}</dt>
-                    <dd className="text-xs text-muted-foreground">Reduz sozinho a velocidade quando a Meta limita ou o servidor sofre.</dd>
-                  </div>
-                  <div>
-                    <dt className="font-medium">
-                      Vagas padrão sem ajuste: Meta {g.perNumberDefaults.meta} · WAHA {g.perNumberDefaults.waha}
-                    </dt>
-                    <dd className="text-xs text-muted-foreground">Valem para o número que não tem vagas definidas aqui.</dd>
-                  </div>
-                </dl>
-              </CardContent>
-            </Card>
+                ))}
+              </dl>
+            </TableCard>
           )}
 
           <HistoryCard overview={overview} />
@@ -567,22 +566,23 @@ export default function ControlesPage() {
             <DialogDescription>Confira o antes e o depois, informe o motivo e confirme. Vale no próximo ciclo do motor.</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 text-sm">
-            <ul className="flex flex-col gap-1 rounded-lg border border-border p-3">
+            <ul className="m-0 flex list-none flex-col gap-1.5 rounded-lg bg-surface-3 p-3">
               {pending?.lines.map((l) => (
                 <li key={l.label} className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-muted-foreground">{l.label}</span>
-                  <span className="font-medium tabular-nums">
+                  <span className="text-foreground-2">{l.label}</span>
+                  <span className="font-semibold tabular-nums text-foreground">
                     {l.before} → {l.after}
                   </span>
                 </li>
               ))}
             </ul>
             {pending?.warnings.map((w) => (
-              <p key={w} className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+              <p key={w} className="m-0 flex items-start gap-2 rounded-lg bg-warning-soft px-3 py-2 text-xs text-foreground">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />
                 {w}
               </p>
             ))}
-            <label className="flex flex-col gap-1 text-xs font-medium">
+            <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
               Motivo (obrigatório)
               <Textarea
                 rows={3}
@@ -593,7 +593,7 @@ export default function ControlesPage() {
               />
             </label>
             {dialogError && (
-              <p role="alert" className="text-xs text-rose-700 dark:text-rose-300">
+              <p role="alert" className="m-0 text-xs font-medium text-danger">
                 {dialogError}
               </p>
             )}
@@ -602,13 +602,13 @@ export default function ControlesPage() {
             <Button variant="outline" onClick={() => setPending(null)} disabled={saving}>
               Cancelar
             </Button>
-            <Button onClick={() => void confirm()} disabled={saving || reason.trim().length < REASON_MIN} className="gap-2">
-              {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            <Button onClick={() => void confirm()} disabled={saving || reason.trim().length < REASON_MIN}>
+              {saving && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
               Confirmar e aplicar
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }

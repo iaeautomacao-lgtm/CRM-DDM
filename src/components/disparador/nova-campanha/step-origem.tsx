@@ -59,13 +59,13 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "ok
     <div
       className={cn(
         "rounded-md p-2 text-center",
-        tone === "ok" ? "bg-emerald-500/10" : tone === "bad" ? "bg-red-500/10" : tone === "warn" ? "bg-amber-500/10" : "bg-muted/40"
+        tone === "ok" ? "bg-success-soft" : tone === "bad" ? "bg-danger-soft" : tone === "warn" ? "bg-warning-soft" : "bg-surface-3"
       )}
     >
       <p
         className={cn(
           "text-base font-bold",
-          tone === "ok" ? "text-emerald-600" : tone === "bad" ? "text-red-600" : tone === "warn" ? "text-amber-600" : "text-foreground"
+          tone === "ok" ? "text-success" : tone === "bad" ? "text-danger" : tone === "warn" ? "text-warning" : "text-foreground"
         )}
       >
         {value.toLocaleString("pt-BR")}
@@ -218,7 +218,7 @@ export function StepOrigem({
             Uma campanha usa um tipo de canal: números oficiais (Meta) de uma mesma conta WhatsApp Business, ou sessões WAHA.
           </p>
           {form.sessionIds.length > 0 && !channelCheck.ok && (
-            <p role="alert" className="flex items-start gap-1.5 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-xs font-medium text-red-600 dark:text-red-400">
+            <p role="alert" className="flex items-start gap-1.5 rounded-md bg-danger-soft px-3 py-2 text-xs font-medium text-danger">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               {channelCheck.error}
             </p>
@@ -291,7 +291,7 @@ export function StepOrigem({
                 <div key={field.key} className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2">
                   <span className="text-xs text-foreground">
                     {field.label}
-                    {field.required && <span className="text-red-500"> *</span>}
+                    {field.required && <span className="text-danger"> *</span>}
                   </span>
                   <Select
                     value={importCtl.columnMap[field.key] ?? "__none__"}
@@ -339,7 +339,7 @@ export function StepOrigem({
                 " Não foi possível conferir a blacklist agora — ela continua sendo aplicada no envio."}
             </p>
             {importCtl.blacklistStatus === "ok" && summary.blacklist > 0 && (
-              <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
+              <p className="flex items-start gap-2 rounded-md bg-warning-soft p-2 text-xs text-foreground">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>
                   De <strong>{importCtl.validBeforeBlacklist.toLocaleString("pt-BR")}</strong> contatos válidos,{" "}
@@ -410,7 +410,7 @@ export function StepOrigem({
                 </>
               ) : utm.done ? (
                 <>
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" aria-hidden="true" /> Gerado
+                  <CheckCircle2 className="h-3.5 w-3.5 text-success" aria-hidden="true" /> Gerado
                 </>
               ) : (
                 "Gerar UTM"
@@ -471,7 +471,7 @@ export function StepOrigem({
                   {audiencePreview.loading ? "Calculando o público…" : audiencePreview.error}
                 </p>
               ) : (audiencePreview.blacklisted ?? 0) > 0 ? (
-                <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300" aria-live="polite">
+                <p className="flex items-start gap-2 rounded-md bg-warning-soft p-2 text-xs text-foreground" aria-live="polite">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span>
                     De <strong>{(audiencePreview.total ?? 0).toLocaleString("pt-BR")}</strong> contatos válidos,{" "}
@@ -491,7 +491,7 @@ export function StepOrigem({
               )
             )}
             {form.tags.length === 0 && (
-              <label className="flex cursor-pointer items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
+              <label className="flex cursor-pointer items-start gap-2 rounded-md bg-warning-soft p-3 text-xs text-foreground">
                 <input
                   type="checkbox"
                   className="mt-0.5"

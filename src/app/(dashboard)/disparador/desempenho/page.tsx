@@ -1,24 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
+// /disparador/desempenho — telemetria do motor (ao vivo a cada ~3 s + histórico por tick a cada 30 s).
+// Visual do redesenho DDM: faixa de indicadores, painéis e tabelas densas; dados, limites e textos
+// operacionais inalterados (as flags `truncated` continuam avisando quando a janela foi cortada).
+
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import {
   Activity,
   AlertTriangle,
-  ArrowLeft,
   CheckCircle2,
-  Clock,
-  Cpu,
-  Gauge,
-  HardDrive,
   Info,
-  Loader2,
   Megaphone,
   Radio,
   RefreshCw,
-  ShieldAlert,
-  ShieldCheck,
-  Sliders,
   TrendingUp,
   Zap,
 } from "lucide-react";
@@ -34,20 +28,15 @@ import {
 } from "recharts";
 
 import { apiFetch } from "@/lib/api-fetch";
-import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { KpiStrip } from "@/components/ddm/kpi-strip";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { Segmented } from "@/components/ddm/segmented";
+import { StatusChip } from "@/components/ddm/status-chip";
+import { DenseTable, Td, Th, Tr } from "@/components/ddm/table-card";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import type { Capacity, ChannelStats } from "@/lib/disparador/desempenho-extra";
 import { formatInt } from "@/lib/disparador/monitor-format";
 import type {
@@ -58,6 +47,69 @@ import type {
   WindowMetricsSummary,
 } from "@/lib/disparador/desempenho";
 
+type PerfTone = "default" | "ok" | "warn" | "bad";
+
+/** Célula da faixa de indicadores (desenho do KpiStrip, com fundo de alerta e linha de apoio). */
+function PerfKpi(props: { title: string; value: ReactNode; sub?: ReactNode; tone?: PerfTone }) {
+  const tone = props.tone ?? "default";
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-1.5 bg-card px-4 py-3.5",
+        tone === "bad" && "bg-danger-soft",
+        tone === "warn" && "bg-warning-soft",
+      )}
+    >
+      <span className="flex items-center gap-1.5 text-[12.5px] text-foreground-2">
+        {tone !== "default" && (
+          <span
+            aria-hidden="true"
+            className={cn("size-1.5 rounded-full", tone === "bad" ? "bg-danger" : tone === "warn" ? "bg-warning" : "bg-success")}
+          />
+        )}
+        {props.title}
+      </span>
+      <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums text-foreground">{props.value}</span>
+      {props.sub && <span className="text-xs text-muted-foreground">{props.sub}</span>}
+    </div>
+  );
+}
+
+// Painel do protótipo (borda 1px, raio 10px) com a mesma anatomia do Card antigo, para manter a marcação.
+function Card({ className, ...props }: ComponentProps<"section">) {
+  return <section className={cn("flex flex-col overflow-hidden rounded-[10px] border border-border bg-card", className)} {...props} />;
+}
+function CardHeader({ className, ...props }: ComponentProps<"div">) {
+  return <div className={cn("px-[18px] pb-2 pt-3.5", className)} {...props} />;
+}
+function CardTitle({ className, ...props }: ComponentProps<"h3">) {
+  return <h3 className={cn("m-0 font-sans text-sm font-semibold text-foreground", className)} {...props} />;
+}
+function CardDescription({ className, ...props }: ComponentProps<"p">) {
+  return <p className={cn("m-0 text-[12.5px] text-muted-foreground", className)} {...props} />;
+}
+function CardContent({ className, ...props }: ComponentProps<"div">) {
+  return <div className={cn("px-[18px] pb-4", className)} {...props} />;
+}
+
+/** Chip de status no lugar do Badge antigo (texto + cor, tokens do tema). */
+function Badge({
+  variant,
+  title,
+  children,
+}: {
+  variant?: "destructive" | "outline" | "warning";
+  className?: string;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <StatusChip tone={variant === "destructive" ? "bad" : variant === "warning" ? "warn" : "ok"} dot={false} title={title}>
+      {children}
+    </StatusChip>
+  );
+}
+
 const WINDOW_OPTIONS: Array<{ key: DesempenhoWindow; label: string }> = [
   { key: "15m", label: "Últimos 15 min" },
   { key: "1h", label: "Última 1 hora" },
@@ -66,7 +118,7 @@ const WINDOW_OPTIONS: Array<{ key: DesempenhoWindow; label: string }> = [
 ];
 
 const PALETTE = [
-  "#f97316", // Laranja DDM
+  "#FF5706", // Laranja DDM
   "#3b82f6", // Azul
   "#10b981", // Esmeralda
   "#8b5cf6", // Violeta
@@ -232,371 +284,205 @@ export default function DisparadorDesempenhoPage() {
     return Array.from(keys);
   }, [throughputSeries]);
 
+  const lagTone: PerfTone =
+    metrics?.latestLagP99 && metrics.latestLagP99 > 100 ? "bad" : metrics?.latestLagP99 && metrics.latestLagP99 > 50 ? "warn" : "default";
+  const p95Tone: PerfTone =
+    metrics?.latestMetaP95 && metrics.latestMetaP95 > 2000 ? "bad" : metrics?.latestMetaP95 && metrics.latestMetaP95 > 1500 ? "warn" : "default";
+  const rssTone: PerfTone =
+    metrics?.peakRssMb && metrics.peakRssMb > 600 ? "bad" : metrics?.peakRssMb && metrics.peakRssMb > 500 ? "warn" : "default";
+
   return (
-    <div className="flex flex-col space-y-6 p-4 lg:p-6 max-w-7xl mx-auto">
-      {/* Header com navegação e controles */}
-      <div className="flex flex-col justify-between gap-4 border-b border-border/60 pb-5 lg:flex-row lg:items-center">
-        <div>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/disparador/campanhas"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
-              title="Voltar para Campanhas"
-              aria-label="Voltar para Campanhas"
+    <PageBody>
+      <PageToolbar
+        actions={
+          <>
+            <label className="flex h-8 cursor-pointer items-center gap-2 rounded-[6px] border border-border bg-card px-2.5 text-[12.5px] font-medium text-foreground">
+              <Switch
+                checked={autoRefresh}
+                onCheckedChange={setAutoRefresh}
+                aria-label="Estado operacional a cada 3 segundos e histórico a cada 30 segundos"
+              />
+              <span className="flex items-center gap-1.5 tabular-nums">
+                <span aria-hidden="true" className={cn("size-2 rounded-full", autoRefresh ? "animate-pulse bg-success" : "bg-muted-foreground")} />
+                Ao vivo 3 s · histórico {autoRefresh ? `(${secondsUntilRefresh}s)` : "(pausado)"}
+              </span>
+            </label>
+            <Button
+              variant="outline"
+              onClick={() => {
+                void fetchData(true);
+                void fetchLiveData();
+              }}
+              disabled={refreshing || loading}
             >
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            </Link>
-            <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
-              aria-hidden="true"
-            >
-              <Gauge className="h-5 w-5" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              Desempenho do Disparador
-            </h1>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Estado operacional atualizado a cada ~3s; saúde do processo e histórico consolidados por tick.
-          </p>
-        </div>
+              <RefreshCw className={cn("size-3.5", (refreshing || loading) && "animate-spin")} aria-hidden="true" />
+              Atualizar
+            </Button>
+          </>
+        }
+      >
+        <Segmented
+          size="lg"
+          ariaLabel="Janela de tempo"
+          value={janela}
+          onChange={setJanela}
+          options={WINDOW_OPTIONS.map((o) => ({ value: o.key, label: o.label }))}
+        />
+      </PageToolbar>
 
-        {/* Ações do topo: janelas, auto-refresh e atualização manual */}
-        <div className="flex flex-wrap items-center gap-2 self-start lg:self-center">
-          {/* Seletor de janela de tempo */}
-          <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1 text-xs">
-            {WINDOW_OPTIONS.map((opt) => (
-              <button
-                key={opt.key}
-                type="button"
-                onClick={() => setJanela(opt.key)}
-                className={cn(
-                  "rounded-md px-2.5 py-1.5 font-medium transition-colors",
-                  janela === opt.key
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-                aria-pressed={janela === opt.key}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Toggle Auto-refresh */}
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
-            <Switch
-              id="switch-auto-refresh"
-              checked={autoRefresh}
-              onCheckedChange={setAutoRefresh}
-              className="scale-90"
-              aria-label="Estado operacional a cada 3 segundos e histórico a cada 30 segundos"
-            />
-            <Label
-              htmlFor="switch-auto-refresh"
-              className="cursor-pointer text-xs flex items-center gap-1.5 font-normal"
-            >
-              <Radio className={cn("size-3.5", autoRefresh ? "text-emerald-500 animate-pulse" : "text-muted-foreground")} />
-              <span>Live 3s · histórico {autoRefresh ? `(${secondsUntilRefresh}s)` : "(pausado)"}</span>
-            </Label>
-          </div>
-
-          {/* Botão Atualizar Agora */}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void fetchData(true);
-              void fetchLiveData();
-            }}
-            disabled={refreshing || loading}
-            className="gap-1.5 text-xs h-9"
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5", (refreshing || loading) && "animate-spin")} />
-            <span>Atualizar</span>
-          </Button>
-
-          {/* Link para Monitor em tempo real */}
-          <Link
-            href="/disparador/monitor"
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5 text-xs h-9 text-muted-foreground")}
-          >
-            <Activity className="h-3.5 w-3.5" />
-            <span>Monitor</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* Atualização: snapshot operacional curto + histórico pesado separado */}
-      {(lastRefreshedAt || lastLiveAt) && (
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground -mt-3">
-          <span>
-            Ao vivo: {lastLiveAt ? lastLiveAt.toLocaleTimeString("pt-BR") : "—"}
-            {" · "}
-            Histórico: {lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString("pt-BR") : "—"}
-          </span>
-          {metrics && (
-            <span>
-              {metrics.totalTicks} {metrics.totalTicks === 1 ? "minuto registrado" : "minutos registrados"} na janela de {janela}
-            </span>
+      <p className="m-0 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+        <span>
+          Estado operacional atualizado a cada ~3 s; saúde do processo e histórico consolidados por tick.
+          {(lastRefreshedAt || lastLiveAt) && (
+            <>
+              {" "}Ao vivo: {lastLiveAt ? lastLiveAt.toLocaleTimeString("pt-BR") : "—"} · histórico:{" "}
+              {lastRefreshedAt ? lastRefreshedAt.toLocaleTimeString("pt-BR") : "—"}
+            </>
           )}
-        </div>
-      )}
+        </span>
+        {metrics && (
+          <span className="tabular-nums">
+            {metrics.totalTicks} {metrics.totalTicks === 1 ? "minuto registrado" : "minutos registrados"} na janela de {janela}
+          </span>
+        )}
+      </p>
 
       {live && (
-        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4 -mt-2" aria-label="Estado operacional ao vivo">
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Campanhas ativas</p>
-            <p className="mt-0.5 text-lg font-bold text-foreground">{live.activeCampaigns.toLocaleString("pt-BR")}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">A enviar</p>
-            <p className="mt-0.5 text-lg font-bold text-foreground">{live.remaining.toLocaleString("pt-BR")}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Processando agora</p>
-            <p className="mt-0.5 text-lg font-bold text-primary">{live.sending.toLocaleString("pt-BR")}</p>
-          </div>
-          <div className="rounded-lg border border-border bg-card px-3 py-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Falhas na campanha ativa</p>
-            <p className="mt-0.5 text-lg font-bold text-foreground">{(live.errors + live.blocked).toLocaleString("pt-BR")}</p>
-          </div>
-        </div>
+        <KpiStrip
+          ariaLabel="Estado operacional ao vivo"
+          minWidth={160}
+          items={[
+            { label: "Campanhas ativas", value: live.activeCampaigns.toLocaleString("pt-BR") },
+            { label: "A enviar", value: live.remaining.toLocaleString("pt-BR") },
+            { label: "Processando agora", value: <span className="text-primary-text">{live.sending.toLocaleString("pt-BR")}</span> },
+            { label: "Falhas na campanha ativa", value: (live.errors + live.blocked).toLocaleString("pt-BR") },
+          ]}
+        />
       )}
 
-      {/* Estados de Carregamento e Erro */}
+      {/* Estados de carregamento e erro */}
       {loading ? (
-        <div className="flex min-h-[300px] flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card p-12 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p className="text-sm font-medium text-foreground">Carregando métricas de desempenho…</p>
-          <p className="text-xs text-muted-foreground">Consultando telemetria do motor de disparo e vazão por minuto.</p>
+        <div className="flex flex-col gap-3.5" aria-busy="true" aria-label="Carregando métricas de desempenho">
+          <Skeleton className="h-[104px] w-full rounded-[10px]" />
+          <Skeleton className="h-72 w-full rounded-[10px]" />
         </div>
       ) : error ? (
-        <Card className="border-destructive/40 bg-destructive/5">
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-10 text-center">
-            <AlertTriangle className="h-8 w-8 text-destructive" />
-            <h3 className="font-semibold text-foreground">Não foi possível carregar a telemetria</h3>
-            <p className="max-w-md text-xs text-muted-foreground">{error}</p>
-            <Button variant="outline" size="sm" onClick={() => void fetchData(false)} className="mt-2">
-              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              Tentar novamente
-            </Button>
-          </CardContent>
-        </Card>
+        <ErrorState title="Não foi possível carregar a telemetria" hint={error} onRetry={() => void fetchData(false)} />
       ) : ticks.length === 0 && !(live && (live.activeCampaigns > 0 || live.sentLast60s > 0)) ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-12 text-center">
-            <Megaphone className="h-10 w-10 text-muted-foreground/40" />
-            <h3 className="font-semibold text-foreground">Nenhum tick registrado na janela selecionada</h3>
-            <p className="max-w-md text-xs text-muted-foreground">
-              O motor de disparo grava uma linha de telemetria por minuto em <code>wacrm.system_logs</code> durante a execução do cron.
-              Tente selecionar uma janela maior (ex.: 6h ou 24h) ou inicie um disparo para observar os dados.
-            </p>
-            <div className="flex gap-2 mt-2">
-              <Button size="sm" variant="outline" onClick={() => setJanela("6h")}>
-                Ver últimas 6 horas
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setJanela("24h")}>
-                Ver últimas 24 horas
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="flex flex-col items-center gap-3 rounded-[10px] border border-dashed border-border bg-card px-6 py-10 text-center">
+          <EmptyState
+            className="min-h-0 border-0 bg-transparent p-0"
+            icon={Megaphone}
+            title="Nenhum tick registrado na janela selecionada"
+            hint="O motor de disparo grava uma linha de telemetria por minuto em wacrm.system_logs durante a execução do cron. Tente uma janela maior ou inicie um disparo para observar os dados."
+          />
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setJanela("6h")}>
+              Ver últimas 6 horas
+            </Button>
+            <Button variant="outline" onClick={() => setJanela("24h")}>
+              Ver últimas 24 horas
+            </Button>
+          </div>
+        </div>
       ) : (
         <>
-          {/* 1. CARDS DE MÉTRICAS */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-            {/* Card: Envios por minuto */}
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-muted-foreground">
-                  Envios / Min
-                </CardTitle>
-                <TrendingUp className="h-4 w-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tracking-tight text-foreground">
+          {/* 1. Indicadores da janela */}
+          <section
+            aria-label="Indicadores da janela"
+            className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-px overflow-hidden rounded-[10px] border border-border bg-border"
+          >
+            <PerfKpi
+              title="Envios / min"
+              value={
+                <>
                   {(live?.sentLast60s ?? metrics?.nowSent ?? 0).toLocaleString("pt-BR")}
-                  <span className="text-xs font-normal text-muted-foreground ml-1">últimos 60s</span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Média: <strong className="text-foreground">{metrics?.avgSentPerMinute ?? 0}</strong>/min · Total: {metrics?.totalSent.toLocaleString("pt-BR")}
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Card: Latência Meta p95 */}
-            <Card
-              className={cn(
-                "shadow-sm transition-colors",
-                metrics?.latestMetaP95 && metrics.latestMetaP95 > 2000
-                  ? "border-destructive bg-destructive/5"
-                  : metrics?.latestMetaP95 && metrics.latestMetaP95 > 1500
-                  ? "border-amber-500/50 bg-amber-500/5"
-                  : ""
-              )}
-            >
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-muted-foreground">
-                  Latência Meta (p95)
-                </CardTitle>
-                <Clock
-                  className={cn(
-                    "h-4 w-4",
-                    metrics?.latestMetaP95 && metrics.latestMetaP95 > 2000
-                      ? "text-destructive"
-                      : metrics?.latestMetaP95 && metrics.latestMetaP95 > 1500
-                      ? "text-amber-500"
-                      : "text-muted-foreground"
-                  )}
-                />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tracking-tight text-foreground">
-                  {metrics?.latestMetaP95 ? `${metrics.latestMetaP95.toLocaleString("pt-BR")} ms` : "—"}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">últimos 60 s</span>
+                </>
+              }
+              sub={
+                <>
+                  Média: <strong className="text-foreground">{metrics?.avgSentPerMinute ?? 0}</strong>/min · Total:{" "}
+                  {metrics?.totalSent.toLocaleString("pt-BR")}
+                </>
+              }
+            />
+            <PerfKpi
+              title="Latência Meta (p95)"
+              tone={p95Tone}
+              value={metrics?.latestMetaP95 ? `${metrics.latestMetaP95.toLocaleString("pt-BR")} ms` : "—"}
+              sub={
+                <>
                   Média: <strong className="text-foreground">{metrics?.avgMetaP95 ?? 0} ms</strong> na janela
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Card: Lentidão do Servidor (Event Loop p99) */}
-            <Card
-              className={cn(
-                "shadow-sm transition-colors",
-                metrics?.latestLagP99 && metrics.latestLagP99 > 100
-                  ? "border-destructive bg-destructive/5"
-                  : metrics?.latestLagP99 && metrics.latestLagP99 > 50
-                  ? "border-amber-500/50 bg-amber-500/5"
-                  : ""
-              )}
-            >
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-muted-foreground">
-                  Lentidão Servidor (p99)
-                </CardTitle>
-                <Cpu
-                  className={cn(
-                    "h-4 w-4",
-                    metrics?.latestLagP99 && metrics.latestLagP99 > 100
-                      ? "text-destructive"
-                      : metrics?.latestLagP99 && metrics.latestLagP99 > 50
-                      ? "text-amber-500"
-                      : "text-muted-foreground"
-                  )}
-                />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tracking-tight text-foreground">
+                </>
+              }
+            />
+            <PerfKpi
+              title="Lentidão do servidor (p99)"
+              tone={lagTone}
+              value={
+                <>
                   {metrics?.latestLagP99 ?? 0}
-                  <span className="text-xs font-normal text-muted-foreground ml-1">ms</span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">ms</span>
+                </>
+              }
+              sub={
+                <>
                   Pico: <strong className="text-foreground">{metrics?.peakLagP99 ?? 0} ms</strong> (corte: 200 ms)
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Card: Memória do Processo (RSS) */}
-            <Card
-              className={cn(
-                "shadow-sm transition-colors",
-                metrics?.peakRssMb && metrics.peakRssMb > 600
-                  ? "border-destructive bg-destructive/5"
-                  : metrics?.peakRssMb && metrics.peakRssMb > 500
-                  ? "border-amber-500/50 bg-amber-500/5"
-                  : ""
-              )}
-            >
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-muted-foreground">
-                  Memória Pico (RSS)
-                </CardTitle>
-                <HardDrive
-                  className={cn(
-                    "h-4 w-4",
-                    metrics?.peakRssMb && metrics.peakRssMb > 600
-                      ? "text-destructive"
-                      : metrics?.peakRssMb && metrics.peakRssMb > 500
-                      ? "text-amber-500"
-                      : "text-muted-foreground"
-                  )}
-                />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tracking-tight text-foreground">
+                </>
+              }
+            />
+            <PerfKpi
+              title="Memória pico (RSS)"
+              tone={rssTone}
+              value={
+                <>
                   {metrics?.peakRssMb ?? 0}
-                  <span className="text-xs font-normal text-muted-foreground ml-1">MB</span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">MB</span>
+                </>
+              }
+              sub={
+                <>
                   Atual: <strong className="text-foreground">{metrics?.latestRssMb ?? 0} MB</strong> (corte: 1.024 MB)
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Card: Freio Acionado (Backoff) */}
-            <Card
-              className={cn(
-                "shadow-sm transition-colors",
-                metrics?.hasBrakeTriggered
-                  ? "border-destructive/60 bg-destructive/5"
-                  : "border-emerald-500/30 bg-emerald-500/5"
-              )}
-            >
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-muted-foreground">
-                  Freio Acionado?
-                </CardTitle>
-                {metrics?.hasBrakeTriggered ? (
-                  <ShieldAlert className="h-4 w-4 text-destructive" />
-                ) : (
-                  <ShieldCheck className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                )}
-              </CardHeader>
-              <CardContent>
-                <div
-                  className={cn(
-                    "text-2xl font-bold tracking-tight",
-                    metrics?.hasBrakeTriggered
-                      ? "text-destructive"
-                      : "text-emerald-700 dark:text-emerald-400"
-                  )}
-                >
+                </>
+              }
+            />
+            <PerfKpi
+              title="Freio acionado?"
+              tone={metrics?.hasBrakeTriggered ? "bad" : "ok"}
+              value={
+                <span className={metrics?.hasBrakeTriggered ? "text-danger" : "text-success"}>
                   {metrics?.hasBrakeTriggered ? "Sim" : "Não"}
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {metrics?.hasBrakeTriggered
-                    ? `${metrics.totalBackoffEvents} evento(s) de redução`
-                    : "Fluxo desimpedido (sem recuo)"}
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Card: Configuração Ativa (Knobs) */}
-            <Card className="shadow-sm">
-              <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-                <CardTitle className="text-xs font-semibold text-muted-foreground">
-                  Configuração Ativa
-                </CardTitle>
-                <Sliders className="h-4 w-4 text-primary" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold tracking-tight text-foreground">
+                </span>
+              }
+              sub={
+                metrics?.hasBrakeTriggered
+                  ? `${metrics.totalBackoffEvents} evento(s) de redução`
+                  : "Fluxo desimpedido (sem recuo)"
+              }
+            />
+            <PerfKpi
+              title="Configuração ativa"
+              value={
+                <>
                   {metrics?.activeKnobs?.global_concurrency ?? 12}
-                  <span className="text-xs font-normal text-muted-foreground ml-1">vagas globais</span>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground truncate">
-                  Meta: <strong className="text-foreground">{metrics?.activeKnobs?.per_number?.meta ?? 12}</strong> · WAHA: {metrics?.activeKnobs?.per_number?.waha ?? 2} · Orç: {Math.round((metrics?.budgetMs ?? 35000) / 1000)}s
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+                  <span className="ml-1 text-xs font-normal text-muted-foreground">vagas globais</span>
+                </>
+              }
+              sub={
+                <span className="block truncate">
+                  Meta: <strong className="text-foreground">{metrics?.activeKnobs?.per_number?.meta ?? 12}</strong> · WAHA:{" "}
+                  {metrics?.activeKnobs?.per_number?.waha ?? 2} · Orç: {Math.round((metrics?.budgetMs ?? 35000) / 1000)}s
+                </span>
+              }
+            />
+          </section>
+
 
           {/* Alerta consolidado se houver erros 429 ou backoff ativo */}
           {(metrics?.hasBrakeTriggered || (metrics?.rateLimitErrorsTotal ?? 0) > 0) && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
-              <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
+            <div className="rounded-lg bg-warning-soft p-3.5 text-xs text-foreground flex items-start gap-2.5">
+              <AlertTriangle className="size-4 shrink-0 text-warning mt-0.5" />
               <div className="space-y-0.5">
                 <strong className="font-semibold">Atenção operacional durante a janela:</strong>
                 <div>
@@ -620,15 +506,15 @@ export default function DisparadorDesempenhoPage() {
           )}
 
           {/* 2. GRÁFICO DE ENVIOS POR MINUTO POR NÚMERO */}
-          <Card className="shadow-sm">
+          <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
-                  <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-                    <TrendingUp className="size-4 text-primary" />
+                  <CardTitle className="flex items-center gap-2">
+                    <TrendingUp className="size-3.5 text-primary-text" aria-hidden="true" />
                     Envios por Minuto por Número
                   </CardTitle>
-                  <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                  <CardDescription className="mt-0.5">
                     Vazão instantânea minuto a minuto (view <code>wacrm.dispatch_throughput_per_minute</code>).
                   </CardDescription>
                 </div>
@@ -650,7 +536,7 @@ export default function DisparadorDesempenhoPage() {
             </CardHeader>
             <CardContent className="pt-2">
               {throughputSeries.length === 0 ? (
-                <div className="flex h-64 items-center justify-center text-xs text-muted-foreground border border-dashed border-border rounded-lg">
+                <div className="flex h-64 items-center justify-center text-xs text-muted-foreground rounded-lg bg-surface-3">
                   Sem dados de envio no intervalo selecionado.
                 </div>
               ) : (
@@ -672,8 +558,8 @@ export default function DisparadorDesempenhoPage() {
                       />
                       <RechartsTooltip
                         contentStyle={{
-                          backgroundColor: "hsl(var(--card))",
-                          borderColor: "hsl(var(--border))",
+                          backgroundColor: "var(--popover)",
+                          borderColor: "var(--border)",
                           borderRadius: "8px",
                           fontSize: "12px",
                           boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
@@ -701,140 +587,140 @@ export default function DisparadorDesempenhoPage() {
           </Card>
 
           {/* 3. TABELA DOS ÚLTIMOS 20 TICKS */}
-          <Card className="shadow-sm">
+          <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                 <div>
-                  <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
-                    <Activity className="size-4 text-primary" />
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="size-3.5 text-primary-text" aria-hidden="true" />
                     Últimos 20 Ticks do Disparador
                   </CardTitle>
-                  <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                  <CardDescription className="mt-0.5">
                     Detalhamento dos ticks por minuto gravados em <code>wacrm.system_logs</code>.
                     Destaques automáticos em amarelo (atenção) e vermelho (crítico) para desvios operacionais.
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1">
-                    <span className="size-2 rounded-full bg-emerald-500" /> Normal
+                    <span className="size-2 rounded-full bg-success" /> Normal
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="size-2 rounded-full bg-amber-500" /> Atenção
+                    <span className="size-2 rounded-full bg-warning" /> Atenção
                   </span>
                   <span className="flex items-center gap-1">
-                    <span className="size-2 rounded-full bg-rose-500" /> Crítico
+                    <span className="size-2 rounded-full bg-danger" /> Crítico
                   </span>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="px-0 pb-0">
               <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="text-xs uppercase bg-muted/30">
-                      <TableHead className="font-semibold">Horário</TableHead>
-                      <TableHead className="font-semibold text-right">Duração</TableHead>
-                      <TableHead className="font-semibold text-right">Enviados</TableHead>
-                      <TableHead className="font-semibold text-right">Falhas/Adiados</TableHead>
-                      <TableHead className="font-semibold text-right">Meta p95</TableHead>
-                      <TableHead className="font-semibold text-right">Lag p99</TableHead>
-                      <TableHead className="font-semibold text-right">Memória RSS</TableHead>
-                      <TableHead className="font-semibold text-right">Vagas</TableHead>
-                      <TableHead className="font-semibold text-center">Freio</TableHead>
-                      <TableHead className="font-semibold">Erros Provedor</TableHead>
-                      <TableHead className="font-semibold text-center">Saúde</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody className="text-xs divide-y divide-border">
+                <DenseTable minWidth={900}>
+                  <thead>
+                    <tr>
+                      <Th className="font-semibold">Horário</Th>
+                      <Th className="font-semibold text-right">Duração</Th>
+                      <Th className="font-semibold text-right">Enviados</Th>
+                      <Th className="font-semibold text-right">Falhas/Adiados</Th>
+                      <Th className="font-semibold text-right">Meta p95</Th>
+                      <Th className="font-semibold text-right">Lag p99</Th>
+                      <Th className="font-semibold text-right">Memória RSS</Th>
+                      <Th className="font-semibold text-right">Vagas</Th>
+                      <Th className="font-semibold text-center">Freio</Th>
+                      <Th className="font-semibold">Erros Provedor</Th>
+                      <Th className="font-semibold text-center">Saúde</Th>
+                    </tr>
+                  </thead>
+                  <tbody className="text-xs">
                     {ticks.map((row) => {
                       const evalStatus = row.evaluation.status;
                       const hasRateErrors = Object.keys(row.rateErrors).length > 0;
 
                       return (
-                        <TableRow
+                        <Tr
                           key={row.id}
                           className={cn(
                             "transition-colors",
                             evalStatus === "critical"
-                              ? "bg-rose-500/[0.04] hover:bg-rose-500/[0.08]"
+                              ? "bg-danger-soft"
                               : evalStatus === "warning"
-                              ? "bg-amber-500/[0.04] hover:bg-amber-500/[0.08]"
-                              : "hover:bg-muted/30"
+                              ? "bg-warning-soft"
+                              : ""
                           )}
                         >
                           {/* Horário */}
-                          <TableCell className="font-mono text-foreground font-medium whitespace-nowrap">
+                          <Td className="font-mono text-foreground font-medium whitespace-nowrap">
                             {new Date(row.createdAt).toLocaleTimeString("pt-BR")}
-                          </TableCell>
+                          </Td>
 
                           {/* Duração */}
-                          <TableCell className="text-right whitespace-nowrap">
+                          <Td className="text-right whitespace-nowrap">
                             <span className="text-foreground">
                               {(row.durationMs / 1000).toFixed(1)}s
                             </span>
                             <span className="text-[10px] text-muted-foreground ml-1">
                               / {Math.round(row.budgetMs / 1000)}s
                             </span>
-                          </TableCell>
+                          </Td>
 
                           {/* Enviados */}
-                          <TableCell className="text-right font-semibold text-foreground">
+                          <Td className="text-right font-semibold text-foreground">
                             {row.sent > 0 ? (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-primary-soft text-primary-text">
                                 {row.sent}
                               </span>
                             ) : (
                               <span className="text-muted-foreground">0</span>
                             )}
-                          </TableCell>
+                          </Td>
 
                           {/* Falhas / Adiados */}
-                          <TableCell className="text-right whitespace-nowrap">
+                          <Td className="text-right whitespace-nowrap">
                             {row.failed > 0 ? (
-                              <span className="text-destructive font-medium">{row.failed}</span>
+                              <span className="text-danger font-medium">{row.failed}</span>
                             ) : (
                               <span className="text-muted-foreground">0</span>
                             )}
                             <span className="text-muted-foreground mx-1">/</span>
                             <span className="text-muted-foreground">{row.deferred}</span>
-                          </TableCell>
+                          </Td>
 
                           {/* Meta p95 (Destaque amarelo > 1500, vermelho > 2000) */}
-                          <TableCell
+                          <Td
                             className={cn(
                               "text-right font-mono whitespace-nowrap",
                               row.evaluation.metaLatencyCritical
-                                ? "font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 rounded"
+                                ? "font-bold text-danger bg-danger-soft px-2 rounded"
                                 : row.evaluation.metaLatencyWarning
-                                ? "font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 rounded"
+                                ? "font-semibold text-warning bg-warning-soft px-2 rounded"
                                 : "text-foreground"
                             )}
                           >
                             {row.metaP95Ms > 0 ? `${row.metaP95Ms} ms` : "—"}
-                          </TableCell>
+                          </Td>
 
                           {/* Lag p99 (Destaque amarelo > 50, vermelho > 100) */}
-                          <TableCell
+                          <Td
                             className={cn(
                               "text-right font-mono whitespace-nowrap",
                               row.evaluation.lagCritical
-                                ? "font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 rounded"
+                                ? "font-bold text-danger bg-danger-soft px-2 rounded"
                                 : row.evaluation.lagWarning
-                                ? "font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 rounded"
+                                ? "font-semibold text-warning bg-warning-soft px-2 rounded"
                                 : "text-foreground"
                             )}
                           >
                             {row.lagP99Ms} ms
-                          </TableCell>
+                          </Td>
 
                           {/* Memória RSS (Destaque amarelo > 500, vermelho > 600) */}
-                          <TableCell
+                          <Td
                             className={cn(
                               "text-right font-mono whitespace-nowrap",
                               row.evaluation.rssCritical
-                                ? "font-bold text-rose-600 dark:text-rose-400 bg-rose-500/10 px-2 rounded"
+                                ? "font-bold text-danger bg-danger-soft px-2 rounded"
                                 : row.evaluation.rssWarning
-                                ? "font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 rounded"
+                                ? "font-semibold text-warning bg-warning-soft px-2 rounded"
                                 : "text-foreground"
                             )}
                           >
@@ -844,16 +730,16 @@ export default function DisparadorDesempenhoPage() {
                                 (pico {row.rssPeakMb})
                               </span>
                             )}
-                          </TableCell>
+                          </Td>
 
                           {/* Concorrência / Vagas */}
-                          <TableCell className="text-right whitespace-nowrap text-muted-foreground">
+                          <Td className="text-right whitespace-nowrap text-muted-foreground">
                             <span className="text-foreground font-medium">{row.peakInFlight}</span>
                             <span> / {row.globalConcurrency}</span>
-                          </TableCell>
+                          </Td>
 
                           {/* Freio / Backoff */}
-                          <TableCell className="text-center whitespace-nowrap">
+                          <Td className="text-center whitespace-nowrap">
                             {row.evaluation.brakeTriggered ? (
                               <Badge variant="destructive" className="text-[10px] px-1.5 py-0 font-normal">
                                 Acionado ({row.backoffEventsCount || 1})
@@ -861,10 +747,10 @@ export default function DisparadorDesempenhoPage() {
                             ) : (
                               <span className="text-[11px] text-muted-foreground">Livre</span>
                             )}
-                          </TableCell>
+                          </Td>
 
                           {/* Erros de Provedor */}
-                          <TableCell className="whitespace-nowrap">
+                          <Td className="whitespace-nowrap">
                             {hasRateErrors ? (
                               <div className="flex flex-wrap gap-1">
                                 {Object.entries(row.rateErrors).map(([code, count]) => (
@@ -881,10 +767,10 @@ export default function DisparadorDesempenhoPage() {
                             ) : (
                               <span className="text-muted-foreground">—</span>
                             )}
-                          </TableCell>
+                          </Td>
 
                           {/* Status de Saúde */}
-                          <TableCell className="text-center whitespace-nowrap">
+                          <Td className="text-center whitespace-nowrap">
                             {evalStatus === "critical" ? (
                               <Badge
                                 variant="destructive"
@@ -896,7 +782,7 @@ export default function DisparadorDesempenhoPage() {
                               </Badge>
                             ) : evalStatus === "warning" ? (
                               <Badge
-                                className="bg-amber-500 text-white dark:bg-amber-600 text-[10px] px-2 py-0.5 gap-1 font-medium"
+                                variant="warning"
                                 title={row.evaluation.warnings.join(" | ")}
                               >
                                 <Info className="size-3" />
@@ -905,75 +791,75 @@ export default function DisparadorDesempenhoPage() {
                             ) : (
                               <Badge
                                 variant="outline"
-                                className="border-emerald-500/40 text-emerald-700 dark:text-emerald-400 bg-emerald-500/5 text-[10px] px-2 py-0.5 gap-1"
+                                
                               >
                                 <CheckCircle2 className="size-3" />
                                 Normal
                               </Badge>
                             )}
-                          </TableCell>
-                        </TableRow>
+                          </Td>
+                        </Tr>
                       );
                     })}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </DenseTable>
               </div>
             </CardContent>
           </Card>
 
           {/* 4. POR NÚMERO (channels{} do cron_tick) */}
-          <Card className="shadow-sm">
+          <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
-                <Radio className="size-4 text-primary" />
+              <CardTitle className="flex items-center gap-2">
+                <Radio className="size-3.5 text-primary-text" aria-hidden="true" />
                 Por número na janela
               </CardTitle>
-              <CardDescription className="mt-0.5 text-xs text-muted-foreground">
+              <CardDescription className="mt-0.5">
                 Soma dos ciclos do motor por número: envios, falhas, adiados, pico em voo e freios.
               </CardDescription>
             </CardHeader>
-            <CardContent className="overflow-x-auto px-0 sm:px-6">
+            <CardContent className="overflow-x-auto px-0 pb-0">
               {channelStats.length === 0 ? (
-                <p className="px-6 py-6 text-center text-sm text-muted-foreground">Nenhum envio por número na janela.</p>
+                <p className="m-0 px-[18px] py-6 text-center text-sm text-muted-foreground">Nenhum envio por número na janela.</p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Número</TableHead>
-                      <TableHead className="text-right">Enviados</TableHead>
-                      <TableHead className="text-right">Falhas</TableHead>
-                      <TableHead className="text-right">Adiados</TableHead>
-                      <TableHead className="text-right">Pico em voo</TableHead>
-                      <TableHead className="text-right">Vagas (início → menor)</TableHead>
-                      <TableHead className="text-right">Ciclos com freio</TableHead>
-                      <TableHead className="text-right">Ciclos em cooldown</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                <DenseTable minWidth={900}>
+                  <thead>
+                    <tr>
+                      <Th>Número</Th>
+                      <Th className="text-right">Enviados</Th>
+                      <Th className="text-right">Falhas</Th>
+                      <Th className="text-right">Adiados</Th>
+                      <Th className="text-right">Pico em voo</Th>
+                      <Th className="text-right">Vagas (início → menor)</Th>
+                      <Th className="text-right">Ciclos com freio</Th>
+                      <Th className="text-right">Ciclos em cooldown</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
                     {channelStats.map((c) => (
-                      <TableRow key={c.id}>
-                        <TableCell>
+                      <Tr key={c.id}>
+                        <Td>
                           <div className="font-medium">{c.label}</div>
                           <div className="text-[11px] text-muted-foreground">
                             {c.provider === "meta" ? "API oficial (Meta)" : c.provider === "waha" ? "WAHA" : "—"} · {c.ticks} {c.ticks === 1 ? "ciclo" : "ciclos"}
                           </div>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-semibold">{formatInt(c.sent)}</TableCell>
-                        <TableCell className={cn("text-right tabular-nums", c.failed > 0 && "text-amber-700 dark:text-amber-300")}>{formatInt(c.failed)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{formatInt(c.deferred)}</TableCell>
-                        <TableCell className="text-right tabular-nums">{formatInt(c.peakInFlight)}</TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        </Td>
+                        <Td className="text-right tabular-nums font-semibold">{formatInt(c.sent)}</Td>
+                        <Td className={cn("text-right tabular-nums", c.failed > 0 && "text-warning")}>{formatInt(c.failed)}</Td>
+                        <Td className="text-right tabular-nums">{formatInt(c.deferred)}</Td>
+                        <Td className="text-right tabular-nums">{formatInt(c.peakInFlight)}</Td>
+                        <Td className="text-right tabular-nums">
                           {c.concurrencyStart ?? "—"} → {c.concurrencyEndMin ?? "—"}
-                        </TableCell>
-                        <TableCell className={cn("text-right tabular-nums", c.brakeTicks > 0 && "font-semibold text-rose-700 dark:text-rose-300")}>{formatInt(c.brakeTicks)}</TableCell>
-                        <TableCell className={cn("text-right tabular-nums", c.cooldownTicks > 0 && "font-semibold text-rose-700 dark:text-rose-300")}>{formatInt(c.cooldownTicks)}</TableCell>
-                      </TableRow>
+                        </Td>
+                        <Td className={cn("text-right tabular-nums", c.brakeTicks > 0 && "font-semibold text-danger")}>{formatInt(c.brakeTicks)}</Td>
+                        <Td className={cn("text-right tabular-nums", c.cooldownTicks > 0 && "font-semibold text-danger")}>{formatInt(c.cooldownTicks)}</Td>
+                      </Tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </DenseTable>
               )}
               {truncated && (truncated.ticks || truncated.throughput) && (
-                <p className="px-6 pt-3 text-[11px] text-amber-700 dark:text-amber-300">
+                <p className="m-0 px-[18px] py-3 text-[11px] text-warning">
                   A janela é maior que o limite de leitura: os dados mais antigos foram omitidos (os mais recentes estão completos).
                 </p>
               )}
@@ -982,49 +868,49 @@ export default function DisparadorDesempenhoPage() {
 
           {/* 5. CAPACIDADE: TETO TEÓRICO × REAL (calculado dos limites e da latência atuais) */}
           {capacity && (
-            <Card className="border-primary/20 bg-primary/[0.02] shadow-sm">
+            <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
-                  <Zap className="size-4 text-primary" />
+                <CardTitle className="flex items-center gap-2">
+                  <Zap className="size-3.5 text-primary-text" aria-hidden="true" />
                   Capacidade: teto teórico × real
                 </CardTitle>
-                <CardDescription className="mt-0.5 text-xs text-muted-foreground">
+                <CardDescription className="mt-0.5">
                   Calculado agora com as vagas e a latência medidas pelo motor — não é uma tabela fixa.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-xs">
                 <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <div className="rounded-lg border border-border bg-card p-3">
+                  <div className="rounded-lg bg-surface-3 p-3">
                     <dt className="text-muted-foreground">Teto teórico por número</dt>
-                    <dd className="mt-1 text-lg font-bold tabular-nums">
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                       {capacity.theoreticalPerMinPerNumber ? `${formatInt(capacity.theoreticalPerMinPerNumber)}/min` : "—"}
                     </dd>
                     <dd className="text-[11px] text-muted-foreground">
                       {capacity.slotsPerNumber ?? "?"} vagas ÷ {capacity.latencySeconds.toLocaleString("pt-BR")} s × {capacity.budgetSeconds} s do ciclo
                     </dd>
                   </div>
-                  <div className="rounded-lg border border-border bg-card p-3">
+                  <div className="rounded-lg bg-surface-3 p-3">
                     <dt className="text-muted-foreground">Real: média / pico</dt>
-                    <dd className="mt-1 text-lg font-bold tabular-nums">
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">
                       {formatInt(capacity.realAvgPerMin)} / {formatInt(capacity.realPeakPerMin)}
                     </dd>
                     <dd className="text-[11px] text-muted-foreground">envios por minuto, todos os números</dd>
                   </div>
-                  <div className="rounded-lg border border-border bg-card p-3">
+                  <div className="rounded-lg bg-surface-3 p-3">
                     <dt className="text-muted-foreground">Uso do teto (número mais ativo)</dt>
-                    <dd className="mt-1 text-lg font-bold tabular-nums">{capacity.utilizationPct != null ? `${capacity.utilizationPct}%` : "—"}</dd>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">{capacity.utilizationPct != null ? `${capacity.utilizationPct}%` : "—"}</dd>
                     <dd className="text-[11px] text-muted-foreground">perto de 100% = falta vaga, não demanda</dd>
                   </div>
-                  <div className="rounded-lg border border-border bg-card p-3">
+                  <div className="rounded-lg bg-surface-3 p-3">
                     <dt className="text-muted-foreground">Vagas para 80 envios/s</dt>
-                    <dd className="mt-1 text-lg font-bold tabular-nums">{capacity.slotsFor80PerSecond ?? "—"}</dd>
+                    <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">{capacity.slotsFor80PerSecond ?? "—"}</dd>
                     <dd className="text-[11px] text-muted-foreground">
                       por número, com esta latência e o tempo ativo do ciclo
                     </dd>
                   </div>
                 </dl>
                 {capacity.above50SlotCap && (
-                  <div className="flex gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-amber-900 dark:text-amber-200">
+                  <div className="flex gap-2 rounded-lg bg-warning-soft p-3 text-foreground">
                     <Info className="mt-0.5 size-4 shrink-0" />
                     <p>
                       80 envios/s por número exige mais de 50 vagas, e hoje o limite do sistema é de 50 vagas por número e 50 no total. Para chegar lá
@@ -1041,6 +927,6 @@ export default function DisparadorDesempenhoPage() {
           )}
         </>
       )}
-    </div>
+    </PageBody>
   );
 }

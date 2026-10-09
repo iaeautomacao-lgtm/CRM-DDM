@@ -269,7 +269,7 @@ function MetaTemplates({
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Carregando templates do número…
             </p>
           ) : catalog.error ? (
-            <p className="p-2 text-xs text-red-600">{catalog.error}</p>
+            <p className="p-2 text-xs text-danger">{catalog.error}</p>
           ) : filtered.length === 0 ? (
             <p className="p-2 text-xs text-muted-foreground">
               Nenhum template aprovado {search ? "com esse nome " : ""}nesta conta WhatsApp Business. Sincronize em Configurações → Templates.
@@ -306,7 +306,7 @@ function MetaTemplates({
                       {t.name} <span className="font-normal text-muted-foreground">· {t.language}{t.category ? ` · ${t.category}` : ""}</span>
                     </span>
                     <span className="line-clamp-2 block text-muted-foreground">{t.body_text}</span>
-                    {problem && <span className="mt-0.5 block text-amber-700 dark:text-amber-400">{problem}</span>}
+                    {problem && <span className="mt-0.5 block text-warning">{problem}</span>}
                   </span>
                 </button>
               );
@@ -347,7 +347,7 @@ function MetaTemplates({
                   type="button"
                   size="icon"
                   variant="ghost"
-                  className="h-8 w-8 text-red-500 hover:bg-red-500/10"
+                  className="h-8 w-8 text-danger hover:bg-danger-soft"
                   onClick={() => setMensagens(mensagens.filter((_, idx) => idx !== i))}
                   aria-label={`Remover template ${msg.template_name}`}
                 >
@@ -356,7 +356,7 @@ function MetaTemplates({
               </div>
             </div>
             {missing && (
-              <p className="flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400">
+              <p className="flex items-start gap-1.5 text-xs text-danger">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 Este template não está no catálogo deste número. Remova-o e escolha um template da lista.
               </p>
@@ -454,11 +454,11 @@ function VariableRow({
           placeholder="Valor fixo para todos"
           aria-label={`Valor fixo da variável ${index + 1}`}
           aria-invalid={staticEmpty || undefined}
-          className={cn("h-8 min-w-32 flex-1 text-xs", staticEmpty && "border-red-500")}
+          className={cn("h-8 min-w-32 flex-1 text-xs", staticEmpty && "border-danger")}
         />
       )}
       {entry.type === "csv_var" && !csvAvailable && (
-        <span className="text-xs text-red-600 dark:text-red-400">Sem base importada: escolha outra origem.</span>
+        <span className="text-xs text-danger">Sem base importada: escolha outra origem.</span>
       )}
     </div>
   );
@@ -555,13 +555,13 @@ function WahaMessages({
               size="icon"
               onClick={() => setMensagens(mensagens.filter((_, idx) => idx !== i))}
               aria-label={`Remover ${rotulo.toLowerCase()} ${i + 1}`}
-              className="h-8 w-8 text-red-500 hover:bg-red-500/10"
+              className="h-8 w-8 text-danger hover:bg-danger-soft"
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </Button>
           </div>
           {msg.tipo === "ligacao" && (
-            <p className="flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400">
+            <p className="flex items-start gap-1.5 text-xs text-danger">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               Ligação não é mais enviada pelo disparador. Escolha outro tipo ou remova.
             </p>

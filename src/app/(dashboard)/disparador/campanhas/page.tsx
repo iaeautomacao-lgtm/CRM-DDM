@@ -13,18 +13,11 @@ import {
   Megaphone,
   Gauge,
   Clock,
-  Tag,
-  Smartphone,
-  Layers,
   Calendar,
-  X,
   Pencil,
   Loader2,
-  BarChart2,
   Search,
   Download,
-  ListChecks,
-  Activity,
   AlertTriangle,
   Info,
   RefreshCw,
@@ -34,14 +27,12 @@ import {
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Segmented } from "@/components/ddm/segmented";
+import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { DenseTable, Td, Th, Tr } from "@/components/ddm/table-card";
+import { DetailDrawer } from "@/components/ddm/list-with-drawer";
+import { EmptyState, Skeleton } from "@/components/ddm/states";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -56,7 +47,6 @@ import Link from "next/link";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { trackAction } from "@/hooks/use-telemetry";
 import { usePermissions } from "@/hooks/use-permission";
-import { useDialogA11y } from "@/hooks/use-dialog-a11y";
 import { formatBrasilia, WEEKDAY_LABELS } from "@/lib/disparador/send-window";
 import { messagesPerContact, parseTemplateMode } from "@/lib/disparador/campaign-validation";
 import { forecastFromCampaign } from "@/lib/disparador/dispatch-forecast";
@@ -146,16 +136,45 @@ type CampaignStatus =
   | "erro"
   | "bloqueada_por_risco";
 
-const STATUS_COLORS: Record<CampaignStatus, string> = {
-  rascunho: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
-  agendado: "bg-blue-500/10 text-blue-500 border border-blue-500/20",
-  em_execucao: "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
-  pausada: "bg-amber-500/10 text-amber-500 border border-amber-500/20",
-  encerrada: "bg-zinc-500/10 text-zinc-500 border border-zinc-500/20",
-  preparando: "bg-blue-500/10 text-blue-600 border border-blue-500/20 dark:text-blue-400",
-  erro: "bg-red-500/10 text-red-600 border border-red-500/20 dark:text-red-400",
-  bloqueada_por_risco: "bg-red-500/10 text-red-600 border border-red-500/20 dark:text-red-400",
+const STATUS_TONE: Record<CampaignStatus, StatusTone> = {
+  rascunho: "mute",
+  agendado: "info",
+  em_execucao: "ok",
+  pausada: "warn",
+  encerrada: "mute",
+  preparando: "info",
+  erro: "bad",
+  bloqueada_por_risco: "bad",
 };
+
+// Filtro segmentado da lista (protótipo): agrupa os status reais.
+type CampaignFilter = "todas" | "ativas" | "agendadas" | "rascunhos" | "pausadas" | "encerradas";
+const FILTERS: ReadonlyArray<{ value: CampaignFilter; label: string }> = [
+  { value: "todas", label: "Todas" },
+  { value: "ativas", label: "Em execução" },
+  { value: "agendadas", label: "Agendadas" },
+  { value: "rascunhos", label: "Rascunhos" },
+  { value: "pausadas", label: "Pausadas" },
+  { value: "encerradas", label: "Encerradas" },
+];
+
+function filterOf(status: string): Exclude<CampaignFilter, "todas"> {
+  switch (status) {
+    case "em_execucao":
+    case "preparando":
+      return "ativas";
+    case "agendado":
+      return "agendadas";
+    case "pausada":
+      return "pausadas";
+    case "encerrada":
+    case "erro":
+    case "bloqueada_por_risco":
+      return "encerradas";
+    default:
+      return "rascunhos";
+  }
+}
 
 const STATUS_LABELS: Record<CampaignStatus, string> = {
   rascunho: "Rascunho",
@@ -183,6 +202,24 @@ function diasLabel(dias: number[] | null | undefined): string {
 /** Janela "08:00:00" (coluna time) → "08:00". */
 function hhmm(value: string | null | undefined): string {
   return (value ?? "").slice(0, 5);
+}
+
+/** Linha de configuração do cartão: modo de envio · tabulação · canais · janela. */
+function configLine(c: Campaign): string {
+  const modo =
+    c.batch_percent != null
+      ? `Segmentado ${c.batch_percent}% / ${Math.round((c.batch_pause_seconds ?? 0) / 60)} min`
+      : (c.batch_size ?? 1) > 1 && (c.batch_pause_seconds ?? 0) === 0
+        ? "Imediato"
+        : `Modo antigo (${c.intervalo_min}–${c.intervalo_max}s)`;
+  const tab =
+    c.tags_filtro.length === 0
+      ? "Todos"
+      : c.tags_filtro.length === 1
+        ? c.tags_filtro[0]
+        : `${c.tags_filtro[0]} +${c.tags_filtro.length - 1}`;
+  const canais = `${c.session_ids.length} ${c.session_ids.length === 1 ? "canal" : "canais"}`;
+  return `${modo} · Tabulação: ${tab} · ${canais} · ${diasLabel(c.dias_envio)} ${hhmm(c.janela_inicio)}–${hhmm(c.janela_fim)}`;
 }
 
 /**
@@ -367,6 +404,9 @@ export default function CampanhasPage() {
   const [redConfirmed, setRedConfirmed] = useState(false);
   const [redReason, setRedReason] = useState("");
   const [unscheduleTarget, setUnscheduleTarget] = useState<Campaign | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Campaign | null>(null);
+  const [filter, setFilter] = useState<CampaignFilter>("todas");
+  const [search, setSearch] = useState("");
 
   // Campanha aguardando confirmação de início (modal de tier Meta)
   const [startConfirmId, setStartConfirmId] = useState<string | null>(null);
@@ -799,18 +839,22 @@ export default function CampanhasPage() {
   );
 
   // Delete Campaign
-  const handleDelete = async (campaign: Campaign) => {
-    // disp_message_queue.campaign_id is ON DELETE CASCADE, so deleting a
-    // running campaign silently wipes its in-flight queue mid-send.
-    // Require pausing/stopping first instead of deleting straight out of
-    // em_execucao.
+  // disp_message_queue.campaign_id is ON DELETE CASCADE, so deleting a
+  // running campaign silently wipes its in-flight queue mid-send.
+  // Require pausing/stopping first instead of deleting straight out of
+  // em_execucao. A confirmação é um AlertDialog (antes, confirm()).
+  const askDelete = (campaign: Campaign) => {
     if (campaign.status === "em_execucao") {
       toast.error(
         "Não é possível deletar uma campanha em execução. Pause ou encerre a campanha primeiro."
       );
       return;
     }
-    if (!confirm("Tem certeza que deseja deletar esta campanha permanentemente?")) return;
+    setDeleteTarget(campaign);
+  };
+
+  const handleDelete = async (campaign: Campaign) => {
+    setDeleteTarget(null);
     try {
       // Deletion is scoped server-side (ownership + status re-checked)
       // instead of a direct client delete, since wacrm.campaigns has no
@@ -1021,253 +1065,233 @@ export default function CampanhasPage() {
     setQueueDetailModal(null);
   };
 
+  const counts = useMemo(() => {
+    const out: Record<CampaignFilter, number> = { todas: campaigns.length, ativas: 0, agendadas: 0, rascunhos: 0, pausadas: 0, encerradas: 0 };
+    for (const c of campaigns) {
+      const f = filterOf(c.status);
+      out[f] += 1;
+    }
+    return out;
+  }, [campaigns]);
 
-  // Modais feitos à mão: foco entra no modal ao abrir e volta ao botão de
-  // origem ao fechar. Métricas e drilldown fecham com Esc.
-  const metricsA11y = useDialogA11y(!!metricsModal, closeMetricsModal);
-  const queueDetailA11y = useDialogA11y(!!(queueDetailModal && metricsModal), () => setQueueDetailModal(null));
+  const visibleCampaigns = useMemo(() => {
+    const q = search.trim().toLocaleLowerCase("pt-BR");
+    return campaigns.filter(
+      (c) =>
+        (filter === "todas" || filterOf(c.status) === filter) &&
+        (!q || c.nome.toLocaleLowerCase("pt-BR").includes(q))
+    );
+  }, [campaigns, filter, search]);
+
+  const metricsCampaign = metricsModal ? campaigns.find((c) => c.id === metricsModal.campaignId) : undefined;
 
   return (
-    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
-              <Megaphone className="h-5 w-5" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              Campanhas de Disparo
-            </h1>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Gerencie disparos agendados em lote e acompanhe o processamento no servidor.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2 self-start">
-          {canRecalculate && (
-            <Button
-              variant="outline"
-              className="gap-1.5 text-xs h-9"
-              onClick={handleRecalculateMetrics}
-              disabled={recalculatingMetrics}
-            >
-              <RefreshCw aria-hidden="true" className={cn("h-4 w-4", recalculatingMetrics && "animate-spin")} />
-              Recalcular métricas
+    <PageBody>
+      <PageToolbar
+        actions={
+          <>
+            {canRecalculate && (
+              <Button variant="outline" onClick={handleRecalculateMetrics} disabled={recalculatingMetrics}>
+                <RefreshCw aria-hidden="true" className={cn("size-3.5", recalculatingMetrics && "animate-spin")} />
+                Recalcular métricas
+              </Button>
+            )}
+            <Button onClick={openCreateModal}>
+              <Plus className="size-3.5" aria-hidden="true" /> Nova campanha
             </Button>
-          )}
-          <Link
-            href="/disparador/monitor"
-            className={cn(buttonVariants({ variant: "outline" }), "gap-1.5 text-xs h-9")}
-          >
-            <Activity className="h-4 w-4 text-primary" aria-hidden="true" /> Monitor em tempo real
-          </Link>
-          <Link
-            href="/disparador/desempenho"
-            className={cn(buttonVariants({ variant: "outline" }), "gap-1.5 text-xs h-9")}
-          >
-            <Gauge className="h-4 w-4 text-primary" aria-hidden="true" /> Desempenho
-          </Link>
-          <Button onClick={openCreateModal} className="gap-1.5 h-9 text-xs">
-            <Plus className="h-4 w-4" aria-hidden="true" /> Nova Campanha
-          </Button>
+          </>
+        }
+      >
+        <Segmented
+          size="lg"
+          ariaLabel="Filtrar campanhas por situação"
+          value={filter}
+          onChange={setFilter}
+          options={FILTERS.map((f) => ({ value: f.value, label: f.label, count: loading ? undefined : counts[f.value] }))}
+        />
+        <div className="relative w-full sm:w-56">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            type="search"
+            aria-label="Buscar campanha pelo nome"
+            placeholder="Buscar campanha"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 pl-8 text-[12.5px]"
+          />
         </div>
-      </div>
+      </PageToolbar>
 
-      {/* Campaigns list */}
-      <div className="flex-1 overflow-y-auto pr-2">
-        {loading ? (
-          <div className="flex h-48 items-center justify-center text-muted-foreground">
-            Carregando campanhas...
-          </div>
-        ) : campaigns.length === 0 ? (
-          <div className="flex h-48 flex-col items-center justify-center text-center text-muted-foreground border border-dashed border-border rounded-xl">
-            <Megaphone className="h-10 w-10 opacity-20 mb-2" />
-            <h4 className="font-semibold">Nenhuma campanha cadastrada</h4>
-            <p className="text-xs max-w-xs mt-1">Crie a sua primeira campanha de disparos clicando no botão acima.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {campaigns.map((c) => (
-              <div key={c.id} className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm relative overflow-hidden">
-                <header className="flex justify-between items-start gap-2">
-                  <h3 className="min-w-0 font-bold text-foreground truncate" title={c.nome}>{c.nome}</h3>
-                  <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${STATUS_COLORS[statusKey(c.status)]}`}>
-                    {STATUS_LABELS[statusKey(c.status)]}
-                  </span>
-                </header>
-
-                <p className="text-xs text-muted-foreground line-clamp-2 min-h-[32px]">{c.descricao || "Sem descrição fornecida."}</p>
-
-                {c.status === "agendado" && c.agendamento && (
-                  <p className="flex items-center gap-1.5 rounded-md bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-300">
-                    <Calendar className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    Começa {formatShortBrasilia(new Date(c.agendamento))} (Brasília)
+      {loading ? (
+        <div className="flex flex-col gap-2.5" aria-busy="true" aria-label="Carregando campanhas">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-[112px] w-full rounded-[10px]" />
+          ))}
+        </div>
+      ) : campaigns.length === 0 ? (
+        <EmptyState
+          icon={Megaphone}
+          title="Nenhuma campanha cadastrada"
+          hint="Crie a primeira campanha em “Nova campanha”."
+        />
+      ) : visibleCampaigns.length === 0 ? (
+        <EmptyState icon={Search} title="Nenhuma campanha neste filtro" hint="Troque o filtro ou a busca." />
+      ) : (
+        <div className="ddm-stagger flex flex-col gap-2.5">
+          {visibleCampaigns.map((c) => {
+            const st = statusKey(c.status);
+            const m = metricsMap[c.id];
+            const total = m?.total_contatos ?? 0;
+            const sentPct = total > 0 ? Math.min(100, (m!.total_enviados / total) * 100) : 0;
+            const readPct = total > 0 ? Math.min(100, (m!.total_lidos / total) * 100) : 0;
+            const showForecast = total > 0 && !["encerrada", "erro", "bloqueada_por_risco"].includes(c.status);
+            return (
+              <section
+                key={c.id}
+                aria-label={c.nome}
+                className="flex flex-wrap items-center gap-x-6 gap-y-4 rounded-[10px] border border-border bg-card px-[18px] py-4 transition-colors hover:border-border-strong"
+              >
+                {/* Identificação e configuração */}
+                <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-1.5">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <h3 className="m-0 truncate font-sans text-sm font-semibold text-foreground" title={c.nome}>
+                      {c.nome}
+                    </h3>
+                    <StatusChip tone={STATUS_TONE[st]}>{STATUS_LABELS[st]}</StatusChip>
+                  </div>
+                  <p className="m-0 truncate text-[12.5px] text-muted-foreground" title={configLine(c)}>
+                    {configLine(c)}
                   </p>
-                )}
-
-                {/* Migration 160: o início falhou (ex.: agendada com template
-                    inválido) e a campanha voltou para rascunho — nunca em
-                    silêncio. */}
-                {c.status === "rascunho" && c.motivo_falha_inicio && (
-                  <p
-                    role="alert"
-                    className="flex items-start gap-1.5 rounded-md border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] font-medium text-red-600 dark:text-red-400"
-                  >
-                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                    <span>{c.motivo_falha_inicio}</span>
-                  </p>
-                )}
-
-                {/* Configurations Overview */}
-                <div className="grid grid-cols-2 gap-2 pt-2 text-xs text-muted-foreground border-t border-border/40">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Layers className="h-3.5 w-3.5" aria-hidden="true" />{" "}
-                    {c.batch_percent != null
-                      ? `Segmentado ${c.batch_percent}% / ${Math.round((c.batch_pause_seconds ?? 0) / 60)} min`
-                      : (c.batch_size ?? 1) > 1 && (c.batch_pause_seconds ?? 0) === 0
-                        ? "Imediato"
-                        : `Modo antigo (${c.intervalo_min}–${c.intervalo_max}s)`}
-                  </div>
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Tag className="h-3.5 w-3.5" aria-hidden="true" /> Tabulação:{" "}
-                    {c.tags_filtro.length === 0
-                      ? "Todos"
-                      : c.tags_filtro.length === 1
-                        ? c.tags_filtro[0]
-                        : `${c.tags_filtro[0]} +${c.tags_filtro.length - 1}`}
-                  </div>
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Smartphone className="h-3.5 w-3.5" aria-hidden="true" /> Canais: {c.session_ids.length}
-                  </div>
-                  <div className="flex items-center gap-1.5 truncate">
-                    <Clock className="h-3.5 w-3.5" aria-hidden="true" /> {diasLabel(c.dias_envio)} {hhmm(c.janela_inicio)}–{hhmm(c.janela_fim)}
-                  </div>
+                  {c.descricao ? (
+                    <p className="m-0 line-clamp-1 text-xs text-muted-foreground">{c.descricao}</p>
+                  ) : null}
+                  {c.status === "agendado" && c.agendamento && (
+                    <p className="m-0 flex items-center gap-1.5 text-[12.5px] font-medium text-foreground-2">
+                      <Calendar className="size-3 shrink-0" aria-hidden="true" />
+                      Começa {formatShortBrasilia(new Date(c.agendamento))} (Brasília)
+                    </p>
+                  )}
+                  {/* Migration 160: o início falhou e a campanha voltou para rascunho — nunca em silêncio. */}
+                  {c.status === "rascunho" && c.motivo_falha_inicio && (
+                    <p role="alert" className="m-0 flex items-start gap-1.5 text-[12.5px] font-medium text-danger">
+                      <AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                      <span>{c.motivo_falha_inicio}</span>
+                    </p>
+                  )}
                 </div>
 
-                {/* Métricas resumidas — vêm de metricsMap, pré-carregado pra
-                    TODAS as campanhas em loadData() (1 query, não N+1); só
-                    aparece quando a campanha já tem uma linha em
-                    campaign_metrics (isto é, o envio já começou pelo menos
-                    uma vez). "Ver métricas" abre o modal com o detalhe
-                    completo (taxas, UTM, etc). */}
-                {metricsMap[c.id] && (
-                  <div className="grid grid-cols-4 gap-2 pt-2 text-center text-[11px] border-t border-border/40">
-                    <div>
-                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_enviados}</p>
-                      <p className="text-muted-foreground">Enviados</p>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_entregues}</p>
-                      <p className="text-muted-foreground">Entregues</p>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_lidos}</p>
-                      <p className="text-muted-foreground">Lidos</p>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-foreground">{metricsMap[c.id].total_respostas}</p>
-                      <p className="text-muted-foreground">Respostas</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Planejamento operacional: quantidade de mensagens e
-                    previsão calculadas com o mesmo motor de forecast usado
-                    pelo assistente de campanha. */}
-                {metricsMap[c.id]?.total_contatos > 0 && (
-                  <div className="space-y-1.5 rounded-lg border border-border/50 bg-muted/15 px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-3 text-xs">
-                      <span className="text-muted-foreground">Disparos previstos</span>
-                      <span className="font-semibold text-foreground">
-                        {plannedDispatchCount(c, metricsMap[c.id].total_contatos).toLocaleString("pt-BR")}
-                      </span>
-                    </div>
-                    {!["encerrada", "erro", "bloqueada_por_risco"].includes(c.status) && (
-                      <>
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          <span className="text-muted-foreground">Duração estimada</span>
-                          <span className="font-medium text-foreground">
-                            {campaignForecastDurationLabel(c, metricsMap[c.id].total_contatos)}
-                          </span>
-                        </div>
-                        <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                          <span>Término previsto: {cardForecastLabel(c, metricsMap[c.id].total_contatos)}</span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* Actions row */}
-                <div className="flex flex-wrap justify-between items-center gap-2 pt-3 border-t border-border/40">
-                  <div className="flex gap-1.5">
-                    {c.status === "em_execucao" ? (
-                      <Button size="sm" variant="outline" onClick={() => handlePause(c.id)} className="h-9 gap-1 text-xs">
-                        <Pause className="h-3.5 w-3.5" aria-hidden="true" /> Pausar
-                      </Button>
-                    ) : c.status === "agendado" ? (
-                      <>
-                        <Button size="sm" onClick={() => handleStartClick(c.id, true)} className="h-9 gap-1 text-xs">
-                          <Play className="h-3.5 w-3.5" aria-hidden="true" /> Iniciar agora
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setUnscheduleTarget(c)} className="h-9 gap-1 text-xs">
-                          <CalendarX2 className="h-3.5 w-3.5" aria-hidden="true" /> Desagendar
-                        </Button>
-                      </>
-                    ) : (
-                      <Button
-                        size="sm"
-                        onClick={() => handleStartClick(c.id)}
-                        disabled={!["rascunho", "pausada"].includes(c.status)}
-                        className="h-9 gap-1 text-xs"
+                {/* Progresso e números reais (campaign_metrics_live) */}
+                <div className="flex min-w-0 flex-[2_1_360px] flex-col gap-2">
+                  {m ? (
+                    <>
+                      <div className="flex justify-between gap-3 text-xs tabular-nums text-foreground-2">
+                        <span>
+                          {m.total_enviados.toLocaleString("pt-BR")} de {total.toLocaleString("pt-BR")} contatos
+                        </span>
+                        <span className="font-semibold text-foreground">{Math.round(sentPct)}%</span>
+                      </div>
+                      <span
+                        className="relative h-1.5 overflow-hidden rounded-full bg-surface-3"
+                        title={`Enviados ${Math.round(sentPct)}% · lidos ${Math.round(readPct)}%`}
                       >
-                        <Play className="h-3.5 w-3.5" aria-hidden="true" /> {c.status === "pausada" ? "Retomar" : "Iniciar"}
+                        <span className="absolute inset-y-0 left-0 origin-left animate-ddm-bar bg-muted-foreground/45 transition-[width] duration-500" style={{ width: `${sentPct}%` }} />
+                        <span className="absolute inset-y-0 left-0 origin-left animate-ddm-bar bg-primary transition-[width] duration-500" style={{ width: `${readPct}%` }} />
+                      </span>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[
+                          ["Enviados", m.total_enviados],
+                          ["Entregues", m.total_entregues],
+                          ["Lidos", m.total_lidos],
+                          ["Respostas", m.total_respostas],
+                        ].map(([label, value]) => (
+                          <div key={label} className="flex flex-col gap-px">
+                            <span className="text-[11.5px] text-muted-foreground">{label}</span>
+                            <span className="text-sm font-semibold tabular-nums text-foreground">
+                              {Number(value).toLocaleString("pt-BR")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {showForecast && (
+                        <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                          <span>
+                            {plannedDispatchCount(c, total).toLocaleString("pt-BR")} disparos previstos
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="size-3" aria-hidden="true" />
+                            {campaignForecastDurationLabel(c, total)} · término {cardForecastLabel(c, total)}
+                          </span>
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="m-0 text-xs text-muted-foreground">Ainda sem envios registrados.</p>
+                  )}
+                </div>
+
+                {/* Ações */}
+                <div className="ml-auto flex flex-none flex-wrap items-center gap-1.5">
+                  {c.status === "em_execucao" ? (
+                    <Button variant="outline" onClick={() => handlePause(c.id)}>
+                      <Pause className="size-3.5" aria-hidden="true" /> Pausar
+                    </Button>
+                  ) : c.status === "agendado" ? (
+                    <>
+                      <Button onClick={() => handleStartClick(c.id, true)}>
+                        <Play className="size-3.5" aria-hidden="true" /> Iniciar agora
                       </Button>
-                    )}
-                    {c.status === "em_execucao" || c.status === "pausada" ? (
-                      <Button size="sm" variant="outline" onClick={() => setStopConfirm({ id: c.id, nome: c.nome })} className="h-9 text-xs">
-                        Encerrar
+                      <Button variant="outline" onClick={() => setUnscheduleTarget(c)}>
+                        <CalendarX2 className="size-3.5" aria-hidden="true" /> Desagendar
                       </Button>
-                    ) : null}
-                  </div>
-                  {/* Ações só com ícone: aria-label com o nome da campanha
-                      (leitor de tela) e alvo de 36px (toque no celular). */}
-                  <div className="flex gap-1">
-                    <Link
-                      href={`/disparador/campanhas/${c.id}`}
-                      className={cn(buttonVariants({ variant: "ghost", size: "icon" }), "h-9 w-9 text-muted-foreground hover:text-foreground")}
-                      title="Ver por contato"
-                      aria-label={`Ver envios por contato — ${c.nome}`}
-                    >
-                      <ListChecks className="h-4 w-4" aria-hidden="true" />
-                    </Link>
+                    </>
+                  ) : c.status === "rascunho" || c.status === "pausada" ? (
+                    <Button onClick={() => handleStartClick(c.id)}>
+                      <Play className="size-3.5" aria-hidden="true" /> {c.status === "pausada" ? "Retomar" : "Iniciar"}
+                    </Button>
+                  ) : null}
+                  {(c.status === "em_execucao" || c.status === "pausada") && (
+                    <Button variant="outline" onClick={() => setStopConfirm({ id: c.id, nome: c.nome })}>
+                      Encerrar
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => handleMetricsClick(c)} aria-label={`Métricas — ${c.nome}`}>
+                    <Gauge className="size-3.5" aria-hidden="true" /> Métricas
+                  </Button>
+                  <Link
+                    href={`/disparador/campanhas/${c.id}`}
+                    className={cn(buttonVariants({ variant: "outline" }))}
+                    aria-label={`Detalhes por contato — ${c.nome}`}
+                  >
+                    Detalhes <ChevronRight className="size-3.5" aria-hidden="true" />
+                  </Link>
+                  {(c.status === "rascunho" || c.status === "agendado") && (
                     <Button
                       size="icon"
                       variant="ghost"
-                      onClick={() => handleMetricsClick(c)}
-                      className="h-9 w-9 text-muted-foreground hover:text-foreground"
-                      title="Ver métricas"
-                      aria-label={`Ver métricas — ${c.nome}`}
+                      onClick={() => handleEditClick(c)}
+                      title="Editar campanha"
+                      aria-label={`Editar campanha — ${c.nome}`}
+                      className="text-muted-foreground hover:text-foreground"
                     >
-                      <BarChart2 className="h-4 w-4" aria-hidden="true" />
+                      <Pencil className="size-4" aria-hidden="true" />
                     </Button>
-                    {(c.status === "rascunho" || c.status === "agendado") && (
-                      <Button size="icon" variant="ghost" onClick={() => handleEditClick(c)} title="Editar campanha" aria-label={`Editar campanha — ${c.nome}`} className="h-9 w-9 text-muted-foreground hover:text-foreground">
-                        <Pencil className="h-4 w-4" aria-hidden="true" />
-                      </Button>
-                    )}
-                    <Button size="icon" variant="ghost" onClick={() => handleDelete(c)} title="Excluir campanha" aria-label={`Excluir campanha — ${c.nome}`} className="h-9 w-9 text-red-500 hover:text-red-600">
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    </Button>
-                  </div>
+                  )}
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => askDelete(c)}
+                    title="Excluir campanha"
+                    aria-label={`Excluir campanha — ${c.nome}`}
+                    className="text-danger hover:bg-danger-soft hover:text-danger"
+                  >
+                    <Trash2 className="size-4" aria-hidden="true" />
+                  </Button>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
 
       {/* Assistente "Nova campanha" — Origem, Configurações, Conteúdo e Revisão. */}
       <CampaignWizard
@@ -1280,6 +1304,24 @@ export default function CampanhasPage() {
         onClose={closeWizard}
         onSaved={loadData}
       />
+
+      {/* Excluir: confirmação (apaga a fila junto, ON DELETE CASCADE). */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir campanha?</AlertDialogTitle>
+            <AlertDialogDescription>
+              &quot;{deleteTarget?.nome}&quot; será excluída permanentemente, junto com o histórico de envios dela.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => deleteTarget && handleDelete(deleteTarget)}>
+              Excluir campanha
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Desagendar: confirmação. */}
       <AlertDialog open={unscheduleTarget !== null} onOpenChange={(open) => !open && setUnscheduleTarget(null)}>
@@ -1322,22 +1364,24 @@ export default function CampanhasPage() {
                 )}
                 {/* Público real (PRD-01): quantos e de onde, antes de enviar. */}
                 {audienceInfo === null ? (
-                  <p className="text-sm text-muted-foreground">Calculando público…</p>
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> Calculando público…
+                  </p>
                 ) : audienceInfo.ok && audienceInfo.source === "resume" ? (
                   <p className="text-sm text-muted-foreground">
                     A campanha está pausada: os envios que ficaram na fila serão retomados.
                   </p>
                 ) : audienceInfo.ok ? (
-                  <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+                  <div className="rounded-lg bg-primary-soft p-3 text-sm">
                     <p className="text-foreground">
                       Enviar para{" "}
-                      <span className="text-base font-semibold">{audienceInfo.total.toLocaleString("pt-BR")}</span>{" "}
+                      <span className="text-base font-semibold tabular-nums">{audienceInfo.total.toLocaleString("pt-BR")}</span>{" "}
                       {audienceInfo.source_label}
                       {audienceInfo.tags.length > 0 && <> ({audienceInfo.tags.join(", ")})</>}.
                     </p>
                     {audienceInfo.blacklisted > 0 ? (
-                      <div className="mt-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-800 dark:text-amber-300">
-                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <div className="mt-2 flex items-start gap-2 rounded-md border border-warning-border bg-warning-soft p-2 text-xs text-foreground">
+                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />
                         <span>
                           De <strong>{audienceInfo.total.toLocaleString("pt-BR")}</strong> contatos válidos,{" "}
                           <strong>{audienceInfo.blacklisted.toLocaleString("pt-BR")}</strong>{" "}
@@ -1358,71 +1402,52 @@ export default function CampanhasPage() {
                       </p>
                     )}
                     {audienceInfo.source === "account" && (
-                      <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-warning">
+                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
                         Sem CSV e sem tabulação: a campanha vai para a conta inteira.
                       </p>
                     )}
                   </div>
                 ) : (
-                  <div className="flex items-start gap-2 rounded-md border border-red-500/50 bg-red-500/10 p-3 text-sm text-red-700 dark:text-red-400">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="flex items-start gap-2 rounded-lg bg-danger-soft p-3 text-sm text-danger">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                     <span>{audienceInfo.error}</span>
                   </div>
                 )}
                 {infoLoading && (
-                  <p className="text-sm text-muted-foreground">
-                    Consultando limites do canal...
+                  <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> Consultando limites do canal…
                   </p>
                 )}
 
                 {!infoLoading && campaignInfo && campaignInfo.hasMeta && (
                   <div className="space-y-2">
                     {campaignInfo.channels.map((ch) => (
-                      <div
-                        key={ch.id}
-                        className="rounded-md border p-3 text-sm space-y-1"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">
-                            {ch.display_phone_number || ch.phone_number_id}
-                          </span>
+                      <div key={ch.id} className="space-y-1 rounded-lg border border-border p-3 text-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium tabular-nums">{ch.display_phone_number || ch.phone_number_id}</span>
                           {ch.quality_rating && (
-                            <span
-                              className={
-                                ch.quality_rating === "GREEN"
-                                  ? "text-green-600 font-medium"
-                                  : ch.quality_rating === "YELLOW"
-                                  ? "text-yellow-600 font-medium"
-                                  : "text-red-600 font-medium"
-                              }
+                            <StatusChip
+                              tone={ch.quality_rating === "GREEN" ? "ok" : ch.quality_rating === "YELLOW" ? "warn" : "bad"}
                             >
-                              {qualityLabel(ch.quality_rating)}
-                            </span>
+                              Qualidade {qualityLabel(ch.quality_rating).toLowerCase()}
+                            </StatusChip>
                           )}
                         </div>
                         <div className="text-muted-foreground">
-                          Nível:{" "}
-                          <span className="font-medium text-foreground">
-                            {tierLabel(ch.tier)}
-                          </span>{" "}
-                          — até{" "}
-                          <span className="font-medium text-foreground">
-                            {ch.dailyLimit === Infinity
-                              ? "ilimitado"
-                              : (ch.dailyLimit ?? 1000).toLocaleString("pt-BR")}
+                          Nível: <span className="font-medium text-foreground">{tierLabel(ch.tier)}</span> — até{" "}
+                          <span className="font-medium tabular-nums text-foreground">
+                            {ch.dailyLimit === Infinity ? "ilimitado" : (ch.dailyLimit ?? 1000).toLocaleString("pt-BR")}
                           </span>{" "}
                           disparos/dia
                         </div>
 
                         {ch.quality_rating === "RED" && (
-                          <div className="flex items-start gap-2 rounded-md border border-red-500 bg-red-500/10 p-2 text-red-700 dark:text-red-400">
-                            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                          <div className="flex items-start gap-2 rounded-md bg-danger-soft p-2 text-danger">
+                            <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                             <span className="font-medium">
-                              Qualidade VERMELHA — este número está em risco de
-                              restrição pela Meta (envio limitado a poucas
-                              mensagens por segundo). Campanha nova nele só
-                              pode ser iniciada pelo owner.
+                              Qualidade VERMELHA — este número está em risco de restrição pela Meta (envio limitado a
+                              poucas mensagens por segundo). Campanha nova nele só pode ser iniciada pelo owner.
                               {!canOverrideRed && " Peça ao owner para iniciar esta campanha."}
                             </span>
                           </div>
@@ -1430,35 +1455,35 @@ export default function CampanhasPage() {
 
                         {ch.quality_rating === "YELLOW" && (
                           <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                            <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
                             <span>
-                              Qualidade AMARELA — número em observação pela
-                              Meta, acompanhe o desempenho dos disparos.
+                              Qualidade AMARELA — número em observação pela Meta, acompanhe o desempenho dos disparos.
                             </span>
                           </div>
                         )}
 
                         {ch.error && (
-                          <div className="text-xs text-yellow-600">
-                            ⚠ {ch.error} — limite padrão aplicado
+                          <div className="flex items-start gap-1.5 text-xs text-warning">
+                            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                            {ch.error} — limite padrão aplicado
                           </div>
                         )}
                       </div>
                     ))}
-                        {hasRedChannel && canOverrideRed && (
-                      <div className="space-y-2 rounded-md border border-red-500 p-3 text-sm">
+                    {hasRedChannel && canOverrideRed && (
+                      <div className="space-y-2 rounded-lg border border-danger/60 p-3 text-sm">
                         <label className="flex items-start gap-2">
                           <input
                             type="checkbox"
-                            className="mt-1"
+                            className="mt-1 accent-[var(--primary)]"
                             checked={redConfirmed}
                             onChange={(e) => setRedConfirmed(e.target.checked)}
                           />
                           <span>Confirmo iniciar mesmo com qualidade vermelha</span>
                         </label>
-                        <input
+                        <Input
                           type="text"
-                          className="w-full rounded-md border bg-background px-2 py-1 text-sm"
+                          aria-label="Motivo para iniciar com qualidade vermelha"
                           placeholder="Motivo (obrigatório, mín. 3 caracteres)"
                           maxLength={500}
                           value={redReason}
@@ -1467,23 +1492,18 @@ export default function CampanhasPage() {
                       </div>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      Se o número de contatos exceder o limite diário, os
-                      disparos restantes serão agendados para os dias
-                      seguintes automaticamente.
+                      Se o número de contatos exceder o limite diário, os disparos restantes serão agendados para os
+                      dias seguintes automaticamente.
                     </p>
                   </div>
                 )}
 
                 {!infoLoading && campaignInfo && !campaignInfo.hasMeta && (
-                  <p className="text-sm text-muted-foreground">
-                    Canal WAHA — sem limite de nível da Meta.
-                  </p>
+                  <p className="text-sm text-muted-foreground">Canal WAHA — sem limite de nível da Meta.</p>
                 )}
 
                 {!infoLoading && !campaignInfo && (
-                  <p className="text-sm text-muted-foreground">
-                    Deseja iniciar esta campanha?
-                  </p>
+                  <p className="text-sm text-muted-foreground">Deseja iniciar esta campanha?</p>
                 )}
               </div>
             </AlertDialogDescription>
@@ -1494,7 +1514,7 @@ export default function CampanhasPage() {
               onClick={handleStartConfirm}
               disabled={infoLoading || starting || !audienceInfo || !audienceInfo.ok || !redReady}
             >
-              {starting ? "Iniciando…" : infoLoading ? "Consultando..." : "Iniciar campanha"}
+              {starting ? "Iniciando…" : infoLoading ? "Consultando…" : "Iniciar campanha"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1519,441 +1539,180 @@ export default function CampanhasPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {metricsModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div
-            ref={metricsA11y.ref}
-            tabIndex={-1}
-            onKeyDown={metricsA11y.onKeyDown}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="campaign-metrics-title"
-            className="bg-card border border-border w-full max-w-md rounded-xl shadow-2xl flex flex-col max-h-[calc(100dvh-2rem)] outline-none"
-          >
-            <header className="px-4 py-3 sm:px-6 sm:py-4 border-b border-border flex justify-between items-center gap-2">
-              <div className="min-w-0">
-                <h3 id="campaign-metrics-title" className="font-bold text-foreground">Métricas da Campanha</h3>
-                <p className="text-xs text-muted-foreground truncate">
-                  {metricsModal.nome}
-                </p>
+      {/* Métricas da campanha: gaveta da direita (protótipo). Atualiza a cada 15 s enquanto aberta. */}
+      <DetailDrawer
+        open={!!metricsModal}
+        onOpenChange={(open) => !open && closeMetricsModal()}
+        title={metricsModal?.nome ?? ""}
+        description="Métricas da campanha"
+        headerExtra={
+          metricsCampaign ? (
+            <StatusChip tone={STATUS_TONE[statusKey(metricsCampaign.status)]}>
+              {STATUS_LABELS[statusKey(metricsCampaign.status)]}
+            </StatusChip>
+          ) : null
+        }
+        size="md"
+      >
+        {metricsLoading ? (
+          <div className="flex flex-col gap-3" aria-busy="true">
+            <Skeleton className="h-48 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        ) : !metricsData ? (
+          <EmptyState title="Nenhuma métrica disponível para esta campanha" />
+        ) : (
+          <div className="flex flex-col gap-5">
+            {/* KPIs — os que têm `status` abrem o detalhamento por contato. */}
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
+              {[
+                { label: "Disparos previstos", value: plannedDispatchCount(metricsCampaign, metricsData.total_contatos), dot: "bg-foreground-2", status: null },
+                { label: "Total de contatos", value: metricsData.total_contatos, dot: "bg-foreground-2", status: "total" as const },
+                { label: "A enviar", value: agendadosCount ?? 0, dot: "bg-muted-foreground", status: "agendado" as const },
+                { label: "Enviados", value: metricsData.total_enviados, dot: "bg-[#5B8DEF]", status: "enviado" as const },
+                { label: "Aguardando confirmação", value: aguardandoConfirmacaoCount ?? 0, dot: "bg-warning", status: "aguardando_confirmacao" as const },
+                { label: "Entregues", value: metricsData.total_entregues, dot: "bg-success", status: "entregue" as const },
+                { label: "Lidos", value: metricsData.total_lidos, dot: "bg-primary", status: "lido" as const },
+                { label: "Respostas", value: metricsData.total_respostas, dot: "bg-primary", status: "respondido" as const },
+                { label: "Blacklist", value: metricsData.total_blacklist, dot: "bg-foreground-2", status: "bloqueado" as const },
+                { label: "Erros", value: metricsData.total_erros, dot: "bg-danger", status: "erro" as const },
+                { label: "Tempo médio de resposta", value: formatResponseTime(metricsData.tempo_medio_resposta), dot: null, status: null },
+                { label: "Tempo efetivo de disparo", value: formatCampaignDuration(timingData?.active_seconds ?? null), dot: null, status: null },
+                { label: "Tempo pausado", value: formatCampaignDuration(timingData?.paused_seconds ?? null), dot: null, status: null },
+                { label: "Tempo corrido", value: formatCampaignDuration(timingData?.wall_clock_seconds ?? null), dot: null, status: null },
+              ].map(({ label, value, dot, status }) => {
+                const body = (
+                  <>
+                    <span className="flex items-center gap-1.5 text-xs text-foreground-2">
+                      {dot && <span aria-hidden="true" className={cn("size-[7px] rounded-[2px]", dot)} />}
+                      {label}
+                    </span>
+                    <span className="text-lg font-semibold tabular-nums text-foreground">
+                      {typeof value === "number" ? value.toLocaleString("pt-BR") : value}
+                    </span>
+                  </>
+                );
+                return status ? (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => openQueueDetail(status, label)}
+                    title="Ver por contato"
+                    className="flex flex-col gap-1 bg-card px-3.5 py-3 text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <div key={label} className="flex flex-col gap-1 bg-card px-3.5 py-3">
+                    {body}
+                  </div>
+                );
+              })}
+            </div>
+
+            {metricsCampaign && metricsData.total_contatos > 0 &&
+              !["encerrada", "erro", "bloqueada_por_risco"].includes(metricsCampaign.status) && (
+                <div className="flex flex-col gap-2.5">
+                  <p className="m-0 text-[13px] font-semibold text-foreground">Previsão do disparo</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-0.5 rounded-lg bg-surface-3 px-3 py-2.5">
+                      <span className="text-xs text-foreground-2">Duração estimada</span>
+                      <span className="text-[13px] font-semibold text-foreground">
+                        {campaignForecastDurationLabel(metricsCampaign, metricsData.total_contatos)}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-0.5 rounded-lg bg-surface-3 px-3 py-2.5">
+                      <span className="text-xs text-foreground-2">Término previsto</span>
+                      <span className="text-[13px] font-semibold text-foreground">
+                        {cardForecastLabel(metricsCampaign, metricsData.total_contatos)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            {metricsData.total_enviados > 0 && (
+              <div className="flex flex-col gap-2.5">
+                <p className="m-0 text-[13px] font-semibold text-foreground">Taxas</p>
+                {[
+                  { label: "Entrega", part: metricsData.total_entregues },
+                  { label: "Leitura", part: metricsData.total_lidos },
+                  { label: "Resposta", part: metricsData.total_respostas },
+                ].map(({ label, part }) => (
+                  <RateRow key={label} label={label} part={part} total={metricsData.total_enviados} />
+                ))}
               </div>
-              <Button
-                size="icon"
-                variant="ghost"
-                aria-label="Fechar"
-                className="h-9 w-9 shrink-0"
-                onClick={closeMetricsModal}
-              >
-                <X className="h-5 w-5" aria-hidden="true" />
-              </Button>
-            </header>
+            )}
 
-            <div className="p-4 sm:p-6 overflow-y-auto sm:max-h-[70vh]">
-              {metricsLoading && (
-                <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span className="text-sm">Carregando métricas...</span>
-                </div>
-              )}
-
-              {!metricsLoading && !metricsData && (
-                <div className="text-center py-8 text-sm text-muted-foreground">
-                  Nenhuma métrica disponível para esta campanha.
-                </div>
-              )}
-
-              {!metricsLoading && metricsData && (
-                <div className="space-y-4">
-                  {/* Grid de KPIs — métricas com `status` abrem o drilldown por
-                      contato (ver queueDetailModal). Total de Contatos usa o
-                      status lógico `total`, que lista toda a fila da campanha. */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {[
-                      {
-                        label: "Disparos previstos",
-                        value: plannedDispatchCount(
-                          campaigns.find((campaign) => campaign.id === metricsModal.campaignId),
-                          metricsData.total_contatos
-                        ),
-                        color: "text-foreground",
-                        status: null,
-                      },
-                      { label: "Total de Contatos", value: metricsData.total_contatos, color: "text-foreground", status: "total" as const },
-                      { label: "A enviar", value: agendadosCount ?? 0, color: "text-cyan-500", status: "agendado" as const },
-                      { label: "Enviados", value: metricsData.total_enviados, color: "text-blue-500", status: "enviado" as const },
-                      {
-                        label: "Aguardando confirmação",
-                        value: aguardandoConfirmacaoCount ?? 0,
-                        color: "text-amber-500",
-                        status: "aguardando_confirmacao" as const,
-                      },
-                      { label: "Entregues", value: metricsData.total_entregues, color: "text-green-500", status: "entregue" as const },
-                      { label: "Lidos", value: metricsData.total_lidos, color: "text-purple-500", status: "lido" as const },
-                      { label: "Respostas", value: metricsData.total_respostas, color: "text-orange-500", status: "respondido" as const },
-                      { label: "Blacklist", value: metricsData.total_blacklist, color: "text-yellow-500", status: "bloqueado" as const },
-                      { label: "Erros", value: metricsData.total_erros, color: "text-red-500", status: "erro" as const },
-                      {
-                        label: "Tempo Médio Resposta",
-                        value: formatResponseTime(metricsData.tempo_medio_resposta),
-                        color: "text-foreground",
-                        status: null,
-                      },
-                      {
-                        label: "Tempo efetivo de disparo",
-                        value: formatCampaignDuration(timingData?.active_seconds ?? null),
-                        color: "text-foreground",
-                        status: null,
-                      },
-                      {
-                        label: "Tempo pausado",
-                        value: formatCampaignDuration(timingData?.paused_seconds ?? null),
-                        color: "text-foreground",
-                        status: null,
-                      },
-                      {
-                        label: "Tempo corrido",
-                        value: formatCampaignDuration(timingData?.wall_clock_seconds ?? null),
-                        color: "text-foreground",
-                        status: null,
-                      },
-                    ].map(({ label, value, color, status }) => {
-                      const content = (
-                        <>
-                          <p className={`text-xl font-bold ${color}`}>{value}</p>
-                          <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
-                        </>
-                      );
-                      return status ? (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() => openQueueDetail(status, label)}
-                          className="rounded-lg border border-border bg-muted/20 p-3 text-center transition-colors hover:border-primary/50 hover:bg-muted/40 cursor-pointer"
-                        >
-                          {content}
-                        </button>
-                      ) : (
+            {(utmMetricsLoading || utmMetrics) && (
+              <div className="flex flex-col gap-2.5">
+                <p className="m-0 text-[13px] font-semibold text-foreground">Rastreamento UTM</p>
+                {utmMetricsLoading && !utmMetrics ? (
+                  <Skeleton className="h-24 w-full" />
+                ) : utmMetrics ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { label: "Cliques", value: utmMetrics.total_cliques.toLocaleString("pt-BR") },
+                        { label: "Cliques únicos", value: utmMetrics.total_cliques_unicos.toLocaleString("pt-BR") },
+                        { label: "Entraram no portal", value: utmMetrics.total_entraram_ddmpay.toLocaleString("pt-BR") },
+                        { label: "Acordos", value: utmMetrics.total_acordos.toLocaleString("pt-BR") },
+                        { label: "Pagaram", value: utmMetrics.total_pagaram.toLocaleString("pt-BR") },
+                        {
+                          label: "Valor total",
+                          value: utmMetrics.valor_total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+                        },
+                      ].map(({ label, value }) => (
                         <div
                           key={label}
-                          className="rounded-lg border border-border bg-muted/20 p-3 text-center"
+                          className="flex items-center justify-between gap-2.5 rounded-lg bg-surface-3 px-3 py-2.5 text-[12.5px]"
                         >
-                          {content}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {(() => {
-                    const campaign = campaigns.find(
-                      (item) => item.id === metricsModal.campaignId
-                    );
-                    if (!campaign || metricsData.total_contatos <= 0) return null;
-                    if (["encerrada", "erro", "bloqueada_por_risco"].includes(campaign.status)) {
-                      return null;
-                    }
-                    return (
-                      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                        <p className="text-xs font-medium text-foreground">Previsão do disparo</p>
-                        <div className="grid grid-cols-2 gap-3 text-xs">
-                          <div>
-                            <p className="text-muted-foreground">Duração estimada</p>
-                            <p className="mt-0.5 font-semibold text-foreground">
-                              {campaignForecastDurationLabel(campaign, metricsData.total_contatos)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Término previsto</p>
-                            <p className="mt-0.5 font-semibold text-foreground">
-                              {cardForecastLabel(campaign, metricsData.total_contatos)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Taxas */}
-                  {metricsData.total_enviados > 0 && (
-                    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                      <p className="text-xs font-medium text-foreground">Taxas</p>
-                      {[
-                        {
-                          label: "Taxa de Entrega",
-                          value: ((metricsData.total_entregues / metricsData.total_enviados) * 100).toFixed(1),
-                          color: "bg-green-500",
-                        },
-                        {
-                          label: "Taxa de Leitura",
-                          value: ((metricsData.total_lidos / metricsData.total_enviados) * 100).toFixed(1),
-                          color: "bg-purple-500",
-                        },
-                        {
-                          label: "Taxa de Resposta",
-                          value: ((metricsData.total_respostas / metricsData.total_enviados) * 100).toFixed(1),
-                          color: "bg-orange-500",
-                        },
-                      ].map(({ label, value, color }) => (
-                        <div key={label} className="space-y-1">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">{label}</span>
-                            <span className="font-medium">{value}%</span>
-                          </div>
-                          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className={`h-full ${color} rounded-full`}
-                              style={{ width: `${Math.min(parseFloat(value), 100)}%` }}
-                            />
-                          </div>
+                          <span className="text-foreground-2">{label}</span>
+                          <span className="font-semibold tabular-nums text-foreground">{value}</span>
                         </div>
                       ))}
                     </div>
-                  )}
+                    {utmMetrics.total_cliques > 0 && (
+                      <div className="flex flex-col gap-2.5">
+                        <p className="m-0 text-xs font-semibold text-foreground-2">Funil</p>
+                        <RateRow label="Clique → portal" part={utmMetrics.total_entraram_ddmpay} total={utmMetrics.total_cliques} />
+                        <RateRow label="Portal → acordo" part={utmMetrics.total_acordos} total={utmMetrics.total_entraram_ddmpay} />
+                        <RateRow label="Acordo → pagamento" part={utmMetrics.total_pagaram} total={utmMetrics.total_acordos} />
+                      </div>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
 
-                  {/* Seção UTM */}
-                  {(utmMetricsLoading || utmMetrics) && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-foreground border-t border-border pt-3">
-                        Rastreamento UTM
-                      </p>
-                      {utmMetricsLoading && (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Carregando métricas UTM...
-                        </div>
-                      )}
-                      {!utmMetricsLoading && utmMetrics && (
-                        <>
-                          <div className="grid grid-cols-2 gap-2">
-                            {[
-                              { label: "Cliques", value: utmMetrics.total_cliques, color: "text-blue-500" },
-                              { label: "Cliques Únicos", value: utmMetrics.total_cliques_unicos, color: "text-blue-400" },
-                              { label: "Entraram no Portal", value: utmMetrics.total_entraram_ddmpay, color: "text-purple-500" },
-                              { label: "Acordos", value: utmMetrics.total_acordos, color: "text-orange-500" },
-                              { label: "Pagaram", value: utmMetrics.total_pagaram, color: "text-green-500" },
-                              {
-                                label: "Valor Total",
-                                value: utmMetrics.valor_total > 0
-                                  ? utmMetrics.valor_total.toLocaleString("pt-BR", {
-                                      style: "currency",
-                                      currency: "BRL",
-                                    })
-                                  : "R$ 0,00",
-                                color: "text-green-600",
-                              },
-                            ].map(({ label, value, color }) => (
-                              <div
-                                key={label}
-                                className="rounded-lg border border-border bg-muted/20 p-2 text-center"
-                              >
-                                <p className={`text-lg font-bold ${color}`}>{value}</p>
-                                <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
-                              </div>
-                            ))}
-                          </div>
-
-                          {/* Funil de conversão */}
-                          {utmMetrics.total_cliques > 0 && (
-                            <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                              <p className="text-xs font-medium text-foreground">Funil</p>
-                              {[
-                                {
-                                  label: "Clique → Portal",
-                                  value: ((utmMetrics.total_entraram_ddmpay / utmMetrics.total_cliques) * 100).toFixed(1),
-                                  color: "bg-purple-500",
-                                },
-                                {
-                                  label: "Portal → Acordo",
-                                  value: utmMetrics.total_entraram_ddmpay > 0
-                                    ? ((utmMetrics.total_acordos / utmMetrics.total_entraram_ddmpay) * 100).toFixed(1)
-                                    : "0.0",
-                                  color: "bg-orange-500",
-                                },
-                                {
-                                  label: "Acordo → Pagamento",
-                                  value: utmMetrics.total_acordos > 0
-                                    ? ((utmMetrics.total_pagaram / utmMetrics.total_acordos) * 100).toFixed(1)
-                                    : "0.0",
-                                  color: "bg-green-500",
-                                },
-                              ].map(({ label, value, color }) => (
-                                <div key={label} className="space-y-1">
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-muted-foreground">{label}</span>
-                                    <span className="font-medium">{value}%</span>
-                                  </div>
-                                  <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                                    <div
-                                      className={`h-full ${color} rounded-full`}
-                                      style={{ width: `${Math.min(parseFloat(value), 100)}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Atualizado em */}
-                  {metricsData.updated_at && (
-                    <p className="text-center text-[10px] text-muted-foreground">
-                      Atualizado em{" "}
-                      {new Date(metricsData.updated_at).toLocaleString("pt-BR", {
-                        timeZone: "America/Sao_Paulo",
-                      })}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
+            {metricsData.updated_at && (
+              <p className="m-0 text-center text-[11px] text-muted-foreground">
+                Atualizado em{" "}
+                {new Date(metricsData.updated_at).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}
+              </p>
+            )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Drilldown por contato de uma métrica clicada — empilhado sobre o
-          modal de métricas (z-index maior), ver openQueueDetail. */}
-      {queueDetailModal && metricsModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div
-            ref={queueDetailA11y.ref}
-            tabIndex={-1}
-            onKeyDown={queueDetailA11y.onKeyDown}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="campaign-queue-detail-title"
-            className="bg-card border border-border w-full max-w-4xl rounded-xl shadow-2xl flex flex-col max-h-[calc(100dvh-2rem)] sm:max-h-[85vh] outline-none"
-          >
-            <header className="px-4 py-3 sm:px-6 sm:py-4 border-b border-border flex justify-between items-center gap-4">
-              <div className="min-w-0">
-                <h3 id="campaign-queue-detail-title" className="font-bold text-foreground truncate">
-                  {queueDetailModal.label} — {queueDetailTotal.toLocaleString("pt-BR")}{" "}
-                  mensagem{queueDetailTotal === 1 ? "" : "s"}
-                </h3>
-                <p className="text-xs text-muted-foreground truncate max-w-[400px]">
-                  {metricsModal.nome}
-                </p>
-              </div>
-              <Button size="icon" variant="ghost" onClick={() => setQueueDetailModal(null)} aria-label="Fechar" className="h-9 w-9 shrink-0">
-                <X className="h-5 w-5" aria-hidden="true" />
-              </Button>
-            </header>
-
-            <div className="px-4 sm:px-6 py-3 border-b border-border flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-              <div className="relative w-full sm:max-w-xs">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                <Input
-                  type="search"
-                  aria-label="Buscar por nome ou telefone"
-                  value={queueDetailSearchInput}
-                  onChange={(e) => setQueueDetailSearchInput(e.target.value)}
-                  placeholder="Buscar por nome ou telefone..."
-                  className="pl-8 h-9 text-xs"
-                />
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 text-xs h-9"
-                onClick={handleExportQueueDetailXlsx}
-                disabled={queueDetailExporting || queueDetailTotal === 0}
-              >
-                {queueDetailExporting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Download className="h-3.5 w-3.5" />
-                )}
-                Baixar XLSX
-              </Button>
-            </div>
-
-            {queueDetailModal.status === "respondido" &&
-              !queueDetailLoading &&
-              metricsData &&
-              queueDetailTotal < metricsData.total_respostas && (
-                <p className="mx-4 sm:mx-6 mt-2 rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
-                  O card conta {metricsData.total_respostas} respostas; {metricsData.total_respostas - queueDetailTotal}{" "}
-                  foram registradas antes do rastreio por envio e não aparecem nesta lista.
-                </p>
-              )}
-            <div className="flex-1 overflow-y-auto">
-              {queueDetailLoading ? (
-                <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span className="text-sm">Carregando...</span>
-                </div>
-              ) : queueDetailRows.length === 0 ? (
-                <div className="text-center py-12 text-sm text-muted-foreground">
-                  Nenhum registro encontrado.
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Contato</TableHead>
-                      <TableHead>Telefone</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Mensagem Final</TableHead>
-                      {queueDetailModal.status === "erro" && <TableHead>Tipo de Erro</TableHead>}
-                      {queueDetailModal.status === "aguardando_confirmacao" && <TableHead>Motivo</TableHead>}
-                      <TableHead>Data/Hora</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {queueDetailRows.map((row) => (
-                      <TableRow key={row.id}>
-                        <TableCell>
-                          {row.conversation_id ? (
-                            <Link
-                              href={`/inbox?c=${row.conversation_id}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-medium text-primary hover:underline"
-                              title="Abrir a conversa no inbox"
-                            >
-                              {row.contact_name || row.phone || "Abrir conversa"}
-                            </Link>
-                          ) : (
-                            row.contact_name || "-"
-                          )}
-                        </TableCell>
-                        <TableCell>{row.phone || "-"}</TableCell>
-                        <TableCell className="capitalize">{row.status}</TableCell>
-                        <TableCell className="max-w-xs truncate" title={row.mensagem_final || ""}>
-                          {(row.mensagem_final || "").slice(0, 60)}
-                          {(row.mensagem_final?.length ?? 0) > 60 ? "…" : ""}
-                        </TableCell>
-                        {queueDetailModal.status === "erro" && (
-                          <TableCell>{row.tipo_erro || "Outro"}</TableCell>
-                        )}
-                        {queueDetailModal.status === "aguardando_confirmacao" && (
-                          <TableCell className="max-w-xs text-xs text-muted-foreground">
-                            {row.erro || "Aguardando confirmação final"}
-                          </TableCell>
-                        )}
-                        <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
-                          {row.data_hora
-                            ? new Date(row.data_hora).toLocaleString("pt-BR", {
-                                timeZone: "America/Sao_Paulo",
-                              })
-                            : "-"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </div>
-
-            {queueDetailTotal > QUEUE_DETAIL_PAGE_SIZES[0] && (
-              <footer className="px-4 sm:px-6 py-3 border-t border-border flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <p className="text-xs text-muted-foreground">
-                    Página {queueDetailPage} de{" "}
-                    {Math.max(1, Math.ceil(queueDetailTotal / queueDetailPageSize))}
-                  </p>
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {/* Detalhamento por contato de uma métrica: gaveta aninhada (foco preso, Esc volta às métricas). */}
+        <DetailDrawer
+          open={!!(queueDetailModal && metricsModal)}
+          onOpenChange={(open) => !open && setQueueDetailModal(null)}
+          title={
+            queueDetailModal
+              ? `${queueDetailModal.label} — ${queueDetailTotal.toLocaleString("pt-BR")} mensage${queueDetailTotal === 1 ? "m" : "ns"}`
+              : ""
+          }
+          description={metricsModal?.nome}
+          size="xl"
+          footer={
+            queueDetailTotal > QUEUE_DETAIL_PAGE_SIZES[0] ? (
+              <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                  <span className="tabular-nums">
+                    Página {queueDetailPage} de {Math.max(1, Math.ceil(queueDetailTotal / queueDetailPageSize))}
+                  </span>
+                  <label className="flex items-center gap-1.5">
                     Itens por página
                     <select
                       value={queueDetailPageSize}
@@ -1962,7 +1721,7 @@ export default function CampanhasPage() {
                         setQueueDetailPage(1);
                       }}
                       disabled={queueDetailLoading}
-                      className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+                      className="h-8 rounded-[6px] border border-input bg-background px-2 text-xs text-foreground"
                     >
                       {QUEUE_DETAIL_PAGE_SIZES.map((size) => (
                         <option key={size} value={size}>
@@ -1975,32 +1734,143 @@ export default function CampanhasPage() {
                 <div className="flex gap-2">
                   <Button
                     variant="outline"
-                    size="sm"
-                    className="h-9 gap-1 text-xs"
                     disabled={queueDetailPage <= 1 || queueDetailLoading}
                     onClick={() => setQueueDetailPage((p) => Math.max(1, p - 1))}
                   >
-                    <ChevronLeft className="h-3.5 w-3.5" /> Anterior
+                    <ChevronLeft className="size-3.5" aria-hidden="true" /> Anterior
                   </Button>
                   <Button
                     variant="outline"
-                    size="sm"
-                    className="h-9 gap-1 text-xs"
-                    disabled={
-                      queueDetailPage >= Math.ceil(queueDetailTotal / queueDetailPageSize) ||
-                      queueDetailLoading
-                    }
+                    disabled={queueDetailPage >= Math.ceil(queueDetailTotal / queueDetailPageSize) || queueDetailLoading}
                     onClick={() => setQueueDetailPage((p) => p + 1)}
                   >
-                    Próxima <ChevronRight className="h-3.5 w-3.5" />
+                    Próxima <ChevronRight className="size-3.5" aria-hidden="true" />
                   </Button>
                 </div>
-              </footer>
+              </div>
+            ) : undefined
+          }
+        >
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative w-full sm:max-w-xs">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                <Input
+                  type="search"
+                  aria-label="Buscar por nome ou telefone"
+                  value={queueDetailSearchInput}
+                  onChange={(e) => setQueueDetailSearchInput(e.target.value)}
+                  placeholder="Buscar por nome ou telefone"
+                  className="h-8 pl-8 text-[12.5px]"
+                />
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleExportQueueDetailXlsx}
+                disabled={queueDetailExporting || queueDetailTotal === 0}
+              >
+                {queueDetailExporting ? (
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Download className="size-3.5" aria-hidden="true" />
+                )}
+                Baixar XLSX
+              </Button>
+            </div>
+
+            {queueDetailModal?.status === "respondido" &&
+              !queueDetailLoading &&
+              metricsData &&
+              queueDetailTotal < metricsData.total_respostas && (
+                <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-muted-foreground">
+                  O card conta {metricsData.total_respostas} respostas; {metricsData.total_respostas - queueDetailTotal}{" "}
+                  foram registradas antes do rastreio por envio e não aparecem nesta lista.
+                </p>
+              )}
+
+            {queueDetailLoading ? (
+              <div className="flex flex-col gap-2" aria-busy="true">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-9 w-full" />
+                ))}
+              </div>
+            ) : queueDetailRows.length === 0 ? (
+              <EmptyState title="Nenhum registro encontrado" />
+            ) : (
+              <div className="-mx-5 overflow-x-auto">
+                <DenseTable minWidth={640}>
+                  <thead>
+                    <tr>
+                      <Th>Contato</Th>
+                      <Th>Telefone</Th>
+                      <Th>Status</Th>
+                      <Th>Mensagem final</Th>
+                      {queueDetailModal?.status === "erro" && <Th>Tipo de erro</Th>}
+                      {queueDetailModal?.status === "aguardando_confirmacao" && <Th>Motivo</Th>}
+                      <Th>Data/hora</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queueDetailRows.map((row) => (
+                      <Tr key={row.id}>
+                        <Td>
+                          {row.conversation_id ? (
+                            <Link
+                              href={`/inbox?c=${row.conversation_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-semibold text-primary-text hover:underline"
+                              title="Abrir a conversa no inbox"
+                            >
+                              {row.contact_name || row.phone || "Abrir conversa"}
+                            </Link>
+                          ) : (
+                            <span className="font-semibold text-foreground">{row.contact_name || "—"}</span>
+                          )}
+                        </Td>
+                        <Td className="whitespace-nowrap tabular-nums">{row.phone || "—"}</Td>
+                        <Td className="capitalize">{row.status}</Td>
+                        <Td className="max-w-xs truncate" title={row.mensagem_final || ""}>
+                          {(row.mensagem_final || "").slice(0, 60)}
+                          {(row.mensagem_final?.length ?? 0) > 60 ? "…" : ""}
+                        </Td>
+                        {queueDetailModal?.status === "erro" && <Td>{row.tipo_erro || "Outro"}</Td>}
+                        {queueDetailModal?.status === "aguardando_confirmacao" && (
+                          <Td className="max-w-xs text-xs text-muted-foreground">
+                            {row.erro || "Aguardando confirmação final"}
+                          </Td>
+                        )}
+                        <Td className="whitespace-nowrap text-xs text-muted-foreground">
+                          {row.data_hora
+                            ? new Date(row.data_hora).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })
+                            : "—"}
+                        </Td>
+                      </Tr>
+                    ))}
+                  </tbody>
+                </DenseTable>
+              </div>
             )}
           </div>
-        </div>
-      )}
+        </DetailDrawer>
+      </DetailDrawer>
+    </PageBody>
+  );
+}
+
+/** Linha de taxa (rótulo · barra · %), protegida contra divisão por zero. */
+function RateRow({ label, part, total }: { label: string; part: number; total: number }) {
+  const pct = total > 0 ? (part / total) * 100 : 0;
+  return (
+    <div className="grid grid-cols-[130px_minmax(0,1fr)_56px] items-center gap-2.5 text-[12.5px]">
+      <span className="text-foreground-2">{label}</span>
+      <span className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+        <span
+          className="block h-full origin-left animate-ddm-bar rounded-full bg-primary"
+          style={{ width: `${Math.min(100, pct)}%` }}
+        />
+      </span>
+      <span className="text-right font-semibold tabular-nums text-foreground">{pct.toFixed(1).replace(".", ",")}%</span>
     </div>
   );
-
 }
