@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { registerAuditActor } from "@/lib/audit/context";
@@ -15,7 +16,7 @@ import { runImportCron } from "@/lib/disparador/import-jobs";
 
 export const maxDuration = 120;
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   await registerAuditActor({ actorType: "system", source: "cron_disparador_imports" });
   if (!process.env.CRON_SECRET) return NextResponse.json({ error: "cron not configured" }, { status: 503 });
   if (!matchesOperationalSecret(process.env.CRON_SECRET, request.headers.get("x-cron-secret"))) {
@@ -29,4 +30,9 @@ export async function POST(request: Request) {
     console.error("[ImportCron] Falha operacional:", error);
     return NextResponse.json({ error: "Import processing unavailable" }, { status: 503 });
   }
+}
+
+// Batimento do cron (D-12, migration 334): registra quando rodou e como terminou; não altera a resposta.
+export async function POST(request: Request) {
+  return trackCron("disparador_imports", () => handlePost(request))
 }

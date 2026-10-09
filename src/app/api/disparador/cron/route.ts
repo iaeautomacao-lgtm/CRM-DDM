@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat";
 import { after, NextResponse } from "next/server";
 import { registerAuditActor } from '@/lib/audit/context'
 import { randomUUID } from 'node:crypto';
@@ -832,7 +833,7 @@ async function runTick(request: Request, chain: ChainContext) {
 // Tick encadeado (tick-chain.ts): ao terminar um tick que PROCESSOU trabalho (lock já liberado no finally de runTick), dispara o
 // próximo hop via after() — sem esperar. O hop encadeado (header x-cron-hop) responde 202 na hora e roda o tick em after(), então
 // nenhuma requisição fica presa ao proxy; o cron externo (hop 0) continua síncrono e é o ressuscitador da cadeia.
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const chainConfig = resolveTickChainConfig();
   const ctx = readChainContext(request.headers);
   const secret = process.env.CRON_SECRET ?? "";
@@ -863,4 +864,9 @@ export async function POST(request: Request) {
   if (!chainConfig.enabled) return response;
   const status = await response.clone().json().then((body) => String(body?.status ?? ""), () => "");
   return chainAfter(response, status);
+}
+
+// Batimento do cron (D-12, migration 334): registra quando rodou e como terminou; não altera a resposta.
+export async function POST(request: Request) {
+  return trackCron("disparador_tick", () => handlePost(request))
 }

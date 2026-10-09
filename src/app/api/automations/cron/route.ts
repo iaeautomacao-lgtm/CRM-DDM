@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat"
 import { NextResponse } from 'next/server'
 import { registerAuditActor } from '@/lib/audit/context'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
@@ -75,7 +76,7 @@ async function handler(request: Request) {
 // Execução só via POST (crontab do cPanel). GET virou apenas diagnóstico
 // para os pingers/health checks existentes: confere o segredo e se a
 // tabela responde, sem executar automações pendentes.
-export const POST = handler
+export const POST = (request: Request) => trackCron("automations", () => handler(request))
 export async function GET(request: Request) {
   const expected = process.env.AUTOMATION_CRON_SECRET;
   if (!expected)

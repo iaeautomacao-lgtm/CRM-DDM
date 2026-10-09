@@ -340,7 +340,7 @@
       "kind": "registry"
     },
     {
-      "version": "333_dispatch_131026_pending_counts",
+      "version": "334_cron_heartbeat",
       "kind": "registry"
     }
   ]

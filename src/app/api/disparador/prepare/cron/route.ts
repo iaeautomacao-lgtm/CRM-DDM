@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { registerAuditActor } from "@/lib/audit/context";
@@ -39,7 +40,7 @@ function authorize(request: Request): NextResponse | null {
   return null;
 }
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   await registerAuditActor({ actorType: "system", source: "cron_disparador_prepare" });
   const rejection = authorize(request);
   if (rejection) return rejection;
@@ -99,4 +100,9 @@ export async function POST(request: Request) {
       }
     }
   }
+}
+
+// Batimento do cron (D-12, migration 334): registra quando rodou e como terminou; não altera a resposta.
+export async function POST(request: Request) {
+  return trackCron("disparador_prepare", () => handlePost(request))
 }
