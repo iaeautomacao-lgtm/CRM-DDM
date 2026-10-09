@@ -29,6 +29,7 @@ export function DeletableEdge({
   style,
   markerEnd,
   label,
+  selected,
 }: EdgeProps) {
   const { deleteElements } = useReactFlow();
   const [edgePath, labelX, labelY] = getBezierPath({
@@ -65,9 +66,9 @@ export function DeletableEdge({
             }}
             title="Excluir conexão"
             aria-label="Excluir conexão"
-            className="border-border bg-card text-muted-foreground flex h-4 w-4 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors hover:border-danger hover:text-danger"
+            className={`border-border bg-card text-muted-foreground flex size-6 shrink-0 items-center justify-center rounded-full border shadow-sm transition-[opacity,color,border-color] hover:border-danger hover:text-danger hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring ${selected ? 'opacity-100' : 'opacity-40'}`}
           >
-            <Trash2 className="h-2.5 w-2.5" />
+            <Trash2 className="size-3" aria-hidden="true" />
           </button>
         </div>
       </EdgeLabelRenderer>

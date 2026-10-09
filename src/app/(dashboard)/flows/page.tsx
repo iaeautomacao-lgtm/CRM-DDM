@@ -115,6 +115,7 @@ export default function FlowsPage() {
   const [loadError, setLoadError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<FlowRow | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,6 +215,8 @@ export default function FlowsPage() {
   }
 
   async function handleExport(flow: FlowRow) {
+    if (busyId) return;
+    setBusyId(flow.id);
     try {
       const res = await apiFetch(`/api/flows/${flow.id}/export`);
       if (!res.ok) throw new Error(`Falha ao exportar: ${res.status}`);
@@ -232,11 +235,15 @@ export default function FlowsPage() {
     } catch (err) {
       console.error(err);
       toast.error("Não foi possível exportar o fluxo.");
+    } finally {
+      setBusyId(null);
     }
   }
 
   // Duplicar = exportar + importar como cópia (rascunho, sem canal ligado).
   async function handleDuplicate(flow: FlowRow) {
+    if (busyId) return;
+    setBusyId(flow.id);
     try {
       const exp = await apiFetch(`/api/flows/${flow.id}/export`);
       if (!exp.ok) throw new Error(`Falha ao ler o fluxo: ${exp.status}`);
@@ -261,6 +268,8 @@ export default function FlowsPage() {
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Não foi possível duplicar o fluxo.");
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -354,6 +363,7 @@ export default function FlowsPage() {
         />
       )}
 
+      {!loadError && (
       <PageToolbar
         actions={
           <>
@@ -399,10 +409,12 @@ export default function FlowsPage() {
           ]}
         />
       </PageToolbar>
+      )}
 
       {loading ? (
         <TableCard label="Fluxos">
           <div className="flex flex-col" aria-busy="true">
+            <span role="status" className="sr-only">Carregando fluxos…</span>
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="flex items-center gap-3 border-b border-border px-[18px] py-3.5" aria-hidden="true">
                 <Skeleton className="size-[30px] rounded-full" />
@@ -445,7 +457,7 @@ export default function FlowsPage() {
               </thead>
               <tbody className="ddm-stagger">
                 {visibleFlows.map((flow) => (
-                  <Tr key={flow.id} onClick={() => setDetailId(flow.id)} className="cursor-pointer">
+                  <Tr key={flow.id} onClick={() => setDetailId(flow.id)} aria-label={`Abrir detalhes de ${flow.name}`} className="cursor-pointer">
                     <Td className="max-w-[360px]">
                       <span className="flex min-w-0 items-center gap-2.5">
                         <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary-text" aria-hidden="true">
@@ -535,13 +547,13 @@ export default function FlowsPage() {
             </dl>
             <div className="flex flex-wrap gap-2 border-t border-border pt-4">
               {canCreate && (
-                <Button variant="outline" size="sm" onClick={() => void handleDuplicate(detailFlow)}>
-                  <Copy className="size-3.5" />
+                <Button variant="outline" size="sm" disabled={busyId === detailFlow.id} onClick={() => void handleDuplicate(detailFlow)}>
+                  {busyId === detailFlow.id ? <Loader2 className="size-3.5 animate-spin" /> : <Copy className="size-3.5" />}
                   Duplicar
                 </Button>
               )}
-              <Button variant="outline" size="sm" onClick={() => void handleExport(detailFlow)}>
-                <Download className="size-3.5" />
+              <Button variant="outline" size="sm" disabled={busyId === detailFlow.id} onClick={() => void handleExport(detailFlow)}>
+                {busyId === detailFlow.id ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />}
                 Exportar JSON
               </Button>
             </div>
@@ -619,16 +631,20 @@ export default function FlowsPage() {
           )}
 
           <div className="space-y-2 border-t border-border pt-4">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            <label htmlFor="flow-new-name" className="block text-xs uppercase tracking-wide text-muted-foreground">
               Ou comece do zero
-            </p>
+            </label>
             <Input
+              id="flow-new-name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="ex.: Menu de boas-vindas"
               className="bg-muted"
               onKeyDown={(e) => {
-                if (e.key === "Enter") handleCreate();
+                if (e.key === "Enter") {
+                  if (creating) return;
+                  void handleCreate();
+                }
               }}
             />
           </div>

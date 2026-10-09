@@ -248,6 +248,12 @@ function FlowNodeCard({ data, selected }: NodeProps) {
               ? `${errorCount} erro(s) neste nó — clique para corrigir`
               : `${warningCount} aviso(s) neste nó`
           }
+          role="img"
+          aria-label={
+            errorCount > 0
+              ? `${errorCount} ${errorCount === 1 ? 'erro' : 'erros'} neste nó`
+              : `${warningCount} ${warningCount === 1 ? 'aviso' : 'avisos'} neste nó`
+          }
         >
           {errorCount > 0 ? errorCount : '!'}
         </span>
@@ -685,7 +691,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
 
   return (
     <>
-      <div className="h-full w-full overflow-hidden">
+      <div className="h-full w-full overflow-hidden" aria-label="Diagrama do fluxo">
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
@@ -765,6 +771,9 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
                 Disparo
               </Button>
               <CanvasNodeSearch nodes={builderNodes} onFound={requestFlash} />
+              <p className="text-muted-foreground max-w-xs text-[11px] leading-snug">
+                Sem arrastar: use a visão Lista ou o campo &quot;Próximo nó&quot; no formulário do nó para ligar etapas.
+              </p>
             </Panel>
           )}
         </ReactFlow>

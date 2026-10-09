@@ -130,14 +130,14 @@ export function EditorHeader({ view, sim, validation }: EditorHeaderProps) {
           placeholder="Nome do fluxo"
           spellCheck={false}
           aria-label="Nome do fluxo"
-          className="-ml-1 h-6 rounded border border-transparent bg-transparent px-1 text-sm font-semibold text-foreground outline-none transition-colors hover:border-border focus:border-primary"
+          className="-ml-1 h-6 rounded border border-transparent bg-transparent px-1 text-sm font-semibold text-foreground outline-none transition-colors hover:border-border focus:border-primary focus-visible:ring-2 focus-visible:ring-ring/50"
         />
         <input
           value={state.description}
           onChange={(e) => setState((s) => ({ ...s, description: e.target.value }))}
           placeholder="Adicione uma descrição curta (interna — o cliente não vê isso)"
           aria-label="Descrição do fluxo"
-          className="-ml-1 h-5 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-border focus:border-primary focus:text-foreground"
+          className="-ml-1 h-5 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-border focus:border-primary focus:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
         />
       </div>
 
@@ -146,7 +146,7 @@ export function EditorHeader({ view, sim, validation }: EditorHeaderProps) {
           disabled={activating}
           aria-label={`Status: ${st.label}. Alterar status`}
           className={cn(
-            "inline-flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full pl-2.5 pr-1.5 text-xs font-semibold transition-opacity disabled:opacity-60",
+            "inline-flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full pl-2.5 pr-1.5 text-xs font-semibold transition-opacity focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60",
             st.chip,
           )}
         >
