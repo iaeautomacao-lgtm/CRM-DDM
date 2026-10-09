@@ -536,7 +536,7 @@ export default function DisparadorDesempenhoPage() {
             </CardHeader>
             <CardContent className="pt-2">
               {throughputSeries.length === 0 ? (
-                <div className="flex h-64 items-center justify-center text-xs text-muted-foreground rounded-lg bg-surface-3">
+                <div className="flex h-64 items-center justify-center text-xs text-foreground-2 rounded-lg bg-surface-3">
                   Sem dados de envio no intervalo selecionado.
                 </div>
               ) : (

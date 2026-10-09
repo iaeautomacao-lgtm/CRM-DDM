@@ -314,7 +314,7 @@ export default function CampanhaContatosPage({
                 setCodigoFilter(null);
                 setPage(0);
               }}
-              className="flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+              className="flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-surface-hover hover:text-foreground"
               aria-label="Limpar filtro de código"
             >
               <X className="size-3" aria-hidden="true" />

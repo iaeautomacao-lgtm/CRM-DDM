@@ -58,7 +58,7 @@ export function Th({ className, align = 'left', ...props }: ComponentProps<'th'>
     <th
       scope="col"
       className={cn(
-        'whitespace-nowrap border-y border-border bg-surface-3 px-[18px] py-2.5 text-xs font-semibold text-muted-foreground',
+        'whitespace-nowrap border-y border-border bg-surface-3 px-[18px] py-2.5 text-xs font-semibold text-foreground-2',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left',
         className,
       )}

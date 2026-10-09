@@ -26,7 +26,7 @@ export function InfoHint({
       <PopoverTrigger
         aria-label={label}
         className={cn(
-          'relative z-[1] inline-flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring',
+          'relative z-[1] inline-flex size-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring',
           className,
         )}
       >
