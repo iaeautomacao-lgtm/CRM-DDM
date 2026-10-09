@@ -19,7 +19,7 @@ import { formatTranscript, transcribeInboundAudio, type TranscriptionResult } fr
 import { callPermissionReplyText, parseCallPermissionReply, recordCallPermissionReply, type CallContext } from '@/lib/whatsapp/calls'
 import { safeDbError } from '@/lib/privacy/mask'
 import { flowResponseVars, parseNfmReply, type ParsedFlowResponse } from '@/lib/whatsapp/flow-response'
-import { deliverFlowResponseToActiveRun } from '@/lib/flows/flow-response-vars'
+import { deliverFlowResponse } from '@/lib/flows/flow-response-vars'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -471,10 +471,11 @@ export async function processMessage(
   // próximo nó já enxergá-las. Só dados: nenhuma efetivação de acordo é chamada aqui (decisão do dono, 09/10). O texto legível segue
   // para o fluxo como um texto comum (kind 'text').
   if (flowResponse) {
-    const delivered = await deliverFlowResponseToActiveRun(supabaseAdmin(), {
+    const delivered = await deliverFlowResponse(supabaseAdmin(), {
       accountId,
       contactId: contactRecord.id,
       vars: flowResponseVars(flowResponse),
+      flowToken: flowResponse.data?.flow_token,
     })
     void writeLog({
       account_id: accountId,
@@ -484,7 +485,7 @@ export async function processMessage(
       message: flowResponse.issue
         ? `Resposta de WhatsApp Flow recebida com problema (${flowResponse.issue}); o texto foi gravado sem o JSON`
         : 'Resposta de WhatsApp Flow recebida',
-      payload: { message_id: message.id, flow_name: flowResponse.flowName, issue: flowResponse.issue, delivered_to_flow: delivered },
+      payload: { message_id: message.id, flow_name: flowResponse.flowName, issue: flowResponse.issue, delivered_to_flow: delivered !== null, delivered_to: delivered },
     })
   }
 
