@@ -20,6 +20,7 @@ import { randomUUID } from "crypto";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
 import { rollbackApiCampaign } from "@/lib/disparador/api-v1-cleanup";
 import { insertInBlocks } from "@/lib/disparador/queue-insert";
+import { flowPublishProblems } from "@/lib/disparador/flow-button";
 import { countBodyVariables, templateComponentProblem, TEMPLATE_VALIDATION_COLUMNS, type LocalTemplateRow } from "@/lib/disparador/template-validation";
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import {
@@ -511,6 +512,9 @@ export async function POST(request: Request) {
       // ou copiar código fariam a Meta recusar todos os envios (132000/132012).
       const problem = templateComponentProblem(tpl as unknown as LocalTemplateRow);
       if (problem) throw badRequest(problem);
+      // FLOW-03 (PRD 21.3): botão FLOW exige Flow PUBLISHED na Meta (sem confirmar, a campanha não é aceita)
+      const flowProblems = await flowPublishProblems(db, ctx.accountId, [channelId!], [tpl as unknown as LocalTemplateRow]);
+      if (flowProblems.length > 0) throw badRequest(flowProblems[0]);
       metaBodyVariables = countBodyVariables((tpl as { body_text?: string | null }).body_text);
       templateLanguage = body.template_language ?? tpl.language ?? "pt_BR";
     }

@@ -26,9 +26,9 @@ export function EditorNotices() {
       {conflict && (
         <div
           role="alert"
-          className="flex flex-wrap items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-sm text-foreground"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-danger/30 bg-danger-soft px-4 py-2.5 text-sm text-foreground"
         >
-          <AlertTriangle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
+          <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden />
           <p className="min-w-0 flex-1">
             Este fluxo foi alterado em outra aba ou por outra pessoa, e o
             salvamento automático foi pausado. Suas alterações ficam
@@ -45,9 +45,9 @@ export function EditorNotices() {
       {draftOffer && (
         <div
           role="status"
-          className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-sm text-foreground"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft px-4 py-2.5 text-sm text-foreground"
         >
-          <History className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+          <History className="h-4 w-4 shrink-0 text-warning" aria-hidden />
           <p className="min-w-0 flex-1">
             Há alterações não salvas deste fluxo neste navegador (de{" "}
             {format(new Date(draftOffer.savedAt), "dd/MM/yyyy 'às' HH:mm")}).

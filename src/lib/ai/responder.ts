@@ -1788,6 +1788,7 @@ async function handleAiAutoResponseAttempt(
     media_url: voiceMediaUrl || null,
     status: "sent",
     sender_type: "bot",
+    origin: "ai",
     created_at: messageDate,
   });
   const newMsgErr = persisted.error;

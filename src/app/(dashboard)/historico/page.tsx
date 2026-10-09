@@ -8,12 +8,15 @@
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { History, Search } from "lucide-react";
+import { Download, History, Search } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
+import { HistoryExportDialog } from "@/components/historico/export-dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -27,6 +30,8 @@ import { ContactTimeline } from "@/components/contact-timeline/ContactTimeline";
 import { formatDuration, type HistoryPeriod } from "@/lib/historico/format";
 import { loadClosedConversations, type ClosedConversation } from "@/lib/historico/queries";
 import type { AccountMember, Team } from "@/types";
+
+const ALL_TABS = "__all__";
 
 const PERIOD_OPTIONS = [
   { value: "hoje", label: "Hoje" },
@@ -63,6 +68,12 @@ export default function HistoricoPage() {
 
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+
+  // Filtro por tabulação (tags de desfecho da conta) e exportação (só exports.manage; o servidor revalida).
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
+  const [tabulacao, setTabulacao] = useState<string>(ALL_TABS);
+  const [exportOpen, setExportOpen] = useState(false);
+  const canExport = usePermissions().can("exports.manage");
 
   // Busca com atraso de 300 ms, como era a busca de contato.
   useEffect(() => {
@@ -101,6 +112,24 @@ export default function HistoricoPage() {
     };
   }, [accountId]);
 
+  useEffect(() => {
+    if (!accountId) return;
+    let cancelled = false;
+    createClient()
+      .from("tags")
+      .select("id, name")
+      .eq("kind", "outcome")
+      .order("name")
+      .then(({ data, error: err }) => {
+        if (cancelled) return;
+        if (err) console.error("[historico] failed to load tags:", err);
+        else setTags((data ?? []) as { id: string; name: string }[]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId]);
+
   const reqRef = useRef(0);
   const fetchPage = useCallback(
     async (nextPage: number, append: boolean) => {
@@ -115,6 +144,7 @@ export default function HistoricoPage() {
           period,
           search,
           page: nextPage,
+          tabulacao: tabulacao === ALL_TABS ? null : tabulacao,
         });
         if (req !== reqRef.current) return;
         setRows((prev) => (append ? [...prev, ...res.rows] : res.rows));
@@ -131,7 +161,7 @@ export default function HistoricoPage() {
         }
       }
     },
-    [accountId, period, search],
+    [accountId, period, search, tabulacao],
   );
 
   useEffect(() => {
@@ -156,7 +186,16 @@ export default function HistoricoPage() {
         <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">Conversas encerradas.</p>
       </div>
 
-      <PageToolbar>
+      <PageToolbar
+        actions={
+          canExport ? (
+            <Button variant="outline" onClick={() => setExportOpen(true)}>
+              <Download className="size-3.5" />
+              Exportar
+            </Button>
+          ) : undefined
+        }
+      >
         <label className="relative flex max-w-[360px] flex-1 basis-60 items-center">
           <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden />
           <Input
@@ -175,6 +214,21 @@ export default function HistoricoPage() {
           onChange={setPeriod}
           size="lg"
         />
+        <Select value={tabulacao} onValueChange={(v) => v && setTabulacao(v)}>
+          <SelectTrigger aria-label="Filtrar por tabulação" className="h-[34px] w-full sm:w-56">
+            <SelectValue>
+              {(v: string) => (v === ALL_TABS ? "Todas as tabulações" : tags.find((t) => t.id === v)?.name ?? "Tabulação")}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL_TABS}>Todas as tabulações</SelectItem>
+            {tags.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </PageToolbar>
 
       {error && !loading ? (
@@ -260,6 +314,15 @@ export default function HistoricoPage() {
             {loadingMore ? "Carregando…" : "Carregar mais"}
           </Button>
         </div>
+      )}
+
+      {canExport && (
+        <HistoryExportDialog
+          open={exportOpen}
+          onOpenChange={setExportOpen}
+          tags={tags}
+          defaultTabulacaoId={tabulacao === ALL_TABS ? null : tabulacao}
+        />
       )}
 
       <DetailDrawer

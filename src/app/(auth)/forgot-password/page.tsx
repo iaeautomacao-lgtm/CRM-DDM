@@ -1,21 +1,19 @@
 "use client";
 
+// Recuperar senha — visual do Acesso redesenhado (AuthShell). Mesma lógica: resetPasswordForEmail com o
+// retorno por /auth/callback?next=/reset-password.
+
 import { useState } from "react";
 import Link from "next/link";
+import { Loader2, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { translateAuthError } from "@/lib/auth/auth-errors";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { MessageSquare, CheckCircle, ArrowLeft } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { AUTH_INPUT_CLASS, AUTH_SUBMIT_CLASS, AuthNotice, AuthShell, BackToLogin } from "@/components/auth/auth-shell";
+
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -45,97 +43,63 @@ export default function ForgotPasswordPage() {
 
   if (success) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <Card className="w-full max-w-md border-border bg-card">
-          <CardHeader className="items-center text-center" role="status">
-            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-              <CheckCircle className="h-6 w-6 text-primary" aria-hidden="true" />
-            </div>
-            <CardTitle className="text-xl text-foreground">
-              Verifique seu e-mail
-            </CardTitle>
-            <CardDescription className="text-muted-foreground">
-              Enviamos um link de redefinição de senha para{" "}
-              <span className="text-foreground">{email}</span>. Por favor, verifique sua
-              caixa de entrada.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link
-              href="/login"
-              className={cn(
-                buttonVariants({ variant: "outline" }),
-                "w-full border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-              )}
-            >
-              Voltar para o login
-            </Link>
-          </CardContent>
-        </Card>
-      </div>
+      <AuthShell
+        icon={
+          <span className="flex size-10 items-center justify-center rounded-full bg-success-soft text-success">
+            <MailCheck className="size-5" aria-hidden="true" />
+          </span>
+        }
+        title="Verifique seu e-mail"
+        description={
+          <span role="status">
+            Enviamos um link de redefinição de senha para <span className="font-semibold text-foreground">{email}</span>. Por
+            favor, verifique sua caixa de entrada.
+          </span>
+        }
+      >
+        <Link href="/login" className={cn(buttonVariants({ variant: "outline" }), AUTH_SUBMIT_CLASS)}>
+          Voltar para o login
+        </Link>
+      </AuthShell>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
-      <Card className="w-full max-w-md border-border bg-card">
-        <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-            <MessageSquare className="h-6 w-6 text-primary" aria-hidden="true" />
-          </div>
-          <CardTitle className="text-xl text-foreground">Redefinir senha</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Digite seu e-mail e enviaremos um link de redefinição de senha
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleReset} className="flex flex-col gap-4">
-            {error && (
-              <div
-                id="forgot-error"
-                role="alert"
-                className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive"
-              >
-                {error}
-              </div>
-            )}
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="email" className="font-medium text-foreground">
-                E-mail
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                placeholder="seu@exemplo.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? "forgot-error" : undefined}
-                className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
-              />
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="mt-2 h-10 w-full bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {loading ? "Enviando..." : "Enviar link de redefinição"}
-            </Button>
-          </form>
-
-          <Link
-            href="/login"
-            className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground hover:text-foreground rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            Voltar para o login
-          </Link>
-        </CardContent>
-      </Card>
-    </div>
+    <AuthShell
+      title="Redefinir senha"
+      description="Digite seu e-mail e enviaremos um link de redefinição de senha"
+      notice={
+        error ? (
+          <AuthNotice tone="bad" id="forgot-error">
+            {error}
+          </AuthNotice>
+        ) : undefined
+      }
+      footer={<BackToLogin />}
+    >
+      <form onSubmit={handleReset} className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="email" className="text-[13px] font-semibold text-foreground-2">
+            E-mail
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            placeholder="seu@exemplo.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "forgot-error" : undefined}
+            className={AUTH_INPUT_CLASS}
+          />
+        </div>
+        <Button type="submit" disabled={loading} className={cn(AUTH_SUBMIT_CLASS, "mt-1")}>
+          {loading && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+          {loading ? "Enviando…" : "Enviar link de redefinição"}
+        </Button>
+      </form>
+    </AuthShell>
   );
 }

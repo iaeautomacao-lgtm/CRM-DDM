@@ -179,3 +179,21 @@ describe("papéis de sistema: conjuntos finais", () => {
     expect(can({ role: "agent" }, "conversations.scope_all")).toBe(false);
   });
 });
+
+describe("execuções de fluxo: ver é leitura, apagar é escrita", () => {
+  const src = read("flows/[id]/runs");
+  const deleteBody = src.slice(src.indexOf("export async function DELETE"));
+  const getBody = src.slice(src.indexOf("export async function GET"), src.indexOf("export async function DELETE"));
+
+  it("a matriz pede flows.view_runs no GET e flows.edit no DELETE", () => {
+    const entries = ROUTE_MATRIX.filter((e) => e.route === "flows/[id]/runs");
+    expect(entries.find((e) => e.method === "GET")?.permission).toBe("flows.view_runs");
+    expect(entries.find((e) => e.method === "DELETE")?.permission).toBe("flows.edit");
+  });
+
+  it("o código da rota pede a mesma chave em cada método", () => {
+    expect(getBody).toMatch(/guardFlow\([^)]*['"]flows\.view_runs['"]/);
+    expect(deleteBody).toMatch(/guardFlow\([^)]*['"]flows\.edit['"]/);
+    expect(deleteBody).not.toMatch(/flows\.view_runs/);
+  });
+});

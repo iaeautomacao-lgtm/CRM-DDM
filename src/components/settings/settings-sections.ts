@@ -1,4 +1,5 @@
 import {
+  Building2,
   KeyRound,
   LayoutGrid,
   Palette,
@@ -37,6 +38,7 @@ export const SETTINGS_SECTIONS = [
   'profile',
   'security',
   'appearance',
+  'organization',
   'api',
   'secrets',
   'tools',
@@ -71,6 +73,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   profile: { id: 'profile', label: 'Seu perfil', icon: User, group: 'account' },
   security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
+  organization: { id: 'organization', label: 'OrganizaÃ§Ã£o', icon: Building2, group: 'workspace', minRole: 'admin' },
   api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', integrationTab: true },
   secrets: {
     id: 'secrets',

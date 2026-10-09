@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import { CornerUpLeft, Copy, SmilePlus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { usePermission } from "@/hooks/use-permission";
 import {
   Popover,
   PopoverContent,
@@ -36,6 +37,8 @@ export function MessageActions({
   // Touch devices have no hover. Long-press fires `contextmenu`; we capture
   // it, suppress the native menu, and pin the toolbar open until the user
   // interacts elsewhere.
+  // Reagir e responder exigem inbox.reply (o servidor bloqueia em /api/whatsapp/react e no envio); sem ela só resta Copiar.
+  const canReply = usePermission("inbox.reply");
   const [touchOpen, setTouchOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -108,6 +111,7 @@ export function MessageActions({
           isAgent ? "right-3" : "left-3",
         )}
       >
+        {canReply && (
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger
             className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-5 lg:w-5"
@@ -132,6 +136,8 @@ export function MessageActions({
             ))}
           </PopoverContent>
         </Popover>
+        )}
+        {canReply && (
         <button
           type="button"
           onClick={handleReply}
@@ -140,6 +146,7 @@ export function MessageActions({
         >
           <CornerUpLeft className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
+        )}
         <button
           type="button"
           onClick={handleCopy}
