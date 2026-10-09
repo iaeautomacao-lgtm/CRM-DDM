@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { registerAuditActor } from "@/lib/audit/context";
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
+import { createDisparadorEnqueuer } from "@/lib/billing/enqueuer";
 import { runBillingTick } from "@/lib/billing/engine";
 import { createDdmDebtSource, ddmAllowance, resolveDdmToken } from "@/lib/billing/ddm-source";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -11,7 +12,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 //   curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://<host>/api/billing/cron
 //
 // Stateless; um tick por vez no cluster (try_acquire_cron_lock). Sem a migration 270–278 devolve 503. Régua DESLIGADA/em dry-run por
-// padrão: enquanto o enqueuer do disparador não existir (PR 17.4) o motor só inscreve, confere e CONTA — nada é reservado nem enviado.
+// padrão (e só ao ligar a régua, fora do dry-run, ela reserva e entrega ao disparador — PR 17.4).
 
 export const maxDuration = 120;
 const LOCK_TTL_SECONDS = 120;
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
       {
         db,
         sourceFor: (accountId) => (token ? createDdmDebtSource({ token, allow: ddmAllowance(accountId) }) : null),
-        enqueuer: null, // PR 17.4 liga a entrega ao disparador
+        enqueuer: createDisparadorEnqueuer(db),
       },
       { budgetMs: 80_000 },
     );
