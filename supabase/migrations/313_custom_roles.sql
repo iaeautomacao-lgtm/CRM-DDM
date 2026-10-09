@@ -45,7 +45,53 @@
 --     wacrm.assign_member_role(uuid, uuid, uuid, uuid), wacrm.custom_role_assert_owner(uuid, uuid),
 --     wacrm.custom_role_check_name(uuid, uuid, text);
 --   DROP INDEX IF EXISTS wacrm.uq_account_roles_custom_name;
---   -- e reaplique a função wacrm.profiles_sync_role() da 240
+--   -- profiles_sync_role() de volta ao corpo da 240 (literal; copie sem o prefixo "--   "):
+--   CREATE OR REPLACE FUNCTION wacrm.profiles_sync_role()
+--   RETURNS trigger
+--   LANGUAGE plpgsql
+--   SECURITY DEFINER
+--   SET search_path = wacrm, pg_catalog
+--   AS $$
+--   DECLARE
+--     v_role_changed boolean;
+--     v_legacy_changed boolean;
+--     v_compat text;
+--     v_role_account uuid;
+--   BEGIN
+--     IF TG_OP = 'INSERT' THEN
+--       v_role_changed := NEW.role_id IS NOT NULL;
+--       v_legacy_changed := NEW.account_role IS NOT NULL;
+--     ELSE
+--       v_role_changed := NEW.role_id IS DISTINCT FROM OLD.role_id;
+--       v_legacy_changed := NEW.account_role IS DISTINCT FROM OLD.account_role;
+--     END IF;
+--
+--     IF NOT v_role_changed AND NOT v_legacy_changed THEN
+--       RETURN NEW;
+--     END IF;
+--
+--     IF NEW.role_id IS NOT NULL AND v_role_changed THEN
+--       SELECT r.compat_role, r.account_id INTO v_compat, v_role_account
+--         FROM wacrm.account_roles r WHERE r.id = NEW.role_id;
+--       IF v_compat IS NULL THEN
+--         RAISE EXCEPTION 'role_id % não existe em account_roles', NEW.role_id USING ERRCODE = '23503';
+--       END IF;
+--       IF v_role_account IS NOT NULL AND v_role_account IS DISTINCT FROM NEW.account_id THEN
+--         RAISE EXCEPTION 'O papel % pertence a outra organização', NEW.role_id USING ERRCODE = '42501';
+--       END IF;
+--       IF NEW.account_role IS NULL OR NEW.account_role::text <> v_compat THEN
+--         NEW.account_role := v_compat;   -- text → enum (conversão de E/S na atribuição do plpgsql)
+--       END IF;
+--     ELSIF NEW.account_role IS NOT NULL THEN
+--       SELECT r.id INTO NEW.role_id
+--         FROM wacrm.account_roles r
+--        WHERE r.account_id IS NULL AND r.key = NEW.account_role::text;
+--     END IF;
+--
+--     RETURN NEW;
+--   END;
+--   $$;
+--   REVOKE ALL ON FUNCTION wacrm.profiles_sync_role() FROM PUBLIC, anon, authenticated;
 --   DELETE FROM wacrm.schema_migrations WHERE version = '313_custom_roles';
 --   COMMIT;
 -- ============================================================

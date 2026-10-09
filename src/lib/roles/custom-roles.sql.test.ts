@@ -301,3 +301,42 @@ describe('migrations 312/313 — papel personalizado', { timeout: 120_000 }, () 
     expect(v.map((x) => x.version)).toEqual(['312_custom_role_validation', '313_custom_roles'])
   })
 })
+
+describe('313 — ROLLBACK do cabeçalho', { timeout: 120_000 }, () => {
+  it('executado literalmente, devolve profiles_sync_role à versão da 240 e remove as RPCs e o índice', async () => {
+    const pg = new PGlite()
+    try {
+      await pg.exec(BOOTSTRAP)
+      await pg.exec(migration('169_profiles_lock_privileged_columns.sql'))
+      for (const f of ['240_roles_foundation.sql', '241_roles_functions.sql', '241b_profiles_role_id_idx.sql', '276_billing_permissions.sql']) {
+        await pg.exec(migration(f))
+      }
+      const def = async () =>
+        (await pg.query<{ d: string }>(`SELECT pg_get_functiondef('wacrm.profiles_sync_role()'::regprocedure) AS d`)).rows[0].d
+      const from240 = await def()
+      await pg.exec(migration('312_custom_role_validation.sql'))
+      await pg.exec(migration('313_custom_roles.sql'))
+      expect(await def()).not.toBe(from240)
+
+      // bloco "-- ROLLBACK ... --   COMMIT;" do cabeçalho, sem o prefixo de comentário
+      const header = migration('313_custom_roles.sql').split('\n')
+      const start = header.findIndex((l) => l.startsWith('-- ROLLBACK'))
+      const end = header.findIndex((l, i) => i > start && l.trim() === '--   COMMIT;')
+      const sql = header
+        .slice(start + 1, end + 1)
+        .map((l) => l.replace(/^-- {3}/, '').replace(/^--$/, '')) // linha vazia do corpo vira '--' no cabeçalho
+        .join('\n')
+      await pg.exec(sql)
+
+      expect(await def()).toBe(from240)
+      const left = await pg.query(
+        `SELECT 1 FROM pg_proc WHERE proname IN ('create_custom_role','update_custom_role','delete_custom_role','assign_member_role','custom_role_assert_owner','custom_role_check_name')`,
+      )
+      expect(left.rows).toHaveLength(0)
+      expect((await pg.query(`SELECT to_regclass('wacrm.uq_account_roles_custom_name') AS r`)).rows).toEqual([{ r: null }])
+      expect((await pg.query(`SELECT 1 FROM wacrm.schema_migrations WHERE version = '313_custom_roles'`)).rows).toHaveLength(0)
+    } finally {
+      await pg.close()
+    }
+  })
+})
