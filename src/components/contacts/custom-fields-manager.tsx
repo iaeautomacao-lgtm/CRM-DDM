@@ -12,6 +12,16 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2 } from 'lucide-react';
@@ -61,6 +71,7 @@ export function CustomFieldsPanel() {
   const [fields, setFields] = useState<CustomField[]>([]);
   const [loading, setLoading] = useState(true);
   const [newName, setNewName] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<CustomField | null>(null);
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -149,14 +160,8 @@ export function CustomFieldsPanel() {
     return true;
   }
 
+  // A confirmação vem do AlertDialog (deleteTarget); handleDelete só executa a exclusão confirmada.
   async function handleDelete(field: CustomField) {
-    if (
-      !window.confirm(
-        `Excluir "${field.field_name}"? Isso também remove o valor armazenado em todos os contatos. Essa ação não pode ser desfeita.`
-      )
-    ) {
-      return;
-    }
     setBusyId(field.id);
     const { error } = await supabase
       .from('custom_fields')
@@ -220,12 +225,35 @@ export function CustomFieldsPanel() {
                 field={field}
                 busy={busyId === field.id}
                 onRename={handleRename}
-                onDelete={handleDelete}
+                onDelete={setDeleteTarget}
               />
             ))}
           </ul>
         )}
       </div>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir “{deleteTarget?.field_name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso também remove o valor armazenado em todos os contatos. Essa ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = deleteTarget;
+                setDeleteTarget(null);
+                if (target) void handleDelete(target);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -63,6 +63,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("billing/rulers/[id]/steps", "PUT", "admin", "billing.manage"), // PRD 17.5
   pg("billing/rulers/[id]/dry-run", "POST", "admin", "billing.manage"), // PRD 17.5
   pg("billing/rulers/[id]/metrics", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/rulers/[id]/report", "GET", "supervisor", "billing.view"), // PRD 17.6
+  pg("billing/alerts", "GET", "supervisor", "billing.view"), // PRD 17.6
   pg("billing/enrollments", "GET", "supervisor", "billing.view"), // PRD 17.5
   pg("billing/enrollments/[id]/pause", "POST", "admin", "billing.manage"), // PRD 17.5
   pg("billing/enrollments/[id]/resume", "POST", "admin", "billing.manage"), // PRD 17.5
@@ -257,6 +259,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("monitoramento/sla", "GET", "supervisor", "monitoring.view_team"),
   pg("monitoramento/lote/transferir-para-mim", "POST", "supervisor", "monitoring.view_team"),
   pg("monitoramento/lote/finalizar", "POST", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/agentes", "GET", "supervisor", "monitoring.view_team"),
   pg("relatorios/exports", "POST", "supervisor", "reports.export"),
   pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
   pg("historico/exports", "POST", "admin", "exports.manage"),
@@ -310,7 +313,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/seguranca", roles: ["owner", "admin", "supervisor", "agent", "viewer"], permission: null, aligned: false, note: "todos os papéis" },
   { prefix: "/templates", roles: ["owner", "admin"], permission: "templates.manage", aligned: true },
   { prefix: "/tabulacoes", roles: ["owner", "admin"], permission: "tags.manage", aligned: true },
-  { prefix: "/respostas-rapidas", roles: ["owner", "admin", "supervisor", "agent"], permission: "inbox.reply", aligned: true, note: "operador cria as prÃ³prias (pessoais); equipe/conta exigem inbox.quick_replies.manage na tela e na RLS" },
+  { prefix: "/respostas-rapidas", roles: ["owner", "admin", "supervisor", "agent"], permission: "inbox.reply", aligned: true, note: "operador cria as próprias (pessoais); equipe/conta exigem inbox.quick_replies.manage na tela e na RLS" },
   { prefix: "/usuarios", roles: ["owner", "admin"], permission: "members.manage", aligned: true },
   { prefix: "/membros", roles: ["owner", "admin"], permission: "members.manage", aligned: true },
 ];

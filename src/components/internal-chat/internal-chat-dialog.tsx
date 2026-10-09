@@ -47,6 +47,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ErrorState } from "@/components/dashboard/error-state";
 import type { InternalMessage } from "@/types";
 
 const CHAT_MEDIA_BUCKET = "chat-media";
@@ -193,6 +194,9 @@ export function InternalChatDialog({
   const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
   const [messages, setMessages] = useState<InternalMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
+  const [contactsError, setContactsError] = useState(false);
+  const [messagesError, setMessagesError] = useState(false);
+  const [threadReloadKey, setThreadReloadKey] = useState(0);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const scrollBottomRef = useRef<HTMLDivElement>(null);
@@ -274,6 +278,7 @@ export function InternalChatDialog({
   const fetchContacts = useCallback(async () => {
     if (!myUserId || !accountId) return;
     setContactsLoading(true);
+    setContactsError(false);
     try {
       const supabase = createClient();
       // PRD 23, item 1 — conversar com outro operador. A RLS de
@@ -330,6 +335,7 @@ export function InternalChatDialog({
       console.error("[InternalChatDialog] failed to load contacts:", err);
       toast.error("Falha ao carregar as pessoas da conta");
       setContacts([]);
+      setContactsError(true);
     } finally {
       setContactsLoading(false);
     }
@@ -354,6 +360,7 @@ export function InternalChatDialog({
 
     (async () => {
       setMessagesLoading(true);
+      setMessagesError(false);
       try {
         const { data, error } = await supabase
           .from("internal_messages")
@@ -380,6 +387,7 @@ export function InternalChatDialog({
         if (!cancelled) {
           console.error("[InternalChatDialog] failed to load thread:", err);
           toast.error("Falha ao carregar conversa");
+          setMessagesError(true);
         }
       } finally {
         if (!cancelled) setMessagesLoading(false);
@@ -389,7 +397,7 @@ export function InternalChatDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, step, selectedContact, myUserId, accountId]);
+  }, [open, step, selectedContact, myUserId, accountId, threadReloadKey]);
 
   // Live updates for the open thread — two listeners (sender_id /
   // recipient_id) since a single postgres_changes filter can't
@@ -676,6 +684,12 @@ export function InternalChatDialog({
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
+                ) : contactsError ? (
+                  <ErrorState
+                    title="Não foi possível carregar as pessoas"
+                    onRetry={() => void fetchContacts()}
+                    className="min-h-32"
+                  />
                 ) : filteredContacts.length === 0 ? (
                   <p className="px-2 py-6 text-center text-xs text-muted-foreground">
                     {emptyListMessage}
@@ -747,6 +761,12 @@ export function InternalChatDialog({
                     <div className="flex items-center justify-center py-8">
                       <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                     </div>
+                  ) : messagesError ? (
+                    <ErrorState
+                      title="Não foi possível carregar a conversa"
+                      onRetry={() => setThreadReloadKey((k) => k + 1)}
+                      className="min-h-32"
+                    />
                   ) : messages.length === 0 ? (
                     <p className="py-6 text-center text-xs text-muted-foreground">
                       Nenhuma mensagem ainda. Diga oi!
@@ -771,7 +791,7 @@ export function InternalChatDialog({
                                 <MessageMedia url={m.media_url} type={m.media_type} />
                               </div>
                             )}
-                            {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
+                            {m.content && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.content}</p>}
                             <p
                               className={`mt-1 text-[10px] ${
                                 "text-muted-foreground"

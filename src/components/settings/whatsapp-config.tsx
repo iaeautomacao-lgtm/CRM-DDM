@@ -24,6 +24,16 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -57,6 +67,9 @@ export function WhatsAppConfig() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<
+    { kind: 'reset' } | { kind: 'remove-line'; config: WhatsAppConfigType } | null
+  >(null);
   const [showToken, setShowToken] = useState(false);
   
   const [configs, setConfigs] = useState<any[]>([]);
@@ -151,13 +164,13 @@ export function WhatsAppConfig() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to request pairing code');
+        throw new Error(data.error || 'Falha ao solicitar o código de pareamento');
       }
 
       setPairingCode(data.code);
       toast.success('Código de pareamento gerado!');
     } catch (err: any) {
-      setPairingError(err.message || 'Failed to generate code');
+      setPairingError(err.message || 'Falha ao gerar o código');
       toast.error(err.message || 'Erro ao gerar código');
     } finally {
       setPairingLoading(false);
@@ -545,11 +558,19 @@ export function WhatsAppConfig() {
     }
   }
 
-  async function handleReset() {
-    if (!confirm('Tem certeza de que deseja limpar esta configuração do WhatsApp?')) {
-      return;
+  async function handleRemoveLine(c: WhatsAppConfigType) {
+    try {
+      const res = await apiFetch(`/api/whatsapp/config?id=${c.id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Erro ao deletar linha');
+      toast.success('Linha removida com sucesso!');
+      if (c.id === activeConfigId) setActiveConfigId(null);
+      if (accountId) fetchConfig(accountId);
+    } catch (err: any) {
+      toast.error(err.message || 'Erro ao deletar linha');
     }
+  }
 
+  async function handleReset() {
     try {
       setResetting(true);
       const url = activeConfigId 
@@ -618,6 +639,31 @@ export function WhatsAppConfig() {
 
   return (
     <section className="animate-in fade-in-50 duration-200">
+      <AlertDialog open={pendingConfirm !== null} onOpenChange={(open) => !open && setPendingConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pendingConfirm?.kind === 'remove-line' ? 'Remover linha' : 'Limpar configuração'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingConfirm?.kind === 'remove-line'
+                ? 'Tem certeza que deseja remover esta linha do WhatsApp?'
+                : 'Tem certeza de que deseja limpar esta configuração do WhatsApp?'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const action = pendingConfirm;
+                setPendingConfirm(null);
+                if (action?.kind === 'remove-line') void handleRemoveLine(action.config);
+                else if (action?.kind === 'reset') void handleReset();
+              }}
+            >
+              {pendingConfirm?.kind === 'remove-line' ? 'Remover' : 'Limpar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <SettingsPanelHead
         title="Conexão do WhatsApp"
         description="Conecte sua conta do WhatsApp ao CRM via Meta Cloud API oficial ou WAHA próprio (WhatsApp HTTP API)."
@@ -698,19 +744,7 @@ export function WhatsAppConfig() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={async () => {
-                              if (confirm('Tem certeza que deseja remover esta linha do WhatsApp?')) {
-                                try {
-                                    const res = await apiFetch(`/api/whatsapp/config?id=${c.id}`, { method: 'DELETE' });
-                                  if (!res.ok) throw new Error('Erro ao deletar linha');
-                                  toast.success('Linha removida com sucesso!');
-                                  if (isActive) setActiveConfigId(null);
-                                  if (accountId) fetchConfig(accountId);
-                                } catch (err: any) {
-                                  toast.error(err.message || 'Erro ao deletar linha');
-                                }
-                              }
-                            }}
+                            onClick={() => setPendingConfirm({ kind: 'remove-line', config: c })}
                             className="text-xs h-7 font-medium border-red-900/50 text-red-400 hover:bg-red-950/20 hover:text-red-300"
                           >
                             Remover
@@ -737,7 +771,7 @@ export function WhatsAppConfig() {
                     {statusMessage}
                   </AlertDescription>
                   <Button
-                    onClick={handleReset}
+                    onClick={() => setPendingConfirm({ kind: 'reset' })}
                     disabled={resetting}
                     size="sm"
                     className="mt-3 bg-amber-600 hover:bg-amber-700 text-white"
@@ -1269,8 +1303,8 @@ export function WhatsAppConfig() {
               <CardTitle className="text-foreground">Configuração de Webhook</CardTitle>
               <CardDescription className="text-muted-foreground font-light">
                 {provider === 'waha'
-                  ? 'Configure this URL in your WAHA settings to receive incoming chats.'
-                  : 'Use this URL as your webhook callback in the Meta App Dashboard.'}
+                  ? 'Configure esta URL nas configurações do seu WAHA para receber as conversas.'
+                  : 'Use esta URL como callback de webhook no painel do app da Meta (Meta App Dashboard).'}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1333,7 +1367,7 @@ export function WhatsAppConfig() {
             {config && (
               <Button
                 variant="outline"
-                onClick={handleReset}
+                onClick={() => setPendingConfirm({ kind: 'reset' })}
                 disabled={resetting}
                 className="border-red-900 text-red-400 hover:text-red-300 hover:bg-red-950/40"
               >

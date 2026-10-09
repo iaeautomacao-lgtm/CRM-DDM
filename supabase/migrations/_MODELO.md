@@ -24,6 +24,9 @@ Migrations são aplicadas **à mão** no SQL Editor do Supabase. Este arquivo n�
    `-- ⚠️ RODAR SOZINHO: só a linha CREATE INDEX, numa execução própria do SQL Editor (sem outro comando junto).`
    Não pode estar em transação, então **não se registra**: o `schema:check` a detecta pelo índice (inclusive `indisvalid = false`).
 7. Nunca altere migration já aplicada para "corrigir produção": crie outra.
+8. **RLS em tabela nova do `wacrm` (2FA, migration 310)**: ao ligar a RLS, aplique também a policy restritiva de 2FA,
+   na mesma migration: `SELECT wacrm.apply_mfa_policy('wacrm.<tabela>'::regclass);` (idempotente). O teste
+   `src/lib/security/mfa-rls.sql.test.ts` falha se uma tabela do `wacrm` com RLS ficar sem a `mfa_aal2_required`.
 
 ## Esqueleto
 

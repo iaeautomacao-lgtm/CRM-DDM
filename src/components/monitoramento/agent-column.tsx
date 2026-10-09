@@ -8,6 +8,8 @@ import { presenceLabel, type PresenceStatus } from "@/lib/presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
 import type { AccountMember } from "@/types";
 import type { MonitorConversation } from "@/lib/monitoramento/queries";
+import { formatFirstResponse, type AgentMetrics } from "@/lib/monitoramento/agent-metrics";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ConversationCard } from "./conversation-card";
 import type { ConversationCardActions } from "./card-actions";
 
@@ -24,6 +26,10 @@ export function AgentColumn({
   now,
   conversations,
   actions,
+  metrics,
+  metricsLoading = false,
+  metricsUnavailable = false,
+  metricsPeriodLabel,
 }: {
   agent: AccountMember;
   presence: PresenceStatus;
@@ -31,6 +37,13 @@ export function AgentColumn({
   now: number;
   conversations: MonitorConversation[];
   actions: ConversationCardActions;
+  /** Métricas do período (GET /api/monitoramento/agentes). Ausente com a lista já carregada = nenhuma no período. */
+  metrics?: AgentMetrics;
+  metricsLoading?: boolean;
+  /** A busca falhou: mostra "—" em vez de zero. */
+  metricsUnavailable?: boolean;
+  /** "hoje" ou "nos últimos 7 dias": entra no rótulo do cartão. */
+  metricsPeriodLabel?: string;
 }) {
   const displayName = agent.full_name || agent.email || "Sem nome";
   const initials = displayName.charAt(0).toUpperCase();
@@ -72,8 +85,20 @@ export function AgentColumn({
         </span>
       </header>
 
-      {/* TODO(monitoramento): bulk-actions bar goes here once selection
-          drives real actions — visual/foundation only for now. */}
+      <dl className="grid grid-cols-2 gap-2 px-3 pt-3">
+        <div className="rounded-md bg-surface-3/60 px-2.5 py-2">
+          <dt className="text-[11.5px] text-muted-foreground">1ª resposta (média)</dt>
+          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">
+            {metricsLoading ? <Skeleton className="h-4 w-12" /> : formatFirstResponse(metrics?.first_response_avg_seconds)}
+          </dd>
+        </div>
+        <div className="rounded-md bg-surface-3/60 px-2.5 py-2">
+          <dt className="text-[11.5px] text-muted-foreground">Resolvidas {metricsPeriodLabel}</dt>
+          <dd className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">
+            {metricsLoading ? <Skeleton className="h-4 w-8" /> : metricsUnavailable ? "—" : (metrics?.resolved_count ?? 0).toLocaleString("pt-BR")}
+          </dd>
+        </div>
+      </dl>
 
       <div className="flex-1 space-y-2 overflow-y-auto p-3" style={{ maxHeight: "70vh" }}>
         {conversations.length === 0 ? (
