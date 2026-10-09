@@ -1234,3 +1234,26 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+export interface SetBusinessEncryptionKeyArgs {
+  phoneNumberId: string
+  accessToken: string
+  /** Chave PÚBLICA RSA em PEM (SPKI). Nunca a privada. */
+  publicKeyPem: string
+}
+
+/**
+ * Registra na Meta a chave pública usada para cifrar o tráfego do Data Exchange dos WhatsApp Flows
+ * (POST /{phone-number-id}/whatsapp_business_encryption). Equivale a colar a chave no WhatsApp Manager.
+ */
+export async function setBusinessEncryptionKey(args: SetBusinessEncryptionKeyArgs): Promise<void> {
+  const { phoneNumberId, accessToken, publicKeyPem } = args
+  const response = await metaFetch(`${META_API_BASE}/${phoneNumberId}/whatsapp_business_encryption`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ business_public_key: publicKeyPem }).toString(),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+}

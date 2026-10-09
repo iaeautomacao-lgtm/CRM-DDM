@@ -96,6 +96,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   session("lines", "GET", "channels.view"),
   session("whatsapp/config", "GET", "channels.view"),
   pg("whatsapp/config", "POST", "admin", "channels.manage"),
+  pg("whatsapp/flows/keys/[channelId]", "GET", "viewer", "channels.view"), // PRD 21, 21.2: par RSA do Data Exchange
+  pg("whatsapp/flows/keys/[channelId]", "POST", "admin", "channels.manage"),
   pg("whatsapp/config", "DELETE", "admin", "channels.manage"),
   pg("whatsapp/config", "PATCH", "admin", "channels.manage"),
   pg("whatsapp/channel-test", "POST", "admin", "channels.manage"),
