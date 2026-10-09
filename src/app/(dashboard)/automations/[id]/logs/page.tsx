@@ -1,7 +1,7 @@
 "use client"
 
 import { use, useCallback, useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { formatDistanceToNow } from "date-fns"
 import { ptBR } from "date-fns/locale"
 import { ArrowLeft, Check, X, ChevronDown, ChevronRight } from "lucide-react"
@@ -26,7 +26,6 @@ export default function AutomationLogsPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
-  const router = useRouter()
 
   const [automation, setAutomation] = useState<Automation | null>(null)
   const [logs, setLogs] = useState<AutomationLog[] | null>(null)
@@ -63,14 +62,13 @@ export default function AutomationLogsPage({
   }, [load])
 
   const back = (
-    <button
-      type="button"
-      onClick={() => router.push("/automations")}
+    <Link
+      href="/automations"
       className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
     >
-      <ArrowLeft className="size-3" />
+      <ArrowLeft className="size-3" aria-hidden="true" />
       Automações
-    </button>
+    </Link>
   )
 
   if (error) {

@@ -13,6 +13,7 @@ type Row = Record<string, unknown>;
 let runs: Row[] = [];
 let updates: Array<{ id: unknown; vars: unknown }> = [];
 let failUpdate = false;
+let events: Row[] = [];
 
 function fakeDb() {
   return {
@@ -25,14 +26,16 @@ function fakeDb() {
       b.order = () => b;
       b.limit = () => b;
       b.update = (p: Row) => ((payload = p), b);
+      b.insert = (p: Row) => (events.push(p), b);
       b.then = (resolve: (v: unknown) => void) => {
         const rows = runs.filter((r) => eqs.every(([c, v]) => r[c] === v)).sort((x, y) => String(y.started_at).localeCompare(String(x.started_at)));
+        if (!payload && events.length > 0 && eqs.length === 0) return resolve({ data: null, error: null });
         if (payload) {
           if (failUpdate) return resolve({ data: null, error: { message: "boom" } });
           updates.push({ id: rows[0]?.id, vars: payload.vars });
           return resolve({ data: null, error: null });
         }
-        resolve({ data: rows.slice(0, 1).map((r) => ({ id: r.id, vars: r.vars })), error: null });
+        resolve({ data: rows.slice(0, 1).map((r) => ({ id: r.id, flow_id: r.flow_id, vars: r.vars })), error: null });
       };
       return b;
     },
@@ -44,9 +47,10 @@ const base = { accountId: A, contactId: "C1", vars: { flow_parcelas: "3" } };
 describe("deliverFlowResponseToActiveRun", () => {
   beforeEach(() => {
     updates = [];
+    events = [];
     failUpdate = false;
     runs = [
-      { id: R_OLD, account_id: A, contact_id: "C1", status: "active", started_at: "2026-10-01T10:00:00Z", vars: { nome: "Maria" } },
+      { id: R_OLD, flow_id: "F1", account_id: A, contact_id: "C1", status: "active", started_at: "2026-10-01T10:00:00Z", vars: { nome: "Maria" } },
       { id: R_NEW, account_id: A, contact_id: "C1", status: "active", started_at: "2026-10-02T10:00:00Z", vars: {} },
       { id: R_ENDED, account_id: A, contact_id: "C1", status: "completed", started_at: "2026-09-30T10:00:00Z", vars: {} },
       { id: R_OTHER_CONTACT, account_id: A, contact_id: "C2", status: "active", started_at: "2026-10-03T10:00:00Z", vars: {} },
@@ -57,6 +61,20 @@ describe("deliverFlowResponseToActiveRun", () => {
   it("token fr:<run>: entrega no run que enviou o formulário, mesmo havendo um run mais recente do contato", async () => {
     expect(await deliverFlowResponseToActiveRun(fakeDb(), { ...base, flowToken: `fr:${R_OLD}` })).toBe("token_run");
     expect(updates).toEqual([{ id: R_OLD, vars: { nome: "Maria", flow_parcelas: "3" } }]);
+  });
+
+  it("grava a linha da timeline (reply_received, payload.kind = flow_response) só com as CHAVES, o nome do Flow e o caminho — sem meta_message_id (chave de dedupe do motor) e sem valores", async () => {
+    await deliverFlowResponseToActiveRun(fakeDb(), { ...base, flowToken: `fr:${R_OLD}`, flowName: "renegociacao" });
+    expect(events).toEqual([
+      { flow_run_id: R_OLD, flow_id: "F1", account_id: A, event_type: "reply_received", node_key: null, payload: { kind: "flow_response", flow_name: "renegociacao", fields: ["flow_parcelas"], delivered_to: "token_run" } },
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(/meta_message_id|"3"/);
+  });
+
+  it("sem entrega não há linha na timeline", async () => {
+    runs = [];
+    await deliverFlowResponseToActiveRun(fakeDb(), base);
+    expect(events).toEqual([]);
   });
 
   it("sem token, token de campanha (dq:) ou token inválido: o run ativo MAIS RECENTE (comportamento de antes)", async () => {

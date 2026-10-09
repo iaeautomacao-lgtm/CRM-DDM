@@ -8,6 +8,7 @@
 
 import { PageBody } from "@/components/ddm/page-toolbar";
 import { ProfileForm } from "@/components/settings/profile-form";
+import { PanelHeadingLevel } from "@/components/settings/settings-panel-head";
 import { SecurityPanel } from "@/components/settings/security-panel";
 import { PushSettingsCard } from "@/components/push/push-settings-card";
 
@@ -21,13 +22,15 @@ export default function PerfilPage() {
         </p>
       </div>
 
-      <div className="grid animate-ddm-fade items-start gap-6 lg:grid-cols-2">
-        <ProfileForm />
-        <div className="flex flex-col gap-6">
-          <SecurityPanel />
-          <PushSettingsCard />
+      <PanelHeadingLevel level={3}>
+        <div className="grid animate-ddm-fade items-start gap-6 lg:grid-cols-2">
+          <ProfileForm />
+          <div className="flex flex-col gap-6">
+            <SecurityPanel />
+            <PushSettingsCard />
+          </div>
         </div>
-      </div>
+      </PanelHeadingLevel>
     </PageBody>
   );
 }

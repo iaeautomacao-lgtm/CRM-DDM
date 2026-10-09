@@ -339,7 +339,7 @@ export function TemplatePicker({
               </div>
             ) : restrictedEmpty ? (
               <div className="flex flex-col items-center gap-2 rounded-md border border-border bg-background/50 p-6 text-center">
-                <AlertTriangle className="h-5 w-5 text-amber-700 dark:text-amber-400" />
+                <AlertTriangle className="h-5 w-5 text-amber-400 [html[data-mode=light]_&]:text-amber-700" />
                 <p className="text-sm text-popover-foreground">
                   Nenhum template disponível para sua equipe. Solicite ao seu supervisor que
                   configure os templates permitidos em Equipes.
