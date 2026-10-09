@@ -315,6 +315,10 @@
       "kind": "registry"
     },
     {
+      "version": "315_user_sessions_refreshed_at_utc",
+      "kind": "registry"
+    },
+    {
       "version": "320_billing_reports",
       "kind": "registry"
     },
