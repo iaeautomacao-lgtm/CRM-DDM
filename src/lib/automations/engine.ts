@@ -519,6 +519,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
           .from('profiles')
           .select('user_id')
           .eq('account_id', args.automation.account_id)
+          .is('deactivated_at', null)
           .limit(1)
         agentId = profiles?.[0]?.user_id
       }
