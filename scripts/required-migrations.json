@@ -311,6 +311,15 @@
       "index": "idx_conversation_assignments_from_agent"
     },
     {
+      "version": "303_internal_chat_reads",
+      "kind": "registry"
+    },
+    {
+      "version": "303b_internal_messages_unread_idx",
+      "kind": "index",
+      "index": "idx_internal_messages_unread"
+    },
+    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },
@@ -319,11 +328,7 @@
       "kind": "registry"
     },
     {
-      "version": "312_custom_role_validation",
-      "kind": "registry"
-    },
-    {
-      "version": "313_custom_roles",
+      "version": "315_user_sessions_refreshed_at_utc",
       "kind": "registry"
     },
     {

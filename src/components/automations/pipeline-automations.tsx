@@ -292,7 +292,7 @@ export function PipelineAutomations() {
                           {rule.days_limit} dias
                         </span>
                         <span>→ Mover para</span>
-                        <span className="font-semibold text-emerald-400">
+                        <span className="font-semibold text-success">
                           {tgt ? `${tgt.name} (${tgt.pipelineName})` : "Desconhecida"}
                         </span>
                       </div>
@@ -301,7 +301,8 @@ export function PipelineAutomations() {
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => handleDeleteRule(rule.id)}
-                          className="text-muted-foreground hover:text-red-400 hover:bg-red-500/10 shrink-0"
+                          className="text-muted-foreground hover:text-danger hover:bg-danger-soft shrink-0"
+                          aria-label="Excluir regra"
                         >
                           <Trash2 className="size-3.5" />
                         </Button>

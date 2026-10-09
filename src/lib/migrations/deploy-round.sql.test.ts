@@ -1,22 +1,33 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { BASELINE_SQL, USER_SESSIONS_290 } from "./deploy-round.baseline";
+import { BASELINE_REAL_MIGRATIONS, BASELINE_SQL, USER_SESSIONS_290 } from "./deploy-round.baseline";
 
 // "Rodada de deploy": aplica sobre o schema-base da v2 (deploy-round.baseline.ts) as migrations novas NA ORDEM em que o dono vai
 // rodá-las no SQL Editor e confere (a) idempotência (2 execuções), (b) que nenhuma depende de outra que venha depois,
 // (c) que os ROLLBACKS do cabeçalho rodam e desfazem o que a migration criou.
 //
-// Para a rodada seguinte, edite só ROUND e (se preciso) a baseline. Arquivo ausente na base = a rodada é PULADA (aparece no relatório);
-// com DEPLOY_ROUND_STRICT=1 (ex.: na branch de integração) ausente vira falha.
-export const ROUND = ["262", "297", "298", "300", "301", "302", "302b", "303", "303b", "311", "315", "320", "310"] as const;
+// Para a rodada seguinte, edite só FULL_ROUND e (se preciso) a baseline. Arquivo ausente na base: a rodada roda só com os que existem e avisa;
+// com DEPLOY_ROUND_STRICT=1 (ex.: na branch de integração, com tudo mergeado) ausente vira falha.
+// A 310 (MFA obrigatório no RLS) é SEMPRE a última: ela põe a policy mfa_aal2_required nas tabelas que já existem.
+export const FULL_ROUND = [
+  "262", "297", "298", "300", "301", "302", "302b", "303", "303b",
+  "311", "312", "313", "314", "315", "320",
+  "322", "323", "324",
+  "330", "330b", "331b",
+  "310",
+] as const;
 
 const DIR = "supabase/migrations";
 const STRICT = process.env.DEPLOY_ROUND_STRICT === "1";
 const files = readdirSync(DIR);
 const fileOf = (n: string) => files.find((f) => f.startsWith(`${n}_`) && f.endsWith(".sql"));
-const missing = ROUND.filter((n) => !fileOf(n));
+const missing = FULL_ROUND.filter((n) => !fileOf(n));
 const complete = missing.length === 0;
+/** O que esta execução aplica: tudo (STRICT) ou só o que existe na base. */
+const ROUND: string[] = STRICT ? [...FULL_ROUND] : FULL_ROUND.filter((n) => fileOf(n));
+/** Rollbacks que o cabeçalho descreve só em PROSA (voltar a uma definição anterior): não há comando para rodar — ficam documentados aqui. */
+const PROSE_ROLLBACK = new Set(["322", "323", "324"]);
 const sqlOf = (n: string) => readFileSync(`${DIR}/${fileOf(n)}`, "utf8");
 
 // ---------- utilitários de SQL ----------
@@ -137,7 +148,9 @@ function rollbackOf(n: string): { statements: string[]; reapply: string[] } {
     kept.push(t);
     if (((t.match(/\$\$/g) ?? []).length % 2) === 1) inDollar = !inDollar;
   });
-  return { statements: splitStatements(kept.join("\n")), reapply };
+  const statements = splitStatements(kept.join("\n"));
+  if (statements.length === 0 && reapply.length === 0) throw new Error(`migration ${n}: rollback do cabeçalho só em prosa (nenhum comando executável)`);
+  return { statements, reapply };
 }
 
 async function runRollback(db: PGlite, n: string) {
@@ -159,8 +172,8 @@ async function runRollbackUnsafe(db: PGlite, n: string) {
 }
 
 // ---------- a rodada ----------
-const suite = complete || STRICT ? describe : describe.skip;
-if (!complete) console.warn(`[deploy-round] migrations ausentes nesta base: ${missing.join(", ")} — rodada pulada (DEPLOY_ROUND_STRICT=1 falha)`);
+const suite = describe;
+if (!complete) console.warn(`[deploy-round] migrations ausentes nesta base: ${missing.join(", ")} — rodada parcial (DEPLOY_ROUND_STRICT=1 falha)`);
 
 describe("rodada de deploy — presença dos arquivos", () => {
   it("todas as migrations da rodada estão nesta base", () => {
@@ -168,12 +181,25 @@ describe("rodada de deploy — presença dos arquivos", () => {
     expect(missing, "arquivos ausentes").toEqual([]);
   });
   it("a ordem da rodada não repete nem inverte o número (b vem logo depois do número)", () => {
-    const nums = ROUND.map((n) => parseInt(n, 10));
+    const nums = FULL_ROUND.map((n) => parseInt(n, 10));
     // 310 vai por último de propósito (aplica o RLS de MFA em TODAS as tabelas já criadas); o resto é crescente.
-    expect(ROUND[ROUND.length - 1]).toBe("310");
+    expect(FULL_ROUND[FULL_ROUND.length - 1]).toBe("310");
     const rest = nums.slice(0, -1);
     expect(rest).toEqual([...rest].sort((a, b) => a - b));
-    expect(new Set(ROUND).size).toBe(ROUND.length);
+    expect(new Set(FULL_ROUND).size).toBe(FULL_ROUND.length);
+  });
+  it("dependências declaradas no cabeçalho (\"Depende da 302\", \"ORDEM: depois da 143, 241\") vêm antes na rodada", () => {
+    const problems: string[] = [];
+    ROUND.forEach((n, i) => {
+      const header = sqlOf(n).split("\n").filter((l) => l.startsWith("--")).join("\n");
+      for (const m of header.matchAll(/(?:Depende d[aeo]s?|ORDEM:\s*depois d[aeo]s?|aplique a(?:s)?)\s+(\d{3}b?(?:\s*(?:,|e)\s*\d{3}b?)*)/gi)) {
+        for (const dep of m[1].match(/\d{3}b?/g) ?? []) {
+          const at = ROUND.indexOf(dep);
+          if (at > i) problems.push(`${n} depende da ${dep}, que vem DEPOIS na rodada`);
+        }
+      }
+    });
+    expect(problems).toEqual([]);
   });
 });
 
@@ -185,6 +211,11 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
   beforeAll(async () => {
     db = new PGlite();
     await db.exec(BASELINE_SQL);
+    for (const f of BASELINE_REAL_MIGRATIONS) {
+      await db.exec(readFileSync(`${DIR}/${f}`, "utf8").replace(/NOTIFY pgrst[^;]*;/g, "")).catch((e) => {
+        throw new Error(`baseline: migration real ${f} falhou: ${e instanceof Error ? e.message : e}`);
+      });
+    }
     for (const n of ROUND) {
       created.set(n, createdBy(n));
       preExisting.set(n, new Set(await exists(db, created.get(n)!)));
@@ -233,20 +264,33 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
     expect((await db.query<{ n: number }>("SELECT count(*)::int AS n FROM wacrm.schema_migrations")).rows[0].n).toBe(before);
   }, 120_000);
 
-  it("a 310 por último cobre as tabelas novas: toda tabela wacrm com RLS tem mfa_aal2_required", async () => {
+  it.skipIf(!ROUND.includes("310"))("a 310 por último cobre as tabelas novas: toda tabela wacrm com RLS tem mfa_aal2_required", async () => {
     const r = await db.query<{ relname: string }>(`
       SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'wacrm' AND c.relkind IN ('r', 'p') AND c.relrowsecurity
          AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'wacrm' AND p.tablename = c.relname AND p.policyname = 'mfa_aal2_required')`);
     expect(r.rows.map((x) => x.relname)).toEqual([]);
-    for (const t of ["history_export_jobs", "push_subscriptions", "quick_reply_usage_daily", "internal_chat_reads"]) {
+    const NEW_RLS_TABLES: Array<[string, string]> = [["history_export_jobs", "297"], ["push_subscriptions", "298"], ["quick_reply_usage_daily", "301"], ["internal_chat_reads", "303"]];
+    for (const [t] of NEW_RLS_TABLES.filter(([, mig]) => ROUND.includes(mig))) {
       const p = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_policies WHERE schemaname = 'wacrm' AND tablename = '${t}' AND policyname = 'mfa_aal2_required'`);
       expect(p.rows[0].n, `${t} sem a policy de MFA`).toBe(1);
     }
   });
 
+  it("as migrations 32x rodando DEPOIS da 310 não removem a policy mfa_aal2_required", async () => {
+    const count = async () =>
+      (await db.query<{ tablename: string }>("SELECT tablename FROM pg_policies WHERE schemaname = 'wacrm' AND policyname = 'mfa_aal2_required' ORDER BY 1")).rows.map((r) => r.tablename);
+    const before = await count();
+    for (const n of ROUND.filter((x) => /^32\d/.test(x))) await applyFile(db, n);
+    expect(await count()).toEqual(before);
+  }, 60_000);
+
   it("(c) rollbacks do cabeçalho, em ordem inversa, rodam e removem o que a migration criou", async () => {
     for (const n of [...ROUND].reverse()) {
+      if (PROSE_ROLLBACK.has(n)) {
+        expect(() => rollbackOf(n), `rollback da ${n} passou a ser executável: tire-a de PROSE_ROLLBACK`).toThrow();
+        continue;
+      }
       await runRollback(db, n).catch((e) => {
         throw new Error(`rollback da migration ${n} (${fileOf(n)}) falhou: ${e instanceof Error ? e.message : e}`);
       });
@@ -267,12 +311,16 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
         throw new Error(`migration ${n} falhou ao reaplicar depois do rollback: ${e instanceof Error ? e.message : e}`);
       });
     }
-    expect(await exists(db, created.get("303")!)).toContain("tabela internal_chat_reads");
+    for (const n of ROUND) {
+      const now = new Set(await exists(db, created.get(n)!));
+      const wanted = [...created.get(n)!.tables.map((t) => `tabela ${t}`), ...created.get(n)!.functions.map((f) => `função ${f}`)];
+      for (const w of wanted.filter((x) => !preExisting.get(n)!.has(x))) expect(now.has(w), `${n}: ${w} não voltou depois do rollback + reaplicação`).toBe(true);
+    }
   }, 120_000);
 });
 
 suite("rodada de deploy — controle negativo: a 310 fora do fim deixa tabela nova sem MFA", () => {
-  it("310 antes da 303 ⇒ internal_chat_reads fica sem a policy (por isso a 310 é a última)", async () => {
+  it.skipIf(!ROUND.includes("310") || !ROUND.includes("303"))("310 antes da 303 ⇒ internal_chat_reads fica sem a policy (por isso a 310 é a última)", async () => {
     const db = new PGlite();
     try {
       await db.exec(BASELINE_SQL);

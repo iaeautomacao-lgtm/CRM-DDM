@@ -25,7 +25,6 @@ import {
 import { createClient } from "@/lib/supabase/client"
 import { usePermission } from "@/hooks/use-permission"
 import type { Automation } from "@/types"
-import { Button } from "@/components/ui/button"
 import { GatedButton } from "@/components/ui/gated-button"
 import { Switch } from "@/components/ui/switch"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -37,13 +36,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { CountUp } from "@/components/motion/count-up"
 import { KpiStrip } from "@/components/ddm/kpi-strip"
 import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar"
@@ -102,21 +103,28 @@ export default function AutomationsPage() {
     setAutomations((prev) =>
       prev?.map((x) => (x.id === a.id ? { ...x, is_active: next } : x)) ?? prev,
     )
-    const res = await apiFetch(`/api/automations/${a.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ is_active: next }),
-    })
-    if (!res.ok) {
-      // Roll back on error.
+    const rollback = () =>
       setAutomations((prev) =>
         prev?.map((x) => (x.id === a.id ? { ...x, is_active: !next } : x)) ?? prev,
       )
-      const body = await res.json().catch(() => ({}))
-      toast.error(body?.error ?? "Falha ao atualizar")
-      return
+    try {
+      const res = await apiFetch(`/api/automations/${a.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ is_active: next }),
+      })
+      if (!res.ok) {
+        // Roll back on error.
+        rollback()
+        const body = await res.json().catch(() => ({}))
+        toast.error(body?.error ?? "Falha ao atualizar")
+        return
+      }
+      toast.success(next ? "Automação ativada" : "Automação pausada")
+    } catch {
+      rollback()
+      toast.error("Falha ao atualizar. Verifique a conexão e tente de novo.")
     }
-    toast.success(next ? "Automação ativada" : "Automação pausada")
   }
 
   async function duplicate(a: Automation) {
@@ -133,16 +141,21 @@ export default function AutomationsPage() {
   async function confirmDelete() {
     if (!pendingDelete) return
     setDeleting(true)
-    const res = await apiFetch(`/api/automations/${pendingDelete.id}`, { method: "DELETE" })
-    setDeleting(false)
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      toast.error(body?.error ?? "Falha ao excluir")
-      return
+    try {
+      const res = await apiFetch(`/api/automations/${pendingDelete.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(body?.error ?? "Falha ao excluir")
+        return
+      }
+      toast.success("Automação excluída")
+      setPendingDelete(null)
+      load()
+    } catch {
+      toast.error("Falha ao excluir. Verifique a conexão e tente de novo.")
+    } finally {
+      setDeleting(false)
     }
-    toast.success("Automação excluída")
-    setPendingDelete(null)
-    load()
   }
 
   async function startFromTemplate(slug: TemplateSlug) {
@@ -343,27 +356,30 @@ export default function AutomationsPage() {
         </>
       )}
 
-      <Dialog open={!!pendingDelete} onOpenChange={(v) => !v && setPendingDelete(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Excluir automação</DialogTitle>
-            <DialogDescription>
+      <AlertDialog open={!!pendingDelete} onOpenChange={(v) => !v && !deleting && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir automação</AlertDialogTitle>
+            <AlertDialogDescription>
               Isso remove permanentemente{" "}
               <span className="text-foreground">{pendingDelete?.name}</span> e seu histórico de
               execução. Esta ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setPendingDelete(null)} disabled={deleting}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
-              {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={() => {
+                void confirmDelete()
+              }}
+            >
+              {deleting && <Loader2 className="size-4 animate-spin" />}
               Excluir
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageBody>
   )
 }

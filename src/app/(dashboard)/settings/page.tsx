@@ -1,10 +1,11 @@
 'use client';
 
-import { Suspense, useMemo, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useAuth } from '@/hooks/use-auth';
 import { useTheme } from '@/hooks/use-theme';
+import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsRail } from '@/components/settings/settings-rail';
 import { SettingsOverview } from '@/components/settings/settings-overview';
 import { ProfileForm } from '@/components/settings/profile-form';
@@ -17,6 +18,7 @@ import {
   canSeeSection,
   isIntegrationTab,
   resolveSection,
+  SECTION_META,
   visibleIntegrationTabs,
   type SettingsSection,
 } from '@/components/settings/settings-sections';
@@ -47,7 +49,20 @@ function SettingsContent() {
       ? 'overview'
       : rawSection;
 
+  // Foco no painel só depois de uma troca feita pelo usuário (clique/teclado no menu), nunca na carga inicial.
+  // Trocar de aba dentro de Integrações não conta: o foco precisa ficar na aba para a navegação por setas.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const userNavigated = useRef(false);
+  const panelKey = isIntegrationTab(section) ? 'integrations' : section;
+  useEffect(() => {
+    if (!userNavigated.current) return;
+    userNavigated.current = false;
+    panelRef.current?.focus({ preventScroll: true });
+  }, [panelKey]);
+
   const go = (next: SettingsSection) => {
+    const nextKey = isIntegrationTab(next) ? 'integrations' : next;
+    if (nextKey !== panelKey) userNavigated.current = true;
     const params = new URLSearchParams(searchParams.toString());
     params.set('tab', next);
     router.replace(`/settings?${params.toString()}`, { scroll: false });
@@ -88,7 +103,13 @@ function SettingsContent() {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
         <SettingsRail active={integrationActive ? 'integrations' : section} onSelect={go} hints={hints} role={accountRole} />
-        <div className="min-w-0">
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          role="region"
+          aria-label={SECTION_META[panelKey].label}
+          className="min-w-0 outline-none"
+        >
           {isIntegrationTab(section) ? (
             <IntegrationsSettings active={section} tabs={integrationTabs} onSelect={go} />
           ) : (
@@ -100,9 +121,22 @@ function SettingsContent() {
   );
 }
 
+function SettingsSkeleton() {
+  return (
+    <div aria-busy="true" aria-label="Carregando configurações">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="mt-2 h-4 w-80 max-w-full" />
+      <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
+        <Skeleton className="h-64 w-full rounded-lg" />
+        <Skeleton className="h-96 w-full rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<SettingsSkeleton />}>
       <SettingsContent />
     </Suspense>
   );

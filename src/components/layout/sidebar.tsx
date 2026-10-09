@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Fragment, useEffect, useState, type ReactElement } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactElement } from "react";
 import {
   Headphones,
   KeyRound,
@@ -118,6 +118,25 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
+  // Gaveta fechada no celular: fora da ordem de foco e da árvore de acessibilidade.
+  const drawerHidden = !open && !isDesktop;
+
+  // Foco: ao abrir vai para o botão "Fechar menu" da gaveta; ao fechar volta
+  // para o botão que abriu.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open || isDesktop) return;
+    const active = document.activeElement;
+    openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    drawerCloseRef.current?.focus({ preventScroll: true });
+    return () => {
+      const opener = openerRef.current;
+      openerRef.current = null;
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+    };
+  }, [open, isDesktop]);
+
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -169,6 +188,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       <button
         type="button"
         aria-label="Fechar menu"
+        aria-hidden="true"
+        tabIndex={-1}
         onClick={onClose}
         className={cn(
           "fixed inset-0 z-30 bg-background/70 backdrop-blur-sm transition-opacity lg:hidden",
@@ -185,6 +206,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           rail ? "lg:w-16" : "lg:w-[232px]",
         )}
         aria-label="Navegação principal"
+        inert={drawerHidden}
       >
         <div
           className={cn(
@@ -213,6 +235,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               </button>
               <button
                 type="button"
+                ref={drawerCloseRef}
                 onClick={onClose}
                 aria-label="Fechar menu"
                 className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"

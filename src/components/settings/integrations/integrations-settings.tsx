@@ -7,7 +7,7 @@
 
 import type { ReactNode } from 'react';
 
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import { SecretsSettings } from '@/components/settings/secrets-settings';
 import { ToolsSettings } from '@/components/settings/tools-settings';
@@ -45,9 +45,10 @@ export function IntegrationsSettings({
         </p>
       </div>
 
-      <Tabs value={active} onValueChange={(v) => onSelect(v as IntegrationTab)}>
-        <div className="-mx-1 overflow-x-auto border-b px-1 [scrollbar-width:thin]">
-          <TabsList variant="line" className="h-auto justify-start gap-5 p-0">
+      <Tabs value={active} onValueChange={(v) => onSelect(v as IntegrationTab)} className="gap-4">
+        {/* Em telas estreitas a faixa rola: o degradê à direita indica que há mais abas. */}
+        <div className="-mx-1 overflow-x-auto border-b px-1 [scrollbar-width:thin] max-sm:[mask-image:linear-gradient(to_right,black_calc(100%-28px),transparent)]">
+          <TabsList variant="line" className="h-auto justify-start gap-5 p-0 max-sm:pr-6">
             {tabs.map((t) => (
               <TabsTrigger
                 key={t}
@@ -59,11 +60,11 @@ export function IntegrationsSettings({
             ))}
           </TabsList>
         </div>
-      </Tabs>
 
-      <div key={active} className="animate-ddm-fade min-w-0">
-        {PANELS[active]()}
-      </div>
+        <TabsContent key={active} value={active} className="animate-ddm-fade min-w-0 flex-none text-[length:inherit]">
+          {PANELS[active]()}
+        </TabsContent>
+      </Tabs>
     </section>
   );
 }
