@@ -46,6 +46,7 @@ import {
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
+import { dispatchSchemaReady } from "@/lib/disparador/cron-preflight";
 import { drainPushOutbox } from "@/lib/push/service";
 import { trackSend } from "@/lib/disparador/shutdown-gate";
 import { sweepStuckApiCampaigns } from "@/lib/disparador/api-v1-cleanup";
@@ -448,8 +449,9 @@ async function runTick(request: Request, chain: ChainContext) {
     // Preflight de deploy: se a coluna next_batch_at (migration 118) não
     // existir, o código novo subiu sem as migrations. Para aqui, antes de
     // qualquer preparação de campanha ou envio externo.
-    const { error: readinessError } = await db.from("campaigns").select("next_batch_at").limit(1);
-    if (readinessError) {
+    // D-16: resultado positivo em cache por 10 min no processo (cron-preflight.ts); falha nunca é guardada.
+    const readiness = await dispatchSchemaReady(db);
+    if (!readiness.ok) {
       tickStatus = "migration_required";
       return NextResponse.json({ error: "Dispatch safety migration required" }, { status: 503 });
     }
