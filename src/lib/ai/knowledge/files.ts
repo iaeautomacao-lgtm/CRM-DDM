@@ -13,23 +13,39 @@ export interface KnowledgeFileSummary {
   size_bytes: number | null;
   char_count: number | null;
   created_at: string;
+  /** Índice da busca por trechos (migration 215); null/ausente = sem índice. */
+  embedding_status?: string | null;
+  embedding_chunks?: number | null;
 }
 
 const SUMMARY_COLUMNS = "id, name, mime_type, size_bytes, char_count, created_at";
+const INDEX_COLUMNS = `${SUMMARY_COLUMNS}, embedding_status, embedding_chunks`;
 const PAGE = 1000;
 
+/** Coluna inexistente (banco sem a 215): a lista cai para as colunas da 214. */
+const MISSING_COLUMN = /42703|embedding_status|does not exist/i;
+
 export async function listKnowledgeFiles(accountId: string): Promise<KnowledgeFileSummary[]> {
+  try {
+    return await listWith(accountId, INDEX_COLUMNS);
+  } catch (err) {
+    if (err instanceof Error && MISSING_COLUMN.test(err.message)) return listWith(accountId, SUMMARY_COLUMNS);
+    throw err;
+  }
+}
+
+async function listWith(accountId: string, columns: string): Promise<KnowledgeFileSummary[]> {
   const out: KnowledgeFileSummary[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabaseAdmin()
       .from("knowledge_base_files")
-      .select(SUMMARY_COLUMNS)
+      .select(columns)
       .eq("account_id", accountId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
-    if (error) throw new Error(`knowledge_base_files: ${error.message}`);
-    const rows = (data ?? []) as KnowledgeFileSummary[];
+    if (error) throw new Error(`knowledge_base_files: ${error.code ?? ""} ${error.message}`);
+    const rows = (data ?? []) as unknown as KnowledgeFileSummary[];
     out.push(...rows);
     if (rows.length < PAGE) return out;
   }
@@ -63,6 +79,19 @@ export async function createKnowledgeFile(input: {
     .limit(1);
   if (error) throw new Error(`knowledge_base_files: ${error.code ?? error.message}`);
   return (data as KnowledgeFileSummary[])[0];
+}
+
+/** Texto guardado de um arquivo da conta (para reindexar). null = não existe na conta. */
+export async function readKnowledgeFileContent(accountId: string, id: string): Promise<{ id: string; content: string } | null> {
+  const { data, error } = await supabaseAdmin()
+    .from("knowledge_base_files")
+    .select("id, content")
+    .eq("account_id", accountId)
+    .eq("id", id)
+    .limit(1);
+  if (error) throw new Error(`knowledge_base_files: ${error.message}`);
+  const row = ((data ?? []) as Array<{ id: string; content: string | null }>)[0];
+  return row ? { id: row.id, content: row.content ?? "" } : null;
 }
 
 export type DeleteKnowledgeFileResult = { ok: true } | { ok: false; status: 404 | 409; error: string };

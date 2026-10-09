@@ -45,7 +45,8 @@ import {
 import { detectAbusiveInput } from "@/lib/ai/abuse-guard";
 import { createAiHeartbeat, type AiHeartbeat } from "@/lib/ai/heartbeat";
 import { gatedFetch } from "@/lib/ai/llm-gate";
-import { buildKnowledgeBaseContext } from "@/lib/ai/kb-context";
+import { buildAgentKnowledgeContext } from "@/lib/ai/knowledge/knowledge-context";
+import { createVectorRetriever } from "@/lib/ai/knowledge/vector-store";
 import { BOT_LOOP_MIN_MESSAGES, BOT_LOOP_WINDOW_SECONDS, detectBotLoop } from "@/lib/ai/loop-guard";
 import { handOffToTeamQueue } from "@/lib/ai/team-handoff";
 import { decrypt, tryDecrypt } from "@/lib/whatsapp/encryption";
@@ -1127,7 +1128,23 @@ async function handleAiAutoResponseAttempt(
       .slice(-3)
       .map((m: any) => m.content_text || "")
       .join("\n");
-    kbContext = buildKnowledgeBaseContext(kbFilesForPrompt, recentCustomerText, agentRuntime?.config.knowledge.max_chars);
+    // RAG vetorial (TASK1-D): agente com knowledge.vector ligado busca os trechos mais próximos; sem índice,
+    // sem chave, erro ou tempo esgotado cai no modo de sempre (teto de caracteres). Sem agente: modo de sempre.
+    const vector = agentRuntime?.config.knowledge.vector;
+    const kb = await buildAgentKnowledgeContext({
+      accountId,
+      files: kbFilesForPrompt,
+      query: recentCustomerText,
+      maxChars: agentRuntime?.config.knowledge.max_chars,
+      vector,
+      retrieve: vector?.enabled ? createVectorRetriever({ db }) : null,
+    });
+    kbContext = kb.context;
+    if (kb.vectorMs !== undefined) {
+      console.log(
+        `[kb-vector] modo=${kb.mode} ms=${kb.vectorMs} trechos=${kb.hits ?? 0}${kb.fallback ? ` queda=${kb.fallback}` : ""}`,
+      );
+    }
   }
 
   // 4b. Orquestrador de Agentes (Lógica Gojenier com API DDM)

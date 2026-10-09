@@ -21,6 +21,7 @@ import { effectivePromptVersion } from "@/lib/ai/attempt-telemetry";
 import { isModelCompatibleWithProvider, resolveAiModel } from "@/lib/ai/models";
 import { tallyToolResult, type ToolExecutionMeta, type ToolRoundTally } from "@/lib/ai/tool-recovery";
 import { buildKnowledgeBaseContext } from "@/lib/ai/kb-context";
+import { buildAgentKnowledgeContext } from "@/lib/ai/knowledge/knowledge-context";
 import { tryDecrypt } from "@/lib/whatsapp/encryption";
 import { loadAccountSecrets, loadAccountSecretsFrom, withAccountSecretsScope } from "@/lib/ai/account-secrets";
 import { sanitizeResponseBody } from "@/lib/ai-tools/tool-request";
@@ -281,7 +282,25 @@ export function createSimulatedAi(ctx: SimContext): FlowEffects["handleAiAutoRes
           .slice(-3)
           .map((m) => m.content_text || "")
           .join("\n");
-        kbContext = buildKnowledgeBaseContext(kbForPrompt, recentCustomerText, knowledge.max_chars);
+        // Mesmo caminho da produção (RAG vetorial com queda para o modo atual); a busca real vem da rota.
+        const kb = await buildAgentKnowledgeContext({
+          accountId,
+          files: kbForPrompt,
+          query: recentCustomerText,
+          maxChars: knowledge.max_chars,
+          vector: knowledge.vector,
+          retrieve: knowledge.vector?.enabled ? ctx.knowledgeRetriever : null,
+        });
+        kbContext = kb.context;
+        if (knowledge.vector?.enabled) {
+          simNote(
+            ctx,
+            kb.mode === "vector"
+              ? `Conhecimento: busca por trechos (${kb.hits} trecho${kb.hits === 1 ? "" : "s"}, ${kb.vectorMs} ms)`
+              : `Conhecimento: modo atual (busca por trechos indisponível${kb.fallback ? `: ${kb.fallback}` : ""})`,
+            node,
+          );
+        }
       }
       systemPrompt = composeAgentPromptDetailed(
         buildPromptVersion(aiConfig.system_prompt as string | null, systemPromptOverride ?? "", hasOverride, agentRuntime),

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Database, FileText, Globe, Search, AlertCircle, Loader2, Trash2, Upload } from 'lucide-react';
+import { Database, FileText, Globe, Search, AlertCircle, Loader2, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   KB_ACCEPT,
@@ -10,7 +10,7 @@ import {
   KB_MAX_FILE_BYTES,
   formatBytes,
 } from '@/lib/ai/knowledge/limits';
-import { AgentApiError, removeKnowledgeFile, uploadKnowledgeFile } from '../api';
+import { AgentApiError, reindexKnowledgeFile, removeKnowledgeFile, uploadKnowledgeFile } from '../api';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -43,6 +43,18 @@ interface KnowledgeTabProps {
 
 const NUMBER = new Intl.NumberFormat('pt-BR');
 
+/** Situação do índice da busca por trechos, para a lista. */
+const INDEX_LABEL: Record<string, { text: string; tone: 'ok' | 'warn' | 'muted' }> = {
+  indexed: { text: 'Indexado', tone: 'ok' },
+  pending: { text: 'Indexando…', tone: 'muted' },
+  no_key: { text: 'Sem chave de IA da conta', tone: 'warn' },
+  failed: { text: 'Falha ao indexar', tone: 'warn' },
+  too_large: { text: 'Grande demais para indexar', tone: 'warn' },
+};
+function indexLabel(status: string | null | undefined) {
+  return (status && INDEX_LABEL[status]) || { text: 'Sem índice', tone: 'muted' as const };
+}
+
 export function KnowledgeTab({
   data,
   onChange,
@@ -55,6 +67,7 @@ export function KnowledgeTab({
   const [fileFilter, setFileFilter] = useState('');
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [reindexing, setReindexing] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const knowledge = data.knowledge;
@@ -90,11 +103,26 @@ export function KnowledgeTab({
       if (explicit && !selectedFileIds.has(saved.id)) {
         onChange({ knowledge: { ...knowledge, file_ids: [...knowledge.file_ids, saved.id] } });
       }
-      toast.success(`${saved.name} enviado (${NUMBER.format(saved.char_count ?? 0)} caracteres).`);
+      toast.success(`${saved.name} enviado (${NUMBER.format(saved.char_count ?? 0)} caracteres · ${indexLabel(saved.embedding_status).text.toLowerCase()}).`);
     } catch (err) {
       toast.error(err instanceof AgentApiError ? err.message : 'Não foi possível enviar o arquivo.');
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function handleReindex(file: KnowledgeBaseFileItem) {
+    setReindexing(file.id);
+    try {
+      const out = await reindexKnowledgeFile(file.id);
+      onFilesChange(kbFiles.map((f) => (f.id === file.id ? { ...f, ...out } : f)));
+      const label = indexLabel(out.embedding_status);
+      if (label.tone === 'ok') toast.success(`${file.name}: ${label.text.toLowerCase()} (${out.embedding_chunks ?? 0} trechos).`);
+      else toast.warning(`${file.name}: ${label.text.toLowerCase()}. Vale o modo atual.`);
+    } catch (err) {
+      toast.error(err instanceof AgentApiError ? err.message : 'Não foi possível reindexar o arquivo.');
+    } finally {
+      setReindexing(null);
     }
   }
 
@@ -153,6 +181,11 @@ export function KnowledgeTab({
         file_ids: [],
       },
     });
+  }
+
+  const vector = knowledge.vector;
+  function updateVector(patch: Partial<typeof vector>) {
+    onChange({ knowledge: { ...knowledge, vector: { ...vector, ...patch } } });
   }
 
   function updateRag(patch: Partial<typeof rag>) {
@@ -314,9 +347,36 @@ export function KnowledgeTab({
                       <span className="text-[11px] text-muted-foreground">
                         {formatBytes(file.size_bytes)} ·{' '}
                         {file.char_count == null ? 'caracteres: —' : `${NUMBER.format(file.char_count)} caracteres`}
+                        {vector.enabled && (
+                          <span
+                            className={
+                              indexLabel(file.embedding_status).tone === 'ok'
+                                ? 'text-emerald-600'
+                                : indexLabel(file.embedding_status).tone === 'warn'
+                                  ? 'text-amber-600'
+                                  : undefined
+                            }
+                          >
+                            {' · '}
+                            {indexLabel(file.embedding_status).text}
+                          </span>
+                        )}
                       </span>
                     </label>
                     {explicit && isChecked && <Badge variant="secondary" className="text-[10px] py-0">Selecionado</Badge>}
+                    {!readOnly && vector.enabled && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void handleReindex(file)}
+                        disabled={reindexing === file.id}
+                        aria-label={`Reindexar ${file.name}`}
+                        title="Reindexar para a busca por trechos"
+                      >
+                        {reindexing === file.id ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                      </Button>
+                    )}
                     {!readOnly && (
                       <Button
                         type="button"
@@ -369,6 +429,77 @@ export function KnowledgeTab({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Busca por trechos (RAG vetorial, TASK1-D) */}
+      <div className="rounded-lg border border-border p-5 space-y-4 max-w-2xl bg-card">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <Sparkles className="size-4 text-primary" />
+              <Label htmlFor="kb-vector-toggle" className="text-sm font-medium cursor-pointer">
+                Busca por trechos
+              </Label>
+              {vector.enabled && (
+                <Badge variant="outline" className="text-[10px] text-primary border-primary/30">
+                  Ligada
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              A cada mensagem, o agente recebe só os trechos dos arquivos mais parecidos com o que o cliente disse, em vez
+              do conhecimento inteiro. Usa a chave de IA da conta (OpenAI) e só vale quando todos os arquivos do agente
+              estão indexados; senão, sem chave ou em caso de erro, continua o modo atual (teto de caracteres).
+            </p>
+          </div>
+          <Switch
+            id="kb-vector-toggle"
+            checked={vector.enabled}
+            onCheckedChange={(checked) => updateVector({ enabled: checked })}
+            disabled={readOnly}
+          />
+        </div>
+
+        {vector.enabled && (
+          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-border animate-in fade-in-50 duration-150">
+            <div className="space-y-1.5">
+              <Label htmlFor="kb-vector-top-k" className="text-xs font-medium">
+                Trechos por mensagem (top_k)
+              </Label>
+              <Input
+                id="kb-vector-top-k"
+                type="number"
+                min={1}
+                max={20}
+                value={vector.top_k}
+                onChange={(e) => updateVector({ top_k: Math.min(20, Math.max(1, Number.parseInt(e.target.value, 10) || 1)) })}
+                disabled={readOnly}
+                className="text-xs"
+              />
+              <p className="text-[11px] text-muted-foreground">Entre 1 e 20 (padrão: 6).</p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="kb-vector-min" className="text-xs font-medium">
+                Similaridade mínima
+              </Label>
+              <Input
+                id="kb-vector-min"
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={vector.min_similarity}
+                onChange={(e) => {
+                  const v = Number.parseFloat(e.target.value);
+                  updateVector({ min_similarity: Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0 });
+                }}
+                disabled={readOnly}
+                className="text-xs"
+              />
+              <p className="text-[11px] text-muted-foreground">De 0 a 1 (padrão: 0,3). Nenhum trecho acima dela → modo atual.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 2. Bloco RAG Externo */}

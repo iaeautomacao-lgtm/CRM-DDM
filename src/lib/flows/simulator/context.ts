@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { VectorRetriever } from "@/lib/ai/knowledge/knowledge-context";
 import { simNow, type SimClock, type SimTables } from "./memory-db";
 import type { SimOutbound, SimOutboundKind, SimTimelineEvent } from "./types";
 
@@ -24,6 +25,8 @@ export interface SimContext {
    * próprio responder.
    */
   realFetch: (input: string, init?: RequestInit, options?: { failOnCrossOriginRedirect?: boolean }) => Promise<Response>;
+  /** Busca vetorial real do conhecimento (TASK1-D), só leitura; ausente = modo atual. */
+  knowledgeRetriever?: VectorRetriever | null;
   /** Contador de ids sintéticos (vai no estado). */
   seq: { value: number };
 }

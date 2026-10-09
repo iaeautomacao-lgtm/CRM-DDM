@@ -13,6 +13,7 @@ import { buildAgentTestFlow, maskAgentTestRun, summarizeAgentTestTimeline } from
 import { applyRealReadPolicy, parseSimulateRequest, SIM_MAX_BODY_CHARS } from '@/lib/flows/simulator/parse'
 import { simulateTurn } from '@/lib/flows/simulator/run'
 import { loadSimulationAccountData } from '@/lib/flows/simulator/seed'
+import { createVectorRetriever } from '@/lib/ai/knowledge/vector-store'
 import { SIM_RATE_LIMIT } from '@/lib/flows/simulator/types'
 
 /**
@@ -103,6 +104,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       flowName: `Teste do agente ${agent.name}`,
       ...accountData,
       agents: agent.seed,
+      // Busca por trechos do conhecimento (TASK1-D): só leitura, chave da conta, mesmo caminho da produção.
+      knowledgeRetriever: createVectorRetriever({ db: supabaseAdmin() }),
     })
     return NextResponse.json({
       state: result.state,
