@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { MessageTemplate } from "@/types";
+import type { Contact, MessageTemplate } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,6 +34,43 @@ interface TemplatePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (template: MessageTemplate, values: TemplateSendValues) => void;
+  /** Contato da conversa: alimenta as sugestões das variáveis (PRD 23, item 6). */
+  contact?: Pick<Contact, "id" | "name" | "instituicao"> | null;
+  /** Linhas para escolher por qual número a conversa começa (PRD 23, item 7). */
+  lineOptions?: { id: string; name: string }[];
+  lineId?: string | null;
+  onLineChange?: (lineId: string) => void;
+}
+
+interface VariableSuggestion {
+  label: string;
+  value: string;
+}
+
+/**
+ * Sugestões para preencher variáveis com dados reais do contato (PRD 23,
+ * item 6). O template não diz o que cada {{n}} significa, então nada é
+ * preenchido sozinho: o operador clica na sugestão certa. CPF fica de fora
+ * (só aparece mascarado na tela).
+ */
+export function variableSuggestions(
+  contact: Pick<Contact, "name" | "instituicao"> | null | undefined,
+  csvVars: Record<number, string>,
+): VariableSuggestion[] {
+  const out: VariableSuggestion[] = [];
+  const name = contact?.name?.trim();
+  if (name) {
+    out.push({ label: "Nome", value: name });
+    const first = name.split(/\s+/)[0];
+    if (first && first !== name) out.push({ label: "Primeiro nome", value: first });
+  }
+  const inst = contact?.instituicao?.trim();
+  if (inst) out.push({ label: "Instituição", value: inst });
+  [0, 1, 2].forEach((i) => {
+    const v = csvVars[i]?.trim();
+    if (v) out.push({ label: `VAR${i + 1}`, value: v });
+  });
+  return out;
 }
 
 function renderBodyPreview(body: string, params: string[]): string {
@@ -78,7 +115,36 @@ export function TemplatePicker({
   open,
   onOpenChange,
   onSelect,
+  contact,
+  lineOptions,
+  lineId,
+  onLineChange,
 }: TemplatePickerProps) {
+  // VAR1–VAR3 da importação mais recente do contato (migration 079; RLS da conta).
+  const [csvVars, setCsvVars] = useState<{ contactId: string; vars: Record<number, string> } | null>(null);
+  const contactId = contact?.id ?? null;
+  useEffect(() => {
+    if (!open || !contactId) return;
+    let cancelled = false;
+    void createClient()
+      .from("contact_import_variables")
+      .select("var_index, value, created_at")
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(9)
+      .then(({ data }) => {
+        if (cancelled) return;
+        const vars: Record<number, string> = {};
+        for (const row of (data ?? []) as { var_index: number; value: string }[]) {
+          if (vars[row.var_index] === undefined) vars[row.var_index] = row.value;
+        }
+        setCsvVars({ contactId, vars });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, contactId]);
+  const suggestions = variableSuggestions(contact, csvVars && csvVars.contactId === contactId ? csvVars.vars : {});
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   // True when the caller belongs to a team and team_allowed_templates
   // (migration 106) has no rows that match an APPROVED template for
@@ -249,6 +315,22 @@ export function TemplatePicker({
           </DialogDescription>
         </DialogHeader>
 
+        {lineOptions && lineOptions.length > 1 && onLineChange && (
+          <label className="flex items-center gap-2 rounded-md border border-border bg-card-2 px-3 py-2 text-[12.5px] text-foreground-2">
+            <span className="shrink-0 font-medium">Enviar pela linha</span>
+            <select
+              value={lineId ?? ""}
+              onChange={(e) => onLineChange(e.target.value)}
+              className="h-8 min-w-0 flex-1 rounded-md border border-border bg-card px-2 text-[13px] text-foreground outline-none focus:border-primary"
+            >
+              {lineOptions.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {!selected ? (
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
             {loading ? (
@@ -329,6 +411,7 @@ export function TemplatePicker({
                   placeholder="Valor para a variável do cabeçalho"
                   className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
                 />
+                <SuggestionChips items={suggestions} onPick={setHeaderText} />
               </div>
             )}
             {slots?.bodyVars.map((v, i) => (
@@ -344,6 +427,14 @@ export function TemplatePicker({
                   }}
                   placeholder={`Valor para {{${v}}}`}
                   className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
+                />
+                <SuggestionChips
+                  items={suggestions}
+                  onPick={(value) => {
+                    const next = [...params];
+                    next[i] = value;
+                    setParams(next);
+                  }}
                 />
               </div>
             ))}
@@ -403,5 +494,26 @@ export function TemplatePicker({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Sugestões clicáveis abaixo de um campo de variável (PRD 23, item 6). */
+function SuggestionChips({ items, onPick }: { items: VariableSuggestion[]; onPick: (value: string) => void }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 pt-0.5" aria-label="Sugestões com dados do contato">
+      {items.map((s) => (
+        <button
+          key={s.label}
+          type="button"
+          onClick={() => onPick(s.value)}
+          title={s.value}
+          className="inline-flex h-6 max-w-[220px] items-center gap-1 rounded-full border border-border bg-card px-2 text-[11.5px] text-foreground-2 hover:border-primary-soft-2 hover:bg-primary-soft hover:text-primary-text"
+        >
+          <span className="font-semibold">{s.label}:</span>
+          <span className="truncate">{s.value}</span>
+        </button>
+      ))}
+    </div>
   );
 }

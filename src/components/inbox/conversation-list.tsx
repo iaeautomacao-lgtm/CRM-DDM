@@ -16,6 +16,9 @@ import {
   Loader2,
   SlidersHorizontal,
   X,
+  Bell,
+  BellOff,
+  PanelLeftClose,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow } from "date-fns";
@@ -63,6 +66,11 @@ interface ConversationListProps {
   /** Opens the "Nova conversa" contact picker — omitted call sites just
    *  don't get the "+ Nova" button (it's also gated on role, see render). */
   onCreateConversation?: () => void;
+  /** Recolhe a lista no desktop (item 9 do PRD 23). */
+  onCollapse?: () => void;
+  /** Avisos de conversa em espera ligados (item 14 do PRD 23). */
+  alertsEnabled?: boolean;
+  onToggleAlerts?: () => void;
 }
 
 const STATUS_OPTIONS: { label: string; value: InboxStatus }[] = [
@@ -121,16 +129,17 @@ function readSectionPref(key: string): boolean {
 function useFilterOptions(accountId: string | null) {
   const [lines, setLines] = useState<LineOption[]>([]);
   const [agents, setAgents] = useState<NamedOption[]>([]);
-  const [teams, setTeams] = useState<NamedOption[]>([]);
+  const [teams, setTeams] = useState<(NamedOption & { color: string | null })[]>([]);
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [campaigns, setCampaigns] = useState<NamedOption[]>([]);
+  const [outcomes, setOutcomes] = useState<ClientOption[]>([]);
 
   useEffect(() => {
     if (!accountId) return;
     let cancelled = false;
     const supabase = createClient();
     (async () => {
-      const [linesRes, agentsRes, teamsRes, clientsRes, campaignsRes] = await Promise.all([
+      const [linesRes, agentsRes, teamsRes, clientsRes, campaignsRes, outcomesRes] = await Promise.all([
         apiFetch("/api/lines").then((r) => (r.ok ? r.json() : { lines: [] })).catch(() => ({ lines: [] })),
         supabase
           .from("profiles")
@@ -138,7 +147,7 @@ function useFilterOptions(accountId: string | null) {
           .eq("account_id", accountId)
           .in("account_role", ["agent", "supervisor", "admin", "owner"])
           .order("full_name"),
-        supabase.from("teams").select("id, name").eq("account_id", accountId).order("name"),
+        supabase.from("teams").select("id, name, color").eq("account_id", accountId).order("name"),
         supabase.from("clients").select("id, name, color").eq("account_id", accountId).order("name"),
         // Campanhas que podem ter originado conversas (as mais recentes).
         supabase
@@ -147,6 +156,8 @@ function useFilterOptions(accountId: string | null) {
           .eq("account_id", accountId)
           .order("created_at", { ascending: false })
           .limit(50),
+        // Tabulações (tags de desfecho) para o filtro do item 11 do PRD 23.
+        supabase.from("tags").select("id, name, color").eq("account_id", accountId).eq("kind", "outcome").order("name"),
       ]);
       if (cancelled) return;
       setLines(linesRes.lines ?? []);
@@ -156,18 +167,27 @@ function useFilterOptions(accountId: string | null) {
           name: p.full_name || p.email || "Atendente",
         }))
       );
-      setTeams((teamsRes.data ?? []) as NamedOption[]);
+      // teams.color (migration 280) pode ainda não existir no banco: sem ela,
+      // busca de novo só id/nome — o filtro de equipe nunca some por isso.
+      let teamRows = teamsRes.data as (NamedOption & { color?: string | null })[] | null;
+      if (teamsRes.error) {
+        const fallback = await supabase.from("teams").select("id, name").eq("account_id", accountId).order("name");
+        if (cancelled) return;
+        teamRows = (fallback.data ?? []) as NamedOption[];
+      }
+      setTeams((teamRows ?? []).map((t) => ({ ...t, color: t.color ?? null })));
       setClients((clientsRes.data ?? []) as ClientOption[]);
       setCampaigns(
         (campaignsRes.data ?? []).map((c: { id: string; nome: string }) => ({ id: c.id, name: c.nome }))
       );
+      setOutcomes((outcomesRes.data ?? []) as ClientOption[]);
     })();
     return () => {
       cancelled = true;
     };
   }, [accountId]);
 
-  return { lines, agents, teams, clients, campaigns };
+  return { lines, agents, teams, clients, campaigns, outcomes };
 }
 
 export function ConversationList({
@@ -177,6 +197,9 @@ export function ConversationList({
   onConversationsLoaded,
   resyncToken = 0,
   onCreateConversation,
+  onCollapse,
+  alertsEnabled,
+  onToggleAlerts,
 }: ConversationListProps) {
   const { accountRole, accountId, user } = useAuth();
   const isAgent = accountRole === "agent";
@@ -381,6 +404,7 @@ export function ConversationList({
 
   const clientsById = useMemo(() => new Map(options.clients.map((c) => [c.id, c])), [options.clients]);
   const agentsById = useMemo(() => new Map(options.agents.map((a) => [a.id, a.name])), [options.agents]);
+  const teamsById = useMemo(() => new Map(options.teams.map((t) => [t.id, t])), [options.teams]);
   const linesForTab = useMemo(
     () =>
       options.lines.filter((l) =>
@@ -428,12 +452,15 @@ export function ConversationList({
   if (filters.campanha) {
     chips.push({ key: "campanha", label: options.campaigns.find((c) => c.id === filters.campanha)?.name ?? "Campanha", remove: () => setFilters({ campanha: null }) });
   }
+  if (filters.tabulacao) {
+    chips.push({ key: "tabulacao", label: options.outcomes.find((o) => o.id === filters.tabulacao)?.name ?? "Tabulação", remove: () => setFilters({ tabulacao: null }) });
+  }
   const activeFilterCount = chips.length;
   const clearFilters = () =>
-    setFilters({ canal: null, status: "active", atendente: activeTab === null ? null : filters.atendente, linha: null, equipe: null, cliente: null, campanha: null });
+    setFilters({ canal: null, status: "active", atendente: activeTab === null ? null : filters.atendente, linha: null, equipe: null, cliente: null, campanha: null, tabulacao: null });
   const clearAll = () => {
     setSearchDraft("");
-    setFilters({ q: "", canal: null, status: "active", atendente: null, linha: null, equipe: null, cliente: null, campanha: null });
+    setFilters({ q: "", canal: null, status: "active", atendente: null, linha: null, equipe: null, cliente: null, campanha: null, tabulacao: null });
   };
 
   const renderItems = (items: Conversation[]) => (
@@ -451,6 +478,7 @@ export function ConversationList({
               : null
           }
           showStatus={!grouped}
+          team={conv.team_id ? teamsById.get(conv.team_id) ?? null : null}
         />
       ))}
     </div>
@@ -487,7 +515,8 @@ export function ConversationList({
     // três linhas (contato · prévia · cliente/canal/atendente).
     <section aria-label="Lista de conversas" className="flex h-full w-full flex-col border-r border-border bg-card lg:w-[288px] xl:w-[320px]">
       <div className="flex flex-col gap-2.5 border-b border-border px-3.5 pb-2.5 pt-3.5">
-        <div className="flex gap-0.5 rounded-lg bg-card-2 p-[3px]" role="tablist" aria-label="Fila">
+        <div className="flex items-center gap-1.5">
+        <div className="flex flex-1 gap-0.5 rounded-lg bg-card-2 p-[3px]" role="tablist" aria-label="Fila">
           {tabs.map((tab) => {
             const on = activeTab === tab.id;
             const count = tabTotals[tab.id];
@@ -520,6 +549,33 @@ export function ConversationList({
               </button>
             );
           })}
+        </div>
+          {onToggleAlerts && (
+            <button
+              type="button"
+              onClick={onToggleAlerts}
+              aria-pressed={!!alertsEnabled}
+              aria-label={alertsEnabled ? "Desligar avisos de conversa em espera" : "Ligar avisos de conversa em espera"}
+              title={alertsEnabled ? "Avisos de conversa em espera: ligados" : "Avisos de conversa em espera: desligados"}
+              className={cn(
+                "flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-surface-hover",
+                alertsEnabled ? "text-primary-text" : "text-muted-foreground",
+              )}
+            >
+              {alertsEnabled ? <Bell className="size-4" aria-hidden="true" /> : <BellOff className="size-4" aria-hidden="true" />}
+            </button>
+          )}
+          {onCollapse && (
+            <button
+              type="button"
+              onClick={onCollapse}
+              aria-label="Recolher lista de conversas"
+              title="Recolher lista (mais espaço para a conversa)"
+              className="hidden size-[30px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground lg:flex"
+            >
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            </button>
+          )}
         </div>
 
         <div className="flex gap-2">
@@ -646,6 +702,17 @@ export function ConversationList({
                     value={filters.campanha}
                     onChange={(v) => setFilters({ campanha: v })}
                     allLabel="Todas as campanhas"
+                  />
+                )}
+                {options.outcomes.length > 0 && (
+                  <FilterMenu
+                    title="Tabulação"
+                    label={options.outcomes.find((o) => o.id === filters.tabulacao)?.name ?? "Todas"}
+                    options={options.outcomes}
+                    value={filters.tabulacao}
+                    // Tabulação só existe em conversa encerrada (item 11 do PRD 23).
+                    onChange={(v) => setFilters(v ? { tabulacao: v, status: "closed" } : { tabulacao: null })}
+                    allLabel="Todas as tabulações"
                   />
                 )}
               </div>
@@ -865,6 +932,8 @@ interface ConversationItemProps {
   assigneeName: string | null;
   /** Mostra o selo da fila no item (lista sem seções — item 15 do PRD 23). */
   showStatus: boolean;
+  /** Equipe da conversa: a cor dela marca o avatar (item 12 do PRD 23). */
+  team: { name: string; color: string | null } | null;
 }
 
 /** Minutos que o cliente espera sem atendente (null se não está esperando). */
@@ -904,7 +973,7 @@ const QUEUE_DOT: Record<string, string> = {
   closed: "bg-muted-foreground",
 };
 
-function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus }: ConversationItemProps) {
+function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus, team }: ConversationItemProps) {
   const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Desconhecido";
@@ -939,6 +1008,9 @@ function ConversationItem({ conversation, isActive, onSelect, client, assigneeNa
       <span
         className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-[12.5px] font-semibold text-foreground-2"
         aria-hidden="true"
+        title={team?.color ? `Equipe: ${team.name}` : undefined}
+        // Anel na cor da equipe (paleta fechada da migration 280).
+        style={team?.color ? { boxShadow: `0 0 0 2px var(--card), 0 0 0 4px ${team.color}` } : undefined}
       >
         {contact?.avatar_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -1006,6 +1078,7 @@ function ConversationItem({ conversation, isActive, onSelect, client, assigneeNa
             </>
           )}
           <span className="shrink-0">{channelLabel}</span>
+          {team && <span className="sr-only">Equipe: {team.name}.</span>}
           {assigneeName && (
             <>
               <span aria-hidden="true">·</span>

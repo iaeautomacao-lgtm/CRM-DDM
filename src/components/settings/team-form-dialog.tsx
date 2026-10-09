@@ -45,6 +45,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import type { AccountMember, Team } from '@/types';
+import { TEAM_COLORS } from '@/lib/teams/palette';
+import { cn } from '@/lib/utils';
+
+// Nome de cada cor da paleta (leitor de tela e dica), na ordem de TEAM_COLORS.
+const TEAM_COLOR_NAMES: Record<string, string> = {
+  '#ef4444': 'Vermelho',
+  '#f97316': 'Laranja',
+  '#eab308': 'Amarelo',
+  '#22c55e': 'Verde',
+  '#14b8a6': 'Turquesa',
+  '#3b82f6': 'Azul',
+  '#6366f1': 'Índigo',
+  '#a855f7': 'Roxo',
+  '#ec4899': 'Rosa',
+  '#64748b': 'Cinza',
+};
 
 // Base UI's Select needs a real string value — there's no "no
 // selection" affordance, so an explicit sentinel stands in for
@@ -56,12 +72,15 @@ interface TeamFormState {
   /** Raw input text — parsed/validated on save, not on keystroke. */
   sessionTimeoutMinutes: string;
   overflowTeamId: string;
+  /** Cor da equipe (paleta fechada, migration 280); null = sem cor. */
+  color: string | null;
 }
 
 const EMPTY_FORM: TeamFormState = {
   name: '',
   sessionTimeoutMinutes: '',
   overflowTeamId: NO_OVERFLOW,
+  color: null,
 };
 
 export interface TeamFormDialogProps {
@@ -104,6 +123,7 @@ export function TeamFormDialog({
                 ? String(team.session_timeout_minutes)
                 : '',
             overflowTeamId: team.overflow_team_id ?? NO_OVERFLOW,
+            color: team.color ?? null,
           }
         : EMPTY_FORM,
     );
@@ -243,6 +263,9 @@ export function TeamFormDialog({
     }
 
     const overflowTeamId = form.overflowTeamId === NO_OVERFLOW ? null : form.overflowTeamId;
+    // Cor só vai quando muda: se a migration 280 ainda não foi aplicada, o
+    // resto do cadastro continua salvando normalmente.
+    const colorPatch = form.color !== (team?.color ?? null) ? { color: form.color } : {};
 
     setSaving(true);
     try {
@@ -253,6 +276,7 @@ export function TeamFormDialog({
             name: trimmedName,
             session_timeout_minutes: sessionTimeoutMinutes,
             overflow_team_id: overflowTeamId,
+            ...colorPatch,
           })
           .eq('id', team.id);
         if (error) throw error;
@@ -268,6 +292,7 @@ export function TeamFormDialog({
             name: trimmedName,
             session_timeout_minutes: sessionTimeoutMinutes,
             overflow_team_id: overflowTeamId,
+            ...colorPatch,
           })
           .select('id')
           .single();
@@ -315,6 +340,46 @@ export function TeamFormDialog({
               maxLength={80}
               disabled={saving}
             />
+          </div>
+
+          {/* Cor da equipe (PRD 23, item 12): marca as conversas dela na
+              lista do Inbox. Paleta fechada — o banco só aceita estas. */}
+          <div className="space-y-2">
+            <Label id="team-color-label">
+              Cor <span className="text-xs text-muted-foreground">(marca as conversas no Inbox)</span>
+            </Label>
+            <div role="radiogroup" aria-labelledby="team-color-label" className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={form.color === null}
+                onClick={() => setForm((f) => ({ ...f, color: null }))}
+                disabled={saving}
+                className={cn(
+                  "h-7 rounded-full border px-2.5 text-xs",
+                  form.color === null ? "border-primary text-primary-text" : "border-border text-muted-foreground hover:bg-surface-hover",
+                )}
+              >
+                Sem cor
+              </button>
+              {TEAM_COLORS.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.color === c}
+                  aria-label={TEAM_COLOR_NAMES[c] ?? c}
+                  title={TEAM_COLOR_NAMES[c] ?? c}
+                  onClick={() => setForm((f) => ({ ...f, color: c }))}
+                  disabled={saving}
+                  className="size-7 rounded-full transition-transform hover:scale-110"
+                  style={{
+                    backgroundColor: c,
+                    boxShadow: form.color === c ? `0 0 0 2px var(--popover), 0 0 0 4px ${c}` : undefined,
+                  }}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="space-y-2">
