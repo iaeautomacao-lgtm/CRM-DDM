@@ -10,15 +10,15 @@ import {
   Pencil,
   Loader2,
   MessageSquare,
-  PlayCircle,
-  PauseCircle,
-  Archive,
   HelpCircle,
   UserPlus,
   FileText,
   Copy,
   Download,
   Upload,
+  Search,
+  History,
+  ChevronRight,
 } from "lucide-react";
 
 import { usePermission } from "@/hooks/use-permission";
@@ -34,8 +34,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { formatDistanceToNow } from "date-fns";
+import { ptBR } from "date-fns/locale";
+import { CountUp } from "@/components/motion/count-up";
+import { KpiStrip } from "@/components/ddm/kpi-strip";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { Segmented } from "@/components/ddm/segmented";
+import { StatusChip } from "@/components/ddm/status-chip";
+import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
+import { DetailDrawer } from "@/components/ddm/list-with-drawer";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/dashboard/error-state";
 
 /**
  * Flows list page.
@@ -64,12 +73,6 @@ const STATUS_LABELS: Record<FlowRow["status"], string> = {
   archived: "Arquivado",
 };
 
-const STATUS_COLORS: Record<FlowRow["status"], string> = {
-  draft: "border-border bg-muted text-muted-foreground",
-  active: "border-emerald-600/40 bg-emerald-500/10 text-emerald-300",
-  archived: "border-border bg-muted/50 text-muted-foreground",
-};
-
 interface TemplateSummary {
   slug: string;
   name: string;
@@ -96,6 +99,11 @@ export default function FlowsPage() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | FlowRow["status"]>("all");
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,7 +129,7 @@ export default function FlowsPage() {
       } catch (err) {
         if (!cancelled) {
           console.error(err);
-          toast.error("Não foi possível carregar os fluxos.");
+          setLoadError(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -130,7 +138,7 @@ export default function FlowsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -295,81 +303,241 @@ export default function FlowsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  const counts = {
+    all: flows.length,
+    active: flows.filter((f) => f.status === "active").length,
+    draft: flows.filter((f) => f.status === "draft").length,
+    archived: flows.filter((f) => f.status === "archived").length,
+  };
+  const totalExecutions = flows.reduce((sum, f) => sum + (f.execution_count ?? 0), 0);
+  const q = search.trim().toLowerCase();
+  const visibleFlows = flows.filter(
+    (f) =>
+      (statusFilter === "all" || f.status === statusFilter) &&
+      (!q || `${f.name} ${f.description ?? ""} ${describeTrigger(f)}`.toLowerCase().includes(q)),
+  );
+  const detailFlow = detailId ? flows.find((f) => f.id === detailId) ?? null : null;
 
   return (
-    <div className="space-y-6 p-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold text-foreground">Fluxos</h1>
-            <span className="inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-300">
-              Beta
-            </span>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Crie conversas ramificadas e orientadas por botões no WhatsApp.
-            Ideal para menus, FAQs e triagem antes do atendimento humano.
-          </p>
-        </div>
+    <PageBody>
+      <div className="flex flex-col gap-1.5 pt-1">
         <div className="flex items-center gap-2">
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".json"
-            className="hidden"
-            onChange={handleImportFile}
-          />
-          <GatedButton
-            variant="outline"
-            canAct={canCreate}
-            gateReason="import flows"
-            disabled={importing}
-            onClick={() => importInputRef.current?.click()}
-          >
-            {importing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="h-4 w-4" />
-            )}
-            Importar fluxo
-          </GatedButton>
-          <GatedButton
-            canAct={canCreate}
-            gateReason="create flows"
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus className="h-4 w-4" />
-            Novo fluxo
-          </GatedButton>
+          <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Fluxos</h2>
+          <StatusChip tone="warn">Beta</StatusChip>
         </div>
-      </header>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+          Conversas ramificadas e orientadas por botões no WhatsApp — menus, FAQs e triagem antes do atendimento humano.
+        </p>
+      </div>
 
-      {flows.length === 0 ? (
-        <EmptyState
-          onCreate={() => setCreateOpen(true)}
-          canCreate={canCreate}
+      {!loading && flows.length > 0 && (
+        <KpiStrip
+          ariaLabel="Resumo dos fluxos"
+          items={[
+            { label: "Fluxos", value: <CountUp value={counts.all} /> },
+            { label: "Ativos", value: <CountUp value={counts.active} className="text-success" />, note: `de ${counts.all}` },
+            { label: "Rascunhos", value: <CountUp value={counts.draft} /> },
+            {
+              label: "Execuções",
+              value: <CountUp value={totalExecutions} />,
+              info: "Total de execuções registradas em todos os fluxos desde a criação de cada um.",
+            },
+          ]}
         />
-      ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {flows.map((flow) => (
-            <FlowCard
-              key={flow.id}
-              flow={flow}
-              onEdit={() => router.push(`/flows/${flow.id}`)}
-              onExport={() => handleExport(flow)}
-              onDuplicate={canCreate ? () => handleDuplicate(flow) : undefined}
-              onDelete={() => handleDelete(flow)}
-            />
-          ))}
-        </div>
       )}
+
+      <PageToolbar
+        actions={
+          <>
+            <input ref={importInputRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
+            <GatedButton
+              variant="outline"
+              canAct={canCreate}
+              gateReason="import flows"
+              disabled={importing}
+              onClick={() => importInputRef.current?.click()}
+            >
+              {importing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+              Importar fluxo
+            </GatedButton>
+            <GatedButton canAct={canCreate} gateReason="create flows" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-3.5" />
+              Novo fluxo
+            </GatedButton>
+          </>
+        }
+      >
+        <label className="relative flex min-w-0 flex-[1_1_240px] items-center sm:max-w-[360px]">
+          <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar fluxo"
+            aria-label="Buscar fluxos"
+            className="h-[34px] w-full rounded-md border border-border bg-card pl-[34px] pr-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
+          />
+        </label>
+        <Segmented
+          ariaLabel="Filtrar por status"
+          size="lg"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={[
+            { value: "all", label: "Todos", count: counts.all },
+            { value: "active", label: "Ativos", count: counts.active },
+            { value: "draft", label: "Rascunhos", count: counts.draft },
+            { value: "archived", label: "Arquivados", count: counts.archived },
+          ]}
+        />
+      </PageToolbar>
+
+      {loading ? (
+        <TableCard label="Fluxos">
+          <div className="flex flex-col" aria-busy="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 border-b border-border px-[18px] py-3.5" aria-hidden="true">
+                <Skeleton className="size-[30px] rounded-full" />
+                <Skeleton className="h-3 w-48" />
+                <Skeleton className="ml-auto h-5 w-20 rounded-full" />
+              </div>
+            ))}
+          </div>
+        </TableCard>
+      ) : loadError ? (
+        <ErrorState
+          title="Não foi possível carregar os fluxos"
+          onRetry={() => {
+            setLoadError(false);
+            setLoading(true);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      ) : flows.length === 0 ? (
+        <EmptyState onCreate={() => setCreateOpen(true)} canCreate={canCreate} />
+      ) : (
+        <TableCard label="Fluxos">
+          {visibleFlows.length === 0 ? (
+            <div className="flex animate-ddm-fade flex-col items-center gap-1.5 px-4 py-12 text-center">
+              <p className="text-[13.5px] font-semibold text-foreground">Nada encontrado</p>
+              <p className="text-[12.5px] text-muted-foreground">Ajuste a busca ou o filtro.</p>
+            </div>
+          ) : (
+            <DenseTable>
+              <thead>
+                <tr>
+                  <Th>Fluxo</Th>
+                  <Th>Status</Th>
+                  <Th className="hidden lg:table-cell">Gatilho</Th>
+                  <Th className="hidden md:table-cell" align="right">Execuções</Th>
+                  <Th className="hidden xl:table-cell">Última execução</Th>
+                  <Th className="hidden xl:table-cell">Atualizado</Th>
+                  <Th className="w-11" />
+                </tr>
+              </thead>
+              <tbody className="ddm-stagger">
+                {visibleFlows.map((flow) => (
+                  <Tr key={flow.id} onClick={() => setDetailId(flow.id)} className="cursor-pointer">
+                    <Td className="max-w-[360px]">
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary-text" aria-hidden="true">
+                          <Workflow className="size-3.5" />
+                        </span>
+                        <CellMain title={flow.name} sub={flow.description || undefined} />
+                      </span>
+                    </Td>
+                    <Td>
+                      <StatusChip tone={STATUS_TONE[flow.status]} dot>
+                        {STATUS_LABELS[flow.status]}
+                      </StatusChip>
+                    </Td>
+                    <Td className="hidden max-w-[280px] truncate text-foreground-2 lg:table-cell">{describeTrigger(flow)}</Td>
+                    <Td className="hidden md:table-cell" align="right">
+                      {(flow.execution_count ?? 0).toLocaleString("pt-BR")}
+                    </Td>
+                    <Td className="hidden whitespace-nowrap text-muted-foreground xl:table-cell">
+                      {flow.last_executed_at ? relativeTime(flow.last_executed_at) : "—"}
+                    </Td>
+                    <Td className="hidden whitespace-nowrap text-muted-foreground xl:table-cell">{relativeTime(flow.updated_at)}</Td>
+                    <Td className="pr-2 text-right text-muted-foreground">
+                      <ChevronRight className="ml-auto size-4" aria-hidden="true" />
+                    </Td>
+                  </Tr>
+                ))}
+              </tbody>
+            </DenseTable>
+          )}
+        </TableCard>
+      )}
+
+      {/* Gaveta de detalhe (primitivo DetailDrawer). */}
+      <DetailDrawer
+        open={detailFlow !== null}
+        onOpenChange={(open) => !open && setDetailId(null)}
+        title={detailFlow?.name ?? ""}
+        description={detailFlow?.description || "Fluxo"}
+        headerExtra={
+          detailFlow ? (
+            <StatusChip tone={STATUS_TONE[detailFlow.status]} dot>
+              {STATUS_LABELS[detailFlow.status]}
+            </StatusChip>
+          ) : undefined
+        }
+        footer={
+          detailFlow ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                variant="ghost"
+                className="mr-auto text-danger hover:bg-danger-soft hover:text-danger"
+                onClick={() => {
+                  setDetailId(null);
+                  void handleDelete(detailFlow);
+                }}
+              >
+                <Trash2 className="size-3.5" />
+                Excluir
+              </Button>
+              <Button variant="outline" onClick={() => router.push(`/flows/${detailFlow.id}/runs`)}>
+                <History className="size-3.5" />
+                Execuções
+              </Button>
+              <Button onClick={() => router.push(`/flows/${detailFlow.id}`)}>
+                <Pencil className="size-3.5" />
+                Abrir editor
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {detailFlow && (
+          <div className="flex flex-col gap-4">
+            <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-[13px]">
+              <dt className="text-muted-foreground">Gatilho</dt>
+              <dd className="text-foreground">{describeTrigger(detailFlow)}</dd>
+              <dt className="text-muted-foreground">Execuções</dt>
+              <dd className="tabular-nums text-foreground">{(detailFlow.execution_count ?? 0).toLocaleString("pt-BR")}</dd>
+              <dt className="text-muted-foreground">Última execução</dt>
+              <dd className="text-foreground">{detailFlow.last_executed_at ? relativeTime(detailFlow.last_executed_at) : "—"}</dd>
+              <dt className="text-muted-foreground">Criado</dt>
+              <dd className="text-foreground">{relativeTime(detailFlow.created_at)}</dd>
+              <dt className="text-muted-foreground">Atualizado</dt>
+              <dd className="text-foreground">{relativeTime(detailFlow.updated_at)}</dd>
+            </dl>
+            <div className="flex flex-wrap gap-2 border-t border-border pt-4">
+              {canCreate && (
+                <Button variant="outline" size="sm" onClick={() => void handleDuplicate(detailFlow)}>
+                  <Copy className="size-3.5" />
+                  Duplicar
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => void handleExport(detailFlow)}>
+                <Download className="size-3.5" />
+                Exportar JSON
+              </Button>
+            </div>
+          </div>
+        )}
+      </DetailDrawer>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         {/* `sm:max-w-4xl` not `max-w-4xl` — shadcn's DialogContent has
@@ -447,7 +615,7 @@ export default function FlowsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }
 
@@ -484,86 +652,6 @@ function EmptyState({
   );
 }
 
-function FlowCard({
-  flow,
-  onEdit,
-  onExport,
-  onDuplicate,
-  onDelete,
-}: {
-  flow: FlowRow;
-  onEdit: () => void;
-  onExport: () => void;
-  onDuplicate?: () => void;
-  onDelete: () => void;
-}) {
-  const triggerSummary = describeTrigger(flow);
-  const StatusIcon =
-    flow.status === "active"
-      ? PlayCircle
-      : flow.status === "archived"
-        ? Archive
-        : PauseCircle;
-  return (
-    <div className="flex flex-col rounded-lg border border-border bg-card p-4 transition-colors hover:border-border">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Workflow className="h-4 w-4 shrink-0 text-primary" />
-          <h3 className="truncate text-sm font-semibold text-foreground">
-            {flow.name}
-          </h3>
-        </div>
-        <Badge
-          variant="outline"
-          className={cn(
-            "shrink-0 gap-1 text-[10px]",
-            STATUS_COLORS[flow.status],
-          )}
-        >
-          <StatusIcon className="h-3 w-3" />
-          {STATUS_LABELS[flow.status]}
-        </Badge>
-      </div>
-
-      <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
-        {flow.description || triggerSummary}
-      </p>
-
-      <div className="mt-4 flex items-center gap-3 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1">
-          <MessageSquare className="h-3 w-3" />
-          {flow.execution_count} {flow.execution_count === 1 ? "execução" : "execuções"}
-        </span>
-      </div>
-
-      <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-3">
-        <Button variant="ghost" size="sm" onClick={onEdit}>
-          <Pencil className="h-3.5 w-3.5" />
-          Editar
-        </Button>
-        {onDuplicate && (
-          <Button variant="ghost" size="sm" onClick={onDuplicate}>
-            <Copy className="h-3.5 w-3.5" />
-            Duplicar
-          </Button>
-        )}
-        <Button variant="ghost" size="sm" onClick={onExport}>
-          <Download className="h-3.5 w-3.5" />
-          Exportar
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDelete}
-          className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Excluir
-        </Button>
-      </div>
-    </div>
-  );
-}
 
 function describeTrigger(flow: FlowRow): string {
   if (flow.trigger_type === "keyword") {
@@ -578,4 +666,15 @@ function describeTrigger(flow: FlowRow): string {
   }
   if ((flow.trigger_type as string) === "called_by_flow") return "Chamado por outro fluxo";
   return "Disparo manual";
+}
+
+const STATUS_TONE: Record<FlowRow["status"], "ok" | "mute"> = {
+  active: "ok",
+  draft: "mute",
+  archived: "mute",
+};
+
+/** "há 3 dias", "agora" — tempo relativo em pt-BR. */
+function relativeTime(iso: string): string {
+  return formatDistanceToNow(new Date(iso), { addSuffix: true, locale: ptBR });
 }

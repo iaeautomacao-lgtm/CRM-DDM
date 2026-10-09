@@ -5,6 +5,8 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import { formatDistanceToNow } from "date-fns"
+import { ptBR } from "date-fns/locale"
 import {
   Zap,
   Plus,
@@ -26,6 +28,7 @@ import type { Automation } from "@/types"
 import { Button } from "@/components/ui/button"
 import { GatedButton } from "@/components/ui/gated-button"
 import { Switch } from "@/components/ui/switch"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,9 +44,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { CountUp } from "@/components/motion/count-up"
+import { KpiStrip } from "@/components/ddm/kpi-strip"
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar"
+import { Segmented } from "@/components/ddm/segmented"
+import { StatusChip } from "@/components/ddm/status-chip"
+import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card"
+import { ErrorState } from "@/components/dashboard/error-state"
 import { AUTOMATION_TEMPLATES, type TemplateSlug } from "@/lib/automations/templates"
-import { triggerMeta, formatRelative } from "@/lib/automations/trigger-meta"
-import { cn } from "@/lib/utils"
+import { triggerMeta } from "@/lib/automations/trigger-meta"
+import { PipelineAutomations } from "@/components/automations/pipeline-automations"
 
 const TEMPLATE_ORDER: TemplateSlug[] = [
   "welcome_message",
@@ -58,8 +68,6 @@ const TEMPLATE_ICON: Record<TemplateSlug, typeof Zap> = {
   lead_qualifier: Users,
   follow_up_reminder: PhoneCall,
 }
-
-import { PipelineAutomations } from "@/components/automations/pipeline-automations"
 
 export default function AutomationsPage() {
   const router = useRouter()
@@ -141,99 +149,90 @@ export default function AutomationsPage() {
     router.push(`/automations/new?template=${slug}`)
   }
 
-  if (error) {
-    return (
-      <div className="flex h-64 flex-col items-center justify-center gap-2">
-        <p className="text-sm text-red-400">{error}</p>
-        <Button variant="outline" onClick={() => window.location.reload()}>
-          Tentar novamente
-        </Button>
-      </div>
-    )
-  }
-
-  if (automations === null) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      </div>
-    )
-  }
-
-  const showTemplates = automations.length < 3
+  const list = automations ?? []
+  const activeCount = list.filter((a) => a.is_active).length
+  const totalExecutions = list.reduce((sum, a) => sum + (a.execution_count ?? 0), 0)
+  const showTemplates = automations !== null && list.length < 3
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Automações</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Crie fluxos automáticos e configure o envelhecimento de cartões do CRM.
-          </p>
-        </div>
-        {activeTab === "chat" && (
-          <GatedButton
-            canAct={canCreate}
-            gateReason="criar automações"
-            onClick={() => router.push("/automations/new")}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 self-start sm:self-auto"
-          >
-            <Plus className="h-4 w-4" />
-            Criar Automação
-          </GatedButton>
-        )}
+    <PageBody>
+      <div className="flex flex-col gap-1.5 pt-1">
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Automações</h2>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+          Crie fluxos automáticos e configure o envelhecimento de cartões do CRM.
+        </p>
       </div>
 
-      {/* Tabs selector */}
-      <div className="flex border-b border-border">
-        <button
-          type="button"
-          onClick={() => setActiveTab("chat")}
-          className={cn(
-            "border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors",
-            activeTab === "chat"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-        >
-          Automações de Chat
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("pipeline")}
-          className={cn(
-            "border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors",
-            activeTab === "pipeline"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          )}
-        >
-          Automações de Pipeline (CRM)
-        </button>
-      </div>
+      <PageToolbar
+        actions={
+          activeTab === "chat" ? (
+            <GatedButton canAct={canCreate} gateReason="criar automações" onClick={() => router.push("/automations/new")}>
+              <Plus className="size-3.5" />
+              Criar automação
+            </GatedButton>
+          ) : undefined
+        }
+      >
+        <Segmented
+          ariaLabel="Tipo de automação"
+          size="lg"
+          value={activeTab}
+          onChange={setActiveTab}
+          options={[
+            { value: "chat", label: "Automações de Chat", count: automations ? list.length : undefined },
+            { value: "pipeline", label: "Automações de Pipeline (CRM)" },
+          ]}
+        />
+      </PageToolbar>
 
       {activeTab === "pipeline" ? (
         <PipelineAutomations />
+      ) : error ? (
+        <ErrorState
+          title="Não foi possível carregar as automações"
+          hint={error}
+          onRetry={() => {
+            setError(null)
+            setAutomations(null)
+            void load()
+          }}
+        />
       ) : (
         <>
+          {automations !== null && list.length > 0 && (
+            <KpiStrip
+              ariaLabel="Resumo das automações"
+              items={[
+                { label: "Automações", value: <CountUp value={list.length} /> },
+                { label: "Ativas", value: <CountUp value={activeCount} className="text-success" />, note: `de ${list.length}` },
+                {
+                  label: "Execuções",
+                  value: <CountUp value={totalExecutions} />,
+                  info: "Total de execuções registradas por automação desde a criação.",
+                },
+              ]}
+            />
+          )}
+
           {showTemplates && (
-            <section>
-              <h2 className="mb-3 text-sm font-semibold text-muted-foreground">Modelos para começar rápido</h2>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <section aria-label="Modelos para começar rápido" className="flex flex-col gap-2.5">
+              <h3 className="text-[13px] font-semibold text-foreground-2">Modelos para começar rápido</h3>
+              <div className="ddm-stagger grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                 {TEMPLATE_ORDER.map((slug) => {
                   const t = AUTOMATION_TEMPLATES[slug]
                   const Icon = TEMPLATE_ICON[slug]
                   return (
                     <button
                       key={slug}
+                      type="button"
                       onClick={() => startFromTemplate(slug)}
-                      className="group flex flex-col items-start rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/50 hover:bg-card/80"
+                      className="group flex flex-col items-start gap-2 rounded-[10px] border border-border bg-card p-4 text-left transition-[border-color,box-shadow,transform] duration-200 ease-ddm hover:-translate-y-0.5 hover:border-primary hover:shadow-overlay"
                     >
-                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary group-hover:bg-primary/15">
-                        <Icon className="h-5 w-5" />
-                      </div>
-                      <div className="text-sm font-semibold text-foreground">{t.name}</div>
-                      <p className="mt-1 text-xs text-muted-foreground">{t.description}</p>
+                      <span className="flex size-9 items-center justify-center rounded-lg bg-primary-soft text-primary-text">
+                        <Icon className="size-[18px]" aria-hidden="true" />
+                      </span>
+                      <span className="text-[13.5px] font-semibold text-foreground">{t.name}</span>
+                      <span className="text-xs leading-relaxed text-muted-foreground">{t.description}</span>
                     </button>
                   )
                 })}
@@ -241,31 +240,106 @@ export default function AutomationsPage() {
             </section>
           )}
 
-          {automations.length === 0 ? (
-            <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                <Zap className="h-6 w-6 text-primary" />
+          <TableCard label="Automações de chat">
+            {automations === null ? (
+              <div className="flex flex-col" aria-busy="true">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3 border-b border-border px-[18px] py-3.5" aria-hidden="true">
+                    <Skeleton className="size-[30px] rounded-full" />
+                    <Skeleton className="h-3 w-48" />
+                    <Skeleton className="ml-auto h-5 w-9 rounded-full" />
+                  </div>
+                ))}
               </div>
-              <p className="mt-3 text-sm font-medium text-foreground">Nenhuma automação ainda</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Escolha um modelo acima ou crie uma do zero.
-              </p>
-            </div>
-          ) : (
-            <ul className="space-y-3">
-              {automations.map((a) => (
-                <AutomationCard
-                  key={a.id}
-                  automation={a}
-                  onToggle={(next) => toggleActive(a, next)}
-                  onEdit={() => router.push(`/automations/${a.id}/edit`)}
-                  onDuplicate={() => duplicate(a)}
-                  onLogs={() => router.push(`/automations/${a.id}/logs`)}
-                  onDelete={() => setPendingDelete(a)}
-                />
-              ))}
-            </ul>
-          )}
+            ) : list.length === 0 ? (
+              <div className="flex animate-ddm-fade flex-col items-center gap-1.5 px-4 py-12 text-center">
+                <Zap className="size-5 text-muted-foreground" aria-hidden="true" />
+                <p className="text-[13.5px] font-semibold text-foreground">Nenhuma automação ainda</p>
+                <p className="text-[12.5px] text-muted-foreground">Escolha um modelo acima ou crie uma do zero.</p>
+              </div>
+            ) : (
+              <DenseTable>
+                <thead>
+                  <tr>
+                    <Th>Automação</Th>
+                    <Th className="hidden md:table-cell">Gatilho</Th>
+                    <Th className="hidden lg:table-cell" align="right">Execuções</Th>
+                    <Th className="hidden xl:table-cell">Última execução</Th>
+                    <Th>Ativa</Th>
+                    <Th className="w-11" />
+                  </tr>
+                </thead>
+                <tbody className="ddm-stagger">
+                  {list.map((a) => (
+                    <Tr key={a.id} onClick={() => router.push(`/automations/${a.id}/edit`)} className="cursor-pointer">
+                      <Td className="max-w-[360px]">
+                        <span className="flex min-w-0 items-center gap-2.5">
+                          <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-primary-soft text-primary-text" aria-hidden="true">
+                            <Zap className="size-3.5" />
+                          </span>
+                          <CellMain title={a.name} sub={a.description || undefined} />
+                        </span>
+                      </Td>
+                      <Td className="hidden md:table-cell">
+                        <StatusChip tone="info">{triggerMeta(a.trigger_type).label}</StatusChip>
+                      </Td>
+                      <Td className="hidden tabular-nums lg:table-cell" align="right">
+                        {(a.execution_count ?? 0).toLocaleString("pt-BR")}
+                      </Td>
+                      <Td className="hidden whitespace-nowrap text-muted-foreground xl:table-cell">
+                        {a.last_executed_at
+                          ? formatDistanceToNow(new Date(a.last_executed_at), { addSuffix: true, locale: ptBR })
+                          : "nunca"}
+                      </Td>
+                      <Td onClick={(e) => e.stopPropagation()}>
+                        <Switch
+                          checked={a.is_active}
+                          onCheckedChange={(v) => toggleActive(a, !!v)}
+                          disabled={!canCreate}
+                          aria-label={`${a.is_active ? "Desativar" : "Ativar"} ${a.name}`}
+                        />
+                      </Td>
+                      <Td className="pr-2 text-right" onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            aria-label={`Ações de ${a.name}`}
+                            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground data-[popup-open]:bg-surface-hover"
+                          >
+                            <MoreVertical className="size-4" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => router.push(`/automations/${a.id}/edit`)}>
+                              <Pencil className="size-4" />
+                              Editar
+                            </DropdownMenuItem>
+                            {canCreate && (
+                              <DropdownMenuItem onClick={() => duplicate(a)}>
+                                <Copy className="size-4" />
+                                Duplicar
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onClick={() => router.push(`/automations/${a.id}/logs`)}>
+                              <FileText className="size-4" />
+                              Ver Logs
+                            </DropdownMenuItem>
+                            {canCreate && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem variant="destructive" onClick={() => setPendingDelete(a)}>
+                                  <Trash2 className="size-4" />
+                                  Excluir
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </DenseTable>
+            )}
+          </TableCard>
         </>
       )}
 
@@ -280,126 +354,16 @@ export default function AutomationsPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setPendingDelete(null)}
-              disabled={deleting}
-            >
+            <Button variant="ghost" onClick={() => setPendingDelete(null)} disabled={deleting}>
               Cancelar
             </Button>
-            <Button
-              variant="destructive"
-              onClick={confirmDelete}
-              disabled={deleting}
-            >
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
               Excluir
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-function AutomationCard({
-  automation,
-  onToggle,
-  onEdit,
-  onDuplicate,
-  onLogs,
-  onDelete,
-}: {
-  automation: Automation
-  onToggle: (next: boolean) => void
-  onEdit: () => void
-  onDuplicate: () => void
-  onLogs: () => void
-  onDelete: () => void
-}) {
-  const meta = triggerMeta(automation.trigger_type)
-  return (
-    <li className="rounded-xl border border-border bg-card transition-colors hover:border-border">
-      <div className="flex items-center gap-4 p-4">
-        <div
-          className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-primary/10"
-          aria-hidden
-        >
-          <Zap className="h-5 w-5 text-primary" />
-        </div>
-
-        <button
-          type="button"
-          onClick={onEdit}
-          className="min-w-0 flex-1 text-left"
-        >
-          <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold text-foreground">
-              {automation.name}
-            </span>
-            {automation.is_active && (
-              <span className="relative flex h-2 w-2" aria-label="ativa">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-              </span>
-            )}
-          </div>
-          {automation.description && (
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">{automation.description}</p>
-          )}
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                meta.pillClass,
-              )}
-            >
-              {meta.label}
-            </span>
-            <span className="tabular-nums">
-              {automation.execution_count} {automation.execution_count === 1 ? "execução" : "execuções"}
-            </span>
-            <span aria-hidden>·</span>
-            <span>última {formatRelative(automation.last_executed_at)}</span>
-          </div>
-        </button>
-
-        <div className="flex items-center gap-3">
-          <Switch
-            checked={automation.is_active}
-            onCheckedChange={(v) => onToggle(!!v)}
-            aria-label={automation.is_active ? "Desativar" : "Ativar"}
-          />
-
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              aria-label="Abrir menu"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[popup-open]:bg-muted"
-            >
-              <MoreVertical className="h-4 w-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={onEdit}>
-                <Pencil className="h-4 w-4" />
-                Editar
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onDuplicate}>
-                <Copy className="h-4 w-4" />
-                Duplicar
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onLogs}>
-                <FileText className="h-4 w-4" />
-                Ver Logs
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant="destructive" onClick={onDelete}>
-                <Trash2 className="h-4 w-4" />
-                Excluir
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-    </li>
+    </PageBody>
   )
 }
