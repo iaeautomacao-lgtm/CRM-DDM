@@ -9,6 +9,8 @@
 // Não contém segredo nenhum (só descrição de contrato).
 // ============================================================
 
+import { webhookPaths, webhookSchemas, webhookTags, WEBHOOK_GUIDE } from './openapi-webhooks';
+
 type Json = Record<string, unknown>;
 
 const ref = (name: string) => ({ $ref: `#/components/schemas/${name}` });
@@ -120,6 +122,7 @@ export const openApiSpec = {
       '- `campaigns:write` — `POST /disparador/campaigns` (também lê campanhas)',
       '- `campaigns:read` — `GET /disparador/campaigns/{id}`',
       '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
+      '- `webhooks:read` / `webhooks:write` — `/webhooks*` (webhooks de saída assinados; veja a seção própria abaixo).',
       '- `GET /me` não exige escopo.',
       '',
       '## Envelope de resposta',
@@ -137,7 +140,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n'),
+    ].join('\n') + WEBHOOK_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -145,9 +148,11 @@ export const openApiSpec = {
     { name: 'Mensagens', description: 'Envio avulso de mensagens WhatsApp.' },
     { name: 'Disparador', description: 'Campanhas em massa (Meta com template, WAHA com texto livre).' },
     { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
+    ...webhookTags,
   ],
   security: SECURITY,
   paths: {
+    ...webhookPaths,
     '/me': {
       get: {
         tags: ['Conta'],
@@ -796,6 +801,7 @@ export const openApiSpec = {
       },
     },
     schemas: {
+      ...webhookSchemas,
       Scope: {
         type: 'string',
         enum: [
@@ -807,6 +813,8 @@ export const openApiSpec = {
           'campaigns:write',
           'campaigns:read',
           'reports:read',
+          'webhooks:read',
+          'webhooks:write',
           'intelligence:read',
         ],
         description: '`intelligence:read` é de chave **pessoal** (MCP do DDM Intelligence) e não se combina com os demais.',

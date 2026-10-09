@@ -11,6 +11,7 @@ export const GUIDE_SECTIONS = [
   { id: 'acompanhar', title: 'Acompanhar a campanha' },
   { id: 'avulso', title: 'Envio avulso' },
   { id: 'relatorios', title: 'Relatórios para BI' },
+  { id: 'webhooks', title: 'Webhooks de saída' },
   { id: 'erros', title: 'Erros e limites' },
 ] as const;
 
@@ -27,6 +28,15 @@ export const GUIDE_COVERAGE: Record<string, GuideSectionId> = {
   getReportTeams: 'relatorios',
   getReportAgents: 'relatorios',
   getReportTabulations: 'relatorios',
+  listWebhooks: 'webhooks',
+  createWebhook: 'webhooks',
+  getWebhook: 'webhooks',
+  updateWebhook: 'webhooks',
+  deleteWebhook: 'webhooks',
+  listWebhookDeliveries: 'webhooks',
+  replayWebhookDelivery: 'webhooks',
+  rotateWebhookSecret: 'webhooks',
+  testWebhook: 'webhooks',
 };
 
 export interface ScopeRow {
@@ -40,6 +50,8 @@ export const SCOPE_ROWS: ScopeRow[] = [
   { scope: 'campaigns:read', paraQue: 'Só acompanhar campanhas', endpoints: 'GET /disparador/campaigns/{id}' },
   { scope: 'messages:send', paraQue: 'Enviar mensagem avulsa', endpoints: 'POST /whatsapp/send' },
   { scope: 'reports:read', paraQue: 'Relatórios para Power BI, Metabase, n8n', endpoints: 'GET /reports/*' },
+  { scope: 'webhooks:write', paraQue: 'Cadastrar/alterar webhooks de saída e reenviar entregas (também lê)', endpoints: 'POST/PATCH/DELETE /webhooks…' },
+  { scope: 'webhooks:read', paraQue: 'Só consultar webhooks e o histórico de entregas', endpoints: 'GET /webhooks…' },
   { scope: '(nenhum)', paraQue: 'Testar se a chave funciona', endpoints: 'GET /me' },
 ];
 

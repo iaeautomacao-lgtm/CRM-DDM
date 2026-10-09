@@ -22,7 +22,9 @@
     "src/lib/ai/acordo-tagging.ts",
     "src/lib/audit/context.ts",
     "src/lib/audit/access-denied.ts",
-    "src/lib/supabase/server.ts"
+    "src/lib/supabase/server.ts",
+    "src/lib/webhooks-out/endpoints.ts",
+    "src/lib/webhooks-out/deliver.ts"
   ],
   "clientOnlyDirs": [
     "src/components",

@@ -103,6 +103,10 @@
       "kind": "registry"
     },
     {
+      "version": "204_outbound_webhooks",
+      "kind": "registry"
+    },
+    {
       "version": "210_wakeable_flow_runs",
       "kind": "registry"
     },
