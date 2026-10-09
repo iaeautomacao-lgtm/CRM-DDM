@@ -311,6 +311,10 @@
       "index": "idx_conversation_assignments_from_agent"
     },
     {
+      "version": "304_campaigns_pipelines_view_perms",
+      "kind": "registry"
+    },
+    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },
