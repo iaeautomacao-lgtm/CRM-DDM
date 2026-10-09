@@ -310,7 +310,7 @@ export default function AutomationsPage() {
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => router.push(`/automations/${a.id}/edit`)}>
                               <Pencil className="size-4" />
-                              Editar
+                              {canCreate ? "Editar" : "Ver detalhes"}
                             </DropdownMenuItem>
                             {canCreate && (
                               <DropdownMenuItem onClick={() => duplicate(a)}>
