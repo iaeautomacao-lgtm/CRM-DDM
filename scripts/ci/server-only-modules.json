@@ -40,7 +40,9 @@
     "src/lib/ai/knowledge/extract.ts",
     "src/lib/ai/knowledge/files.ts",
     "src/lib/ai/knowledge/vector-store.ts",
-    "src/lib/members/member-status.ts"
+    "src/lib/members/member-status.ts",
+    "src/lib/roles/custom-roles.ts",
+    "src/lib/roles/http.ts"
   ],
   "clientOnlyDirs": [
     "src/components",
