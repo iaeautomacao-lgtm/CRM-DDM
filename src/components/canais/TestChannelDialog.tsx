@@ -26,6 +26,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import type { ChannelConfig } from "./types";
+import { ErrorState } from "@/components/dashboard/error-state";
 
 const META_TEMPLATE_REQUIRED_MESSAGE =
   "Canais Meta exigem template aprovado para enviar mensagens. Use a aba Templates para criar e aprovar um template primeiro.";
@@ -48,11 +49,16 @@ export function TestChannelDialog({
   const [sending, setSending] = useState(false);
   const [templates, setTemplates] = useState<ApprovedTemplate[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  // Falha de rede ao listar os templates ≠ canal sem template aprovado.
+  const [templatesError, setTemplatesError] = useState(false);
+  const [templatesAttempt, setTemplatesAttempt] = useState(0);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [templateParams, setTemplateParams] = useState<string[]>([]);
   const [testResult, setTestResult] = useState<
     | { status: "pending"; messageId: string }
     | { status: "delivered" }
+    // Tempo esgotado sem webhook: a Meta aceitou, mas a entrega não foi confirmada (antes aparecia como entregue).
+    | { status: "unconfirmed" }
     | { status: "warning" }
     | { status: "failed"; error: string }
     | null
@@ -62,14 +68,20 @@ export function TestChannelDialog({
     if (!channel || channel.provider !== "meta") return;
     let cancelled = false;
     setLoadingTemplates(true);
+    setTemplatesError(false);
     apiFetch(`/api/whatsapp/channel-test/templates?configId=${channel.id}`)
-      .then((res) => res.json())
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+        return data;
+      })
       .then((data) => {
         if (cancelled) return;
         setTemplates(data.templates ?? []);
       })
       .catch((err) => {
         console.error("[TestChannelDialog] failed to load templates:", err);
+        if (!cancelled) setTemplatesError(true);
       })
       .finally(() => {
         if (!cancelled) setLoadingTemplates(false);
@@ -77,7 +89,7 @@ export function TestChannelDialog({
     return () => {
       cancelled = true;
     };
-  }, [channel]);
+  }, [channel, templatesAttempt]);
 
   if (!channel) return null;
 
@@ -189,7 +201,7 @@ export function TestChannelDialog({
           setTimeout(poll, INTERVAL_MS);
         } else if (!provisional131026) {
           // Timeout — Meta provavelmente entregou mas webhook não chegou
-          setTestResult({ status: "delivered" });
+          setTestResult({ status: "unconfirmed" });
         }
       };
 
@@ -222,12 +234,25 @@ export function TestChannelDialog({
             <div className="flex items-center justify-center py-6">
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
+          ) : templatesError ? (
+            <>
+              <ErrorState
+                className="min-h-0"
+                title="Não foi possível carregar os templates aprovados"
+                onRetry={() => setTemplatesAttempt((n) => n + 1)}
+              />
+              <DialogFooter>
+                <Button variant="outline" onClick={() => handleOpenChange(false)}>
+                  Fechar
+                </Button>
+              </DialogFooter>
+            </>
           ) : templates.length === 0 ? (
             <>
-              <Alert className="bg-amber-950/40 border-amber-600/40">
-                <AlertTriangle className="size-4 text-amber-400" />
-                <AlertTitle className="text-amber-200">Não suportado para Meta</AlertTitle>
-                <AlertDescription className="text-amber-100/80">
+              <Alert className="border-warning-border bg-warning-soft">
+                <AlertTriangle className="size-4 text-warning" />
+                <AlertTitle className="text-foreground">Não suportado para Meta</AlertTitle>
+                <AlertDescription className="text-foreground-2">
                   {META_TEMPLATE_REQUIRED_MESSAGE}
                 </AlertDescription>
               </Alert>
@@ -311,6 +336,7 @@ export function TestChannelDialog({
                 />
               </div>
 
+              <div role="status" aria-live="polite" className="contents">
               {testResult?.status === "pending" && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -318,23 +344,25 @@ export function TestChannelDialog({
                 </div>
               )}
               {testResult?.status === "delivered" && (
-                <div className="flex items-center gap-2 text-xs text-green-600">
+                <div className="flex items-center gap-2 text-xs text-success">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Mensagem entregue com sucesso!
                 </div>
               )}
+{testResult?.status === "unconfirmed" && (                <div className="flex items-start gap-2 rounded-md border border-warning-border bg-warning-soft p-2 text-xs text-foreground">                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />                  A Meta aceitou o envio, mas a confirmação de entrega não chegou a tempo. Confira no aparelho de destino.                </div>              )}
               {testResult?.status === "warning" && (
-                <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 p-2 text-xs text-yellow-800">
+                <div className="flex items-start gap-2 rounded-md border border-warning-border bg-warning-soft p-2 text-xs text-foreground">
                   <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   A Meta informou que não conseguiu entregar ainda (131026). Pode ser aparelho offline — a entrega será confirmada quando o aparelho ficar online.
                 </div>
               )}
               {testResult?.status === "failed" && (
-                <div className="flex items-center gap-2 text-xs text-red-500">
+                <div className="flex items-center gap-2 text-xs text-danger">
                   <AlertCircle className="h-3.5 w-3.5" />
                   {testResult.error}
                 </div>
               )}
+              </div>
             </div>
 
               <DialogFooter>

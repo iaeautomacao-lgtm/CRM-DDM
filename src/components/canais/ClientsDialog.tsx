@@ -43,7 +43,8 @@ export function ClientsDialog({
   const [busy, setBusy] = useState(false);
 
   async function addClient() {
-    if (!accountId || !name.trim()) return;
+    // busy: o Enter não respeitava o botão desabilitado e criava o cliente em dobro.
+    if (busy || !accountId || !name.trim()) return;
     setBusy(true);
     const { error } = await createClient()
       .from("clients")
@@ -89,13 +90,17 @@ export function ClientsDialog({
             <div key={c.id} className="flex items-center gap-2">
               <input
                 type="color"
-                value={c.color}
-                onChange={(e) => updateClient(c.id, { color: e.target.value })}
+                defaultValue={c.color}
+                // Grava ao fechar o seletor (onChange de input color dispara a cada movimento do arraste).
+                onBlur={(e) => {
+                  if (e.target.value !== c.color) void updateClient(c.id, { color: e.target.value });
+                }}
                 className="h-8 w-8 shrink-0 cursor-pointer rounded border border-border bg-transparent"
                 aria-label={`Cor de ${c.name}`}
               />
               <Input
                 defaultValue={c.name}
+                aria-label={`Nome de ${c.name}`}
                 onBlur={(e) => {
                   const next = e.target.value.trim();
                   if (next && next !== c.name) void updateClient(c.id, { name: next });
@@ -105,7 +110,7 @@ export function ClientsDialog({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-red-400"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-danger"
                 onClick={() => removeClient(c.id)}
                 aria-label={`Remover ${c.name}`}
               >
@@ -127,6 +132,7 @@ export function ClientsDialog({
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && addClient()}
+            aria-label="Nome do novo cliente"
             placeholder="Nome do cliente"
             maxLength={80}
             className="h-8"
