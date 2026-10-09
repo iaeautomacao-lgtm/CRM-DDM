@@ -81,3 +81,22 @@ describe("buildPermissionCatalogGroups", () => {
     }
   });
 });
+
+describe("buildMePermissions com papel personalizado (migrations 312/313)", () => {
+  it("papel = o personalizado (id, nome, kind custom) com key/rank do compat; permissões e escopos do conjunto dele", () => {
+    const me = buildMePermissions({
+      account: { id: "acc-1", name: "Acme" },
+      role: "supervisor",
+      permissions: new Set(["inbox.view", "inbox.reply", "reports.view_team"]),
+      customRole: { id: "c1", name: "Cobrança" },
+    });
+    expect(me.role).toEqual({ id: "c1", key: "supervisor", name: "Cobrança", kind: "custom", rank: 3 });
+    expect(me.permissions.sort()).toEqual(["inbox.reply", "inbox.view", "reports.view_team"]);
+    expect(me.scopes).toEqual({ inbox: "own", monitoring: "none", reports: "team", intelligence: "none" });
+  });
+
+  it("catálogo: future não é concedível (integrations.manage)", () => {
+    const all = buildPermissionCatalogGroups().flatMap((g) => g.permissions);
+    expect(all.find((p) => p.key === "integrations.manage")).toMatchObject({ ownerOnly: false, grantable: false });
+  });
+});
