@@ -81,8 +81,8 @@ export function PipelineAnalytics({ stages, deals }: PipelineAnalyticsProps) {
   const money = (n: number) => formatCurrency(n, defaultCurrency);
   const count = (n: number) => Math.round(n).toLocaleString("pt-BR");
 
-  // Faixa de indicadores (primitivo KpiStrip do redesenho). A explicação de
-  // cada número fica no `title` da célula.
+  // Faixa de indicadores (primitivo KpiStrip do redesenho); a explicação de
+  // cada número abre no "i" (InfoHint: clique, teclado ou toque).
   return (
     <KpiStrip
       ariaLabel="Indicadores do pipeline"
@@ -91,32 +91,32 @@ export function PipelineAnalytics({ stages, deals }: PipelineAnalyticsProps) {
         {
           label: "Total de negócios",
           value: <CountUp value={stats.totalCount} format={count} />,
-          title: "Contagem de todos os negócios neste pipeline que não estão marcados como Perdido. Negócios Ganhos ainda são incluídos.",
+          info: "Contagem de todos os negócios neste pipeline que não estão marcados como Perdido. Negócios Ganhos ainda são incluídos.",
         },
         {
           label: "Valor do pipeline",
           value: <CountUp value={stats.totalValue} format={money} />,
-          title: "Soma dos valores de todos os negócios neste pipeline, excluindo os marcados como Perdido.",
+          info: "Soma dos valores de todos os negócios neste pipeline, excluindo os marcados como Perdido.",
         },
         {
           label: "Ticket médio",
           value: <CountUp value={stats.avgValue} format={money} />,
-          title: "Valor do Pipeline dividido pelo Total de Negócios — o valor médio de um único negócio não perdido.",
+          info: "Valor do Pipeline dividido pelo Total de Negócios — o valor médio de um único negócio não perdido.",
         },
         {
           label: "Valor ponderado",
           value: <CountUp value={stats.weightedValue} format={money} />,
-          title: "Receita esperada: valor de cada negócio aberto × probabilidade da etapa. Primeira etapa ≈ 10%, etapas progridem até 90%, Ganho = 100%. Negócios Perdidos são excluídos.",
+          info: "Receita esperada: valor de cada negócio aberto × probabilidade da etapa. Primeira etapa ≈ 10%, etapas progridem até 90%, Ganho = 100%. Negócios Perdidos são excluídos.",
         },
         {
           label: "Ganhos no mês",
           value: <CountUp value={stats.wonThisMonth} format={count} className="text-success" />,
-          title: "Negócios marcados como Ganho desde o primeiro dia do mês atual.",
+          info: "Negócios marcados como Ganho desde o primeiro dia do mês atual.",
         },
         {
           label: "Perdidos no mês",
           value: <CountUp value={stats.lostThisMonth} format={count} className="text-danger" />,
-          title: "Negócios marcados como Perdido desde o primeiro dia do mês atual.",
+          info: "Negócios marcados como Perdido desde o primeiro dia do mês atual.",
         },
       ]}
     />

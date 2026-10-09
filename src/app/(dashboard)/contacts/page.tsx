@@ -52,7 +52,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CountUp } from '@/components/motion/count-up';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
-import { PageToolbar } from '@/components/ddm/page-toolbar';
+import { PageBody, PageToolbar } from '@/components/ddm/page-toolbar';
 
 const PAGE_SIZE = 25;
 
@@ -348,7 +348,7 @@ export default function ContactsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-3.5">
+    <PageBody>
       {/* Cabeçalho da página (redesenho DDM): título em Poppins + resumo. */}
       <div className="flex flex-col gap-1.5 pt-1">
         <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Contatos</h2>
@@ -840,7 +840,7 @@ export default function ContactsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }
 
