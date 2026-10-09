@@ -142,7 +142,7 @@ const titleMap: Record<string, string> = (() => {
   return { ...map, ...extraTitles };
 })();
 
-export function getPageTitle(pathname: string): string {
+function baseTitle(pathname: string): string {
   const match = longestMatchingHref(pathname, Object.keys(titleMap));
   if (match) return titleMap[match];
   // Fallback: nunca devolve vazio (WCAG 2.4.2/2.4.6). Usa o último segmento
@@ -162,4 +162,46 @@ export function getPageTitle(pathname: string): string {
   const friendly = decoded.replace(/[-_]+/g, " ").trim();
   if (!friendly) return "OmniDDM";
   return friendly.charAt(0).toUpperCase() + friendly.slice(1);
+}
+
+export interface Crumb {
+  label: string;
+  /** Ausente no último item (a página atual). */
+  href?: string;
+}
+
+/**
+ * Trilha "você está em" por rota. Só as telas de mais de um nível têm trilha própria (editor e execuções de
+ * fluxo, automações, detalhe de equipe/contato/campanha, chaves do Intelligence); as demais têm um item só,
+ * com o título de sempre. O último item é o título da página (h1 do cabeçalho); os anteriores são links.
+ */
+export function getBreadcrumbs(pathname: string): Crumb[] {
+  const path = pathname.split("?")[0].replace(/\/+$/, "");
+  const [root, a, b] = path.split("/").filter(Boolean);
+
+  if (root === "flows" && a) {
+    const flows: Crumb = { label: "Fluxos", href: "/flows" };
+    if (!b) return [flows, { label: "Editor de fluxo" }];
+    if (b === "runs") return [flows, { label: "Fluxo", href: `/flows/${a}` }, { label: "Execuções" }];
+  }
+  if (root === "automations" && a) {
+    const automations: Crumb = { label: "Automações", href: "/automations" };
+    if (a === "new") return [automations, { label: "Nova automação" }];
+    if (b === "edit") return [automations, { label: "Editar automação" }];
+    if (b === "logs") return [automations, { label: "Logs de execução" }];
+  }
+  if (root === "equipes" && a && !b) return [{ label: "Equipes", href: "/equipes" }, { label: "Equipe" }];
+  if (root === "contacts" && a && !b) return [{ label: "Contatos", href: "/contacts" }, { label: "Contato" }];
+  if (root === "disparador" && a === "campanhas" && b) {
+    return [{ label: "Disparador · Campanhas", href: "/disparador/campanhas" }, { label: "Campanha" }];
+  }
+  if (root === "inteligencia" && a === "chaves") return [{ label: "Inteligência", href: "/inteligencia" }, { label: "Chaves" }];
+
+  return [{ label: baseTitle(path) }];
+}
+
+/** Título da página (aba do navegador e anúncio): a trilha junta com " · " quando há mais de um nível. */
+export function getPageTitle(pathname: string): string {
+  const crumbs = getBreadcrumbs(pathname);
+  return crumbs.length > 1 ? crumbs.map((c) => c.label).join(" · ") : crumbs[0].label;
 }
