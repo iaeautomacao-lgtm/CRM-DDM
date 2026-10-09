@@ -68,8 +68,8 @@ function getEventColor(ev: FlowDebugEvent): string {
   ) {
     return "text-success";
   }
-  if (ev.event_type === "message_sent") return "text-blue-400";
-  if (ev.event_type === "reply_received") return "text-sky-300";
+  if (ev.event_type === "message_sent") return "text-info";
+  if (ev.event_type === "reply_received") return "text-foreground-2";
   return "text-muted-foreground";
 }
 

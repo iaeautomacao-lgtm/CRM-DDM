@@ -132,7 +132,7 @@ const PERIOD_OPTIONS: { value: string; label: string; ms: number }[] = [
 
 const LEVEL_BADGE_STYLES: Record<string, string> = {
   debug: "bg-surface-3 text-foreground-2 border-border",
-  info: "bg-[rgba(91,141,239,.14)] text-[#5B8DEF] [html[data-mode=light]_&]:text-[#3B6FD8] border-[#5B8DEF]/40",
+  info: "bg-info-soft text-info border-info/40",
   warn: "bg-warning-soft text-warning border-warning/40",
   error: "bg-danger-soft text-danger border-danger/40",
   critical: "bg-danger-soft text-danger border-danger/40 animate-pulse",
@@ -240,7 +240,7 @@ function getInitials(name?: string | null): string {
 }
 
 const ACTION_BADGE_PALETTE = [
-  "bg-[rgba(91,141,239,.14)] text-[#5B8DEF] [html[data-mode=light]_&]:text-[#3B6FD8] border-[#5B8DEF]/40",
+  "bg-info-soft text-info border-info/40",
   "bg-success-soft text-success border-success/40",
   "bg-purple-500/15 text-purple-300 [html[data-mode=light]_&]:text-purple-700 border-purple-500/40",
   "bg-warning-soft text-warning border-warning/40",
@@ -281,7 +281,7 @@ function highlightJson(value: unknown): string {
     (match) => {
       let cls = "text-orange-300 [html[data-mode=light]_&]:text-orange-700"; // número
       if (/^"/.test(match)) {
-        cls = /:\s*$/.test(match) ? "text-[#5B8DEF] [html[data-mode=light]_&]:text-[#3B6FD8]" : "text-success"; // chave vs. valor string
+        cls = /:\s*$/.test(match) ? "text-info" : "text-success"; // chave vs. valor string
       } else if (/^(true|false)$/.test(match)) {
         cls = "text-purple-300 [html[data-mode=light]_&]:text-purple-700";
       } else if (match === "null") {
