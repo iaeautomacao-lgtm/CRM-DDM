@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { assertRowColumns } from "@/test/db-columns";
 
 const mocks = vi.hoisted(() => ({ account: vi.fn(), audit: vi.fn(), writes: [] as unknown[], tables: [] as string[] }));
 
@@ -32,7 +33,7 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       };
       proxy.then = (resolve: (v: unknown) => unknown) => {
         let data: unknown = [];
-        if (table === "whatsapp_config") data = [{ id: SESSION, phone_number: "5511", display_name: "Principal", provider: "meta", habilitado: true }];
+        if (table === "whatsapp_config") data = assertRowColumns("whatsapp_config", [{ id: SESSION, display_phone_number: "5511", provider: "meta", habilitado: true }]);
         if (table === "dispatch_channel_limits") data = [{ session_id: SESSION, max_in_flight: 4, hourly_limit: null, paused: false }];
         return resolve({ data, error: null });
       };
