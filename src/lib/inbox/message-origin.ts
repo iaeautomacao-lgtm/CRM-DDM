@@ -22,11 +22,11 @@ export interface OriginAuthor {
 // Cores fixas por origem, legíveis no claro e no escuro e distintas da
 // paleta dos atendentes (sky/violet/emerald/rose/teal/amber).
 const AUTOMATED: Record<Exclude<MessageOrigin, "customer" | "operator">, OriginAuthor> = {
-  ai: { label: "IA", className: "text-fuchsia-700 dark:text-fuchsia-400", bot: true },
-  flow: { label: "Fluxo", className: "text-indigo-700 dark:text-indigo-400", bot: true },
-  campaign: { label: "Disparo", className: "text-orange-700 dark:text-orange-400", bot: true },
+  ai: { label: "IA", className: "text-fuchsia-400 [html[data-mode=light]_&]:text-fuchsia-700", bot: true },
+  flow: { label: "Fluxo", className: "text-indigo-400 [html[data-mode=light]_&]:text-indigo-700", bot: true },
+  campaign: { label: "Disparo", className: "text-orange-400 [html[data-mode=light]_&]:text-orange-700", bot: true },
   automation: { label: "Automação", className: "text-muted-foreground", bot: true },
-  api: { label: "API", className: "text-slate-600 dark:text-slate-300", bot: true },
+  api: { label: "API", className: "text-slate-300 [html[data-mode=light]_&]:text-slate-600", bot: true },
 };
 
 export const GENERIC_AUTOMATION: OriginAuthor = AUTOMATED.automation;

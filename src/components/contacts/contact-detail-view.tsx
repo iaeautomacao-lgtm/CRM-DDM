@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useId } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { PageBody } from '@/components/ddm/page-toolbar';
+import { ErrorState } from '@/components/ddm/states';
 import { Segmented } from '@/components/ddm/segmented';
 import { StatusChip, type StatusTone } from '@/components/ddm/status-chip';
 import { ContactActivityFeed, ContactCampaignsList } from '@/components/contacts/contact-history-tabs';
@@ -156,6 +157,18 @@ export function ContactDetailView({
   const [pageTab, setPageTab] = useState<'activity' | 'deals' | 'campaigns' | 'notes'>('activity');
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [phoneToRemove, setPhoneToRemove] = useState<string | null>(null);
+  const [noteToDelete, setNoteToDelete] = useState<string | null>(null);
+  // Falha na leitura principal do contato (bloqueia a tela, com "Tentar de novo").
+  const [loadError, setLoadError] = useState(false);
+  // Consultas secundárias (notas, negócios, campos, telefones, etiquetas) que
+  // falharam: aviso discreto, sem bloquear a tela.
+  const [secondaryFailed, setSecondaryFailed] = useState<string[]>([]);
+  const uid = useId();
+  const reportSecondary = useCallback((name: string, failed: boolean) => {
+    setSecondaryFailed((prev) =>
+      failed ? (prev.includes(name) ? prev : [...prev, name]) : prev.filter((n) => n !== name),
+    );
+  }, []);
 
   // Send template — lets the business initiate (or re-open) a conversation
   // with this contact by sending an approved template. The send route
@@ -285,22 +298,33 @@ export function ContactDetailView({
     if (!contactId) return;
     setLoading(true);
     setLoadingCsvVars(true);
+    setLoadError(false);
 
-    const [{ data }, { data: csvVarRows }] = await Promise.all([
-      supabase.from('contacts').select('*').eq('id', contactId).single(),
-      supabase
-        .from('contact_import_variables')
-        .select('var_index, value, created_at')
-        .eq('contact_id', contactId)
-        .order('created_at', { ascending: false }),
-    ]);
-
-    if (isCancelled()) return;
+    let data: Contact | null = null;
+    let csvVarRows: { var_index: number; value: string; created_at: string }[] | null = null;
+    try {
+      const [contactRes, csvRes] = await Promise.all([
+        supabase.from('contacts').select('*').eq('id', contactId).single(),
+        supabase
+          .from('contact_import_variables')
+          .select('var_index, value, created_at')
+          .eq('contact_id', contactId)
+          .order('created_at', { ascending: false }),
+      ]);
+      if (isCancelled()) return;
+      data = contactRes.data;
+      csvVarRows = csvRes.data;
+      if (contactRes.error) setLoadError(true);
+      reportSecondary('dados importados', Boolean(csvRes.error));
+    } catch {
+      if (isCancelled()) return;
+      setLoadError(true);
+    }
 
     if (data) {
       setContact(data);
       setEditName(data.name ?? '');
-      setEditPhone(data.phone);
+      setEditPhone(data.phone ?? '');
       setEditEmail(data.email ?? '');
       setEditCompany(data.company ?? '');
       setEditCpf(onlyDigits(data.cpf ?? ''));
@@ -323,94 +347,133 @@ export function ContactDetailView({
 
     setLoading(false);
     setLoadingCsvVars(false);
-  }, [contactId, supabase]);
+  }, [contactId, supabase, reportSecondary]);
 
   const fetchTags = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
 
-    const [tagsRes, contactTagsRes] = await Promise.all([
-      supabase.from('tags').select('*').order('name'),
-      supabase.from('contact_tags').select('tag_id').eq('contact_id', contactId),
-    ]);
+    try {
+      const [tagsRes, contactTagsRes] = await Promise.all([
+        supabase.from('tags').select('*').order('name'),
+        supabase.from('contact_tags').select('tag_id').eq('contact_id', contactId),
+      ]);
 
-    if (isCancelled()) return;
+      if (isCancelled()) return;
 
-    if (tagsRes.data) setAllTags(tagsRes.data);
-    if (contactTagsRes.data) {
-      setContactTagIds(contactTagsRes.data.map((ct) => ct.tag_id));
+      reportSecondary('etiquetas', Boolean(tagsRes.error || contactTagsRes.error));
+      if (tagsRes.data) setAllTags(tagsRes.data);
+      if (contactTagsRes.data) {
+        setContactTagIds(contactTagsRes.data.map((ct) => ct.tag_id));
+      }
+    } catch {
+      if (!isCancelled()) reportSecondary('etiquetas', true);
     }
-  }, [contactId, supabase]);
+  }, [contactId, supabase, reportSecondary]);
 
   const fetchNotes = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingNotes(true);
 
-    const { data } = await supabase
-      .from('contact_notes')
-      .select('*')
-      .eq('contact_id', contactId)
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('contact_notes')
+        .select('*')
+        .eq('contact_id', contactId)
+        .order('created_at', { ascending: false });
 
-    if (isCancelled()) return;
+      if (isCancelled()) return;
 
-    if (data) setNotes(data);
+      reportSecondary('notas', Boolean(error));
+      if (data) setNotes(data);
+    } catch {
+      if (isCancelled()) return;
+      reportSecondary('notas', true);
+    }
     setLoadingNotes(false);
-  }, [contactId, supabase]);
+  }, [contactId, supabase, reportSecondary]);
 
   const fetchCustomFields = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingCustom(true);
 
-    const [fieldsRes, valuesRes] = await Promise.all([
-      supabase.from('custom_fields').select('*').order('field_name'),
-      supabase
-        .from('contact_custom_values')
-        .select('*')
-        .eq('contact_id', contactId),
-    ]);
+    try {
+      const [fieldsRes, valuesRes] = await Promise.all([
+        supabase.from('custom_fields').select('*').order('field_name'),
+        supabase
+          .from('contact_custom_values')
+          .select('*')
+          .eq('contact_id', contactId),
+      ]);
 
-    if (isCancelled()) return;
+      if (isCancelled()) return;
 
-    if (fieldsRes.data) setCustomFields(fieldsRes.data);
-    if (valuesRes.data) {
-      const map: Record<string, string> = {};
-      valuesRes.data.forEach((v) => {
-        map[v.custom_field_id] = v.value ?? '';
-      });
-      setCustomValues(map);
+      reportSecondary('campos personalizados', Boolean(fieldsRes.error || valuesRes.error));
+      if (fieldsRes.data) setCustomFields(fieldsRes.data);
+      if (valuesRes.data) {
+        const map: Record<string, string> = {};
+        valuesRes.data.forEach((v) => {
+          map[v.custom_field_id] = v.value ?? '';
+        });
+        setCustomValues(map);
+      }
+    } catch {
+      if (isCancelled()) return;
+      reportSecondary('campos personalizados', true);
     }
     setLoadingCustom(false);
-  }, [contactId, supabase]);
+  }, [contactId, supabase, reportSecondary]);
 
   const fetchDeals = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingDeals(true);
-    const { data } = await supabase
-      .from('deals')
-      .select('*, stage:pipeline_stages(*)')
-      .eq('contact_id', contactId)
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('deals')
+        .select('*, stage:pipeline_stages(*)')
+        .eq('contact_id', contactId)
+        .order('created_at', { ascending: false });
 
-    if (isCancelled()) return;
+      if (isCancelled()) return;
 
-    setDeals((data ?? []) as Deal[]);
+      reportSecondary('negócios', Boolean(error));
+      setDeals((data ?? []) as Deal[]);
+    } catch {
+      if (isCancelled()) return;
+      reportSecondary('negócios', true);
+    }
     setLoadingDeals(false);
-  }, [contactId, supabase]);
+  }, [contactId, supabase, reportSecondary]);
 
   const fetchPhones = useCallback(async (isCancelled: () => boolean = () => false) => {
     if (!contactId) return;
     setLoadingPhones(true);
-    const { data } = await supabase
-      .from('contact_phones')
-      .select('*')
-      .eq('contact_id', contactId)
-      .order('ordem', { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from('contact_phones')
+        .select('*')
+        .eq('contact_id', contactId)
+        .order('ordem', { ascending: true });
 
-    if (isCancelled()) return;
+      if (isCancelled()) return;
 
-    setPhones((data ?? []) as ContactPhone[]);
+      reportSecondary('telefones', Boolean(error));
+      setPhones((data ?? []) as ContactPhone[]);
+    } catch {
+      if (isCancelled()) return;
+      reportSecondary('telefones', true);
+    }
     setLoadingPhones(false);
-  }, [contactId, supabase]);
+  }, [contactId, supabase, reportSecondary]);
+
+  // Refaz todas as leituras (usado pelo "Tentar novamente").
+  const reloadAll = useCallback(() => {
+    void fetchContact();
+    void fetchTags();
+    void fetchNotes();
+    void fetchCustomFields();
+    void fetchDeals();
+    void fetchPhones();
+  }, [fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals, fetchPhones]);
 
   // Guard defensivo contra a troca rápida de contato: o remount via
   // key={contactId} no pai (contacts/page.tsx) já é a correção
@@ -737,18 +800,27 @@ export function ContactDetailView({
   const renderDetails = () => (
     <div className="space-y-3">
       <div className="space-y-1.5">
-        <Label className="text-muted-foreground text-xs">Nome</Label>
-        <Input value={editName} onChange={(e) => setEditName(e.target.value)} className={fieldInput} />
+        <Label htmlFor={`${uid}-nome`} className="text-muted-foreground text-xs">Nome</Label>
+        <Input id={`${uid}-nome`} value={editName} onChange={(e) => setEditName(e.target.value)} className={fieldInput} />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-muted-foreground text-xs">
+        <Label htmlFor={`${uid}-telefone`} className="text-muted-foreground text-xs">
           Telefone <span className="text-danger">*</span>
         </Label>
-        <Input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} className={fieldInput} />
+        <Input
+          id={`${uid}-telefone`}
+          value={editPhone}
+          onChange={(e) => setEditPhone(e.target.value)}
+          inputMode="tel"
+          autoComplete="tel"
+          required
+          className={fieldInput}
+        />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-muted-foreground text-xs">CPF</Label>
+        <Label htmlFor={`${uid}-cpf`} className="text-muted-foreground text-xs">CPF</Label>
         <Input
+          id={`${uid}-cpf`}
           value={formatCpf(editCpf)}
           onChange={(e) => setEditCpf(onlyDigits(e.target.value).slice(0, CPF_DIGITS_LENGTH))}
           placeholder="000.000.000-00"
@@ -757,8 +829,8 @@ export function ContactDetailView({
         />
       </div>
       <div className="space-y-1.5">
-        <Label className="text-muted-foreground text-xs">Instituição</Label>
-        <Input value={editInstituicao} onChange={(e) => setEditInstituicao(e.target.value)} className={fieldInput} />
+        <Label htmlFor={`${uid}-instituicao`} className="text-muted-foreground text-xs">Instituição</Label>
+        <Input id={`${uid}-instituicao`} value={editInstituicao} onChange={(e) => setEditInstituicao(e.target.value)} className={fieldInput} />
       </div>
 
       <div className="space-y-1.5 pt-2 border-t border-border">
@@ -766,8 +838,9 @@ export function ContactDetailView({
       </div>
       {CSV_VAR_INDICES.map((idx) => (
         <div key={idx} className="space-y-1.5">
-          <Label className="text-muted-foreground text-xs">{CSV_VAR_LABELS[idx]}</Label>
+          <Label htmlFor={`${uid}-csv-${idx}`} className="text-muted-foreground text-xs">{CSV_VAR_LABELS[idx]}</Label>
           <Input
+            id={`${uid}-csv-${idx}`}
             value={loadingCsvVars ? '' : csvVars[idx] ?? ''}
             readOnly
             disabled
@@ -788,7 +861,7 @@ export function ContactDetailView({
     <div className="space-y-4">
       {/* Seção 1 — telefone principal (contacts.phone / TELEFONE1) */}
       <div className="space-y-1.5">
-        <Label className="text-muted-foreground text-xs">Telefone principal</Label>
+        <Label className="text-muted-foreground text-xs" id={`${uid}-principal-label`}>Telefone principal</Label>
         <div className="flex items-center gap-2 rounded-lg bg-surface-3 border border-border px-3 py-2">
           <span className="text-sm text-foreground flex-1 tabular-nums">{c.phone}</span>
           <StatusChip tone="brand" dot={false}>Principal</StatusChip>
@@ -818,15 +891,21 @@ export function ContactDetailView({
                   {isEditing ? (
                     <div className="space-y-2">
                       <Input
+                        id={`${uid}-edit-phone-${phone.id}`}
                         value={editPhoneNumber}
                         onChange={(e) => setEditPhoneNumber(e.target.value)}
                         placeholder="Número"
+                        aria-label="Número do telefone"
+                        inputMode="tel"
+                        autoComplete="tel"
                         className={fieldInput}
                       />
                       <Input
+                        id={`${uid}-edit-label-${phone.id}`}
                         value={editPhoneLabel}
                         onChange={(e) => setEditPhoneLabel(e.target.value)}
                         placeholder="Rótulo (opcional)"
+                        aria-label="Rótulo do telefone (opcional)"
                         className={fieldInput}
                       />
                       <div className="flex items-center gap-2">
@@ -861,12 +940,12 @@ export function ContactDetailView({
                           </p>
                         )}
                       </div>
-                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all shrink-0">
+                      <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-all shrink-0">
                         <button
                           type="button"
                           onClick={() => startEditPhone(phone)}
-                          aria-label={`Editar ${phone.phone}`}
-                          className="text-muted-foreground hover:text-primary-text transition-colors cursor-pointer p-1"
+                          aria-label={`Editar telefone ${phone.phone}`}
+                          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:text-primary-text hover:bg-surface-hover transition-colors cursor-pointer"
                         >
                           <Pencil className="size-3.5" />
                         </button>
@@ -874,8 +953,8 @@ export function ContactDetailView({
                           type="button"
                           onClick={() => setPhoneToRemove(phone.id)}
                           disabled={deletingPhoneId === phone.id}
-                          aria-label={`Remover ${phone.phone}`}
-                          className="text-muted-foreground hover:text-danger transition-colors cursor-pointer p-1"
+                          aria-label={`Remover telefone ${phone.phone}`}
+                          className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:text-danger hover:bg-surface-hover transition-colors cursor-pointer"
                         >
                           {deletingPhoneId === phone.id ? (
                             <Loader2 className="size-3.5 animate-spin" />
@@ -898,13 +977,19 @@ export function ContactDetailView({
         <Input
           value={newPhoneNumber}
           onChange={(e) => setNewPhoneNumber(e.target.value)}
+          id={`${uid}-new-phone`}
           placeholder="Novo número"
+          aria-label="Novo número de telefone"
+          inputMode="tel"
+          autoComplete="tel"
           className={fieldInput}
         />
         <Input
+          id={`${uid}-new-phone-label`}
           value={newPhoneLabel}
           onChange={(e) => setNewPhoneLabel(e.target.value)}
           placeholder="Rótulo (opcional)"
+          aria-label="Rótulo do novo telefone (opcional)"
           className={fieldInput}
         />
         <Button onClick={addPhone} disabled={!newPhoneNumber.trim() || addingPhone} variant="outline" className="w-full" size="sm">
@@ -968,12 +1053,12 @@ export function ContactDetailView({
                 onKeyDown={makeTagButtonKeyDownHandler(index, tagButtonRefs, tagSearchRef)}
                 disabled={savingTags}
                 aria-pressed={selected}
-                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
-                  selected ? 'ring-2 ring-primary ring-offset-1 ring-offset-border' : 'opacity-50 hover:opacity-80'
+                className={`inline-flex items-center gap-1.5 rounded-full bg-card-2 px-3 py-1 text-xs font-medium text-foreground transition-all cursor-pointer ${
+                  selected ? 'ring-2 ring-primary ring-offset-1 ring-offset-border' : 'opacity-70 hover:opacity-100'
                 }`}
-                style={{ backgroundColor: tag.color + '20', color: tag.color }}
               >
-                {selected && <Check className="size-3 mr-1" />}
+                <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
+                {selected && <Check className="size-3" aria-hidden="true" />}
                 {tag.name}
               </button>
             );
@@ -989,6 +1074,8 @@ export function ContactDetailView({
         <Textarea
           value={newNote}
           onChange={(e) => setNewNote(e.target.value)}
+          id={`${uid}-nova-nota`}
+          aria-label="Nova nota"
           placeholder="Escreva uma nota..."
           className="bg-card border-border text-foreground placeholder:text-muted-foreground min-h-[60px] text-sm resize-none"
         />
@@ -1013,9 +1100,9 @@ export function ContactDetailView({
                 <p className="text-sm text-foreground-2 whitespace-pre-wrap flex-1">{note.note_text}</p>
                 <button
                   type="button"
-                  onClick={() => deleteNote(note.id)}
+                  onClick={() => setNoteToDelete(note.id)}
                   aria-label="Excluir nota"
-                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-danger transition-all cursor-pointer shrink-0"
+                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-md opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 text-muted-foreground hover:text-danger hover:bg-surface-hover transition-all cursor-pointer"
                 >
                   <Trash2 className="size-3.5" />
                 </button>
@@ -1033,6 +1120,27 @@ export function ContactDetailView({
           ))
         )}
       </div>
+
+      <AlertDialog open={noteToDelete !== null} onOpenChange={(o) => !o && setNoteToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir esta nota?</AlertDialogTitle>
+            <AlertDialogDescription>A nota será removida deste contato.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const id = noteToDelete;
+                setNoteToDelete(null);
+                if (id) void deleteNote(id);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 
@@ -1050,8 +1158,9 @@ export function ContactDetailView({
       <div className="space-y-3">
         {customFields.map((field) => (
           <div key={field.id} className="space-y-1.5">
-            <Label className="text-muted-foreground text-xs capitalize">{field.field_name}</Label>
+            <Label htmlFor={`${uid}-cf-${field.id}`} className="text-muted-foreground text-xs capitalize">{field.field_name}</Label>
             <Input
+              id={`${uid}-cf-${field.id}`}
               value={customValues[field.id] ?? ''}
               onChange={(e) =>
                 setCustomValues((prev) => ({
@@ -1142,7 +1251,38 @@ export function ContactDetailView({
     />
   );
 
+  const secondaryNotice =
+    secondaryFailed.length > 0 ? (
+      <div
+        role="status"
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-surface-3 px-3 py-2 text-xs text-muted-foreground"
+      >
+        <span>Não foi possível carregar: {secondaryFailed.join(', ')}.</span>
+        <button
+          type="button"
+          onClick={reloadAll}
+          className="font-medium text-primary-text hover:underline cursor-pointer"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    ) : null;
+
   if (variant === 'page') {
+    if (loadError && !contact) {
+      return (
+        <PageBody>
+          <Link href="/contacts" className="inline-flex w-fit items-center gap-1 pt-1 text-xs text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-3" />
+            Contatos
+          </Link>
+          <ErrorState
+            title="Não foi possível carregar o contato"
+            onRetry={reloadAll}
+          />
+        </PageBody>
+      );
+    }
     if (loading && !contact) {
       return (
         <PageBody>
@@ -1224,23 +1364,23 @@ export function ContactDetailView({
               {appliedTags.map((tag) => (
                 <span
                   key={tag.id}
-                  className="inline-flex h-[22px] items-center gap-1 rounded-full pl-2 pr-1 text-[11.5px] font-semibold"
-                  style={{ backgroundColor: tag.color + '20', color: tag.color }}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-full bg-card-2 pl-2.5 pr-0.5 text-[11.5px] font-semibold text-foreground"
                 >
+                  <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
                   {tag.name}
                   <button
                     type="button"
                     onClick={() => toggleTag(tag.id)}
                     disabled={savingTags}
                     aria-label={`Remover etiqueta ${tag.name}`}
-                    className="flex size-4 items-center justify-center rounded-full hover:bg-black/10"
+                    className="flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-surface-hover hover:text-foreground cursor-pointer"
                   >
-                    <X className="size-3" />
+                    <X className="size-3" aria-hidden="true" />
                   </button>
                 </span>
               ))}
               <Popover>
-                <PopoverTrigger className="inline-flex h-[22px] items-center gap-1 rounded-full border border-dashed border-border-strong px-2 text-[11.5px] font-semibold text-muted-foreground hover:border-primary hover:text-primary-text">
+                <PopoverTrigger className="inline-flex h-7 items-center gap-1 rounded-full border border-dashed border-border-strong px-2 text-[11.5px] font-semibold text-muted-foreground hover:border-primary hover:text-primary-text">
                   <Plus className="size-3" />
                   Etiqueta
                 </PopoverTrigger>
@@ -1252,6 +1392,8 @@ export function ContactDetailView({
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">{actionButtons}</div>
         </section>
+
+        {secondaryNotice}
 
         <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
           <div className="ddm-stagger flex flex-col gap-3.5">
@@ -1304,8 +1446,22 @@ export function ContactDetailView({
         className="bg-popover border-border text-popover-foreground sm:max-w-lg w-full p-0"
       >
         {loading || !contact ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="size-6 animate-spin text-primary" />
+          <div className="flex h-full flex-col items-center justify-center p-4">
+            <SheetTitle className="sr-only">Detalhes do contato</SheetTitle>
+            <SheetDescription className="sr-only">Informações e histórico do contato.</SheetDescription>
+            {loadError || (!loading && !contact) ? (
+              <ErrorState
+                title={loadError ? 'Não foi possível carregar o contato' : 'Contato não encontrado'}
+                hint={loadError ? undefined : 'Ele pode ter sido excluído ou você não tem acesso.'}
+                onRetry={reloadAll}
+                className="w-full"
+              />
+            ) : (
+              <div role="status" className="flex items-center justify-center">
+                <Loader2 className="size-6 animate-spin text-primary" aria-hidden="true" />
+                <span className="sr-only">Carregando contato...</span>
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col h-full">
@@ -1357,6 +1513,8 @@ export function ContactDetailView({
               </div>
               <div className="mt-3 flex items-center gap-2">{actionButtons}</div>
             </SheetHeader>
+
+            {secondaryNotice && <div className="mx-4 mt-3">{secondaryNotice}</div>}
 
             {/* Tabs */}
             <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">

@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     )
 
     if (configError || !configs || configs.length === 0 || configs[0].provider !== 'waha') {
-      return new Response('WAHA not configured', { status: 400 })
+      return new Response('WAHA não configurado', { status: 400 })
     }
 
     const config = configs[0]
@@ -47,7 +47,7 @@ export async function GET(request: Request) {
     // Nunca repassa Content-Type do servidor WAHA (configurável pelo tenant).
     const contentType = safeInlineContentType(wahaRes.headers.get('content-type'))
     if (!contentType?.startsWith('image/')) {
-      return new Response('Invalid QR response', { status: 502 })
+      return new Response('Resposta de QR code inválida', { status: 502 })
     }
     const body = await wahaRes.arrayBuffer()
 
@@ -60,6 +60,6 @@ export async function GET(request: Request) {
     })
   } catch (err: any) {
     console.error('[waha/qr] error:', err)
-    return new Response('Internal server error', { status: 500 })
+    return new Response('Erro interno do servidor', { status: 500 })
   }
 }

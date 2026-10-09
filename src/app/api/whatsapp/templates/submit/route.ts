@@ -138,14 +138,14 @@ export async function POST(request: Request) {
       channelId = typeof body.channel_id === 'string' && body.channel_id.trim() ? body.channel_id : undefined
       payload = body
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+      return NextResponse.json({ error: 'Corpo JSON inválido.' }, { status: 400 })
     }
 
     if (payload.category === 'Authentication') {
       return NextResponse.json(
         {
           error:
-            'AUTHENTICATION templates are not yet supported here — create them in Meta WhatsApp Manager and use "Sync from Meta".',
+            'Templates de AUTENTICAÇÃO ainda não são suportados aqui — crie-os no Gerenciador do WhatsApp da Meta e use "Sincronizar do Meta".',
         },
         { status: 400 },
       )
@@ -155,7 +155,7 @@ export async function POST(request: Request) {
       validateTemplatePayload(payload)
     } catch (e) {
       return NextResponse.json(
-        { error: e instanceof Error ? e.message : 'Validation failed.' },
+        { error: e instanceof Error ? e.message : 'Falha na validação.' },
         { status: 400 },
       )
     }
@@ -195,8 +195,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: channelId
-              ? 'Channel not found in your account.'
-              : 'No enabled Meta channel found for this account. Connect and enable a Meta WhatsApp channel in Canais first.',
+              ? 'Canal não encontrado na sua conta.'
+              : 'Nenhum canal Meta habilitado nesta conta. Conecte e habilite primeiro um canal WhatsApp Meta em Canais.',
           },
           { status: 400 },
         )
@@ -206,7 +206,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              'WABA (WhatsApp Business Account) ID missing. Re-connect your account in Settings.',
+              'ID da WABA (conta do WhatsApp Business) ausente. Reconecte sua conta nas Configurações.',
           },
           { status: 400 },
         )
@@ -222,7 +222,7 @@ export async function POST(request: Request) {
         await ensureImageHeaderHandle(payload, accessToken)
       } catch (e) {
         return NextResponse.json(
-          { error: e instanceof Error ? e.message : 'Header image upload failed.' },
+          { error: e instanceof Error ? e.message : 'Falha no envio da imagem do cabeçalho.' },
           { status: 400 },
         )
       }
@@ -237,7 +237,7 @@ export async function POST(request: Request) {
         metaTemplateId = meta.id
         metaStatus = meta.status
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'Meta submit failed.'
+        const message = e instanceof Error ? e.message : 'Falha no envio à Meta.'
         // Persist the failure so the user can retry; row stays DRAFT
         // until they fix and re-submit.
         await upsertTemplateRow(
@@ -253,7 +253,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error: isRateLimit
-              ? 'Meta rate limit hit (100 template creates per hour). Try again later.'
+              ? 'Limite da Meta atingido (100 criações de template por hora). Tente novamente mais tarde.'
               : message,
           },
           { status: isRateLimit ? 429 : 502 },
@@ -277,7 +277,7 @@ export async function POST(request: Request) {
       // so the user can recover via "Sync from Meta".
       return NextResponse.json(
         {
-          error: `Submitted to Meta but failed to save locally: ${upsertErr.message}. Run "Sync from Meta" to recover.`,
+          error: `Enviado à Meta, mas falhou ao salvar localmente: ${upsertErr.message}. Use "Sincronizar do Meta" para recuperar.`,
           meta_template_id: metaTemplateId,
         },
         { status: 500 },
@@ -294,7 +294,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : 'Failed to submit template.',
+          error instanceof Error ? error.message : 'Falha ao enviar o template.',
       },
       { status: 500 },
     )

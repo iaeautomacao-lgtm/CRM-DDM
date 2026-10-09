@@ -66,7 +66,7 @@ export async function POST(request: Request) {
       typeof body.fileBase64 !== "string" ||
       !body.fileBase64
     ) {
-      return NextResponse.json({ error: "Invalid export payload" }, { status: 400 });
+      return NextResponse.json({ error: "Dados da exportação inválidos" }, { status: 400 });
     }
 
     if (body.fileBase64.length > MAX_BASE64_LENGTH) {
@@ -106,7 +106,7 @@ export async function POST(request: Request) {
 
     if (uploadError) {
       console.error("[POST /api/relatorios/exports] upload error:", uploadError);
-      return NextResponse.json({ error: "Failed to upload export" }, { status: 500 });
+      return NextResponse.json({ error: "Falha ao enviar a exportação" }, { status: 500 });
     }
 
     const { data, error: insertError } = await admin
@@ -136,7 +136,7 @@ export async function POST(request: Request) {
       // it's just unlisted until someone reconciles storage vs. the
       // table, same trade-off as any two-step write without a
       // transaction spanning both systems.
-      return NextResponse.json({ error: "Failed to record export" }, { status: 500 });
+      return NextResponse.json({ error: "Falha ao registrar a exportação" }, { status: 500 });
     }
 
     return NextResponse.json({ id: data.id, storage_path: storagePath });
@@ -152,7 +152,7 @@ export async function DELETE(request: Request) {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     if (!id) {
-      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+      return NextResponse.json({ error: "id ausente" }, { status: 400 });
     }
 
     // Look up storage_path ourselves via the RLS-scoped client rather
@@ -168,17 +168,17 @@ export async function DELETE(request: Request) {
 
     if (fetchError) {
       console.error("[DELETE /api/relatorios/exports] fetch error:", fetchError);
-      return NextResponse.json({ error: "Failed to load export" }, { status: 500 });
+      return NextResponse.json({ error: "Falha ao carregar a exportação" }, { status: 500 });
     }
     if (!row) {
-      return NextResponse.json({ error: "Export not found" }, { status: 404 });
+      return NextResponse.json({ error: "Exportação não encontrada" }, { status: 404 });
     }
 
     const admin = supabaseAdmin();
     const { error: removeError } = await admin.storage.from(BUCKET).remove([row.storage_path]);
     if (removeError) {
       console.error("[DELETE /api/relatorios/exports] storage remove error:", removeError);
-      return NextResponse.json({ error: "Failed to delete file" }, { status: 500 });
+      return NextResponse.json({ error: "Falha ao excluir o arquivo" }, { status: 500 });
     }
 
     const { error: deleteError } = await admin
@@ -188,7 +188,7 @@ export async function DELETE(request: Request) {
       .eq("account_id", ctx.accountId);
     if (deleteError) {
       console.error("[DELETE /api/relatorios/exports] delete error:", deleteError);
-      return NextResponse.json({ error: "Failed to delete export record" }, { status: 500 });
+      return NextResponse.json({ error: "Falha ao excluir o registro da exportação" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
