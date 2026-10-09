@@ -20,6 +20,7 @@ import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
+import { maskUrlForLog, safeDbError } from "@/lib/privacy/mask";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
 import type { ConfirmArgs, ConfirmResult } from "@/lib/disparador/confirm-batcher";
 
@@ -440,7 +441,7 @@ async function markPhoneInvalid(item: QueueItem): Promise<void> {
 
     if (error) throw error;
   } catch (err: any) {
-    console.error("[Disparador] markPhoneInvalid: falha ao atualizar contact_phones:", err);
+    console.error("[Disparador] markPhoneInvalid: falha ao atualizar contact_phones:", safeDbError(err));
     void writeLog({
       level: "warn",
       source: "disparador",
@@ -1274,7 +1275,7 @@ export async function sendCampaignCallback(campaignId: string): Promise<boolean>
     if (!response.ok) throw new Error(`Callback rejeitado: HTTP ${response.status}`);
 
     console.log(
-      `[Callback] Campanha ${campaignId} — callback enviado para ${campaign.callback_url}`
+      `[Callback] Campanha ${campaignId} — callback enviado para ${maskUrlForLog(campaign.callback_url)}`
     );
     return true;
   } catch (err: any) {

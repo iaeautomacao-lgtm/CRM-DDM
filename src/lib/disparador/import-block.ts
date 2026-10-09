@@ -20,6 +20,7 @@ import {
 import { processWithConcurrency } from "@/lib/disparador/concurrency";
 import { contactLookupDigits, sliceInto } from "@/lib/disparador/import-chunks";
 import { writeLog } from "@/lib/logger";
+import { safeDbError } from "@/lib/privacy/mask";
 
 // Lotes de escrita (um import de 100 mil linhas fazia ~2.700 idas ao banco:
 // contatos de 50 em 50, VARs de 100 em 100). Até WRITE_CONCURRENCY lotes
@@ -485,11 +486,11 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
       await processWithConcurrency(slice, BACKFILL_CONCURRENCY, async ({ id, name, cpf }) => {
         if (name) {
           const { error: nameErr } = await supabaseAdmin().from("contacts").update({ name }).eq("id", id);
-          if (nameErr) console.error("[Contacts Import] Failed to backfill name:", nameErr);
+          if (nameErr) console.error("[Contacts Import] Failed to backfill name:", safeDbError(nameErr));
         }
         if (cpf) {
           const { error: cpfErr } = await supabaseAdmin().from("contacts").update({ cpf }).eq("id", id).is("cpf", null);
-          if (cpfErr) console.error("[Contacts Import] Failed to backfill cpf:", cpfErr);
+          if (cpfErr) console.error("[Contacts Import] Failed to backfill cpf:", safeDbError(cpfErr));
         }
       });
     });
@@ -564,7 +565,7 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
           if (existing?.[0]?.id) importedContactIds.add(existing[0].id);
         }
       } else {
-        console.error("[Contacts Import] Falha ao salvar contato:", singleErr);
+        console.error("[Contacts Import] Falha ao salvar contato:", safeDbError(singleErr));
         results.erros.push(`${source.phone}: não foi possível salvar o contato.`);
       }
     }
@@ -602,7 +603,7 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
     try {
       await assignImportedContactTags(supabaseAdmin(), tagAssignments, tagIdByKey);
     } catch (err) {
-      console.error("[Contacts Import] Failed to assign tags:", err);
+      console.error("[Contacts Import] Failed to assign tags:", safeDbError(err));
     }
   }
 
@@ -626,7 +627,7 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
       WRITE_CONCURRENCY
     );
     if (altSummary.failedBatches > 0) {
-      console.error("[Contacts Import] Failed to save alternate phones:", altSummary.firstError);
+      console.error("[Contacts Import] Failed to save alternate phones:", safeDbError(altSummary.firstError));
       results.erros.push(
         `Telefones alternativos: ${altSummary.failedRows} não foram salvos. Tente importar de novo.`
       );
@@ -720,7 +721,7 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
       results.erros.push(
         `Variáveis VAR1–VAR3: ${varFailedRows} de ${varRows.length} valores não foram salvos — reimporte o arquivo antes de iniciar a campanha.`
       );
-      console.error("[Contacts Import] Failed to save csv import variables:", varFirstError);
+      console.error("[Contacts Import] Failed to save csv import variables:", safeDbError(varFirstError));
       await writeLog({
         account_id: accountId,
         level: "error",
@@ -774,7 +775,7 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
       }
     }
     if (clearErr) {
-      console.error("[Contacts Import] Failed to clear import link:", clearErr);
+      console.error("[Contacts Import] Failed to clear import link:", safeDbError(clearErr));
       return { failure: { error: "Contatos importados, mas não foi possível vinculá-los à campanha. Tente importar de novo.", status: 500 } };
     }
     // Reenvio do mesmo bloco (ou contato repetido em blocos diferentes): não reinserir vínculos que já
@@ -813,14 +814,14 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
         for (const row of slice) {
           const { error: rowErr } = await supabaseAdmin().from("disp_import_contacts").insert(row);
           if (rowErr && !isUniqueViolation(rowErr)) {
-            console.error("[Contacts Import] Failed to link import contacts:", rowErr);
+            console.error("[Contacts Import] Failed to link import contacts:", safeDbError(rowErr));
             linkFailed = true;
             return;
           }
         }
         return;
       }
-      console.error("[Contacts Import] Failed to link import contacts:", linkErr);
+      console.error("[Contacts Import] Failed to link import contacts:", safeDbError(linkErr));
       linkFailed = true;
     });
     if (linkFailed) {

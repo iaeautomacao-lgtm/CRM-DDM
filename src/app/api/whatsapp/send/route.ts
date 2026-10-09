@@ -20,6 +20,7 @@ import { persistOutboundMessage } from '@/lib/messages/persist-outbound'
 import { sendWebchatMessage } from '@/lib/webchat/send'
 import { hasActiveWebchatSession } from '@/lib/webchat/sessions'
 import { SocialWindowClosedError, sendSocialMessage } from '@/lib/channels/social'
+import { maskPhoneForLog } from '@/lib/privacy/mask'
 import {
   sanitizePhoneForMeta,
   isValidE164,
@@ -614,7 +615,7 @@ export async function POST(request: Request) {
       if (workingPhone !== sanitizedPhone) {
         // operacional — registra uma correção de telefone aplicada de fato
         console.log(
-          `[whatsapp/send] Auto-corrected contact phone: ${sanitizedPhone} → ${workingPhone}`
+          `[whatsapp/send] Auto-corrected contact phone: ${maskPhoneForLog(sanitizedPhone)} → ${maskPhoneForLog(workingPhone)}`
         )
         await supabase
           .from('contacts')
