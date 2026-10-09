@@ -86,6 +86,9 @@ interface PostBody {
 
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  // Rota pública: limite por IP+sessão ANTES de qualquer leitura (o anti-flood por sessão abaixo roda depois das consultas).
+  const limited = await webchatRateLimit(request, token, 'write')
+  if (limited) return limited
   const result = await requireActiveSession(token)
   if ('response' in result) return result.response
   const { session } = result
