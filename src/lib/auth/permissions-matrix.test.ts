@@ -159,8 +159,8 @@ describe("papéis de sistema: conjuntos finais", () => {
     const viewer = [...permissionsForRole("viewer")].sort();
     expect(viewer).toEqual(
       [
-        "account.view", "api_keys.view", "channels.view", "contacts.view", "conversations.scope_all", "conversations.scope_team",
-        "dashboard.view", "members.view", "teams.view", "templates.view",
+        "account.view", "api_keys.view", "campaigns.view", "channels.view", "contacts.view", "conversations.scope_all", "conversations.scope_team",
+        "dashboard.view", "members.view", "pipelines.view", "teams.view", "templates.view",
       ].sort(),
     );
   });

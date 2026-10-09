@@ -82,7 +82,7 @@ export async function POST(request: Request) {
           media_url = await resolveProviderMedia(originalMediaUrl, accountId);
         } catch (err) {
           if (err instanceof MediaUrlNotAllowedError) {
-            return NextResponse.json({ error: 'media_url must be a public URL' }, { status: 400 });
+            return NextResponse.json({ error: 'media_url deve ser uma URL pública' }, { status: 400 });
           }
           throw err;
         }
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              'Either conversation_id or contact_id, plus message_type, are required',
+              'Informe conversation_id ou contact_id, além de message_type',
           },
           { status: 400 }
         )
@@ -110,28 +110,28 @@ export async function POST(request: Request) {
       const VALID_MESSAGE_TYPES = ['text', 'template', ...MEDIA_KINDS] as const
       if (!(VALID_MESSAGE_TYPES as readonly string[]).includes(message_type)) {
         return NextResponse.json(
-          { error: `Unsupported message_type "${message_type}"` },
+          { error: `message_type não suportado: "${message_type}"` },
           { status: 400 }
         )
       }
 
       if (message_type === 'text' && !content_text) {
         return NextResponse.json(
-          { error: 'content_text is required for text messages' },
+          { error: 'content_text é obrigatório para mensagens de texto' },
           { status: 400 }
         )
       }
 
       if (message_type === 'template' && !template_name) {
         return NextResponse.json(
-          { error: 'template_name is required for template messages' },
+          { error: 'template_name é obrigatório para mensagens de template' },
           { status: 400 }
         )
       }
 
       if (isMediaKind && !media_url) {
         return NextResponse.json(
-          { error: `media_url is required for ${message_type} messages` },
+          { error: `media_url é obrigatório para mensagens do tipo ${message_type}` },
           { status: 400 }
         )
       }
@@ -145,7 +145,7 @@ export async function POST(request: Request) {
         content_text.length > 1024
       ) {
         return NextResponse.json(
-          { error: 'Caption exceeds the 1024-character limit' },
+          { error: 'A legenda excede o limite de 1024 caracteres' },
           { status: 400 }
         )
       }
@@ -179,7 +179,7 @@ export async function POST(request: Request) {
 
         if (convError || !data) {
           return NextResponse.json(
-            { error: 'Conversation not found' },
+            { error: 'Conversa não encontrada' },
             { status: 404 }
           )
         }
@@ -200,7 +200,7 @@ export async function POST(request: Request) {
 
         if (contactErr || !contactRow) {
           return NextResponse.json(
-            { error: 'Contact not found' },
+            { error: 'Contato não encontrado' },
             { status: 404 }
           )
         }
@@ -228,7 +228,7 @@ export async function POST(request: Request) {
         )
         if (!resolved) {
           return NextResponse.json(
-            { error: 'Failed to open a conversation for this contact' },
+            { error: 'Falha ao abrir uma conversa para este contato' },
             { status: 500 }
           )
         }
@@ -238,7 +238,7 @@ export async function POST(request: Request) {
 
       if (!conversation) {
         return NextResponse.json(
-          { error: 'Conversation not found' },
+          { error: 'Conversa não encontrada' },
           { status: 404 }
         )
       }
@@ -338,7 +338,7 @@ export async function POST(request: Request) {
       const contact = conversation.contact
       if (!contact?.phone) {
         return NextResponse.json(
-          { error: 'Contact phone number not found' },
+          { error: 'Telefone do contato não encontrado' },
           { status: 400 }
         )
       }
@@ -347,7 +347,7 @@ export async function POST(request: Request) {
       const sanitizedPhone = sanitizePhoneForMeta(contact.phone)
       if (!isValidE164(sanitizedPhone)) {
         return NextResponse.json(
-          { error: 'Invalid phone number format' },
+          { error: 'Formato de telefone inválido' },
           { status: 400 }
         )
       }
@@ -378,7 +378,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              'WhatsApp not configured. Please set up your WhatsApp integration first.',
+              'WhatsApp não configurado. Configure primeiro a integração com o WhatsApp.',
           },
           { status: 400 }
         )
@@ -428,7 +428,7 @@ export async function POST(request: Request) {
 
         if (parentError || !parent) {
           return NextResponse.json(
-            { error: 'reply_to_message_id not found in this conversation' },
+            { error: 'reply_to_message_id não encontrado nesta conversa' },
             { status: 400 }
           )
         }
@@ -490,7 +490,7 @@ export async function POST(request: Request) {
           return NextResponse.json(
             {
               error:
-                'Template row is malformed locally — run "Sync from Meta" in Settings to repair it.',
+                'O template salvo está malformado — use "Sincronizar do Meta" nas Configurações para repará-lo.',
             },
             { status: 500 }
           )
@@ -614,14 +614,14 @@ export async function POST(request: Request) {
 
         if (lastError) throw lastError
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown API error'
+        const message = err instanceof Error ? err.message : 'Erro desconhecido da API'
         console.error(
           `${config.provider === 'waha' ? 'WAHA' : 'Meta'} API send failed:`,
           message
         )
         return NextResponse.json(
           {
-            error: `${config.provider === 'waha' ? 'WAHA' : 'Meta'} API error: ${message}`,
+            error: `Erro na API (${config.provider === 'waha' ? 'WAHA' : 'Meta'}): ${message}`,
           },
           { status: 502 }
         )
@@ -713,7 +713,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Error in WhatsApp send POST:', error)
     return NextResponse.json(
-      { error: 'Failed to send message' },
+      { error: 'Falha ao enviar a mensagem' },
       { status: 500 }
     )
   }
@@ -788,7 +788,18 @@ async function findOrCreateConversation(
     query = query.is('waha_session', null)
   }
 
-  const { data: existing } = await query.maybeSingle()
+  // Várias conversas do contato nesta linha são normais (o webhook abre uma nova
+  // quando a última está fechada): reaproveita a mais recente. Com maybeSingle(),
+  // duas linhas davam erro (ignorado) e cada envio criava MAIS uma conversa.
+  const { data: rows, error: findError } = await query
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (findError) {
+    // Antes o erro era ignorado e caía no insert (mais uma conversa duplicada).
+    console.error('Error finding conversation for contact send:', findError.message)
+    return null
+  }
+  const existing = rows?.[0]
 
   if (existing) return existing
 
