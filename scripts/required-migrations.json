@@ -290,6 +290,10 @@
       "kind": "registry"
     },
     {
+      "version": "300_monitoring_agent_metrics",
+      "kind": "registry"
+    },
+    {
       "version": "301_quick_replies_visibility_usage",
       "kind": "registry"
     },
@@ -303,7 +307,15 @@
       "index": "idx_conversation_assignments_from_agent"
     },
     {
+      "version": "310_rls_mfa_aal2",
+      "kind": "registry"
+    },
+    {
       "version": "311_member_deactivation_last_access",
+      "kind": "registry"
+    },
+    {
+      "version": "320_billing_reports",
       "kind": "registry"
     },
     {
