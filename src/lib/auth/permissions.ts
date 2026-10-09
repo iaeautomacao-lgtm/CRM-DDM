@@ -124,6 +124,10 @@ export const PERMISSION_CATALOG = {
   "api_keys.view": { label: "Ver chaves de API", description: "Listar as chaves de API da organização (sem o segredo).", group: "Organização", scope: "none", roles: ALL },
   "api_keys.manage": { label: "Gerenciar chaves de API", description: "Criar e revogar chaves de API.", group: "Organização", scope: "none", roles: atLeast("admin"), dependsOn: ["api_keys.view"] },
   "integrations.manage": { label: "Integrações da organização", description: "Chaves e integrações por organização (PRD 19).", group: "Organização", scope: "none", roles: atLeast("admin"), future: true },
+
+  // ── Cobrança (PRD 17) ───────────────────────────────────
+  "billing.view": { label: "Ver a régua de cobrança", description: "Ver réguas, etapas, inscrições e métricas da régua de cobrança.", group: "Cobrança", scope: "account", roles: atLeast("supervisor") },
+  "billing.manage": { label: "Gerir a régua de cobrança", description: "Criar e alterar réguas e etapas, simular, pausar e parar inscrições.", group: "Cobrança", scope: "none", roles: atLeast("admin"), dependsOn: ["billing.view"] },
 } as const satisfies Record<string, PermissionDef>;
 
 export type Permission = keyof typeof PERMISSION_CATALOG;
