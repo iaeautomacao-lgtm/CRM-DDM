@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 const NAME_MAX_LENGTH = 50
 
@@ -66,7 +67,7 @@ export async function PATCH(
       .maybeSingle()
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return internalErrorResponse('templates/folders/[id]', error)
     }
     if (!folder) {
       return NextResponse.json({ error: 'Pasta não encontrada.' }, { status: 404 })
@@ -109,7 +110,7 @@ export async function DELETE(
       .eq('folder_id', id)
       .eq('account_id', accountId)
     if (unfileErr) {
-      return NextResponse.json({ error: unfileErr.message }, { status: 500 })
+      return internalErrorResponse('templates/folders/[id]', unfileErr)
     }
 
     const { error: delErr } = await supabase
@@ -118,7 +119,7 @@ export async function DELETE(
       .eq('id', id)
       .eq('account_id', accountId)
     if (delErr) {
-      return NextResponse.json({ error: delErr.message }, { status: 500 })
+      return internalErrorResponse('templates/folders/[id]', delErr)
     }
 
     return NextResponse.json({ deleted: true })
