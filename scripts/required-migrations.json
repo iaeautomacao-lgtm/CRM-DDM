@@ -336,7 +336,25 @@
       "kind": "registry"
     },
     {
+      "version": "314_contacts_phone_suffix_lookup",
+      "kind": "registry"
+    },
+    {
+      "version": "314b_contacts_phone_suffix_idx",
+      "kind": "index",
+      "index": "idx_contacts_account_phone_suffix8"
+    },
+    {
       "version": "315_user_sessions_refreshed_at_utc",
+      "kind": "registry"
+    },
+    {
+      "version": "316b_conversations_account_created_idx",
+      "kind": "index",
+      "index": "idx_conversations_account_created"
+    },
+    {
+      "version": "317_automation_pending_lease",
       "kind": "registry"
     },
     {
@@ -344,7 +362,15 @@
       "kind": "registry"
     },
     {
+      "version": "322_report_rpcs_has_perm",
+      "kind": "registry"
+    },
+    {
       "version": "323_contacts_rls_has_perm",
+      "kind": "registry"
+    },
+    {
+      "version": "324_conversations_rls_has_perm",
       "kind": "registry"
     }
   ]

@@ -16,6 +16,7 @@ import {
   Loader2,
   SlidersHorizontal,
   X,
+  AlertTriangle,
   Bell,
   BellOff,
   History,
@@ -93,11 +94,11 @@ const CHANNEL_TABS: { label: string; value: InboxChannel | null }[] = [
 ];
 
 export const CHANNEL_BADGE: Record<string, { label: string; className: string }> = {
-  whatsapp: { label: "WhatsApp", className: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20" },
-  webchat: { label: "Webchat", className: "text-cyan-600 bg-cyan-500/10 border-cyan-500/20" },
-  instagram: { label: "Instagram", className: "text-pink-600 bg-pink-500/10 border-pink-500/20" },
-  messenger: { label: "Messenger", className: "text-blue-600 bg-blue-500/10 border-blue-500/20" },
-  sms: { label: "SMS", className: "text-violet-600 bg-violet-500/10 border-violet-500/20" },
+  whatsapp: { label: "WhatsApp", className: "text-emerald-400 [html[data-mode=light]_&]:text-emerald-700 bg-emerald-500/10 border-emerald-500/20" },
+  webchat: { label: "Webchat", className: "text-cyan-400 [html[data-mode=light]_&]:text-cyan-700 bg-cyan-500/10 border-cyan-500/20" },
+  instagram: { label: "Instagram", className: "text-pink-400 [html[data-mode=light]_&]:text-pink-700 bg-pink-500/10 border-pink-500/20" },
+  messenger: { label: "Messenger", className: "text-blue-400 [html[data-mode=light]_&]:text-blue-700 bg-blue-500/10 border-blue-500/20" },
+  sms: { label: "SMS", className: "text-violet-400 [html[data-mode=light]_&]:text-violet-700 bg-violet-500/10 border-violet-500/20" },
 };
 
 // Persisted independently per section so collapsing one doesn't touch
@@ -225,6 +226,10 @@ export function ConversationList({
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
+  // Falha da carga inicial: antes virava "Nenhuma conversa encontrada" e o
+  // operador achava que não havia atendimentos. 403 = sem permissão.
+  const [loadError, setLoadError] = useState<"error" | "forbidden" | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [statusTotals, setStatusTotals] = useState<StatusTotals>({});
   // Totais das abas (null = contagem indisponível: a aba fica sem número).
   const [tabTotals, setTabTotals] = useState<Record<QueueTab, number | null>>({ me: null, unassigned: null, all: null });
@@ -297,6 +302,7 @@ export function ConversationList({
         .catch(() => ({})) as Promise<{ unread?: Record<string, number>; status?: StatusTotals }>;
     (async () => {
       setLoading(true);
+      setLoadError(null);
       try {
         const [listRes, counts, baseCounts, mineCounts] = await Promise.all([
           apiFetch(`/api/inbox/conversations?${filtersKey}`),
@@ -304,9 +310,12 @@ export function ConversationList({
           countKeys.base === filtersKey ? null : fetchCounts(countKeys.base),
           countKeys.mine === filtersKey ? null : fetchCounts(countKeys.mine),
         ]);
-        const list = await listRes.json();
+        const list = await listRes.json().catch(() => ({}));
         if (cancelled) return;
-        if (!listRes.ok) throw new Error(list.error ?? `HTTP ${listRes.status}`);
+        if (!listRes.ok) {
+          setLoadError(listRes.status === 403 ? "forbidden" : "error");
+          throw new Error(list.error ?? `HTTP ${listRes.status}`);
+        }
         onConversationsLoadedRef.current(list.conversations ?? []);
         setNextCursor(list.next_cursor ?? null);
         setUnread(counts.unread ?? {});
@@ -321,6 +330,7 @@ export function ConversationList({
         setLoadMoreFailed(false);
       } catch (err) {
         console.error("Failed to fetch conversations:", err);
+        if (!cancelled) setLoadError((cur) => cur ?? "error");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -328,7 +338,7 @@ export function ConversationList({
     return () => {
       cancelled = true;
     };
-  }, [filtersKey, resyncToken, countKeys]);
+  }, [filtersKey, resyncToken, countKeys, retryKey]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
@@ -521,7 +531,7 @@ export function ConversationList({
       <PushNudge />
       <div className="flex flex-col gap-2.5 border-b border-border px-3.5 pb-2.5 pt-3.5">
         <div className="flex items-center gap-1.5">
-        <div className="flex flex-1 gap-0.5 rounded-lg bg-card-2 p-[3px]" role="tablist" aria-label="Fila">
+        <div className="flex flex-1 gap-0.5 rounded-lg bg-card-2 p-[3px]" role="group" aria-label="Fila">
           {tabs.map((tab) => {
             const on = activeTab === tab.id;
             const count = tabTotals[tab.id];
@@ -530,11 +540,10 @@ export function ConversationList({
               <button
                 key={tab.id}
                 type="button"
-                role="tab"
-                aria-selected={on}
+                aria-pressed={on}
                 onClick={() => selectTab(tab.id)}
                 className={cn(
-                  "flex h-[30px] flex-1 items-center justify-center gap-1.5 rounded-md text-[12.5px] font-semibold",
+                  "flex h-[30px] flex-1 items-center justify-center gap-1.5 rounded-md text-[12.5px] font-semibold focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
                   on
                     ? "bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,.12),0_0_0_1px_var(--border)]"
                     : "text-foreground-2 hover:text-foreground",
@@ -768,6 +777,21 @@ export function ConversationList({
           min-height:auto, so without it this ScrollArea grows to fit
           every conversation instead of shrinking to the remaining
           space (issue #229). */}
+      {/* Falha ao atualizar com a lista anterior ainda na tela: avisa que
+          ela pode estar desatualizada, sem escondê-la. */}
+      {!loading && loadError === "error" && visible.length > 0 && (
+        <div role="alert" className="flex items-center gap-2 border-b border-border bg-danger-soft px-3.5 py-2 text-[12px] text-foreground">
+          <AlertTriangle className="size-3.5 shrink-0 text-danger" aria-hidden="true" />
+          <span className="min-w-0 flex-1">Não foi possível atualizar a lista.</span>
+          <button
+            type="button"
+            onClick={() => setRetryKey((k) => k + 1)}
+            className="shrink-0 font-semibold text-primary-text hover:underline"
+          >
+            Tentar de novo
+          </button>
+        </div>
+      )}
       <ScrollArea className="min-h-0 flex-1">
         {loading ? (
           <div className="flex flex-col" role="status" aria-busy="true">
@@ -782,6 +806,27 @@ export function ConversationList({
                 </div>
               </div>
             ))}
+          </div>
+        ) : loadError && visible.length === 0 ? (
+          <div role="alert" className="flex animate-ddm-fade flex-col items-center gap-1.5 px-6 py-12 text-center">
+            <AlertTriangle className="size-4 text-danger" aria-hidden="true" />
+            <p className="text-[13px] font-semibold text-foreground">
+              {loadError === "forbidden" ? "Sem permissão para ver estas conversas" : "Não foi possível carregar as conversas"}
+            </p>
+            <p className="text-[12.5px] text-muted-foreground">
+              {loadError === "forbidden"
+                ? "Peça a um administrador para revisar o seu perfil."
+                : "Verifique a conexão e tente de novo."}
+            </p>
+            {loadError === "error" && (
+              <button
+                type="button"
+                onClick={() => setRetryKey((k) => k + 1)}
+                className="mt-1.5 h-[30px] rounded-md border border-border bg-card px-3 text-[12.5px] font-medium text-foreground hover:bg-surface-hover"
+              >
+                Tentar de novo
+              </button>
+            )}
           </div>
         ) : visible.length === 0 ? (
           <div className="flex animate-ddm-fade flex-col items-center gap-1.5 px-6 py-12 text-center">
@@ -1017,7 +1062,7 @@ function ConversationItem({ conversation, isActive, onSelect, client, assigneeNa
       onClick={() => onSelect(conversation)}
       aria-current={isActive ? "true" : undefined}
       className={cn(
-        "flex w-full gap-3 border-b border-l-2 border-b-border-soft py-3 pl-3 pr-3.5 text-left",
+        "flex w-full gap-3 border-b border-l-2 border-b-border-soft py-3 pl-3 pr-3.5 text-left focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary",
         isActive ? "border-l-primary bg-selected" : "border-l-transparent hover:bg-surface-hover",
       )}
     >

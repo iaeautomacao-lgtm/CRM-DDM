@@ -76,6 +76,8 @@ describe("findExistingContact", () => {
   function stubDb(
     contactsRows: Array<{ id: string; phone: string }>,
     altPhoneRows: Array<{ contact_id: string; phone_normalized: string }> = [],
+    // RPC da migration 314: "missing" = banco sem a 314 (cai no LIKE antigo).
+    rpc: { mode: "missing" | "ok" | "error"; calls?: unknown[][]; likeCalls?: unknown[] } = { mode: "missing" },
   ): SupabaseClient {
     const from = (table: string) => {
       if (table === "contact_phones") {
@@ -99,7 +101,7 @@ describe("findExistingContact", () => {
       // 2) .select().eq('id',...).eq('account_id',...).maybeSingle() -> fallback
       const builder: any = {
         select: () => builder,
-        like: () => Promise.resolve({ data: contactsRows, error: null }),
+        like: (_col: string, pattern: string) => (rpc.likeCalls?.push(pattern), Promise.resolve({ data: contactsRows, error: null })),
         eq: (col: string, val: string) => {
           if (col === "id") {
             const found = contactsRows.find((r) => r.id === val) ?? null;
@@ -114,7 +116,13 @@ describe("findExistingContact", () => {
       };
       return builder;
     };
-    return { from } as unknown as SupabaseClient;
+    const rpcFn = (name: string, args: unknown) => {
+      rpc.calls?.push([name, args]);
+      if (rpc.mode === "missing") return Promise.resolve({ data: null, error: { code: "PGRST202", message: "not found" } });
+      if (rpc.mode === "error") return Promise.resolve({ data: null, error: { code: "57014", message: "timeout" } });
+      return Promise.resolve({ data: contactsRows, error: null });
+    };
+    return { from, rpc: rpcFn } as unknown as SupabaseClient;
   }
 
   it("returns a trunk-variant match via phonesMatch", async () => {
@@ -150,5 +158,60 @@ describe("findExistingContact", () => {
     const db = stubDb([{ id: "c1", phone: "15551234567" }], []);
     const hit = await findExistingContact(db, "acct", "15551234567");
     expect(hit?.id).toBe("c1");
+  });
+});
+
+describe("findExistingContact com a RPC da migration 314 (índice por sufixo)", () => {
+  function db(mode: "ok" | "error" | "missing", rows: Array<{ id: string; phone: string }>) {
+    const calls: unknown[][] = [];
+    const likeCalls: unknown[] = [];
+    const client = {
+      rpc: (name: string, args: unknown) => {
+        calls.push([name, args]);
+        if (mode === "missing") return Promise.resolve({ data: null, error: { code: "PGRST202" } });
+        if (mode === "error") return Promise.resolve({ data: null, error: { code: "57014" } });
+        return Promise.resolve({ data: rows, error: null });
+      },
+      from: () => {
+        const b: Record<string, unknown> = {};
+        b.select = () => b;
+        b.eq = () => b;
+        b.like = (_c: string, p: string) => (likeCalls.push(p), Promise.resolve({ data: rows, error: null }));
+        b.limit = () => ({ maybeSingle: () => Promise.resolve({ data: null, error: null }) });
+        return b;
+      },
+    } as unknown as SupabaseClient;
+    return { client, calls, likeCalls };
+  }
+
+  it("usa a RPC com os últimos 8 dígitos e NÃO faz o LIKE", async () => {
+    const d = db("ok", [{ id: "c1", phone: "5511987654321" }]);
+    const hit = await findExistingContact(d.client, "acct", "+55 (11) 98765-4321");
+    expect(hit?.id).toBe("c1");
+    expect(d.calls).toEqual([["find_contacts_by_phone_suffix", { p_account: "acct", p_suffix: "87654321" }]]);
+    expect(d.likeCalls).toEqual([]);
+  });
+
+  it("o resultado da RPC ainda passa pelo phonesMatch", async () => {
+    const d = db("ok", [{ id: "c1", phone: "5511900000000" }]); // linha que não bate (a RPC filtra no banco; o app confere de novo)
+    expect(await findExistingContact(d.client, "acct", "5511987654321")).toBeNull();
+  });
+
+  it("banco sem a 314: cai no LIKE antigo", async () => {
+    const d = db("missing", [{ id: "c1", phone: "5511987654321" }]);
+    expect((await findExistingContact(d.client, "acct", "5511987654321"))?.id).toBe("c1");
+    expect(d.likeCalls).toEqual(["%87654321"]);
+  });
+
+  it("outro erro da RPC: null (como o erro da consulta antiga), sem varrer a conta", async () => {
+    const d = db("error", [{ id: "c1", phone: "5511987654321" }]);
+    expect(await findExistingContact(d.client, "acct", "5511987654321")).toBeNull();
+    expect(d.likeCalls).toEqual([]);
+  });
+
+  it("sufixo curto (número inválido com menos de 8 dígitos): consulta antiga, sem RPC", async () => {
+    const d = db("ok", [{ id: "c1", phone: "12345" }]);
+    expect((await findExistingContact(d.client, "acct", "12345"))?.id).toBe("c1");
+    expect(d.calls).toEqual([]);
   });
 });
