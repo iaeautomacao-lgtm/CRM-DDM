@@ -117,9 +117,15 @@ SET search_path = pg_catalog
 AS $$
   SELECT p.user_id,
          u.last_sign_in_at,
-         -- refreshed_at é timestamp SEM fuso no GoTrue (UTC): converter como UTC, não pelo fuso da sessão.
-    (SELECT max(coalesce(((to_jsonb(s) ->> 'refreshed_at')::timestamp AT TIME ZONE 'UTC'), s.updated_at, s.created_at))
+         -- refreshed_at é timestamp SEM fuso no GoTrue (UTC): sem fuso no texto, ler como UTC (não pelo fuso da sessão);
+         -- se alguma versão trouxer timestamptz, o texto do to_jsonb vem com fuso e vale o dele. Mesma regra da 315.
+         (SELECT max(coalesce(
+                   CASE WHEN r.v IS NULL OR r.v = '' THEN NULL
+                        WHEN r.v ~ '(Z|[+-][0-9]{2}(:?[0-9]{2})?)$' THEN r.v::timestamptz
+                        ELSE r.v::timestamp AT TIME ZONE 'UTC' END,
+                   s.updated_at, s.created_at))
             FROM auth.sessions s
+            CROSS JOIN LATERAL (SELECT to_jsonb(s) ->> 'refreshed_at' AS v) r
            WHERE s.user_id = p.user_id) AS last_active_at
     FROM wacrm.profiles p
     LEFT JOIN auth.users u ON u.id = p.user_id
