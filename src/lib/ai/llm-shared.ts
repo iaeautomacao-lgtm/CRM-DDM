@@ -136,7 +136,10 @@ export async function callLlmForAnalysis(
   apiKey: string,
   prompt: string,
   model?: string,
+  opts: { maxTokens?: number; timeoutMs?: number } = {},
 ): Promise<string> {
+  const maxTokens = opts.maxTokens ?? ANALYSIS_MAX_TOKENS;
+  const timeoutMs = opts.timeoutMs ?? ANALYSIS_TIMEOUT_MS;
   const effectiveModel =
     model ||
     (isAiProvider(provider) ? DEFAULT_MODEL_BY_PROVIDER[provider] : null);
@@ -155,15 +158,15 @@ export async function callLlmForAnalysis(
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
-        signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
           model: effectiveModel,
           messages: [{ role: "user", content: prompt }],
           temperature: 0.2,
           response_format: { type: "json_object" },
           ...(reasoningEffort
-            ? { reasoning_effort: reasoningEffort, max_completion_tokens: ANALYSIS_MAX_TOKENS }
-            : { max_tokens: ANALYSIS_MAX_TOKENS }),
+            ? { reasoning_effort: reasoningEffort, max_completion_tokens: maxTokens }
+            : { max_tokens: maxTokens }),
         }),
       }),
     );
@@ -178,10 +181,10 @@ export async function callLlmForAnalysis(
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
       },
-      signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       body: JSON.stringify({
         model: effectiveModel,
-        max_tokens: ANALYSIS_MAX_TOKENS,
+        max_tokens: maxTokens,
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -200,12 +203,12 @@ export async function callLlmForAnalysis(
         "HTTP-Referer": "https://wacrm.vercel.app",
         "X-Title": "WA CRM",
       },
-      signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       body: JSON.stringify({
         model: effectiveModel,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.2,
-        max_tokens: ANALYSIS_MAX_TOKENS,
+        max_tokens: maxTokens,
         response_format: { type: "json_object" },
       }),
     });
@@ -218,11 +221,11 @@ export async function callLlmForAnalysis(
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      signal: AbortSignal.timeout(ANALYSIS_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
-          maxOutputTokens: ANALYSIS_MAX_TOKENS,
+          maxOutputTokens: maxTokens,
           temperature: 0.2,
           responseMimeType: "application/json",
         },

@@ -275,6 +275,8 @@ export const RATE_LIMITS = {
   /** Webchat público (por IP + token) — AP-19: leitura/poll/mídia e abertura/upload. */
   webchatRead: { limit: 120, windowMs: 60_000 },
   webchatWrite: { limit: 30, windowMs: 60_000 },
+  /** IA no composer (reescrever/variações de tom): cada chamada gasta a chave de IA da CONTA; 20/min por operador cobre o uso humano. */
+  aiRewrite: { limit: 20, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't
