@@ -2,16 +2,9 @@
 
 import { useMemo } from "react";
 import type { Deal, PipelineStage } from "@/types";
-import { Info } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { formatCurrency } from "@/lib/currency";
-import { cn } from "@/lib/utils";
+import { KpiStrip } from "@/components/ddm/kpi-strip";
 import { CountUp } from "@/components/motion/count-up";
 
 interface PipelineAnalyticsProps {
@@ -85,95 +78,47 @@ export function PipelineAnalytics({ stages, deals }: PipelineAnalyticsProps) {
     };
   }, [deals, sortedStages]);
 
-  return (
-    <TooltipProvider>
-      {/* Faixa de indicadores (redesenho DDM): células unidas por 1px. */}
-      <section
-        aria-label="Indicadores do pipeline"
-        className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-border bg-border sm:grid-cols-3 xl:grid-cols-6"
-      >
-        <Metric
-          label="Total de negócios"
-          value={stats.totalCount}
-          format={(n) => Math.round(n).toLocaleString("pt-BR")}
-          tooltip="Contagem de todos os negócios neste pipeline que não estão marcados como Perdido. Negócios Ganhos ainda são incluídos."
-        />
-        <Metric
-          label="Valor do pipeline"
-          value={stats.totalValue}
-          format={(n) => formatCurrency(n, defaultCurrency)}
-          tooltip="Soma dos valores de todos os negócios neste pipeline, excluindo os marcados como Perdido."
-        />
-        <Metric
-          label="Ticket médio"
-          value={stats.avgValue}
-          format={(n) => formatCurrency(n, defaultCurrency)}
-          tooltip="Valor do Pipeline dividido pelo Total de Negócios — o valor médio de um único negócio não perdido."
-        />
-        <Metric
-          label="Valor ponderado"
-          value={stats.weightedValue}
-          format={(n) => formatCurrency(n, defaultCurrency)}
-          tooltip="Receita esperada: valor de cada negócio aberto × probabilidade da etapa. Primeira etapa ≈ 10%, etapas progridem até 90%, Ganho = 100%. Negócios Perdidos são excluídos."
-        />
-        <Metric
-          label="Ganhos no mês"
-          value={stats.wonThisMonth}
-          format={(n) => Math.round(n).toLocaleString("pt-BR")}
-          valueClassName="text-success"
-          tooltip="Negócios marcados como Ganho desde o primeiro dia do mês atual."
-        />
-        <Metric
-          label="Perdidos no mês"
-          value={stats.lostThisMonth}
-          format={(n) => Math.round(n).toLocaleString("pt-BR")}
-          valueClassName="text-danger"
-          tooltip="Negócios marcados como Perdido desde o primeiro dia do mês atual."
-        />
-      </section>
-    </TooltipProvider>
-  );
-}
+  const money = (n: number) => formatCurrency(n, defaultCurrency);
+  const count = (n: number) => Math.round(n).toLocaleString("pt-BR");
 
-function Metric({
-  label,
-  value,
-  format,
-  tooltip,
-  valueClassName,
-}: {
-  label: string;
-  value: number;
-  format: (n: number) => string;
-  tooltip: string;
-  valueClassName?: string;
-}) {
+  // Faixa de indicadores (primitivo KpiStrip do redesenho). A explicação de
+  // cada número fica no `title` da célula.
   return (
-    <div className="flex min-w-0 flex-col gap-1 bg-card px-3.5 py-3">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="truncate">{label}</span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                aria-label={`Como ${label} é calculado`}
-                className="ml-auto flex cursor-help text-muted-foreground hover:text-foreground"
-              />
-            }
-          >
-            <Info className="size-3" />
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-xs text-left">
-            {tooltip}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      <CountUp
-        value={value}
-        format={format}
-        className={cn("truncate text-[17px] font-semibold text-foreground", valueClassName)}
-      />
-    </div>
+    <KpiStrip
+      ariaLabel="Indicadores do pipeline"
+      minWidth={150}
+      items={[
+        {
+          label: "Total de negócios",
+          value: <CountUp value={stats.totalCount} format={count} />,
+          title: "Contagem de todos os negócios neste pipeline que não estão marcados como Perdido. Negócios Ganhos ainda são incluídos.",
+        },
+        {
+          label: "Valor do pipeline",
+          value: <CountUp value={stats.totalValue} format={money} />,
+          title: "Soma dos valores de todos os negócios neste pipeline, excluindo os marcados como Perdido.",
+        },
+        {
+          label: "Ticket médio",
+          value: <CountUp value={stats.avgValue} format={money} />,
+          title: "Valor do Pipeline dividido pelo Total de Negócios — o valor médio de um único negócio não perdido.",
+        },
+        {
+          label: "Valor ponderado",
+          value: <CountUp value={stats.weightedValue} format={money} />,
+          title: "Receita esperada: valor de cada negócio aberto × probabilidade da etapa. Primeira etapa ≈ 10%, etapas progridem até 90%, Ganho = 100%. Negócios Perdidos são excluídos.",
+        },
+        {
+          label: "Ganhos no mês",
+          value: <CountUp value={stats.wonThisMonth} format={count} className="text-success" />,
+          title: "Negócios marcados como Ganho desde o primeiro dia do mês atual.",
+        },
+        {
+          label: "Perdidos no mês",
+          value: <CountUp value={stats.lostThisMonth} format={count} className="text-danger" />,
+          title: "Negócios marcados como Perdido desde o primeiro dia do mês atual.",
+        },
+      ]}
+    />
   );
 }

@@ -51,6 +51,8 @@ import { GatedButton } from '@/components/ui/gated-button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { CountUp } from '@/components/motion/count-up';
+import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
+import { PageToolbar } from '@/components/ddm/page-toolbar';
 
 const PAGE_SIZE = 25;
 
@@ -361,7 +363,31 @@ export default function ContactsPage() {
       </div>
 
       {/* Barra: busca, etiquetas e ações */}
-      <div className="flex flex-wrap items-center gap-2">
+      <PageToolbar
+        actions={
+          <>
+            {canEditSettings && (
+              <Button variant="outline" onClick={() => setCustomFieldsOpen(true)} className="hidden sm:inline-flex">
+                <SlidersHorizontal className="size-3.5" />
+                Campos personalizados
+              </Button>
+            )}
+            <GatedButton
+              variant="outline"
+              canAct={canEdit}
+              gateReason="adicionar ou importar contatos"
+              onClick={() => setImportOpen(true)}
+            >
+              <Upload className="size-3.5" />
+              Importar
+            </GatedButton>
+            <GatedButton canAct={canEdit} gateReason="adicionar ou importar contatos" onClick={openAddForm}>
+              <Plus className="size-3.5" />
+              Adicionar contato
+            </GatedButton>
+          </>
+        }
+      >
         <label className="relative flex min-w-0 flex-[1_1_280px] items-center sm:max-w-[420px]">
           <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
           <input
@@ -450,28 +476,7 @@ export default function ContactsPage() {
           </PopoverContent>
         </Popover>
 
-        <span className="hidden flex-1 sm:block" />
-
-        {canEditSettings && (
-          <Button variant="outline" onClick={() => setCustomFieldsOpen(true)} className="hidden sm:inline-flex">
-            <SlidersHorizontal className="size-3.5" />
-            Campos personalizados
-          </Button>
-        )}
-        <GatedButton
-          variant="outline"
-          canAct={canEdit}
-          gateReason="adicionar ou importar contatos"
-          onClick={() => setImportOpen(true)}
-        >
-          <Upload className="size-3.5" />
-          Importar
-        </GatedButton>
-        <GatedButton canAct={canEdit} gateReason="adicionar ou importar contatos" onClick={openAddForm}>
-          <Plus className="size-3.5" />
-          Adicionar contato
-        </GatedButton>
-      </div>
+      </PageToolbar>
 
       {/* Etiquetas ativas */}
       {selectedTagIds.length > 0 && (
@@ -528,12 +533,11 @@ export default function ContactsPage() {
       )}
 
       {/* Tabela */}
-      <section className="overflow-hidden rounded-[10px] border border-border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-[13px]">
+      <TableCard label="Contatos">
+          <DenseTable>
             <thead>
-              <tr className="bg-card-2">
-                <th className="w-11 border-b border-border pl-4">
+              <tr>
+                <Th className="w-11 pr-0 pl-4">
                   <Checkbox
                     checked={allOnPageSelected}
                     indeterminate={!allOnPageSelected && someOnPageSelected}
@@ -541,14 +545,14 @@ export default function ContactsPage() {
                     disabled={contacts.length === 0}
                     aria-label="Selecionar todos os contatos desta página"
                   />
-                </th>
-                <th className="border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground">Nome</th>
-                <th className="hidden border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground sm:table-cell">Telefone</th>
-                <th className="hidden border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground lg:table-cell">E-mail</th>
-                <th className="hidden border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground xl:table-cell">Instituição</th>
-                <th className="hidden border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground md:table-cell">Etiquetas</th>
-                <th className="hidden border-b border-border px-3 py-2.5 text-left text-xs font-semibold text-muted-foreground xl:table-cell">Criado em</th>
-                <th className="w-11 border-b border-border" />
+                </Th>
+                <Th>Nome</Th>
+                <Th className="hidden sm:table-cell">Telefone</Th>
+                <Th className="hidden lg:table-cell">E-mail</Th>
+                <Th className="hidden xl:table-cell">Instituição</Th>
+                <Th className="hidden md:table-cell">Etiquetas</Th>
+                <Th className="hidden xl:table-cell">Criado em</Th>
+                <Th className="w-11" />
               </tr>
             </thead>
             <tbody className={loading ? undefined : 'ddm-stagger'}>
@@ -595,22 +599,22 @@ export default function ContactsPage() {
                   const on = selected.has(contact.id);
                   const name = contact.name || contact.phone || 'Sem nome';
                   return (
-                    <tr
+                    <Tr
                       key={contact.id}
                       onClick={() => openDetail(contact.id)}
                       className={cn(
-                        'group cursor-pointer hover:bg-surface-hover hover:shadow-[inset_2px_0_0_var(--primary)]',
+                        'group cursor-pointer',
                         on && 'bg-selected',
                       )}
                     >
-                      <td className="border-b border-border pl-4" onClick={(e) => e.stopPropagation()}>
+                      <Td className="pl-4 pr-0" onClick={(e) => e.stopPropagation()}>
                         <Checkbox
                           checked={on}
                           onCheckedChange={() => toggleSelect(contact.id)}
                           aria-label={`Selecionar ${name}`}
                         />
-                      </td>
-                      <td className="border-b border-border px-3 py-2.5">
+                      </Td>
+                      <Td>
                         <span className="flex min-w-0 items-center gap-2.5">
                           <span
                             className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-card-2 text-[11.5px] font-semibold text-foreground-2"
@@ -625,17 +629,17 @@ export default function ContactsPage() {
                             <span className="truncate text-xs tabular-nums text-muted-foreground sm:hidden">{contact.phone}</span>
                           </span>
                         </span>
-                      </td>
-                      <td className="hidden whitespace-nowrap border-b border-border px-3 py-2.5 tabular-nums text-foreground sm:table-cell">
+                      </Td>
+                      <Td className="hidden whitespace-nowrap tabular-nums text-foreground sm:table-cell">
                         {contact.phone}
-                      </td>
-                      <td className="hidden max-w-[240px] truncate border-b border-border px-3 py-2.5 text-foreground-2 lg:table-cell">
+                      </Td>
+                      <Td className="hidden max-w-[240px] truncate text-foreground-2 lg:table-cell">
                         {contact.email || <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="hidden whitespace-nowrap border-b border-border px-3 py-2.5 text-foreground xl:table-cell">
+                      </Td>
+                      <Td className="hidden whitespace-nowrap text-foreground xl:table-cell">
                         {contact.instituicao || contact.company || <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="hidden border-b border-border px-3 py-2.5 md:table-cell">
+                      </Td>
+                      <Td className="hidden md:table-cell">
                         <span className="flex flex-nowrap items-center gap-1">
                           {contact.tags && contact.tags.length > 0 ? (
                             contact.tags.slice(0, 2).map((tag) => (
@@ -654,11 +658,11 @@ export default function ContactsPage() {
                             <span className="text-[11px] text-muted-foreground">+{contact.tags.length - 2}</span>
                           )}
                         </span>
-                      </td>
-                      <td className="hidden whitespace-nowrap border-b border-border px-3 py-2.5 tabular-nums text-muted-foreground xl:table-cell">
+                      </Td>
+                      <Td className="hidden whitespace-nowrap tabular-nums text-muted-foreground xl:table-cell">
                         {new Date(contact.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                      </td>
-                      <td className="border-b border-border pr-2 text-right" onClick={(e) => e.stopPropagation()}>
+                      </Td>
+                      <Td className="pr-2 text-right" onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
@@ -692,14 +696,13 @@ export default function ContactsPage() {
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
                   );
                 })
               )}
             </tbody>
-          </table>
-        </div>
+          </DenseTable>
 
         {/* Rodapé com a paginação (sempre visível quando há contatos) */}
         {!loading && totalCount > 0 && (
@@ -724,7 +727,7 @@ export default function ContactsPage() {
             )}
           </div>
         )}
-      </section>
+      </TableCard>
 
       {/* Contact Form Dialog */}
       <ContactForm
