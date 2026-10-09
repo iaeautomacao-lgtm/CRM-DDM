@@ -44,6 +44,7 @@ import { NextResponse } from "next/server";
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { isAccountRole, type AccountRole } from "@/lib/auth/roles";
 import { supabaseAdmin } from "@/lib/account/admin-client";
+import { maskEmailForLog } from "@/lib/privacy/mask";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -68,11 +69,11 @@ async function rollbackOrphanedAuthUser(
   const { error: deleteErr } = await admin.auth.admin.deleteUser(userId);
   if (deleteErr) {
     console.error(
-      `[bulk-invite] rollback failed for ${email} (user_id=${userId}) after ${reason} — orphaned auth user left behind:`,
+      `[bulk-invite] rollback failed for ${maskEmailForLog(email)} (user_id=${userId}) after ${reason} — orphaned auth user left behind:`,
       deleteErr,
     );
   } else {
-    console.error(`[bulk-invite] rolled back auth user for ${email} after ${reason}`);
+    console.error(`[bulk-invite] rolled back auth user for ${maskEmailForLog(email)} after ${reason}`);
   }
 }
 

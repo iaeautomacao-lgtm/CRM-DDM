@@ -46,6 +46,7 @@ import { handleChannelHealthChange, isChannelHealthField } from '@/lib/disparado
 import { processMessage, type WhatsAppMessage } from '@/lib/whatsapp/inbound-message'
 import { extractMessageEvents, ingestMessageEvents, messageInboxMode } from '@/lib/whatsapp/message-inbox'
 import { drainMessageInboxLive } from '@/lib/whatsapp/message-inbox-runner'
+import { maskTextForLog } from '@/lib/privacy/mask'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -590,7 +591,7 @@ async function processWebhook(
 
       // WH-06: erros reportados pela Meta no value (tipo não suportado, restrição do número…) ficam no log.
       if (Array.isArray(value.errors) && value.errors.length > 0) {
-        console.warn('[webhook] value.errors da Meta:', JSON.stringify(value.errors))
+        console.warn('[webhook] value.errors da Meta:', maskTextForLog(JSON.stringify(value.errors), 500))
         void writeLog({
           account_id: channel.account_id,
           level: 'warn',

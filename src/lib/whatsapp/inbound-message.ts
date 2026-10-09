@@ -15,6 +15,7 @@ import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
+import { safeDbError } from '@/lib/privacy/mask'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -335,7 +336,7 @@ export async function processMessage(
       )
       return "duplicate"
     }
-    console.error("Error inserting message:", msgError)
+    console.error("Error inserting message:", safeDbError(msgError))
     // Antes: só console.error + return (mensagem perdida, sem retry — WH-02). Agora sinaliza: o caminho inline
     // registra o erro; o drenador do inbox aplica backoff e, após N tentativas, marca dead.
     throw new Error(`Falha ao gravar a mensagem recebida: ${msgError.message}`)
@@ -943,7 +944,7 @@ async function findOrCreateContact(
       const raced = await findExistingContact(supabaseAdmin(), accountId, phone)
       if (raced) return { contact: raced, wasCreated: false }
     }
-    console.error('Error creating contact:', createError)
+    console.error('Error creating contact:', safeDbError(createError))
     void writeLog({
       account_id: accountId,
       level: 'error',
@@ -1010,7 +1011,7 @@ async function findOrCreateConversation(
     .single()
 
   if (createError) {
-    console.error('Error creating conversation:', createError)
+    console.error('Error creating conversation:', safeDbError(createError))
     void writeLog({
       account_id: accountId,
       level: 'error',

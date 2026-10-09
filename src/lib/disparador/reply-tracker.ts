@@ -61,23 +61,23 @@ export async function recordCampaignReply(input: CampaignReplyInput): Promise<vo
   // nada, silenciosamente.
   if (replyPhoneNormalized) {
     try {
-      const { error: phoneUpdateError } = await supabaseAdmin()
+      const { error: markRepliedError } = await supabaseAdmin()
         .from("contact_phones")
         .update({ status: "respondeu" })
         .eq("contact_id", contactId)
         .eq("phone_normalized", replyPhoneNormalized);
 
-      if (phoneUpdateError) {
+      if (markRepliedError) {
         console.error(
           "[recordCampaignReply] falha ao marcar contact_phones como respondeu:",
-          phoneUpdateError.message
+          markRepliedError.message
         );
         void writeLog({
           level: "warn",
           source: "disparador",
           event: "contact_phone_mark_replied_failed",
           message: "Falha ao marcar telefone como respondido em contact_phones",
-          payload: { contact_id: contactId, erro: phoneUpdateError.message },
+          payload: { contact_id: contactId, erro: markRepliedError.message },
         });
       }
     } catch (err) {

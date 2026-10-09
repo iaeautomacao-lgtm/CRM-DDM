@@ -41,3 +41,55 @@ export function maskPiiArgs<T>(value: T, key = ''): T {
   }
   return value
 }
+
+/**
+ * Telefone só com os 4 últimos dígitos (`+5511999998888` → `****8888`); aceita qualquer formato de entrada. Vazio vira null
+ * (payload de writeLog). `logger.maskPhone` é a reexportação desta função — um mascarador só.
+ */
+export function maskPhone(phone: string | null | undefined): string | null {
+  if (!phone) return null
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length <= 4) return '****'
+  return `****${digits.slice(-4)}`
+}
+
+/** Para `console.*`: igual a `maskPhone`, mas sempre string (nunca `null` na interpolação). */
+export function maskPhoneForLog(phone: string | null | undefined): string {
+  return maskPhone(phone) ?? '****'
+}
+
+/** Para log de servidor: e-mail sem o usuário (`m***@dominio`). Sem `@` vira `***`. */
+export function maskEmailForLog(email: string | null | undefined): string {
+  const value = email ?? ''
+  const at = value.lastIndexOf('@')
+  return at > 0 ? `${value[0]}***${value.slice(at)}` : '***'
+}
+
+/**
+ * Para log de servidor: trecho de texto livre (corpo de resposta de parceiro, mensagem) com CPF mascarado e cortado em `max`
+ * caracteres. Nunca registre o corpo inteiro: ele pode trazer nome e telefone que nenhuma regex pega.
+ */
+export function maskTextForLog(text: string | null | undefined, max = 200): string {
+  const masked = maskCpfInText(text ?? '')
+  return masked.length > max ? `${masked.slice(0, max)}…` : masked
+}
+
+/**
+ * Erro do banco/PostgREST para log: só `code` e `message`. O `details` de uma violação de unicidade traz o VALOR da chave
+ * (`Key (phone)=(5511…) already exists`) e o `hint` pode repetir trechos da linha; por isso nunca vão para o console.
+ */
+export function safeDbError(error: unknown): { code?: string; message: string } {
+  const e = (error ?? {}) as { code?: unknown; message?: unknown }
+  const message = typeof e.message === 'string' ? e.message : String(error)
+  return { ...(typeof e.code === 'string' ? { code: e.code } : {}), message: maskTextForLog(message, 300) }
+}
+
+/** URL para log: sem query string, fragmento nem credenciais (`https://host/caminho`) — token em `?key=` não vai para o console. */
+export function maskUrlForLog(url: string | null | undefined): string {
+  try {
+    const u = new URL(String(url))
+    return `${u.origin}${u.pathname}`
+  } catch {
+    return '***'
+  }
+}
