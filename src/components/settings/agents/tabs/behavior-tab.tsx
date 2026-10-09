@@ -84,7 +84,7 @@ export function BehaviorTab({ data, onChange, readOnly }: BehaviorTabProps) {
             onChange={(e) => onChange({ execution: { ...data.execution, llm_timeout_ms: intValue(e.target.value, 1) } })} />
         </div>
 
-        <div className="flex items-center justify-between rounded-lg border border-border p-4">
+        <div className="flex items-center justify-between rounded-[10px] border border-border p-4">
           <div className="space-y-0.5">
             <Label htmlFor="b-inherit" className="text-sm font-medium cursor-pointer">Herdar contexto anterior</Label>
             <p className="text-xs text-muted-foreground">

@@ -224,7 +224,7 @@ export function KnowledgeTab({
             className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3.5 transition-all ${
               knowledge.selection_mode === 'legacy_account_all'
                 ? 'border-primary bg-primary/5 text-foreground'
-                : 'border-border hover:bg-muted/30 text-muted-foreground'
+                : 'border-border hover:bg-card-2 text-muted-foreground'
             } ${readOnly ? 'pointer-events-none opacity-80' : ''}`}
           >
             <input
@@ -248,7 +248,7 @@ export function KnowledgeTab({
             className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3.5 transition-all ${
               knowledge.selection_mode === 'explicit'
                 ? 'border-primary bg-primary/5 text-foreground'
-                : 'border-border hover:bg-muted/30 text-muted-foreground'
+                : 'border-border hover:bg-card-2 text-muted-foreground'
             } ${readOnly ? 'pointer-events-none opacity-80' : ''}`}
           >
             <input
@@ -270,7 +270,7 @@ export function KnowledgeTab({
         </div>
 
         {/* Arquivos da conta: envio, uso do teto, vínculo (modo escolhido) e remoção */}
-        <div className="rounded-lg border border-border bg-card p-4 space-y-3 max-w-2xl">
+        <div className="rounded-[10px] border border-border bg-card p-4 space-y-3 max-w-2xl">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
@@ -353,7 +353,7 @@ export function KnowledgeTab({
                               indexLabel(file.embedding_status).tone === 'ok'
                                 ? 'text-emerald-600'
                                 : indexLabel(file.embedding_status).tone === 'warn'
-                                  ? 'text-amber-600'
+                                  ? 'text-warning'
                                   : undefined
                             }
                           >
@@ -402,7 +402,7 @@ export function KnowledgeTab({
                   ? `${knowledge.file_ids.length} de ${kbFiles.length} arquivos selecionados`
                   : `Todos os ${kbFiles.length} arquivos da conta`}
               </span>
-              <span className={overLimit ? 'text-amber-600 font-medium' : undefined}>
+              <span className={overLimit ? 'text-warning font-medium' : undefined}>
                 {NUMBER.format(usedChars)}
                 {unknownChars ? '+' : ''} de {NUMBER.format(maxChars)} caracteres do teto ({usedPct}%)
               </span>
@@ -416,12 +416,12 @@ export function KnowledgeTab({
               aria-label="Uso do teto de caracteres da base"
             >
               <div
-                className={`h-full rounded-full ${overLimit ? 'bg-amber-500' : 'bg-primary'}`}
+                className={`h-full rounded-full ${overLimit ? 'bg-warning' : 'bg-primary'}`}
                 style={{ width: `${Math.min(usedPct, 100)}%` }}
               />
             </div>
             {overLimit && (
-              <p className="flex items-start gap-1.5 text-[11px] text-amber-600">
+              <p className="flex items-start gap-1.5 text-[11px] text-warning">
                 <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
                 Acima do teto: a cada resposta entram só os arquivos mais relevantes para a conversa, até o teto (o último
                 pode ser cortado).
@@ -432,7 +432,7 @@ export function KnowledgeTab({
       </div>
 
       {/* Busca por trechos (RAG vetorial, TASK1-D) */}
-      <div className="rounded-lg border border-border p-5 space-y-4 max-w-2xl bg-card">
+      <div className="rounded-[10px] border border-border p-5 space-y-4 max-w-2xl bg-card">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
@@ -503,7 +503,7 @@ export function KnowledgeTab({
       </div>
 
       {/* 2. Bloco RAG Externo */}
-      <div className="rounded-lg border border-border p-5 space-y-5 max-w-2xl bg-card">
+      <div className="rounded-[10px] border border-border p-5 space-y-5 max-w-2xl bg-card">
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
@@ -554,7 +554,7 @@ export function KnowledgeTab({
                 Credencial de Autenticação <span className="text-destructive">*</span>
               </Label>
               {credentialSecrets.length === 0 ? (
-                <div className="rounded border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+                <div className="rounded-md border border-warning-border bg-warning-soft p-2.5 text-xs text-warning flex items-start gap-2">
                   <AlertCircle className="size-4 shrink-0 mt-0.5" />
                   <div>
                     Nenhuma credencial cadastrada. Cadastre um token ou chave em{' '}

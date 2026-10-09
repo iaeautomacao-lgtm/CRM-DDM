@@ -43,7 +43,7 @@ export function PreviewTab({ onPreview, readOnly }: PreviewTabProps) {
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       {prompt !== null && (
-        <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/30 p-4 text-xs leading-relaxed">
+        <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap rounded-[10px] border border-border bg-card-2 p-4 text-xs leading-relaxed">
           {prompt || 'O prompt composto está vazio.'}
         </pre>
       )}

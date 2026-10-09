@@ -31,7 +31,7 @@ export function GeneralTab({ data, onChange, readOnly, usedIn = [] }: GeneralTab
         </p>
       </div>
 
-      <div className="rounded-lg border border-border p-4 space-y-3 max-w-xl">
+      <div className="rounded-[10px] border border-border p-4 space-y-3 max-w-xl">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <Label htmlFor="agent-enabled" className="text-sm font-medium cursor-pointer">
@@ -53,7 +53,7 @@ export function GeneralTab({ data, onChange, readOnly, usedIn = [] }: GeneralTab
       </div>
 
       {usedIn.length > 0 && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2 max-w-xl">
+        <div className="rounded-[10px] border border-border bg-card-2 p-4 space-y-2 max-w-xl">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Uso em Fluxos

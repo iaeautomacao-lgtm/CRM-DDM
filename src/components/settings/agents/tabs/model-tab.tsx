@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -43,7 +44,7 @@ function OptionalField({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-border p-4 space-y-3">
+    <div className="rounded-[10px] border border-border p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-0.5">
           <Label htmlFor={id} className="text-sm font-medium">
@@ -83,22 +84,33 @@ export function ModelTab({ data, onChange, readOnly }: ModelTabProps) {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">Provedor</Label>
-          <Select value={llm.provider} onValueChange={(v) => handleProvider(v as AgentFormData['llm']['provider'])} disabled={readOnly}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {AI_PROVIDERS.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {aiProviderLabel(p)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+      <div className="space-y-2">
+        <Label id="agent-provider-label" className="text-sm font-medium">Provedor</Label>
+        <div role="radiogroup" aria-labelledby="agent-provider-label" className="flex flex-wrap gap-2">
+          {AI_PROVIDERS.map((p) => {
+            const on = llm.provider === p;
+            return (
+              <button
+                key={p}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                disabled={readOnly}
+                onClick={() => !on && handleProvider(p)}
+                className={cn(
+                  'h-9 rounded-md border px-3 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60',
+                  on
+                    ? 'border-primary bg-primary-soft text-primary-text'
+                    : 'border-border bg-card text-foreground hover:bg-surface-hover',
+                )}
+              >
+                {aiProviderLabel(p)}
+              </button>
+            );
+          })}
         </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label className="text-sm font-medium">Modelo</Label>
           <Select value={llm.model} onValueChange={(v) => patch({ model: v ?? llm.model })} disabled={readOnly}>
