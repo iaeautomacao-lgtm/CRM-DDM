@@ -1,6 +1,7 @@
 import "server-only";
 import { maskCpfForLog, maskTextForLog, safeDbError } from '@/lib/privacy/mask';
 import { openAiUrl } from '@/lib/loadtest/gate';
+import { parseTranscript } from "@/lib/ai/stt";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { safeFetch, SsrfBlockedError } from "@/lib/security/ssrf-guard";
 import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
@@ -932,7 +933,12 @@ async function handleAiAutoResponseAttempt(
   let incomingWasAudio = false;
   const lastMsg = history[history.length - 1];
 
-  if (lastMsg && lastMsg.content_type === "audio" && lastMsg.media_url && aiConfig.multimodal_enabled) {
+  // Áudio já transcrito na ENTRADA da mensagem (migration 213, chave da conta): usa o texto gravado e não chama o Whisper de novo.
+  const storedTranscript = lastMsg && lastMsg.content_type === "audio" ? parseTranscript(lastMsg.content_text) : null;
+  if (storedTranscript) {
+    incomingWasAudio = true;
+    incomingText = storedTranscript;
+  } else if (lastMsg && lastMsg.content_type === "audio" && lastMsg.media_url && aiConfig.multimodal_enabled) {
     incomingWasAudio = true;
     const whisperKey = aiConfig.api_provider === "openai" ? activeKey : (process.env.OPENAI_API_KEY || "");
 

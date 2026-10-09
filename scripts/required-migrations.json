@@ -137,6 +137,10 @@
       "kind": "registry"
     },
     {
+      "version": "213_messages_transcription",
+      "kind": "registry"
+    },
+    {
       "version": "220_export_history_policy",
       "kind": "registry"
     },
