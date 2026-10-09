@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     )
 
     if (configError || !configs || configs.length === 0 || configs[0].provider !== 'waha') {
-      return NextResponse.json({ error: 'WAHA is not configured.' }, { status: 400 })
+      return NextResponse.json({ error: 'WAHA não configurado.' }, { status: 400 })
     }
 
     const config = configs[0]
@@ -46,9 +46,9 @@ export async function POST(request: Request) {
     // URL do webhook a partir de env confiável (nunca de Host/X-Forwarded-Host)
     // e segredo derivado por canal — o segredo global não vai para o WAHA.
     await startWahaSession(wahaConfig, wahaWebhookFor(config.id))
-    return NextResponse.json({ success: true, message: 'WAHA session start requested.' })
+    return NextResponse.json({ success: true, message: 'Início da sessão WAHA solicitado.' })
   } catch (err: any) {
     console.error('[waha/start] error:', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 })
   }
 }

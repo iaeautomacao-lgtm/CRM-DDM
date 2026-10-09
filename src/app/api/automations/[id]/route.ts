@@ -32,7 +32,7 @@ export async function GET(
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  if (!automation) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!automation) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
 
   const steps = await loadStepsTree(id)
   return NextResponse.json({ automation, steps })
@@ -49,7 +49,7 @@ export async function PATCH(
   const { accountId } = auth.ctx
 
   const body = await request.json().catch(() => null)
-  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  if (!body) return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
 
   const admin = supabaseAdmin()
 
@@ -62,7 +62,7 @@ export async function PATCH(
     .eq('account_id', accountId)
     .maybeSingle()
   if (!existing) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
   }
 
   const update: Record<string, unknown> = {}
@@ -100,7 +100,7 @@ export async function PATCH(
     if (issues.length > 0) {
       return NextResponse.json(
         {
-          error: 'Cannot keep automation active with invalid configuration',
+          error: 'Não é possível manter a automação ativa com configuração inválida',
           issues,
         },
         { status: 400 },

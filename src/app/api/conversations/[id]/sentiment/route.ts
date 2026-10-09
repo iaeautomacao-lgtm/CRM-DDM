@@ -25,7 +25,7 @@ export async function POST(
       .maybeSingle()
 
     if (convError || !conversation) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
     }
 
     // 4. Trigger sentiment analysis
