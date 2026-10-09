@@ -114,8 +114,9 @@ export function MessageActions({
         {canReply && (
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger
-            className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-5 lg:w-5"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-6 lg:w-6"
             aria-label="Reagir"
+            aria-haspopup="dialog"
           >
             <SmilePlus className="h-3.5 w-3.5" aria-hidden="true" />
           </PopoverTrigger>
@@ -141,7 +142,7 @@ export function MessageActions({
         <button
           type="button"
           onClick={handleReply}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-5 lg:w-5"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-6 lg:w-6"
           aria-label="Responder"
         >
           <CornerUpLeft className="h-3.5 w-3.5" aria-hidden="true" />
@@ -150,7 +151,7 @@ export function MessageActions({
         <button
           type="button"
           onClick={handleCopy}
-          className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-5 lg:w-5"
+          className="flex h-7 w-7 items-center justify-center rounded-full text-popover-foreground hover:bg-muted hover:text-foreground lg:h-6 lg:w-6"
           aria-label="Copiar"
         >
           <Copy className="h-3.5 w-3.5" aria-hidden="true" />

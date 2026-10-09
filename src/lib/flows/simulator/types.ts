@@ -70,6 +70,17 @@ export interface SimulateRequest {
   realReadOnlyTools: string[];
   /** Resposta simulada por nó http_fetch (node_key → corpo). */
   httpMocks: Record<string, string>;
+  /** Operadores fictícios (menu "escolha seu atendente" e handoff de equipe): quem está online/ausente e o teto de conversas. Só vivem na simulação. */
+  operators?: SimOperator[];
+}
+
+export interface SimOperator {
+  user_id: string;
+  name: string;
+  team_id: string | null;
+  online: boolean;
+  away: boolean;
+  max: number | null;
 }
 
 export type SimOutboundKind = "text" | "media" | "buttons" | "list" | "template" | "webchat_invite";
