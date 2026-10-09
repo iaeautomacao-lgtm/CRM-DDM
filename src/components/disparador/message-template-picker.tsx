@@ -42,7 +42,7 @@ interface PickerTemplate {
 
 const categoryColors: Record<string, string> = {
   Marketing: "bg-purple-500/20 text-purple-400 border-purple-500/30",
-  Utility: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  Utility: "bg-info-soft text-info border-info/30",
   Authentication: "bg-amber-500/20 text-amber-400 border-amber-500/30",
 };
 const categoryColorFallback = "bg-gray-500/20 text-gray-400 border-gray-500/30";

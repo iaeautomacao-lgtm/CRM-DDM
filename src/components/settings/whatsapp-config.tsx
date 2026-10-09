@@ -847,12 +847,12 @@ export function WhatsAppConfig() {
                       <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
                         sessionStatus === 'WORKING' ? 'bg-emerald-400' :
                         (sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') ? 'bg-amber-400' :
-                        sessionStatus === 'STARTING' ? 'bg-blue-400' : 'bg-red-400'
+                        sessionStatus === 'STARTING' ? 'bg-info' : 'bg-red-400'
                       }`}></span>
                       <span className={`relative inline-flex rounded-full h-3 w-3 ${
                         sessionStatus === 'WORKING' ? 'bg-emerald-500' :
                         (sessionStatus === 'SCAN_QR' || sessionStatus === 'SCAN_QR_CODE') ? 'bg-amber-500' :
-                        sessionStatus === 'STARTING' ? 'bg-blue-500' : 'bg-red-500'
+                        sessionStatus === 'STARTING' ? 'bg-info' : 'bg-red-500'
                       }`}></span>
                     </span>
                     <div>
