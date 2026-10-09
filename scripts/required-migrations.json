@@ -284,6 +284,15 @@
     {
       "version": "297_history_export_jobs",
       "kind": "registry"
+    },
+    {
+      "version": "302_message_origin_my_handled",
+      "kind": "registry"
+    },
+    {
+      "version": "302b_conversation_assignments_from_agent_idx",
+      "kind": "index",
+      "index": "idx_conversation_assignments_from_agent"
     }
   ]
 }
