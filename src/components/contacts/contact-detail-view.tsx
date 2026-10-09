@@ -26,6 +26,16 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -145,6 +155,7 @@ export function ContactDetailView({
   const [loading, setLoading] = useState(true);
   const [pageTab, setPageTab] = useState<'activity' | 'deals' | 'campaigns' | 'notes'>('activity');
   const [copiedPhone, setCopiedPhone] = useState(false);
+  const [phoneToRemove, setPhoneToRemove] = useState<string | null>(null);
 
   // Send template — lets the business initiate (or re-open) a conversation
   // with this contact by sending an approved template. The send route
@@ -861,11 +872,7 @@ export function ContactDetailView({
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
-                            if (window.confirm('Remover este telefone?')) {
-                              deletePhone(phone.id);
-                            }
-                          }}
+                          onClick={() => setPhoneToRemove(phone.id)}
                           disabled={deletingPhoneId === phone.id}
                           aria-label={`Remover ${phone.phone}`}
                           className="text-muted-foreground hover:text-danger transition-colors cursor-pointer p-1"
@@ -905,6 +912,27 @@ export function ContactDetailView({
           Adicionar telefone
         </Button>
       </div>
+
+      <AlertDialog open={phoneToRemove !== null} onOpenChange={(open) => !open && setPhoneToRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover este telefone?</AlertDialogTitle>
+            <AlertDialogDescription>O telefone deixa de fazer parte deste contato.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const id = phoneToRemove;
+                setPhoneToRemove(null);
+                if (id) void deletePhone(id);
+              }}
+            >
+              Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 
