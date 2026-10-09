@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
+import { ErrorScreen } from "@/components/errors/error-screen";
 import { Button } from "@/components/ui/button";
 import { trackError } from "@/hooks/use-telemetry";
 
@@ -26,33 +27,20 @@ export default function DashboardError({
   }, [error]);
 
   return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-5 px-4 text-center">
-      <div className="flex size-16 items-center justify-center rounded-full bg-[#FF5706]/10">
-        <AlertTriangle className="size-8 text-[#FF5706]" />
-      </div>
-
-      <div className="space-y-2">
-        <h2 className="text-2xl font-semibold text-foreground">Algo deu errado</h2>
-        <p className="max-w-md text-sm leading-6 text-muted-foreground">
-          Ocorreu um erro inesperado nesta página. Você pode tentar novamente ou voltar ao início do CRM.
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <Button
-          onClick={() => reset()}
-          className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
-        >
-          Tentar novamente
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => window.location.assign("/")}
-          className="border-border text-foreground hover:bg-muted"
-        >
-          Voltar ao início
-        </Button>
-      </div>
-    </div>
+    <ErrorScreen
+      tone="danger"
+      icon={AlertTriangle}
+      title="Algo deu errado"
+      description="Ocorreu um erro inesperado nesta página. Você pode tentar novamente ou voltar ao início do CRM."
+      reference={error?.digest}
+      actions={
+        <>
+          <Button onClick={() => reset()}>Tentar novamente</Button>
+          <Button variant="outline" onClick={() => window.location.assign("/")}>
+            Voltar ao início
+          </Button>
+        </>
+      }
+    />
   );
 }
