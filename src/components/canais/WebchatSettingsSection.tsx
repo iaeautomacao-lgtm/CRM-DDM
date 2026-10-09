@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCard } from "@/components/ddm/table-card";
+import { ErrorState } from "@/components/dashboard/error-state";
 import {
   DEFAULT_WEBCHAT_SETTINGS,
   WEBCHAT_BUTTON_MAX,
@@ -33,6 +34,9 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
   const [ready, setReady] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Falha na carga: mostra ErrorState e esconde o formulário (salvar os padrões sobrescreveria a configuração real).
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,9 +49,10 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
         setForm(loaded);
         setSaved(loaded);
         setReady(!!json.ready);
+        setLoadError(null);
       })
       .catch(() => {
-        if (!cancelled) toast.error("Falha ao carregar a configuração do Webchat");
+        if (!cancelled) setLoadError("Não foi possível carregar a configuração do Webchat.");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -55,7 +60,7 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [attempt]);
 
   const set = (patch: Partial<WebchatSettings>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -115,6 +120,15 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
               </div>
             ))}
           </div>
+        ) : loadError ? (
+          <ErrorState
+            className="min-h-0"
+            title={loadError}
+            onRetry={() => {
+              setLoading(true);
+              setAttempt((n) => n + 1);
+            }}
+          />
         ) : (
           <div className="grid animate-ddm-fade gap-4 md:grid-cols-2">
             <div className="space-y-1.5">
@@ -222,7 +236,7 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
       </div>
 
       {/* Rodapé de configurações (padrão do protótipo): só age com mudança. */}
-      {!loading && (
+      {!loading && !loadError && (
         <div className="flex items-center justify-end gap-2 border-t border-border bg-card-2 px-[18px] py-3">
           {dirty && <span className="mr-auto text-xs text-muted-foreground">Alterações não salvas</span>}
           <Button variant="outline" onClick={() => setForm(saved)} disabled={!dirty || saving}>
