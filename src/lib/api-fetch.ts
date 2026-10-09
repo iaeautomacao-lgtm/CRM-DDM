@@ -19,6 +19,18 @@
  */
 
 import { createClient } from "@/lib/supabase/client";
+import { MFA_PATH, MFA_REQUIRED_CODE, mfaRedirectUrl } from "@/lib/auth/mfa";
+
+/** 401 com code mfa_required (lê uma cópia: o corpo original segue disponível para quem chamou). */
+export async function isMfaRequiredResponse(res: Response): Promise<boolean> {
+  if (res.status !== 401) return false;
+  try {
+    const body = (await res.clone().json()) as { code?: unknown };
+    return body?.code === MFA_REQUIRED_CODE;
+  } catch {
+    return false;
+  }
+}
 
 // Coalesce session checks after bursts of concurrent 401s. getSession()
 // may update browser auth state if the local session is truly gone, but
@@ -60,6 +72,15 @@ export async function apiFetch(
   }
   const res = await fetch(url, requestOptions);
   if (res.status !== 401) return res;
+
+  // 2FA obrigatório (src/lib/auth/mfa.ts): o servidor recusa a sessão só com senha de quem tem
+  // fator verificado. Não adianta repetir: leva ao passo do código, preservando a página atual.
+  if (await isMfaRequiredResponse(res)) {
+    if (typeof window !== "undefined" && !window.location.pathname.startsWith(MFA_PATH)) {
+      window.location.replace(mfaRedirectUrl(window.location.pathname + window.location.search));
+    }
+    return res;
+  }
 
   const hasSession = await hasRecoverableBrowserSession();
   if (!hasSession) return res;
