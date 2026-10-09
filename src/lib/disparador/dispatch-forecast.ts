@@ -200,14 +200,20 @@ function simulate(p: Plan, times: Date[], perMinute: number, janela: SendWindowC
   return new Date(finish);
 }
 
+/**
+ * Modo sequencial (1 contato por rodada) com mais rodadas que isto usa fórmula fechada em vez de simular rodada a rodada
+ * (A25: 100 mil contatos = 100 mil rodadas × 2 cenários a cada alteração no navegador). O resultado é o mesmo enquanto
+ * uma rodada drena dentro do intervalo entre rodadas (sempre, no sequencial); fora disso simula como antes.
+ */
+export const FORECAST_CLOSED_FORM_ROUNDS = 2_000;
+
 /** Previsão de término (faixa otimista–conservadora), no relógio de janela. */
-export function forecastCampaign(input: ForecastInput): ForecastResult {
+export function forecastCampaign(input: ForecastInput, options: { closedFormFromRounds?: number } = {}): ForecastResult {
   const p = plan(input);
+  const closedFormFrom = options.closedFormFromRounds ?? FORECAST_CLOSED_FORM_ROUNDS;
   const mpc = Math.max(1, Math.floor(input.messagesPerContact));
   const items = p.sequentialFallback ? p.rounds : Math.max(0, Math.floor(input.contacts)) * mpc;
   const firstSendAt = addOpenWindowTime(input.start, 0, input.janela);
-  const times = scheduleRounds(input.start, p.rounds, p.pauseSeconds, input.janela);
-
   const slots = input.throughput?.slots ?? CRON_SEND_CONCURRENCY;
   const budgetSeconds = input.throughput?.budgetSeconds ?? CRON_SEND_BUDGET_SECONDS;
   const ratePerSecond = input.throughput?.ratePerSecond;
@@ -220,6 +226,22 @@ export function forecastCampaign(input: ForecastInput): ForecastResult {
   const drainMin = Math.ceil(fullRound / perMinOtimista);
   const drainMax = Math.ceil(fullRound / perMinConservador);
 
+  // Cada rodada ocupa ceil(itens/ritmo) minutos; se cabe no intervalo entre rodadas, o início de cada rodada é só o
+  // relógio de janela (firstSendAt + k × pausa) e o fim é a última rodada + a drenagem dela.
+  const pauseMs = Math.max(0, p.pauseSeconds) * 1000;
+  const fitsInPause = (perMinute: number) => Math.ceil(p.itemsPerRound(0) / perMinute) * CRON_TICK_MS <= pauseMs;
+  const closedForm =
+    p.sequentialFallback && p.rounds > closedFormFrom && p.rounds > 1 && fitsInPause(perMinOtimista) && fitsInPause(perMinConservador);
+  const times = closedForm
+    ? [firstSendAt, addOpenWindowTime(firstSendAt, (p.rounds - 1) * pauseMs, input.janela)]
+    : scheduleRounds(input.start, p.rounds, p.pauseSeconds, input.janela);
+  const endFor = (perMinute: number): Date => {
+    if (!times.length) return firstSendAt;
+    if (!closedForm) return simulate(p, times, perMinute, input.janela);
+    const minutes = Math.ceil(p.itemsPerRound(p.rounds - 1) / perMinute);
+    return addOpenWindowTime(times[times.length - 1], minutes * CRON_TICK_MS, input.janela);
+  };
+
   return {
     items,
     rounds: p.rounds,
@@ -229,11 +251,11 @@ export function forecastCampaign(input: ForecastInput): ForecastResult {
     lastRoundAt: times[times.length - 1] ?? firstSendAt,
     otimista: {
       perMinute: perMinOtimista,
-      end: times.length ? simulate(p, times, perMinOtimista, input.janela) : firstSendAt,
+      end: endFor(perMinOtimista),
     },
     conservador: {
       perMinute: perMinConservador,
-      end: times.length ? simulate(p, times, perMinConservador, input.janela) : firstSendAt,
+      end: endFor(perMinConservador),
     },
     roundDrainMinutes: { min: drainMin, max: drainMax },
     roundsOverlap: p.rounds > 1 && p.pauseSeconds > 0 && drainMax * 60 > p.pauseSeconds,
