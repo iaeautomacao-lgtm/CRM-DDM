@@ -268,7 +268,7 @@ export const NODE_META: Record<
   send_flow: {
     label: 'Formulário (WhatsApp Flow)',
     icon: ClipboardList,
-    color: 'text-teal-500',
+    color: 'text-fuchsia-500',
     blurb: 'Abre um formulário nativo do WhatsApp (só canal Meta)',
     category: 'messaging',
   },
@@ -352,7 +352,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   go_to: { l: 0.65, c: 0.14, h: 125 }, // green — jumps to an anchor
   go_to_flow: { l: 0.62, c: 0.15, h: 232 }, // blue — leaves to another flow
   send_template: { l: 0.65, c: 0.14, h: 148 }, // green-emerald — an approved send
-  send_flow: { l: 0.64, c: 0.12, h: 185 }, // teal — a native WhatsApp form
+  send_flow: { l: 0.6, c: 0.2, h: 320 }, // magenta-violet — a native WhatsApp form (185 já era do collect_input)
   add_note: { l: 0.68, c: 0.16, h: 38 }, // orange — a flag for humans
   receive_attachment: { l: 0.65, c: 0.17, h: 335 }, // magenta-pink — inbound media
   ai_agent: { l: 0.65, c: 0.2, h: 32 }, // DDM brand orange (#FF5706) — the AI speaks
