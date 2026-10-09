@@ -85,13 +85,16 @@ export async function prepareDueCampaigns(
 ): Promise<PrepareReport> {
   const start = options.start ?? ((id: string, account: string) => startCampaign(id, account));
   const report: PrepareReport = { attempted: 0, prepared: 0, failed: 0, results: [] };
-  const { data: due, error } = await db
-    .from("campaigns")
-    .select("id, account_id")
-    .eq("status", "agendado")
-    .lte("agendamento", (options.now ?? new Date()).toISOString())
-    .order("agendamento", { ascending: true })
-    .limit(PREPARE_BATCH_LIMIT);
+  const nowIso = (options.now ?? new Date()).toISOString();
+  const dueQuery = (withBackoff: boolean) => {
+    let q = db.from("campaigns").select("id, account_id").eq("status", "agendado").lte("agendamento", nowIso);
+    // A3 (migration 196): campanha em backoff só volta a tentar quando next_prepare_at chegar.
+    if (withBackoff) q = q.or(`next_prepare_at.is.null,next_prepare_at.lte.${nowIso}`);
+    return q.order("agendamento", { ascending: true }).limit(PREPARE_BATCH_LIMIT);
+  };
+  let { data: due, error } = await dueQuery(true);
+  // Sem a migration 196 (coluna ausente): o filtro de antes.
+  if (error && (error.code === "42703" || /next_prepare_at/.test(error.message ?? ""))) ({ data: due, error } = await dueQuery(false));
   if (error) throw error;
 
   for (const campaign of due ?? []) {

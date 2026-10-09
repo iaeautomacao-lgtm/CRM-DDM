@@ -23,6 +23,8 @@ function fakeDb(options: {
       b.lte = (c: string, v: unknown) => (filters.push(["lte", c, v]), b);
       b.not = (c: string, op: string, v: unknown) => (filters.push(["not", c, `${op}:${String(v)}`]), b);
       b.is = (c: string, v: unknown) => (filters.push(["is", c, v]), b);
+      b.or = (expr: string) => (filters.push(["or", "", expr]), b);
+      b.or = (expr: string) => (filters.push(["or", "", expr]), b);
       b.order = () => b;
       b.limit = () => b;
       b.then = (resolve: (v: unknown) => unknown) => {

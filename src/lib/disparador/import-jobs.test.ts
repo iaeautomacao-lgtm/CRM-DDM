@@ -132,6 +132,28 @@ describe("putImportBlock / startImportJob", () => {
     expect(await startImportJob(env.db, j(), 3)).toMatchObject({ code: "not_receiving" });
   });
 
+  it("com a RPC atômica (migration 196): usa dispatch_import_set_block e NÃO faz ler-modificar-gravar da linha", async () => {
+    const env = fakeEnv({ jobs: [job({ state: "receiving", blocks: {}, blocks_total: null, rows_total: 0 })] });
+    const updated = { ...job({ state: "receiving", blocks_total: null }), blocks: { "0": 1, "1": 5 }, rows_total: 6 };
+    const rpc = vi.fn(async () => ({ data: updated, error: null }));
+    (env.db as any).rpc = rpc;
+    const spy = vi.spyOn(env.db, "from");
+    const result = await putImportBlock(env.db, env.tables.dispatch_import_jobs[0] as ImportJob, 0, [row(1)]);
+    expect(rpc).toHaveBeenCalledWith("dispatch_import_set_block", { p_job_id: "job-1", p_n: 0, p_rows: 1 });
+    expect((result as { job: ImportJob }).job.rows_total).toBe(6); // o total vem do banco (inclui o bloco concorrente), não do objeto local
+    expect(spy).not.toHaveBeenCalled(); // nenhum UPDATE de blocks no cliente
+  });
+
+  it("RPC devolve NULL (job não recebe mais): 409; RPC com erro (função ausente): cai no caminho antigo e grava", async () => {
+    const env = fakeEnv({ jobs: [job({ state: "receiving", blocks: {}, blocks_total: null, rows_total: 0 })] });
+    (env.db as any).rpc = async () => ({ data: null, error: null });
+    expect(await putImportBlock(env.db, env.tables.dispatch_import_jobs[0] as ImportJob, 0, [row(1)])).toMatchObject({ ok: false, code: "not_receiving", status: 409 });
+    (env.db as any).rpc = async () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function wacrm.dispatch_import_set_block" } });
+    const fallback = await putImportBlock(env.db, env.tables.dispatch_import_jobs[0] as ImportJob, 0, [row(1)]);
+    expect(fallback).toMatchObject({ ok: true });
+    expect(env.tables.dispatch_import_jobs[0]).toMatchObject({ blocks: { "0": 1 }, rows_total: 1 });
+  });
+
   it("normalizeBlockRows: só objetos, valores viram texto", () => {
     expect(normalizeBlockRows([{ a: 1, b: null }, "x", null, [1], { c: true }])).toEqual([{ a: "1", b: "" }, { c: "true" }]);
   });
