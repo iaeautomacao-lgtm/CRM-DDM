@@ -275,6 +275,12 @@ async function prepareCampaign(
     }
     state.agendamento = campaign.agendamento ?? null;
 
+    // A7: campanha da API v1 nunca é iniciada por aqui (vai direto a em_execucao; rascunho api_v1 é criação
+    // interrompida). Iniciar apagaria a fila parcial e usaria a conta inteira como público.
+    if (claimedFreshStart && campaign.source === "api_v1") {
+      return { ok: false, status: 409, error: "Campanha criada pela API v1 que não terminou de ser enfileirada; crie-a de novo pela API." };
+    }
+
     // Not claimed above (não era rascunho/agendado) e não é retomada de
     // pausada — genuinamente não iniciável agora. Enforced aqui, não só
     // desabilitado na UI, pra uma chamada direta não conseguir reiniciar
