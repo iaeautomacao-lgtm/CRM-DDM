@@ -228,6 +228,10 @@
     {
       "version": "291_whatsapp_flows_keys",
       "kind": "registry"
+    },
+    {
+      "version": "292_import_lists",
+      "kind": "registry"
     }
   ]
 }
