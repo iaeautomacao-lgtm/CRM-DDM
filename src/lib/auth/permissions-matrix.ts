@@ -306,7 +306,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/seguranca", roles: ["owner", "admin", "supervisor", "agent", "viewer"], permission: null, aligned: false, note: "todos os papéis" },
   { prefix: "/templates", roles: ["owner", "admin"], permission: "templates.manage", aligned: true },
   { prefix: "/tabulacoes", roles: ["owner", "admin"], permission: "tags.manage", aligned: true },
-  { prefix: "/respostas-rapidas", roles: ["owner", "admin", "supervisor", "agent"], permission: "inbox.reply", aligned: true, note: "operador cria as prÃ³prias (pessoais); equipe/conta exigem inbox.quick_replies.manage na tela e na RLS" },
+  { prefix: "/respostas-rapidas", roles: ["owner", "admin", "supervisor", "agent"], permission: "inbox.reply", aligned: true, note: "operador cria as próprias (pessoais); equipe/conta exigem inbox.quick_replies.manage na tela e na RLS" },
   { prefix: "/usuarios", roles: ["owner", "admin"], permission: "members.manage", aligned: true },
   { prefix: "/membros", roles: ["owner", "admin"], permission: "members.manage", aligned: true },
 ];
