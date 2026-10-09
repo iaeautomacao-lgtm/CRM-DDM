@@ -301,6 +301,15 @@
       "version": "302b_conversation_assignments_from_agent_idx",
       "kind": "index",
       "index": "idx_conversation_assignments_from_agent"
+    },
+    {
+      "version": "303_internal_chat_reads",
+      "kind": "registry"
+    },
+    {
+      "version": "303b_internal_messages_unread_idx",
+      "kind": "index",
+      "index": "idx_internal_messages_unread"
     }
   ]
 }
