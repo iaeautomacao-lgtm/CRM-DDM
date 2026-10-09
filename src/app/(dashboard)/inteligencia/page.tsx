@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { AnswerMarkdown } from "@/components/inteligencia/answer-markdown";
 import { SUGGESTED_QUESTIONS, toolLabel, type ChatStreamEvent } from "@/lib/intelligence/chat/labels";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ddm/states";
 
 // /inteligencia — chat do DDM Intelligence (PRD-04, Fase 2). Owner/admin/
 // supervisor (ROUTE_ALLOWLIST em src/lib/role-utils.ts). As respostas vêm
@@ -221,45 +222,65 @@ export default function InteligenciaPage() {
   };
 
   const limitReached = usage !== null && usage.used >= usage.limit;
+  const usagePct = usage && usage.limit > 0 ? Math.min(100, (usage.used / usage.limit) * 100) : 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4 p-4 lg:flex-row lg:p-6">
+    <div className="animate-ddm-up flex h-full min-h-0 flex-col gap-4 lg:flex-row">
       {/* Histórico */}
-      <aside className="flex w-full shrink-0 flex-col gap-2 lg:w-64">
-        <Button variant="outline" onClick={newChat} disabled={streaming}>
+      <aside className="flex max-h-[220px] w-full shrink-0 flex-col gap-2 lg:max-h-none lg:w-64">
+        <Button variant="outline" onClick={newChat} disabled={streaming} className="justify-center">
           <MessageSquarePlus className="size-4" />
           Nova conversa
         </Button>
-        <div className="max-h-48 overflow-y-auto rounded-lg border lg:max-h-none lg:flex-1">
+        <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border bg-card">
           {listError ? (
             <p className="p-3 text-xs text-muted-foreground">{listError}</p>
           ) : chats.length === 0 ? (
             <p className="p-3 text-xs text-muted-foreground">Nenhuma conversa ainda.</p>
           ) : (
-            <ul className="divide-y">
-              {chats.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    onClick={() => void openChat(c.id)}
-                    disabled={streaming}
-                    className={cn(
-                      "w-full px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-60",
-                      c.id === activeChatId && "bg-muted",
-                    )}
-                  >
-                    <span className="line-clamp-2">{c.title}</span>
-                    <span className="text-xs text-muted-foreground">{fmtWhen(c.updated_at)}</span>
-                  </button>
-                </li>
-              ))}
+            <ul aria-label="Conversas anteriores">
+              {chats.map((c, i) => {
+                const current = c.id === activeChatId;
+                return (
+                  <li key={c.id} className="animate-ddm-row border-b last:border-b-0" style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}>
+                    <button
+                      type="button"
+                      onClick={() => void openChat(c.id)}
+                      disabled={streaming}
+                      aria-current={current ? "true" : undefined}
+                      className={cn(
+                        "flex w-full flex-col gap-0.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-hover disabled:opacity-60",
+                        current && "bg-selected shadow-[inset_2px_0_0_var(--primary)]",
+                      )}
+                    >
+                      <span className="line-clamp-2 text-[13px] leading-snug text-foreground">{c.title}</span>
+                      <span className="text-[11.5px] text-muted-foreground">{fmtWhen(c.updated_at)}</span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
         {usage && (
-          <p className="text-xs text-muted-foreground">
-            Perguntas da conta hoje: {usage.used} de {usage.limit}
-          </p>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs tabular-nums text-muted-foreground">
+              Perguntas da conta hoje: {usage.used} de {usage.limit}
+            </span>
+            <div
+              className="h-1 overflow-hidden rounded-sm bg-surface-3"
+              role="progressbar"
+              aria-label="Perguntas da conta hoje"
+              aria-valuemin={0}
+              aria-valuemax={usage.limit}
+              aria-valuenow={usage.used}
+            >
+              <div
+                className={cn("animate-ddm-bar h-full rounded-sm transition-[width] duration-300", usagePct > 90 ? "bg-warning" : "bg-primary")}
+                style={{ width: `${usagePct}%` }}
+              />
+            </div>
+          </div>
         )}
         <Link
           href="/inteligencia/chaves"
@@ -271,30 +292,35 @@ export default function InteligenciaPage() {
       </aside>
 
       {/* Conversa */}
-      <section className="flex min-h-[60vh] min-w-0 flex-1 flex-col rounded-lg border">
-        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <section
+        aria-label="Conversa com o DDM Intelligence"
+        className="flex min-h-[60vh] min-w-0 flex-1 flex-col rounded-[10px] border bg-card"
+      >
+        <div className="flex flex-1 flex-col gap-3.5 overflow-y-auto overflow-x-hidden p-4" aria-live="polite">
           {loadingChat ? (
-            <div className="flex justify-center py-10 text-muted-foreground">
-              <Loader2 className="size-5 animate-spin" />
+            <div className="flex flex-col gap-3" aria-busy>
+              <Skeleton className="ml-auto h-10 w-2/5 rounded-[10px]" />
+              <Skeleton className="h-24 w-3/4 rounded-[10px]" />
             </div>
           ) : messages.length === 0 ? (
-            <div className="mx-auto max-w-xl space-y-4 py-6 text-center">
-              <Sparkles className="mx-auto size-8 text-primary" />
-              <div>
-                <h2 className="text-lg font-semibold">Pergunte sobre o atendimento</h2>
-                <p className="text-sm text-muted-foreground">
-                  As respostas usam só os dados do CRM que você pode ver, sempre com o período e o escopo
-                  consultados.
+            <div className="animate-ddm-fade m-auto flex max-w-[560px] flex-col items-center gap-4 py-6 text-center">
+              <span className="flex size-10 items-center justify-center rounded-[10px] bg-primary-soft text-primary">
+                <Sparkles className="size-5" />
+              </span>
+              <div className="flex flex-col gap-1.5">
+                <h2 className="text-[17px] font-semibold text-foreground">Pergunte sobre o atendimento</h2>
+                <p className="text-[13.5px] leading-relaxed text-foreground-2">
+                  As respostas usam só os dados do CRM que você pode ver, sempre com o período e o escopo consultados.
                 </p>
               </div>
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid w-full gap-2 sm:grid-cols-2">
                 {SUGGESTED_QUESTIONS.map((q) => (
                   <button
                     key={q}
                     type="button"
                     onClick={() => void send(q)}
                     disabled={streaming || limitReached}
-                    className="rounded-lg border px-3 py-2 text-left text-sm hover:bg-muted disabled:opacity-60"
+                    className="rounded-lg border bg-card px-3 py-2.5 text-left text-[13px] leading-snug text-foreground transition-colors hover:border-border-strong hover:bg-surface-hover disabled:opacity-60"
                   >
                     {q}
                   </button>
@@ -304,27 +330,32 @@ export default function InteligenciaPage() {
           ) : (
             messages.map((m) =>
               m.role === "user" ? (
-                <div key={m.key} className="flex justify-end">
-                  <div className="max-w-[85%] whitespace-pre-wrap rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground">
+                <div key={m.key} className="animate-ddm-fade flex justify-end">
+                  <div className="max-w-[80%] whitespace-pre-wrap rounded-[10px_10px_2px_10px] bg-primary-soft px-3 py-2 text-[13.5px] leading-relaxed text-foreground">
                     {m.content}
                   </div>
                 </div>
               ) : (
-                <div key={m.key} className="flex justify-start">
+                <div key={m.key} className="animate-ddm-fade flex justify-start">
                   <div
                     className={cn(
-                      "max-w-[90%] rounded-lg bg-muted px-3 py-2",
-                      m.failed && "border border-destructive/40",
+                      "flex max-w-[90%] flex-col gap-2 rounded-[10px_10px_10px_2px] border bg-card-2 px-3.5 py-2.5",
+                      m.failed && "border-destructive/50",
                     )}
                   >
                     {m.tools.length > 0 && (
-                      <p className="mb-1 text-xs text-muted-foreground">Consultas: {m.tools.join(" · ")}</p>
+                      <p className="text-[11.5px] text-muted-foreground">Consultas: {m.tools.join(" · ")}</p>
                     )}
                     {m.content ? (
-                      <AnswerMarkdown text={m.content} />
+                      <div className="text-[13.5px] leading-relaxed">
+                        <AnswerMarkdown text={m.content} />
+                        {m.pending && streaming && (
+                          <span aria-hidden className="ml-0.5 inline-block h-3.5 w-[7px] animate-pulse bg-muted-foreground align-middle" />
+                        )}
+                      </div>
                     ) : m.pending ? (
-                      <span className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Loader2 className="size-4 animate-spin" />
+                      <span className="flex items-center gap-2 text-[13px] text-foreground-2">
+                        <Loader2 className="size-3.5 animate-spin text-primary" />
                         {toolStatus ? `${toolStatus}…` : "Pensando…"}
                       </span>
                     ) : null}
@@ -337,7 +368,7 @@ export default function InteligenciaPage() {
         </div>
 
         <form
-          className="flex items-end gap-2 border-t p-3"
+          className="flex shrink-0 items-end gap-2 border-t p-3"
           onSubmit={(e) => {
             e.preventDefault();
             void send(input);
@@ -358,10 +389,17 @@ export default function InteligenciaPage() {
                 : "Ex.: qual instituição converteu melhor esta semana?"
             }
             disabled={streaming || limitReached}
-            className="max-h-40 min-h-10"
+            rows={1}
+            className="max-h-40 min-h-10 resize-y text-[13.5px]"
             aria-label="Pergunta para o DDM Intelligence"
           />
-          <Button type="submit" size="icon-lg" disabled={streaming || !input.trim() || limitReached} aria-label="Enviar">
+          <Button
+            type="submit"
+            size="icon-lg"
+            disabled={streaming || !input.trim() || limitReached}
+            aria-label="Enviar"
+            className="size-10 shrink-0"
+          >
             {streaming ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
           </Button>
         </form>

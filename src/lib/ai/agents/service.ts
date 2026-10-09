@@ -298,6 +298,24 @@ export async function loadAgentUsage(accountId: string) {
   }
   return usage;
 }
+/** Resumo exibido no cartão do agente. null = sem versão publicada (ou config ilegível). */
+export function summarizeConfig(config: AgentConfig | undefined) {
+  if (!config) return null;
+  const knowledge = config.knowledge;
+  return {
+    provider: config.llm?.provider ?? null,
+    model: config.llm?.model ?? null,
+    mode: config.behavior?.mode ?? null,
+    tools: (config.tools ?? []).filter((t) => t.enabled).length,
+    knowledge: knowledge?.selection_mode ?? null,
+    files:
+      knowledge?.selection_mode === 'explicit'
+        ? (knowledge.files?.length ?? knowledge.file_ids?.length ?? 0)
+        : null,
+    vector: !!knowledge?.vector?.enabled,
+  };
+}
+
 export async function listAgents(accountId: string) {
   const [agents, versions, usage] = await Promise.all([
     all<AgentRow>(
@@ -313,11 +331,21 @@ export async function listAgents(accountId: string) {
     loadAgentUsage(accountId),
   ]);
   const byId = new Map(versions.map((v) => [v.id, v]));
+  // Resumo da versão publicada para o cartão da lista (modelo, modo, ferramentas, conhecimento): só dados reais.
+  const publishedIds = agents.map((a) => a.published_version_id).filter((v): v is string => !!v);
+  const configs = new Map<string, AgentConfig>();
+  for (let i = 0; i < publishedIds.length; i += 100) {
+    const rows = await all<{ id: string; config: AgentConfig }>('ai_agent_versions', 'id,config', accountId, {
+      id: publishedIds.slice(i, i + 100),
+    });
+    for (const r of rows) configs.set(r.id, r.config);
+  }
   return {
     agents: agents
       .map(({ published_version_id, ...a }) => ({
         ...a,
         published_version: byId.get(published_version_id ?? '') ?? null,
+        summary: summarizeConfig(configs.get(published_version_id ?? '')),
         used_in_flows: new Set((usage.get(a.id) ?? []).map((u) => u.flow_id))
           .size,
       }))

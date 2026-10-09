@@ -53,7 +53,7 @@ export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps)
 
   if (data.composition === 'legacy_v1') {
     return (
-      <div className="space-y-4 rounded-lg border border-amber-500/40 bg-amber-500/5 p-5">
+      <div className="space-y-4 rounded-[10px] border border-warning-border bg-warning-soft p-5">
         <h3 className="text-sm font-medium text-foreground">Regras separadas indisponíveis</h3>
         <p className="text-sm text-muted-foreground">
           Este agente usa o prompt original do fluxo; regras separadas só valem depois de converter.
@@ -86,7 +86,7 @@ export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps)
       </div>
 
       {rules.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border p-8 text-center space-y-3">
+        <div className="rounded-[10px] border border-dashed border-border p-8 text-center space-y-3">
           <p className="text-sm text-muted-foreground">
             Nenhuma regra adicionada ainda. As regras ajudam a modular e condicionar o comportamento do agente.
           </p>
@@ -106,7 +106,7 @@ export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps)
             return (
               <div
                 key={rule.id}
-                className="group rounded-lg border border-border bg-card p-4 transition-colors hover:border-primary/40 space-y-3"
+                className="group rounded-[10px] border border-border bg-card p-4 transition-colors hover:border-border-strong space-y-3"
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">

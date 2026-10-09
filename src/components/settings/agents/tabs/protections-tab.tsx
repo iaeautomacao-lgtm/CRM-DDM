@@ -43,7 +43,7 @@ export function ProtectionsTab({ data, onChange, readOnly }: ProtectionsTabProps
       </div>
 
       {PROTECTIONS.map((p) => (
-        <div key={p.key} className="flex items-start justify-between gap-4 rounded-lg border border-border p-4">
+        <div key={p.key} className="flex items-start justify-between gap-4 rounded-[10px] border border-border p-4">
           <div className="space-y-0.5">
             <Label htmlFor={`prot-${p.key}`} className="text-sm font-medium cursor-pointer">
               {p.label}
@@ -59,7 +59,7 @@ export function ProtectionsTab({ data, onChange, readOnly }: ProtectionsTabProps
         </div>
       ))}
 
-      <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 p-4">
+      <div className="flex items-start gap-3 rounded-[10px] border border-border bg-card-2 p-4">
         <ShieldCheck className="size-4 mt-0.5 text-primary shrink-0" />
         <div className="space-y-0.5">
           <p className="text-sm font-medium text-foreground">Opt-out é sempre aplicado</p>

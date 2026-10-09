@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/core";
 import type { Deal, PipelineStage } from "@/types";
 import { DealCard } from "./deal-card";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { formatCurrency } from "@/lib/currency";
@@ -130,7 +130,7 @@ export function PipelineBoard({
         }}
       >
         {activeDeal ? (
-          <div className="opacity-90">
+          <div className="opacity-95">
             <DealCard
               deal={activeDeal}
               stage={
@@ -209,58 +209,51 @@ function StageColumn({
     // restore the flex-1 share-the-row behavior. The droppable ref is
     // on the inner messages region below — intentionally NOT here, so
     // a drag over the column header doesn't highlight the whole column.
-    <div className="flex w-[85vw] min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col rounded-xl border border-border bg-card/60 p-4 lg:w-auto lg:max-w-none lg:flex-1 lg:basis-[260px] lg:shrink lg:snap-none">
-      {/* 3px colored top border — sits above the column's padding */}
-      <div
-        className="-mx-4 -mt-4 h-[3px] rounded-t-xl"
-        style={{ backgroundColor: stage.color }}
-      />
-      <div className="flex items-center justify-between pt-3">
-        <h3 className="truncate text-sm font-semibold text-foreground">
-          {stage.name}
-        </h3>
-        <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-          {deals.length}
-        </span>
+    <section
+      aria-label={stage.name}
+      className="flex min-h-[440px] w-[85vw] min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col overflow-hidden rounded-[10px] border border-border bg-card lg:w-auto lg:max-w-none lg:flex-1 lg:basis-[260px] lg:shrink lg:snap-none"
+    >
+      {/* Fio de 3px na cor da etapa */}
+      <div className="h-[3px] shrink-0" style={{ backgroundColor: stage.color }} />
+      <div className="flex flex-col gap-0.5 px-3 pt-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="truncate text-[13.5px] font-semibold text-foreground">{stage.name}</h3>
+          <span className="flex h-[22px] min-w-[22px] shrink-0 items-center justify-center rounded-full bg-card-2 px-[7px] text-[11.5px] font-semibold text-foreground-2">
+            {deals.length}
+          </span>
+        </div>
+        <p className="text-xs tabular-nums text-muted-foreground">{formatCurrency(totalValue, currency)}</p>
       </div>
-      <p className="text-xs text-muted-foreground">
-        {formatCurrency(totalValue, currency)}
-      </p>
 
       <div
         ref={setNodeRef}
-        className={`mt-3 flex flex-1 flex-col gap-2 rounded-lg transition-all ${
-          isOver
-            ? "bg-primary/5 outline outline-2 outline-dashed outline-primary outline-offset-2"
-            : ""
-        }`}
+        className={cn(
+          "mx-2 mt-2.5 flex flex-1 flex-col gap-2 rounded-lg p-0.5 outline-2 outline-dashed transition-colors duration-150",
+          isOver ? "bg-primary-soft outline-primary" : "outline-transparent",
+        )}
       >
         {deals.length === 0 ? (
-          <div className="flex flex-1 items-center justify-center rounded-lg border-2 border-dashed border-border py-10 text-xs text-muted-foreground">
+          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-border-strong py-10 text-xs text-muted-foreground">
             Arraste um negócio aqui
           </div>
         ) : (
-          deals.map((deal) => (
-            <DraggableDealCard
-              key={deal.id}
-              deal={deal}
-              stage={stage}
-              onEdit={onEditDeal}
-            />
-          ))
+          <div className="ddm-stagger flex flex-col gap-2">
+            {deals.map((deal) => (
+              <DraggableDealCard key={deal.id} deal={deal} stage={stage} onEdit={onEditDeal} />
+            ))}
+          </div>
         )}
       </div>
 
-      <Button
-        variant="ghost"
-        size="sm"
+      <button
+        type="button"
         onClick={() => onAddDeal(stage.id)}
-        className="mt-3 w-full justify-start border border-dashed border-border bg-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+        className="m-2 flex h-8 items-center justify-center gap-1.5 rounded-md border border-dashed border-border text-xs font-medium text-muted-foreground hover:border-border-strong hover:bg-surface-hover hover:text-foreground"
       >
-        <Plus className="mr-1 h-3 w-3" />
-        Adicionar Negócio
-      </Button>
-    </div>
+        <Plus className="size-3" aria-hidden="true" />
+        Adicionar negócio
+      </button>
+    </section>
   );
 }
 

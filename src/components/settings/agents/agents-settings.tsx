@@ -8,13 +8,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
-import { ArrowLeft, Loader2, Plus, Save, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Loader2, Trash2, Upload } from 'lucide-react';
 
 import { usePermissions } from '@/hooks/use-permission';
 import { useAuth } from '@/hooks/use-auth';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -23,10 +21,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Switch } from '@/components/ui/switch';
+import { StatusChip } from '@/components/ddm/status-chip';
+import { ErrorState, Skeleton } from '@/components/ddm/states';
 import { LEGACY_AGENT_DEFAULTS } from '@/lib/ai/agents/schema';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { SettingsPanelHead } from '../settings-panel-head';
 import {
   AgentApiError,
   createAgent,
@@ -34,7 +32,6 @@ import {
   deleteAgent,
   fetchAccountSecrets,
   fetchAgent,
-  fetchAgents,
   fetchKnowledgeBaseFiles,
   fetchToolsCatalog,
   patchAgent,
@@ -50,7 +47,6 @@ import {
 import type {
   AgentDetailResponse,
   AgentFormData,
-  AgentListItem,
   KnowledgeBaseFileItem,
   SecretItem,
   ToolCatalogItem,
@@ -66,6 +62,7 @@ import { ProtectionsTab } from './tabs/protections-tab';
 import { VersionsTab } from './tabs/versions-tab';
 import { PreviewTab } from './tabs/preview-tab';
 import { TestTab, type TestTabTool } from './tabs/test-tab';
+import { AgentList } from './agent-list';
 
 const TABS = [
   ['general', 'Geral'],
@@ -82,12 +79,6 @@ const TABS = [
 ] as const;
 
 const SAVE_CONFIRM = 'Salvar publica uma nova versão do agente.\n\nConversas em andamento continuam na versão anterior.';
-
-function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
-}
 
 function errorMessage(err: unknown, fallback: string): string {
   if (err instanceof AgentApiError) {
@@ -137,113 +128,6 @@ export function AgentsSettings() {
     );
   }
   return <AgentList canEdit={canEdit} onOpen={select} />;
-}
-
-/* ───────────────────────────── Lista ───────────────────────────── */
-
-function AgentList({ canEdit, onOpen }: { canEdit: boolean; onOpen: (id: string) => void }) {
-  const [agents, setAgents] = useState<AgentListItem[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetchAgents().then(
-      (list) => {
-        if (!cancelled) setAgents(list);
-      },
-      (err) => {
-        if (cancelled) return;
-        setError(errorMessage(err, 'Não foi possível carregar os agentes.'));
-        setAgents([]);
-      },
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function toggle(agent: AgentListItem, enabled: boolean) {
-    setAgents((prev) => prev?.map((a) => (a.id === agent.id ? { ...a, enabled } : a)) ?? prev);
-    try {
-      await patchAgent(agent.id, { enabled });
-      toast.success(enabled ? `${agent.name} ligado` : `${agent.name} desligado — os nós que o usam seguem pela saída de falha`);
-    } catch (err) {
-      setAgents((prev) => prev?.map((a) => (a.id === agent.id ? { ...a, enabled: !enabled } : a)) ?? prev);
-      toast.error(errorMessage(err, 'Não foi possível alterar o agente.'));
-    }
-  }
-
-  if (!agents) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="text-primary size-6 animate-spin" />
-      </div>
-    );
-  }
-
-  return (
-    <section className="animate-in fade-in-50 space-y-6 duration-200">
-      <SettingsPanelHead
-        title="Agentes"
-        description="Perfis de IA reutilizáveis: prompt, regras, base de conhecimento, ferramentas, modelo e proteções. Escolha um agente no nó de IA do fluxo; cada alteração publica uma nova versão."
-        action={
-          canEdit ? (
-            <Button onClick={() => onOpen('new')}>
-              <Plus className="size-4" />
-              Novo agente
-            </Button>
-          ) : undefined
-        }
-      />
-
-      {!canEdit && <p className="text-muted-foreground text-sm">Você pode ver os agentes. Só owner e admin criam ou editam.</p>}
-      {error && <p className="text-destructive text-sm">{error}</p>}
-
-      {agents.length === 0 && !error ? (
-        <Card>
-          <CardContent className="text-muted-foreground flex flex-col items-center gap-2 py-10 text-sm">
-            <Sparkles className="size-6" />
-            Nenhum agente criado ainda.
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">
-          {agents.map((agent) => (
-            <Card key={agent.id}>
-              <CardContent className="flex flex-wrap items-center gap-3 py-3">
-                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onOpen(agent.id)}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold">{agent.name}</span>
-                    {agent.published_version ? (
-                      <Badge variant="secondary">v{agent.published_version.version}</Badge>
-                    ) : (
-                      <Badge variant="outline">Sem versão publicada</Badge>
-                    )}
-                    {!agent.enabled && <Badge variant="outline">Desligado</Badge>}
-                  </div>
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    Usado em {agent.used_in_flows} fluxo{agent.used_in_flows === 1 ? '' : 's'} · atualizado em{' '}
-                    {formatDate(agent.updated_at)}
-                  </div>
-                </button>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={agent.enabled}
-                    onCheckedChange={(v) => void toggle(agent, v)}
-                    disabled={!canEdit}
-                    aria-label={`${agent.enabled ? 'Desligar' : 'Ligar'} ${agent.name}`}
-                  />
-                  <Button variant="outline" size="sm" onClick={() => onOpen(agent.id)}>
-                    {canEdit ? 'Editar' : 'Ver'}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-    </section>
-  );
 }
 
 /* ───────────────────────────── Editor ───────────────────────────── */
@@ -447,72 +331,102 @@ function AgentEditor({
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="text-primary size-6 animate-spin" />
-      </div>
+      <section className="flex flex-col gap-4" aria-busy>
+        <Skeleton className="h-8 w-32" />
+        <Skeleton className="h-7 w-72" />
+        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-64 w-full rounded-[10px]" />
+      </section>
     );
   }
 
   if (loadError) {
     return (
-      <section className="space-y-4">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+      <section className="flex flex-col gap-4">
+        <Button variant="ghost" size="sm" onClick={onBack} className="self-start">
           <ArrowLeft className="size-4" />
           Agentes
         </Button>
-        <p className="text-destructive text-sm">{loadError}</p>
+        <ErrorState
+          title="Não foi possível carregar o agente"
+          hint={loadError}
+          onRetry={agentId ? () => void reload(agentId) : undefined}
+        />
       </section>
     );
   }
 
   return (
-    <section className="animate-in fade-in-50 space-y-5 duration-200">
+    <section className="animate-ddm-up flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2">
           <ArrowLeft className="size-4" />
           Agentes
         </Button>
-        <div className="flex items-center gap-2">
-          {detail?.published && <Badge variant="secondary">Publicada: v{detail.published.version}</Badge>}
-          {dirty && <Badge variant="outline">Alterações não salvas</Badge>}
+        <div className="flex flex-wrap items-center gap-2">
+          {dirty && <StatusChip tone="warn">Alterações não salvas</StatusChip>}
+          {detail?.published ? (
+            <StatusChip tone="mute" dot={false}>
+              Publicada: v{detail.published.version}
+            </StatusChip>
+          ) : agentId ? (
+            <StatusChip tone="warn">Sem versão publicada</StatusChip>
+          ) : null}
           {canEdit && agentId && (
-            <Button variant="ghost" size="sm" onClick={() => void remove()} aria-label="Excluir agente">
+            <Button variant="ghost" size="icon-sm" onClick={() => void remove()} aria-label="Excluir agente" title="Excluir agente">
               <Trash2 className="size-4" />
             </Button>
           )}
           {canEdit && (
             <Button onClick={() => void save()} disabled={saving || (!dirty && agentId !== null)}>
-              {saving ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+              {saving ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
               {agentId ? 'Publicar nova versão' : 'Criar e publicar'}
             </Button>
           )}
         </div>
       </div>
 
-      {!canEdit && <p className="text-muted-foreground text-sm">Somente leitura: só owner e admin editam agentes.</p>}
+      <div className="min-w-0">
+        <h2 className="font-heading truncate text-[22px] font-semibold tracking-tight text-foreground">
+          {form.name.trim() || (agentId ? 'Agente sem nome' : 'Novo agente')}
+        </h2>
+        {!canEdit && (
+          <p className="mt-1 text-sm text-muted-foreground">Somente leitura: você pode ver o agente, mas não editar.</p>
+        )}
+      </div>
+
       {agentId && detail && !detail.published && (
-        <p className="text-sm text-amber-600">Este agente ainda não tem versão publicada: os nós que o usam seguem pela saída de falha.</p>
+        <p role="note" className="flex items-start gap-2 rounded-lg border border-warning-border bg-warning-soft px-3 py-2 text-sm text-foreground">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
+          Este agente ainda não tem versão publicada: os nós que o usam seguem pela saída de falha.
+        </p>
       )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
-          {TABS.filter(([value]) => value !== 'test' || canSimulate).map(([value, label]) => (
-            <TabsTrigger key={value} value={value}>
-              {label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="-mx-1 overflow-x-auto border-b px-1 [scrollbar-width:thin]">
+          <TabsList variant="line" className="h-auto justify-start gap-5 p-0">
+            {TABS.filter(([value]) => value !== 'test' || canSimulate).map(([value, label]) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className="flex-none px-0 pb-2.5 pt-1 text-[13.5px] data-active:text-foreground after:bg-primary after:!bottom-[-1px]"
+              >
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
-        <TabsContent value="general" className="pt-4">
+        <TabsContent value="general" className="animate-ddm-fade pt-5">
           <GeneralTab data={form} onChange={patch} readOnly={readOnly} usedIn={detail?.used_in ?? []} />
         </TabsContent>
-        <TabsContent value="prompt" className="pt-4">
+        <TabsContent value="prompt" className="animate-ddm-fade pt-5">
           <PromptTab data={form} onChange={patch} readOnly={readOnly} />
         </TabsContent>
-        <TabsContent value="rules" className="pt-4">
+        <TabsContent value="rules" className="animate-ddm-fade pt-5">
           <RulesTab data={form} onChange={patch} readOnly={readOnly || converting} onConvert={() => void startConvert()} />
         </TabsContent>
-        <TabsContent value="knowledge" className="pt-4">
+        <TabsContent value="knowledge" className="animate-ddm-fade pt-5">
           <KnowledgeTab
             data={form}
             onChange={patch}
@@ -523,7 +437,7 @@ function AgentEditor({
             readOnly={readOnly}
           />
         </TabsContent>
-        <TabsContent value="tools" className="pt-4">
+        <TabsContent value="tools" className="animate-ddm-fade pt-5">
           <ToolsTab
             data={form}
             onChange={patch}
@@ -533,16 +447,16 @@ function AgentEditor({
             onToolCreated={(tool) => setCatalog((prev) => [...prev.filter((t) => t.id !== tool.id), tool])}
           />
         </TabsContent>
-        <TabsContent value="model" className="pt-4">
+        <TabsContent value="model" className="animate-ddm-fade pt-5">
           <ModelTab data={form} onChange={patch} readOnly={readOnly} />
         </TabsContent>
-        <TabsContent value="behavior" className="pt-4">
+        <TabsContent value="behavior" className="animate-ddm-fade pt-5">
           <BehaviorTab data={form} onChange={patch} readOnly={readOnly} />
         </TabsContent>
-        <TabsContent value="protections" className="pt-4">
+        <TabsContent value="protections" className="animate-ddm-fade pt-5">
           <ProtectionsTab data={form} onChange={patch} readOnly={readOnly} />
         </TabsContent>
-        <TabsContent value="versions" className="pt-4">
+        <TabsContent value="versions" className="animate-ddm-fade pt-5">
           <VersionsTab
             versions={detail?.versions ?? []}
             publishedVersionId={detail?.published?.version_id}
@@ -551,11 +465,11 @@ function AgentEditor({
             busy={saving}
           />
         </TabsContent>
-        <TabsContent value="preview" className="pt-4">
+        <TabsContent value="preview" className="animate-ddm-fade pt-5">
           <PreviewTab onPreview={preview} readOnly={readOnly} />
         </TabsContent>
         {canSimulate && (
-          <TabsContent value="test" className="pt-4">
+          <TabsContent value="test" className="animate-ddm-fade pt-5">
             <TestTab agentId={agentId} buildDraft={testDraft} tools={testTools} canRealRead={canRealRead} />
           </TabsContent>
         )}
