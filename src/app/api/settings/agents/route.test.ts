@@ -258,6 +258,19 @@ describe('API perfis e RPC 180 — integração PGlite', () => {
       )
     ).rejects.toThrow(/imutável/);
   });
+  it('lista traz o resumo da versão publicada para o cartão (redesenho)', async () => {
+    const body = await (await LIST()).json();
+    const item = body.agents.find((a: { id: string }) => a.id === agentId);
+    expect(item.summary).toEqual({
+      provider: 'openai',
+      model: expect.any(String),
+      mode: expect.any(String),
+      tools: 0,
+      knowledge: 'explicit',
+      files: 1,
+      vector: false,
+    });
+  });
   it('tenancy: tools/KB de outra conta são recusados sem criar agente', async () => {
     const tool = input('tool-alheia');
     tool.tool_ids = [OTHER_TOOL];

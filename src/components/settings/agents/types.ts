@@ -12,6 +12,16 @@ export interface AgentListItem {
   } | null;
   used_in_flows: number;
   updated_at: string;
+  /** Resumo da versão publicada (null = sem versão). */
+  summary?: {
+    provider: string | null;
+    model: string | null;
+    mode: string | null;
+    tools: number;
+    knowledge: 'legacy_account_all' | 'explicit' | null;
+    files: number | null;
+    vector: boolean;
+  } | null;
 }
 
 export interface AgentVersionSummary {

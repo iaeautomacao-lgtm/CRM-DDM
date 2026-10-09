@@ -52,8 +52,8 @@ const COLORS: Record<SimTimelineEvent['type'], string> = {
   node: 'text-muted-foreground',
   branch: 'text-sky-600 dark:text-sky-400',
   tag: 'text-violet-600 dark:text-violet-400',
-  tool_call: 'text-amber-700 dark:text-amber-400',
-  tool_result: 'text-amber-700 dark:text-amber-400',
+  tool_call: 'text-warning',
+  tool_result: 'text-warning',
   handoff: 'text-orange-600 dark:text-orange-400',
   run_end: 'text-emerald-700 dark:text-emerald-400',
   error: 'text-destructive',
@@ -120,7 +120,7 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section aria-label="Conversa de teste" className="flex min-h-[28rem] flex-col overflow-hidden rounded-lg border border-border bg-card">
+      <section aria-label="Conversa de teste" className="flex min-h-[28rem] flex-col overflow-hidden rounded-[10px] border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
           <FlaskConical className="size-4 text-primary" />
           <span className="text-sm font-semibold">Testar agente</span>
@@ -133,13 +133,13 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
 
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
           {info?.disabled && (
-            <p className="flex items-start gap-1.5 text-xs text-amber-600">
+            <p className="flex items-start gap-1.5 text-xs text-warning">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
               Este agente está desligado: em produção os nós que o usam seguem pela saída de falha. O teste roda mesmo assim.
             </p>
           )}
           {realDenied && (
-            <p className="text-xs text-amber-600">A consulta real das ferramentas exige permissão para gravar credenciais: tudo foi simulado.</p>
+            <p className="text-xs text-warning">A consulta real das ferramentas exige permissão para gravar credenciais: tudo foi simulado.</p>
           )}
           {chat.length === 0 && (
             <p className="text-xs text-muted-foreground">
@@ -193,7 +193,7 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
       </section>
 
       <aside className="space-y-4">
-        <div className="space-y-2 rounded-lg border border-border bg-card p-3 text-xs">
+        <div className="space-y-2 rounded-[10px] border border-border bg-card p-3 text-xs">
           <p className="font-medium text-foreground">Respostas das ferramentas (mock)</p>
           {tools.length === 0 ? (
             <p className="text-muted-foreground">Nenhuma ferramenta ligada neste agente.</p>
@@ -219,7 +219,7 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
                       <span>
                         Consultar a API real (somente leitura)
                         {isReal && (
-                          <span className="mt-0.5 flex items-center gap-1 text-amber-700 dark:text-amber-400">
+                          <span className="mt-0.5 flex items-center gap-1 text-warning">
                             <TriangleAlert className="size-3" /> Usa dados reais de devedor — só com CPF de teste.
                           </span>
                         )}
@@ -242,7 +242,7 @@ export function TestTab({ agentId, buildDraft, tools, canRealRead }: TestTabProp
         </div>
 
         {turns.length > 0 && (
-          <div className="rounded-lg border border-border bg-card p-3">
+          <div className="rounded-[10px] border border-border bg-card p-3">
             <p className="mb-1 text-xs font-medium">O que o agente fez</p>
             <ol className="space-y-2">
               {turns.map((turn) => (
