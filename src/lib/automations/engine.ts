@@ -682,7 +682,10 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
  * manual engine POSTs. Throws if none exists — send steps have
  * no meaningful target without a conversation.
  */
-async function resolveConversationId(args: ExecuteArgs): Promise<string> {
+/** Exportada só para teste. */
+export async function resolveConversationId(
+  args: Pick<ExecuteArgs, 'automation' | 'contactId' | 'context'>,
+): Promise<string> {
   const fromCtx = args.context.conversation_id
   if (fromCtx) return fromCtx
   if (!args.contactId) throw new Error('cannot resolve conversation: no contact')
@@ -692,12 +695,17 @@ async function resolveConversationId(args: ExecuteArgs): Promise<string> {
     .eq('account_id', args.automation.account_id)
     .eq('contact_id', args.contactId)
     // Automações enviam pela Meta: ignora a conversa de Webchat do contato
-    // (migration 127), senão o maybeSingle quebraria com duas linhas.
+    // (migration 127).
     .eq('channel_type', 'whatsapp')
-    .maybeSingle()
+    // O contato pode ter várias conversas de WhatsApp (o webhook abre uma
+    // nova quando a última está fechada): vale a mais recente, como no
+    // inbound-message. maybeSingle() quebrava com duas linhas.
+    .order('created_at', { ascending: false })
+    .limit(1)
   if (error) throw new Error(`conversation lookup failed: ${error.message}`)
-  if (!data?.id) throw new Error('no conversation for contact')
-  return data.id as string
+  const id = (data?.[0] as { id?: string } | undefined)?.id
+  if (!id) throw new Error('no conversation for contact')
+  return id
 }
 
 function triggerMatches(automation: Automation, ctx: AutomationContext | undefined): boolean {
