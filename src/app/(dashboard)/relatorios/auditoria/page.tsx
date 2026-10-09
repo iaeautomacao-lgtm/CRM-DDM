@@ -178,7 +178,6 @@ export default function AuditoriaPage() {
       if (seq !== requestSeq.current) return;
       console.error("[auditoria] failed to load audit logs:", err);
       setLoadError(true);
-      toast.error("Falha ao carregar a auditoria");
     } finally {
       if (seq === requestSeq.current) setLoading(false);
     }
