@@ -125,6 +125,12 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("conversations/[id]/suggest-tag", "GET", "agent", "inbox.ai_assist"),
   pg("conversations/[id]/flow-runs", "GET", "admin", "flows.view_runs"),
   pg("contacts/[id]/link", "POST", "agent", "contacts.edit"),
+  pg("contacts", "POST", "agent", "contacts.edit"),
+  pg("contacts/[id]", "PATCH", "agent", "contacts.edit"),
+  pg("contacts/[id]/tags", "GET", "viewer", "contacts.view"),
+  pg("contacts/[id]/tags", "POST", "agent", "contacts.edit"),
+  pg("contacts/[id]/tags/[tagId]", "DELETE", "agent", "contacts.edit"),
+  pg("contacts/[id]/phones/invalid", "POST", "agent", "contacts.edit"),
   pg("calls/[...path]", "*", "agent", "calls.use"),
   pg("flows/end-run", "POST", "agent", "inbox.reply"),
 
