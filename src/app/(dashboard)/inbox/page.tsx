@@ -779,6 +779,7 @@ export default function InboxPage() {
             <ContactSidebar
               contact={activeContact}
               conversation={activeConversation}
+              onClose={handleToggleContactPanel}
               onUpdateConversation={handleUpdateActiveConversation}
               onUpdateContact={(updatedContact) => {
                 setActiveContact(updatedContact);
