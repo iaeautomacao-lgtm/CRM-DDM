@@ -37,6 +37,8 @@ import {
   EVENT_LABEL,
   isRoutineEvent,
   summarizeRun,
+  distinctFailures,
+  humanizeError,
 } from "@/lib/flows/run-log";
 import { toast } from "sonner";
 import { format, formatDistanceStrict } from "date-fns";
@@ -153,7 +155,9 @@ function computeRunEventStats(
       .filter((e) => e.event_type === "node_entered" && e.node_key)
       .map((e) => e.node_key as string),
   );
-  const errorCount = events.filter((e) => e.event_type === "node_error").length;
+  // Uma falha por ocorrência (o motor grava a mesma falha 3x), sem
+  // contar corridas inofensivas — mesmo critério do resumo.
+  const errorCount = distinctFailures(events).length;
   const notExecuted = flowNodes.filter((n) => !executedKeys.has(n.node_key));
   return { executedCount: executedKeys.size, errorCount, notExecuted };
 }
@@ -230,6 +234,8 @@ const STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "timed_out", label: "Expirado" },
   { value: "paused_by_agent", label: "Pausado" },
   { value: "error", label: "Erro" },
+  { value: "delayed", label: "Aguardando" },
+  { value: "transferred", label: "Encaminhado a outro fluxo" },
 ];
 
 export default function FlowRunsPage() {
@@ -814,7 +820,8 @@ function RunCard({
   flowNodes: FlowNodeDef[];
   onViewInDiagram: () => void;
 }) {
-  const meta = STATUS_META[run.status];
+  // Status novo no banco sem rótulo aqui não pode quebrar a tela.
+  const meta = STATUS_META[run.status] ?? { label: run.status, tone: "mute" as const, icon: Circle };
   const StatusIcon = meta.icon;
   const contactLabel =
     run.contact?.name?.trim() || run.contact?.phone || "Contato desconhecido";
@@ -841,7 +848,7 @@ function RunCard({
         focused ? "border-primary shadow-[0_0_0_3px_var(--primary-soft-2)]" : "border-border hover:border-border-strong",
       )}
     >
-      <div className="flex w-full items-center gap-2 px-4 py-3">
+      <div className="flex w-full flex-wrap items-center gap-2 px-4 py-3">
         <Checkbox
           checked={selected}
           onCheckedChange={onToggleSelect}
@@ -851,12 +858,13 @@ function RunCard({
         <button
           type="button"
           onClick={onToggle}
+          aria-expanded={expanded}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
         {expanded ? (
-          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         )}
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
@@ -892,7 +900,9 @@ function RunCard({
                 </StatusChip>
               )}
               {stats.notExecuted.length > 0 && (
-                <StatusChip tone="warn">{stats.notExecuted.length} não executados</StatusChip>
+                <StatusChip tone="mute" title="Ramos não escolhidos e passos que ainda não chegaram — não indica erro">
+                  {stats.notExecuted.length} não alcançados
+                </StatusChip>
               )}
             </div>
           )}
@@ -957,7 +967,7 @@ function RunCard({
                 ) : (
                   (visibleEvents ?? []).map((ev, ix) => (
                     <EventLine
-                      key={ix}
+                      key={`${ev.created_at}-${ev.event_type}-${ix}`}
                       ev={ev}
                       selected={selectedEvent === ev}
                       onSelect={() => onSelectEvent(ev)}
@@ -986,7 +996,10 @@ function NotExecutedSection({ nodes }: { nodes: FlowNodeDef[] }) {
   return (
     <div className="mt-3 border-t border-border pt-3">
       <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
-        Nós não executados
+        Nós não alcançados
+      </p>
+      <p className="mb-1.5 text-[11px] text-muted-foreground">
+        Inclui os ramos que o cliente não escolheu e os passos depois de onde a execução parou. Não indica erro.
       </p>
       <div className="flex flex-col gap-1">
         {nodes.map((n) => (
@@ -994,11 +1007,11 @@ function NotExecutedSection({ nodes }: { nodes: FlowNodeDef[] }) {
             key={n.node_key}
             className="flex items-center gap-2 rounded-md px-2 py-1 text-xs"
           >
-            <MinusCircle className="h-3 w-3 shrink-0 text-amber-400" />
-            <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
-              {n.node_key} ({n.node_type})
+            <MinusCircle className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <code className="min-w-0 truncate rounded bg-surface-3 px-1 py-0.5 text-[10px] text-muted-foreground">
+              {n.node_key} ({NODE_META[n.node_type as NodeType]?.label ?? n.node_type})
             </code>
-            <span className="text-[10.5px] text-muted-foreground">
+            <span className="hidden text-[10.5px] text-muted-foreground sm:inline">
               Não alcançado nesta execução
             </span>
           </div>
@@ -1036,24 +1049,24 @@ const EVENT_ICON: Record<string, typeof Clock> = {
 };
 
 const EVENT_COLOR: Record<string, string> = {
-  started: "text-emerald-600",
-  run_started: "text-emerald-600",
+  started: "text-success",
+  run_started: "text-success",
   node_entered: "text-muted-foreground",
-  node_completed: "text-emerald-400",
-  message_sent: "text-blue-400",
-  reply_received: "text-sky-300",
-  fallback_fired: "text-amber-300",
-  handoff: "text-amber-300",
+  node_completed: "text-success",
+  message_sent: "text-primary-text",
+  reply_received: "text-foreground-2",
+  fallback_fired: "text-warning",
+  handoff: "text-warning",
   timeout: "text-muted-foreground",
-  error: "text-red-400",
-  node_error: "text-red-400",
-  completed: "text-emerald-400",
-  run_completed: "text-emerald-400",
-  run_error: "text-red-400",
+  error: "text-danger",
+  node_error: "text-danger",
+  completed: "text-success",
+  run_completed: "text-success",
+  run_error: "text-danger",
   tool_called: "text-violet-500",
   tool_result: "text-violet-500",
   ai_agent_takeover: "text-violet-500",
-  ai_agent_failed: "text-red-400",
+  ai_agent_failed: "text-danger",
 };
 
 function getEventIcon(ev: EventRow): typeof Clock {
@@ -1062,8 +1075,8 @@ function getEventIcon(ev: EventRow): typeof Clock {
 }
 
 function getEventColor(ev: EventRow): string {
-  if (ev.event_type === "node_completed" && ev.status === "error") return "text-red-400";
-  if (ev.event_type === "tool_result" && ev.status === "error") return "text-red-400";
+  if (ev.event_type === "node_completed" && ev.status === "error") return "text-danger";
+  if (ev.event_type === "tool_result" && ev.status === "error") return "text-danger";
   return EVENT_COLOR[ev.event_type] ?? "text-muted-foreground";
 }
 
@@ -1091,29 +1104,24 @@ function EventLine({
     <button
       type="button"
       onClick={onSelect}
-      style={
-        isNodeError
-          ? { backgroundColor: `rgba(239,68,68,${selected ? 0.18 : 0.1})` }
-          : undefined
-      }
       className={cn(
         "flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1 text-left text-xs transition-colors",
         !isNodeError && (selected ? "bg-muted" : "hover:bg-muted/50"),
-        isNodeError && "hover:brightness-110"
+        isNodeError && (selected ? "bg-danger/20" : "bg-danger-soft hover:bg-danger/20")
       )}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex flex-wrap items-start gap-x-2 gap-y-0.5">
         {createElement(iconComponent, {
           className: cn("mt-0.5 h-3 w-3 shrink-0", cls),
         })}
-        <span className="w-28 shrink-0 text-[10px] text-muted-foreground">
+        <span className="w-14 shrink-0 text-[10px] tabular-nums text-muted-foreground">
           {format(new Date(ev.created_at), "HH:mm:ss")}
         </span>
-        <span className={cn("w-36 shrink-0 text-[11px] font-medium", cls)} title={ev.event_type}>
+        <span className={cn("shrink-0 text-[11px] font-medium sm:w-36", cls)} title={ev.event_type}>
           {EVENT_LABEL[ev.event_type] ?? ev.event_type}
         </span>
         {ev.node_key && (
-          <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground" title={ev.node_type ?? undefined}>
+          <code className="min-w-0 max-w-full truncate rounded bg-surface-3 px-1 py-0.5 text-[10px] text-muted-foreground" title={ev.node_type ?? undefined}>
             {nodeTypeLabel ? `${nodeTypeLabel} · ${ev.node_key}` : ev.node_key}
           </code>
         )}
@@ -1124,12 +1132,12 @@ function EventLine({
           </span>
         )}
         {!isError && sentence && sentence !== EVENT_LABEL[ev.event_type] && (
-          <span className="min-w-0 truncate text-[11px] text-foreground/80" title={sentence}>
+          <span className="min-w-0 basis-full truncate text-[11px] text-foreground/80 sm:basis-auto sm:flex-1" title={sentence}>
             {sentence}
           </span>
         )}
       </div>
-      {isError && <p className="ml-9 text-[11px] text-red-500 dark:text-red-400">{sentence}</p>}
+      {isError && <p className="ml-5 text-[11px] text-danger">{sentence}</p>}
     </button>
   );
 }
@@ -1149,12 +1157,12 @@ const STATUS_BADGE: Record<
 > = {
   success: {
     label: "Sucesso",
-    classes: "border-emerald-600/40 bg-emerald-500/10 text-emerald-300",
+    classes: "border-success/40 bg-success-soft text-success",
     icon: CircleCheck,
   },
   error: {
     label: "Erro",
-    classes: "border-red-600/40 bg-red-500/10 text-red-300",
+    classes: "border-danger/40 bg-danger-soft text-danger",
     icon: CircleAlert,
   },
   skipped: {
@@ -1205,17 +1213,24 @@ function EventPayloadBody({ ev }: { ev: EventRow }) {
     <div className="flex flex-col gap-4">
       {errorMessage && (
         <div>
-          <p className="mb-1 text-[11px] font-semibold tracking-wide text-red-400 uppercase">
+          <p className="mb-1 text-[11px] font-semibold tracking-wide text-danger uppercase">
             Erro
           </p>
-          <p className="rounded-md bg-red-500/10 p-2 text-xs text-red-300">
-            {errorMessage}
+          {/* Frase legível primeiro; o texto cru e o stack ficam recolhidos. */}
+          <p className="rounded-md bg-danger-soft p-2 text-xs text-foreground">
+            {humanizeError(errorMessage) ?? errorMessage}
           </p>
-          {errorStack && (
-            <div className="mt-1">
-              <CollapsibleJson value={errorStack} />
-            </div>
-          )}
+          <details className="mt-1.5">
+            <summary className="cursor-pointer text-[11px] text-muted-foreground">Detalhes técnicos</summary>
+            <p className="mt-1 break-words rounded-md bg-surface-3 p-2 font-mono text-[11px] text-muted-foreground">
+              {errorMessage}
+            </p>
+            {errorStack && (
+              <div className="mt-1">
+                <CollapsibleJson value={errorStack} />
+              </div>
+            )}
+          </details>
         </div>
       )}
 
@@ -1261,14 +1276,15 @@ function EventDetailSheet({
             {createElement(iconComponent, {
               className: cn("h-4 w-4 shrink-0", cls),
             })}
-            <span className={cn("font-mono", cls)}>{ev.event_type}</span>
+            <span className={cls}>{EVENT_LABEL[ev.event_type] ?? ev.event_type}</span>
           </SheetTitle>
           <SheetDescription className="flex flex-wrap items-center gap-2 pt-1">
             {ev.node_key && (
-              <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {ev.node_type ? `${ev.node_key} (${ev.node_type})` : ev.node_key}
+              <code className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                {ev.node_type ? `${ev.node_key} (${NODE_META[ev.node_type as NodeType]?.label ?? ev.node_type})` : ev.node_key}
               </code>
             )}
+            <code className="text-[10px] text-muted-foreground" title="Tipo técnico do evento">{ev.event_type}</code>
             {statusMeta && StatusIcon && (
               <Badge variant="outline" className={cn("gap-1", statusMeta.classes)}>
                 <StatusIcon className="h-3 w-3" />
@@ -1285,6 +1301,7 @@ function EventDetailSheet({
         </SheetHeader>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          <p className="mb-3 text-sm text-foreground">{describeEvent(ev)}</p>
           <div className="mb-3 flex justify-end">
             <CopyJsonButton value={ev.payload} />
           </div>
