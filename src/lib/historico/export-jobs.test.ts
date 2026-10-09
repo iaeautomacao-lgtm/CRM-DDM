@@ -177,7 +177,7 @@ describe('processHistoryExportJob', () => {
   })
 
   it('formato público não expõe caminho de arquivo nem dono', () => {
-    const pub = toPublicHistoryExportJob({ ...(conv(1) as never), state: 'done', file_path: 'segredo', rows_done: 2, total_rows: 2 } as unknown as HistoryExportJob)
+    const pub = toPublicHistoryExportJob({ ...(conv(1) as Record<string, unknown>), state: 'done', file_path: 'segredo', rows_done: 2, total_rows: 2 } as unknown as HistoryExportJob)
     expect(JSON.stringify(pub)).not.toContain('segredo')
     expect(pub.progress).toBe(1)
   })
