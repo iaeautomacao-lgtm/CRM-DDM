@@ -5,7 +5,7 @@ export default function ReportsLayout({ children }: { children: React.ReactNode 
   return (
     <PageBody className="gap-4">
       <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Relatórios</h2>
+        <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Relatórios</h1>
         <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
           Atendimento, conversas, campanhas e auditoria da operação, por período.
         </p>

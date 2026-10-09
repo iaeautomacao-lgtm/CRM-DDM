@@ -16,7 +16,7 @@ import { apiFetch } from "@/lib/api-fetch";
 // applied — nothing is backfilled.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { LogIn, Search } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -102,6 +102,7 @@ function defaultFilters(): Filters {
 }
 
 export default function AgentesPage() {
+  const uid = useId();
   const { accountId } = useAuth();
 
   const [members, setMembers] = useState<AccountMember[]>([]);
@@ -188,7 +189,7 @@ export default function AgentesPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Agentes</h1>
+        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Agentes</h2>
         <p className="text-sm text-muted-foreground">
           Histórico de sessões (login/logout) por agente.
         </p>
@@ -202,9 +203,9 @@ export default function AgentesPage() {
           />
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Agente</label>
+            <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Agente</label>
             <Select value={draft.userId} onValueChange={(v) => v && setDraft((d) => ({ ...d, userId: v }))}>
-              <SelectTrigger className="w-44">
+              <SelectTrigger id={`${uid}-agente`} className="w-44">
                 <SelectValue>{(v: string) => userLabel(v)}</SelectValue>
               </SelectTrigger>
               <SelectContent>
