@@ -254,6 +254,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("monitoramento/sla", "GET", "supervisor", "monitoring.view_team"),
   pg("monitoramento/lote/transferir-para-mim", "POST", "supervisor", "monitoring.view_team"),
   pg("monitoramento/lote/finalizar", "POST", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/agentes", "GET", "supervisor", "monitoring.view_team"),
   pg("relatorios/exports", "POST", "supervisor", "reports.export"),
   pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
   pg("historico/exports", "POST", "admin", "exports.manage"),
