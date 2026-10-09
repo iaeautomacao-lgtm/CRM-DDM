@@ -317,6 +317,10 @@
     {
       "version": "320_billing_reports",
       "kind": "registry"
+    },
+    {
+      "version": "323_contacts_rls_has_perm",
+      "kind": "registry"
     }
   ]
 }
