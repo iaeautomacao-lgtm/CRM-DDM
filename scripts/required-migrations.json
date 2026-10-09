@@ -307,15 +307,11 @@
       "index": "idx_conversation_assignments_from_agent"
     },
     {
-      "version": "310_rls_mfa_aal2",
-      "kind": "registry"
-    },
-    {
       "version": "311_member_deactivation_last_access",
       "kind": "registry"
     },
     {
-      "version": "320_billing_reports",
+      "version": "323_contacts_rls_has_perm",
       "kind": "registry"
     }
   ]
