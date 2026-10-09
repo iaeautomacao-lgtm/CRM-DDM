@@ -26,10 +26,13 @@ import {
   X,
   Pencil,
   IdCard,
+  PhoneOff,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Contact, ContactNote, Tag, Conversation } from "@/types";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -81,6 +84,11 @@ export function ContactSidebar({
   const [savingCpf, setSavingCpf] = useState(false);
   // Nomes do atendente e da equipe para o bloco "Atendimento" (RLS da conta).
   const [assigneeName, setAssigneeName] = useState<string | null>(null);
+  // Etiquetas pela API (PRD 23, item 20): `available` = as que o operador
+  // pode pôr/tirar (a API já exclui as automáticas da conversa).
+  const [availableTags, setAvailableTags] = useState<Tag[] | null>(null);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
   const [teamName, setTeamName] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [notes, setNotes] = useState<ContactNote[]>([]);
@@ -140,6 +148,125 @@ export function ContactSidebar({
       }
     } finally {
       setSavingCpf(false);
+    }
+  };
+
+  // Telefones do contato e o status de cada um (contact_phones, RLS 087) —
+  // PRD 23, item 8: o operador marca "número errado" e a escada do
+  // disparador deixa de usar (migration 086).
+  const [phones, setPhones] = useState<{ ordem: number; phone: string; phone_normalized: string; status: string | null }[]>([]);
+  const [phoneBusy, setPhoneBusy] = useState<number | null>(null);
+  const phonesContactId = contact?.id ?? null;
+  useEffect(() => {
+    if (!phonesContactId) return;
+    let cancelled = false;
+    void createClient()
+      .from("contact_phones")
+      .select("ordem, phone, phone_normalized, status")
+      .eq("contact_id", phonesContactId)
+      .order("ordem")
+      .then(({ data }) => {
+        if (!cancelled) setPhones((data ?? []) as typeof phones);
+      });
+    return () => {
+      cancelled = true;
+      setPhones([]);
+    };
+  }, [phonesContactId]);
+  const principalRow = phones.find(
+    (p) => (contact?.phone_normalized && p.phone_normalized === contact.phone_normalized) || p.ordem === 1,
+  );
+  const principalInvalid = principalRow?.status === "invalido";
+  const altPhones = phones.filter((p) => p !== principalRow && p.ordem > 1);
+
+  const handleFlagPhone = async (ordem: number, invalid: boolean) => {
+    if (!contact || phoneBusy !== null) return;
+    setPhoneBusy(ordem);
+    try {
+      const res = await apiFetch(`/api/contacts/${contact.id}/phones/invalid`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ordem, status: invalid ? "invalido" : "ativo" }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(json.error ?? "Não foi possível atualizar o telefone");
+        return;
+      }
+      const status = invalid ? "invalido" : "ativo";
+      setPhones((prev) => {
+        const target = ordem === 1 ? principalRow : prev.find((p) => p.ordem === ordem);
+        if (target) return prev.map((p) => (p === target ? { ...p, status } : p));
+        // Principal ainda sem linha: a API criou com a ordem 1.
+        return [...prev, { ordem: 1, phone: contact.phone ?? "", phone_normalized: contact.phone_normalized ?? "", status }];
+      });
+      toast.success(invalid ? "Marcado como número errado" : "Número voltou a ser usado");
+    } finally {
+      setPhoneBusy(null);
+    }
+  };
+
+  // Etiquetas disponíveis do contato (GET /api/contacts/[id]/tags), só para
+  // quem pode editar — é a lista do seletor e diz quais chips têm "×".
+  const tagsContactId = canEditContact ? contact?.id ?? null : null;
+  useEffect(() => {
+    if (!tagsContactId) return;
+    let cancelled = false;
+    apiFetch(`/api/contacts/${tagsContactId}/tags`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { available?: Tag[] } | null) => {
+        if (!cancelled) setAvailableTags(json?.available ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableTags([]);
+      });
+    return () => {
+      cancelled = true;
+      setAvailableTags(null);
+    };
+  }, [tagsContactId]);
+
+  const editableTagIds = new Set((availableTags ?? []).map((t) => t.id));
+  const appliedTagIds = new Set(tags.map((t) => t.id));
+  const tagNeedle = tagQuery.trim().toLowerCase();
+  const addableTags = (availableTags ?? []).filter(
+    (t) => !appliedTagIds.has(t.id) && (!tagNeedle || t.name.toLowerCase().includes(tagNeedle)),
+  );
+
+  const handleAddTag = async (tag: Tag) => {
+    if (!contact || tagBusy) return;
+    setTagBusy(true);
+    try {
+      const res = await apiFetch(`/api/contacts/${contact.id}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag_id: tag.id }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(json.error ?? "Não foi possível adicionar a etiqueta");
+        return;
+      }
+      setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, { ...tag, contact_tag_id: tag.id }]));
+      setTagQuery("");
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  const handleRemoveTag = async (tag: Tag) => {
+    if (!contact || tagBusy) return;
+    setTagBusy(true);
+    try {
+      const res = await apiFetch(`/api/contacts/${contact.id}/tags/${tag.id}`, { method: "DELETE" });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(json.error ?? "Não foi possível remover a etiqueta");
+        return;
+      }
+      setTags((prev) => prev.filter((t) => t.id !== tag.id));
+    } finally {
+      setTagBusy(false);
     }
   };
 
@@ -458,22 +585,47 @@ export function ContactSidebar({
           </div>
 
           <div className="flex flex-col gap-0.5">
-            <button
-              type="button"
-              onClick={handleCopyPhone}
-              disabled={!contact.phone}
-              title={contact.phone ? "Copiar telefone" : undefined}
-              className="-mx-2 flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-[13px] text-foreground hover:bg-surface-hover disabled:hover:bg-transparent"
-            >
-              <Phone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate tabular-nums">{contact.phone ?? "Sem telefone"}</span>
-              {contact.phone && (
-                <span className={cn("inline-flex items-center gap-1 text-[11.5px] font-semibold", copied ? "text-success" : "text-muted-foreground")}>
-                  {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
-                  {copied ? "Copiado" : "Copiar"}
+            <div className="-mx-2 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleCopyPhone}
+                disabled={!contact.phone}
+                title={contact.phone ? "Copiar telefone" : undefined}
+                className="flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] text-foreground hover:bg-surface-hover disabled:hover:bg-transparent"
+              >
+                <Phone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className={cn("min-w-0 flex-1 truncate tabular-nums", principalInvalid && "text-muted-foreground line-through")}>
+                  {contact.phone ?? "Sem telefone"}
                 </span>
+                {contact.phone && (
+                  <span className={cn("inline-flex items-center gap-1 text-[11.5px] font-semibold", copied ? "text-success" : "text-muted-foreground")}>
+                    {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+                    {copied ? "Copiado" : "Copiar"}
+                  </span>
+                )}
+              </button>
+              {contact.phone && canEditContact && (
+                <WrongNumberButton invalid={principalInvalid} busy={phoneBusy === 1} onToggle={() => void handleFlagPhone(1, !principalInvalid)} />
               )}
-            </button>
+            </div>
+            {principalInvalid && (
+              <p className="-mt-0.5 pl-6 text-[11.5px] font-medium text-destructive">Marcado como número errado</p>
+            )}
+            {altPhones.map((p) => {
+              const invalid = p.status === "invalido";
+              return (
+                <div key={p.ordem} className="-mx-2 flex items-center gap-1">
+                  <span className="flex h-8 min-w-0 flex-1 items-center gap-2.5 px-2 text-[13px] text-foreground-2">
+                    <Phone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className={cn("min-w-0 flex-1 truncate tabular-nums", invalid && "text-muted-foreground line-through")}>{p.phone}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{invalid ? "número errado" : `alternativo ${p.ordem - 1}`}</span>
+                  </span>
+                  {canEditContact && (
+                    <WrongNumberButton invalid={invalid} busy={phoneBusy === p.ordem} onToggle={() => void handleFlagPhone(p.ordem, !invalid)} />
+                  )}
+                </div>
+              );
+            })}
 
             {contact.email && (
               <div className="flex h-8 min-w-0 items-center gap-2.5 text-[13px] text-foreground-2">
@@ -689,19 +841,81 @@ export function ContactSidebar({
             sections={sections}
             onToggle={toggleSection}
           >
-            <div className="flex flex-wrap gap-1">
-              {tags.length === 0 ? (
-                <p className="px-1 text-xs text-muted-foreground">Sem etiquetas</p>
-              ) : (
-                tags.map((tag) => (
+            {/* PRD 23, item 20: etiquetas pela API (contacts.edit; as automáticas
+                da conversa aparecem, mas não saem — a API devolve 409). */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {tags.length === 0 && !canEditContact && (
+                <p className="text-xs text-muted-foreground">Sem etiquetas</p>
+              )}
+              {tags.map((tag) => {
+                const removable = canEditContact && editableTagIds.has(tag.id);
+                return (
                   <span
                     key={tag.contact_tag_id}
-                    className="inline-flex items-center gap-1 rounded-full border border-border px-2 text-xs text-foreground"
+                    className="inline-flex h-[22px] animate-ddm-pop items-center gap-1.5 rounded-full border border-border pl-[9px] pr-[9px] text-xs text-foreground"
                   >
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
+                    <span className="size-[7px] rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
                     {tag.name}
+                    {removable && (
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoveTag(tag)}
+                        disabled={tagBusy}
+                        aria-label={`Remover etiqueta ${tag.name}`}
+                        className="-mr-1 rounded-full p-0.5 text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+                      >
+                        <X className="size-3" aria-hidden="true" />
+                      </button>
+                    )}
                   </span>
-                ))
+                );
+              })}
+              {canEditContact && (
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        className="inline-flex h-6 items-center gap-1 rounded-full border border-dashed border-border-strong px-[9px] text-xs text-foreground-2 hover:border-muted-foreground hover:text-foreground"
+                      />
+                    }
+                  >
+                    <Plus className="size-3" aria-hidden="true" />
+                    Etiqueta
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-64 gap-2 p-2">
+                    <input
+                      type="search"
+                      value={tagQuery}
+                      onChange={(e) => setTagQuery(e.target.value)}
+                      placeholder="Buscar etiqueta"
+                      aria-label="Buscar etiqueta"
+                      className="h-8 w-full rounded-md border border-border bg-card px-2 text-[13px] outline-none focus:border-primary"
+                    />
+                    <div className="max-h-56 overflow-y-auto" role="listbox" aria-label="Etiquetas disponíveis">
+                      {addableTags.length === 0 ? (
+                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                          {availableTags === null ? "Carregando…" : "Nenhuma etiqueta para adicionar"}
+                        </p>
+                      ) : (
+                        addableTags.map((tag) => (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            role="option"
+                            aria-selected={false}
+                            disabled={tagBusy}
+                            onClick={() => void handleAddTag(tag)}
+                            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-foreground hover:bg-surface-hover"
+                          >
+                            <span className="size-[7px] shrink-0 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
+                            <span className="truncate">{tag.name}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               )}
             </div>
           </SidebarSection>
@@ -914,5 +1128,23 @@ function SidebarSection({
         </div>
       )}
     </section>
+  );
+}
+/** Marca/desmarca "número errado" (PRD 23, item 8). */
+function WrongNumberButton({ invalid, busy, onToggle }: { invalid: boolean; busy: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={busy}
+      title={invalid ? "Desfazer: o número volta a ser usado" : "Marcar como número errado (o disparador deixa de usar)"}
+      aria-label={invalid ? "Desfazer número errado" : "Marcar como número errado"}
+      className={cn(
+        "flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-surface-hover",
+        invalid ? "text-destructive" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : invalid ? <Undo2 className="size-3.5" aria-hidden="true" /> : <PhoneOff className="size-3.5" aria-hidden="true" />}
+    </button>
   );
 }
