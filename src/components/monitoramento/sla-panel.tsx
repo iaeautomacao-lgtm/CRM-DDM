@@ -127,7 +127,9 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
             <Kpi
               label={`Dentro de ${target} min`}
               value={data.total.withinTargetPct === null ? "—" : `${data.total.withinTargetPct}%`}
-              hint={`${data.total.responded} respondidas`}
+              hint={`${data.total.responded} respondidas${
+                data.total.withinTargetPct !== null && data.total.withinTargetPct < 80 ? " · abaixo da meta" : ""
+              }`}
             />
             <Kpi
               label="Conversas no período"
@@ -243,10 +245,13 @@ function SlaTable({
                 <td
                   className={cn(
                     "px-3 py-2",
-                    r.withinTargetPct !== null && r.withinTargetPct < 80 ? "text-amber-600" : undefined
+                    r.withinTargetPct !== null && r.withinTargetPct < 80 ? "font-semibold text-warning" : undefined
                   )}
                 >
                   {r.withinTargetPct === null ? "—" : `${r.withinTargetPct}%`}
+                  {r.withinTargetPct !== null && r.withinTargetPct < 80 && (
+                    <span className="ml-1 text-[10px] font-medium">abaixo da meta</span>
+                  )}
                 </td>
                 <td className={cn("px-3 py-2", r.queued > 0 ? "font-semibold text-foreground" : undefined)}>
                   <CellButton value={r.queued} onClick={() => onOpen("queued", r.key, labelFor(r.key))} />
