@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { checkRateLimit } from '@/lib/rate-limit'
 import { applyRealReadPolicy, parseSimulateRequest, SIM_MAX_BODY_CHARS } from '@/lib/flows/simulator/parse'
 import { simulateTurn } from '@/lib/flows/simulator/run'
+import { loadSimulationAccountData } from '@/lib/flows/simulator/seed'
 import { SIM_RATE_LIMIT } from '@/lib/flows/simulator/types'
 
 /**
@@ -113,23 +114,7 @@ export async function POST(
   }
 
   const admin = supabaseAdmin()
-  const [aiConfigRes, kbRes, teamsRes, toolsRes, secretsRes] = await Promise.all([
-    admin.from('ai_config').select('*').eq('account_id', account.accountId).limit(1),
-    admin
-      .from('knowledge_base_files')
-      .select('id, name, content')
-      .eq('account_id', account.accountId)
-      .range(0, 199),
-    admin.from('teams').select('id, name').eq('account_id', account.accountId).range(0, 499),
-    // Catálogo de ferramentas e nomes/hosts das credenciais: só SELECT, sem valores secretos
-    // (account_secrets: nunca value_encrypted — o simulador mostra credenciais como ***).
-    admin.from('ai_tools').select('*').eq('account_id', account.accountId).range(0, 499),
-    admin
-      .from('account_secrets')
-      .select('name, kind, value_plain, allowed_hosts')
-      .eq('account_id', account.accountId)
-      .range(0, 499),
-  ])
+  const accountData = await loadSimulationAccountData(admin, account.accountId)
 
   // Agentes dos nós do rascunho: só a versão PUBLICADA (o simulador não fixa versão por run).
   const agentIds = [
@@ -151,17 +136,8 @@ export async function POST(
       userId: (flow.user_id as string | null) ?? account.userId,
       flowId: flow.id as string,
       flowName: (flow.name as string | null) ?? 'Fluxo',
-      aiConfig: (aiConfigRes.data?.[0] as Record<string, unknown> | undefined) ?? null,
-      knowledgeBase: (kbRes.data ?? []) as Array<{ name: string; content: string }>,
-      teams: (teamsRes.data ?? []) as Array<{ id: string; name: string }>,
+      ...accountData,
       agents,
-      aiTools: (toolsRes.data ?? []) as Array<Record<string, unknown>>,
-      accountSecrets: (secretsRes.data ?? []) as Array<{
-        name: string
-        kind: string
-        value_plain: string | null
-        allowed_hosts: string[] | null
-      }>,
     })
     return NextResponse.json({ ...result, remaining: limit.remaining, ...(realReadDenied ? { real_read_denied: true } : {}) })
   } catch (err) {

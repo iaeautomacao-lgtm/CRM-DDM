@@ -636,3 +636,53 @@ export async function previewAgent(accountId: string, body: unknown) {
     }),
   };
 }
+
+/** Id fixo do agente ainda não criado no "Testar agente" (só existe no banco em memória do simulador). */
+export const SIM_NEW_AGENT_ID = '00000000-0000-4000-8000-00000000a9e7';
+
+/**
+ * Rascunho do editor no formato que o simulador carrega no banco em memória (ai_agents, ai_agent_versions,
+ * ai_rule_versions). Mesma validação e montagem de config da publicação (parseInput + prepare), mas NADA é
+ * gravado: a versão e as regras ganham ids só desta simulação. `agentId` null = agente novo, ainda não salvo.
+ */
+export async function buildSimulationAgent(accountId: string, agentId: string | null, draft: unknown) {
+  const agent = agentId ? await own(accountId, agentId) : null;
+  const input = parseInput(draft, false);
+  const previous = agent?.published_version_id
+    ? (
+        await all<VersionRow>('ai_agent_versions', '*', accountId, {
+          agent_id: agent.id,
+          id: agent.published_version_id,
+        })
+      )[0]
+    : undefined;
+  if (input.composition === 'legacy_v1' && previous?.composition !== 'legacy_v1')
+    fail('A composição legacy_v1 só vale para nova versão de agente legacy_v1.');
+  const { config, rules } = await prepare(accountId, input, previous);
+  const id = agent?.id ?? SIM_NEW_AGENT_ID;
+  const name = agent?.name ?? 'Novo agente';
+  const versionId = randomUUID();
+  const version = (previous?.version ?? 0) + 1;
+  return {
+    agentId: id,
+    name,
+    version,
+    /** Desligado no liga/desliga: em produção os nós seguiriam pela saída de falha (o teste roda mesmo assim). */
+    disabled: agent ? !agent.enabled : false,
+    seed: {
+      agents: [{ id, name, enabled: true, published_version_id: versionId }],
+      versions: [
+        {
+          id: versionId,
+          agent_id: id,
+          version,
+          config,
+          prompt_content: input.prompt_content,
+          composition: input.composition,
+          config_hash: hashAgentVersion({ config, prompt_content: input.prompt_content, composition: input.composition }),
+        },
+      ],
+      ruleVersions: rules.map((r) => ({ id: r.rule_version_id, rule_id: r.rule_id, version: 1, content: r.content })),
+    },
+  };
+}
