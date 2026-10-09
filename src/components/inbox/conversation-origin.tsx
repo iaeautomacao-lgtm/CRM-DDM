@@ -86,13 +86,26 @@ export function ConversationOriginBanner({ conversationId }: { conversationId: s
         ? "iniciada por campanha"
         : "iniciada pela operação";
 
+  const detail = origin.campaign?.name ? `Campanha ` : summary;
+
   return (
-    <div className="flex items-center gap-1.5 overflow-hidden border-b border-border/70 bg-background px-4 py-1.5 text-[11px] text-muted-foreground">
-      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span className="truncate">
-        <span className="font-medium text-foreground/85">{ativo ? "Ativo" : "Receptivo"}</span>
-        <span> · {summary}</span>
-      </span>
+    <div className="flex h-[34px] shrink-0 animate-ddm-fade items-center gap-2 overflow-hidden whitespace-nowrap border-b border-border bg-card-2 px-3 text-xs text-foreground-2 sm:px-5">
+      <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="shrink-0 font-semibold text-foreground">{ativo ? "Ativo" : "Receptivo"}</span>
+      <span className="text-muted-foreground" aria-hidden="true">·</span>
+      <span className="min-w-0 truncate">{detail}</span>
+      {data.channel && (
+        <>
+          <span className="text-muted-foreground" aria-hidden="true">·</span>
+          <span className="hidden shrink-0 sm:inline">{data.line ? ` · ` : data.channel}</span>
+        </>
+      )}
+      {data.client && (
+        <span className="ml-auto hidden shrink-0 items-center gap-1.5 md:inline-flex">
+          <span className="size-[7px] rounded-[2px]" style={{ backgroundColor: data.client.color }} aria-hidden="true" />
+          {data.client.name}
+        </span>
+      )}
     </div>
   );
 }
