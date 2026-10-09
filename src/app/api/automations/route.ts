@@ -9,6 +9,7 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 export async function GET() {
   const auth = await guardPermission('automations.view')
@@ -20,7 +21,7 @@ export async function GET() {
     .select('*')
     .eq('account_id', accountId)
     .order('created_at', { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return internalErrorResponse('automations', error)
   return NextResponse.json({ automations: data ?? [] })
 }
 

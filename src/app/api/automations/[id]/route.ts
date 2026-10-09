@@ -12,6 +12,7 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 export async function GET(
   _request: Request,
@@ -31,7 +32,7 @@ export async function GET(
     .eq('account_id', accountId)
     .maybeSingle()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return internalErrorResponse('automations/[id]', error)
   if (!automation) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
 
   const steps = await loadStepsTree(id)
@@ -124,7 +125,7 @@ export async function PATCH(
       .update(update)
       .eq('id', id)
       .eq('account_id', accountId)
-    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 })
+    if (updErr) return internalErrorResponse('automations/[id]', updErr)
   }
 
   if (Array.isArray(body.steps)) {
@@ -150,6 +151,6 @@ export async function DELETE(
     .delete()
     .eq('id', id)
     .eq('account_id', accountId)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return internalErrorResponse('automations/[id]', error)
   return NextResponse.json({ ok: true })
 }

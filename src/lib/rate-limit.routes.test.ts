@@ -98,6 +98,21 @@ describe("AP-19: webchat por IP + token", () => {
     expect(await webchatRateLimit(req("198.51.100.9"), "token-C", "read")).toBeNull();
   });
 
+  it("todo handler das rotas públicas do webchat chama o limite ANTES da sessão (inclui o POST de mensagens)", () => {
+    const dir = resolve("src/app/api/webchat/[token]");
+    const files = [join(dir, "route.ts"), ...readdirSync(dir).map((d) => join(dir, d, "route.ts")).filter((f) => { try { return statSync(f).isFile(); } catch { return false; } })];
+    for (const file of files) {
+      const src = readFileSync(file, "utf8");
+      for (const handler of src.split(/export async function /).slice(1)) {
+        const name = `${relative(dir, file)} ${handler.slice(0, handler.indexOf("("))}`;
+        const limit = handler.indexOf("webchatRateLimit(");
+        expect(limit, name).toBeGreaterThan(-1);
+        const session = handler.indexOf("requireActiveSession(");
+        if (session > -1) expect(limit, name).toBeLessThan(session);
+      }
+    }
+  });
+
   it("as 5 rotas públicas do webchat chamam o limitador ANTES de resolver a sessão", () => {
     const base = resolve(process.cwd(), "src/app/api/webchat/[token]");
     for (const file of ["route.ts", "open/route.ts", "media/route.ts", "messages/route.ts", "upload/route.ts"]) {
