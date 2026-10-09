@@ -35,8 +35,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
-import { SettingsPanelHead } from './settings-panel-head';
+import { PageBody } from '@/components/ddm/page-toolbar';
+import { Segmented } from '@/components/ddm/segmented';
+import { StatusChip, type StatusTone } from '@/components/ddm/status-chip';
+import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import {
   Dialog,
   DialogContent,
@@ -66,7 +68,6 @@ import type {
   TemplateFolder,
   TemplateSampleValues,
 } from '@/types';
-import { templateStatusConfig } from '@/lib/template-status';
 import {
   extractVariableIndices,
   TEMPLATE_LIMITS,
@@ -83,12 +84,6 @@ const HEADER_FORMAT_LABELS: Record<HeaderFormat, string> = {
   document: 'Documento',
 };
 
-const categoryColors: Record<string, string> = {
-  Marketing: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
-  Utility: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
-  Authentication: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
-};
-
 // Sidebar sentinel folder selections — not real folder ids.
 type FolderFilter = 'all' | 'unorganized' | string;
 type StatusFilter = 'all' | MessageTemplateStatus;
@@ -97,6 +92,24 @@ type StatusFilter = 'all' | MessageTemplateStatus;
 type ChannelFilter = 'all' | string;
 type TeamFilter = 'all' | string;
 const FOLDER_NAME_MAX_LENGTH = 50;
+
+// Status e categoria no visual do redesenho (rótulos em português e tom do
+// StatusChip). Os códigos são os da Meta; nada muda no dado.
+const STATUS_UI: Record<MessageTemplateStatus, { label: string; tone: StatusTone }> = {
+  DRAFT: { label: 'Rascunho', tone: 'mute' },
+  PENDING: { label: 'Em análise', tone: 'warn' },
+  APPROVED: { label: 'Aprovado', tone: 'ok' },
+  REJECTED: { label: 'Rejeitado', tone: 'bad' },
+  PAUSED: { label: 'Pausado', tone: 'warn' },
+  DISABLED: { label: 'Desativado', tone: 'bad' },
+  IN_APPEAL: { label: 'Em recurso', tone: 'info' },
+  PENDING_DELETION: { label: 'Aguardando exclusão', tone: 'mute' },
+};
+const CATEGORY_LABEL: Record<string, string> = { Marketing: 'Marketing', Utility: 'Utilidade', Authentication: 'Autenticação' };
+const CATEGORY_TONE: Record<string, StatusTone> = { Marketing: 'brand', Utility: 'info', Authentication: 'warn' };
+type MainStatusFilter = 'all' | 'APPROVED' | 'PENDING' | 'REJECTED';
+const MAIN_STATUS_FILTERS: readonly string[] = ['all', 'APPROVED', 'PENDING', 'REJECTED'];
+const OTHER_STATUSES: MessageTemplateStatus[] = ['DRAFT', 'PAUSED', 'DISABLED', 'IN_APPEAL', 'PENDING_DELETION'];
 
 interface TemplateFormData {
   name: string;
@@ -581,6 +594,13 @@ export function TemplateManager() {
     [templates],
   );
 
+  // Contagem real por status para o filtro segmentado.
+  const statusCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const t of templates) m.set(t.status || 'DRAFT', (m.get(t.status || 'DRAFT') ?? 0) + 1);
+    return m;
+  }, [templates]);
+
   const filteredTemplates = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase();
     const selectedChannel =
@@ -918,13 +938,14 @@ export function TemplateManager() {
   }
 
   return (
-    <section className="animate-in fade-in-50 space-y-4 duration-200">
-      <SettingsPanelHead
-        title="Templates de mensagem"
-        description={
-          'Crie templates e envie para aprovação do Meta. Use "Sincronizar do Meta" para importar templates aprovados externamente.'
-        }
-        action={
+    <PageBody>
+      <div className="flex flex-wrap items-end justify-between gap-3 pt-1">
+        <div className="flex flex-col gap-1.5">
+          <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Templates</h2>
+          <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+            Crie templates e envie para aprovação da Meta. Use &ldquo;Sincronizar do Meta&rdquo; para importar os aprovados externamente.
+          </p>
+        </div>
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -937,26 +958,25 @@ export function TemplateManager() {
             </Button>
             <Button onClick={openCreate}>
               <Plus className="size-4" />
-              Novo Template
+              Novo template
             </Button>
           </div>
-        }
-      />
+      </div>
 
-      <div className="flex gap-4 items-start">
-          <aside className="w-48 shrink-0 border-r border-border pr-3 space-y-1">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+          <aside className="w-full shrink-0 space-y-0.5 rounded-[10px] border border-border bg-card p-1.5 lg:sticky lg:top-0 lg:w-52" aria-label="Pastas">
             <button
               type="button"
               onClick={() => setActiveFolder('all')}
               className={cn(
-                'w-full flex items-center justify-between rounded px-2 py-1.5 text-sm text-left',
+                'relative flex h-8 w-full items-center justify-between rounded-md px-2.5 text-left text-[13px]',
                 activeFolder === 'all'
-                  ? 'bg-muted text-foreground'
-                  : 'text-muted-foreground hover:bg-muted/50',
+                  ? 'bg-selected font-medium text-foreground shadow-[inset_2px_0_0_var(--primary)]'
+                  : 'text-foreground-2 hover:bg-surface-hover',
               )}
             >
               Todos
-              <span className="text-xs text-muted-foreground">{templates.length}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{templates.length}</span>
             </button>
 
             <button
@@ -978,15 +998,15 @@ export function TemplateManager() {
                 }
               }}
               className={cn(
-                'w-full flex items-center justify-between rounded px-2 py-1.5 text-sm text-left border',
+                'relative flex h-8 w-full items-center justify-between rounded-md px-2.5 text-left text-[13px] border',
                 activeFolder === 'unorganized'
-                  ? 'bg-muted text-foreground border-transparent'
-                  : 'text-muted-foreground hover:bg-muted/50 border-transparent',
+                  ? 'bg-selected font-medium text-foreground shadow-[inset_2px_0_0_var(--primary)] border-transparent'
+                  : 'text-foreground-2 hover:bg-surface-hover border-transparent',
                 dragOverFolder === 'unorganized' && 'border-primary',
               )}
             >
               Sem pasta
-              <span className="text-xs text-muted-foreground">{unorganizedCount}</span>
+              <span className="text-xs tabular-nums text-muted-foreground">{unorganizedCount}</span>
             </button>
 
             <div className="h-px bg-border my-2" />
@@ -1027,8 +1047,8 @@ export function TemplateManager() {
                     className={cn(
                       'group flex items-center gap-1 rounded px-1.5 py-1.5 text-sm border cursor-pointer',
                       activeFolder === folder.id
-                        ? 'bg-muted text-foreground border-transparent'
-                        : 'text-muted-foreground hover:bg-muted/50 border-transparent',
+                        ? 'bg-selected font-medium text-foreground shadow-[inset_2px_0_0_var(--primary)] border-transparent'
+                        : 'text-foreground-2 hover:bg-surface-hover border-transparent',
                       dragOverFolder === folder.id && 'border-primary',
                       draggingFolder === folder.id && 'opacity-50',
                     )}
@@ -1137,80 +1157,61 @@ export function TemplateManager() {
             )}
           </aside>
 
-          <div className="flex-1 min-w-0 space-y-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative w-56">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por nome..."
+          <div className="min-w-0 flex-1 space-y-3">
+            {/* Barra de filtros (redesenho DDM): status em Segmented com as
+                contagens reais, "Outros" para os status menos comuns, e os
+                filtros de canal e equipe que já existiam. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="relative flex w-full items-center sm:w-56">
+                <Search className="pointer-events-none absolute left-2.5 size-3.5 text-muted-foreground" aria-hidden="true" />
+                <input
+                  type="search"
+                  placeholder="Buscar por nome"
+                  aria-label="Buscar templates por nome"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                  className="h-[34px] w-full rounded-md border border-border bg-card pl-8 pr-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
                 />
-              </div>
+              </label>
+              <Segmented
+                ariaLabel="Filtrar por status"
+                size="lg"
+                value={MAIN_STATUS_FILTERS.includes(filterStatus as MainStatusFilter) ? (filterStatus as MainStatusFilter) : 'other'}
+                onChange={(v) => {
+                  if (v !== 'other') setFilterStatus(v);
+                }}
+                options={[
+                  { value: 'all', label: 'Todos', count: templates.length },
+                  { value: 'APPROVED', label: 'Aprovados', count: statusCounts.get('APPROVED') ?? 0 },
+                  { value: 'PENDING', label: 'Em análise', count: statusCounts.get('PENDING') ?? 0 },
+                  { value: 'REJECTED', label: 'Rejeitados', count: statusCounts.get('REJECTED') ?? 0 },
+                  ...(MAIN_STATUS_FILTERS.includes(filterStatus as MainStatusFilter)
+                    ? []
+                    : [{ value: 'other' as const, label: STATUS_UI[filterStatus as MessageTemplateStatus]?.label ?? 'Outro' }]),
+                ]}
+              />
               <Select
-                value={filterStatus}
+                value={MAIN_STATUS_FILTERS.includes(filterStatus as MainStatusFilter) ? '' : filterStatus}
                 onValueChange={(val) => setFilterStatus((val || 'all') as StatusFilter)}
               >
-                <SelectTrigger className="w-40 bg-muted border-border text-foreground h-8 text-xs">
-                  <SelectValue />
+                <SelectTrigger className="h-[34px] w-36 text-xs" aria-label="Outros status">
+                  <SelectValue placeholder="Outros status">
+                    {(val: string) => (val ? STATUS_UI[val as MessageTemplateStatus]?.label ?? val : 'Outros status')}
+                  </SelectValue>
                 </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem
-                    value="all"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Todos os status
-                  </SelectItem>
-                  <SelectItem
-                    value="APPROVED"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Aprovados
-                  </SelectItem>
-                  <SelectItem
-                    value="PENDING"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Aguardando
-                  </SelectItem>
-                  <SelectItem
-                    value="REJECTED"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Rejeitado
-                  </SelectItem>
-                  <SelectItem
-                    value="PAUSED"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Pausado
-                  </SelectItem>
-                  <SelectItem
-                    value="DISABLED"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Desativados
-                  </SelectItem>
-                  <SelectItem
-                    value="IN_APPEAL"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Em recurso
-                  </SelectItem>
-                  <SelectItem
-                    value="PENDING_DELETION"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Aguardando exclusão
-                  </SelectItem>
+                <SelectContent>
+                  {OTHER_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {STATUS_UI[s].label} ({statusCounts.get(s) ?? 0})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Select
                 value={filterChannelId}
                 onValueChange={(val) => setFilterChannelId((val || 'all') as ChannelFilter)}
               >
-                <SelectTrigger className="w-44 bg-muted border-border text-foreground h-8 text-xs">
+                <SelectTrigger className="h-[34px] w-44 text-xs" aria-label="Filtrar por canal">
                   <SelectValue>
                     {(val: string) => {
                       if (val === 'all') return 'Todos os canais';
@@ -1219,19 +1220,10 @@ export function TemplateManager() {
                     }}
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem
-                    value="all"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Todos os canais
-                  </SelectItem>
+                <SelectContent>
+                  <SelectItem value="all">Todos os canais</SelectItem>
                   {channels.map((c) => (
-                    <SelectItem
-                      key={c.id}
-                      value={c.id}
-                      className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                    >
+                    <SelectItem key={c.id} value={c.id}>
                       {channelLabel(c)}
                     </SelectItem>
                   ))}
@@ -1241,221 +1233,187 @@ export function TemplateManager() {
                 value={filterTeamId}
                 onValueChange={(val) => setFilterTeamId((val || 'all') as TeamFilter)}
               >
-                <SelectTrigger className="w-44 bg-muted border-border text-foreground h-8 text-xs">
+                <SelectTrigger className="h-[34px] w-44 text-xs" aria-label="Filtrar por equipe">
                   <SelectValue>
                     {(val: string) =>
                       val === 'all' ? 'Todas as equipes' : (teams.find((t) => t.id === val)?.name ?? val)
                     }
                   </SelectValue>
                 </SelectTrigger>
-                <SelectContent className="bg-popover border-border">
-                  <SelectItem
-                    value="all"
-                    className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                  >
-                    Todas as equipes
-                  </SelectItem>
+                <SelectContent>
+                  <SelectItem value="all">Todas as equipes</SelectItem>
                   {teams.map((t) => (
-                    <SelectItem
-                      key={t.id}
-                      value={t.id}
-                      className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
-                    >
+                    <SelectItem key={t.id} value={t.id}>
                       {t.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {(filterStatus !== 'all' ||
-                filterChannelId !== 'all' ||
-                filterTeamId !== 'all' ||
-                searchQuery) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
+              {(filterStatus !== 'all' || filterChannelId !== 'all' || filterTeamId !== 'all' || searchQuery) && (
+                <button
+                  type="button"
                   onClick={() => {
                     setFilterStatus('all');
                     setFilterChannelId('all');
                     setFilterTeamId('all');
                     setSearchQuery('');
                   }}
-                  className="h-8 text-xs text-muted-foreground"
+                  className="px-1 text-xs font-semibold text-primary-text hover:underline"
                 >
                   Limpar filtros
-                </Button>
+                </button>
               )}
             </div>
 
-            {filteredTemplates.length === 0 ? (
-              <Card>
-                <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                  {templates.length === 0 ? (
-                    <>
-                      <p className="text-muted-foreground text-sm">Nenhum template ainda.</p>
-                      <p className="text-muted-foreground text-xs mt-1">
-                        Crie seu primeiro template de mensagem para começar.
-                      </p>
-                    </>
-                  ) : (
-                    <p className="text-muted-foreground text-sm">
-                      Nenhum template corresponde aos filtros.
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-3 xl:grid-cols-2">
-                {filteredTemplates.map((template) => {
-                  const statusKey = template.status || 'DRAFT';
-                  const status = templateStatusConfig[statusKey];
-                  return (
-                    <Card
-                      key={template.id}
-                      draggable
-                      onDragStart={(e) => {
-                        setDraggingTemplate(template.id);
-                        e.dataTransfer.setData('text/plain', template.id);
-                        e.dataTransfer.effectAllowed = 'move';
-                      }}
-                      onDragEnd={() => setDraggingTemplate(null)}
-                      className={draggingTemplate === template.id ? 'opacity-50' : ''}
-                    >
-                      <CardContent className="group relative flex items-start justify-between pt-4">
-                        <GripVertical className="absolute left-1 top-1 size-4 text-muted-foreground opacity-0 group-hover:opacity-100 cursor-grab" />
-                        <div className="space-y-2 min-w-0 flex-1 pl-3">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className="font-medium text-foreground">{template.name}</h3>
-                            <Badge
-                              className={`text-xs border ${categoryColors[template.category] || ''}`}
-                            >
-                              {template.category}
-                            </Badge>
-                            <Badge className={`text-xs border ${status.classes}`}>
-                              {status.label}
-                            </Badge>
-                            {!template.waba_id && (
-                              <Badge className="gap-1 border border-border bg-muted text-xs text-muted-foreground">
-                                <AlertCircle className="size-3" />
-                                Canal não identificado
-                              </Badge>
-                            )}
-                            {template.language && (
-                              <span className="text-xs text-muted-foreground uppercase">
-                                {template.language}
+            <TableCard label="Templates">
+              {filteredTemplates.length === 0 ? (
+                <div className="flex animate-ddm-fade flex-col items-center gap-1.5 px-4 py-12 text-center">
+                  <p className="text-[13.5px] font-semibold text-foreground">
+                    {templates.length === 0 ? 'Nenhum template ainda' : 'Nada encontrado'}
+                  </p>
+                  <p className="text-[12.5px] text-muted-foreground">
+                    {templates.length === 0
+                      ? 'Crie seu primeiro template de mensagem ou sincronize os aprovados do Meta.'
+                      : 'Ajuste a busca, o status ou a pasta.'}
+                  </p>
+                </div>
+              ) : (
+                <DenseTable>
+                  <thead>
+                    <tr>
+                      <Th>Template</Th>
+                      <Th className="hidden md:table-cell">Categoria</Th>
+                      <Th className="hidden lg:table-cell">Idioma</Th>
+                      <Th>Status</Th>
+                      <Th className="hidden xl:table-cell">Qualidade</Th>
+                      <Th className="w-[1%]" />
+                    </tr>
+                  </thead>
+                  <tbody className="ddm-stagger">
+                    {filteredTemplates.map((template) => {
+                      const statusKey = (template.status || 'DRAFT') as MessageTemplateStatus;
+                      const status = STATUS_UI[statusKey] ?? STATUS_UI.DRAFT;
+                      const problem = template.rejection_reason || template.submission_error;
+                      return (
+                        <Tr
+                          key={template.id}
+                          draggable
+                          onDragStart={(e) => {
+                            setDraggingTemplate(template.id);
+                            e.dataTransfer.setData('text/plain', template.id);
+                            e.dataTransfer.effectAllowed = 'move';
+                          }}
+                          onDragEnd={() => setDraggingTemplate(null)}
+                          title="Arraste para uma pasta"
+                          className={cn('group cursor-grab', draggingTemplate === template.id && 'opacity-50')}
+                        >
+                          <Td className="max-w-[420px]">
+                            <span className="flex min-w-0 items-start gap-2">
+                              <GripVertical className="mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
+                              <span className="flex min-w-0 flex-col gap-0.5">
+                                <span className="truncate font-semibold text-foreground">{template.name}</span>
+                                <span className="line-clamp-1 text-xs text-muted-foreground">{template.body_text}</span>
+                                {!template.waba_id && (
+                                  <span className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground">
+                                    <AlertCircle className="size-3" aria-hidden="true" />
+                                    Canal não identificado
+                                  </span>
+                                )}
+                                {problem && (
+                                  <span className="mt-1 flex items-start gap-1.5 rounded-md bg-danger-soft px-2 py-1 text-[11.5px] text-danger">
+                                    <AlertCircle className="mt-0.5 size-3 shrink-0" aria-hidden="true" />
+                                    {problem}
+                                  </span>
+                                )}
                               </span>
-                            )}
-                            {template.quality_score && (
-                              <span
-                                className={`text-[10px] uppercase font-medium ${
-                                  template.quality_score === 'GREEN'
-                                    ? 'text-emerald-400'
-                                    : template.quality_score === 'YELLOW'
-                                      ? 'text-yellow-400'
-                                      : 'text-red-400'
-                                }`}
+                            </span>
+                          </Td>
+                          <Td className="hidden md:table-cell">
+                            <StatusChip tone={CATEGORY_TONE[template.category] ?? 'mute'}>
+                              {CATEGORY_LABEL[template.category] ?? template.category}
+                            </StatusChip>
+                          </Td>
+                          <Td className="hidden uppercase text-foreground-2 lg:table-cell">{template.language ?? '—'}</Td>
+                          <Td>
+                            <StatusChip tone={status.tone} dot>
+                              {status.label}
+                            </StatusChip>
+                          </Td>
+                          <Td className="hidden xl:table-cell">
+                            {template.quality_score ? (
+                              <StatusChip
+                                tone={template.quality_score === 'GREEN' ? 'ok' : template.quality_score === 'YELLOW' ? 'warn' : 'bad'}
                                 title="Pontuação de qualidade do Meta"
                               >
-                                {template.quality_score}
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground line-clamp-2">
-                            {template.body_text}
-                          </p>
-                          {template.footer_text && (
-                            <p className="text-xs text-muted-foreground italic">
-                              {template.footer_text}
-                            </p>
-                          )}
-                          {template.channel_tags && template.channel_tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {template.channel_tags.map((tag) => (
-                                <Badge
-                                  key={tag}
-                                  className="text-[10px] border bg-muted text-muted-foreground border-border"
-                                >
-                                  {tag}
-                                </Badge>
-                              ))}
-                            </div>
-                          )}
-                          {(template.rejection_reason || template.submission_error) && (
-                            <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-950/20 border border-red-900/40 rounded px-2 py-1.5">
-                              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
-                              <span>
-                                {template.rejection_reason || template.submission_error}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0 ml-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setPreviewTemplate(template)}
-                            title="Ver prévia do template"
-                            aria-label="Prévia do template"
-                            className="text-muted-foreground hover:text-foreground hover:bg-muted h-8 px-2"
-                          >
-                            <Eye className="size-3.5" />
-                            Prévia
-                          </Button>
-                          {statusKey === 'APPROVED' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEdit(template)}
-                              title="Editar dispara uma nova revisão do Meta — o status muda para PENDENTE."
-                              aria-label="Editar template"
-                              className="text-muted-foreground hover:text-primary hover:bg-primary/10 h-8 px-2"
-                            >
-                              <Pencil className="size-3.5" />
-                              Editar
-                            </Button>
-                          )}
-                          {(statusKey === 'REJECTED' || statusKey === 'PAUSED') && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => openEdit(template)}
-                              title="Editar o template e reenviar para revisão do Meta."
-                              aria-label="Editar e reenviar template"
-                              className="text-muted-foreground hover:text-primary hover:bg-primary/10 h-8 px-2"
-                            >
-                              <RotateCcw className="size-3.5" />
-                              Reenviar
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setTemplateToDelete(template)}
-                            disabled={deletingId === template.id}
-                            aria-label={
-                              template.meta_template_id
-                                ? 'Excluir template do Meta e localmente'
-                                : 'Excluir template localmente'
-                            }
-                            title={
-                              template.meta_template_id
-                                ? 'Excluir do Meta e localmente'
-                                : 'Excluir localmente'
-                            }
-                            className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 h-8 w-8"
-                          >
-                            {deletingId === template.id ? (
-                              <Loader2 className="size-4 animate-spin" />
+                                {template.quality_score === 'GREEN' ? 'Alta' : template.quality_score === 'YELLOW' ? 'Média' : 'Baixa'}
+                              </StatusChip>
                             ) : (
-                              <Trash2 className="size-4" />
+                              <span className="text-muted-foreground">—</span>
                             )}
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
+                          </Td>
+                          <Td className="whitespace-nowrap pr-2 text-right">
+                            <span className="inline-flex items-center gap-0.5">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setPreviewTemplate(template)}
+                                title="Ver prévia do template"
+                                aria-label={`Prévia de ${template.name}`}
+                              >
+                                <Eye className="size-3.5" />
+                                <span className="hidden sm:inline">Prévia</span>
+                              </Button>
+                              {statusKey === 'APPROVED' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openEdit(template)}
+                                  title="Editar dispara uma nova revisão do Meta — o status muda para Em análise."
+                                  aria-label={`Editar ${template.name}`}
+                                >
+                                  <Pencil className="size-3.5" />
+                                  <span className="hidden sm:inline">Editar</span>
+                                </Button>
+                              )}
+                              {(statusKey === 'REJECTED' || statusKey === 'PAUSED') && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => openEdit(template)}
+                                  title="Editar o template e reenviar para revisão do Meta."
+                                  aria-label={`Editar e reenviar ${template.name}`}
+                                >
+                                  <RotateCcw className="size-3.5" />
+                                  <span className="hidden sm:inline">Reenviar</span>
+                                </Button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setTemplateToDelete(template)}
+                                disabled={deletingId === template.id}
+                                aria-label={
+                                  template.meta_template_id
+                                    ? `Excluir ${template.name} do Meta e localmente`
+                                    : `Excluir ${template.name} localmente`
+                                }
+                                title={template.meta_template_id ? 'Excluir do Meta e localmente' : 'Excluir localmente'}
+                                className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+                              >
+                                {deletingId === template.id ? (
+                                  <Loader2 className="size-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="size-4" />
+                                )}
+                              </button>
+                            </span>
+                          </Td>
+                        </Tr>
+                      );
+                    })}
+                  </tbody>
+                </DenseTable>
+              )}
+            </TableCard>
           </div>
         </div>
 
@@ -2162,6 +2120,6 @@ export function TemplateManager() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </section>
+    </PageBody>
   );
 }
