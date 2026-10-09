@@ -4,7 +4,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 
-import { ACC, ACC_B, SYSTEM, U, asUser, createRolesDb, id, migration } from "./rls-fixture";
+import { ACC, ACC_B, SYSTEM, U, asUser, createRolesDb, headerRollback, id, migration } from "./rls-fixture";
 
 const TABLES = ["contacts", "contact_tags", "contact_custom_values", "contact_import_variables", "contact_phones", "contact_notes", "contact_identities", "tags", "custom_fields"] as const;
 const ROW = (t: string) => (t === "contacts" || t === "tags" || t === "custom_fields" || t === "contact_notes" || t === "contact_identities" ? "id" : "contact_id");
@@ -114,6 +114,14 @@ describe("migration 323 — contatos pelo catálogo", { timeout: 180_000 }, () =
   it("escrita não mudou: operador (agent) continua inserindo em contact_tags de contato que vê; visualizador continua sem escrever", async () => {
     await expect(asUser(db, "agent", `INSERT INTO wacrm.contact_tags VALUES ('${id(501)}', '${id(699)}')`)).resolves.toBeDefined();
     await expect(asUser(db, "viewer", `INSERT INTO wacrm.contact_tags VALUES ('${id(501)}', '${id(698)}')`)).rejects.toThrow(/row-level security/i);
+  });
+
+  it("ROLLBACK do cabeçalho é SQL executável: roda, devolve a leitura de antes (o papel sem contacts.view volta a ler) e remove o registro da versão", async () => {
+    await db.exec(headerRollback("323_contacts_rls_has_perm.sql"));
+    for (const t of TABLES) expect((await rowsOf("semContatos", t)).length, `semContatos:${t}`).toBe(snap.before[`semContatos:${t}`] + (t === "contact_tags" ? 1 : 0)); // +1: a linha que o teste de escrita inseriu
+    expect((await db.query(`SELECT version FROM wacrm.schema_migrations WHERE version LIKE '323%'`)).rows).toEqual([]);
+    await db.exec(migration("323_contacts_rls_has_perm.sql")); // reaplica: a migration continua idempotente depois do rollback
+    expect((await rowsOf("semContatos", "contacts")).length).toBe(0);
   });
 
   it("idempotente (rodar de novo não duplica policies) e registra a versão", async () => {

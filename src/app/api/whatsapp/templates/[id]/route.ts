@@ -13,6 +13,7 @@ import {
 } from '@/lib/whatsapp/template-validators'
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 /**
  * Per-template lifecycle endpoint.
@@ -73,7 +74,7 @@ async function handleMetadataPatch(
 
   if ('folder_id' in body) {
     if (body.folder_id !== null && !UUID_RE.test(body.folder_id ?? '')) {
-      return NextResponse.json({ error: 'Invalid folder_id.' }, { status: 400 })
+      return NextResponse.json({ error: 'folder_id inválido.' }, { status: 400 })
     }
     if (body.folder_id !== null) {
       const { data: folder } = await supabase
@@ -83,7 +84,7 @@ async function handleMetadataPatch(
         .eq('account_id', accountId)
         .maybeSingle()
       if (!folder) {
-        return NextResponse.json({ error: 'Folder not found.' }, { status: 404 })
+        return NextResponse.json({ error: 'Pasta não encontrada.' }, { status: 404 })
       }
     }
     patch.folder_id = body.folder_id
@@ -91,20 +92,20 @@ async function handleMetadataPatch(
 
   if ('channel_tags' in body) {
     if (!Array.isArray(body.channel_tags) || !body.channel_tags.every((t) => typeof t === 'string')) {
-      return NextResponse.json({ error: 'channel_tags must be an array of strings.' }, { status: 400 })
+      return NextResponse.json({ error: 'channel_tags deve ser uma lista de textos.' }, { status: 400 })
     }
     const tags = [
       ...new Set(body.channel_tags.map((t) => t.trim()).filter(Boolean)),
     ]
     if (tags.length > CHANNEL_TAGS_MAX_COUNT) {
       return NextResponse.json(
-        { error: `At most ${CHANNEL_TAGS_MAX_COUNT} channel tags allowed.` },
+        { error: `No máximo ${CHANNEL_TAGS_MAX_COUNT} tags de canal.` },
         { status: 400 },
       )
     }
     if (tags.some((t) => t.length > CHANNEL_TAG_MAX_LENGTH)) {
       return NextResponse.json(
-        { error: `Channel tags must be at most ${CHANNEL_TAG_MAX_LENGTH} characters.` },
+        { error: `As tags de canal devem ter no máximo ${CHANNEL_TAG_MAX_LENGTH} caracteres.` },
         { status: 400 },
       )
     }
@@ -120,10 +121,10 @@ async function handleMetadataPatch(
     .maybeSingle()
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return internalErrorResponse('templates/[id]', error)
   }
   if (!template) {
-    return NextResponse.json({ error: 'Template not found.' }, { status: 404 })
+    return NextResponse.json({ error: 'Template não encontrado.' }, { status: 404 })
   }
 
   return NextResponse.json({ success: true, template })
@@ -137,7 +138,7 @@ export async function PATCH(
     const { id } = await context.params
     if (!UUID_RE.test(id)) {
       return NextResponse.json(
-        { error: 'Invalid template id.' },
+        { error: 'ID de template inválido.' },
         { status: 400 },
       )
     }
@@ -151,10 +152,10 @@ export async function PATCH(
     try {
       rawBody = await request.json()
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+      return NextResponse.json({ error: 'Corpo JSON inválido.' }, { status: 400 })
     }
     if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
-      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+      return NextResponse.json({ error: 'Corpo JSON inválido.' }, { status: 400 })
     }
 
     if (isMetadataOnlyBody(rawBody as Record<string, unknown>)) {
@@ -177,14 +178,14 @@ export async function PATCH(
       .eq('account_id', accountId)
       .maybeSingle()
     if (lookupErr || !existing) {
-      return NextResponse.json({ error: 'Template not found.' }, { status: 404 })
+      return NextResponse.json({ error: 'Template não encontrado.' }, { status: 404 })
     }
 
     if (!existing.meta_template_id) {
       return NextResponse.json(
         {
           error:
-            'This template was never submitted to Meta — use New Template to submit it instead.',
+            'Este template nunca foi enviado à Meta — use "Novo template" para enviá-lo.',
         },
         { status: 400 },
       )
@@ -193,7 +194,7 @@ export async function PATCH(
     if (!EDITABLE_STATUSES.has(existing.status)) {
       return NextResponse.json(
         {
-          error: `Templates in status ${existing.status} cannot be edited. Allowed: APPROVED, REJECTED, PAUSED.`,
+          error: `Templates com status ${existing.status} não podem ser editados. Permitidos: APPROVED, REJECTED, PAUSED.`,
         },
         { status: 400 },
       )
@@ -203,7 +204,7 @@ export async function PATCH(
       return NextResponse.json(
         {
           error:
-            'AUTHENTICATION templates are not editable here — manage them in Meta WhatsApp Manager.',
+            'Templates de AUTENTICAÇÃO não são editáveis aqui — gerencie-os no Gerenciador do WhatsApp da Meta.',
         },
         { status: 400 },
       )
@@ -213,7 +214,7 @@ export async function PATCH(
       validateTemplatePayload(payload)
     } catch (e) {
       return NextResponse.json(
-        { error: e instanceof Error ? e.message : 'Validation failed.' },
+        { error: e instanceof Error ? e.message : 'Falha na validação.' },
         { status: 400 },
       )
     }
@@ -228,7 +229,7 @@ export async function PATCH(
       const config = configRows?.length === 1 ? (configRows[0] as any) : null
       if (configError || !config) {
         return NextResponse.json(
-          { error: 'WhatsApp not configured.' },
+          { error: 'WhatsApp não configurado.' },
           { status: 400 },
         )
       }
@@ -240,7 +241,7 @@ export async function PATCH(
         await ensureImageHeaderHandle(payload, accessToken)
       } catch (e) {
         return NextResponse.json(
-          { error: e instanceof Error ? e.message : 'Header image upload failed.' },
+          { error: e instanceof Error ? e.message : 'Falha no envio da imagem do cabeçalho.' },
           { status: 400 },
         )
       }
@@ -253,7 +254,7 @@ export async function PATCH(
           components: metaPayload.components,
         })
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'Meta edit failed.'
+        const message = e instanceof Error ? e.message : 'Falha na edição na Meta.'
         await supabase
           .from('message_templates')
           .update({
@@ -290,7 +291,7 @@ export async function PATCH(
     if (updErr) {
       return NextResponse.json(
         {
-          error: `Edited on Meta but failed to save locally: ${updErr.message}. Run "Sync from Meta" to recover.`,
+          error: `Editado na Meta, mas falhou ao salvar localmente: ${updErr.message}. Use "Sincronizar do Meta" para recuperar.`,
         },
         { status: 500 },
       )
@@ -306,7 +307,7 @@ export async function PATCH(
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : 'Failed to edit template.',
+          error instanceof Error ? error.message : 'Falha ao editar o template.',
       },
       { status: 500 },
     )
@@ -321,7 +322,7 @@ export async function DELETE(
     const { id } = await context.params
     if (!UUID_RE.test(id)) {
       return NextResponse.json(
-        { error: 'Invalid template id.' },
+        { error: 'ID de template inválido.' },
         { status: 400 },
       )
     }
@@ -338,7 +339,7 @@ export async function DELETE(
       .eq('account_id', accountId)
       .maybeSingle()
     if (lookupErr || !existing) {
-      return NextResponse.json({ error: 'Template not found.' }, { status: 404 })
+      return NextResponse.json({ error: 'Template não encontrado.' }, { status: 404 })
     }
 
     if (existing.meta_template_id && !isDryRun()) {
@@ -351,7 +352,7 @@ export async function DELETE(
       const config = configRows?.length === 1 ? (configRows[0] as any) : null
       if (configError || !config || !config.waba_id) {
         return NextResponse.json(
-          { error: 'WhatsApp not configured — cannot delete on Meta.' },
+          { error: 'WhatsApp não configurado — não é possível excluir na Meta.' },
           { status: 400 },
         )
       }
@@ -364,7 +365,7 @@ export async function DELETE(
           metaTemplateId: existing.meta_template_id,
         })
       } catch (e) {
-        const message = e instanceof Error ? e.message : 'Meta delete failed.'
+        const message = e instanceof Error ? e.message : 'Falha na exclusão na Meta.'
         return NextResponse.json({ error: message }, { status: 502 })
       }
     }
@@ -376,7 +377,7 @@ export async function DELETE(
     if (delErr) {
       return NextResponse.json(
         {
-          error: `Deleted on Meta but failed to delete locally: ${delErr.message}.`,
+          error: `Excluído na Meta, mas falhou ao excluir localmente: ${delErr.message}.`,
         },
         { status: 500 },
       )
@@ -388,7 +389,7 @@ export async function DELETE(
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : 'Failed to delete template.',
+          error instanceof Error ? error.message : 'Falha ao excluir o template.',
       },
       { status: 500 },
     )

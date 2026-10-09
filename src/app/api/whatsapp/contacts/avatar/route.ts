@@ -20,16 +20,22 @@ export async function GET(request: Request) {
   const phone = searchParams.get('phone')
 
   if (!phone) {
-    return NextResponse.json({ error: 'phone required' }, { status: 400 })
+    return NextResponse.json({ error: 'phone é obrigatório' }, { status: 400 })
   }
 
   const db = supabaseAdmin()
 
-  const { data: config, error: configError } = await db
+  const { data: configRows, error: configError } = await db
     .from('whatsapp_config')
     .select('waha_url, waha_session, waha_api_key')
     .eq('account_id', accountId)
-    .maybeSingle()
+    // Foto de perfil vem do WAHA: qualquer linha WAHA da conta serve. Antes era
+    // maybeSingle() sem filtro de provedor, que dava 404 em conta com 2+ linhas.
+    .eq('provider', 'waha')
+    .not('waha_url', 'is', null)
+    .order('created_at', { ascending: true })
+    .limit(1)
+  const config = configRows?.[0]
 
   if (configError || !config) {
     return new NextResponse(null, { status: 404 })

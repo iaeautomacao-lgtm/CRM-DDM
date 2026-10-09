@@ -137,9 +137,12 @@ export function validateFlowForActivation(
     seen.add(n.node_key);
   }
 
+  // Âncoras: "Ir para" deveria apontar para uma (é o que o formulário do editor oferece).
+  const anchorKeys = new Set(nodes.filter((n) => n.node_type === "anchor").map((n) => n.node_key));
+
   // Per-node rules (Meta limits + dead-end + edge resolution).
   for (const n of nodes) {
-    issues.push(...validateNode(n, keys, context));
+    issues.push(...validateNode(n, keys, context, anchorKeys));
   }
 
   // Variáveis em textos que chegam ao cliente: só {{vars.nome}} é trocado
@@ -267,6 +270,7 @@ function validateNode(
     aiTools?: Array<{ id: string; name: string; enabled: boolean }> | null;
     agents?: Array<{ id: string; name: string; enabled: boolean }> | null;
   },
+  anchorKeys: Set<string> = new Set(),
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
@@ -953,6 +957,15 @@ function validateNode(
           field: "target_node_key",
           message: `"Ir para" aponta para um nó inexistente "${cfg.target_node_key}".`,
         });
+      } else if (!anchorKeys.has(cfg.target_node_key)) {
+        // Aviso (não erro): fluxos antigos podem apontar para um nó comum e funcionam; o editor só oferece âncoras.
+        issues.push({
+          severity: "warning",
+          scope: "node",
+          node_key: node.node_key,
+          field: "target_node_key",
+          message: `"Ir para" aponta para "${cfg.target_node_key}", que não é uma âncora. Funciona, mas o editor só oferece âncoras como destino: prefira uma âncora.`,
+        });
       }
       break;
     }
@@ -1184,6 +1197,26 @@ function validateNode(
         issues.push(
           ...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "O agente de IA"),
         );
+      } else if (cfg.next_node_key && !knownKeys.has(cfg.next_node_key)) {
+        // Sem modo no nó (agente vinculado: o modo vem do agente) ou takeover: a saída não é obrigatória, mas se existe tem que apontar para um nó real.
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "next_node_key",
+          message: `O agente de IA aponta para um nó inexistente "${cfg.next_node_key}".`,
+        });
+      }
+      // Saída de falha (usada quando o agente não responde): se configurada, tem que apontar para um nó real.
+      const failureKey = (node.config as { failure_next_node_key?: unknown }).failure_next_node_key;
+      if (typeof failureKey === "string" && failureKey && !knownKeys.has(failureKey)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "failure_next_node_key",
+          message: `A saída de falha do agente de IA aponta para um nó inexistente "${failureKey}".`,
+        });
       }
       if (
         cfg.mode === "loop" &&
@@ -1429,9 +1462,12 @@ function outgoingEdges(node: NodeInput): string[] {
       return out;
     }
     case "ai_agent": {
-      const cfg = node.config as { mode?: string; next_node_key?: string };
-      if (cfg.mode === "takeover") return [];
-      return cfg.next_node_key ? [cfg.next_node_key] : [];
+      const cfg = node.config as { mode?: string; next_node_key?: string; failure_next_node_key?: string };
+      // A saída de falha também é uma aresta (sem isto o destino dela aparecia como "inalcançável" no editor).
+      const out: string[] = [];
+      if (cfg.mode !== "takeover" && cfg.next_node_key) out.push(cfg.next_node_key);
+      if (typeof cfg.failure_next_node_key === "string" && cfg.failure_next_node_key) out.push(cfg.failure_next_node_key);
+      return out;
     }
     case "handoff":
     case "handoff_agent":

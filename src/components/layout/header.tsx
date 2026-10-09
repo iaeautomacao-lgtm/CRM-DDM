@@ -4,7 +4,7 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, Menu, Search, Settings as SettingsIcon, User } from "lucide-react";
+import { ChevronRight, LogOut, Menu, Search, Settings as SettingsIcon, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -20,7 +20,7 @@ import {
 import { ModeToggle } from "@/components/layout/mode-toggle";
 import { openCommandPalette } from "@/components/command-palette/command-palette";
 // Título derivado dos itens da sidebar (fonte única em lib/nav.ts).
-import { getPageTitle } from "@/lib/nav";
+import { getBreadcrumbs } from "@/lib/nav";
 import { usePermissions } from "@/hooks/use-permission";
 
 const subscribeNoop = () => () => {};
@@ -36,7 +36,8 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
   const { canOpen } = usePermissions();
-  const title = getPageTitle(pathname);
+  const crumbs = getBreadcrumbs(pathname);
+  const current = crumbs[crumbs.length - 1];
   // Atalho exibido conforme a plataforma (⌘K no Mac). Começa em Ctrl para
   // casar com o HTML do servidor e troca após montar.
   const isMac = useSyncExternalStore(subscribeNoop, detectMac, () => false);
@@ -58,8 +59,24 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         >
           <Menu className="h-5 w-5" />
         </button>
+        {crumbs.length > 1 && (
+          <nav aria-label="Você está em" className="hidden min-w-0 items-center gap-1.5 text-[13px] text-muted-foreground sm:flex">
+            {crumbs.slice(0, -1).map((c) => (
+              <span key={c.label} className="flex min-w-0 items-center gap-1.5">
+                {c.href ? (
+                  <Link href={c.href} className="truncate rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    {c.label}
+                  </Link>
+                ) : (
+                  <span className="truncate">{c.label}</span>
+                )}
+                <ChevronRight className="size-3.5 shrink-0" aria-hidden="true" />
+              </span>
+            ))}
+          </nav>
+        )}
         <h1 className="truncate font-heading text-base font-semibold tracking-[-0.01em] text-foreground sm:text-[17px]">
-          {title}
+          {current.label}
         </h1>
       </div>
 

@@ -720,7 +720,7 @@ export default function EnvioEmLotePage() {
                                   <button
                                     type="button"
                                     onClick={() => handleAddToBlacklist(item)}
-                                    className="rounded-md p-1.5 text-muted-foreground hover:bg-red-500/10 hover:text-red-500"
+                                    className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-soft hover:text-danger"
                                     title="Adicionar à blacklist"
                                     aria-label="Adicionar à blacklist"
                                   >

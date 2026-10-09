@@ -13,11 +13,12 @@ export type FlowResponseDelivery = "token_run" | "latest_active" | null;
 type Db = Pick<SupabaseClient, "from">;
 interface RunRow {
   id: string;
+  flow_id: string | null;
   vars: Record<string, unknown> | null;
 }
 
 async function findRun(db: Db, accountId: string, contactId: string, runId?: string): Promise<RunRow | null> {
-  let query = db.from("flow_runs").select("id, vars").eq("account_id", accountId).eq("contact_id", contactId).eq("status", "active");
+  let query = db.from("flow_runs").select("id, flow_id, vars").eq("account_id", accountId).eq("contact_id", contactId).eq("status", "active");
   if (runId) query = query.eq("id", runId);
   const { data, error } = await query.order("started_at", { ascending: false }).limit(1);
   if (error || !data || data.length === 0) return null;
@@ -30,7 +31,7 @@ async function findRun(db: Db, accountId: string, contactId: string, runId?: str
  */
 export async function deliverFlowResponse(
   db: Db,
-  input: { accountId: string; contactId: string; vars: Record<string, string>; flowToken?: unknown },
+  input: { accountId: string; contactId: string; vars: Record<string, string>; flowToken?: unknown; flowName?: string | null },
 ): Promise<FlowResponseDelivery> {
   if (Object.keys(input.vars).length === 0) return null;
   try {
@@ -46,7 +47,23 @@ export async function deliverFlowResponse(
       .from("flow_runs")
       .update({ vars: { ...(run.vars ?? {}), ...input.vars } })
       .eq("id", run.id);
-    return updateError ? null : delivery;
+    if (updateError) return null;
+    // Linha na timeline do run ("Formulário recebido"): evento `reply_received` com payload.kind = 'flow_response'. SEM meta_message_id: esse campo é a
+    // chave de dedupe do motor (isDuplicateInbound) e faria a próxima mensagem do cliente ser ignorada como duplicada. Só as CHAVES das variáveis, nunca
+    // os valores. Melhor esforço: não afeta a entrega.
+    try {
+      await db.from("flow_run_events").insert({
+        flow_run_id: run.id,
+        flow_id: run.flow_id,
+        account_id: input.accountId,
+        event_type: "reply_received",
+        node_key: null,
+        payload: { kind: "flow_response", flow_name: input.flowName ?? null, fields: Object.keys(input.vars).slice(0, 40), delivered_to: delivery },
+      });
+    } catch {
+      /* a linha da timeline é opcional */
+    }
+    return delivery;
   } catch {
     return null;
   }
@@ -55,7 +72,7 @@ export async function deliverFlowResponse(
 /** Versão booleana (PR 21.1): true = entregue em algum run ativo. */
 export async function deliverFlowResponseToActiveRun(
   db: Db,
-  input: { accountId: string; contactId: string; vars: Record<string, string>; flowToken?: unknown },
+  input: { accountId: string; contactId: string; vars: Record<string, string>; flowToken?: unknown; flowName?: string | null },
 ): Promise<boolean> {
   return (await deliverFlowResponse(db, input)) !== null;
 }
