@@ -284,6 +284,10 @@
     {
       "version": "297_history_export_jobs",
       "kind": "registry"
+    },
+    {
+      "version": "298_web_push",
+      "kind": "registry"
     }
   ]
 }
