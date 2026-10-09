@@ -13,7 +13,7 @@ import { BASELINE_REAL_MIGRATIONS, BASELINE_SQL, USER_SESSIONS_290 } from "./dep
 const PRE_DEPLOY = [
   "262", "297", "298", "300", "301", "302", "302b", "303", "303b",
   "304", "305",
-  "311", "312", "313", "315", "320",
+  "311", "312", "313", "314", "314b", "315", "316b", "317", "320",
   "322", "323", "324", "325", "326",
   "330", "330b", "331b",
   "310",
@@ -163,6 +163,7 @@ function rollbackOf(n: string): { statements: string[]; reapply: string[] } {
       if (!SQL_START.test(t)) return; // prosa
     }
     t = t.replace(/\s+--\s.*$/, ""); // comentário no fim da linha
+    t = t.replace(/;\s+\(.*$/, ";"); // observação em parênteses depois do último ; (ex.: "COMMIT;   (antes: reverter o deploy)")
     kept.push(t);
     if (((t.match(/\$\$/g) ?? []).length % 2) === 1) inDollar = !inDollar;
   });
