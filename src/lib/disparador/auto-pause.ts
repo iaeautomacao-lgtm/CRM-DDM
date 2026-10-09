@@ -232,7 +232,9 @@ export async function checkCampaignAutoPause(
     // imutável; rejeição antes de enviar usa updated_at. Não ordenamos por
     // scheduled_at (retry/reflow) nem por entrega/leitura tardia.
     let sentQuery = attemptsQuery().not("sent_at", "is", null);
-    let rejectedQuery = attemptsQuery().is("sent_at", null);
+    // Rejeição antes de enviar só existe em erro/bloqueado: o filtro de status deixa o planner usar o índice
+    // parcial idx_dmq_auto_pause_rejected (294b), em vez de varrer todos os envios da campanha (F7).
+    let rejectedQuery = attemptsQuery().is("sent_at", null).in("status", ["erro", "bloqueado"]);
     if (since) {
       sentQuery = sentQuery.gte("sent_at", since);
       rejectedQuery = rejectedQuery.gte("updated_at", since);

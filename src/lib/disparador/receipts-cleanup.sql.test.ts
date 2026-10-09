@@ -54,7 +54,7 @@ it('159 adiciona as colunas de pausa automática', async () => {
   );
 });
 
-it('apaga só recibos antigos (> 7 dias) sem item correspondente na fila', async () => {
+it('apaga só recibos antigos (> 7 dias, função da 159) sem item correspondente na fila', async () => {
   await db.exec(`
     INSERT INTO wacrm.disp_message_queue(id, status, waha_message_id) VALUES (gen_random_uuid(), 'enviando', 'wamid.fila');
     INSERT INTO wacrm.dispatch_status_receipts(message_id, status, created_at) VALUES
