@@ -21,7 +21,7 @@ import { usePresence } from "@/hooks/use-presence";
 import { useSelection } from "@/hooks/use-selection";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { RequireRole } from "@/components/auth/require-role";
+import { Can } from "@/components/auth/can";
 import { TeamFormDialog } from "@/components/settings/team-form-dialog";
 import { OutcomeTagPicker } from "@/components/inbox/outcome-tag-picker";
 import type { AccountMember, Conversation, Tag, Team } from "@/types";
@@ -799,26 +799,26 @@ export default function MonitoramentoPage() {
           ) : teams.length === 0 ? (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
               <p>Nenhuma equipe criada ainda.</p>
-              <RequireRole
-                min="admin"
+              <Can
+                permission="teams.manage"
                 fallback={<p>Peça a um administrador ou supervisor para criar equipes em Configurações → Equipes.</p>}
               >
                 <Button onClick={openCreateTeam}>
                   <Plus className="size-4" />
                   Criar primeira equipe
                 </Button>
-              </RequireRole>
+              </Can>
             </div>
           ) : (
             <>
-              <RequireRole min="admin">
+              <Can permission="teams.manage">
                 <div className="flex justify-end">
                   <Button variant="outline" onClick={openCreateTeam}>
                     <Plus className="size-4" />
                     Nova equipe
                   </Button>
                 </div>
-              </RequireRole>
+              </Can>
 
               <DndContext
                 sensors={dndSensors}

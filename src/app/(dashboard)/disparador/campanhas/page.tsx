@@ -55,7 +55,7 @@ import { toast } from "sonner";
 import Link from "next/link";
 import { getDisparadorScope } from "@/lib/disparador/scope";
 import { trackAction } from "@/hooks/use-telemetry";
-import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
 import { useDialogA11y } from "@/hooks/use-dialog-a11y";
 import { formatBrasilia, WEEKDAY_LABELS } from "@/lib/disparador/send-window";
 import { messagesPerContact, parseTemplateMode } from "@/lib/disparador/campaign-validation";
@@ -342,7 +342,11 @@ function qualityLabel(rating: string | null | undefined): string {
 }
 
 export default function CampanhasPage() {
-  const { canManageMembers, isOwner } = useAuth();
+  // Pelas permissões do servidor: recalcular = campaigns.manage; iniciar em
+  // número vermelho = campaigns.red_quality_override (só proprietário).
+  const { can } = usePermissions();
+  const canRecalculate = can("campaigns.manage");
+  const canOverrideRed = can("campaigns.red_quality_override");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [recalculatingMetrics, setRecalculatingMetrics] = useState(false);
@@ -381,7 +385,7 @@ export default function CampanhasPage() {
   } | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
   const hasRedChannel = !!campaignInfo?.channels.some((ch) => ch.quality_rating === "RED");
-  const redReady = !hasRedChannel || (isOwner && redConfirmed && redReason.trim().length >= 3);
+  const redReady = !hasRedChannel || (canOverrideRed && redConfirmed && redReason.trim().length >= 3);
   // Público real da campanha no modal de início (PRD-01) — mesma resolução
   // do startCampaign (GET .../audience).
   const [audienceInfo, setAudienceInfo] = useState<
@@ -656,7 +660,7 @@ export default function CampanhasPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agora: startNow,
-          ...(hasRedChannel && isOwner && redConfirmed
+          ...(hasRedChannel && canOverrideRed && redConfirmed
             ? { confirm_red_quality: true, red_quality_reason: redReason.trim() }
             : {}),
         }),
@@ -1041,7 +1045,7 @@ export default function CampanhasPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2 self-start">
-          {canManageMembers && (
+          {canRecalculate && (
             <Button
               variant="outline"
               className="gap-1.5 text-xs h-9"
@@ -1419,7 +1423,7 @@ export default function CampanhasPage() {
                               restrição pela Meta (envio limitado a poucas
                               mensagens por segundo). Campanha nova nele só
                               pode ser iniciada pelo owner.
-                              {!isOwner && " Peça ao owner para iniciar esta campanha."}
+                              {!canOverrideRed && " Peça ao owner para iniciar esta campanha."}
                             </span>
                           </div>
                         )}
@@ -1441,7 +1445,7 @@ export default function CampanhasPage() {
                         )}
                       </div>
                     ))}
-                        {hasRedChannel && isOwner && (
+                        {hasRedChannel && canOverrideRed && (
                       <div className="space-y-2 rounded-md border border-red-500 p-3 text-sm">
                         <label className="flex items-start gap-2">
                           <input

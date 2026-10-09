@@ -10,8 +10,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { ArrowLeft, Loader2, Plus, Save, Sparkles, Trash2 } from 'lucide-react';
 
-import { can } from '@/lib/auth/permissions';
-import { hasMinRole } from '@/lib/auth/roles';
+import { usePermissions } from '@/hooks/use-permission';
 import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -97,9 +96,11 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function AgentsSettings() {
-  const { accountRole, accountId } = useAuth();
-  const canEdit = !!accountRole && hasMinRole(accountRole, 'admin');
-  const canManageTools = !!accountRole && can({ role: accountRole }, 'ai.tools.edit');
+  const { accountId } = useAuth();
+  const { can } = usePermissions();
+  const canEdit = can('ai.agents.edit');
+  // Criar/vincular ferramenta na aba do agente (Farol, #217): ai.tools.edit.
+  const canManageTools = can('ai.tools.edit');
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedId = searchParams.get('id');

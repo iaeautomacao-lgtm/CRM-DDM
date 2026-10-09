@@ -14,7 +14,7 @@ import { NODE_META } from "@/components/flows/shared";
 // Card "Fluxo" do painel do contato: mostra em qual fluxo (e em qual nó)
 // a conversa está ou esteve, com atalho para abrir o editor naquele ponto.
 // Só é montado para owner/admin — quem decide é o ContactSidebar via
-// useCan("view-conversation-flows"); a API também exige admin.
+// usePermission("flows.view_runs"); a API também exige essa permissão.
 
 interface ConversationFlowRun {
   id: string;

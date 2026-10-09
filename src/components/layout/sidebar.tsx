@@ -15,8 +15,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useUnreadInternalMessages } from "@/hooks/use-unread-internal-messages";
-import type { AccountRole } from "@/lib/auth/roles";
-import { canAccessRoute, getDefaultRoute, isRouteGated } from "@/lib/role-utils";
+import { getDefaultRoute } from "@/lib/role-utils";
+import { usePermissions } from "@/hooks/use-permission";
 import {
   bottomNavItems,
   longestMatchingHref,
@@ -74,17 +74,6 @@ function RailDot() {
   );
 }
 
-function isNavItemVisible(
-  href: string,
-  role: AccountRole | null,
-  roleLoading: boolean,
-): boolean {
-  const path = href.split("?")[0];
-  if (!isRouteGated(path)) return true;
-  if (roleLoading || !role) return false;
-  return canAccessRoute(role, path);
-}
-
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
@@ -93,7 +82,7 @@ interface SidebarProps {
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { profileLoading, accountRole } = useAuth();
+  const { accountRole } = useAuth();
   const totalUnread = useTotalUnread();
   const unreadInternalMessages = useUnreadInternalMessages(true);
 
@@ -104,13 +93,13 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const isDesktop = useIsDesktop();
   const rail = collapsed && isDesktop;
 
+  // Itens que o servidor libera (GET /api/me/permissions, campo pages).
+  const { canOpen } = usePermissions();
   const visibleNavItems = navItems
-    .filter((item) => isNavItemVisible(item.href, accountRole, profileLoading))
+    .filter((item) => canOpen(item.href.split("?")[0]))
     .filter((item) => item.href !== "/settings?tab=ai" || accountRole !== "admin");
 
-  const visibleBottomNavItems = bottomNavItems.filter((item) =>
-    isNavItemVisible(item.href, accountRole, profileLoading),
-  );
+  const visibleBottomNavItems = bottomNavItems.filter((item) => canOpen(item.href.split("?")[0]));
 
   const isAiTab = pathname === "/settings" && searchParams.get("tab") === "ai";
   const activeNavHref = isAiTab

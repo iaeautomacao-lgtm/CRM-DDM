@@ -20,7 +20,7 @@ import { ModeToggle } from "@/components/layout/mode-toggle";
 import { openCommandPalette } from "@/components/command-palette/command-palette";
 // Título derivado dos itens da sidebar (fonte única em lib/nav.ts).
 import { getPageTitle } from "@/lib/nav";
-import { canAccessRoute } from "@/lib/role-utils";
+import { usePermissions } from "@/hooks/use-permission";
 
 interface HeaderProps {
   /** Wired to the shell's drawer state. Used only on mobile — the
@@ -30,7 +30,8 @@ interface HeaderProps {
 
 export function Header({ onOpenSidebar }: HeaderProps) {
   const pathname = usePathname();
-  const { profile, accountRole, signOut } = useAuth();
+  const { profile, signOut } = useAuth();
+  const { canOpen } = usePermissions();
   const title = getPageTitle(pathname);
 
   const initial =
@@ -103,7 +104,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             </p>
           </div>
           <DropdownMenuSeparator className="bg-border" />
-          {accountRole && canAccessRoute(accountRole, "/perfil") && (
+          {canOpen("/perfil") && (
             <DropdownMenuItem
               render={
                 <Link
@@ -116,7 +117,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               Meu Perfil
             </DropdownMenuItem>
           )}
-          {accountRole && canAccessRoute(accountRole, "/settings") && <DropdownMenuItem
+          {canOpen("/settings") && <DropdownMenuItem
             render={
               <Link
                 href="/settings"
