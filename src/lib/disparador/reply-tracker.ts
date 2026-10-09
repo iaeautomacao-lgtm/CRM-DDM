@@ -315,6 +315,7 @@ async function ensureCampaignMessage(
     .insert({
       conversation_id: conversationId,
       sender_type: "bot",
+      origin: "campaign",
       content_type: contentType,
       content_text: campaignMessageText(item, { templateBody, loggedText }),
       media_url:

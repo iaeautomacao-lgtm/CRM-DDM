@@ -1042,6 +1042,67 @@ export async function sendInteractiveCtaUrl(
   return { messageId: await readSentMessageId(response) }
 }
 
+export interface SendInteractiveFlowArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  bodyText: string
+  /** id do Flow na Meta. */
+  flowId: string
+  /** Token de correlação deste envio (volta no Data Exchange e no nfm_reply). */
+  flowToken: string
+  /** Texto do botão que abre o formulário (≤ 30). */
+  ctaText: string
+  flowAction: 'navigate' | 'data_exchange'
+  /** Tela inicial — obrigatória em 'navigate'. */
+  screenId?: string
+  headerText?: string
+  footerText?: string
+}
+
+/**
+ * Mensagem interativa que abre um WhatsApp Flow (`interactive.type = 'flow'`, PRD 21.4). Como toda interativa, só vale dentro da janela de
+ * 24h (fora dela, use template com botão FLOW — PR 21.3). Valida antes de chamar a Meta, para o erro dizer qual campo está errado.
+ */
+export async function sendInteractiveFlow(args: SendInteractiveFlowArgs): Promise<MetaSendResult> {
+  const { phoneNumberId, accessToken, to, bodyText, flowId, flowToken, ctaText, flowAction, screenId, headerText, footerText } = args
+  validateInteractiveBody(bodyText)
+  if (!/^[0-9]{5,30}$/.test(flowId)) throw new Error('Flow id must be numeric.')
+  if (!flowToken || flowToken.length > 200) throw new Error('Flow token must have 1-200 chars.')
+  if (!ctaText || ctaText.length > 30) throw new Error(`Flow CTA must have 1-30 chars (got ${ctaText.length}).`)
+  if (flowAction === 'navigate' && !screenId) throw new Error("Flow action 'navigate' requires screenId.")
+
+  const parameters: Record<string, unknown> = {
+    flow_message_version: '3',
+    flow_token: flowToken,
+    flow_id: flowId,
+    flow_cta: ctaText,
+    flow_action: flowAction,
+  }
+  if (flowAction === 'navigate') parameters.flow_action_payload = { screen: screenId }
+
+  const interactive: Record<string, unknown> = {
+    type: 'flow',
+    body: { text: bodyText },
+    action: { name: 'flow', parameters },
+  }
+  if (headerText) interactive.header = { type: 'text', text: headerText }
+  if (footerText) interactive.footer = { text: footerText }
+
+  const response = await metaFetch(`${META_API_BASE}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to, type: 'interactive', interactive }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return { messageId: await readSentMessageId(response) }
+}
+
 export interface InteractiveListRow {
   /** Stable id sent back in the webhook when tapped (≤ 200 chars). */
   id: string

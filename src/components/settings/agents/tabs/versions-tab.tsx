@@ -1,4 +1,17 @@
+'use client';
+
+import { useState } from 'react';
 import { History, Loader2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { AgentVersionSummary } from '../types';
@@ -19,16 +32,32 @@ function formatDate(iso: string): string {
 }
 
 export function VersionsTab({ versions, publishedVersionId, onRestore, readOnly, busy }: VersionsTabProps) {
-  async function handleRestore(v: AgentVersionSummary) {
-    const ok = window.confirm(
-      `Restaurar a versão ${v.version}? Isso publica uma nova versão com este conteúdo. Conversas em andamento continuam na versão anterior.`,
-    );
-    if (!ok) return;
-    await onRestore(v.id);
-  }
+  const [pending, setPending] = useState<AgentVersionSummary | null>(null);
 
   return (
     <div className="space-y-4">
+      <AlertDialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restaurar versão</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`Restaurar a versão ${pending?.version ?? ''}? Isso publica uma nova versão com este conteúdo. Conversas em andamento continuam na versão anterior.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = pending;
+                setPending(null);
+                if (target) void onRestore(target.id);
+              }}
+            >
+              Restaurar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div>
         <h3 className="text-sm font-medium text-foreground">Histórico de versões</h3>
         <p className="text-xs text-muted-foreground mt-0.5">
@@ -58,7 +87,7 @@ export function VersionsTab({ versions, publishedVersionId, onRestore, readOnly,
                   </p>
                 </div>
                 {!readOnly && !current && (
-                  <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void handleRestore(v)}>
+                  <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => setPending(v)}>
                     {busy && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
                     Restaurar esta versão
                   </Button>

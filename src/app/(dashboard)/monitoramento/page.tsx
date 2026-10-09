@@ -48,6 +48,13 @@ import { BatchReportPanel, BulkBar, failureMessage, type BatchReport } from "@/c
 import { MonitorKpiRow } from "@/components/monitoramento/kpi-row";
 import { MonitorFiltersPanel } from "@/components/monitoramento/monitor-filters-panel";
 import type { MultiSelectOption } from "@/components/monitoramento/multi-select-filter";
+import {
+  agentMetricsRange,
+  indexMetricsByAgent,
+  type AgentMetrics,
+  type AgentMetricsPeriod,
+  type AgentMetricsResponse,
+} from "@/lib/monitoramento/agent-metrics";
 import { PhaseColumn } from "@/components/monitoramento/phase-column";
 import { AgentColumn } from "@/components/monitoramento/agent-column";
 import { AgentDragCard } from "@/components/monitoramento/agent-drag-card";
@@ -95,11 +102,17 @@ export default function MonitoramentoPage() {
 }
 
 function MonitoramentoBoard() {
-  const { accountId, canManageMembers, profile } = useAuth();
+  const { accountId, profile } = useAuth();
   const { can } = usePermissions();
+  // Arrastar agente entre equipes grava em /api/account/teams/[teamId]/members, que exige teams.manage (não o papel).
+  const canManageTeams = can("teams.manage");
   const canBulkTransfer = can("inbox.transfer");
   const canBulkFinalize = can("inbox.close");
   const [view, setView] = useState<MonitorView>("fases");
+  const [agentPeriod, setAgentPeriod] = useState<AgentMetricsPeriod>("hoje");
+  const [agentMetrics, setAgentMetrics] = useState<Map<string, AgentMetrics> | null>(null);
+  const [agentMetricsError, setAgentMetricsError] = useState(false);
+  const [agentMetricsTick, setAgentMetricsTick] = useState(0);
   const [conversations, setConversations] = useState<Map<string, MonitorConversation>>(
     () => new Map(),
   );
@@ -350,22 +363,33 @@ function MonitoramentoBoard() {
   // ----------------------------------------------------------
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
+  const [membersError, setMembersError] = useState(false);
+  const [membersTick, setMembersTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     apiFetch("/api/account/members", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data: { members?: AccountMember[] }) => {
-        if (!cancelled) setMembers(data.members ?? []);
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json();
       })
-      .catch((err) => console.error("[monitoramento] failed to load members:", err))
+      .then((data: { members?: AccountMember[] }) => {
+        if (!cancelled) {
+          setMembers(data.members ?? []);
+          setMembersError(false);
+        }
+      })
+      .catch((err) => {
+        console.error("[monitoramento] failed to load members:", err);
+        if (!cancelled) setMembersError(true);
+      })
       .finally(() => {
         if (!cancelled) setMembersLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [membersTick]);
 
   const { getPresence, getRow, now } = usePresence();
 
@@ -389,6 +413,7 @@ function MonitoramentoBoard() {
   // ----------------------------------------------------------
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
+  const [teamsError, setTeamsError] = useState(false);
   // Single dialog instance for both "create" (team=null) and "edit"
   // (team=<the column's team>) — same TeamFormDialog used in
   // teams-panel.tsx (Settings), not a second copy.
@@ -415,8 +440,10 @@ function MonitoramentoBoard() {
       .order("name");
     if (error) {
       console.error("[monitoramento] failed to load teams:", error);
+      setTeamsError(true);
       return;
     }
+    setTeamsError(false);
     setTeams((data ?? []) as Team[]);
   }, [accountId]);
 
@@ -770,6 +797,32 @@ function MonitoramentoBoard() {
   // selectAgentForTeam/selectAnyAgentForAccount em src/lib/flows/engine.ts).
   // /api/account/members não é filtrado (é genérico, usado também pela
   // aba Membros), então o filtro é aplicado aqui no array resultante.
+  // Métricas por atendente (1ª resposta média e resolvidas) só são buscadas com a aba Agentes aberta;
+  // a lista de conversas e a presença continuam em tempo real, estes dois números são do período.
+  useEffect(() => {
+    if (view !== "agentes") return;
+    let cancelled = false;
+    const { from, to } = agentMetricsRange(agentPeriod);
+    apiFetch(`/api/monitoramento/agentes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return (await res.json()) as AgentMetricsResponse;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setAgentMetrics(indexMetricsByAgent(data.agents));
+        setAgentMetricsError(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[monitoramento] failed to load agent metrics:", err);
+        setAgentMetricsError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, agentPeriod, agentMetricsTick]);
+
   const agentOptions: MultiSelectOption[] = useMemo(
     () =>
       members
@@ -892,7 +945,49 @@ function MonitoramentoBoard() {
                 <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
+          ) : membersError ? (
+            <ErrorState
+              className="min-h-0"
+              title="Não foi possível carregar os agentes"
+              hint="Verifique sua conexão e tente novamente."
+              onRetry={() => {
+                setMembersLoading(true);
+                setMembersError(false);
+                setMembersTick((n) => n + 1);
+              }}
+            />
           ) : (
+            <>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Segmented<AgentMetricsPeriod>
+                ariaLabel="Período das métricas por atendente"
+                options={[
+                  { value: "hoje", label: "Hoje" },
+                  { value: "7d", label: "7 dias" },
+                ]}
+                value={agentPeriod}
+                onChange={(p) => {
+                  setAgentMetrics(null);
+                  setAgentPeriod(p);
+                }}
+              />
+              {agentMetricsError && (
+                <span role="alert" className="text-xs text-danger">
+                  Não foi possível carregar as métricas.{" "}
+                  <button
+                    type="button"
+                    className="font-medium underline"
+                    onClick={() => {
+                      setAgentMetrics(null);
+                      setAgentMetricsError(false);
+                      setAgentMetricsTick((n) => n + 1);
+                    }}
+                  >
+                    Tentar de novo
+                  </button>
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {sortedAgents.map((agent) => (
                 <AgentColumn
@@ -903,9 +998,14 @@ function MonitoramentoBoard() {
                   now={now}
                   conversations={byAgent.get(agent.user_id) ?? []}
                   actions={agentesActions}
+                  metrics={agentMetrics?.get(agent.user_id)}
+                  metricsLoading={agentMetrics === null && !agentMetricsError}
+                  metricsUnavailable={agentMetricsError}
+                  metricsPeriodLabel={agentPeriod === "hoje" ? "hoje" : "em 7 dias"}
                 />
               ))}
             </div>
+            </>
           )}
         </div>
         )}
@@ -918,6 +1018,19 @@ function MonitoramentoBoard() {
                 <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
+          ) : teamsError || membersError ? (
+            <ErrorState
+              className="min-h-0"
+              title="Não foi possível carregar as equipes"
+              hint="Verifique sua conexão e tente novamente."
+              onRetry={() => {
+                setTeamsLoading(true);
+                setMembersLoading(true);
+                setMembersError(false);
+                setMembersTick((n) => n + 1);
+                void fetchTeams().finally(() => setTeamsLoading(false));
+              }}
+            />
           ) : teams.length === 0 ? (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
               <p>Nenhuma equipe criada ainda.</p>
@@ -961,7 +1074,7 @@ function MonitoramentoBoard() {
                       getPresence={getPresence}
                       getLastSeenAt={(userId) => getRow(userId)?.last_seen_at}
                       now={now}
-                      canDrag={canManageMembers}
+                      canDrag={canManageTeams}
                       onEdit={openEditTeam}
                       actions={equipesActions}
                     />

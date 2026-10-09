@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  canEditQuickReply,
+  dedupeByShortcut,
   filterQuickReplies,
   isValidShortcut,
   matchSlashQuery,
   normalizeShortcut,
   renderQuickReply,
+  shortcutTaken,
+  visibilityOf,
+  visibilityOptions,
   type QuickReply,
 } from "./quick-replies";
 
@@ -67,5 +72,66 @@ describe("renderQuickReply", () => {
     expect(renderQuickReply("{primeiro_nome}, seu boleto", {})).toBe("seu boleto");
     expect(renderQuickReply("Segue o boleto.\n\n{atendente}", {})).toBe("Segue o boleto.");
     expect(renderQuickReply("Oi {primeiro_nome}\nLinha 2", {})).toBe("Oi\nLinha 2");
+  });
+});
+
+const scoped = (id: string, shortcut: string, extra: Partial<QuickReply>): QuickReply => ({ ...reply(shortcut, id), id, ...extra });
+
+describe("visibilidade (301)", () => {
+  it("sem a coluna vale 'conta'", () => {
+    expect(visibilityOf(reply("a", "t"))).toBe("account");
+  });
+
+  it("atalho repetido: pessoal > equipe > conta, mantendo a ordem dos que ficam", () => {
+    const list = [
+      scoped("c", "oi", { visibility: "account" }),
+      scoped("t", "oi", { visibility: "team", team_id: "eq1" }),
+      scoped("p", "oi", { visibility: "personal", created_by: "u1" }),
+      scoped("x", "tchau", { visibility: "account" }),
+    ];
+    expect(dedupeByShortcut(list).map((r) => r.id)).toEqual(["p", "x"]);
+    expect(dedupeByShortcut(list.slice(0, 2)).map((r) => r.id)).toEqual(["t"]);
+  });
+
+  it("duas equipes com o mesmo atalho: vale a primeira", () => {
+    const list = [
+      scoped("a", "oi", { visibility: "team", team_id: "eq1" }),
+      scoped("b", "oi", { visibility: "team", team_id: "eq2" }),
+    ];
+    expect(dedupeByShortcut(list).map((r) => r.id)).toEqual(["a"]);
+  });
+
+  it("o filtro do composer já resolve o repetido", () => {
+    const list = [scoped("c", "oi", {}), scoped("p", "oi", { visibility: "personal", created_by: "u1" })];
+    expect(filterQuickReplies(list, "oi").map((r) => r.id)).toEqual(["p"]);
+    expect(filterQuickReplies(list, "").map((r) => r.id)).toEqual(["p"]);
+  });
+
+  it("quem edita: pessoal só o dono; equipe/conta só com manage", () => {
+    const personal = { visibility: "personal" as const, created_by: "u1" };
+    expect(canEditQuickReply(personal, { userId: "u1", canManage: false })).toBe(true);
+    expect(canEditQuickReply(personal, { userId: "u2", canManage: true })).toBe(false);
+    expect(canEditQuickReply({ visibility: "account" }, { userId: "u1", canManage: false })).toBe(false);
+    expect(canEditQuickReply({ visibility: "team" }, { userId: "u1", canManage: true })).toBe(true);
+  });
+
+  it("seletor: sem manage só pessoal", () => {
+    expect(visibilityOptions(false)).toEqual(["personal"]);
+    expect(visibilityOptions(true)).toEqual(["personal", "team", "account"]);
+  });
+
+  it("atalho único por escopo", () => {
+    const list = [
+      scoped("p1", "oi", { visibility: "personal", created_by: "u1" }),
+      scoped("t1", "oi", { visibility: "team", team_id: "eq1" }),
+      scoped("c1", "oi", { visibility: "account" }),
+    ];
+    const base = { shortcut: "oi", teamId: null, ownerId: "u2" };
+    expect(shortcutTaken(list, { ...base, visibility: "personal" })).toBe(false); // outro dono
+    expect(shortcutTaken(list, { ...base, visibility: "personal", ownerId: "u1" })).toBe(true);
+    expect(shortcutTaken(list, { ...base, visibility: "personal", ownerId: "u1" }, "p1")).toBe(false);
+    expect(shortcutTaken(list, { ...base, visibility: "team", teamId: "eq2" })).toBe(false);
+    expect(shortcutTaken(list, { ...base, visibility: "team", teamId: "eq1" })).toBe(true);
+    expect(shortcutTaken(list, { ...base, visibility: "account" })).toBe(true);
   });
 });

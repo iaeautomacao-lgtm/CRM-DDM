@@ -18,6 +18,7 @@ import { readCappedBody } from "@/lib/security/webhook-body";
 import { decryptStoredSecret } from "@/lib/whatsapp/encryption";
 import { decryptFlowRequest, encryptFlowResponse, FlowCryptoError, isFlowEncryptedRequest } from "@/lib/whatsapp/flows-crypto";
 import { handleFlowData } from "@/lib/whatsapp/flows-data";
+import { ensureDdmFlowDataHandler } from "@/lib/whatsapp/flows-data-ddm";
 import { loadFlowsPrivateKey } from "@/lib/whatsapp/flows-keys";
 import { verifyMetaWebhookSignature } from "@/lib/whatsapp/webhook-signature";
 
@@ -39,6 +40,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ cha
   if (!body.ok) return reject(body.status);
 
   const db = supabaseAdmin();
+  ensureDdmFlowDataHandler(() => db); // PR 21.4: dados DDM por flow_token (uma vez por processo)
   const { data: rows, error } = await db.from("whatsapp_config").select("id, account_id, app_secret").eq("id", channelId).limit(1);
   const channel = (rows as Array<{ id: string; account_id: string; app_secret: string | null }> | null)?.[0];
   if (error || !channel) return reject(404);

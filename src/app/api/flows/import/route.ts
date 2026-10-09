@@ -43,6 +43,7 @@ const NODE_TYPES = new Set([
   'go_to_flow',
   'send_webchat',
   'send_template',
+  'send_flow',
   'add_note',
   'receive_attachment',
   'ai_agent',

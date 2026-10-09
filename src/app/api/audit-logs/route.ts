@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
+import { cappedTotal } from '@/lib/reports/capped-count'
 import { logAuditEvent } from '@/lib/audit/log-event'
 import { safeRows } from '@/lib/security/csv-safe'
 import {
@@ -133,14 +134,20 @@ export async function GET(request: Request) {
     const page = Math.max(1, parseInt(p.get('page') ?? '1', 10) || 1)
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(p.get('pageSize') ?? '', 10) || DEFAULT_PAGE_SIZE))
     const fromRow = (page - 1) * pageSize
-    const { data, error, count } = await applyFilters(
-      supabase.from('audit_logs').select('*', { count: 'exact' })
-    )
+    const { data, error } = await applyFilters(supabase.from('audit_logs').select('*'))
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .range(fromRow, fromRow + pageSize - 1)
     if (error) throw error
-    return NextResponse.json({ logs: data ?? [], total: count ?? 0, page, pageSize })
+    // Total com teto ("100 mil+"): count exato varre a tabela inteira numa conta grande. total/page/pageSize seguem iguais; total_capped/total_cap são aditivos.
+    const totals = await cappedTotal({
+      pageRows: data?.length ?? 0,
+      fromRow,
+      pageSize,
+      probe: (a, b) => applyFilters(supabase.from('audit_logs').select('id')).range(a, b),
+      exact: () => applyFilters(supabase.from('audit_logs').select('id', { count: 'exact', head: true })),
+    })
+    return NextResponse.json({ logs: data ?? [], ...totals, page, pageSize })
   } catch (err) {
     return toErrorResponse(err)
   }

@@ -449,6 +449,7 @@ export async function POST(request: Request) {
           .insert({
             conversation_id: conversation.id,
             sender_type: 'bot',
+            origin: 'api',
             content_type: mediaKind ?? 'text',
             content_text: mediaKind ? (mediaCaption ?? null) : targetText,
             // Only hasMediaUrl gives us a fetchable URL to store — a

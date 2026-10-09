@@ -55,6 +55,7 @@ import {
 import { effectivePromptVersion } from "@/lib/ai/attempt-telemetry";
 import { promptVersionOf } from "@/lib/ai/prompt-versions";
 import { flowExitTagsFromNodes } from "./exit-tag-routing";
+import { flowTokenForRun } from "@/lib/whatsapp/flow-token";
 import {
   isTurnFreeInbound,
   nextAiTurnCount,
@@ -95,6 +96,7 @@ import {
   type SendListNodeConfig,
   type SendMediaNodeConfig,
   type SendMessageNodeConfig,
+  type SendFlowNodeConfig,
   type SendTemplateNodeConfig,
   type SendWebchatNodeConfig,
   type SetTagNodeConfig,
@@ -117,6 +119,7 @@ const engineSendMedia = viaFlowEffects("engineSendMedia");
 const engineSendInteractiveButtons = viaFlowEffects("engineSendInteractiveButtons");
 const engineSendInteractiveList = viaFlowEffects("engineSendInteractiveList");
 const engineMetaSendTemplate = viaFlowEffects("engineMetaSendTemplate");
+const engineSendFlow = viaFlowEffects("engineSendFlow");
 const engineWahaSendText = viaFlowEffects("engineWahaSendText");
 const engineWahaSendMedia = viaFlowEffects("engineWahaSendMedia");
 const engineWahaSendButtons = viaFlowEffects("engineWahaSendButtons");
@@ -3593,6 +3596,66 @@ export async function advanceFromNodeKey(
       }
       currentKey = cfg.next_node_key;
       await nodeCompleted({ message_text: cfg.template_name });
+      continue;
+    }
+    if (node.node_type === "send_flow") {
+      // PRD 21.4 — convite para um WhatsApp Flow. O token (fr:<run>) correlaciona o Data Exchange e a resposta do formulário com ESTE run.
+      // A resposta vai ao run como variáveis (flow_*, PR 21.1); nenhuma efetivação de acordo é chamada aqui nem no retorno do formulário.
+      const cfg = node.config as unknown as SendFlowNodeConfig;
+      try {
+        const provider = (await getConversationChannel(run.conversation_id)) !== "whatsapp"
+          ? "other_channel"
+          : run.config_id
+            ? await getConfigProvider(run.config_id)
+            : "meta";
+        if (provider === "waha" || provider === "other_channel") {
+          // Flow é só do WhatsApp Meta: nos demais canais vai o texto alternativo (se houver)
+          if (cfg.fallback_text) {
+            await sendTextViaProvider(run, { text: interpolateVars(cfg.fallback_text, run.vars) });
+          }
+        } else {
+          if (cfg.flow_action === "data_exchange" && cfg.screen_id?.trim()) {
+            // tela que o Data Exchange devolve no INIT (o Flow desenhado pela operação define o nome)
+            await updateRunVars(db, run, { _flow_screen: cfg.screen_id.trim() });
+          }
+          await engineSendFlow({
+            accountId: run.account_id,
+            userId: run.user_id,
+            configId: run.config_id ?? undefined,
+            conversationId: run.conversation_id!,
+            contactId: run.contact_id!,
+            bodyText: interpolateVars(cfg.body_text, run.vars),
+            headerText: cfg.header_text ? interpolateVars(cfg.header_text, run.vars) : undefined,
+            footerText: cfg.footer_text ? interpolateVars(cfg.footer_text, run.vars) : undefined,
+            flowId: cfg.flow_id.trim(),
+            flowToken: flowTokenForRun(run.id),
+            ctaText: cfg.cta_text,
+            flowAction: cfg.flow_action,
+            screenId: cfg.screen_id?.trim() || undefined,
+          });
+        }
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_flow",
+          flow_id: cfg.flow_id,
+        });
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_flow_failed",
+          detail,
+        });
+        await endRun(db, run, "failed", "send_flow_failed", {
+          node_key: node.node_key,
+          node_type: node.node_type,
+          error_message: detail,
+          err,
+          input: inputSnapshot,
+          output: { flow_id: cfg.flow_id },
+        });
+        return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      await nodeCompleted({ flow_id: cfg.flow_id });
       continue;
     }
     if (node.node_type === "add_note") {
