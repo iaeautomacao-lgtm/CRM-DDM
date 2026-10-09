@@ -3,6 +3,7 @@ import { logAuditEvent } from '@/lib/audit/log-event'
 import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
+import { serializeContact } from '@/lib/contacts/contact-api'
 
 // POST /api/contacts/[id]/link  { phone?, email? }
 //
@@ -101,7 +102,8 @@ export async function POST(
         await db.from('contacts').update({ email }).eq('id', match.id)
         keptRow.email = email
       }
-      return NextResponse.json({ contact: keptRow, merged: true })
+      // CPF nunca volta em claro (mesmo formato de contacts/[id]).
+      return NextResponse.json({ contact: keptRow ? serializeContact(keptRow) : null, merged: true })
     }
 
     const patch: Record<string, string> = {}
@@ -114,7 +116,7 @@ export async function POST(
       .eq('id', contactId)
       .select('*')
     if (error) throw error
-    return NextResponse.json({ contact: updated?.[0] ?? null, merged: false })
+    return NextResponse.json({ contact: updated?.[0] ? serializeContact(updated[0]) : null, merged: false })
   } catch (err) {
     return toErrorResponse(err)
   }
