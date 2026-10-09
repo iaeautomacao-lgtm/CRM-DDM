@@ -9,6 +9,8 @@ export interface QuickReply {
   shortcut: string;
   title: string;
   content: string;
+  /** Quem cadastrou (coluna da 142); a tela usa para o filtro "Minhas". */
+  created_by?: string | null;
   created_at: string;
   updated_at: string;
 }
