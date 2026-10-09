@@ -590,7 +590,15 @@ export default function ControlesPage() {
                 placeholder="Ex.: teste de capacidade com a campanha de cobrança de outubro"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
+                aria-describedby="controles-motivo-dica"
               />
+              {/* A regra do mínimo aparecia só depois do erro; o botão ficava desabilitado sem explicar por quê. */}
+              <span id="controles-motivo-dica" className="flex justify-between gap-2 font-normal text-muted-foreground">
+                <span>Mínimo de {REASON_MIN} caracteres.</span>
+                <span className="tabular-nums">
+                  {reason.length}/{REASON_MAX}
+                </span>
+              </span>
             </label>
             {dialogError && (
               <p role="alert" className="m-0 text-xs font-medium text-danger">
