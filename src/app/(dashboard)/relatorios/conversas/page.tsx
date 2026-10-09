@@ -20,7 +20,7 @@ import { apiFetch } from "@/lib/api-fetch";
 // that component.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -197,16 +197,13 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
 
   return (
     <div className="overflow-hidden rounded-[10px] border border-border">
-      <div
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
+        aria-expanded={expanded}
         onClick={toggleExpand}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") toggleExpand();
-        }}
-        className="flex cursor-pointer flex-wrap items-center justify-between gap-2 bg-muted/60 px-4 py-3 text-foreground transition-colors hover:bg-muted"
+        className="flex w-full cursor-pointer flex-wrap items-center justify-between gap-2 bg-muted/60 px-4 py-3 text-left text-foreground transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <span className="flex min-w-0 items-center gap-2">
           <UserRound className="size-4 shrink-0 text-muted-foreground" />
           <span className="truncate text-sm font-medium">
             {contactLabel(row.contactName, row.contactPhone)}
@@ -219,9 +216,9 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
           <span className="truncate text-xs text-muted-foreground">
             {row.wahaSession || "Meta/Webchat"}
           </span>
-        </div>
+        </span>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <span className="flex shrink-0 items-center gap-2">
           <span className="text-xs text-muted-foreground">{formatRange(row.startedAt, row.endedAt)}</span>
           <Badge className={isClosed ? "bg-background text-muted-foreground" : "bg-primary/10 text-primary"}>
             {isClosed ? "Encerrado" : "Em andamento"}
@@ -231,8 +228,8 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
           ) : (
             <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
           )}
-        </div>
-      </div>
+        </span>
+      </button>
 
       {expanded && (
         <div className="bg-background">
@@ -251,6 +248,7 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
 }
 
 export default function ConversasPage() {
+  const uid = useId();
   // Exportar exige reports.export (supervisor+); o servidor revalida.
   const canExport = usePermissions().can("reports.export");
   const { accountId } = useAuth();
@@ -476,7 +474,7 @@ export default function ConversasPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Conversas</h1>
+        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Conversas</h2>
         <p className="text-sm text-muted-foreground">
           Lista de conversas com filtros avançados e visualização inline das mensagens.
         </p>
@@ -486,6 +484,8 @@ export default function ConversasPage() {
         <button
           type="button"
           onClick={() => setFiltersOpen((o) => !o)}
+          aria-expanded={filtersOpen}
+          aria-controls={`${uid}-filtros`}
           className="flex w-full items-center justify-between gap-2 px-4 py-3"
         >
           <span className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -496,7 +496,7 @@ export default function ConversasPage() {
         </button>
 
         {filtersOpen && (
-          <div className="border-t border-border p-4">
+          <div id={`${uid}-filtros`} className="border-t border-border p-4">
             <div className="flex flex-wrap items-end gap-3">
               <PeriodFilter
                 value={{ dateFrom: draft.dateFrom, dateTo: draft.dateTo }}
@@ -504,12 +504,12 @@ export default function ConversasPage() {
               />
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Canal</label>
+                <label htmlFor={`${uid}-canal`} className="text-xs font-medium text-muted-foreground">Canal</label>
                 <Select
                   value={draft.wahaSession}
                   onValueChange={(v) => v && setDraft((d) => ({ ...d, wahaSession: v }))}
                 >
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger id={`${uid}-canal`} className="w-40">
                     <SelectValue>{(v: string) => (v === ALL ? "Todos" : v)}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -524,8 +524,9 @@ export default function ConversasPage() {
               </div>
 
               <div className="min-w-[200px] flex-1 space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Identificador</label>
+                <label htmlFor={`${uid}-ident`} className="text-xs font-medium text-muted-foreground">Identificador</label>
                 <Input
+                  id={`${uid}-ident`}
                   value={draft.search}
                   onChange={(e) => setDraft((d) => ({ ...d, search: e.target.value }))}
                   placeholder="Nome ou telefone do contato"
@@ -533,9 +534,9 @@ export default function ConversasPage() {
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-muted-foreground">Agente</label>
+                <label htmlFor={`${uid}-agente`} className="text-xs font-medium text-muted-foreground">Agente</label>
                 <Select value={draft.agentId} onValueChange={(v) => v && setDraft((d) => ({ ...d, agentId: v }))}>
-                  <SelectTrigger className="w-44">
+                  <SelectTrigger id={`${uid}-agente`} className="w-44">
                     <SelectValue>{(v: string) => agentLabel(v)}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
@@ -554,9 +555,9 @@ export default function ConversasPage() {
             <div className="mt-3 flex flex-wrap items-end justify-between gap-3">
               <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Equipes</label>
+                  <label htmlFor={`${uid}-equipe`} className="text-xs font-medium text-muted-foreground">Equipes</label>
                   <Select value={draft.teamId} onValueChange={(v) => v && setDraft((d) => ({ ...d, teamId: v }))}>
-                    <SelectTrigger className="w-44">
+                    <SelectTrigger id={`${uid}-equipe`} className="w-44">
                       <SelectValue>{(v: string) => teamLabel(v)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent className="z-50">
@@ -571,12 +572,12 @@ export default function ConversasPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Escopo</label>
+                  <label htmlFor={`${uid}-escopo`} className="text-xs font-medium text-muted-foreground">Escopo</label>
                   <Select
                     value={draft.scope}
                     onValueChange={(v) => v && setDraft((d) => ({ ...d, scope: v as Filters["scope"] }))}
                   >
-                    <SelectTrigger className="w-56">
+                    <SelectTrigger id={`${uid}-escopo`} className="w-56">
                       <SelectValue>
                         {(v: string) => SCOPE_OPTIONS.find((o) => o.value === v)?.label ?? v}
                       </SelectValue>
@@ -592,9 +593,9 @@ export default function ConversasPage() {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground">Status</label>
+                  <label htmlFor={`${uid}-status`} className="text-xs font-medium text-muted-foreground">Status</label>
                   <Select value={draft.status} onValueChange={(v) => v && setDraft((d) => ({ ...d, status: v }))}>
-                    <SelectTrigger className="w-36">
+                    <SelectTrigger id={`${uid}-status`} className="w-36">
                       <SelectValue>
                         {(v: string) => STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v}
                       </SelectValue>
@@ -679,7 +680,7 @@ export default function ConversasPage() {
               <span className="text-xs text-muted-foreground">
                 {rangeStart} - {rangeEnd} de {totalCount} itens
               </span>
-              <div className="flex items-center gap-1">
+              <nav aria-label="Paginação" className="flex items-center gap-1">
                 <Button
                   variant="outline"
                   size="icon-sm"
@@ -700,6 +701,8 @@ export default function ConversasPage() {
                       variant={p === page ? "default" : "outline"}
                       size="icon-sm"
                       onClick={() => setPage(p)}
+                      aria-label={`Página ${p}`}
+                      aria-current={p === page ? "page" : undefined}
                       className={p === page ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}
                     >
                       {p}
@@ -715,7 +718,7 @@ export default function ConversasPage() {
                 >
                   <ChevronRight className="size-4" />
                 </Button>
-              </div>
+              </nav>
             </div>
           </>
         )}
