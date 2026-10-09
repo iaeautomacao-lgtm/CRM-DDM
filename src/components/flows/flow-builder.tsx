@@ -86,6 +86,7 @@ export function FlowBuilder() {
     updateNodeConfig,
     removeNode: removeNodeCtx,
     duplicateNode,
+    askConfirm,
   } = useFlowEditor();
 
   // List-only UI state: which cards are expanded + scroll refs for
@@ -108,8 +109,8 @@ export function FlowBuilder() {
   );
 
   const removeNode = useCallback(
-    (key: string) => {
-      if (!confirmNodeRemoval(state.nodes, [key])) return;
+    async (key: string) => {
+      if (!(await confirmNodeRemoval(state.nodes, [key], askConfirm))) return;
       removeNodeCtx(key);
       setExpanded((prev) => {
         const next = new Set(prev);
@@ -117,7 +118,7 @@ export function FlowBuilder() {
         return next;
       });
     },
-    [removeNodeCtx, state.nodes]
+    [removeNodeCtx, state.nodes, askConfirm]
   );
 
   const toggleExpanded = useCallback((key: string) => {
@@ -439,7 +440,7 @@ function NodeCard({
       className={cn(
         'bg-card relative overflow-hidden rounded-xl border transition-shadow duration-500',
         hasError
-          ? 'border-red-500/40'
+          ? 'border-danger/40'
           : isEntry
             ? 'border-primary/50'
             : 'border-border',
@@ -487,7 +488,7 @@ function NodeCard({
           )}
         </div>
         {hasError && (
-          <CircleAlert className="h-3.5 w-3.5 shrink-0 text-red-400" />
+          <CircleAlert className="h-3.5 w-3.5 shrink-0 text-danger" />
         )}
         {expanded ? (
           <ChevronUp className="text-muted-foreground h-4 w-4" />
@@ -521,14 +522,14 @@ function NodeCard({
               variant="ghost"
               size="sm"
               onClick={onRemove}
-              className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              className="text-danger hover:bg-danger-soft hover:text-danger"
             >
               <Trash2 className="h-3.5 w-3.5" />
               Remover nó
             </Button>
           </div>
           {issues.length > 0 && (
-            <div className="mt-3 flex flex-col gap-1 rounded-md bg-red-500/5 p-2">
+            <div className="mt-3 flex flex-col gap-1 rounded-md bg-danger-soft p-2">
               {issues.map((i, ix) => (
                 <IssueLine key={ix} issue={i} />
               ))}
@@ -621,6 +622,7 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
     'send_message',
     'send_media',
     'send_template',
+    'send_flow',
     'receive_attachment',
     'ai_agent',
     'collect_input',

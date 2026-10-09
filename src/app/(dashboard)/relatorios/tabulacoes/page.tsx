@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { usePermissions } from '@/hooks/use-permission';
 import { ErrorState } from '@/components/dashboard/error-state';
 import { Skeleton } from '@/components/dashboard/skeleton';
 import { MetricCard } from '@/components/relatorios/MetricCard';
@@ -76,6 +77,8 @@ export default function TabulacoesPage() {
   const [loadError, setLoadError] = useState(false);
   const [retry, setRetry] = useState(0);
   const [exporting, setExporting] = useState(false);
+  // POST /api/relatorios/exports exige reports.export (o servidor revalida).
+  const canExport = usePermissions().can('reports.export');
 
   useEffect(() => {
     if (!accountId) return;
@@ -178,9 +181,9 @@ export default function TabulacoesPage() {
   }
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Tabulações</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Tabulações</h1>
         <p className="text-muted-foreground text-sm">
           Conversas encerradas no período, por tabulação e origem.
         </p>
@@ -254,14 +257,16 @@ export default function TabulacoesPage() {
             <Search className="size-4" />
             Pesquisar
           </Button>
-          <Button
-            variant="outline"
-            disabled={loading || loadError || !summary.total || exporting}
-            onClick={exportCsv}
-          >
-            <Download className="size-4" />
-            {exporting ? 'Exportando…' : 'CSV'}
-          </Button>
+          {canExport && (
+            <Button
+              variant="outline"
+              disabled={loading || loadError || !summary.total || exporting}
+              onClick={exportCsv}
+            >
+              <Download className="size-4" />
+              {exporting ? 'Exportando…' : 'CSV'}
+            </Button>
+          )}
         </div>
       </div>
       {loading ? (

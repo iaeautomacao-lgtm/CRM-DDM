@@ -5,6 +5,16 @@ import { toast } from 'sonner';
 import { Database, FileText, Globe, Search, AlertCircle, Loader2, RefreshCw, Sparkles, Trash2, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   KB_ACCEPT,
   KB_ACCEPT_LABEL,
   KB_MAX_FILE_BYTES,
@@ -68,6 +78,7 @@ export function KnowledgeTab({
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
   const [reindexing, setReindexing] = useState<string | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<KnowledgeBaseFileItem | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const knowledge = data.knowledge;
@@ -127,7 +138,6 @@ export function KnowledgeTab({
   }
 
   async function handleRemove(file: KnowledgeBaseFileItem) {
-    if (!window.confirm(`Remover o arquivo "${file.name}" da base de conhecimento da conta?`)) return;
     setRemoving(file.id);
     try {
       await removeKnowledgeFile(file.id);
@@ -207,6 +217,29 @@ export function KnowledgeTab({
 
   return (
     <div className="space-y-8">
+      <AlertDialog open={pendingRemove !== null} onOpenChange={(open) => !open && setPendingRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover arquivo</AlertDialogTitle>
+            <AlertDialogDescription>
+              {`Remover o arquivo "${pendingRemove?.name ?? ''}" da base de conhecimento da conta?`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = pendingRemove;
+                setPendingRemove(null);
+                if (target) void handleRemove(target);
+              }}
+            >
+              Remover
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* 1. Base de Conhecimento Interna */}
       <div className="space-y-4">
         <div>
@@ -382,7 +415,7 @@ export function KnowledgeTab({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => void handleRemove(file)}
+                        onClick={() => setPendingRemove(file)}
                         disabled={removing === file.id}
                         aria-label={`Remover ${file.name}`}
                       >

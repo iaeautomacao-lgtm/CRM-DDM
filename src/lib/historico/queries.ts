@@ -39,7 +39,8 @@ export async function loadClosedConversations(
     period,
     search,
     page,
-  }: { accountId: string; period: HistoryPeriod; search: string; page: number },
+    tabulacao = null,
+  }: { accountId: string; period: HistoryPeriod; search: string; page: number; tabulacao?: string | null },
 ): Promise<{ rows: ClosedConversation[]; hasMore: boolean }> {
   let contactIds: string[] | null = null;
   const term = search.trim().replace(/[%,"]/g, "");
@@ -69,6 +70,8 @@ export async function loadClosedConversations(
   const start = periodStartIso(period);
   if (start) query = query.gte("closed_at", start);
   if (contactIds) query = query.in("contact_id", contactIds);
+  // Filtro por tabulação (tags.id gravada em conversations.outcome_tag_id ao encerrar; índice idx_conversations_outcome_tag, 041).
+  if (tabulacao) query = query.eq("outcome_tag_id", tabulacao);
 
   const { data, error } = await query;
   if (error) throw error;

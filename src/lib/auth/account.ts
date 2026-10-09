@@ -32,6 +32,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAccessDenied } from "@/lib/audit/access-denied";
 import { can, permissionsForRole, type Permission } from "./permissions";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
+import { MFA_REQUIRED_CODE } from "./mfa";
 
 // ------------------------------------------------------------
 // Errors
@@ -45,6 +46,26 @@ export class UnauthorizedError extends Error {
   constructor(message = "Unauthorized") {
     super(message);
     this.name = "UnauthorizedError";
+  }
+}
+
+/** Membro desativado (TASK3, migration 311): 403 com code 'member_deactivated' — vale enquanto o token antigo ainda vive. */
+export class MemberDeactivatedError extends Error {
+  readonly status = 403 as const;
+  readonly code = "member_deactivated" as const;
+  constructor(message = "Seu acesso a esta organização foi desativado. Fale com o administrador.") {
+    super(message);
+    this.name = "MemberDeactivatedError";
+  }
+}
+
+/** Sessão só com senha de quem tem 2FA (src/lib/auth/mfa.ts): 401 com code 'mfa_required'. */
+export class MfaRequiredError extends Error {
+  readonly status = 401 as const;
+  readonly code = MFA_REQUIRED_CODE;
+  constructor(message = "Confirme o código de verificação em duas etapas.") {
+    super(message);
+    this.name = "MfaRequiredError";
   }
 }
 
@@ -72,6 +93,12 @@ export class ForbiddenError extends Error {
  * server internals out of the wire.
  */
 export function toErrorResponse(err: unknown): NextResponse {
+  if (err instanceof MemberDeactivatedError) {
+    return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+  }
+  if (err instanceof MfaRequiredError) {
+    return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+  }
   if (err instanceof ForbiddenError && err.permission) {
     // Campos extras são aditivos: quem lê só `error` (string) continua funcionando.
     return NextResponse.json(
@@ -129,13 +156,16 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
+  if ((userErr as { code?: string } | null)?.code === MFA_REQUIRED_CODE) {
+    throw new MfaRequiredError();
+  }
   if (userErr || !user) {
     throw new UnauthorizedError();
   }
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("account_id, account_role")
+    .select("*")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -148,6 +178,9 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     // signup trigger. The user is authenticated but the app has
     // no way to scope their queries — treat as forbidden.
     throw new ForbiddenError("Profile is not linked to an account");
+  }
+  if ((data as { deactivated_at?: string | null }).deactivated_at) {
+    throw new MemberDeactivatedError();
   }
   if (!isAccountRole(data.account_role)) {
     // The DB enum should make this impossible, but a future

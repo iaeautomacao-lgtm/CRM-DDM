@@ -5,8 +5,9 @@ import { apiFetch } from "@/lib/api-fetch";
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
 
+import { ErrorState, ForbiddenState } from "@/components/ddm/states";
+import { usePermissions } from "@/hooks/use-permission";
 import { FlowEditorShell } from "@/components/flows/flow-editor-shell";
 import { useFlowDebug } from "@/hooks/use-flow-debug";
 import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
@@ -24,6 +25,30 @@ import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
  * "Flow not found" state below.
  */
 export default function FlowEditorPage() {
+  // O servidor exige flows.edit até para ler o fluxo (guardFlow em
+  // /api/flows/[id]): sem a permissão não há editor nem modo leitura.
+  const { loading, can } = usePermissions();
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (!can("flows.edit")) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <ForbiddenState
+          title="Você não tem acesso ao editor de fluxos"
+          hint="Se precisar dele, peça a um administrador da organização."
+        />
+      </div>
+    );
+  }
+  return <FlowEditorLoader />;
+}
+
+function FlowEditorLoader() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
 
@@ -31,6 +56,8 @@ export default function FlowEditorPage() {
   const [nodes, setNodes] = useState<FlowNodeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     if (!params.id) return;
@@ -54,7 +81,7 @@ export default function FlowEditorPage() {
       } catch (err) {
         if (!cancelled) {
           console.error(err);
-          toast.error("Não foi possível carregar o fluxo.");
+          setLoadError("Não foi possível carregar o fluxo.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -63,12 +90,27 @@ export default function FlowEditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [params.id]);
+  }, [params.id, reloadNonce]);
 
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <ErrorState
+          title="Não foi possível carregar o fluxo"
+          hint={loadError}
+          onRetry={() => {
+            setLoadError(null);
+            setLoading(true);
+            setReloadNonce((n) => n + 1);
+          }}
+        />
       </div>
     );
   }

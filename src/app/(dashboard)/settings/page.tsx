@@ -10,6 +10,7 @@ import { SettingsOverview } from '@/components/settings/settings-overview';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
+import { OrganizationPanel } from '@/components/settings/organization-panel';
 import { AgentsSettings } from '@/components/settings/agents/agents-settings';
 import { IntegrationsSettings } from '@/components/settings/integrations/integrations-settings';
 import {
@@ -68,6 +69,7 @@ function SettingsContent() {
     profile: <ProfileForm />,
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
+    organization: <OrganizationPanel />,
     agents: <AgentsSettings />,
   };
   const integrationActive = isIntegrationTab(section);

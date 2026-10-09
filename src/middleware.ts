@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { MFA_PATH } from '@/lib/auth/mfa'
 
 // Derivado de NEXT_PUBLIC_SUPABASE_URL, sem ref de fallback: um ref antigo
 // embutido faria o middleware procurar o cookie de OUTRO projeto e deslogar todo
@@ -136,6 +137,17 @@ export function middleware(request: NextRequest) {
     return finalizeAuthFx(noStore(NextResponse.redirect(url)))
   }
 
+  // Passo do código de 2FA (src/lib/auth/mfa.ts): só faz sentido com sessão (aal1). Sem sessão volta ao login
+  // preservando o destino. Com sessão a página decide (já aal2 ou sem fator → segue para ?next=), sem loop.
+  if (!isAuthenticated && pathname === MFA_PATH) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.search = ''
+    const next = request.nextUrl.searchParams.get('next')
+    if (next) url.searchParams.set('next', next)
+    return finalizeAuthFx(noStore(NextResponse.redirect(url)))
+  }
+
   // Protected pages - redirect to login if not authenticated.
   // '/unauthorized' is deliberately NOT in this list — it must stay
   // reachable without looping back into the role gate below.
@@ -149,6 +161,7 @@ export function middleware(request: NextRequest) {
     '/relatorios',
     '/monitoramento',
     '/disparador',
+    '/regua',
     '/agente-de-ia',
     '/configuracoes',
     '/automacoes',

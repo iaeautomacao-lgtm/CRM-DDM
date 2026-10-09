@@ -5,6 +5,8 @@ import {
   formatBytes,
   firstMissingBlock,
   importTokenField,
+  parseReusedList,
+  reuseCampaignHref,
   importListLabel,
   importPercent,
   isActiveExport,
@@ -94,5 +96,24 @@ describe("firstMissingBlock", () => {
     expect(firstMissingBlock("Faltam blocos: 0, 1, 2, 3, 4, 5, 6, 7, 8, 9….")).toBe(0);
     expect(firstMissingBlock("outra coisa")).toBe(0);
     expect(firstMissingBlock(undefined)).toBe(0);
+  });
+});
+
+describe("lista reaproveitada", () => {
+  const draftId = "6f1c2a4e-0b7d-4c1e-9a3f-2d5b8e7c9a01";
+  it("ida e volta pela URL", () => {
+    const href = reuseCampaignHref({ draftId, name: "Base & outubro", contacts: 1200, variables: 3 });
+    expect(href.startsWith("/disparador/campanhas?")).toBe(true);
+    expect(parseReusedList(href.split("?")[1])).toEqual({ draftId, name: "Base & outubro", contacts: 1200, variables: 3 });
+  });
+  it("rejeita draft_id inválido e normaliza números e nome", () => {
+    expect(parseReusedList("lista=nao-e-uuid")).toBeNull();
+    expect(parseReusedList("")).toBeNull();
+    expect(parseReusedList(`lista=${draftId}&contatos=-3&variaveis=abc`)).toEqual({
+      draftId,
+      name: "Lista importada",
+      contacts: 0,
+      variables: 0,
+    });
   });
 });

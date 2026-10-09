@@ -19,7 +19,7 @@ export function ReportTabs() {
   return (
     <nav
       aria-label="Seções de relatórios"
-      className="flex h-11 shrink-0 items-stretch gap-1 overflow-x-auto border-b border-border bg-background px-3 lg:px-6"
+      className="flex max-w-full shrink-0 gap-0.5 self-start overflow-x-auto rounded-lg bg-surface-3 p-[3px] [scrollbar-width:none]"
     >
       {visible.map(({ href, label }) => {
         const active = pathname === href || pathname.startsWith(href + "/");
@@ -29,10 +29,10 @@ export function ReportTabs() {
             href={href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex shrink-0 items-center border-b-2 px-3 text-sm font-medium transition-colors",
+              "inline-flex h-7 shrink-0 items-center whitespace-nowrap rounded-[6px] px-3 text-[12.5px] font-semibold transition-colors",
               active
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,.12),0_0_0_1px_var(--border)]"
+                : "text-foreground-2 hover:text-foreground",
             )}
           >
             {label}

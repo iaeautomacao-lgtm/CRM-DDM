@@ -25,16 +25,16 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Eye, FlaskConical, GitFork, List } from "lucide-react";
+import { Eye } from "lucide-react";
 import { format } from "date-fns";
 
 import { FlowBuilder } from "./flow-builder";
 import { FlowCanvas } from "./flow-canvas";
 import { FlowSimulatorPanel } from "./flow-simulator-panel";
 import { FlowEditorProvider, useFlowEditor } from "./flow-editor-state";
-import { EditorHeader } from "./header";
+import { EditorHeader, type EditorView } from "./header";
 import { EditorNotices } from "./editor-notices";
-import { ValidationPanel, ValidationPanelBadge } from "./validation-panel";
+import { ValidationPanel } from "./validation-panel";
 import { NODE_META, nodeColors, type NodeType } from "./shared";
 import { cn } from "@/lib/utils";
 import type { FlowRow, FlowNodeRow } from "@/lib/flows/types";
@@ -48,7 +48,7 @@ import type { FlowDebugState } from "@/hooks/use-flow-debug";
  */
 const MOBILE_BREAKPOINT = "(max-width: 767px)";
 
-type View = "canvas" | "list";
+type View = EditorView;
 
 const STORAGE_KEY = "wacrm.flowEditor.view";
 const VALIDATION_PANEL_STORAGE_KEY = "flows-validation-panel-open";
@@ -137,54 +137,23 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
       <div className="flex h-full min-h-0 flex-col">
         {isDebugMode && debug && <DebugBanner debug={debug} />}
 
-        <EditorHeader />
+        <EditorHeader
+          view={!isMobile && !isDebugMode ? { value: effectiveView, onChange: choose } : null}
+          sim={!isMobile && !isDebugMode ? { open: simOpen, onToggle: () => setSimOpen((v) => !v) } : null}
+          validation={{ open: panelOpen, onToggle: () => setPanelOpenPersisted(!panelOpen) }}
+        />
         <EditorNotices />
 
-        {/* ---- mode row: view toggle + node-type legend ----
-            Omitted entirely on mobile (canvas is unavailable there and
-            the legend is lg-only), so there's no empty band above the
-            stage on small screens. Also omitted in debug mode — List
-            isn't offered there (see effectiveView above), so a
-            Canvas/List toggle with only one live option is just noise. */}
+        {/* ---- legenda dos tipos de nó (só telas largas, fora do debug) ---- */}
         {!isMobile && !isDebugMode && (
-          <div className="flex items-center gap-4 px-6 py-3.5">
-            <div
-              role="group"
-              aria-label="Visualização do editor"
-              className="inline-flex gap-0.5 rounded-lg border border-border bg-muted p-0.5"
-            >
-              <SegButton
-                active={effectiveView === "canvas"}
-                onClick={() => choose("canvas")}
-                icon={<GitFork className="h-3.5 w-3.5" />}
-                label="Diagrama"
-              />
-              <SegButton
-                active={effectiveView === "list"}
-                onClick={() => choose("list")}
-                icon={<List className="h-3.5 w-3.5" />}
-                label="Lista"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => setSimOpen((v) => !v)}
-              aria-pressed={simOpen}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12.5px] font-medium transition-colors",
-                simOpen ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <FlaskConical className="h-3.5 w-3.5" />
-              Testar fluxo
-            </button>
+          <div className="hidden items-center px-6 pt-3 lg:flex">
             <NodeLegend />
           </div>
         )}
 
         {/* ---- stage (+ painel "Testar fluxo" ao lado, quando aberto) ---- */}
-        <div className="mx-6 flex min-h-0 flex-1 gap-3">
-          <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-card-2">
+        <div className="mx-4 mt-3 flex min-h-0 flex-1 gap-3 md:mx-6">
+          <div className="relative min-h-0 flex-1 overflow-hidden rounded-[10px] border border-border bg-card-2">
             {effectiveView === "canvas" ? (
               <FlowCanvas debug={debug} />
             ) : (
@@ -192,23 +161,21 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
                 <FlowBuilder />
               </div>
             )}
-            {/* Reopen affordance — only rendered while the bar below is
-                collapsed, in both views (the bar itself is shared across
-                views too, per its own header comment). */}
-            {!panelOpen && (
-              <ValidationPanelBadge onClick={() => setPanelOpenPersisted(true)} />
-            )}
           </div>
           {simOpen && !isMobile && !isDebugMode && (
-            <FlowSimulatorPanel onClose={() => setSimOpen(false)} />
+            <div className="flex min-h-0 animate-ddm-drawer">
+              <FlowSimulatorPanel onClose={() => setSimOpen(false)} />
+            </div>
           )}
         </div>
 
         {/* ---- validation / activate-readiness bar ---- */}
-        {panelOpen && (
-          <div className="px-6 pb-5 pt-3">
+        {panelOpen ? (
+          <div className="animate-ddm-up px-4 pb-5 pt-3 md:px-6">
             <ValidationPanel onClose={() => setPanelOpenPersisted(false)} />
           </div>
+        ) : (
+          <div className="pb-4" />
         )}
       </div>
     </FlowEditorProvider>
@@ -309,14 +276,8 @@ function DebugBanner({ debug }: { debug: FlowDebugState }) {
   const contactLabel = contact?.name?.trim() || contact?.phone || "contato desconhecido";
   const startedAt = debug.runMeta?.started_at;
   return (
-    <div
-      className="flex items-center gap-2.5 border-b px-6 py-2.5 text-[13px]"
-      style={{
-        backgroundColor: "rgba(255, 87, 6, 0.12)",
-        borderBottomColor: "#FF5706",
-      }}
-    >
-      <Eye className="h-4 w-4 shrink-0" style={{ color: "#FF5706" }} />
+    <div className="flex animate-ddm-fade items-center gap-2.5 border-b border-primary bg-primary-soft px-6 py-2.5 text-[13px]">
+      <Eye className="size-4 shrink-0 text-primary-text" />
       <span className="min-w-0 truncate text-foreground">
         {debug.loading
           ? "Modo debug — carregando execução…"
@@ -327,7 +288,7 @@ function DebugBanner({ debug }: { debug: FlowDebugState }) {
       <button
         type="button"
         onClick={debug.exitDebugMode}
-        className="ml-auto shrink-0 rounded-md border border-border bg-card px-2.5 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-muted"
+        className="ml-auto shrink-0 rounded-md border border-border bg-card px-2.5 py-1 text-[12px] font-medium text-foreground transition-colors hover:bg-surface-hover"
       >
         Sair do debug
       </button>
@@ -335,31 +296,3 @@ function DebugBanner({ debug }: { debug: FlowDebugState }) {
   );
 }
 
-function SegButton({
-  active,
-  onClick,
-  icon,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12.5px] font-medium transition-colors",
-        active
-          ? "bg-card text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}

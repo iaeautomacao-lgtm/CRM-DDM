@@ -44,6 +44,8 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api-fetch";
 import { normalizeForSearch } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
+import { ErrorState } from "@/components/dashboard/error-state";
 import { ROLE_META } from "@/components/settings/role-meta";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -322,9 +324,12 @@ export default function EquipeDetailPage({
   // Supervisor (admin) view: read-only. Owner keeps full edit access.
   // UI-only — RLS still allows admin writes where migrations already
   // granted them; this just hides the controls per this task's scope.
-  const isReadOnly = accountRole === "admin";
+  // Também sem `teams.manage` (papel personalizado) a tela fica só leitura.
+  const { can } = usePermissions();
+  const isReadOnly = accountRole === "admin" || !can("teams.manage");
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [team, setTeam] = useState<Team | null>(null);
   const [otherTeams, setOtherTeams] = useState<Team[]>([]);
   const [channels, setChannels] = useState<LinkedChannel[]>([]);
@@ -418,9 +423,11 @@ export default function EquipeDetailPage({
       if (!channelsRes.error) {
         setChannels((channelsRes.data ?? []) as LinkedChannel[]);
       }
+      setLoadError(false);
     } catch (err) {
       console.error("[EquipeDetail] fetch error:", err);
       toast.error("Falha ao carregar equipe");
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -936,6 +943,14 @@ export default function EquipeDetailPage({
     );
   }
 
+  if (loadError && !team) {
+    return (
+      <PageBody>
+        <ErrorState title="Não foi possível carregar a equipe" onRetry={() => void fetchTeam()} />
+      </PageBody>
+    );
+  }
+
   if (!team) return null;
 
   return (
@@ -950,7 +965,9 @@ export default function EquipeDetailPage({
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="min-w-0 flex-1">
-          {isEditingName ? (
+          {isReadOnly ? (
+            <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">{team.name}</h1>
+          ) : isEditingName ? (
             <div className="flex items-center gap-1.5">
               <Input
                 value={editName}
@@ -1129,6 +1146,7 @@ export default function EquipeDetailPage({
                     min={1}
                     value={sessionTimeout}
                     onChange={(e) => setSessionTimeout(e.target.value)}
+                    disabled={isReadOnly}
                     placeholder="ex.: 30"
                   />
                 </div>
@@ -1137,7 +1155,7 @@ export default function EquipeDetailPage({
                     Equipe de transbordo{" "}
                     <span className="text-xs text-muted-foreground">(opcional)</span>
                   </Label>
-                  <Select value={overflowTeamId} onValueChange={(v) => v && setOverflowTeamId(v)}>
+                  <Select value={overflowTeamId} onValueChange={(v) => v && setOverflowTeamId(v)} disabled={isReadOnly}>
                     <SelectTrigger className="w-full">
                       <SelectValue>
                         {(v: string) =>
@@ -1159,7 +1177,7 @@ export default function EquipeDetailPage({
                 </div>
               </div>
               <div className="flex justify-end">
-                <Button onClick={handleSaveInfo} disabled={!infoChanged || savingInfo}>
+                <Button onClick={handleSaveInfo} disabled={isReadOnly || !infoChanged || savingInfo}>
                   {savingInfo ? (
                     <>
                       <Loader2 className="size-4 animate-spin" />

@@ -28,13 +28,18 @@
     "src/lib/auth/sessions.ts",
     "src/lib/billing/ddm-source.ts",
     "src/lib/billing/engine.ts",
+    "src/lib/whatsapp/flows-data-ddm.ts",
+    "src/lib/billing/ruler-api.ts",
+    "src/lib/billing/route-helpers.ts",
+    "src/lib/disparador/flow-button.ts",
     "src/lib/billing/enqueuer.ts",
     "src/lib/billing/sync.ts",
     "src/lib/webhooks-out/endpoints.ts",
     "src/lib/webhooks-out/deliver.ts",
     "src/lib/ai/knowledge/extract.ts",
     "src/lib/ai/knowledge/files.ts",
-    "src/lib/ai/knowledge/vector-store.ts"
+    "src/lib/ai/knowledge/vector-store.ts",
+    "src/lib/members/member-status.ts"
   ],
   "clientOnlyDirs": [
     "src/components",

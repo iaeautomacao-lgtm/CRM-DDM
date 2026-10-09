@@ -52,6 +52,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Disparador · Blacklist", group: "Campanhas", href: "/disparador/blacklist", keywords: "bloqueados descadastro" },
   { label: "Contatos do disparador", group: "Campanhas", href: "/disparador/contatos", keywords: "importar lista planilha" },
   { label: "Templates", group: "Campanhas", href: "/templates", keywords: "modelos meta" },
+  { label: "Régua de cobrança", group: "Campanhas", href: "/regua", keywords: "cobranca vencimento inscricoes dunning" },
 
   { label: "Fluxos", group: "Automação", href: "/flows", keywords: "flow builder" },
   { label: "Automações", group: "Automação", href: "/automations", permission: "automations.view" },

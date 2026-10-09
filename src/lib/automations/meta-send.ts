@@ -157,6 +157,7 @@ async function sendViaMeta(
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: input.conversationId,
     sender_type: 'bot',
+    origin: 'automation',
     content_type,
     content_text,
     template_name,

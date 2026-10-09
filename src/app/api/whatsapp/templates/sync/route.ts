@@ -33,6 +33,11 @@ interface MetaButton {
   url?: string
   phone_number?: string
   example?: string[] | string
+  // botão FLOW (PRD 21)
+  flow_id?: string
+  flow_name?: string
+  flow_action?: string
+  navigate_screen?: string
 }
 
 interface MetaTemplateComponent {
@@ -108,7 +113,18 @@ function parseButtons(metaButtons: MetaButton[] | undefined): TemplateButton[] {
           example: Array.isArray(b.example) ? b.example[0] ?? '' : b.example ?? '',
         })
         break
-      // OTP, FLOW, etc — out of scope for v1; drop silently.
+      case 'FLOW':
+        // PRD 21.3: guardar o botão para o disparador mandar o flow_token por envio (antes era descartado e o envio sem ele era recusado pela Meta)
+        out.push({
+          type: 'FLOW',
+          text: b.text,
+          ...(b.flow_id ? { flow_id: String(b.flow_id) } : {}),
+          ...(b.flow_name ? { flow_name: b.flow_name } : {}),
+          ...(b.flow_action === 'data_exchange' || b.flow_action === 'navigate' ? { flow_action: b.flow_action } : {}),
+          ...(b.navigate_screen ? { navigate_screen: b.navigate_screen } : {}),
+        })
+        break
+      // OTP etc — out of scope; drop silently.
     }
   }
   return out

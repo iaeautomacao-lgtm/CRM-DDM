@@ -241,23 +241,32 @@ export function WebchatClient({ token }: { token: string }) {
   const accentStyle = page.accent ? accentVars(page.accent) : undefined;
 
   return (
-    <div className="flex h-dvh flex-col bg-background" style={accentStyle}>
-      <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+    // Visual do protótipo DDM: cartão de até 420px centralizado no desktop e
+    // tela cheia no celular. A cor do Webchat (/canais) segue valendo.
+    <div className="flex h-dvh items-center justify-center bg-surface-3 sm:p-6" style={accentStyle}>
+      <section
+        aria-label={`Chat com ${page.brand}`}
+        className="flex h-full w-full max-w-[420px] animate-ddm-up flex-col overflow-hidden bg-card sm:h-[min(680px,100%)] sm:rounded-2xl sm:shadow-[0_24px_60px_rgba(20,16,12,.14),0_0_0_1px_rgba(20,16,12,.06)]"
+      >
+      <header className="flex shrink-0 items-center gap-3 bg-[#18191B] px-4 py-3.5 text-white">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-[10px] bg-primary text-[13px] font-bold text-primary-foreground">
           {page.brand.charAt(0).toUpperCase()}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{page.brand}</p>
-          <p className="text-[11px] text-muted-foreground">Atendimento online</p>
+          <p className="truncate text-sm font-semibold">{page.brand}</p>
+          <p className="flex items-center gap-1.5 text-xs text-[#B4B9C0]">
+            <span aria-hidden className="size-[7px] rounded-full bg-[#3FCF8E]" />
+            Atendimento online
+          </p>
         </div>
       </header>
 
-      <p className="border-b border-border bg-muted/60 px-4 py-2 text-center text-[11px] text-muted-foreground">
+      <p className="shrink-0 border-b border-border bg-surface-3 px-4 py-2 text-center text-[11.5px] text-muted-foreground">
         Mantenha esta página aberta: você não recebe notificação das respostas aqui.
       </p>
 
-      <main className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-        <div className="mx-auto flex max-w-2xl flex-col gap-2">
+      <main className="min-h-0 flex-1 overflow-y-auto bg-background px-4 py-4">
+        <div className="flex flex-col gap-2">
           {messages.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {page.welcome}
@@ -298,6 +307,7 @@ export function WebchatClient({ token }: { token: string }) {
         onSend={sendText}
         onFile={sendFile}
       />
+      </section>
     </div>
   );
 }
@@ -345,13 +355,15 @@ function MessageBubble({
     <div className={cn("flex flex-col", mine ? "items-end" : "items-start")}>
       <div
         className={cn(
-          "max-w-[85%] rounded-2xl px-3 py-2 text-sm",
-          mine ? "rounded-br-md bg-primary text-primary-foreground" : "rounded-bl-md bg-muted text-foreground"
+          "max-w-[84%] px-3 py-2 text-[13.5px] leading-relaxed",
+          mine
+            ? "rounded-[14px_14px_4px_14px] bg-primary-soft text-foreground"
+            : "rounded-[14px_14px_14px_4px] bg-card text-foreground shadow-[inset_0_0_0_1px_var(--border)]"
         )}
       >
         <MessageMedia message={message} />
         {message.text && <p className="whitespace-pre-wrap break-words">{message.text}</p>}
-        <p className={cn("mt-1 text-right text-[10px]", mine ? "text-primary-foreground/70" : "text-muted-foreground")}>
+        <p className="mt-1 text-right text-[11px] text-muted-foreground">
           {time}
         </p>
       </div>
@@ -468,8 +480,8 @@ function Composer({
   };
 
   return (
-    <footer className="border-t border-border bg-card px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-      <div className="mx-auto flex max-w-2xl items-end gap-2">
+    <footer className="shrink-0 border-t border-border bg-card px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))]">
+      <div className="flex items-end gap-2">
         <input
           ref={fileRef}
           type="file"
@@ -503,14 +515,14 @@ function Composer({
           maxLength={4000}
           placeholder={recorder ? "Gravando áudio…" : "Digite uma mensagem"}
           disabled={!!recorder}
-          className="max-h-32 min-h-10 flex-1 resize-none rounded-2xl border border-border bg-background px-4 py-2.5 text-base text-foreground outline-none focus:border-primary/60 md:text-sm"
+          className="max-h-32 min-h-10 flex-1 resize-none rounded-[20px] border border-border bg-card px-4 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-[3px] focus:ring-primary/20 md:text-sm"
         />
         {draft.trim() || !canRecord ? (
           <button
             type="button"
             onClick={onSend}
             disabled={sending || !draft.trim()}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-50"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-muted-foreground"
             aria-label="Enviar"
           >
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

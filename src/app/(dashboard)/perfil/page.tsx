@@ -6,23 +6,24 @@
 // same components /settings?tab=profile and /settings?tab=security
 // already render — reused as-is, no new API routes.
 
+import { PageBody } from "@/components/ddm/page-toolbar";
 import { ProfileForm } from "@/components/settings/profile-form";
 import { SecurityPanel } from "@/components/settings/security-panel";
 
 export default function PerfilPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Meu Perfil</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">
+    <PageBody className="gap-6">
+      <div className="flex flex-col gap-1.5 pt-1">
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Meu perfil</h2>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
           Suas informações pessoais e configurações de segurança.
         </p>
       </div>
 
-      <div className="space-y-6">
+      <div className="grid animate-ddm-fade items-start gap-6 lg:grid-cols-2">
         <ProfileForm />
         <SecurityPanel />
       </div>
-    </div>
+    </PageBody>
   );
 }

@@ -8,9 +8,9 @@ export interface MetricCardProps {
 
 export function MetricCard({ title, icon: Icon, metrics }: MetricCardProps) {
   return (
-    <div className="rounded-xl border border-border bg-card p-4">
+    <div className="animate-ddm-up rounded-[10px] border border-border bg-card p-4">
       <div className="mb-3 flex items-center gap-2">
-        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
           <Icon className="size-4" />
         </span>
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>
@@ -19,7 +19,7 @@ export function MetricCard({ title, icon: Icon, metrics }: MetricCardProps) {
         {metrics.map((m) => (
           <div key={m.label} className="flex items-center justify-between text-sm">
             <dt className="text-muted-foreground">{m.label}</dt>
-            <dd className="font-medium text-foreground">{m.value}</dd>
+            <dd className="font-semibold tabular-nums text-foreground">{m.value}</dd>
           </div>
         ))}
       </dl>

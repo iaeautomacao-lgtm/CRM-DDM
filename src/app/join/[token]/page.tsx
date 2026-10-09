@@ -37,14 +37,10 @@ import {
   UsersRound,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { AUTH_SUBMIT_CLASS, AuthShell } from '@/components/auth/auth-shell';
+import { cn } from '@/lib/utils';
 import {
   Dialog,
   DialogContent,
@@ -69,7 +65,7 @@ type PeekResult = PeekOk | PeekFail;
 
 // PT-BR labels, matching the canonical mapping in role-meta.ts
 // (admin=Administrador, supervisor=Supervisor, agent=Operador,
-// viewer=Visualizador) even though the rest of this page is English —
+// viewer=Visualizador) —
 // this page has no AuthProvider to pull role-meta.ts's icon-bearing
 // ROLE_META from, so the non-owner labels are duplicated here.
 const ROLE_LABEL: Record<PeekOk['role'], string> = {
@@ -81,20 +77,20 @@ const ROLE_LABEL: Record<PeekOk['role'], string> = {
 
 const FAIL_COPY: Record<PeekFail['reason'], { title: string; body: string }> = {
   not_found: {
-    title: 'Invite not found',
-    body: 'This link doesn’t match a valid invitation. Double-check the URL or ask the person who invited you to send a new one.',
+    title: 'Convite não encontrado',
+    body: 'Este link não corresponde a um convite válido. Confira o endereço ou peça a quem convidou para enviar um novo.',
   },
   used: {
-    title: 'Invite already used',
-    body: 'This invitation has already been accepted. If that wasn’t you, ask the account admin to send a fresh link.',
+    title: 'Convite já usado',
+    body: 'Este convite já foi aceito. Se não foi você, peça ao administrador da organização para enviar um novo link.',
   },
   expired: {
-    title: 'Invite expired',
-    body: 'This invitation has expired. Ask the account admin to send a new one — they take a few seconds to generate.',
+    title: 'Convite expirado',
+    body: 'Este convite expirou. Peça ao administrador da organização para enviar um novo.',
   },
   server_error: {
-    title: 'Something went wrong',
-    body: 'We couldn’t verify this invitation right now. Try refreshing the page in a moment.',
+    title: 'Algo deu errado',
+    body: 'Não foi possível verificar o convite agora. Tente de novo em instantes.',
   },
 };
 
@@ -190,21 +186,21 @@ export default function JoinPage() {
         if (res.status === 409) {
           setConflictMessage(
             payload.error ||
-              'You are already in another account. Sign in with a different email to join this one.',
+              'Você já está em outra organização. Entre com outro e-mail para participar desta.',
           );
         } else {
-          toast.error(payload.error || 'Failed to accept invitation');
+          toast.error(payload.error || 'Não foi possível aceitar o convite.');
         }
         setAccepting(false);
         return;
       }
-      toast.success('Welcome to the team');
+      toast.success('Boas-vindas à equipe!');
       // Full reload (not router.push) so AuthProvider re-fetches
       // the profile with the new account_id and account_role.
       window.location.href = '/dashboard';
     } catch (err) {
       console.error('[join] redeem error:', err);
-      toast.error('Could not reach the server');
+      toast.error('Não foi possível falar com o servidor.');
       setAccepting(false);
     }
   }, [token]);
@@ -219,176 +215,133 @@ export default function JoinPage() {
       window.location.reload();
     } catch (err) {
       console.error('[join] sign-out error:', err);
-      toast.error('Could not sign out. Try refreshing the page.');
+      toast.error('Não foi possível sair. Atualize a página e tente de novo.');
       setSigningOut(false);
     }
   }, []);
 
-  // ----- Loading state (peek pending OR auth not yet resolved) -----
+  // ----- Carregando (convite ou sessão ainda sem resposta) -----
   if (peek === null || authedUserId === undefined) {
     return (
-      <Card className="w-full max-w-md border-border bg-card">
-        <CardContent className="flex flex-col items-center gap-3 py-12">
-          <Loader2 className="size-6 animate-spin text-primary" />
-          <p className="text-sm text-muted-foreground">Verifying invitation…</p>
-        </CardContent>
-      </Card>
+      <AuthShell title="Convite" description="Verificando o convite…">
+        <div role="status" aria-busy="true" className="flex flex-col gap-3">
+          <Skeleton className="h-14 w-full rounded-lg" />
+          <Skeleton className="h-11 w-full rounded-lg" />
+        </div>
+      </AuthShell>
     );
   }
 
-  // ----- Peek failed -----
+  // ----- Convite inválido -----
   if (!peek.ok) {
     const copy = FAIL_COPY[peek.reason];
     return (
-      <Card className="w-full max-w-md border-border bg-card">
-        <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/10">
-            <MailX className="h-6 w-6 text-red-400" />
-          </div>
-          <CardTitle className="text-xl text-foreground">{copy.title}</CardTitle>
-          <CardDescription className="text-muted-foreground">
-            {copy.body}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
-          {/* For server_error the failure is transient — the network
-              flapped or the peek endpoint hiccupped. Try-again is
-              the right primary action; the "create account" /
-              "sign in" links stay as secondary options. Other
-              failure reasons (not_found / used / expired) are
-              terminal for this token, so no retry — just the
-              signup/sign-in escape hatches. */}
-          {peek.reason === 'server_error' ? (
-            <>
-              <Button
-                onClick={loadPeekAndAuth}
-                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                Try again
-              </Button>
-            </>
-          ) : (
-            <>
-              <Link href="/login">
-                <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-                  Entrar
-                </Button>
-              </Link>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      <AuthShell
+        icon={
+          <span className="flex size-10 items-center justify-center rounded-full bg-danger-soft text-danger">
+            <MailX className="size-5" aria-hidden="true" />
+          </span>
+        }
+        title={<span role="alert">{copy.title}</span>}
+        description={copy.body}
+      >
+        {/* server_error é passageiro: "Tentar de novo" é a ação principal. Os demais motivos encerram este link. */}
+        {peek.reason === "server_error" ? (
+          <Button onClick={loadPeekAndAuth} className={AUTH_SUBMIT_CLASS}>
+            Tentar de novo
+          </Button>
+        ) : (
+          <Link href="/login" className={cn(buttonVariants(), AUTH_SUBMIT_CLASS)}>
+            Entrar
+          </Link>
+        )}
+      </AuthShell>
     );
   }
 
-  // ----- Peek OK -----
-  const inviteHeader = (
-    <CardHeader className="items-center text-center">
-      <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-        <UsersRound className="h-6 w-6 text-primary" />
-      </div>
-      <CardTitle className="text-xl text-foreground">
-        You&apos;re invited to{' '}
-        <span className="text-primary">{peek.account_name}</span>
-      </CardTitle>
-      <CardDescription className="text-muted-foreground">
-        You&apos;ll join as{' '}
-        <span className="inline-flex items-center gap-1 text-foreground">
-          <ShieldCheck className="size-3.5 text-primary" />
-          {ROLE_LABEL[peek.role]}
-        </span>
-        . Link valid until{' '}
-        {new Date(peek.expires_at).toLocaleDateString(undefined, {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-        })}
-        .
-      </CardDescription>
-    </CardHeader>
+  // ----- Convite válido -----
+  const inviteIcon = (
+    <span className="flex size-10 items-center justify-center rounded-full bg-primary-soft text-primary-text">
+      <UsersRound className="size-5" aria-hidden="true" />
+    </span>
+  );
+  const inviteTitle = (
+    <>
+      Você foi convidado para <span className="text-primary-text">{peek.account_name}</span>
+    </>
+  );
+  const inviteDetails = (
+    <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 rounded-lg bg-surface-3 px-3.5 py-3 text-[13px]">
+      <dt className="text-foreground-2">Papel</dt>
+      <dd className="m-0 inline-flex items-center gap-1.5 font-semibold text-foreground">
+        <ShieldCheck className="size-3.5 text-primary-text" aria-hidden="true" />
+        {ROLE_LABEL[peek.role]}
+      </dd>
+      <dt className="text-foreground-2">Válido até</dt>
+      <dd className="m-0 font-semibold tabular-nums text-foreground">
+        {new Date(peek.expires_at).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}
+      </dd>
+    </dl>
   );
 
-  // ----- Authed: show Accept button -----
+  // ----- Com sessão: aceitar -----
   if (authedUserId) {
     return (
       <>
-        <Card className="w-full max-w-md border-border bg-card">
-          {inviteHeader}
-          <CardContent className="flex flex-col gap-3">
-            <Button
-              onClick={handleAccept}
-              disabled={accepting}
-              className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-            >
+        <AuthShell icon={inviteIcon} title={inviteTitle} description="Confira os dados e aceite para entrar na organização.">
+          {inviteDetails}
+          <div className="flex flex-col gap-2.5">
+            <Button onClick={handleAccept} disabled={accepting} className={AUTH_SUBMIT_CLASS}>
               {accepting ? (
                 <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Accepting…
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  Aceitando…
                 </>
               ) : (
                 <>
-                  <CheckCircle className="size-4" />
-                  Accept invitation
+                  <CheckCircle className="size-4" aria-hidden="true" />
+                  Aceitar convite
                 </>
               )}
             </Button>
-            <p className="text-center text-xs text-muted-foreground">
-              Accepting moves your login into{' '}
-              <span className="text-muted-foreground">{peek.account_name}</span>. Your
-              empty personal account from signup will be cleaned up.
+            <p className="m-0 text-center text-xs text-muted-foreground">
+              Ao aceitar, seu login passa para <span className="font-semibold text-foreground-2">{peek.account_name}</span>. A
+              conta pessoal vazia criada no cadastro é removida.
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </AuthShell>
 
-        {/* Conflict modal — opens when the redeem endpoint returns 409
-            (caller already in a shared account or has domain data).
-            Blocks the flow until the user picks a recovery action so
-            they aren't stuck retrying an inevitable failure. */}
+        {/* Conflito (409): o usuário já está em outra organização ou tem dados. Bloqueia até escolher o que fazer. */}
         <Dialog
           open={conflictMessage !== null}
           onOpenChange={(open) => {
             if (!open) setConflictMessage(null);
           }}
         >
-          <DialogContent className="bg-popover border-border sm:max-w-md">
+          <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2 text-popover-foreground">
-                <AlertTriangle className="size-4 text-amber-400" />
-                Can&apos;t join {peek.account_name} with this account
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="size-4 text-warning" aria-hidden="true" />
+                Não dá para entrar em {peek.account_name} com esta conta
               </DialogTitle>
-              <DialogDescription className="text-muted-foreground">
-                {conflictMessage}
-              </DialogDescription>
+              <DialogDescription>{conflictMessage}</DialogDescription>
             </DialogHeader>
-            <div className="space-y-2 py-2 text-xs text-muted-foreground">
-              <p>
-                To join{' '}
-                <span className="text-popover-foreground">{peek.account_name}</span>,
-                sign out and sign up again with a different email address.
-                The invite link stays valid as long as it hasn&apos;t
-                expired.
-              </p>
-            </div>
-            <DialogFooter className="bg-popover border-border">
-              <Button
-                variant="outline"
-                onClick={() => setConflictMessage(null)}
-                className="border-border text-popover-foreground hover:bg-muted"
-              >
-                Stay signed in
+            <p className="m-0 text-xs text-muted-foreground">
+              Para entrar em <span className="font-semibold text-foreground">{peek.account_name}</span>, saia e entre com outro
+              e-mail. O link do convite continua valendo enquanto não expirar.
+            </p>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConflictMessage(null)}>
+                Continuar conectado
               </Button>
-              <Button
-                onClick={handleSignOutAndRetry}
-                disabled={signingOut}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
+              <Button onClick={handleSignOutAndRetry} disabled={signingOut}>
                 {signingOut ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Signing out…
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    Saindo…
                   </>
                 ) : (
-                  'Sign out & use a different email'
+                  "Sair e usar outro e-mail"
                 )}
               </Button>
             </DialogFooter>
@@ -398,21 +351,19 @@ export default function JoinPage() {
     );
   }
 
-  // ----- Not authed: prompt to sign up or sign in -----
+  // ----- Sem sessão: entrar para aceitar -----
   return (
-    <Card className="w-full max-w-md border-border bg-card">
-      {inviteHeader}
-      <CardContent className="flex flex-col gap-2">
-        {/* Sem cadastro público: quem ainda não tem usuário pede ao admin. */}
-        <Link href={`/login?invite=${encodeURIComponent(token!)}`}>
-          <Button className="w-full bg-primary text-primary-foreground hover:bg-primary/90">
-            Entrar para aceitar o convite
-          </Button>
-        </Link>
-        <p className="text-center text-xs text-muted-foreground">
-          Ainda não tem usuário? Peça ao administrador para criá-lo.
-        </p>
-      </CardContent>
-    </Card>
+    <AuthShell
+      icon={inviteIcon}
+      title={inviteTitle}
+      description="Entre com o seu usuário para aceitar o convite."
+      // Sem cadastro público: quem ainda não tem usuário pede ao admin.
+      footer="Ainda não tem usuário? Peça ao administrador para criá-lo."
+    >
+      {inviteDetails}
+      <Link href={`/login?invite=${encodeURIComponent(token!)}`} className={cn(buttonVariants(), AUTH_SUBMIT_CLASS)}>
+        Entrar para aceitar o convite
+      </Link>
+    </AuthShell>
   );
 }

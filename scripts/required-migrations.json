@@ -199,6 +199,10 @@
       "kind": "registry"
     },
     {
+      "version": "262_flow_send_flow_node",
+      "kind": "registry"
+    },
+    {
       "version": "270_billing_rulers",
       "kind": "registry"
     },
@@ -220,6 +224,14 @@
     },
     {
       "version": "275_billing_sync_state",
+      "kind": "registry"
+    },
+    {
+      "version": "276_billing_permissions",
+      "kind": "registry"
+    },
+    {
+      "version": "277_billing_api_functions",
       "kind": "registry"
     },
     {
@@ -269,7 +281,33 @@
       "kind": "registry"
     },
     {
-      "version": "310_rls_mfa_aal2",
+      "version": "296b_dmq_contact_scheduled_idx",
+      "kind": "index",
+      "index": "idx_dmq_contact_scheduled"
+    },
+    {
+      "version": "297_history_export_jobs",
+      "kind": "registry"
+    },
+    {
+      "version": "300_monitoring_agent_metrics",
+      "kind": "registry"
+    },
+    {
+      "version": "301_quick_replies_visibility_usage",
+      "kind": "registry"
+    },
+    {
+      "version": "302_message_origin_my_handled",
+      "kind": "registry"
+    },
+    {
+      "version": "302b_conversation_assignments_from_agent_idx",
+      "kind": "index",
+      "index": "idx_conversation_assignments_from_agent"
+    },
+    {
+      "version": "311_member_deactivation_last_access",
       "kind": "registry"
     }
   ]

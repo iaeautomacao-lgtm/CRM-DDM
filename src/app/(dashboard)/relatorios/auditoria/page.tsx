@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/dashboard/empty-state";
+import { ErrorState, ForbiddenState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { AccountMember } from "@/types";
 import { AuditDetailModal, EVENT_BADGE } from "@/components/relatorios/AuditDetailModal";
@@ -40,6 +41,7 @@ import {
 } from "@/lib/audit/labels";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
 import { loadSharedPeriod, saveSharedPeriod } from "@/lib/relatorios/period";
+import { usePermissions } from "@/hooks/use-permission";
 import { PeriodFilter } from "@/components/relatorios/period-filter";
 
 const ALL = "all";
@@ -115,6 +117,9 @@ function FilterSelect({
 }
 
 export default function AuditoriaPage() {
+  // Exportar exige reports.export; o servidor revalida.
+  const perms = usePermissions();
+  const canExport = perms.can("reports.export");
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [draft, setDraft] = useState<AuditFilters>(defaultFilters);
   const [applied, setApplied] = useState<AuditFilters>(defaultFilters);
@@ -134,6 +139,7 @@ export default function AuditoriaPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   // Só a resposta da busca mais recente vale (troca rápida de página).
@@ -155,6 +161,7 @@ export default function AuditoriaPage() {
   const runSearch = useCallback(async () => {
     const seq = ++requestSeq.current;
     setLoading(true);
+    setLoadError(false);
     try {
       const qs = toQuery(applied);
       qs.set("page", String(page));
@@ -168,6 +175,7 @@ export default function AuditoriaPage() {
     } catch (err) {
       if (seq !== requestSeq.current) return;
       console.error("[auditoria] failed to load audit logs:", err);
+      setLoadError(true);
       toast.error("Falha ao carregar a auditoria");
     } finally {
       if (seq === requestSeq.current) setLoading(false);
@@ -214,22 +222,34 @@ export default function AuditoriaPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const set = (patch: Partial<AuditFilters>) => setDraft((d) => ({ ...d, ...patch }));
 
+  // GET /api/audit-logs exige audit.view; o servidor revalida.
+  if (!perms.loading && !perms.error && !perms.can("audit.view")) {
+    return (
+      <ForbiddenState
+        title="Você não tem permissão para ver a auditoria"
+        hint="A auditoria é restrita a administradores e ao proprietário."
+      />
+    );
+  }
+
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Auditoria</h1>
+          <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Auditoria</h1>
           <p className="text-sm text-muted-foreground">
             Quem fez o quê, quando e de onde — conversas, contatos, campanhas, fluxos, automações, canais e equipe.
           </p>
         </div>
+        {canExport && (
         <Button variant="outline" onClick={handleExport} disabled={exporting || total === 0}>
           {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
           Exportar Excel
         </Button>
+        )}
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div className="rounded-[10px] border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
           <PeriodFilter
             value={{ dateFrom: draft.from, dateTo: draft.to }}
@@ -257,12 +277,16 @@ export default function AuditoriaPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="p-4">
+            <ErrorState title="Não foi possível carregar a auditoria" onRetry={() => runSearch()} />
           </div>
         ) : logs.length === 0 ? (
           <div className="p-4">

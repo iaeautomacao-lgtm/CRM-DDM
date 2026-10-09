@@ -37,6 +37,7 @@ import {
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -63,6 +64,7 @@ import {
 } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
+import { ErrorState } from "@/components/dashboard/error-state";
 import { buildPageList } from "@/lib/relatorios/pagination";
 import { exportWithHistory } from "@/lib/relatorios/export-with-history";
 import { MessageModal } from "@/components/relatorios/MessageModal";
@@ -231,6 +233,8 @@ function defaultItemFilters(): ItemFilters {
 }
 
 export default function EnvioEmLotePage() {
+  // Exportar exige reports.export (supervisor+); o servidor revalida.
+  const canExport = usePermissions().can("reports.export");
   const { accountId } = useAuth();
 
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -239,6 +243,7 @@ export default function EnvioEmLotePage() {
 
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(false);
 
   const [draft, setDraft] = useState<ItemFilters>(defaultItemFilters);
   const [applied, setApplied] = useState<ItemFilters>(defaultItemFilters);
@@ -250,6 +255,7 @@ export default function EnvioEmLotePage() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const [viewingMessage, setViewingMessage] = useState<string | null>(null);
@@ -277,6 +283,7 @@ export default function EnvioEmLotePage() {
   const loadDetail = useCallback(async () => {
     if (!accountId || !campaignId) return;
     setDetailLoading(true);
+    setDetailError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc("get_campaign_report_detail", {
@@ -289,6 +296,7 @@ export default function EnvioEmLotePage() {
     } catch (err) {
       console.error("[envio-em-lote] failed to load campaign detail:", err);
       setDetail(null);
+      setDetailError(true);
     } finally {
       setDetailLoading(false);
     }
@@ -309,6 +317,7 @@ export default function EnvioEmLotePage() {
   const loadItems = useCallback(async () => {
     if (!accountId || !campaignId) return;
     setItemsLoading(true);
+    setItemsError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc(
@@ -321,6 +330,7 @@ export default function EnvioEmLotePage() {
       setTotalCount(raw.length > 0 ? n(raw[0].total_count) : 0);
     } catch (err) {
       console.error("[envio-em-lote] failed to load queue items:", err);
+      setItemsError(true);
     } finally {
       setItemsLoading(false);
     }
@@ -438,8 +448,8 @@ export default function EnvioEmLotePage() {
         throw error;
       }
       toast.success("Número adicionado à blacklist!");
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao adicionar à blacklist.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error && err.message ? err.message : "Erro ao adicionar à blacklist.");
     }
   }
 
@@ -458,15 +468,15 @@ export default function EnvioEmLotePage() {
   }
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Envio em Lote</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Envio em Lote</h1>
         <p className="text-sm text-muted-foreground">
           Campanhas do Disparador com métricas agregadas e detalhe por contato.
         </p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         <button
           type="button"
           onClick={() => setFiltersOpen((o) => !o)}
@@ -561,10 +571,12 @@ export default function EnvioEmLotePage() {
                   <Search className="size-4" />
                   Pesquisar
                 </Button>
+                {canExport && (
                 <Button variant="outline" size="sm" disabled={!campaignId || exporting} onClick={handleExportCsv}>
                   <Download className="size-4" />
                   {exporting ? "Exportando…" : "CSV"}
                 </Button>
+                )}
               </div>
             </div>
           </div>
@@ -572,7 +584,7 @@ export default function EnvioEmLotePage() {
       </div>
 
       {!campaignId ? (
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-[10px] border border-border bg-card p-4">
           <EmptyState
             icon={Search}
             title="Selecione uma campanha"
@@ -581,10 +593,12 @@ export default function EnvioEmLotePage() {
         </div>
       ) : (
         <>
-          <div className="rounded-xl border border-border bg-card p-4">
+          <div className="rounded-[10px] border border-border bg-card p-4">
             <h2 className="mb-3 text-sm font-semibold text-foreground">Detalhes</h2>
             {detailLoading ? (
               <Skeleton className="h-32 w-full" />
+            ) : detailError ? (
+              <ErrorState title="Não foi possível carregar os detalhes da campanha" onRetry={() => void loadDetail()} />
             ) : !detail ? (
               <p className="text-sm text-muted-foreground">Campanha não encontrada.</p>
             ) : (
@@ -624,12 +638,16 @@ export default function EnvioEmLotePage() {
             )}
           </div>
 
-          <div className="rounded-xl border border-border bg-card">
+          <div className="rounded-[10px] border border-border bg-card">
             {itemsLoading ? (
               <div className="space-y-3 p-4">
                 {[0, 1, 2].map((i) => (
                   <Skeleton key={i} className="h-10 w-full rounded-lg" />
                 ))}
+              </div>
+            ) : itemsError ? (
+              <div className="p-4">
+                <ErrorState title="Não foi possível carregar os itens da campanha" onRetry={() => void loadItems()} />
               </div>
             ) : visibleItems.length === 0 ? (
               <div className="p-4">
@@ -731,7 +749,7 @@ export default function EnvioEmLotePage() {
           </div>
 
           {items.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
               <span className="text-xs text-muted-foreground">
                 {rangeStart} - {rangeEnd} de {totalCount} itens
               </span>

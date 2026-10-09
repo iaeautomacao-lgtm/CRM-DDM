@@ -42,7 +42,9 @@ import {
   filterConversations,
   type MonitorFilters,
 } from "@/lib/monitoramento/filters";
-import { closeConversationWithOutcomeTag } from "@/lib/conversations/actions";
+import { closeConversationWithOutcomeTag, sendTakeoverMessage } from "@/lib/conversations/actions";
+import { newlyAssigned, runBatch, type BatchItemResult } from "@/lib/monitoramento/batch-client";
+import { BatchReportPanel, BulkBar, failureMessage, type BatchReport } from "@/components/monitoramento/bulk-bar";
 import { MonitorKpiRow } from "@/components/monitoramento/kpi-row";
 import { MonitorFiltersPanel } from "@/components/monitoramento/monitor-filters-panel";
 import type { MultiSelectOption } from "@/components/monitoramento/multi-select-filter";
@@ -93,7 +95,12 @@ export default function MonitoramentoPage() {
 }
 
 function MonitoramentoBoard() {
-  const { accountId, canManageMembers } = useAuth();
+  const { accountId, profile } = useAuth();
+  const { can } = usePermissions();
+  // Arrastar agente entre equipes grava em /api/account/teams/[teamId]/members, que exige teams.manage (não o papel).
+  const canManageTeams = can("teams.manage");
+  const canBulkTransfer = can("inbox.transfer");
+  const canBulkFinalize = can("inbox.close");
   const [view, setView] = useState<MonitorView>("fases");
   const [conversations, setConversations] = useState<Map<string, MonitorConversation>>(
     () => new Map(),
@@ -345,22 +352,33 @@ function MonitoramentoBoard() {
   // ----------------------------------------------------------
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
+  const [membersError, setMembersError] = useState(false);
+  const [membersTick, setMembersTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     apiFetch("/api/account/members", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data: { members?: AccountMember[] }) => {
-        if (!cancelled) setMembers(data.members ?? []);
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json();
       })
-      .catch((err) => console.error("[monitoramento] failed to load members:", err))
+      .then((data: { members?: AccountMember[] }) => {
+        if (!cancelled) {
+          setMembers(data.members ?? []);
+          setMembersError(false);
+        }
+      })
+      .catch((err) => {
+        console.error("[monitoramento] failed to load members:", err);
+        if (!cancelled) setMembersError(true);
+      })
       .finally(() => {
         if (!cancelled) setMembersLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [membersTick]);
 
   const { getPresence, getRow, now } = usePresence();
 
@@ -384,6 +402,7 @@ function MonitoramentoBoard() {
   // ----------------------------------------------------------
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
+  const [teamsError, setTeamsError] = useState(false);
   // Single dialog instance for both "create" (team=null) and "edit"
   // (team=<the column's team>) — same TeamFormDialog used in
   // teams-panel.tsx (Settings), not a second copy.
@@ -410,8 +429,10 @@ function MonitoramentoBoard() {
       .order("name");
     if (error) {
       console.error("[monitoramento] failed to load teams:", error);
+      setTeamsError(true);
       return;
     }
+    setTeamsError(false);
     setTeams((data ?? []) as Team[]);
   }, [accountId]);
 
@@ -527,6 +548,72 @@ function MonitoramentoBoard() {
       setFinalizeTarget(null);
     },
     [finalizeTarget],
+  );
+
+  // ----------------------------------------------------------
+  // Seleção em massa (APIs em lote do Monitoramento, até 50 ids por chamada;
+  // a tela divide em blocos). A barra age sobre a seleção da visão atual.
+  // Os itens que falham continuam selecionados para tentar de novo.
+  // ----------------------------------------------------------
+  const activeSelection =
+    view === "agentes" ? agentesSelection : view === "equipes" ? equipesSelection : view === "fases" ? fasesSelection : null;
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchReport, setBatchReport] = useState<BatchReport | null>(null);
+  const [batchPickerOpen, setBatchPickerOpen] = useState(false);
+
+  const finishBatch = useCallback(
+    (
+      title: string,
+      selection: ReturnType<typeof useSelection>,
+      done: { summary: { total: number; ok: number; failed: number }; results: BatchItemResult[] },
+      pending: string[],
+      error: string | null,
+    ) => {
+      const label = (id: string) => {
+        const c = conversations.get(id)?.contact;
+        return c?.name?.trim() || c?.phone || "Contato sem nome";
+      };
+      const okIds = done.results.filter((r) => r.ok).map((r) => r.conversation_id);
+      selection.setMany(okIds, false);
+      const failures = done.results
+        .filter((r) => !r.ok)
+        .map((r) => ({ id: r.conversation_id, label: label(r.conversation_id), message: failureMessage(r) }));
+      setBatchReport({ title, summary: done.summary, failures, pendingCount: pending.length, error });
+      if (error) toast.error(error);
+      else if (done.summary.failed > 0) toast.warning(`${done.summary.ok} ok, ${done.summary.failed} falharam`);
+      else toast.success(`${done.summary.ok} ${done.summary.ok === 1 ? "conversa" : "conversas"} concluída(s)`);
+    },
+    [conversations],
+  );
+
+  const handleBatchTransfer = useCallback(async () => {
+    if (!activeSelection || activeSelection.selected.size === 0) return;
+    setBatchBusy(true);
+    try {
+      const ids = [...activeSelection.selected];
+      const { done, pending, error } = await runBatch({ fetcher: apiFetch }, "transferir-para-mim", {}, ids);
+      // Como na ação unitária: a mensagem de "assumi o atendimento" sai do cliente, só para quem mudou de dono.
+      await Promise.all(newlyAssigned(done.results).map((id) => sendTakeoverMessage(id, profile?.full_name)));
+      finishBatch("Transferência para mim", activeSelection, done, pending, error);
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [activeSelection, finishBatch, profile?.full_name]);
+
+  const handleBatchFinalize = useCallback(
+    async (tag: Tag) => {
+      setBatchPickerOpen(false);
+      if (!activeSelection || activeSelection.selected.size === 0) return;
+      setBatchBusy(true);
+      try {
+        const ids = [...activeSelection.selected];
+        const { done, pending, error } = await runBatch({ fetcher: apiFetch }, "finalizar", { outcome_tag_id: tag.id }, ids);
+        finishBatch("Finalização com tabulação", activeSelection, done, pending, error);
+      } finally {
+        setBatchBusy(false);
+      }
+    },
+    [activeSelection, finishBatch],
   );
 
   // "Ver histórico" opens ContactTimeline in a modal overlaying the
@@ -754,6 +841,19 @@ function MonitoramentoBoard() {
         size="lg"
       />
 
+      {activeSelection && activeSelection.selected.size > 0 && (
+        <BulkBar
+          count={activeSelection.selected.size}
+          busy={batchBusy}
+          canTransfer={canBulkTransfer}
+          canFinalize={canBulkFinalize}
+          onTransfer={() => void handleBatchTransfer()}
+          onFinalize={() => setBatchPickerOpen(true)}
+          onClear={activeSelection.clear}
+        />
+      )}
+      {batchReport && <BatchReportPanel report={batchReport} onDismiss={() => setBatchReport(null)} />}
+
       <MonitorFiltersPanel
         agentOptions={agentOptions}
         teamOptions={teamOptions}
@@ -808,6 +908,17 @@ function MonitoramentoBoard() {
                 <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
+          ) : membersError ? (
+            <ErrorState
+              className="min-h-0"
+              title="Não foi possível carregar os agentes"
+              hint="Verifique sua conexão e tente novamente."
+              onRetry={() => {
+                setMembersLoading(true);
+                setMembersError(false);
+                setMembersTick((n) => n + 1);
+              }}
+            />
           ) : (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {sortedAgents.map((agent) => (
@@ -834,6 +945,19 @@ function MonitoramentoBoard() {
                 <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
+          ) : teamsError || membersError ? (
+            <ErrorState
+              className="min-h-0"
+              title="Não foi possível carregar as equipes"
+              hint="Verifique sua conexão e tente novamente."
+              onRetry={() => {
+                setTeamsLoading(true);
+                setMembersLoading(true);
+                setMembersError(false);
+                setMembersTick((n) => n + 1);
+                void fetchTeams().finally(() => setTeamsLoading(false));
+              }}
+            />
           ) : teams.length === 0 ? (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
               <p>Nenhuma equipe criada ainda.</p>
@@ -877,7 +1001,7 @@ function MonitoramentoBoard() {
                       getPresence={getPresence}
                       getLastSeenAt={(userId) => getRow(userId)?.last_seen_at}
                       now={now}
-                      canDrag={canManageMembers}
+                      canDrag={canManageTeams}
                       onEdit={openEditTeam}
                       actions={equipesActions}
                     />
@@ -959,6 +1083,9 @@ function MonitoramentoBoard() {
         onSelect={handleOutcomeTagSelect}
         conversationId={finalizeTarget?.id}
       />
+
+      {/* Finalização em lote: a tabulação é obrigatória, como na ação unitária. */}
+      <OutcomeTagPicker open={batchPickerOpen} onOpenChange={setBatchPickerOpen} onSelect={handleBatchFinalize} />
 
       {timelineModal && (
         <ContactTimelineModal

@@ -1,25 +1,16 @@
 "use client";
 
 /**
- * Editor toolbar — flow name / description, status chip, dirty
- * indicator, and the action buttons (Save, Activate/Pause, Delete,
- * View runs, Back).
- *
- * Restyled to the Flow Builder design handoff: a single compact
- * toolbar row (back · icon · inline-editable name · status chip ·
- * edited dot on the left; Runs · Delete · Activate · Save on the
- * right) followed by a subtle, full-width description "note" line.
- * Replaces the old three-row stack so the editor reads as one app
- * chrome bar above the canvas/list stage.
+ * Editor toolbar — barra única do redesenho DDM ("Fluxo Editor"):
+ * voltar · nome + descrição (editáveis inline) · status em menu
+ * (Rascunho / Ativo / Arquivado) · estado do salvamento | desfazer ·
+ * refazer · Diagrama/Lista · Execuções · Testar fluxo · Validação ·
+ * mais ações (Excluir) · Salvar/Publicar.
  *
  * Lifted out of flow-builder.tsx so the same toolbar renders above
- * both views in FlowEditorShell. Without this, canvas users had no
- * way to save without toggling to list view.
- *
- * Reads everything from the editor context (`useFlowEditor`) so it
- * stays in sync with whichever view is mutating state, and routes
- * router navigation locally (back to /flows, View runs to
- * /flows/[id]/runs) — those don't belong in the hook.
+ * both views in FlowEditorShell. Reads everything from the editor
+ * context (`useFlowEditor`); a visualização, o simulador e o painel de
+ * validação são estado do shell e chegam por props.
  */
 
 import { useRouter } from "next/navigation";
@@ -27,26 +18,51 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
-  CircleDot,
+  ChevronDown,
+  CircleCheck,
+  FlaskConical,
   History,
   Loader2,
-  PauseCircle,
-  PlayCircle,
+  MoreHorizontal,
   Redo2,
   Save,
   Trash2,
   Undo2,
-  Workflow,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Segmented } from "@/components/ddm/segmented";
 import { cn } from "@/lib/utils";
 import {
   useFlowEditor,
   type BuilderState,
 } from "./flow-editor-state";
 
-export function EditorHeader() {
+const STATUS_UI: Record<BuilderState["status"], { label: string; chip: string; dot: string }> = {
+  draft: { label: "Rascunho", chip: "bg-surface-3 text-foreground-2", dot: "bg-foreground-2" },
+  active: { label: "Ativo", chip: "bg-success-soft text-success", dot: "bg-success" },
+  archived: { label: "Arquivado", chip: "bg-surface-3 text-muted-foreground", dot: "bg-muted-foreground" },
+};
+
+const STATUS_ORDER: BuilderState["status"][] = ["draft", "active", "archived"];
+
+export type EditorView = "canvas" | "list";
+
+interface EditorHeaderProps {
+  /** null = sem alternância (celular força Lista; debug força Diagrama). */
+  view: { value: EditorView; onChange: (v: EditorView) => void } | null;
+  /** null = simulador indisponível (celular / debug). */
+  sim: { open: boolean; onToggle: () => void } | null;
+  validation: { open: boolean; onToggle: () => void };
+}
+
+export function EditorHeader({ view, sim, validation }: EditorHeaderProps) {
   const router = useRouter();
   const {
     flow,
@@ -65,6 +81,7 @@ export function EditorHeader() {
     redo,
     canUndo,
     canRedo,
+    issues,
   } = useFlowEditor();
 
   // Save before leaving the editor via its own nav actions (back / view
@@ -77,198 +94,226 @@ export function EditorHeader() {
     router.push(href);
   };
 
+  const st = STATUS_UI[state.status];
+  const errors = issues.filter((i) => i.severity === "error").length;
+  const warnings = issues.filter((i) => i.severity === "warning").length;
+  const isActive = state.status === "active";
+
+  const savedLabel = saving
+    ? "Salvando…"
+    : saveError
+      ? "Erro ao salvar"
+      : dirty
+        ? isActive
+          ? "Alterações não publicadas"
+          : "Alterações não salvas"
+        : isActive
+          ? "Publicado"
+          : "Salvo";
+
   return (
-    <div className="flex flex-col gap-1.5 px-6 pt-5">
-      <div className="flex flex-wrap items-center gap-3">
-        {/* ---- left: back · icon · name · status · edited ---- */}
-        <button
-          type="button"
-          onClick={() => navigateAway("/flows")}
-          title="Voltar para Fluxos"
-          aria-label="Voltar para Fluxos"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
-          <Workflow className="h-[18px] w-[18px]" />
-        </span>
+    <div className="flex flex-wrap items-center gap-2.5 border-b border-border bg-card px-4 py-2.5">
+      {/* ---- esquerda: voltar · nome/descrição · status · salvamento ---- */}
+      <button
+        type="button"
+        onClick={() => navigateAway("/flows")}
+        title="Voltar para Fluxos"
+        aria-label="Voltar para Fluxos"
+        className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border text-foreground-2 transition-colors hover:bg-surface-hover hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" />
+      </button>
+      <div className="flex min-w-0 flex-[0_1_320px] flex-col">
         <input
           value={state.name}
           onChange={(e) => setState((s) => ({ ...s, name: e.target.value }))}
           placeholder="Nome do fluxo"
           spellCheck={false}
           aria-label="Nome do fluxo"
-          className="min-w-[120px] max-w-[340px] rounded-lg border border-transparent bg-transparent px-2 py-1 text-lg font-bold leading-tight tracking-tight text-foreground outline-none transition-colors hover:bg-muted focus:border-primary focus:bg-transparent focus:shadow-[0_0_0_3px_var(--primary-soft)]"
+          className="-ml-1 h-6 rounded border border-transparent bg-transparent px-1 text-sm font-semibold text-foreground outline-none transition-colors hover:border-border focus:border-primary"
         />
-        <StatusChip status={state.status} />
-
-        {/* ---- right: runs · delete · activate · save ---- */}
-        <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={undo}
-              disabled={!canUndo}
-              title="Desfazer (Ctrl+Z)"
-              aria-label="Desfazer"
-              className="h-8 w-8 p-0"
-            >
-              <Undo2 className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={redo}
-              disabled={!canRedo}
-              title="Refazer (Ctrl+Shift+Z)"
-              aria-label="Refazer"
-              className="h-8 w-8 p-0"
-            >
-              <Redo2 className="h-4 w-4" />
-            </Button>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigateAway(`/flows/${flow.id}/runs`)}
-          >
-            <History className="h-3.5 w-3.5" />
-            Execuções
-            <span className="ml-0.5 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-              {flow.execution_count}
-            </span>
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void deleteFlow()}
-            className="text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-700 dark:hover:text-red-300"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            Excluir
-          </Button>
-          {state.status === "active" ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void setStatus("draft")}
-              disabled={activating}
-            >
-              {activating ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <PauseCircle className="h-3.5 w-3.5" />
-              )}
-              Pausar
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void setStatus("active")}
-              disabled={activating || !canActivate}
-              title={
-                !canActivate
-                  ? "Corrija os problemas abaixo antes de ativar"
-                  : undefined
-              }
-            >
-              {activating ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <PlayCircle className="h-3.5 w-3.5" />
-              )}
-              Ativar
-            </Button>
-          )}
-          {/* Falha ao salvar: anunciada a leitores de tela uma vez. */}
-          {saveError && !saving && (
-            <span role="alert" className="sr-only">
-              Erro ao salvar o fluxo: {saveError}
-            </span>
-          )}
-          <Button
-            onClick={() => void save()}
-            disabled={saving}
-            size="sm"
-            variant={saveError && !saving ? "destructive" : dirty ? "default" : "outline"}
-            className={
-              saveError && !saving
-                ? undefined
-                : dirty
-                  ? "bg-amber-500 text-white hover:bg-amber-600 dark:bg-amber-600 dark:hover:bg-amber-500"
-                  : undefined
-            }
-            title={saveError && !saving ? saveError : undefined}
-            aria-live="polite"
-          >
-            {saving ? (
-              <>
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Salvando...
-              </>
-            ) : saveError ? (
-              <>
-                <AlertTriangle className="h-3.5 w-3.5" />
-                Erro ao salvar — Tentar novamente
-              </>
-            ) : dirty ? (
-              <>
-                <Save className="h-3.5 w-3.5" />
-                {state.status === "active" ? "Publicar alterações" : "Salvar"}
-              </>
-            ) : (
-              <>
-                <Check className="h-3.5 w-3.5" />
-                {state.status === "active" ? "Publicado" : "Salvo"}
-              </>
-            )}
-          </Button>
-        </div>
+        <input
+          value={state.description}
+          onChange={(e) => setState((s) => ({ ...s, description: e.target.value }))}
+          placeholder="Adicione uma descrição curta (interna — o cliente não vê isso)"
+          aria-label="Descrição do fluxo"
+          className="-ml-1 h-5 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground outline-none transition-colors placeholder:text-muted-foreground/70 hover:border-border focus:border-primary focus:text-foreground"
+        />
       </div>
 
-      {/* ---- description note (subtle, inline-editable) ---- */}
-      <input
-        value={state.description}
-        onChange={(e) =>
-          setState((s) => ({ ...s, description: e.target.value }))
-        }
-        placeholder="Adicione uma descrição curta (interna — o cliente não vê isso)"
-        aria-label="Descrição do fluxo"
-        className="w-full max-w-[78ch] rounded-md border border-transparent bg-transparent px-2 py-1 text-[13px] text-muted-foreground outline-none transition-colors placeholder:text-muted-foreground/60 hover:bg-muted/50 focus:border-primary focus:bg-transparent focus:text-foreground"
-      />
-    </div>
-  );
-}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          disabled={activating}
+          aria-label={`Status: ${st.label}. Alterar status`}
+          className={cn(
+            "inline-flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full pl-2.5 pr-1.5 text-xs font-semibold transition-opacity disabled:opacity-60",
+            st.chip,
+          )}
+        >
+          {activating ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <span aria-hidden="true" className={cn("size-1.5 rounded-full", st.dot)} />
+          )}
+          {st.label}
+          <ChevronDown className="size-3" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-52">
+          {STATUS_ORDER.map((s) => {
+            const blocked = s === "active" && !canActivate && state.status !== "active";
+            return (
+              <DropdownMenuItem
+                key={s}
+                disabled={s === state.status || blocked}
+                onClick={() => void setStatus(s)}
+                title={blocked ? "Corrija os erros da validação antes de ativar" : undefined}
+              >
+                <span aria-hidden="true" className={cn("size-[7px] rounded-full", STATUS_UI[s].dot)} />
+                {s === "draft" && state.status === "active" ? "Pausar (rascunho)" : STATUS_UI[s].label}
+                {s === state.status && <Check className="ml-auto size-3.5" />}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-function StatusChip({ status }: { status: BuilderState["status"] }) {
-  const cfg = {
-    draft: {
-      // Neutral, not amber — amber is reserved for the adjacent
-      // "Edited" dirty signal, so the two don't read as the same alert.
-      cls: "border-border bg-muted text-muted-foreground",
-      label: "Rascunho",
-    },
-    active: {
-      cls: "border-emerald-600/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-      label: "Ativo",
-    },
-    archived: {
-      cls: "border-border bg-muted/50 text-muted-foreground",
-      label: "Arquivado",
-    },
-  }[status];
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-medium",
-        cfg.cls,
+      <span
+        className={cn(
+          "whitespace-nowrap text-[11.5px]",
+          saveError && !saving ? "text-danger" : dirty ? "text-warning" : "text-muted-foreground",
+        )}
+        aria-live="polite"
+      >
+        {savedLabel}
+      </span>
+      {/* Falha ao salvar: anunciada a leitores de tela uma vez. */}
+      {saveError && !saving && (
+        <span role="alert" className="sr-only">
+          Erro ao salvar o fluxo: {saveError}
+        </span>
       )}
-    >
-      <CircleDot className="h-3 w-3" />
-      {cfg.label}
-    </span>
+
+      <span className="flex-1" />
+
+      {/* ---- direita ---- */}
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={undo}
+          disabled={!canUndo}
+          title="Desfazer (Ctrl+Z)"
+          aria-label="Desfazer"
+          className="flex size-8 items-center justify-center rounded-md text-foreground-2 transition-colors hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Undo2 className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={redo}
+          disabled={!canRedo}
+          title="Refazer (Ctrl+Shift+Z)"
+          aria-label="Refazer"
+          className="flex size-8 items-center justify-center rounded-md text-foreground-2 transition-colors hover:bg-surface-hover disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Redo2 className="size-4" />
+        </button>
+      </div>
+
+      {view && (
+        <Segmented
+          ariaLabel="Visualização do editor"
+          value={view.value}
+          onChange={view.onChange}
+          options={[
+            { value: "canvas", label: "Diagrama" },
+            { value: "list", label: "Lista" },
+          ]}
+        />
+      )}
+
+      <Button variant="outline" size="sm" onClick={() => navigateAway(`/flows/${flow.id}/runs`)} title="Histórico de execuções">
+        <History className="size-3.5" />
+        <span className="hidden sm:inline">Execuções</span>
+        <span className="rounded bg-surface-3 px-1.5 font-mono text-[11px] text-muted-foreground">
+          {flow.execution_count}
+        </span>
+      </Button>
+
+      {sim && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={sim.onToggle}
+          aria-pressed={sim.open}
+          className={cn(sim.open && "border-primary bg-primary-soft text-primary-text hover:bg-primary-soft")}
+        >
+          <FlaskConical className="size-3.5" />
+          Testar fluxo
+        </Button>
+      )}
+
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={validation.onToggle}
+        aria-pressed={validation.open}
+        title={validation.open ? "Ocultar validação" : "Mostrar validação"}
+        className={cn(
+          errors > 0 ? "border-danger/50 text-danger hover:text-danger" : warnings > 0 ? "border-warning/50 text-warning hover:text-warning" : "text-success hover:text-success",
+        )}
+      >
+        {errors === 0 && warnings === 0 ? <CircleCheck className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
+        {errors > 0
+          ? `${errors} erro${errors === 1 ? "" : "s"}`
+          : warnings > 0
+            ? `${warnings} aviso${warnings === 1 ? "" : "s"}`
+            : "Sem problemas"}
+      </Button>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label="Mais ações do fluxo"
+          className="flex size-8 items-center justify-center rounded-md text-foreground-2 transition-colors hover:bg-surface-hover data-[popup-open]:bg-surface-hover"
+        >
+          <MoreHorizontal className="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem variant="destructive" onClick={() => void deleteFlow()}>
+            <Trash2 className="size-4" />
+            Excluir fluxo
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Button
+        onClick={() => void save()}
+        disabled={saving}
+        size="sm"
+        variant={saveError && !saving ? "destructive" : dirty ? "default" : "outline"}
+        title={saveError && !saving ? saveError : undefined}
+      >
+        {saving ? (
+          <>
+            <Loader2 className="size-3.5 animate-spin" />
+            Salvando...
+          </>
+        ) : saveError ? (
+          <>
+            <AlertTriangle className="size-3.5" />
+            Tentar novamente
+          </>
+        ) : dirty ? (
+          <>
+            <Save className="size-3.5" />
+            {isActive ? "Publicar alterações" : "Salvar"}
+          </>
+        ) : (
+          <>
+            <Check className="size-3.5" />
+            {isActive ? "Publicado" : "Salvo"}
+          </>
+        )}
+      </Button>
+    </div>
   );
 }

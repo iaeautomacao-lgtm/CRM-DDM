@@ -55,6 +55,18 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("account", "GET", "viewer", "account.view"),
   pg("account", "PATCH", "admin", "settings.account"),
   pg("settings/account-config", "GET", "viewer", "account.view"), // PRD 24, item 6
+  pg("billing/rulers", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/rulers", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/rulers/[id]", "PATCH", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]", "DELETE", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]/steps", "PUT", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]/dry-run", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]/metrics", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/enrollments", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/enrollments/[id]/pause", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/enrollments/[id]/resume", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/enrollments/[id]/stop", "POST", "admin", "billing.manage"), // PRD 17.5
   pg("settings/account-config/[key]", "PUT", "admin", "settings.account"),
   pg("settings/account-config/[key]", "DELETE", "admin", "settings.account"),
   pg("account/ai-config", "GET", "admin", "ai.config"),
@@ -76,6 +88,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   session("account/permission-catalog", "GET", "members.view"),
   pg("account/members/[userId]", "PATCH", "admin", "members.manage"),
   pg("account/members/[userId]", "DELETE", "admin", "members.manage"),
+  pg("account/members/[userId]/status", "POST", "admin", "members.manage"),
   pg("account/members/[userId]/reset-password", "POST", "owner", "members.reset_password"),
   pg("account/members/bulk-invite", "POST", "owner", "members.bulk_invite"),
   pg("account/transfer-ownership", "POST", "owner", "ownership.transfer"),
@@ -127,11 +140,15 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("conversations/[id]/suggest-tag", "GET", "agent", "inbox.ai_assist"),
   pg("ai/rewrite", "POST", "agent", "inbox.ai_assist"),
   pg("conversations/[id]/assign-self", "POST", "agent", "inbox.reply"),
+  pg("quick-replies/[id]/use", "POST", "agent", "inbox.reply"),
+  pg("inbox/meus-atendidos", "GET", "agent", "inbox.view"),
   pg("conversations/[id]/flow-runs", "GET", "admin", "flows.view_runs"),
   pg("contacts/[id]/link", "POST", "agent", "contacts.edit"),
   pg("contacts", "POST", "agent", "contacts.edit"),
   pg("contacts/[id]", "PATCH", "agent", "contacts.edit"),
   pg("contacts/[id]/tags", "GET", "viewer", "contacts.view"),
+  pg("contacts/[id]/activity", "GET", "viewer", "contacts.view"),
+  pg("contacts/[id]/campaigns", "GET", "viewer", "contacts.view"),
   pg("contacts/[id]/tags", "POST", "agent", "contacts.edit"),
   pg("contacts/[id]/tags/[tagId]", "DELETE", "agent", "contacts.edit"),
   pg("contacts/[id]/phones/invalid", "POST", "agent", "contacts.edit"),
@@ -193,7 +210,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   flow("flows/[id]/activate", "POST"),
   flow("flows/[id]/export", "GET"),
   flow("flows/[id]/runs", "GET", "flows.view_runs"),
-  flow("flows/[id]/runs", "DELETE", "flows.view_runs"),
+  flow("flows/[id]/runs", "DELETE", "flows.edit"),
   pg("flows/[id]/simulate", "POST", "supervisor", "flows.simulate"),
   pg("automations", "GET", "agent", "automations.view"),
   pg("automations", "POST", "admin", "automations.edit"),
@@ -238,8 +255,14 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("monitoramento/dia", "GET", "supervisor", "monitoring.view_team"),
   pg("monitoramento/conversations", "GET", "supervisor", "monitoring.view_team"),
   pg("monitoramento/sla", "GET", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/lote/transferir-para-mim", "POST", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/lote/finalizar", "POST", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/agentes", "GET", "supervisor", "monitoring.view_team"),
   pg("relatorios/exports", "POST", "supervisor", "reports.export"),
   pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
+  pg("historico/exports", "POST", "admin", "exports.manage"),
+  pg("historico/exports", "GET", "admin", "exports.manage"),
+  pg("historico/exports/[id]", "GET", "admin", "exports.manage"),
   { route: "intelligence/chat", method: "POST", guard: "scope", min: "supervisor", permission: "intelligence.use" },
   { route: "intelligence/chats", method: "GET", guard: "scope", min: "supervisor", permission: "intelligence.use" },
   { route: "intelligence/chats/[id]", method: "GET", guard: "scope", min: "supervisor", permission: "intelligence.use" },
@@ -277,6 +300,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/pipelines", roles: ["owner"], permission: "pipelines.manage", aligned: false, note: "página só owner; RLS admin (G7)" },
   { prefix: "/flows", roles: ["owner", "admin"], permission: "flows.edit", aligned: true },
   { prefix: "/disparador", roles: ["owner", "admin"], permission: "campaigns.manage", aligned: true },
+  { prefix: "/regua", roles: ["owner", "admin", "supervisor"], permission: "billing.view", aligned: true },
   { prefix: "/ajuda", roles: ["owner"], permission: null, aligned: false, note: "sem capacidade correspondente" },
   { prefix: "/settings", roles: ["owner", "admin"], permission: "settings.account", aligned: true },
   { prefix: "/equipes", roles: ["owner", "admin"], permission: "teams.manage", aligned: true, note: "a tela é só leitura para admin; a API deixa gerir (G6)" },
@@ -284,7 +308,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/seguranca", roles: ["owner", "admin", "supervisor", "agent", "viewer"], permission: null, aligned: false, note: "todos os papéis" },
   { prefix: "/templates", roles: ["owner", "admin"], permission: "templates.manage", aligned: true },
   { prefix: "/tabulacoes", roles: ["owner", "admin"], permission: "tags.manage", aligned: true },
-  { prefix: "/respostas-rapidas", roles: ["owner", "admin"], permission: "inbox.quick_replies.manage", aligned: true },
+  { prefix: "/respostas-rapidas", roles: ["owner", "admin", "supervisor", "agent"], permission: "inbox.reply", aligned: true, note: "operador cria as prÃ³prias (pessoais); equipe/conta exigem inbox.quick_replies.manage na tela e na RLS" },
   { prefix: "/usuarios", roles: ["owner", "admin"], permission: "members.manage", aligned: true },
   { prefix: "/membros", roles: ["owner", "admin"], permission: "members.manage", aligned: true },
 ];

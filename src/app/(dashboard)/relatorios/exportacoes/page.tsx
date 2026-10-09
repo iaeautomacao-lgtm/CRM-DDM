@@ -32,6 +32,9 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
+import { toast } from "sonner";
+import { ErrorState, ForbiddenState } from "@/components/dashboard/error-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -119,11 +122,13 @@ function formatPeriod(from: string | null, to: string | null): string {
 
 export default function ExportacoesPage() {
   const { accountId } = useAuth();
+  const perms = usePermissions();
 
   const [draftSearch, setDraftSearch] = useState("");
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<ExportRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -132,6 +137,7 @@ export default function ExportacoesPage() {
   const runSearch = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc("get_export_history", {
@@ -142,6 +148,7 @@ export default function ExportacoesPage() {
       setRows(normalizeRows((data ?? []) as RawExportRow[]));
     } catch (err) {
       console.error("[exportacoes] failed to load export history:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -173,6 +180,7 @@ export default function ExportacoesPage() {
       if (data?.signedUrl) window.open(data.signedUrl, "_blank");
     } catch (err) {
       console.error("[exportacoes] failed to create signed url:", err);
+      toast.error("Não foi possível gerar o link de download");
     } finally {
       setDownloadingId(null);
     }
@@ -182,11 +190,12 @@ export default function ExportacoesPage() {
     if (!pendingDeleteIds || pendingDeleteIds.length === 0) return;
     setDeleting(true);
     try {
-      await Promise.all(
+      const results = await Promise.all(
         pendingDeleteIds.map((id) =>
           apiFetch(`/api/relatorios/exports?id=${id}`, { method: "DELETE" }),
         ),
       );
+      if (results.some((res) => !res.ok)) throw new Error("delete_failed");
       setSelected((prev) => {
         const next = new Set(prev);
         pendingDeleteIds.forEach((id) => next.delete(id));
@@ -195,6 +204,7 @@ export default function ExportacoesPage() {
       await runSearch();
     } catch (err) {
       console.error("[exportacoes] failed to delete export(s):", err);
+      toast.error("Não foi possível excluir a exportação");
     } finally {
       setDeleting(false);
       setPendingDeleteIds(null);
@@ -203,10 +213,20 @@ export default function ExportacoesPage() {
 
   const selectedCount = selected.size;
 
+  // Histórico e download de exportações: só exports.manage (admin e proprietário). O servidor revalida.
+  if (!perms.loading && !perms.error && !perms.can("exports.manage")) {
+    return (
+      <ForbiddenState
+        title="Você não tem permissão para ver as exportações"
+        hint="O histórico de exportações é restrito a administradores e ao proprietário."
+      />
+    );
+  }
+
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Exportações</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Exportações</h1>
         <p className="text-sm text-muted-foreground">
           Histórico de arquivos exportados nos relatórios — baixe novamente sem gerar de novo.
         </p>
@@ -242,12 +262,16 @@ export default function ExportacoesPage() {
         </Button>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="p-4">
+            <ErrorState title="Não foi possível carregar as exportações" onRetry={() => runSearch()} />
           </div>
         ) : rows.length === 0 ? (
           <div className="p-4">
