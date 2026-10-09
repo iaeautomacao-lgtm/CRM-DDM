@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
 import type { MonitorConversation } from "@/lib/monitoramento/queries";
 import { PHASE_META, type MonitorPhase } from "@/lib/monitoramento/phases";
 
@@ -50,6 +51,10 @@ export function ConversationCard({
   onHistoryClick: (conversation: MonitorConversation) => void;
 }) {
   const { accountId } = useAuth();
+  // O servidor exige inbox.transfer em /api/conversations/[id]/transfer e inbox.close em .../close.
+  const { can } = usePermissions();
+  const canTransfer = can("inbox.transfer");
+  const canFinalize = can("inbox.close");
   const contact = conversation.contact;
   const displayName = contact?.name?.trim() || contact?.phone || "Desconhecido";
   const initials = displayName.charAt(0).toUpperCase();
@@ -157,22 +162,30 @@ export function ConversationCard({
             <History className="size-4" />
             Ver histórico
           </DropdownMenuItem>
-          <DropdownMenuSeparator className="bg-border" />
-          <DropdownMenuItem
-            onClick={() => onTransferClick(conversation)}
-            className="whitespace-nowrap text-popover-foreground"
-          >
-            <ArrowLeftRight className="size-4" />
-            Transferir para…
-          </DropdownMenuItem>
-          <DropdownMenuSeparator className="bg-border" />
-          <DropdownMenuItem
-            onClick={() => onFinalizeClick(conversation)}
-            className="whitespace-nowrap text-red-500 focus:bg-red-50 focus:text-red-500"
-          >
-            <XCircle className="size-4" />
-            Finalizar atendimento
-          </DropdownMenuItem>
+          {canTransfer && (
+            <>
+              <DropdownMenuSeparator className="bg-border" />
+              <DropdownMenuItem
+                onClick={() => onTransferClick(conversation)}
+                className="whitespace-nowrap text-popover-foreground"
+              >
+                <ArrowLeftRight className="size-4" />
+                Transferir para…
+              </DropdownMenuItem>
+            </>
+          )}
+          {canFinalize && (
+            <>
+              <DropdownMenuSeparator className="bg-border" />
+              <DropdownMenuItem
+                onClick={() => onFinalizeClick(conversation)}
+                className="whitespace-nowrap text-red-500 focus:bg-red-50 focus:text-red-500"
+              >
+                <XCircle className="size-4" />
+                Finalizar atendimento
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

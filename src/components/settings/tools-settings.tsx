@@ -17,7 +17,17 @@ import { SettingsPanelHead } from './settings-panel-head';
 import { ToolDialog, type ToolItem } from './tool-dialogs';
 import { ListCard, ListRow } from '@/components/ddm/list-with-drawer';
 import { StatusChip } from '@/components/ddm/status-chip';
-import { EmptyState, Skeleton } from '@/components/ddm/states';
+import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export function ToolsSettings() {
   const canEdit = usePermission('ai.tools.edit');
@@ -26,17 +36,22 @@ export function ToolsSettings() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<ToolItem | 'new' | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // warning preenchido = segunda confirmação ("Apagar mesmo assim?") quando a ferramenta está em uso.
+  const [pendingDelete, setPendingDelete] = useState<{ item: ToolItem; warning: string | null } | null>(null);
+
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const res = await apiFetch('/api/settings/tools', { cache: 'no-store' });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(payload.error || 'Não foi possível carregar as ferramentas.');
+        setLoadError(payload.error || 'Não foi possível carregar as ferramentas.');
         return;
       }
       setItems((payload as { tools: ToolItem[] }).tools);
     } catch {
-      toast.error('Não foi possível falar com o servidor.');
+      setLoadError('Não foi possível falar com o servidor.');
     } finally {
       setLoading(false);
     }
@@ -63,20 +78,24 @@ export function ToolsSettings() {
   }
 
   async function remove(item: ToolItem, force = false) {
-    if (!force && !window.confirm(`Apagar a ferramenta ${item.name}?`)) return;
-    const res = await apiFetch(`/api/settings/tools/${item.id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
-    if (res.status === 409) {
-      const payload = await res.json().catch(() => ({}));
-      if (window.confirm(`${payload.error}\n\nApagar mesmo assim?`)) await remove(item, true);
-      return;
+    try {
+      const res = await apiFetch(`/api/settings/tools/${item.id}${force ? '?force=true' : ''}`, { method: 'DELETE' });
+      if (res.status === 409) {
+        const payload = await res.json().catch(() => ({}));
+        // Em uso: pede a segunda confirmação ("Apagar mesmo assim?") no mesmo diálogo.
+        setPendingDelete({ item, warning: String(payload.error ?? '') });
+        return;
+      }
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        toast.error(payload.error || 'Não foi possível apagar.');
+        return;
+      }
+      toast.success(`${item.name} apagada`);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch {
+      toast.error('Não foi possível falar com o servidor.');
     }
-    if (!res.ok) {
-      const payload = await res.json().catch(() => ({}));
-      toast.error(payload.error || 'Não foi possível apagar.');
-      return;
-    }
-    toast.success(`${item.name} apagada`);
-    setItems((prev) => prev.filter((i) => i.id !== item.id));
   }
 
   if (loading) {
@@ -87,6 +106,19 @@ export function ToolsSettings() {
           <Skeleton key={i} className="h-16 rounded-[10px]" />
         ))}
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Não foi possível carregar as ferramentas"
+        hint={loadError}
+        onRetry={() => {
+          setLoading(true);
+          void load();
+        }}
+      />
     );
   }
 
@@ -157,7 +189,7 @@ export function ToolsSettings() {
                   <Button variant="outline" size="sm" onClick={() => setEditing(item)}>
                     Editar
                   </Button>
-                  <Button variant="ghost" size="icon-sm" onClick={() => void remove(item)} aria-label={`Apagar ${item.name}`} title="Apagar">
+                  <Button variant="ghost" size="icon-sm" onClick={() => setPendingDelete({ item, warning: null })} aria-label={`Apagar ${item.name}`} title="Apagar">
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
@@ -166,6 +198,32 @@ export function ToolsSettings() {
           ))}
         </ListCard>
       )}
+
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar ferramenta</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">
+              {pendingDelete
+                ? pendingDelete.warning !== null
+                  ? `${pendingDelete.warning}\n\nApagar mesmo assim?`
+                  : `Apagar a ferramenta ${pendingDelete.item.name}?`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = pendingDelete;
+                if (target) void remove(target.item, target.warning !== null);
+              }}
+            >
+              {pendingDelete?.warning !== null && pendingDelete?.warning !== undefined ? 'Apagar mesmo assim' : 'Apagar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {editing && (
         <ToolDialog

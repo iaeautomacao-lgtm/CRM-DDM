@@ -86,6 +86,7 @@ export function FlowBuilder() {
     updateNodeConfig,
     removeNode: removeNodeCtx,
     duplicateNode,
+    askConfirm,
   } = useFlowEditor();
 
   // List-only UI state: which cards are expanded + scroll refs for
@@ -108,8 +109,8 @@ export function FlowBuilder() {
   );
 
   const removeNode = useCallback(
-    (key: string) => {
-      if (!confirmNodeRemoval(state.nodes, [key])) return;
+    async (key: string) => {
+      if (!(await confirmNodeRemoval(state.nodes, [key], askConfirm))) return;
       removeNodeCtx(key);
       setExpanded((prev) => {
         const next = new Set(prev);
@@ -117,7 +118,7 @@ export function FlowBuilder() {
         return next;
       });
     },
-    [removeNodeCtx, state.nodes]
+    [removeNodeCtx, state.nodes, askConfirm]
   );
 
   const toggleExpanded = useCallback((key: string) => {
@@ -621,6 +622,7 @@ function AddNodeButton({ onAdd }: { onAdd: (type: NodeType) => void }) {
     'send_message',
     'send_media',
     'send_template',
+    'send_flow',
     'receive_attachment',
     'ai_agent',
     'collect_input',
