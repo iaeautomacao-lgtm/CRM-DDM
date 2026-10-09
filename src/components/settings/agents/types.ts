@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentComposition } from '@/lib/ai/agents/schema';
+import type { AiAgentTool } from '@/lib/flows/types';
 
 export interface AgentListItem {
   id: string;
@@ -104,12 +105,18 @@ export interface ToolCatalogItem {
     url: string;
     method: string;
   };
+  /** Esquema dos argumentos (usado pelo "Testar" da aba Ferramentas). */
+  parameters?: AiAgentTool['parameters'];
 }
 
 export interface KnowledgeBaseFileItem {
   id: string;
   name: string;
   created_at: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  /** Caracteres do texto extraído (conta para o teto da base do agente). */
+  char_count?: number | null;
 }
 
 export interface SecretItem {

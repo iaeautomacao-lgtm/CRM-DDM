@@ -141,6 +141,10 @@
       "kind": "registry"
     },
     {
+      "version": "214_knowledge_base_files",
+      "kind": "registry"
+    },
+    {
       "version": "220_export_history_policy",
       "kind": "registry"
     },
@@ -207,6 +211,14 @@
     },
     {
       "version": "275_billing_sync_state",
+      "kind": "registry"
+    },
+    {
+      "version": "278_billing_event_stops",
+      "kind": "registry"
+    },
+    {
+      "version": "290_user_sessions_mfa",
       "kind": "registry"
     }
   ]

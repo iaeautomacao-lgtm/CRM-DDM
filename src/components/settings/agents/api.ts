@@ -1,5 +1,4 @@
 import { apiFetch } from '@/lib/api-fetch';
-import { createClient } from '@/lib/supabase/client';
 import type {
   AgentDetailResponse,
   AgentListItem,
@@ -238,26 +237,46 @@ export async function fetchAccountSecrets(): Promise<SecretItem[]> {
   }
 }
 
-export async function fetchKnowledgeBaseFiles(accountId?: string | null): Promise<KnowledgeBaseFileItem[]> {
+export async function fetchKnowledgeBaseFiles(): Promise<KnowledgeBaseFileItem[]> {
   try {
-    const supabase = createClient();
-    let query = supabase
-      .from('knowledge_base_files')
-      .select('id, name, created_at')
-      .order('created_at', { ascending: false });
-
-    if (accountId) {
-      query = query.eq('account_id', accountId);
-    }
-
-    const { data, error } = await query;
-    if (error) {
-      console.warn('Falha ao listar arquivos da base de conhecimento via Supabase:', error.message);
-      return [];
-    }
-    return (data as KnowledgeBaseFileItem[]) ?? [];
+    const res = await apiFetch('/api/settings/agents/knowledge', { cache: 'no-store' });
+    const data = await handleResponse<{ files: KnowledgeBaseFileItem[] }>(
+      res,
+      'Não foi possível carregar os arquivos de conhecimento.',
+    );
+    return data.files ?? [];
   } catch (err) {
-    console.warn('Erro ao conectar à base de conhecimento:', err);
-    return [];
+    if (err instanceof AgentApiError) throw err;
+    throw new AgentApiError(
+      'Não foi possível conectar ao servidor para carregar os arquivos de conhecimento.',
+      0,
+    );
   }
+}
+
+/** Envia um arquivo de conhecimento (o texto é extraído no servidor). */
+export async function uploadKnowledgeFile(file: File): Promise<KnowledgeBaseFileItem> {
+  const body = new FormData();
+  body.append('file', file);
+  let res: Response;
+  try {
+    res = await apiFetch('/api/settings/agents/knowledge', { method: 'POST', body });
+  } catch {
+    throw new AgentApiError('Não foi possível conectar ao servidor para enviar o arquivo.', 0);
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new AgentApiError(data?.error || 'Não foi possível enviar o arquivo.', res.status);
+  return (data as { file: KnowledgeBaseFileItem }).file;
+}
+
+/** Remove um arquivo de conhecimento (409 se algum agente o usa). */
+export async function removeKnowledgeFile(id: string): Promise<void> {
+  let res: Response;
+  try {
+    res = await apiFetch(`/api/settings/agents/knowledge/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch {
+    throw new AgentApiError('Não foi possível conectar ao servidor para remover o arquivo.', 0);
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new AgentApiError(data?.error || 'Não foi possível remover o arquivo.', res.status);
 }
