@@ -45,20 +45,20 @@ export async function POST(request: Request) {
     try {
       body = (await request.json()) as ReorderBody
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+      return NextResponse.json({ error: 'Corpo JSON inválido.' }, { status: 400 })
     }
 
     const templates = body.templates ?? []
     const folders = body.folders ?? []
 
     if (!Array.isArray(templates) || !templates.every(isValidTemplateEntry)) {
-      return NextResponse.json({ error: 'Invalid templates payload.' }, { status: 400 })
+      return NextResponse.json({ error: 'Lista de templates inválida.' }, { status: 400 })
     }
     if (!Array.isArray(folders) || !folders.every(isValidFolderEntry)) {
-      return NextResponse.json({ error: 'Invalid folders payload.' }, { status: 400 })
+      return NextResponse.json({ error: 'Lista de pastas inválida.' }, { status: 400 })
     }
     if (templates.length === 0 && folders.length === 0) {
-      return NextResponse.json({ error: 'Nothing to reorder.' }, { status: 400 })
+      return NextResponse.json({ error: 'Nada para reordenar.' }, { status: 400 })
     }
 
     // Verify every id (template, folder, and target folder_id) belongs
@@ -96,23 +96,23 @@ export async function POST(request: Request) {
     ])
 
     if (templateCheck.error || folderCheck.error || targetFolderCheck.error) {
-      return NextResponse.json({ error: 'Failed to validate ownership.' }, { status: 500 })
+      return NextResponse.json({ error: 'Falha ao validar a propriedade.' }, { status: 500 })
     }
     if ((templateCheck.data?.length ?? 0) !== templateIds.length) {
       return NextResponse.json(
-        { error: 'One or more templates do not belong to your account.' },
+        { error: 'Um ou mais templates não pertencem à sua conta.' },
         { status: 403 },
       )
     }
     if ((folderCheck.data?.length ?? 0) !== folderIds.length) {
       return NextResponse.json(
-        { error: 'One or more folders do not belong to your account.' },
+        { error: 'Uma ou mais pastas não pertencem à sua conta.' },
         { status: 403 },
       )
     }
     if ((targetFolderCheck.data?.length ?? 0) !== targetFolderIds.length) {
       return NextResponse.json(
-        { error: 'One or more target folders do not belong to your account.' },
+        { error: 'Uma ou mais pastas de destino não pertencem à sua conta.' },
         { status: 403 },
       )
     }

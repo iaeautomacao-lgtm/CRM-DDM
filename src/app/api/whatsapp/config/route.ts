@@ -118,7 +118,7 @@ export async function GET() {
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
     const accountId = await resolveAccountId(supabase, user.id)
@@ -127,7 +127,7 @@ export async function GET() {
         {
           connected: false,
           reason: 'no_account',
-          message: 'Your profile is not linked to an account.',
+          message: 'Seu perfil não está vinculado a uma conta.',
         },
         { status: 200 },
       )
@@ -144,7 +144,7 @@ export async function GET() {
     if (configError) {
       console.error('Error fetching whatsapp_config:', configError)
       return NextResponse.json(
-        { connected: false, reason: 'db_error', message: 'Failed to fetch configuration' },
+        { connected: false, reason: 'db_error', message: 'Falha ao buscar a configuração' },
         { status: 200 }
       )
     }
@@ -154,7 +154,7 @@ export async function GET() {
         {
           connected: false,
           reason: 'no_config',
-          message: 'No WhatsApp configuration saved yet. Fill in the form and click Save Configuration.',
+          message: 'Nenhuma configuração de WhatsApp salva ainda. Preencha o formulário e clique em Salvar configuração.',
         },
         { status: 200 }
       )
@@ -259,7 +259,7 @@ export async function GET() {
               habilitado: config.habilitado,
               team_id: config.team_id,
               reason: 'waha_api_error',
-              message: 'Could not connect to the WAHA server. Please check the configured URL and try again.',
+              message: 'Não foi possível conectar ao servidor WAHA. Confira a URL configurada e tente de novo.',
               phone_info: {
                 id: config.waha_session,
                 display_phone_number: config.waha_session,
@@ -285,7 +285,7 @@ export async function GET() {
               has_app_secret: !!config.app_secret,
               reason: 'token_corrupted',
               needs_reset: true,
-              message: 'The stored access token cannot be decrypted.'
+              message: 'O token de acesso salvo não pode ser decifrado.'
             }
           }
 
@@ -317,7 +317,7 @@ export async function GET() {
               phone_info: phoneInfo
             }
           } catch (err) {
-            const message = err instanceof Error ? err.message : 'Unknown Meta API error'
+            const message = err instanceof Error ? err.message : 'Erro desconhecido da API da Meta'
             return {
               id: config.id,
               connected: false,
@@ -330,7 +330,7 @@ export async function GET() {
               client_id: config.client_id ?? null,
               has_app_secret: !!config.app_secret,
               reason: 'meta_api_error',
-              message: `Meta API rejected credentials: ${message}`
+              message: `A API da Meta rejeitou as credenciais: ${message}`
             }
           }
         }
@@ -347,13 +347,13 @@ export async function GET() {
       session_status: (primary as any).session_status || undefined,
       phone_info: primary.phone_info,
       reason: !isAnyConnected ? (primary as any).reason || 'disconnected' : undefined,
-      message: !isAnyConnected ? (primary as any).message || 'Not connected' : undefined
+      message: !isAnyConnected ? (primary as any).message || 'Não conectado' : undefined
     })
 
   } catch (error) {
     console.error('Error in WhatsApp config GET:', error)
     return NextResponse.json(
-      { connected: false, reason: 'unknown', message: 'Internal server error' },
+      { connected: false, reason: 'unknown', message: 'Erro interno do servidor' },
       { status: 500 }
     )
   }
@@ -375,13 +375,13 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
     const accountId = await resolveAccountId(supabase, user.id)
     if (!accountId) {
       return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
+        { error: 'Seu perfil não está vinculado a uma conta.' },
         { status: 403 },
       )
     }
@@ -398,7 +398,7 @@ export async function POST(request: Request) {
     const callerRole = (roleRow as { account_role?: string } | null)?.account_role
     if (!callerRole || !isAccountRole(callerRole) || !can({ role: callerRole }, 'channels.manage')) {
       return NextResponse.json(
-        { error: 'Only account admins can change channel settings.' },
+        { error: 'Somente administradores da conta podem alterar as configurações dos canais.' },
         { status: 403 },
       )
     }
@@ -426,10 +426,10 @@ export async function POST(request: Request) {
         .maybeSingle()
       if (teamError) {
         console.error('Error validating team_id ownership:', teamError)
-        return NextResponse.json({ error: 'Failed to validate team' }, { status: 500 })
+        return NextResponse.json({ error: 'Falha ao validar a equipe' }, { status: 500 })
       }
       if (!team) {
-        return NextResponse.json({ error: 'Team not found in your account' }, { status: 404 })
+        return NextResponse.json({ error: 'Equipe não encontrada na sua conta' }, { status: 404 })
       }
     }
 
@@ -441,7 +441,7 @@ export async function POST(request: Request) {
           await assertWahaUrlIsSafe(waha_url)
         } catch (err) {
           if (err instanceof WahaUrlBlockedError) {
-            return NextResponse.json({ error: 'waha_url is not allowed.' }, { status: 400 })
+            return NextResponse.json({ error: 'waha_url não é permitida.' }, { status: 400 })
           }
           throw err
         }
@@ -449,7 +449,7 @@ export async function POST(request: Request) {
 
       if (!waha_url || !waha_session) {
         return NextResponse.json(
-          { error: 'waha_url and waha_session are required' },
+          { error: 'waha_url e waha_session são obrigatórios' },
           { status: 400 }
         )
       }
@@ -459,7 +459,7 @@ export async function POST(request: Request) {
       // anything, and the value is later interpolated into WAHA URL paths.
       if (!/^[a-z0-9_-]+$/.test(waha_session)) {
         return NextResponse.json(
-          { error: 'waha_session must match ^[a-z0-9_-]+$' },
+          { error: 'waha_session deve corresponder a ^[a-z0-9_-]+$' },
           { status: 400 }
         )
       }
@@ -475,7 +475,7 @@ export async function POST(request: Request) {
       if (claimedError) {
         console.error('Error checking waha_session ownership:', claimedError.message)
         return NextResponse.json(
-          { error: 'Failed to validate configuration' },
+          { error: 'Falha ao validar a configuração' },
           { status: 500 }
         )
       }
@@ -484,7 +484,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              'This WAHA session is already linked to another account on this instance.',
+              'Esta sessão WAHA já está vinculada a outra conta nesta instância.',
           },
           { status: 409 }
         )
@@ -498,7 +498,7 @@ export async function POST(request: Request) {
         } catch (err) {
           console.error('Encryption failed:', err)
           return NextResponse.json(
-            { error: 'Failed to encrypt API key.' },
+            { error: 'Falha ao cifrar a chave de API.' },
             { status: 500 }
           )
         }
@@ -585,7 +585,7 @@ export async function POST(request: Request) {
             ? (existing.waha_api_key ? decryptStoredSecret(existing.waha_api_key, 'whatsapp_config.waha_api_key') : null)
             : waha_api_key
 
-          if (!savedConfigId) throw new Error('Saved WAHA config id not found')
+          if (!savedConfigId) throw new Error('ID da configuração WAHA salva não encontrado')
 
           // URL a partir de env confiável (nunca de Host/X-Forwarded-Host) e
           // segredo derivado por canal — o segredo global não vai para o WAHA.
@@ -618,12 +618,12 @@ export async function POST(request: Request) {
         }
       }
 
-      return NextResponse.json({ success: true, message: 'WAHA configuration saved.' })
+      return NextResponse.json({ success: true, message: 'Configuração do WAHA salva.' })
     }
 
     if (!phone_number_id) {
       return NextResponse.json(
-        { error: 'phone_number_id is required' },
+        { error: 'phone_number_id é obrigatório' },
         { status: 400 }
       )
     }
@@ -631,7 +631,7 @@ export async function POST(request: Request) {
     if (pin !== undefined && pin !== null && pin !== '') {
       if (typeof pin !== 'string' || !/^\d{6}$/.test(pin)) {
         return NextResponse.json(
-          { error: 'PIN must be exactly 6 digits.' },
+          { error: 'O PIN deve ter exatamente 6 dígitos.' },
           { status: 400 }
         )
       }
@@ -654,7 +654,7 @@ export async function POST(request: Request) {
     if (claimedError) {
       console.error('Error checking phone_number_id ownership:', claimedError)
       return NextResponse.json(
-        { error: 'Failed to validate configuration' },
+        { error: 'Falha ao validar a configuração' },
         { status: 500 }
       )
     }
@@ -663,7 +663,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            'This WhatsApp phone number is already linked to another account on this instance. Each phone number can only be connected to one wacrm user.',
+            'Este número de WhatsApp já está vinculado a outra conta nesta instância. Cada número só pode ser conectado a um usuário do wacrm.',
         },
         { status: 409 }
       )
@@ -708,7 +708,7 @@ export async function POST(request: Request) {
       } catch (err) {
         console.error('Failed to decrypt existing access_token:', err)
         return NextResponse.json(
-          { error: 'The stored access token cannot be decrypted. Please re-enter it.' },
+          { error: 'O token de acesso salvo não pode ser decifrado. Informe-o novamente.' },
           { status: 500 }
         )
       }
@@ -717,19 +717,19 @@ export async function POST(request: Request) {
       try {
         encryptedAccessToken = encrypt(access_token)
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown encryption error'
+        const message = err instanceof Error ? err.message : 'Erro desconhecido de criptografia'
         console.error('Encryption failed:', message)
         return NextResponse.json(
           {
             error:
-              'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+              'Falha ao cifrar o token. Confira se ENCRYPTION_KEY é uma string hexadecimal válida de 64 caracteres nas variáveis de ambiente.',
           },
           { status: 500 }
         )
       }
     } else {
       return NextResponse.json(
-        { error: 'access_token and phone_number_id are required' },
+        { error: 'access_token e phone_number_id são obrigatórios' },
         { status: 400 }
       )
     }
@@ -748,25 +748,25 @@ export async function POST(request: Request) {
       const resolved = resolveSecretForWrite(app_secret, existing?.app_secret)
       if (!resolved.ok) {
         return NextResponse.json(
-          { error: 'app_secret must be a string' },
+          { error: 'app_secret deve ser um texto' },
           { status: 400 }
         )
       }
       encryptedAppSecret = resolved.value
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown encryption error'
+      const message = err instanceof Error ? err.message : 'Erro desconhecido de criptografia'
       console.error('Encryption failed:', message)
       return NextResponse.json(
         {
           error:
-            'Failed to encrypt App Secret. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+            'Falha ao cifrar o App Secret. Confira se ENCRYPTION_KEY é uma string hexadecimal válida de 64 caracteres nas variáveis de ambiente.',
         },
         { status: 500 }
       )
     }
     if (!encryptedAppSecret && !existing) {
       return NextResponse.json(
-        { error: 'app_secret is required' },
+        { error: 'app_secret é obrigatório' },
         { status: 400 }
       )
     }
@@ -779,10 +779,10 @@ export async function POST(request: Request) {
         accessToken: effectiveAccessToken,
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown Meta API error'
+      const message = err instanceof Error ? err.message : 'Erro desconhecido da API da Meta'
       console.error('Meta API verification failed during save:', message)
       return NextResponse.json(
-        { error: `Meta API error: ${message}` },
+        { error: `Erro da API da Meta: ${message}` },
         { status: 400 }
       )
     }
@@ -797,18 +797,18 @@ export async function POST(request: Request) {
       const resolved = resolveSecretForWrite(verify_token, existing?.verify_token)
       if (!resolved.ok) {
         return NextResponse.json(
-          { error: 'verify_token must be a string' },
+          { error: 'verify_token deve ser um texto' },
           { status: 400 }
         )
       }
       encryptedVerifyToken = resolved.value
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown encryption error'
+      const message = err instanceof Error ? err.message : 'Erro desconhecido de criptografia'
       console.error('Encryption failed:', message)
       return NextResponse.json(
         {
           error:
-            'Failed to encrypt token. Check that ENCRYPTION_KEY is a valid 64-character hex string in your environment variables.',
+            'Falha ao cifrar o token. Confira se ENCRYPTION_KEY é uma string hexadecimal válida de 64 caracteres nas variáveis de ambiente.',
         },
         { status: 500 }
       )
@@ -855,7 +855,7 @@ export async function POST(request: Request) {
           registeredAt = new Date().toISOString()
         } catch (err) {
           registrationError =
-            err instanceof Error ? err.message : 'Unknown Meta API error'
+            err instanceof Error ? err.message : 'Erro desconhecido da API da Meta'
           console.error('Phone number /register failed:', registrationError)
           // We deliberately fall through and still save the row so the
           // user can retry without re-entering everything. The UI
@@ -916,7 +916,7 @@ export async function POST(request: Request) {
       if (updateError) {
         console.error('Error updating whatsapp_config:', updateError)
         return NextResponse.json(
-          { error: 'Failed to update configuration' },
+          { error: 'Falha ao atualizar a configuração' },
           { status: 500 }
         )
       }
@@ -936,7 +936,7 @@ export async function POST(request: Request) {
       if (insertError) {
         console.error('Error inserting whatsapp_config:', insertError)
         return NextResponse.json(
-          { error: 'Failed to save configuration' },
+          { error: 'Falha ao salvar a configuração' },
           { status: 500 }
         )
       }
@@ -968,7 +968,7 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     console.error('Error in WhatsApp config POST:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 })
   }
 }
 
@@ -988,18 +988,18 @@ export async function DELETE(request: Request) {
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
     const accountId = await resolveAccountId(supabase, user.id)
     if (!accountId) {
       return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
+        { error: 'Seu perfil não está vinculado a uma conta.' },
         { status: 403 },
       )
     }
 
-    const denied = await requireChannelAdmin(supabase, user.id, 'Only account admins can delete channels.')
+    const denied = await requireChannelAdmin(supabase, user.id, 'Somente administradores da conta podem excluir canais.')
     if (denied) return denied
 
     const { searchParams } = new URL(request.url)
@@ -1019,7 +1019,7 @@ export async function DELETE(request: Request) {
     if (deleteError) {
       console.error('Error deleting whatsapp_config:', deleteError)
       return NextResponse.json(
-        { error: 'Failed to delete configuration' },
+        { error: 'Falha ao excluir a configuração' },
         { status: 500 }
       )
     }
@@ -1027,7 +1027,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error in WhatsApp config DELETE:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 })
   }
 }
 
@@ -1052,25 +1052,25 @@ export async function PATCH(request: Request) {
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
     const accountId = await resolveAccountId(supabase, user.id)
     if (!accountId) {
       return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
+        { error: 'Seu perfil não está vinculado a uma conta.' },
         { status: 403 },
       )
     }
 
-    const denied = await requireChannelAdmin(supabase, user.id, 'Only account admins can change channel settings.')
+    const denied = await requireChannelAdmin(supabase, user.id, 'Somente administradores da conta podem alterar as configurações dos canais.')
     if (denied) return denied
 
     const body = await request.json()
     const { id, flow_id, receptivo, habilitado, team_id, client_id } = body
 
     if (!id) {
-      return NextResponse.json({ error: 'id is required' }, { status: 400 })
+      return NextResponse.json({ error: 'id é obrigatório' }, { status: 400 })
     }
 
     const update: Record<string, unknown> = {}
@@ -1083,16 +1083,16 @@ export async function PATCH(request: Request) {
 
     if (Object.keys(update).length === 0) {
       return NextResponse.json(
-        { error: 'At least one of flow_id, receptivo, habilitado, team_id, client_id is required' },
+        { error: 'Informe ao menos um destes campos: flow_id, receptivo, habilitado, team_id, client_id' },
         { status: 400 },
       )
     }
 
     if (typeof update.receptivo !== 'undefined' && typeof update.receptivo !== 'boolean') {
-      return NextResponse.json({ error: 'receptivo must be a boolean' }, { status: 400 })
+      return NextResponse.json({ error: 'receptivo deve ser verdadeiro ou falso' }, { status: 400 })
     }
     if (typeof update.habilitado !== 'undefined' && typeof update.habilitado !== 'boolean') {
-      return NextResponse.json({ error: 'habilitado must be a boolean' }, { status: 400 })
+      return NextResponse.json({ error: 'habilitado deve ser verdadeiro ou falso' }, { status: 400 })
     }
 
     // flow_id, when set (not null), must belong to the caller's own
@@ -1108,10 +1108,10 @@ export async function PATCH(request: Request) {
         .maybeSingle()
       if (flowError) {
         console.error('Error validating flow_id ownership:', flowError)
-        return NextResponse.json({ error: 'Failed to validate flow' }, { status: 500 })
+        return NextResponse.json({ error: 'Falha ao validar o fluxo' }, { status: 500 })
       }
       if (!flow) {
-        return NextResponse.json({ error: 'Flow not found in your account' }, { status: 404 })
+        return NextResponse.json({ error: 'Fluxo não encontrado na sua conta' }, { status: 404 })
       }
     }
 
@@ -1128,10 +1128,10 @@ export async function PATCH(request: Request) {
         .maybeSingle()
       if (teamError) {
         console.error('Error validating team_id ownership:', teamError)
-        return NextResponse.json({ error: 'Failed to validate team' }, { status: 500 })
+        return NextResponse.json({ error: 'Falha ao validar a equipe' }, { status: 500 })
       }
       if (!team) {
-        return NextResponse.json({ error: 'Team not found in your account' }, { status: 404 })
+        return NextResponse.json({ error: 'Equipe não encontrada na sua conta' }, { status: 404 })
       }
     }
 
@@ -1143,7 +1143,7 @@ export async function PATCH(request: Request) {
         .eq('account_id', accountId)
         .maybeSingle()
       if (!client) {
-        return NextResponse.json({ error: 'Client not found in your account' }, { status: 404 })
+        return NextResponse.json({ error: 'Cliente não encontrado na sua conta' }, { status: 404 })
       }
     }
 
@@ -1155,12 +1155,12 @@ export async function PATCH(request: Request) {
 
     if (updateError) {
       console.error('Error updating whatsapp_config (PATCH):', updateError)
-      return NextResponse.json({ error: 'Failed to update configuration' }, { status: 500 })
+      return NextResponse.json({ error: 'Falha ao atualizar a configuração' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error in WhatsApp config PATCH:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 })
   }
 }

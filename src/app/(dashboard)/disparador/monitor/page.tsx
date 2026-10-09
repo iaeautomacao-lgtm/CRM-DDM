@@ -238,7 +238,7 @@ export default function MonitorV2Page() {
           )}
 
           {s.degraded.length > 0 && (
-            <p className="m-0 rounded-lg bg-surface-3 px-3.5 py-2 text-xs text-muted-foreground">
+            <p className="m-0 rounded-lg bg-surface-3 px-3.5 py-2 text-xs text-foreground-2">
               Algumas fontes não responderam e o painel está parcial: {s.degraded.join("; ")}.
             </p>
           )}

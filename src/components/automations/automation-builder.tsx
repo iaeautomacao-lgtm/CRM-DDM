@@ -587,6 +587,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           onChange={(e) => patchTop("name", e.target.value)}
           readOnly={readOnly}
           placeholder="Automação sem nome"
+          aria-label="Nome da automação"
           className="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:bg-muted focus:outline-none sm:text-base"
         />
         {/* O switch só vale ao salvar — o rótulo deixa isso explícito
@@ -705,10 +706,11 @@ function LinesCard({ value, onChange }: { value: string[]; onChange: (ids: strin
               key={l.id}
               type="button"
               onClick={() => toggle(l.id)}
+              aria-pressed={active}
               className={cn(
                 "rounded-full border px-2.5 py-1 transition-colors",
                 active
-                  ? "border-primary bg-primary/10 text-primary"
+                  ? "border-primary bg-primary-soft text-primary-text"
                   : "border-border text-muted-foreground hover:text-foreground",
               )}
             >
@@ -742,17 +744,18 @@ function TriggerCard({
     // Card width: full on mobile, fixed 320px on sm+. The canvas wrapper
     // (max-w-2xl + px-4) keeps this tidy on tablet/desktop.
     <div className="z-10 w-full max-w-[320px] sm:w-80">
-      <div className="rounded-lg border border-border border-l-4 border-l-blue-500 bg-card shadow-lg">
+      <div className="rounded-lg border border-border border-l-4 border-l-primary bg-card shadow-lg">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
           className="flex w-full items-center gap-3 px-4 py-3 text-left"
         >
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/10 text-blue-400">
-            <Zap className="h-4 w-4" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary-soft text-primary-text">
+            <Zap className="h-4 w-4" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] uppercase tracking-wide text-blue-300">Gatilho</div>
+            <div className="text-[11px] uppercase tracking-wide text-primary-text">Gatilho</div>
             <div className="truncate text-sm font-medium text-foreground">
               {TRIGGER_OPTIONS.find((o) => o.value === type)?.label ?? type}
             </div>
@@ -764,10 +767,11 @@ function TriggerCard({
         {open && (
           <div className="space-y-3 border-t border-border px-4 py-3">
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              <label htmlFor="automation-trigger-type" className="mb-1 block text-xs font-medium text-muted-foreground">
                 Tipo de gatilho
               </label>
               <select
+                id="automation-trigger-type"
                 value={type}
                 onChange={(e) => onTypeChange(e.target.value as AutomationTriggerType)}
                 className="w-full rounded-md border border-border bg-muted px-2 py-1.5 text-sm text-foreground focus:border-primary focus:outline-none"

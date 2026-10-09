@@ -853,12 +853,13 @@ function RunCard({
           checked={selected}
           onCheckedChange={onToggleSelect}
           onClick={(e) => e.stopPropagation()}
-          aria-label="Selecionar execução"
+          aria-label={`Selecionar execução de ${contactLabel}`}
         />
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={expanded}
+          aria-controls={`run-${run.id}-details`}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
         {expanded ? (
@@ -920,7 +921,7 @@ function RunCard({
       )}
       </div>
       {expanded && (
-        <div className="border-t border-border px-4 py-3">
+        <div id={`run-${run.id}-details`} className="border-t border-border px-4 py-3">
           {summary && (
             <div className="mb-3 rounded-md border border-border bg-surface-3 px-3 py-2">
               <p className="text-sm font-medium text-foreground">{summary.headline}</p>
@@ -1254,13 +1255,7 @@ function EventDetailSheet({
   onClose: () => void;
 }) {
   const open = ev !== null;
-  if (!ev) {
-    return (
-      <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-        <SheetContent side="right" className="w-full sm:max-w-md" />
-      </Sheet>
-    );
-  }
+  if (!ev) return null;
   const iconComponent = getEventIcon(ev);
   const cls = getEventColor(ev);
   const statusMeta = ev.status ? STATUS_BADGE[ev.status] : null;
