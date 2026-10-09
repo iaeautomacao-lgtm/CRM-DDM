@@ -301,6 +301,10 @@
       "version": "302b_conversation_assignments_from_agent_idx",
       "kind": "index",
       "index": "idx_conversation_assignments_from_agent"
+    },
+    {
+      "version": "311_member_deactivation_last_access",
+      "kind": "registry"
     }
   ]
 }

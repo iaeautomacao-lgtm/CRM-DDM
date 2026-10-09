@@ -21,6 +21,17 @@
 import { createClient } from "@/lib/supabase/client";
 import { MFA_PATH, MFA_REQUIRED_CODE, mfaRedirectUrl } from "@/lib/auth/mfa";
 
+/** 403 com code member_deactivated (lê uma cópia; o corpo original segue disponível). */
+export async function isMemberDeactivatedResponse(res: Response): Promise<boolean> {
+  if (res.status !== 403) return false;
+  try {
+    const body = (await res.clone().json()) as { code?: unknown };
+    return body?.code === "member_deactivated";
+  } catch {
+    return false;
+  }
+}
+
 /** 401 com code mfa_required (lê uma cópia: o corpo original segue disponível para quem chamou). */
 export async function isMfaRequiredResponse(res: Response): Promise<boolean> {
   if (res.status !== 401) return false;
@@ -71,6 +82,14 @@ export async function apiFetch(
     requestOptions.headers = headers;
   }
   const res = await fetch(url, requestOptions);
+  // Membro desativado (migration 311): encerra a sessão local e volta ao login com o motivo.
+  if (res.status === 403 && (await isMemberDeactivatedResponse(res))) {
+    if (typeof window !== "undefined") {
+      await createClient().auth.signOut().catch(() => undefined);
+      window.location.replace("/login?error=member-deactivated");
+    }
+    return res;
+  }
   if (res.status !== 401) return res;
 
   // 2FA obrigatório (src/lib/auth/mfa.ts): o servidor recusa a sessão só com senha de quem tem
