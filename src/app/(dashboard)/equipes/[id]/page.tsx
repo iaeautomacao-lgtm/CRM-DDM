@@ -68,6 +68,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PageBody } from "@/components/ddm/page-toolbar";
 import type { AccountMember, MessageTemplate, Tag, Team } from "@/types";
 
 /** Replaces {{1}}, {{2}}, ... with the matching sample value — left as
@@ -88,7 +89,7 @@ const TEMPLATE_BUTTON_TYPE_LABELS: Record<string, string> = {
 };
 
 const ACTIVE_TAB_CLASS =
-  "rounded-none border-none bg-transparent px-1 pb-2 text-muted-foreground shadow-none transition-colors duration-200 hover:text-foreground data-active:bg-transparent data-active:text-[#FF5706] data-active:shadow-none data-active:after:bg-[#FF5706]";
+  "rounded-none border-none bg-transparent px-1 pb-2 text-muted-foreground shadow-none transition-colors duration-200 hover:text-foreground data-active:bg-transparent data-active:text-primary data-active:shadow-none data-active:after:bg-primary";
 
 const NO_OVERFLOW = "__none__";
 
@@ -938,8 +939,8 @@ export default function EquipeDetailPage({
   if (!team) return null;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
+    <PageBody className="gap-6">
+      <div className="flex items-center gap-3 pt-1">
         <button
           type="button"
           onClick={() => router.push("/equipes")}
@@ -985,7 +986,7 @@ export default function EquipeDetailPage({
               className="group flex items-center gap-2 text-left"
               title="Clique para editar o nome"
             >
-              <h1 className="text-2xl font-bold text-foreground">{team.name}</h1>
+              <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">{team.name}</h1>
               <Pencil className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
             </button>
           )}
@@ -1660,6 +1661,6 @@ export default function EquipeDetailPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }
