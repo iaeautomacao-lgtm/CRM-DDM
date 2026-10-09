@@ -264,13 +264,14 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
     expect((await db.query<{ n: number }>("SELECT count(*)::int AS n FROM wacrm.schema_migrations")).rows[0].n).toBe(before);
   }, 120_000);
 
-  it("a 310 por último cobre as tabelas novas: toda tabela wacrm com RLS tem mfa_aal2_required", async () => {
+  it.skipIf(!ROUND.includes("310"))("a 310 por último cobre as tabelas novas: toda tabela wacrm com RLS tem mfa_aal2_required", async () => {
     const r = await db.query<{ relname: string }>(`
       SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
        WHERE n.nspname = 'wacrm' AND c.relkind IN ('r', 'p') AND c.relrowsecurity
          AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'wacrm' AND p.tablename = c.relname AND p.policyname = 'mfa_aal2_required')`);
     expect(r.rows.map((x) => x.relname)).toEqual([]);
-    for (const t of ["history_export_jobs", "push_subscriptions", "quick_reply_usage_daily", "internal_chat_reads"]) {
+    const NEW_RLS_TABLES: Array<[string, string]> = [["history_export_jobs", "297"], ["push_subscriptions", "298"], ["quick_reply_usage_daily", "301"], ["internal_chat_reads", "303"]];
+    for (const [t] of NEW_RLS_TABLES.filter(([, mig]) => ROUND.includes(mig))) {
       const p = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_policies WHERE schemaname = 'wacrm' AND tablename = '${t}' AND policyname = 'mfa_aal2_required'`);
       expect(p.rows[0].n, `${t} sem a policy de MFA`).toBe(1);
     }
@@ -310,12 +311,16 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
         throw new Error(`migration ${n} falhou ao reaplicar depois do rollback: ${e instanceof Error ? e.message : e}`);
       });
     }
-    expect(await exists(db, created.get("303")!)).toContain("tabela internal_chat_reads");
+    for (const n of ROUND) {
+      const now = new Set(await exists(db, created.get(n)!));
+      const wanted = [...created.get(n)!.tables.map((t) => `tabela ${t}`), ...created.get(n)!.functions.map((f) => `função ${f}`)];
+      for (const w of wanted.filter((x) => !preExisting.get(n)!.has(x))) expect(now.has(w), `${n}: ${w} não voltou depois do rollback + reaplicação`).toBe(true);
+    }
   }, 120_000);
 });
 
 suite("rodada de deploy — controle negativo: a 310 fora do fim deixa tabela nova sem MFA", () => {
-  it("310 antes da 303 ⇒ internal_chat_reads fica sem a policy (por isso a 310 é a última)", async () => {
+  it.skipIf(!ROUND.includes("310") || !ROUND.includes("303"))("310 antes da 303 ⇒ internal_chat_reads fica sem a policy (por isso a 310 é a última)", async () => {
     const db = new PGlite();
     try {
       await db.exec(BASELINE_SQL);
