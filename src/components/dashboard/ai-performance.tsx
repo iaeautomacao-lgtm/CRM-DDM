@@ -1,149 +1,111 @@
-"use client";
+import type { AiAnalyticsData } from '@/lib/dashboard/types'
+import { pct } from '@/lib/dashboard/view'
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
+import { DashCard, Swatch } from './dash-card'
 
-import type { ReactNode } from "react";
-import type { AiAnalyticsData } from "@/lib/dashboard/types";
+const fmt = (n: number) => n.toLocaleString('pt-BR')
 
-interface AiPerformanceProps {
-  data: AiAnalyticsData | null;
-  loading: boolean;
+/**
+ * "IA e conversão": sentimento das conversas, mensagens por autor (IA ×
+ * humano) e o resultado dos negócios (ganhos, perdidos, em aberto).
+ * Os dados cobrem todo o histórico da conta (loadAiAnalytics não filtra
+ * período), por isso o subtítulo não fala em "últimos N dias".
+ */
+export function AiPerformance({ data, loading }: { data: AiAnalyticsData | null; loading: boolean }) {
+  return (
+    <DashCard title="IA e conversão" subtitle="Todo o histórico da organização" className="flex-[1_1_300px] gap-[18px]">
+      {loading || !data ? (
+        <div className="flex flex-col gap-3" aria-busy="true">
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-14 w-full" />
+        </div>
+      ) : (
+        <Body data={data} />
+      )}
+    </DashCard>
+  )
 }
 
-export function AiPerformance({ data, loading }: AiPerformanceProps) {
-  if (loading || !data) {
-    return (
-      <div className="grid animate-pulse grid-cols-1 gap-3 md:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <div key={i} className="rounded-lg border border-border/80 bg-card/25 p-4">
-            <div className="h-3 w-20 rounded bg-muted" />
-            <div className="mt-4 h-7 w-16 rounded bg-muted" />
-            <div className="mt-5 h-20 rounded bg-muted" />
+function Body({ data }: { data: AiAnalyticsData }) {
+  const { sentiment, messagesRatio, conversion } = data
+  const sentimentRows = [
+    { label: 'Positivo', value: sentiment.positive, color: 'bg-success' },
+    { label: 'Neutro', value: sentiment.neutral, color: 'bg-muted-foreground' },
+    { label: 'Negativo', value: sentiment.negative, color: 'bg-danger' },
+    { label: 'Misto', value: sentiment.mixed, color: 'bg-warning' },
+  ]
+  const botPct = pct(messagesRatio.bot, messagesRatio.total)
+  const humanPct = messagesRatio.total > 0 ? 100 - botPct : 0
+
+  return (
+    <>
+      <div className="flex flex-col gap-2">
+        <p className="m-0 text-[12.5px] font-semibold text-foreground-2">Sentimento dos clientes</p>
+        {sentiment.total === 0 ? (
+          <p className="m-0 text-[12.5px] text-muted-foreground">Nenhuma conversa com sentimento analisado.</p>
+        ) : (
+          sentimentRows.map((s) => {
+            const p = pct(s.value, sentiment.total)
+            return (
+              <div key={s.label} className="grid grid-cols-[72px_minmax(0,1fr)_84px] items-center gap-2.5">
+                <span className="text-[12.5px] text-foreground">{s.label}</span>
+                <span className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+                  <span
+                    className={cn('block h-full origin-left animate-ddm-bar rounded-full', s.color)}
+                    style={{ width: `${p}%` }}
+                  />
+                </span>
+                <span className="text-right text-[12.5px] tabular-nums text-foreground-2">
+                  {fmt(s.value)} · {p}%
+                </span>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <div className="flex justify-between text-[12.5px]">
+          <span className="font-semibold text-foreground-2">Mensagens por autor</span>
+          <span className="tabular-nums text-muted-foreground">{fmt(messagesRatio.total)}</span>
+        </div>
+        <div className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-surface-3">
+          {messagesRatio.total > 0 && (
+            <>
+              <span className="origin-left animate-ddm-bar bg-foreground-2" style={{ width: `${botPct}%` }} />
+              <span className="origin-left animate-ddm-bar bg-primary" style={{ width: `${humanPct}%` }} />
+            </>
+          )}
+        </div>
+        <div className="flex flex-wrap justify-between gap-2 text-xs tabular-nums text-foreground-2">
+          <span className="inline-flex items-center gap-1.5">
+            <Swatch className="bg-foreground-2" />
+            IA · {fmt(messagesRatio.bot)} ({botPct}%)
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <Swatch className="bg-primary" />
+            Humano · {fmt(messagesRatio.human)} ({humanPct}%)
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { label: 'Ganhos', value: conversion.won, color: 'text-success' },
+          { label: 'Perdidos', value: conversion.lost, color: 'text-danger' },
+          { label: 'Em aberto', value: conversion.open, color: 'text-foreground' },
+        ].map((c) => (
+          <div key={c.label} className="flex flex-col gap-1 rounded-lg bg-surface-3 px-3 py-2.5">
+            <span className="text-xs text-foreground-2">{c.label}</span>
+            <span className={cn('text-lg font-semibold tabular-nums', c.color)}>{fmt(c.value)}</span>
           </div>
         ))}
       </div>
-    );
-  }
-
-  const { sentiment, messagesRatio, conversion } = data;
-  const totalSentiment = sentiment.total || 1;
-  const pctPositive = Math.round((sentiment.positive / totalSentiment) * 100);
-  const pctNeutral = Math.round((sentiment.neutral / totalSentiment) * 100);
-  const pctNegative = Math.round((sentiment.negative / totalSentiment) * 100);
-  const pctMixed = Math.round((sentiment.mixed / totalSentiment) * 100);
-
-  const totalOutbound = messagesRatio.total || 1;
-  const pctBot = Math.round((messagesRatio.bot / totalOutbound) * 100);
-  const pctHuman = Math.round((messagesRatio.human / totalOutbound) * 100);
-
-  return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-      <MetricColumn eyebrow="Sentimento" value={pctPositive + "%"} description="positivo">
-        <BreakdownRow label="Positivo" value={sentiment.positive + " (" + pctPositive + "%)"} percent={pctPositive} tone="success" />
-        <BreakdownRow label="Neutro" value={sentiment.neutral + " (" + pctNeutral + "%)"} percent={pctNeutral} />
-        <BreakdownRow label="Negativo" value={sentiment.negative + " (" + pctNegative + "%)"} percent={pctNegative} tone="danger" />
-        {sentiment.mixed > 0 ? (
-          <BreakdownRow label="Misto" value={sentiment.mixed + " (" + pctMixed + "%)"} percent={pctMixed} tone="warning" />
-        ) : null}
-      </MetricColumn>
-
-      <MetricColumn eyebrow="Automação" value={pctBot + "%"} description="pela IA">
-        <BreakdownRow label="IA" value={messagesRatio.bot.toLocaleString("pt-BR")} percent={pctBot} />
-        <BreakdownRow label="Humano" value={messagesRatio.human.toLocaleString("pt-BR")} percent={pctHuman} />
-      </MetricColumn>
-
-      <MetricColumn eyebrow="Conversão" value={conversion.rate + "%"} description="fechamento">
-        <SimpleRow label="Ganhos" value={conversion.won} tone="success" />
-        <SimpleRow label="Perdidos" value={conversion.lost} tone="danger" />
-        <SimpleRow label="Em aberto" value={conversion.open} />
-      </MetricColumn>
-    </div>
-  );
-}
-
-function MetricColumn({
-  eyebrow,
-  value,
-  description,
-  children,
-}: {
-  eyebrow: string;
-  value: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-lg border border-border/80 bg-card/25 p-4">
-      <p className="text-xs font-medium text-muted-foreground">{eyebrow}</p>
-
-      <div className="mt-3 flex items-end gap-2">
-        <strong className="text-[28px] font-semibold leading-none tracking-[-0.035em] tabular-nums text-foreground">
-          {value}
-        </strong>
-        <span className="pb-0.5 text-[11px] text-muted-foreground">{description}</span>
-      </div>
-
-      <div className="mt-5 space-y-3">{children}</div>
-    </section>
-  );
-}
-
-function BreakdownRow({
-  label,
-  value,
-  percent,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  percent: number;
-  tone?: "neutral" | "success" | "warning" | "danger";
-}) {
-  const barClass =
-    tone === "success"
-      ? "bg-emerald-500"
-      : tone === "warning"
-        ? "bg-amber-500"
-        : tone === "danger"
-          ? "bg-rose-500"
-          : "bg-primary";
-
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-3 text-xs">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium tabular-nums text-foreground">{value}</span>
-      </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
-        <div
-          className={"h-full rounded-full " + barClass}
-          style={{ width: String(Math.max(0, Math.min(100, percent))) + "%" }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function SimpleRow({
-  label,
-  value,
-  tone = "neutral",
-}: {
-  label: string;
-  value: number;
-  tone?: "neutral" | "success" | "danger";
-}) {
-  const toneClass =
-    tone === "success"
-      ? "text-emerald-500"
-      : tone === "danger"
-        ? "text-rose-500"
-        : "text-foreground";
-
-  return (
-    <div className="flex items-center justify-between border-b border-border/70 pb-2.5 text-xs last:border-b-0 last:pb-0">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={"font-semibold tabular-nums " + toneClass}>
-        {value.toLocaleString("pt-BR")}
-      </span>
-    </div>
-  );
+      <p className="m-0 -mt-2 text-xs text-muted-foreground">
+        Taxa de fechamento: <span className="font-semibold tabular-nums text-foreground">{conversion.rate}%</span> dos negócios encerrados
+      </p>
+    </>
+  )
 }
