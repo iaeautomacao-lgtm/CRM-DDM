@@ -71,7 +71,7 @@ import {
 } from "@/components/ui/sheet";
 import { CollapsibleJson, CopyJsonButton } from "@/components/flows/json-highlight";
 import { cn } from "@/lib/utils";
-import { useCan } from "@/hooks/use-can";
+import { usePermission } from "@/hooks/use-permission";
 
 /**
  * Run history viewer.
@@ -226,7 +226,8 @@ const STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 export default function FlowRunsPage() {
-  const canDelete = useCan("send-messages");
+  // DELETE /api/flows/[id]/runs exige flows.view_runs.
+  const canDelete = usePermission("flows.view_runs");
   const router = useRouter();
   const params = useParams<{ id: string }>();
   // ?run_id= (atalho "Fluxo" do inbox): abre já expandida e rolada até ela.

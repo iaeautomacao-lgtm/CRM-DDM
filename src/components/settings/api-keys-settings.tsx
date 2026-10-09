@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api-fetch";
 //
 // Manage the credentials that authenticate the public REST API
 // (`/api/v1/*`). Any member sees the roster (read-only); admin+ can
-// mint and revoke (gated by <RequireRole min="admin"> here and the
+// mint and revoke (gated by <Can permission="api_keys.manage"> here and the
 // admin-only API routes + RLS on the server).
 //
 // One-time reveal: a freshly-minted key's plaintext is shown ONCE in
@@ -41,7 +41,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { RequireRole } from '@/components/auth/require-role';
+import { Can } from '@/components/auth/can';
 import { useAuth } from '@/hooks/use-auth';
 import {
   API_SCOPES,
@@ -184,12 +184,12 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
           )
         }
         action={
-          <RequireRole min={personal ? 'supervisor' : 'admin'}>
+          <Can permission={personal ? 'intelligence.personal_key' : 'api_keys.manage'}>
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="size-4" />
               {personal ? 'Nova chave' : 'Nova chave de API'}
             </Button>
-          </RequireRole>
+          </Can>
         }
       />
 
@@ -285,7 +285,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
                     {status === 'active' && (
                       // Modo pessoal: a lista só tem chaves do próprio
                       // usuário, que pode revogá-las (supervisor incluso).
-                      <RequireRole min={personal ? 'supervisor' : 'admin'}>
+                      <Can permission={personal ? 'intelligence.personal_key' : 'api_keys.manage'}>
                         <Button
                           variant="outline"
                           size="sm"
@@ -300,7 +300,7 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
                           )}
                           Revogar
                         </Button>
-                      </RequireRole>
+                      </Can>
                     )}
                   </li>
                 );

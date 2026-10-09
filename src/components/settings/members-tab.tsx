@@ -17,7 +17,7 @@ import { apiFetch } from "@/lib/api-fetch";
 //
 // Role-gating
 //   The tab itself is reachable by any member, but mutation buttons
-//   are wrapped in `<RequireRole min="admin">` / `useCan` so an
+//   are wrapped in `<Can permission="members.*">` / usePermissions so an
 //   agent or viewer sees the roster read-only. The server-side
 //   RPCs (set_member_role, remove_account_member) double-check
 //   the role anyway.
@@ -76,7 +76,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { RequireRole } from '@/components/auth/require-role';
+import { Can } from '@/components/auth/can';
+import { usePermissions } from '@/hooks/use-permission';
 import { useAuth } from '@/hooks/use-auth';
 import { usePresence } from '@/hooks/use-presence';
 import type { AccountRole } from '@/lib/auth/roles';
@@ -151,7 +152,13 @@ function fmtExpiresIn(iso: string): string {
 }
 
 export function MembersTab() {
-  const { user, canManageMembers, isOwner } = useAuth();
+  const { user } = useAuth();
+  // Ações pela permissão que o servidor exige (GET /api/me/permissions).
+  const { can } = usePermissions();
+  const canManageMembers = can('members.manage');
+  const canInvite = can('members.invite');
+  const canBulkInvite = can('members.bulk_invite');
+  const canResetPassword = can('members.reset_password');
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -178,7 +185,7 @@ export function MembersTab() {
     try {
       const [mres, ires] = await Promise.all([
         apiFetch('/api/account/members', { cache: 'no-store' }),
-        canManageMembers
+        canInvite
           ? apiFetch('/api/account/invitations', { cache: 'no-store' })
           : Promise.resolve(null),
       ]);
@@ -208,7 +215,7 @@ export function MembersTab() {
     } finally {
       setLoading(false);
     }
-  }, [canManageMembers]);
+  }, [canInvite]);
 
   useEffect(() => {
     void loadEverything();
@@ -372,22 +379,25 @@ export function MembersTab() {
         title="Usuários"
         description="Pessoas com acesso a esta conta. Os papéis controlam o que cada usuário pode fazer."
         action={
-          <RequireRole min="admin">
+          <Can permission="members.invite">
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setBulkImportOpen(true)}
-                className="border-border text-muted-foreground hover:bg-muted"
-              >
-                <Upload className="size-4" />
-                Importar usuários
-              </Button>
+              {/* Convite em lote é só do proprietário no servidor (members.bulk_invite). */}
+              {canBulkInvite && (
+                <Button
+                  variant="outline"
+                  onClick={() => setBulkImportOpen(true)}
+                  className="border-border text-muted-foreground hover:bg-muted"
+                >
+                  <Upload className="size-4" />
+                  Importar usuários
+                </Button>
+              )}
               <Button onClick={() => setInviteOpen(true)}>
                 <Plus className="size-4" />
                 Convidar usuário
               </Button>
             </div>
-          </RequireRole>
+          </Can>
         }
       />
 
@@ -612,7 +622,7 @@ export function MembersTab() {
                     {/* Owner-only actions menu. Never shown on the
                         caller's own row — resetting your own password
                         belongs in your profile settings, not here. */}
-                    {isOwner && !isSelf && (
+                    {canResetPassword && !isSelf && (
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -649,8 +659,8 @@ export function MembersTab() {
         </CardContent>
       </Card>
 
-      {/* Pending invitations — admin+ only */}
-      <RequireRole min="admin">
+      {/* Convites pendentes — members.invite */}
+      <Can permission="members.invite">
         <div>
           <div className="mb-2 flex items-center gap-2">
             <UsersRound className="size-4 text-muted-foreground" />
@@ -737,7 +747,7 @@ export function MembersTab() {
             </Card>
           )}
         </div>
-      </RequireRole>
+      </Can>
 
       <InviteMemberDialog
         open={inviteOpen}

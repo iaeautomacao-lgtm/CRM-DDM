@@ -36,8 +36,7 @@ import {
 import { ConversationCard } from "@/components/contact-timeline/ConversationCard";
 import { ConversationFlowCard } from "@/components/inbox/conversation-flow-card";
 import { ContactChannelsCard } from "@/components/inbox/contact-channels-card";
-import { useCan } from "@/hooks/use-can";
-import { canAccessRoute } from "@/lib/role-utils";
+import { usePermissions } from "@/hooks/use-permission";
 
 // One more than the display cap — same "fetch cap+1 to detect more
 // without a second COUNT query" shape loadConversationMessages uses.
@@ -62,11 +61,12 @@ export function ContactSidebar({
   onUpdateConversation,
   onUpdateContact,
 }: ContactSidebarProps) {
-  const { accountId, accountRole } = useAuth();
+  const { accountId } = useAuth();
   // Card "Fluxo" só para owner/admin (o agente não vê o fluxo da conversa).
   // O link para o editor depende de quem pode abrir /flows (ROUTE_ALLOWLIST).
-  const canViewFlows = useCan("view-conversation-flows");
-  const canOpenFlowEditor = !!accountRole && canAccessRoute(accountRole, "/flows");
+  const { can, canOpen } = usePermissions();
+  const canViewFlows = can("flows.view_runs");
+  const canOpenFlowEditor = canOpen("/flows");
   const [copied, setCopied] = useState(false);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
@@ -149,7 +149,7 @@ export function ContactSidebar({
   // Só quando o cliente já escreveu (last_customer_message_at, trigger da
   // 128) — conversa só de campanha/bot não tem o que analisar.
   const hasCustomerMessageForAuto = Boolean(conversation?.last_customer_message_at);
-  const canAutoAnalyze = !!accountRole && accountRole !== "viewer";
+  const canAutoAnalyze = can("inbox.ai_assist");
   useEffect(() => {
     if (!canAutoAnalyze || !conversationIdForAuto || !hasCustomerMessageForAuto) return;
     if (sentimentForAuto && sentimentForAuto !== "unknown") return;
@@ -415,7 +415,7 @@ export function ContactSidebar({
             <ContactChannelsCard
               key={contact.id}
               contact={contact}
-              canEdit={accountRole !== "viewer"}
+              canEdit={can("contacts.edit")}
               onLinked={(result, merged) => {
                 if (merged) onUpdateConversation?.({ contact_id: result.id, contact: result });
                 onUpdateContact?.(result);

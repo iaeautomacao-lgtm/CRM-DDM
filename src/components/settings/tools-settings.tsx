@@ -10,8 +10,7 @@ import { toast } from 'sonner';
 import { Loader2, Pencil, Play, Plus, Trash2, Wrench } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
-import { hasMinRole } from '@/lib/auth/roles';
-import { useAuth } from '@/hooks/use-auth';
+import { usePermission } from '@/hooks/use-permission';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,8 +19,7 @@ import { SettingsPanelHead } from './settings-panel-head';
 import { TestDialog, ToolDialog, type ToolItem } from './tool-dialogs';
 
 export function ToolsSettings() {
-  const { accountRole } = useAuth();
-  const canEdit = !!accountRole && hasMinRole(accountRole, 'admin');
+  const canEdit = usePermission('ai.tools.edit');
 
   const [items, setItems] = useState<ToolItem[]>([]);
   const [loading, setLoading] = useState(true);

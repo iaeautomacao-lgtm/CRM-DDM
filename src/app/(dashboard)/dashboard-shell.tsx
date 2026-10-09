@@ -11,7 +11,8 @@ import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 import { FeedbackButton } from "@/components/feedback-button";
 import { RouteTransition } from "@/components/motion/route-transition";
 import { CommandPalette } from "@/components/command-palette/command-palette";
-import { canAccessRoute, getDefaultRoute, isRouteGated } from "@/lib/role-utils";
+import { getDefaultRoute } from "@/lib/role-utils";
+import { usePermissions } from "@/hooks/use-permission";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -21,6 +22,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   const { user, loading, profileLoading, accountRole, authError, refreshProfile, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const permissions = usePermissions();
 
   // Sidebar drawer state — only used on mobile. On lg+ the sidebar is
   // always visible and this stays at `false` (ignored by the component).
@@ -34,14 +36,15 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   }, [user, loading, router, authError]);
 
   useEffect(() => {
-    if (loading || profileLoading || !user || authError) return;
+    if (loading || profileLoading || permissions.loading || !user || authError) return;
 
     if (!accountRole) {
       if (pathname !== "/unauthorized") router.replace("/unauthorized");
       return;
     }
 
-    if (isRouteGated(pathname) && !canAccessRoute(accountRole, pathname)) {
+    // Páginas liberadas pelo servidor (GET /api/me/permissions, campo pages).
+    if (!permissions.canOpen(pathname)) {
       const fallback = getDefaultRoute(accountRole);
       if (pathname !== fallback) {
         // Explica o redirecionamento — o id fixo deduplica o toast caso
@@ -56,7 +59,7 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
         router.replace(fallback);
       }
     }
-  }, [accountRole, loading, pathname, profileLoading, router, user, authError]);
+  }, [accountRole, loading, pathname, permissions, profileLoading, router, user, authError]);
 
   // Page views — dispara a cada troca de rota dentro do dashboard.
   // duration_ms enviado aqui é o tempo gasto na página ANTERIOR (por

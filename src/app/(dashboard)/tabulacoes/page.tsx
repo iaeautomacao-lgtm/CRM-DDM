@@ -1,6 +1,6 @@
 "use client";
 
-import { useCan } from "@/hooks/use-can";
+import { usePermission } from "@/hooks/use-permission";
 import { CustomFieldsSettings } from "@/components/settings/custom-fields-settings";
 import { TagManager } from "@/components/settings/tag-manager";
 import { TabulacoesManager } from "@/components/tabulacoes/tabulacoes-manager";
@@ -15,7 +15,7 @@ import { TabulacoesManager } from "@/components/tabulacoes/tabulacoes-manager";
 // dropping it here would silently remove that capability. Custom
 // fields stayed admin-gated exactly as FieldsAndTagsPanel had it.
 export default function TabulacoesPage() {
-  const canEditSettings = useCan("edit-settings");
+  const canEditSettings = usePermission("tags.manage");
 
   return (
     <div className="max-w-3xl space-y-8 p-4 lg:p-6">
