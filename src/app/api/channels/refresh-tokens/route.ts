@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat"
 import { NextResponse } from 'next/server'
 import { registerAuditActor } from '@/lib/audit/context'
 import { matchesOperationalSecret } from '@/lib/auth/operational-secret'
@@ -70,4 +71,4 @@ async function handler(request: Request) {
   return NextResponse.json({ checked: due?.length ?? 0, refreshed, failed })
 }
 
-export const POST = handler
+export const POST = (request: Request) => trackCron("channels_refresh_tokens", () => handler(request))

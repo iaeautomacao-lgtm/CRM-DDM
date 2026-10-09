@@ -1,9 +1,10 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat";
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { selectAgentForTeam, selectAnyAgentForAccount } from "@/lib/flows/engine";
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   // Auth: reutiliza AUTOMATION_CRON_SECRET (mesmo padrão de
   // /api/flows/cron e /api/automations/cron)
   const secret = process.env.AUTOMATION_CRON_SECRET ?? "";
@@ -85,4 +86,9 @@ export async function POST(request: Request) {
     retried: conversations.length,
     assigned,
   });
+}
+
+// Batimento do cron (D-12, migration 334): registra quando rodou e como terminou; não altera a resposta.
+export async function POST(request: Request) {
+  return trackCron("conversations_retry_assignment", () => handlePost(request))
 }

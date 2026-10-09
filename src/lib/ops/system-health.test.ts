@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildSystemHealth, cronLevel, loadRequiredMigrations, CRON_LATE_AFTER_S, CRON_STOPPED_AFTER_S } from "./system-health";
+import { buildSystemHealth, cronLevel, cronLevelFor, loadRequiredMigrations, CRON_LATE_AFTER_S, CRON_STOPPED_AFTER_S } from "./system-health";
 
 const NOW = new Date("2026-10-09T15:00:00Z");
 const required = {
@@ -13,12 +13,18 @@ const required = {
 };
 
 type Rpc = Record<string, { data?: unknown; error?: { code?: string; message?: string } | null }>;
-function fakeDb(rpc: Rpc, tick: { created_at?: string; error?: boolean } = {}) {
+type HeartbeatRow = { job: string; expected_every_seconds: number; last_ok_at: string | null; last_status: "ok" | "error"; last_error: string | null; runs: number; failures: number };
+function fakeDb(rpc: Rpc, tick: { created_at?: string; error?: boolean } = {}, heartbeat: HeartbeatRow[] | "missing" = "missing") {
   return {
     rpc: vi.fn(async (name: string) => ({ data: rpc[name]?.data ?? null, error: rpc[name]?.error ?? null })),
-    from: () => {
+    from: (table: string) => {
       const b: Record<string, unknown> = {};
       for (const m of ["select", "eq", "order"]) b[m] = () => b;
+      if (table === "cron_heartbeat") {
+        // Migration 334: por padrão ausente (cai no cron_tick, como antes); os testes do D-12 a ligam.
+        b.limit = async () => (heartbeat === "missing" ? { data: null, error: { code: "PGRST205", message: "relation does not exist" } } : { data: heartbeat, error: null });
+        return b;
+      }
       b.limit = async () => (tick.error ? { data: null, error: { message: "x" } } : { data: tick.created_at ? [{ created_at: tick.created_at }] : [], error: null });
       return b;
     },
@@ -85,5 +91,51 @@ describe("buildSystemHealth", () => {
     expect(real?.minVersion).toBe(183);
     expect(real!.migrations.length).toBeGreaterThan(10);
     expect(loadRequiredMigrations("/nao/existe")).toBeNull();
+  });
+});
+
+describe("D-12: batimento de todos os crons (migration 334)", () => {
+  const hb = (job: string, ageS: number | null, over: Partial<HeartbeatRow> = {}): HeartbeatRow => ({
+    job, expected_every_seconds: 60, last_ok_at: ageS === null ? null : new Date(NOW.getTime() - ageS * 1000).toISOString(),
+    last_status: "ok", last_error: null, runs: 100, failures: 0, ...over,
+  });
+  const health = (rows: HeartbeatRow[]) => buildSystemHealth(fakeDb(healthy, { created_at: "2026-10-09T14:59:30Z" }, rows), { now: NOW, required });
+
+  it("lista todos os jobs conhecidos; quem nunca registrou fica 'indisponivel' (não é alarme)", async () => {
+    const h = await health([hb("disparador_tick", 20), hb("billing", 30)]);
+    const byJob = Object.fromEntries(h.crons.map((c) => [c.job, c]));
+    expect(Object.keys(byJob)).toEqual(expect.arrayContaining(["disparador_tick", "disparador_prepare", "disparador_health", "disparador_exports", "disparador_imports", "automations", "flows", "webhooks_out", "billing", "channels_refresh_tokens", "conversations_retry_assignment"]));
+    expect(byJob.disparador_tick).toMatchObject({ status: "ok", age_s: 20, label: "Disparador (tick de envio)", expected_every_s: 60 })
+    expect(byJob.automations).toMatchObject({ status: "indisponivel", last_ok_at: null });
+    expect(h.ok).toBe(true);
+  });
+
+  it("cron que parou aparece como atrasado e depois parado, pela cadência de cada job", async () => {
+    const h = await health([hb("disparador_prepare", 200), hb("webhooks_out", 700), hb("disparador_health", 700, { expected_every_seconds: 600 }), hb("channels_refresh_tokens", 20 * 3600, { expected_every_seconds: 86_400 })]);
+    const byJob = Object.fromEntries(h.crons.map((c) => [c.job, c.status]));
+    expect(byJob.disparador_prepare).toBe("atrasado"); // 200 s > 180 s
+    expect(byJob.webhooks_out).toBe("parado"); // 700 s > 600 s
+    expect(byJob.disparador_health).toBe("ok"); // 700 s < 1.500 s (2,5 ciclos de 10 min)
+    expect(byJob.channels_refresh_tokens).toBe("ok"); // 20 h de um job diário
+    expect(h.ok).toBe(false);
+  });
+
+  it("cron que só falha envelhece pelo ÚLTIMO OK (mesmo 'rodando'); o erro aparece sem vazar além do texto curto", async () => {
+    const h = await health([hb("billing", 900, { last_status: "error", last_error: "HTTP 503", failures: 40 })]);
+    const billing = h.crons.find((c) => c.job === "billing")!;
+    expect(billing).toMatchObject({ status: "parado", last_status: "error", last_error: "HTTP 503", failures: 40 });
+  });
+
+  it("job que nunca teve um OK (só erros) fica parado", async () => {
+    const h = await health([hb("flows", null, { last_status: "error", last_error: "HTTP 500", expected_every_seconds: 300 })]);
+    expect(h.crons.find((c) => c.job === "flows")).toMatchObject({ status: "parado", last_ok_at: null });
+  });
+
+  it("cronLevelFor mantém os limiares antigos para 1 min e escala com a cadência", () => {
+    expect(cronLevelFor(CRON_LATE_AFTER_S, 60)).toBe("ok");
+    expect(cronLevelFor(CRON_LATE_AFTER_S + 1, 60)).toBe("atrasado");
+    expect(cronLevelFor(CRON_STOPPED_AFTER_S + 1, 60)).toBe("parado");
+    expect(cronLevelFor(null, 60)).toBe("parado");
+    expect(cronLevelFor(3600, 86_400)).toBe("ok");
   });
 });

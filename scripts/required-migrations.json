@@ -338,6 +338,10 @@
     {
       "version": "323_contacts_rls_has_perm",
       "kind": "registry"
+    },
+    {
+      "version": "334_cron_heartbeat",
+      "kind": "registry"
     }
   ]
 }
