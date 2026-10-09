@@ -336,6 +336,14 @@
       "kind": "registry"
     },
     {
+      "version": "312_custom_role_validation",
+      "kind": "registry"
+    },
+    {
+      "version": "313_custom_roles",
+      "kind": "registry"
+    },
+    {
       "version": "314_contacts_phone_suffix_lookup",
       "kind": "registry"
     },

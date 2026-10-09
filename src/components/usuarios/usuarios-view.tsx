@@ -47,6 +47,8 @@ import type { PresenceStatus } from '@/lib/presence';
 import { BulkImportMembersDialog } from '@/components/settings/bulk-import-members-dialog';
 import { InviteMemberDialog } from '@/components/settings/invite-member-dialog';
 import { ROLE_META } from '@/components/settings/role-meta';
+import { UsuariosTabs } from './usuarios-tabs';
+import { roleErrorMessage, type RoleItem } from '@/lib/roles/editor';
 
 interface Member {
   user_id: string;
@@ -125,7 +127,14 @@ function lastAccessLabel(m: Pick<Member, 'last_active_at' | 'last_sign_in_at'>, 
   return fmtLastSeen(m.last_active_at ?? m.last_sign_in_at, now);
 }
 
-function RoleChip({ role }: { role: AccountRole }) {
+function RoleChip({ role, customName }: { role: AccountRole; customName?: string | null }) {
+  if (customName) {
+    return (
+      <StatusChip tone="info" dot={false} title="Papel personalizado">
+        {customName}
+      </StatusChip>
+    );
+  }
   return (
     <StatusChip tone={ROLE_TONE[role]} dot={false}>
       {ROLE_META[role].label}
@@ -171,6 +180,9 @@ export function UsuariosView() {
   // Desativar/reativar (POST /api/account/members/{id}/status): nunca o proprietário nem a si mesmo.
   const [statusTarget, setStatusTarget] = useState<{ member: Member; active: boolean } | null>(null);
   const [changingStatus, setChangingStatus] = useState(false);
+  // Papéis (sistema e personalizados) para mostrar o papel personalizado e atribuir (roles.manage, só o proprietário).
+  const [roles, setRoles] = useState<RoleItem[]>([]);
+  const canAssignRoles = can('roles.manage');
 
   const load = useCallback(async () => {
     try {
@@ -184,6 +196,13 @@ export function UsuariosView() {
       }
       const mdata = (await mres.json()) as { members: Member[] };
       setMembers(mdata.members);
+      // Papéis personalizados: best-effort (sem as migrations 312/313 a lista segue só com os papéis de sistema).
+      try {
+        const rres = await apiFetch('/api/account/roles', { cache: 'no-store' });
+        if (rres.ok) setRoles(((await rres.json()) as { roles: RoleItem[] }).roles);
+      } catch {
+        setRoles([]);
+      }
       if (ires?.ok) {
         const idata = (await ires.json()) as { invitations: Invitation[] };
         setInvitations(idata.invitations);
@@ -247,6 +266,12 @@ export function UsuariosView() {
     return invitations.filter((i) => !q || (i.label ?? '').toLowerCase().includes(q));
   }, [invitations, filter, search]);
 
+  const customRoleByMember = useMemo(() => {
+    const map = new Map<string, RoleItem>();
+    for (const r of roles) if (r.kind === 'custom') for (const id of r.member_ids) map.set(id, r);
+    return map;
+  }, [roles]);
+
   const selected = members.find((m) => m.user_id === selectedId) ?? null;
 
   async function handleRoleChange(member: Member, nextRole: AccountRole) {
@@ -272,6 +297,29 @@ export function UsuariosView() {
     } catch (err) {
       apply(previousRole);
       console.error('[UsuariosView] role change error:', err);
+      toast.error('Não foi possível conectar ao servidor');
+    } finally {
+      setPendingMemberAction(null);
+    }
+  }
+
+  async function handleAssignRole(member: Member, roleId: string) {
+    setPendingMemberAction(member.user_id);
+    try {
+      const res = await apiFetch(`/api/account/members/${member.user_id}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role_id: roleId }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(roleErrorMessage(payload, 'Falha ao atualizar papel'));
+        return;
+      }
+      toast.success(`${member.full_name || 'Usuário'} atualizado`);
+      await load();
+    } catch (err) {
+      console.error('[UsuariosView] assign role error:', err);
       toast.error('Não foi possível conectar ao servidor');
     } finally {
       setPendingMemberAction(null);
@@ -432,6 +480,7 @@ export function UsuariosView() {
           Pessoas com acesso a esta conta. Os papéis controlam o que cada usuário pode fazer.
         </p>
       </div>
+      <UsuariosTabs />
 
       {loadError === 'forbidden' ? (
         <ForbiddenState title="Você não tem permissão para ver os usuários" />
@@ -634,7 +683,7 @@ export function UsuariosView() {
                           </span>
                         </Td>
                         <Td>
-                          <RoleChip role={m.role} />
+                          <RoleChip role={m.role} customName={customRoleByMember.get(m.user_id)?.name} />
                         </Td>
                         <Td className="hidden text-foreground-2 md:table-cell">{(m.team_id && teamNames[m.team_id]) || '—'}</Td>
                         <Td>
@@ -664,7 +713,7 @@ export function UsuariosView() {
         onOpenChange={(o) => !o && setSelectedId(null)}
         title={selected?.full_name || 'Usuário'}
         description={selected?.email ?? 'Usuário da conta'}
-        headerExtra={selected ? <RoleChip role={selected.role} /> : null}
+        headerExtra={selected ? <RoleChip role={selected.role} customName={customRoleByMember.get(selected.user_id)?.name} /> : null}
         size="md"
         footer={
           selected && (canResetPassword || selectedCanEdit || selectedCanTransfer) && selected.user_id !== user?.id ? (
@@ -714,7 +763,31 @@ export function UsuariosView() {
             <div className="flex flex-col gap-1.5">
               <dt className="text-xs font-semibold text-muted-foreground">Papel</dt>
               <dd>
-                {selectedCanEdit ? (
+                {selectedCanEdit && canAssignRoles && roles.length > 0 ? (
+                  <Select
+                    value={customRoleByMember.get(selected.user_id)?.id ?? roles.find((r) => r.kind === 'system' && r.key === selected.role)?.id ?? ''}
+                    onValueChange={(v) => v && void handleAssignRole(selected, v)}
+                  >
+                    <SelectTrigger className="w-full" disabled={pendingMemberAction === selected.user_id}>
+                      <SelectValue>{(value: string | null) => roles.find((r) => r.id === value)?.name ?? ''}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {roles
+                        .filter((r) => r.key !== 'owner')
+                        .map((r) => (
+                          <SelectItem key={r.id} value={r.id}>
+                            {r.name}
+                            {r.kind === 'custom' ? ' (personalizado)' : ''}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                ) : selectedCanEdit && customRoleByMember.has(selected.user_id) ? (
+                  <span className="text-foreground">
+                    {customRoleByMember.get(selected.user_id)?.name}
+                    <span className="ml-1.5 text-xs text-muted-foreground">(papel personalizado: só o proprietário altera)</span>
+                  </span>
+                ) : selectedCanEdit ? (
                   <Select value={selected.role} onValueChange={(v) => v && void handleRoleChange(selected, v as AccountRole)}>
                     <SelectTrigger className="w-full" disabled={pendingMemberAction === selected.user_id}>
                       <SelectValue>{(value: AccountRole | null) => (value ? ROLE_META[value].label : '')}</SelectValue>
