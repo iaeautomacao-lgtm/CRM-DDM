@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Conversation } from "@/types";
 import {
   conversationMatchesFilters,
@@ -97,9 +97,39 @@ describe("conversationMatchesFilters", () => {
     expect(conversationMatchesFilters(conv({ status: "pending", assigned_agent_id: "agent-1" }), waiting, ctx)).toBe(false);
   });
 
+  it("tabulação: encaixa só a conversa encerrada com aquela tabulação", () => {
+    const f = { ...DEFAULT_INBOX_FILTERS, tabulacao: UUID };
+    expect(conversationMatchesFilters(conv({ outcome_tag_id: UUID }), f, ctx)).toBe(true);
+    expect(conversationMatchesFilters(conv({ outcome_tag_id: OTHER }), f, ctx)).toBe(false);
+    expect(conversationMatchesFilters(conv({}), f, ctx)).toBe(false);
+  });
+
   it("cliente e campanha", () => {
     const f = { ...DEFAULT_INBOX_FILTERS, cliente: UUID, campanha: OTHER };
     expect(conversationMatchesFilters(conv({ client_id: UUID, origin_campaign_id: OTHER }), f, ctx)).toBe(true);
     expect(conversationMatchesFilters(conv({ client_id: UUID }), f, ctx)).toBe(false);
+  });
+});
+
+describe("filtro de tabulação na URL", () => {
+  it("lê ?tabulacao= e o apelido ?outcome_tag_id=; ignora valor que não é uuid; grava de volta", () => {
+    expect(parseInboxFilters(new URLSearchParams(`tabulacao=${UUID}`)).tabulacao).toBe(UUID);
+    expect(parseInboxFilters(new URLSearchParams(`outcome_tag_id=${UUID}`)).tabulacao).toBe(UUID);
+    expect(parseInboxFilters(new URLSearchParams("tabulacao=drop table")).tabulacao).toBeNull();
+    const url = writeInboxFilters(new URLSearchParams("c=1"), { ...DEFAULT_INBOX_FILTERS, tabulacao: UUID });
+    expect(url.get("tabulacao")).toBe(UUID);
+    expect(writeInboxFilters(url, DEFAULT_INBOX_FILTERS).has("tabulacao")).toBe(false);
+  });
+
+  it("applyInboxFilters aplica eq(outcome_tag_id) na lista e nos contadores", async () => {
+    const { applyInboxFilters } = await import("./query");
+    const eq = vi.fn();
+    const q: Record<string, unknown> = {};
+    for (const m of ["eq", "is", "in", "gt", "neq", "not", "or"]) q[m] = (...a: unknown[]) => (m === "eq" && eq(...a), q);
+    applyInboxFilters(q, { ...DEFAULT_INBOX_FILTERS, tabulacao: UUID }, { accountId: "acc", userId: "u", line: { kind: "none" } }, { includeStatus: false });
+    expect(eq).toHaveBeenCalledWith("outcome_tag_id", UUID);
+    eq.mockClear();
+    applyInboxFilters(q, DEFAULT_INBOX_FILTERS, { accountId: "acc", userId: "u", line: { kind: "none" } }, { includeStatus: false });
+    expect(eq).not.toHaveBeenCalledWith("outcome_tag_id", expect.anything());
   });
 });

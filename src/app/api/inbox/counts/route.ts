@@ -5,7 +5,7 @@ import { applyInboxFilters, resolveLineClause } from '@/lib/inbox/query'
 
 // GET /api/inbox/counts — números das abas de canal: conversas com
 // mensagem não lida (não fechadas) por canal, com os MESMOS filtros da
-// lista (linha, atendente, equipe, cliente, campanha), menos o canal.
+// lista (linha, atendente, equipe, cliente, campanha, tabulação), menos o canal.
 // RLS do usuário, como a lista.
 
 export async function GET(request: Request) {

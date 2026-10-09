@@ -5,7 +5,7 @@ import { applyInboxFilters, resolveLineClause } from '@/lib/inbox/query'
 
 // GET /api/inbox/conversations — lista do inbox paginada no servidor.
 //
-// Filtros (?canal=&linha=&atendente=&equipe=&cliente=&campanha=&status=&q=)
+// Filtros (?canal=&linha=&atendente=&equipe=&cliente=&campanha=&tabulacao=&status=&q=)
 // em src/lib/inbox/filters.ts. Paginação por cursor (last_message_at, id),
 // 50 por página. Usa o cliente com a sessão do usuário: a RLS de
 // conversations (migration 128) já limita o agente às atribuídas a ele e

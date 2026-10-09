@@ -58,6 +58,8 @@ export function applyInboxFilters<Q extends Record<string, any>>(
   if (f.equipe) q = q.eq("team_id", f.equipe);
   if (f.cliente) q = q.eq("client_id", f.cliente);
   if (f.campanha) q = q.eq("origin_campaign_id", f.campanha);
+  // Tabulação (índice idx_conversations_outcome_tag, migration 041): achar a conversa que foi encerrada com aquela tabulação.
+  if (f.tabulacao) q = q.eq("outcome_tag_id", f.tabulacao);
   if (opts.includeStatus) {
     if (f.status === "active") {
       q = q.in("status", ["open", "pending"]);
