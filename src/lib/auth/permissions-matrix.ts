@@ -63,6 +63,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("billing/rulers/[id]/steps", "PUT", "admin", "billing.manage"), // PRD 17.5
   pg("billing/rulers/[id]/dry-run", "POST", "admin", "billing.manage"), // PRD 17.5
   pg("billing/rulers/[id]/metrics", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/rulers/[id]/report", "GET", "supervisor", "billing.view"), // PRD 17.6
+  pg("billing/alerts", "GET", "supervisor", "billing.view"), // PRD 17.6
   pg("billing/enrollments", "GET", "supervisor", "billing.view"), // PRD 17.5
   pg("billing/enrollments/[id]/pause", "POST", "admin", "billing.manage"), // PRD 17.5
   pg("billing/enrollments/[id]/resume", "POST", "admin", "billing.manage"), // PRD 17.5

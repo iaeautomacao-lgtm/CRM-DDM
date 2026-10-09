@@ -29,6 +29,7 @@
     "src/lib/billing/ddm-source.ts",
     "src/lib/billing/engine.ts",
     "src/lib/whatsapp/flows-data-ddm.ts",
+    "src/lib/billing/reports.ts",
     "src/lib/billing/ruler-api.ts",
     "src/lib/billing/route-helpers.ts",
     "src/lib/disparador/flow-button.ts",
