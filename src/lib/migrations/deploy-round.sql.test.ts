@@ -12,6 +12,7 @@ import { BASELINE_REAL_MIGRATIONS, BASELINE_SQL, USER_SESSIONS_290 } from "./dep
 // A 310 (MFA obrigatório no RLS) é SEMPRE a última: ela põe a policy mfa_aal2_required nas tabelas que já existem.
 const PRE_DEPLOY = [
   "262", "297", "298", "300", "301", "302", "302b", "303", "303b",
+  "304", "305",
   "311", "312", "313", "315", "320",
   "322", "323", "324",
   "330", "330b", "331b",

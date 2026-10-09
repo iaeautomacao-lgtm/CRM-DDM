@@ -155,6 +155,25 @@ CREATE FUNCTION wacrm.get_campaign_report_detail(p_account_id uuid, p_campaign u
 CREATE FUNCTION wacrm.get_campaign_queue_items(p_account_id uuid, p_campaign uuid, p_a text, p_b text, p_c integer, p_d integer) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
   AS $$ BEGIN IF NOT wacrm.is_account_member(p_account_id) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
 
+-- Campanhas e funis (a 305 troca as policies de SELECT delas) com a policy de membership de hoje (040/085/017).
+CREATE TABLE wacrm.campaigns (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.campaign_metrics (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.pipelines (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.pipeline_stages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), pipeline_id uuid NOT NULL REFERENCES wacrm.pipelines(id));
+CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.campaign_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.disp_message_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.pipelines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.pipeline_stages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.deals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY campaigns_select ON wacrm.campaigns FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY campaign_metrics_select ON wacrm.campaign_metrics FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY disp_message_queue_select ON wacrm.disp_message_queue FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY pipelines_select ON wacrm.pipelines FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY deals_select ON wacrm.deals FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY pipeline_stages_select ON wacrm.pipeline_stages FOR SELECT USING (
+  EXISTS (SELECT 1 FROM wacrm.pipelines p WHERE p.id = pipeline_stages.pipeline_id AND wacrm.is_account_member(p.account_id)));
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wacrm TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA wacrm TO service_role;
 -- profiles: a 169 trocou o UPDATE de tabela inteira por UPDATE só nas colunas que o usuário edita (full_name, avatar_url).
