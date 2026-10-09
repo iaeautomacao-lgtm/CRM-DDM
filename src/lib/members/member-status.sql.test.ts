@@ -119,6 +119,15 @@ describe('migration 311 — desativar membro e último acesso', { timeout: 60_00
     await expect(asRole('authenticated', () => db.query(`SELECT * FROM wacrm.account_members_access('${A}')`))).rejects.toThrow(/permission denied/);
   });
 
+  it('último acesso com refreshed_at timestamptz (outra versão do GoTrue): vale o fuso do texto', async () => {
+    await db.exec(`ALTER TABLE auth.sessions ALTER COLUMN refreshed_at TYPE timestamptz USING refreshed_at AT TIME ZONE 'UTC'`);
+    await db.query(`INSERT INTO auth.sessions (user_id, created_at, updated_at, refreshed_at) VALUES ($1, '2026-10-09T08:00:00Z', '2026-10-09T08:00:00Z', '2026-10-09T15:00:00Z')`, [OWNER]);
+    const r = await asRole('service_role', () =>
+      db.query<{ last_active_at: Date }>(`SELECT last_active_at FROM wacrm.account_members_access($1) WHERE user_id = $2`, [A, OWNER]),
+    );
+    expect(new Date(r.rows[0].last_active_at).toISOString()).toBe('2026-10-09T15:00:00.000Z');
+  });
+
   it('registra a si mesma', async () => {
     expect((await db.query(`SELECT 1 FROM wacrm.schema_migrations WHERE version = '311_member_deactivation_last_access'`)).rows).toHaveLength(1);
   });

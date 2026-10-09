@@ -309,6 +309,10 @@
     {
       "version": "311_member_deactivation_last_access",
       "kind": "registry"
+    },
+    {
+      "version": "315_user_sessions_refreshed_at_utc",
+      "kind": "registry"
     }
   ]
 }
