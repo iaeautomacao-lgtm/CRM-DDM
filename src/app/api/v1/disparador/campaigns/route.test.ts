@@ -257,6 +257,11 @@ describe('POST /api/v1/disparador/campaigns', () => {
     expect(r.status).toBe(413)
   })
 
+  it('teto do corpo é em BYTES (A10): 9 milhões de caracteres de 2 bytes (18 MB) → 413, mesmo com menos de 15M caracteres', async () => {
+    const r = await POST(post(null, {}, '"' + 'é'.repeat(9_000_000) + '"'))
+    expect(r.status).toBe(413)
+  })
+
   it('JSON inválido → 400', async () => {
     const r = await POST(post(null, {}, '{nao-json'))
     expect(r.status).toBe(400)

@@ -20,6 +20,7 @@ import { applyTemplateVars } from "@/lib/disparador/template-vars";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { writeLog, maskPhone } from "@/lib/logger";
+import { throttleItemLog } from "@/lib/disparador/log-throttle";
 import { maskUrlForLog, safeDbError } from "@/lib/privacy/mask";
 import { autoBlacklistOn131026 } from "@/lib/disparador/auto-blacklist";
 import type { ConfirmArgs, ConfirmResult } from "@/lib/disparador/confirm-batcher";
@@ -373,7 +374,13 @@ export async function markQueueError(
     .eq("id", itemId);
 
   if (error) {
-    await supabaseAdmin().from("disp_message_queue").update(baseUpdate).eq("id", itemId);
+    // Coluna erro_permanente ausente (migration antiga): segundo UPDATE sem ela. F24: se este também falha, o item NÃO foi marcado —
+    // loga e não conta total_erros (senão o contador anda sem o item ter saído de "enviando").
+    const { error: fallbackError } = await supabaseAdmin().from("disp_message_queue").update(baseUpdate).eq("id", itemId);
+    if (fallbackError) {
+      console.error("[Disparador] markQueueError: falha ao marcar o item como erro:", fallbackError.message);
+      return;
+    }
   }
 
   if (permanent) {
@@ -722,13 +729,16 @@ export async function processQueueItem(
     const generated = await generateDispatchAiText(messageText, item.contacts?.name);
     if (generated === null) {
       await markQueueError(item.id, AI_UNAVAILABLE_ERROR, false, item.campaign_id, tentativasAtuais);
-      void writeLog({
-        level: "warn",
-        source: "disparador",
-        event: "message_ai_unavailable",
-        message: "Geração por IA indisponível; item devolvido à fila sem enviar nada ao cliente",
-        payload: { campaign_id: item.campaign_id, queue_id: item.id },
-      });
+      const aiLog = throttleItemLog(item.campaign_id, "message_ai_unavailable", null);
+      if (aiLog.log) {
+        void writeLog({
+          level: "warn",
+          source: "disparador",
+          event: "message_ai_unavailable",
+          message: "Geração por IA indisponível; item devolvido à fila sem enviar nada ao cliente",
+          payload: { campaign_id: item.campaign_id, queue_id: item.id, suppressed_since_last: aiLog.suppressed },
+        });
+      }
       return { outcome: "deferred", reason: "ai_unavailable" };
     }
     messageText = generated;
@@ -909,7 +919,9 @@ export async function processQueueItem(
     const novasTentativas = rateLimited ? tentativasAtuais : tentativasAtuais + 1;
     const permanent = isPermanentSendError(sendErr) || (!rateLimited && novasTentativas >= MAX_TENTATIVAS);
     const message = sendErr?.message || String(sendErr);
-    if (isPermanentSendError(sendErr)) {
+    const permanentMetaCode = sendErr instanceof MetaApiError ? sendErr.metaCode : null;
+    const permLog = isPermanentSendError(sendErr) ? throttleItemLog(item.campaign_id, "message_permanent_error", permanentMetaCode) : null;
+    if (permLog?.log) {
       void writeLog({
         level: "warn",
         source: "disparador",
@@ -920,8 +932,9 @@ export async function processQueueItem(
           queue_id: item.id,
           contact_id: item.contact_id,
           phone: maskPhone(normalizedPhone),
-          metaCode: sendErr instanceof MetaApiError ? sendErr.metaCode : null,
+          metaCode: permanentMetaCode,
           erro: message,
+          suppressed_since_last: permLog.suppressed,
         },
       });
     }

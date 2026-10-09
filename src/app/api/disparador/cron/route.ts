@@ -334,6 +334,7 @@ async function runTick(request: Request, chain: ChainContext) {
   // Vira true se a renovação do lock falhar: outro tick pode ter assumido,
   // então paramos de iniciar trabalho novo o quanto antes.
   let lostLease = false;
+  let renewFailures = 0;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   // Botões de vazão (throughput-config.ts). Padrões = comportamento antigo.
   const config = resolveThroughputConfig();
@@ -368,15 +369,19 @@ async function runTick(request: Request, chain: ChainContext) {
       void (async () => {
         try {
           const { data, error } = await db.rpc('renew_cron_lock', { p_name: 'disparador_cron', p_owner: owner });
-          if (error || !data) lostLease = true;
-        } catch { lostLease = true; }
+          // data === false: outro dono assumiu o lease → perdeu na hora. Erro/timeout transitório (Supabase lento sob carga)
+          // só derruba o tick na 3ª falha seguida (~60 s, abaixo do TTL de 90 s); antes, 1 falha parava o tick inteiro (F17).
+          if (!error && data === false) lostLease = true;
+          else if (error || !data) { if (++renewFailures >= 3) lostLease = true; }
+          else renewFailures = 0;
+        } catch { if (++renewFailures >= 3) lostLease = true; }
       })();
     }, 20_000);
     if (maintenanceHop) {
     // Reaplica recibos de status (delivered/read/failed) que chegaram antes
     // da confirmação local do envio e entrega um callback pendente. Vem
     // primeiro para não ficar sempre sem tempo quando a fila está cheia.
-    const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 100 });
+    const { error: receiptsError } = await db.rpc('reconcile_dispatch_receipts', { p_limit: 500 });
     if (receiptsError) throw receiptsError;
     // Rede de segurança do webhook de status em lote (migration 185): aplica o que o after() do webhook
     // não conseguiu (processo caiu entre o 200 e o apply, ele não ganhou a vez…). Só com sobra de tempo e
