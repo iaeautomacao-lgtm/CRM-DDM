@@ -132,6 +132,8 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("contacts", "POST", "agent", "contacts.edit"),
   pg("contacts/[id]", "PATCH", "agent", "contacts.edit"),
   pg("contacts/[id]/tags", "GET", "viewer", "contacts.view"),
+  pg("contacts/[id]/activity", "GET", "viewer", "contacts.view"),
+  pg("contacts/[id]/campaigns", "GET", "viewer", "contacts.view"),
   pg("contacts/[id]/tags", "POST", "agent", "contacts.edit"),
   pg("contacts/[id]/tags/[tagId]", "DELETE", "agent", "contacts.edit"),
   pg("contacts/[id]/phones/invalid", "POST", "agent", "contacts.edit"),
