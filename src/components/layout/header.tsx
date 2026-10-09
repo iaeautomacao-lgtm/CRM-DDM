@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
-import { LogOut, Menu, Settings as SettingsIcon, User } from "lucide-react";
+import { LogOut, Menu, Search, Settings as SettingsIcon, User } from "lucide-react";
 import {
   Avatar,
   AvatarFallback,
@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ModeToggle } from "@/components/layout/mode-toggle";
+import { openCommandPalette } from "@/components/command-palette/command-palette";
 // Título derivado dos itens da sidebar (fonte única em lib/nav.ts).
 import { getPageTitle } from "@/lib/nav";
 import { canAccessRoute } from "@/lib/role-utils";
@@ -49,12 +50,23 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         >
           <Menu className="h-5 w-5" />
         </button>
-        <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
+        <h1 className="truncate font-heading text-base font-semibold tracking-[-0.01em] text-foreground sm:text-[17px]">
           {title}
         </h1>
       </div>
 
       <div className="flex items-center gap-1 sm:gap-2">
+        <button
+          type="button"
+          onClick={openCommandPalette}
+          aria-label="Buscar telas (Ctrl+K)"
+          aria-keyshortcuts="Control+K Meta+K"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground md:h-8 md:w-56 md:justify-start md:gap-2 md:border md:border-border md:bg-card md:px-2.5"
+        >
+          <Search className="size-4 shrink-0" aria-hidden="true" />
+          <span className="hidden flex-1 text-left text-[13px] md:inline">Buscar…</span>
+          <kbd className="hidden rounded border border-border px-1.5 font-mono text-[10.5px] md:inline">Ctrl K</kbd>
+        </button>
         <ModeToggle />
 
         <DropdownMenu>
