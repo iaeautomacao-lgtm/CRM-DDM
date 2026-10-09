@@ -1965,7 +1965,19 @@ async function updateRunVars(
     .from("flow_runs")
     .update({ vars: newVars })
     .eq("id", run.id);
-  if (!error) run.vars = newVars;
+  if (!error) {
+    run.vars = newVars;
+    return;
+  }
+  // A gravação falhou: run.vars em memória continua com o valor antigo (como antes) e agora fica rastro. Só as CHAVES (nunca os valores).
+  void writeLog({
+    account_id: run.account_id,
+    level: "error",
+    source: "flows",
+    event: "flow_vars_update_failed",
+    message: "Falha ao gravar as variáveis do run do fluxo",
+    payload: { flow_run_id: run.id, keys: Object.keys(patch).slice(0, 20), code: error.code ?? null, detail: String(error.message ?? "").slice(0, 200) },
+  });
 }
 
 /** Classify a MIME type into receive_attachment's allowed_types buckets. */
@@ -2016,7 +2028,7 @@ async function endRun(
     output?: Record<string, unknown>;
   },
 ): Promise<void> {
-  await db
+  const { error: endError } = await db
     .from("flow_runs")
     .update({
       status,
@@ -2024,6 +2036,17 @@ async function endRun(
       end_reason: reason,
     })
     .eq("id", run.id);
+  if (endError) {
+    // Sem isto o run podia ficar 'active' num nó já encerrado, sem nenhum rastro. O caminho do fluxo não muda (segue registrando os eventos).
+    void writeLog({
+      account_id: run.account_id,
+      level: "error",
+      source: "flows",
+      event: "flow_end_run_failed",
+      message: "Falha ao encerrar o run do fluxo (o status não foi gravado)",
+      payload: { flow_run_id: run.id, intended_status: status, end_reason: reason, code: endError.code ?? null, detail: String(endError.message ?? "").slice(0, 200) },
+    });
+  }
 
   if (errorContext) {
     await logRunEvent(db, {
@@ -3120,20 +3143,21 @@ export async function advanceFromNodeKey(
     if (node.node_type === "set_tag") {
       const cfg = node.config as unknown as SetTagNodeConfig;
       try {
-        if (cfg.mode === "add") {
-          await db
-            .from("contact_tags")
-            .upsert(
-              { contact_id: run.contact_id!, tag_id: cfg.tag_id },
-              { onConflict: "contact_id,tag_id" },
-            );
-        } else {
-          await db
-            .from("contact_tags")
-            .delete()
-            .eq("contact_id", run.contact_id!)
-            .eq("tag_id", cfg.tag_id);
-        }
+        // O cliente Supabase NÃO lança em erro de banco: devolve { error }. Sem esta conferência o catch nunca rodava e o nó logava sucesso.
+        const { error: tagError } =
+          cfg.mode === "add"
+            ? await db
+                .from("contact_tags")
+                .upsert(
+                  { contact_id: run.contact_id!, tag_id: cfg.tag_id },
+                  { onConflict: "contact_id,tag_id" },
+                )
+            : await db
+                .from("contact_tags")
+                .delete()
+                .eq("contact_id", run.contact_id!)
+                .eq("tag_id", cfg.tag_id);
+        if (tagError) throw new Error(tagError.message);
         await nodeCompleted({ mode: cfg.mode, tag_id: cfg.tag_id });
       } catch (err) {
         // Non-fatal — log + advance. A tag-write failure shouldn't
@@ -3662,11 +3686,12 @@ export async function advanceFromNodeKey(
       const cfg = node.config as unknown as AddNoteNodeConfig;
       const note_text = interpolateVars(cfg.note_text, run.vars);
       try {
-        await db.from("contact_notes").insert({
+        const { error: noteError } = await db.from("contact_notes").insert({
           contact_id: run.contact_id!,
           user_id: run.user_id,
           note_text,
         });
+        if (noteError) throw new Error(noteError.message); // o cliente Supabase devolve { error }, não lança
         await nodeCompleted({ note_text });
       } catch (err) {
         // Non-fatal — a note-write failure shouldn't strand the customer.
@@ -4249,6 +4274,15 @@ export async function dispatchInboundToFlows(
       "[flows] dispatchInboundToFlows threw:",
       err instanceof Error ? err.message : err,
     );
+    // Rastro em system_logs (antes só console). O retorno NÃO muda: consumed:false como sempre (mudar isso altera quem responde ao cliente).
+    void writeLog({
+      account_id: input.accountId,
+      level: "error",
+      source: "flows",
+      event: "flow_dispatch_error",
+      message: "Exceção ao despachar mensagem recebida para os fluxos",
+      payload: { contact_id: input.contactId, conversation_id: input.conversationId ?? null, detail: (err instanceof Error ? err.message : String(err)).slice(0, 200) },
+    });
     return { consumed: false, outcome: "no_match" };
   }
 }

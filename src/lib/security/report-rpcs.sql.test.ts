@@ -7,6 +7,8 @@ import { resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { headerRollback } from "./rls-fixture";
+
 const migration = (file: string) => readFileSync(resolve(process.cwd(), "supabase/migrations", file), "utf8").replace(/NOTIFY pgrst[^;]*;/g, "");
 const id = (n: number) => `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 const ACC = id(1);
@@ -229,6 +231,18 @@ describe("migration 322 — RPCs de relatório pelo catálogo", { timeout: 180_0
     const defs = (await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_proc WHERE pronamespace = 'wacrm'::regnamespace AND pg_get_functiondef(oid) LIKE '%report_can(p_account_id%'`)).rows[0].n;
     expect(defs).toBe(9);
     expect((await db.query(`SELECT version FROM wacrm.schema_migrations WHERE version LIKE '322%'`)).rows).toEqual([{ version: "322_report_rpcs_has_perm" }]);
+  });
+
+  it("ROLLBACK do cabeçalho é SQL executável: devolve EXATAMENTE o comportamento da 143 (relatório antes/depois do rollback idêntico, para todos os usuários e RPCs) e remove report_can", async () => {
+    await db.exec(headerRollback("322_report_rpcs_has_perm.sql"));
+    const rolled: Record<string, string[]> = {};
+    const saved = results.after;
+    results.after = rolled;
+    await snapshot("after");
+    results.after = saved;
+    for (const key of Object.keys(results.before)) expect(rolled[key], key).toEqual(results.before[key]);
+    expect((await db.query(`SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'report_can'`)).rows[0]).toEqual({ n: 0 });
+    expect((await db.query(`SELECT version FROM wacrm.schema_migrations WHERE version LIKE '322%'`)).rows).toEqual([]);
   });
 
   it("aborta sem alterar nada se a definição viva tem o guard em número diferente do esperado", async () => {

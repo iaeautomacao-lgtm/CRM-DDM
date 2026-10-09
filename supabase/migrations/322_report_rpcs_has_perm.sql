@@ -30,9 +30,21 @@
 --             SELECT proname, (length(pg_get_functiondef(oid)) - length(regexp_replace(pg_get_functiondef(oid), 'is_account_member\(p_account_id\)', '', 'g'))) / length('is_account_member(p_account_id)') AS guards
 --               FROM pg_proc WHERE pronamespace = 'wacrm'::regnamespace AND proname IN ('get_attendance_summary','report_tabulacoes','get_campaign_queue_items');   -- 1, 2 e 1
 -- ORDEM: depois da 143, 165 e 241. Antes ou depois do deploy (o app não depende dela). Idempotente.
--- ROLLBACK:   reabre os relatórios a todo membro — só em emergência. Reaplicar o guard antigo: para cada função acima,
---             pg_get_functiondef → trocar `(SELECT wacrm.report_can(p_account_id, 'team'))` e `'all'` por `wacrm.is_account_member(p_account_id)` → EXECUTE;
---             e recriar report_sees_conversation/report_sees_user com `coalesce(wacrm.current_user_role(), '') <> 'supervisor' OR …` (corpo da 143).
+-- ROLLBACK:   BEGIN;
+--             DO $$
+--             DECLARE r text; d text;
+--             BEGIN
+--             FOREACH r IN ARRAY ARRAY['wacrm.get_attendance_report_by_team(uuid, timestamptz, timestamptz)', 'wacrm.get_attendance_report_by_agent(uuid, timestamptz, timestamptz)', 'wacrm.get_attendance_summary(uuid, timestamptz, timestamptz)', 'wacrm.get_conversations_report(uuid, timestamptz, timestamptz, text, text, uuid, uuid, text, text, integer, integer)', 'wacrm.get_agent_sessions_report(uuid, timestamptz, timestamptz, uuid)', 'wacrm.report_tabulacoes(uuid, timestamptz, timestamptz, uuid, uuid)', 'wacrm.get_campaigns_for_report(uuid)', 'wacrm.get_campaign_report_detail(uuid, uuid)', 'wacrm.get_campaign_queue_items(uuid, uuid, text, text, integer, integer)'] LOOP
+--             d := pg_get_functiondef(to_regprocedure(r));
+--             d := replace(replace(d, '(SELECT wacrm.report_can(p_account_id, ''team''))', 'wacrm.is_account_member(p_account_id)'), '(SELECT wacrm.report_can(p_account_id, ''all''))', 'wacrm.is_account_member(p_account_id)');
+--             EXECUTE d;
+--             END LOOP;
+--             END $$;
+--             CREATE OR REPLACE FUNCTION wacrm.report_sees_conversation(p_team uuid, p_agent uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$ SELECT coalesce(wacrm.current_user_role(), '') <> 'supervisor' OR p_team IN (SELECT wacrm.current_user_team_ids()) OR p_agent = auth.uid() OR (p_team IS NULL AND p_agent IN (SELECT tm.user_id FROM wacrm.team_members tm WHERE tm.team_id IN (SELECT wacrm.current_user_team_ids()))) $$;
+--             CREATE OR REPLACE FUNCTION wacrm.report_sees_user(p_user uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$ SELECT coalesce(wacrm.current_user_role(), '') <> 'supervisor' OR p_user = auth.uid() OR p_user IN (SELECT tm.user_id FROM wacrm.team_members tm WHERE tm.team_id IN (SELECT wacrm.current_user_team_ids())) $$;
+--             DROP FUNCTION IF EXISTS wacrm.report_can(uuid, text);
+--             DELETE FROM wacrm.schema_migrations WHERE version = '322_report_rpcs_has_perm';
+--             COMMIT;
 -- ============================================================
 
 BEGIN;
