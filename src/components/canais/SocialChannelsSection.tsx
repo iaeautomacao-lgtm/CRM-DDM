@@ -6,15 +6,11 @@ import { AtSign, MessageCircle, Trash2 } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { ClientOption } from "./ClientsDialog";
+import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
+import { StatusChip } from "@/components/ddm/status-chip";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 // Linhas de Instagram e Messenger (wacrm.channels, migration 128). A
 // conexão é por OAuth da Meta (/api/channels/<tipo>/connect); aqui se
@@ -106,7 +102,7 @@ export function SocialChannelsSection({
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
       aria-label={label}
-      className="h-8 max-w-[180px] rounded-md border border-border bg-background px-2 text-xs text-foreground"
+      className="h-8 max-w-[180px] rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
     >
       <option value="">—</option>
       {options.map((o) => (
@@ -118,15 +114,11 @@ export function SocialChannelsSection({
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-foreground">Instagram e Messenger</h2>
-          <p className="text-sm text-muted-foreground">
-            Conecte pela Meta. No Messenger, a própria Meta pergunta quais páginas liberar.
-          </p>
-        </div>
-        <div className="flex gap-2">
+    <TableCard
+      title="Instagram e Messenger"
+      hint="Conecte pela Meta. No Messenger, a própria Meta pergunta quais páginas liberar."
+      action={
+        <div className="flex flex-wrap gap-2">
           {/* Navegação completa: o OAuth sai para a Meta e volta em /canais. */}
           <Button
             variant="outline"
@@ -134,7 +126,7 @@ export function SocialChannelsSection({
             title={setup?.instagram.missing.length ? `Faltam no servidor: ${setup.instagram.missing.join(", ")}` : undefined}
             onClick={() => (window.location.href = "/api/channels/instagram/connect")}
           >
-            <AtSign className="size-4 text-pink-500" />
+            <AtSign className="size-3.5 text-pink-500" />
             Conectar Instagram
           </Button>
           <Button
@@ -143,15 +135,15 @@ export function SocialChannelsSection({
             title={setup?.messenger.missing.length ? `Faltam no servidor: ${setup.messenger.missing.join(", ")}` : undefined}
             onClick={() => (window.location.href = "/api/channels/messenger/connect")}
           >
-            <MessageCircle className="size-4 text-blue-500" />
+            <MessageCircle className="size-3.5 text-blue-500" />
             Conectar Messenger
           </Button>
         </div>
-      </div>
-
+      }
+    >
       {setup && (setup.instagram.missing.length > 0 || setup.messenger.missing.length > 0 || !setup.webhook_verify_token) && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-          <p className="font-medium">Configuração pendente no servidor (.env)</p>
+        <div className="mx-[18px] mb-3.5 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3 text-[12.5px] text-foreground-2" role="status">
+          <p className="font-semibold text-foreground">Configuração pendente no servidor (.env)</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4">
             {setup.instagram.missing.length > 0 && <li>Instagram: {setup.instagram.missing.join(", ")}</li>}
             {setup.messenger.missing.length > 0 && <li>Messenger: {setup.messenger.missing.join(", ")}</li>}
@@ -163,83 +155,91 @@ export function SocialChannelsSection({
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card">
-        {loading ? (
-          <p className="p-4 text-sm text-muted-foreground">Carregando…</p>
-        ) : channels.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">Nenhuma conta de Instagram ou página do Messenger conectada.</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Canal</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Fluxo</TableHead>
-                <TableHead>Equipe</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Habilitado</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {channels.map((c) => {
-                const expiresSoon =
-                  c.token_expires_at && Date.parse(c.token_expires_at) - Date.now() < 7 * 86_400_000;
-                return (
-                  <TableRow key={c.id}>
-                    <TableCell>
-                      <span className="inline-flex items-center gap-2">
-                        {c.type === "instagram" ? (
-                          <AtSign className="size-4 text-pink-500" />
-                        ) : (
-                          <MessageCircle className="size-4 text-blue-500" />
+      {loading ? (
+        <div className="flex flex-col border-t border-border" aria-busy="true">
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center gap-3 border-b border-border px-[18px] py-3.5" aria-hidden="true">
+              <Skeleton className="size-[30px] rounded-full" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+          ))}
+        </div>
+      ) : channels.length === 0 ? (
+        <p className="border-t border-border px-[18px] py-6 text-center text-[13px] text-muted-foreground">
+          Nenhuma conta de Instagram ou página do Messenger conectada.
+        </p>
+      ) : (
+        <DenseTable>
+          <thead>
+            <tr>
+              <Th>Canal</Th>
+              <Th className="hidden md:table-cell">Situação</Th>
+              <Th className="hidden lg:table-cell">Fluxo</Th>
+              <Th className="hidden xl:table-cell">Equipe</Th>
+              <Th className="hidden lg:table-cell">Cliente</Th>
+              <Th>Ativo</Th>
+              <Th className="w-11" />
+            </tr>
+          </thead>
+          <tbody className="ddm-stagger">
+            {channels.map((c) => {
+              const expiresSoon =
+                c.token_expires_at && Date.parse(c.token_expires_at) - Date.now() < 7 * 86_400_000;
+              return (
+                <Tr key={c.id} interactive={false}>
+                  <Td>
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        className={cn(
+                          "flex size-[30px] shrink-0 items-center justify-center rounded-full",
+                          c.type === "instagram" ? "bg-pink-500/12 text-pink-500" : "bg-blue-500/12 text-blue-500",
                         )}
-                        <span className="font-medium text-foreground">{c.name}</span>
-                        {c.username && <span className="text-xs text-muted-foreground">@{c.username}</span>}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {c.status === "connected" && !expiresSoon ? (
-                        <span className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-xs font-medium text-[#14532D]">
-                          Conectado
-                        </span>
-                      ) : (
-                        <span
-                          className="rounded-full bg-[#FEE2E2] px-2 py-0.5 text-xs font-medium text-[#B91C1C]"
-                          title={c.last_error ?? undefined}
-                        >
-                          {c.status !== "connected" ? "Erro — reconecte" : "Token vence em breve"}
-                        </span>
-                      )}
-                    </TableCell>
-                    <TableCell>{select(c.flow_id, flows, (v) => patch(c.id, { flow_id: v }), "Fluxo")}</TableCell>
-                    <TableCell>{select(c.team_id, teams, (v) => patch(c.id, { team_id: v }), "Equipe")}</TableCell>
-                    <TableCell>{select(c.client_id, clients, (v) => patch(c.id, { client_id: v }), "Cliente")}</TableCell>
-                    <TableCell>
-                      <Switch
-                        checked={c.habilitado}
-                        onCheckedChange={(checked) => patch(c.id, { habilitado: checked })}
-                        aria-label={`Habilitado — ${c.name}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-red-400"
-                        onClick={() => remove(c)}
-                        aria-label={`Desconectar ${c.name}`}
+                        aria-hidden="true"
                       >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </div>
-    </div>
+                        {c.type === "instagram" ? <AtSign className="size-3.5" /> : <MessageCircle className="size-3.5" />}
+                      </span>
+                      <CellMain
+                        title={c.name}
+                        sub={`${c.type === "instagram" ? "Instagram" : "Messenger"}${c.username ? ` · @${c.username}` : ""}`}
+                      />
+                    </span>
+                  </Td>
+                  <Td className="hidden md:table-cell">
+                    {c.status === "connected" && !expiresSoon ? (
+                      <StatusChip tone="ok" dot>Conectado</StatusChip>
+                    ) : (
+                      <StatusChip tone={c.status !== "connected" ? "bad" : "warn"} dot title={c.last_error ?? undefined}>
+                        {c.status !== "connected" ? "Erro — reconecte" : "Token vence em breve"}
+                      </StatusChip>
+                    )}
+                  </Td>
+                  <Td className="hidden lg:table-cell">{select(c.flow_id, flows, (v) => patch(c.id, { flow_id: v }), `Fluxo — ${c.name}`)}</Td>
+                  <Td className="hidden xl:table-cell">{select(c.team_id, teams, (v) => patch(c.id, { team_id: v }), `Equipe — ${c.name}`)}</Td>
+                  <Td className="hidden lg:table-cell">{select(c.client_id, clients, (v) => patch(c.id, { client_id: v }), `Cliente — ${c.name}`)}</Td>
+                  <Td>
+                    <Switch
+                      checked={c.habilitado}
+                      onCheckedChange={(checked) => patch(c.id, { habilitado: checked })}
+                      aria-label={`Ativo — ${c.name}`}
+                    />
+                  </Td>
+                  <Td className="pr-2 text-right">
+                    <button
+                      type="button"
+                      className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-danger-soft hover:text-danger"
+                      onClick={() => remove(c)}
+                      aria-label={`Desconectar ${c.name}`}
+                      title="Desconectar"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </Td>
+                </Tr>
+              );
+            })}
+          </tbody>
+        </DenseTable>
+      )}
+    </TableCard>
   );
 }
