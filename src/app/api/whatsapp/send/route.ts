@@ -788,7 +788,18 @@ async function findOrCreateConversation(
     query = query.is('waha_session', null)
   }
 
-  const { data: existing } = await query.maybeSingle()
+  // Várias conversas do contato nesta linha são normais (o webhook abre uma nova
+  // quando a última está fechada): reaproveita a mais recente. Com maybeSingle(),
+  // duas linhas davam erro (ignorado) e cada envio criava MAIS uma conversa.
+  const { data: rows, error: findError } = await query
+    .order('created_at', { ascending: false })
+    .limit(1)
+  if (findError) {
+    // Antes o erro era ignorado e caía no insert (mais uma conversa duplicada).
+    console.error('Error finding conversation for contact send:', findError.message)
+    return null
+  }
+  const existing = rows?.[0]
 
   if (existing) return existing
 

@@ -17,6 +17,7 @@ import {
   FileText,
   Mic,
   Square,
+  Lock,
   X,
   Loader2,
   Zap,
@@ -51,6 +52,9 @@ import {
   renderQuickReply,
   type QuickReply,
 } from "@/lib/quick-replies";
+
+// Rótulo do tipo de mídia no aviso de limite (antes saía "image limit" em inglês).
+const MEDIA_KIND_PT: Record<string, string> = { image: "imagem", video: "vídeo", audio: "áudio", document: "documento" };
 
 /** Media content types an agent can send from the composer. */
 export type ComposerMediaKind = "image" | "video" | "document" | "audio";
@@ -483,7 +487,7 @@ export function MessageComposer({
       const max = MEDIA_MAX_BYTES_BY_KIND[kind];
       if (file.size > max) {
         toast.error(
-          `File is ${(file.size / 1024 / 1024).toFixed(1)} MB — ${kind} limit is ${Math.round(
+          `Arquivo de ${(file.size / 1024 / 1024).toFixed(1).replace(".", ",")} MB: o limite para ${MEDIA_KIND_PT[kind] ?? kind} é ${Math.round(
             max / 1024 / 1024,
           )} MB.`,
         );
@@ -707,8 +711,8 @@ export function MessageComposer({
       ) : recording ? (
         // Recording bar — replaces the composer while the mic is live.
         <div className="flex items-center gap-3 rounded-lg bg-muted/55 px-3 py-2.5">
-          <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" aria-hidden="true" />
-          <span className="flex-1 text-sm text-foreground">
+          <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger" aria-hidden="true" />
+          <span className="flex-1 text-sm text-foreground" role="status">
             Gravando… {formatDuration(recordSeconds)} /{" "}
             {formatDuration(MAX_RECORDING_SECONDS)}
           </span>
@@ -722,6 +726,9 @@ export function MessageComposer({
           <Button
             size="sm"
             onClick={stopRecording}
+            // Foco no Parar ao começar a gravar (antes o foco voltava ao
+            // gatilho do menu, sem pista de que a gravação começou).
+            autoFocus
             className="h-9 w-9 shrink-0 bg-primary p-0 hover:bg-primary/90"
             title="Parar e anexar"
             aria-label="Parar gravação e anexar"
@@ -731,6 +738,14 @@ export function MessageComposer({
         </div>
       ) : (
         <div className="relative">
+          {/* Somente leitura visível e persistente (antes só no placeholder,
+              que some, e no title, que não aparece no toque). */}
+          {readOnly && (
+            <p role="status" className="mb-1.5 flex items-center gap-1.5 px-1 text-[12px] text-muted-foreground">
+              <Lock className="size-3.5 shrink-0" aria-hidden="true" />
+              Somente leitura: seu perfil pode ver esta conversa, mas não responder.
+            </p>
+          )}
           {qr && !inputsDisabled && (
             <QuickReplyMenu
               items={qrItems}
@@ -745,6 +760,7 @@ export function MessageComposer({
 
           <div>
             <textarea
+              aria-describedby={!readOnly && !sessionExpired ? "composer-hint" : undefined}
               ref={textareaRef}
               aria-label="Mensagem"
               aria-controls={qr ? QUICK_REPLY_MENU_ID : undefined}
@@ -788,7 +804,7 @@ export function MessageComposer({
                           : "Anexar mídia"
                     }
                     aria-label={busy ? "Enviando anexo…" : "Anexar mídia"}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                    className="inline-flex size-11 shrink-0 items-center justify-center rounded-md p-0 text-muted-foreground sm:size-8 transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {busy ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -798,19 +814,19 @@ export function MessageComposer({
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="border-border bg-popover">
                     <DropdownMenuItem onClick={() => imageInputRef.current?.click()}>
-                      <ImageIcon className="mr-2 h-4 w-4" />
+                      <ImageIcon className="mr-2 h-4 w-4" aria-hidden="true" />
                       Foto
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => videoInputRef.current?.click()}>
-                      <Video className="mr-2 h-4 w-4" />
+                      <Video className="mr-2 h-4 w-4" aria-hidden="true" />
                       Vídeo
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => documentInputRef.current?.click()}>
-                      <FileText className="mr-2 h-4 w-4" />
+                      <FileText className="mr-2 h-4 w-4" aria-hidden="true" />
                       Documento
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => void startRecording()}>
-                      <Mic className="mr-2 h-4 w-4" />
+                      <Mic className="mr-2 h-4 w-4" aria-hidden="true" />
                       Nota de voz
                     </DropdownMenuItem>
                   </DropdownMenuContent>
@@ -821,10 +837,10 @@ export function MessageComposer({
                     variant="ghost"
                     size="sm"
                     canAct={!readOnly}
-                    gateReason="send messages"
+                    gateReason="enviar mensagens"
                     title={readOnly ? undefined : "Enviar template"}
                     aria-label="Enviar template"
-                    className="h-8 w-8 shrink-0 p-0 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    className="size-11 shrink-0 p-0 text-muted-foreground hover:bg-muted hover:text-foreground sm:size-8"
                     onClick={onOpenTemplates}
                   >
                     <LayoutTemplate className="h-4 w-4" aria-hidden="true" />
@@ -840,7 +856,7 @@ export function MessageComposer({
                   aria-label="Respostas rápidas"
                   aria-expanded={Boolean(qr)}
                   className={cn(
-                    "h-8 w-8 shrink-0 p-0 text-muted-foreground hover:bg-muted hover:text-foreground",
+                    "size-11 shrink-0 p-0 text-muted-foreground hover:bg-muted hover:text-foreground sm:size-8",
                     qr && "text-primary",
                   )}
                   onMouseDown={(e) => e.preventDefault()}
@@ -876,7 +892,7 @@ export function MessageComposer({
                           }}
                           title="Revisar com IA (corrigir e sugerir tons)"
                           aria-label="Revisar texto com IA"
-                          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground sm:size-8 hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                         />
                       }
                     >
@@ -909,14 +925,14 @@ export function MessageComposer({
 
               <div className="flex items-center gap-2">
                 {!readOnly && !sessionExpired && (
-                  <span className="mr-2.5 hidden text-[11.5px] text-muted-foreground sm:inline">
-                    Enter envia · Shift+Enter quebra linha
+                  <span id="composer-hint" className="mr-2.5 hidden text-[11.5px] text-muted-foreground sm:inline">
+                    Enter envia · Shift+Enter quebra linha · / abre respostas rápidas
                   </span>
                 )}
                 <GatedButton
                   size="sm"
                   canAct={!readOnly}
-                  gateReason="send messages"
+                  gateReason="enviar mensagens"
                   disabled={!text.trim() || sessionExpired || sending}
                   aria-label="Enviar mensagem"
                   onClick={handleSend}
@@ -1012,7 +1028,7 @@ function MediaDraftPreview({
         <GatedButton
           size="sm"
           canAct={!readOnly}
-          gateReason="send messages"
+          gateReason="enviar mensagens"
           disabled={busy}
           aria-label="Enviar anexo"
           onClick={onSend}
