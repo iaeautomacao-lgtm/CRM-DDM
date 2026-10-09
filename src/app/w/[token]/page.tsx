@@ -18,6 +18,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   // Evita o zoom automático do iOS ao focar o campo de texto.
   maximumScale: 1,
+  // Teclado virtual encolhe a página em vez de cobrir o campo de texto.
+  interactiveWidget: "resizes-content",
 };
 
 export default async function WebchatPage({ params }: { params: Promise<{ token: string }> }) {
