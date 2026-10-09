@@ -12,7 +12,10 @@ import { tryDecrypt } from '@/lib/whatsapp/encryption'
 
 export const TRANSCRIPT_PREFIX = '🎙️ _Áudio transcrito:_ '
 export const STT_MODEL = 'whisper-1'
-export const STT_TIMEOUT_MS = 20_000
+// Roda no caminho de entrada da mensagem (antes de gravar): teto curto para não segurar o Inbox nem a IA.
+export const STT_TIMEOUT_MS = 8_000
+// Áudio maior que isto não é transcrito (fica "skipped"): no WhatsApp são vários minutos de voz e levaria mais que o teto.
+export const STT_MAX_BYTES = 8 * 1024 * 1024
 
 export type TranscriptionStatus = 'done' | 'failed' | 'skipped'
 export interface TranscriptionResult {
@@ -109,5 +112,6 @@ export async function transcribeInboundAudio(
 ): Promise<TranscriptionResult> {
   const key = await resolveAccountSttKey(db, accountId)
   if (!key) return { status: 'skipped', text: null }
+  if (audio.byteLength > STT_MAX_BYTES) return { status: 'skipped', text: null }
   return transcribeWithKey(audio, key, { mimeType })
 }

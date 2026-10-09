@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { formatTranscript, parseTranscript, resolveAccountSttKey, transcribeWithKey } from './stt'
+import { formatTranscript, parseTranscript, resolveAccountSttKey, STT_MAX_BYTES, transcribeInboundAudio, transcribeWithKey } from './stt'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -62,5 +62,38 @@ describe('transcribeWithKey', () => {
     expect((await transcribeWithKey(new Uint8Array(1), 'sk-segredo', { fetchImpl: (async () => new Response('{"text":""}', { status: 200 })) as never })).status).toBe('failed')
     expect((await transcribeWithKey(new Uint8Array(1), 'sk-segredo', { fetchImpl: (async () => { throw new Error('sk-segredo caiu') }) as never })).status).toBe('failed')
     expect(JSON.stringify(log.mock.calls)).not.toContain('sk-segredo')
+  })
+})
+
+describe('transcribeInboundAudio — teto de tamanho', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it('áudio acima do teto não sai do sistema (skipped) mesmo com chave', async () => {
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    const db = {
+      from: () => ({
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { enabled: true, api_provider: 'openai', api_key: 'sk-x', multimodal_enabled: true }, error: null }) }) }),
+      }),
+    }
+    const big = new Uint8Array(STT_MAX_BYTES + 1)
+    const r = await transcribeInboundAudio(db as never, 'acc-1', big, 'audio/ogg')
+    expect(r).toEqual({ status: 'skipped', text: null })
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('transcribeInboundAudio — contraprova do teto (mesma conta)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it('áudio pequeno com a mesma chave chama a OpenAI', async () => {
+    const fetchSpy = vi.fn(async () => new Response(JSON.stringify({ text: 'oi' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const db = {
+      from: () => ({
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { enabled: true, api_provider: 'openai', api_key: 'sk-x', multimodal_enabled: true }, error: null }) }) }),
+      }),
+    }
+    const r = await transcribeInboundAudio(db as never, 'acc-1', new Uint8Array(10), 'audio/ogg')
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+    expect(r.status).toBe('done')
   })
 })
