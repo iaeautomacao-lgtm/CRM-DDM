@@ -2,15 +2,7 @@
 
 import { useMemo } from "react";
 import type { Deal, PipelineStage } from "@/types";
-import {
-  DollarSign,
-  TrendingUp,
-  Target,
-  BarChart3,
-  Trophy,
-  XCircle,
-  Info,
-} from "lucide-react";
+import { Info } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -19,6 +11,8 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { formatCurrency } from "@/lib/currency";
+import { cn } from "@/lib/utils";
+import { CountUp } from "@/components/motion/count-up";
 
 interface PipelineAnalyticsProps {
   stages: PipelineStage[];
@@ -93,82 +87,93 @@ export function PipelineAnalytics({ stages, deals }: PipelineAnalyticsProps) {
 
   return (
     <TooltipProvider>
-      <div className="grid grid-cols-2 gap-3 rounded-xl border border-border bg-card/60 p-4 sm:grid-cols-3 xl:grid-cols-6">
+      {/* Faixa de indicadores (redesenho DDM): células unidas por 1px. */}
+      <section
+        aria-label="Indicadores do pipeline"
+        className="grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-border bg-border sm:grid-cols-3 xl:grid-cols-6"
+      >
         <Metric
-          icon={<BarChart3 className="h-4 w-4 text-muted-foreground" />}
-          label="Total de Negócios"
-          value={String(stats.totalCount)}
+          label="Total de negócios"
+          value={stats.totalCount}
+          format={(n) => Math.round(n).toLocaleString("pt-BR")}
           tooltip="Contagem de todos os negócios neste pipeline que não estão marcados como Perdido. Negócios Ganhos ainda são incluídos."
         />
         <Metric
-          icon={<DollarSign className="h-4 w-4 text-primary" />}
-          label="Valor do Pipeline"
-          value={formatCurrency(stats.totalValue, defaultCurrency)}
+          label="Valor do pipeline"
+          value={stats.totalValue}
+          format={(n) => formatCurrency(n, defaultCurrency)}
           tooltip="Soma dos valores de todos os negócios neste pipeline, excluindo os marcados como Perdido."
         />
         <Metric
-          icon={<Target className="h-4 w-4 text-blue-400" />}
-          label="Ticket Médio"
-          value={formatCurrency(stats.avgValue, defaultCurrency)}
+          label="Ticket médio"
+          value={stats.avgValue}
+          format={(n) => formatCurrency(n, defaultCurrency)}
           tooltip="Valor do Pipeline dividido pelo Total de Negócios — o valor médio de um único negócio não perdido."
         />
         <Metric
-          icon={<TrendingUp className="h-4 w-4 text-purple-400" />}
-          label="Valor Ponderado"
-          value={formatCurrency(stats.weightedValue, defaultCurrency)}
+          label="Valor ponderado"
+          value={stats.weightedValue}
+          format={(n) => formatCurrency(n, defaultCurrency)}
           tooltip="Receita esperada: valor de cada negócio aberto × probabilidade da etapa. Primeira etapa ≈ 10%, etapas progridem até 90%, Ganho = 100%. Negócios Perdidos são excluídos."
         />
         <Metric
-          icon={<Trophy className="h-4 w-4 text-primary" />}
-          label="Ganhos no Mês"
-          value={String(stats.wonThisMonth)}
+          label="Ganhos no mês"
+          value={stats.wonThisMonth}
+          format={(n) => Math.round(n).toLocaleString("pt-BR")}
+          valueClassName="text-success"
           tooltip="Negócios marcados como Ganho desde o primeiro dia do mês atual."
         />
         <Metric
-          icon={<XCircle className="h-4 w-4 text-red-400" />}
-          label="Perdidos no Mês"
-          value={String(stats.lostThisMonth)}
+          label="Perdidos no mês"
+          value={stats.lostThisMonth}
+          format={(n) => Math.round(n).toLocaleString("pt-BR")}
+          valueClassName="text-danger"
           tooltip="Negócios marcados como Perdido desde o primeiro dia do mês atual."
         />
-      </div>
+      </section>
     </TooltipProvider>
   );
 }
 
 function Metric({
-  icon,
   label,
   value,
+  format,
   tooltip,
+  valueClassName,
 }: {
-  icon: React.ReactNode;
   label: string;
-  value: string;
+  value: number;
+  format: (n: number) => string;
   tooltip: string;
+  valueClassName?: string;
 }) {
   return (
-    <div className="rounded-lg bg-muted/50 p-3">
-      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {icon}
-        <span>{label}</span>
+    <div className="flex min-w-0 flex-col gap-1 bg-card px-3.5 py-3">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="truncate">{label}</span>
         <Tooltip>
           <TooltipTrigger
             render={
               <button
                 type="button"
                 aria-label={`Como ${label} é calculado`}
-                className="ml-auto text-muted-foreground hover:text-foreground focus:outline-none"
+                className="ml-auto flex cursor-help text-muted-foreground hover:text-foreground"
               />
             }
           >
-            <Info className="h-3 w-3" />
+            <Info className="size-3" />
           </TooltipTrigger>
           <TooltipContent side="top" className="max-w-xs text-left">
             {tooltip}
           </TooltipContent>
         </Tooltip>
       </div>
-      <p className="mt-1 text-base font-semibold text-foreground">{value}</p>
+      <CountUp
+        value={value}
+        format={format}
+        className={cn("truncate text-[17px] font-semibold text-foreground", valueClassName)}
+      />
     </div>
   );
 }
