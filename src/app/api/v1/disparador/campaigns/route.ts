@@ -205,7 +205,7 @@ export async function POST(request: Request) {
       throw payloadTooLarge("Corpo da requisição acima de 15 MB; divida os contatos em várias campanhas");
     }
     const rawBody = await request.text();
-    if (rawBody.length > MAX_BODY_BYTES) {
+    if (Buffer.byteLength(rawBody, "utf8") > MAX_BODY_BYTES) {
       throw payloadTooLarge("Corpo da requisição acima de 15 MB; divida os contatos em várias campanhas");
     }
     let parsed: unknown;
@@ -343,13 +343,14 @@ export async function POST(request: Request) {
       const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
       if (uuidPattern.test(body.channel)) {
-        let { data: ch } = await db
+        const { data: chRows } = await db
           .from("whatsapp_config")
           .select("id, provider, created_at")
           .eq("id", body.channel)
           .eq("account_id", ctx.accountId)
           .eq("habilitado", true)
-          .maybeSingle();
+          .limit(1);
+        let ch = chRows?.[0] ?? null;
 
         // Compatibilidade para integrações que guardaram o UUID de um
         // canal WAHA e depois o operador removeu/reconectou a linha. O
@@ -400,14 +401,16 @@ export async function POST(request: Request) {
         // Primeiro tenta o identificador estável da sessão WAHA. Isso evita
         // acoplar integrações externas ao UUID da linha, que pode mudar se
         // a configuração for removida e recriada.
-        const { data: wahaBySession } = await db
+        // .limit(1): sessão duplicada na conta não pode virar erro silencioso (maybeSingle falha com 2+ linhas).
+        const { data: wahaRows } = await db
           .from("whatsapp_config")
           .select("id, provider")
           .eq("account_id", ctx.accountId)
           .eq("habilitado", true)
           .eq("provider", "waha")
           .eq("waha_session", body.channel)
-          .maybeSingle();
+          .limit(1);
+        const wahaBySession = wahaRows?.[0] ?? null;
 
         if (wahaBySession) {
           channelId = wahaBySession.id;

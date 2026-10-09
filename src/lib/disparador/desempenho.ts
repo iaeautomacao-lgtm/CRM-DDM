@@ -453,7 +453,11 @@ export function computeWindowMetrics(
   }
 
   const validTicksCount = ticks.filter((t) => !!t.payload).length;
-  const avgSent = validTicksCount > 0 ? Math.round(totalSent / validTicksCount) : 0;
+  // A24: "por minuto" = envios / minutos REAIS da janela (do tick mais antigo ao mais novo, inclusive). Antes dividia pelo número de
+  // ticks: tick encadeado (vários por minuto) ou lacuna (tick perdido) distorcia a média. Sem datas válidas, volta ao nº de ticks.
+  const stamps = ticks.filter((t) => !!t.payload).map((t) => Date.parse(t.created_at)).filter((n) => Number.isFinite(n));
+  const windowMinutes = stamps.length > 0 ? Math.floor(Math.max(...stamps) / 60_000) - Math.floor(Math.min(...stamps) / 60_000) + 1 : validTicksCount;
+  const avgSent = validTicksCount > 0 ? Math.round(totalSent / windowMinutes) : 0;
   const avgMetaP95 = metaP95Count > 0 ? Math.round(metaP95Sum / metaP95Count) : 0;
 
   return {

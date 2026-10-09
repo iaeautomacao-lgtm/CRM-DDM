@@ -334,3 +334,28 @@ describe("desempenho - formatação para Recharts", () => {
     expect(row.evaluation.status).toBe("ok");
   });
 });
+
+describe("computeWindowMetrics — média por minuto (A24)", () => {
+  const tick = (created_at: string, sent: number) => ({
+    id: created_at,
+    created_at,
+    payload: {
+      status: "finished", duration_ms: 1000, budget_ms: 35000, campaigns: 1, stopped_early: false,
+      totals: { sent, failed: 0, deferred: 0, blocked: 0, pending_confirmation: 0 },
+      latency: { meta: { count: 0, avg_ms: 0, p95_ms: 0, max_ms: 0 }, waha: { count: 0, avg_ms: 0, p95_ms: 0, max_ms: 0 } },
+      event_loop_lag_p99_ms: 0, rss_mb: 0, rss_peak_mb: 0, backoff_events: [],
+    },
+  });
+
+  it("vários ticks no mesmo minuto não inflam a divisão: 3 ticks em 1 min = soma/1", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = computeWindowMetrics([tick("2026-10-06T15:00:40Z", 100), tick("2026-10-06T15:00:20Z", 100), tick("2026-10-06T15:00:00Z", 100)] as any);
+    expect(s.avgSentPerMinute).toBe(300);
+  });
+
+  it("tick perdido (lacuna) conta o minuto: 2 ticks com 4 min entre eles = soma/5", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const s = computeWindowMetrics([tick("2026-10-06T15:04:00Z", 500), tick("2026-10-06T15:00:00Z", 500)] as any);
+    expect(s.avgSentPerMinute).toBe(200);
+  });
+});
