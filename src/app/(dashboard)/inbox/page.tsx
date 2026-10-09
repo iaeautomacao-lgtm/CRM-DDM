@@ -878,6 +878,7 @@ export default function InboxPage() {
         open={newConvTemplatePickerOpen}
         onOpenChange={setNewConvTemplatePickerOpen}
         onSelect={handleSendNewConversationTemplate}
+        contact={newConvContact}
       />
     </div>
   );

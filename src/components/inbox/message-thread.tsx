@@ -1804,6 +1804,7 @@ export function MessageThread({
         open={templateModalOpen}
         onOpenChange={setTemplateModalOpen}
         onSelect={handleSendTemplate}
+        contact={contact}
       />
 
       <OutcomeTagPicker
