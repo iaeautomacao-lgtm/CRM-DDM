@@ -133,6 +133,10 @@
       "kind": "registry"
     },
     {
+      "version": "222_audit_contacts",
+      "kind": "registry"
+    },
+    {
       "version": "240_roles_foundation",
       "kind": "registry"
     },
