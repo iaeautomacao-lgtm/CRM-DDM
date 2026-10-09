@@ -75,6 +75,12 @@ export default function HistoricoPage() {
   const [exportOpen, setExportOpen] = useState(false);
   const canExport = usePermissions().can("exports.manage");
 
+  // Apoios (atendentes, equipes, tabulações) que falharam ao carregar: aviso discreto em vez de só console.
+  const [supportFailed, setSupportFailed] = useState<string[]>([]);
+  const markFailed = useCallback((what: string) => {
+    setSupportFailed((prev) => (prev.includes(what) ? prev : [...prev, what]));
+  }, []);
+
   // Busca com atraso de 300 ms, como era a busca de contato.
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 300);
@@ -84,15 +90,21 @@ export default function HistoricoPage() {
   useEffect(() => {
     let cancelled = false;
     apiFetch("/api/account/members", { cache: "no-store" })
-      .then((res) => res.json())
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
       .then((data: { members?: AccountMember[] }) => {
         if (!cancelled) setMembers(data.members ?? []);
       })
-      .catch((err) => console.error("[historico] failed to load members:", err));
+      .catch((err) => {
+        console.error("[historico] failed to load members:", err);
+        if (!cancelled) markFailed("atendentes");
+      });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [markFailed]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -104,13 +116,15 @@ export default function HistoricoPage() {
       .order("name")
       .then(({ data, error: err }) => {
         if (cancelled) return;
-        if (err) console.error("[historico] failed to load teams:", err);
-        else setTeams((data ?? []) as Team[]);
+        if (err) {
+          console.error("[historico] failed to load teams:", err);
+          markFailed("equipes");
+        } else setTeams((data ?? []) as Team[]);
       });
     return () => {
       cancelled = true;
     };
-  }, [accountId]);
+  }, [accountId, markFailed]);
 
   useEffect(() => {
     if (!accountId) return;
@@ -122,13 +136,15 @@ export default function HistoricoPage() {
       .order("name")
       .then(({ data, error: err }) => {
         if (cancelled) return;
-        if (err) console.error("[historico] failed to load tags:", err);
-        else setTags((data ?? []) as { id: string; name: string }[]);
+        if (err) {
+          console.error("[historico] failed to load tags:", err);
+          markFailed("tabulações");
+        } else setTags((data ?? []) as { id: string; name: string }[]);
       });
     return () => {
       cancelled = true;
     };
-  }, [accountId]);
+  }, [accountId, markFailed]);
 
   const reqRef = useRef(0);
   const fetchPage = useCallback(
@@ -231,6 +247,17 @@ export default function HistoricoPage() {
         </Select>
       </PageToolbar>
 
+      {/* Anuncia a quantidade de linhas ao carregar mais resultados. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {!loading && !error ? `${rows.length} conversa${rows.length === 1 ? "" : "s"} exibida${rows.length === 1 ? "" : "s"}.` : ""}
+      </p>
+
+      {supportFailed.length > 0 && (
+        <p role="status" className="text-xs text-warning">
+          Não foi possível carregar {supportFailed.join(" e ")}. As colunas correspondentes podem aparecer como &quot;—&quot;.
+        </p>
+      )}
+
       {error && !loading ? (
         <ErrorState
           className="min-h-0"
@@ -276,7 +303,7 @@ export default function HistoricoPage() {
                         setSelected(c);
                       }
                     }}
-                    aria-label={`Abrir conversa de ${contactLabel(c.contact)}`}
+                    title="Abrir conversa (Enter)"
                   >
                     <Td>
                       <CellMain title={contactLabel(c.contact)} sub={c.contact?.name ? c.contact.phone : undefined} />

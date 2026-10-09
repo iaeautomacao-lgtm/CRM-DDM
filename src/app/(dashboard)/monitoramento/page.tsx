@@ -300,6 +300,25 @@ function MonitoramentoBoard() {
     let cancelled = false;
     const db = createClient();
     (async () => {
+      // contact_tags em páginas com .range(): o PostgREST corta em 1000
+      // linhas sem avisar e o filtro por etiqueta ficaria incompleto.
+      const fetchAllContactTags = async () => {
+        const PAGE = 1000;
+        const rows: { contact_id: string; tag_id: string }[] = [];
+        for (let from = 0; ; from += PAGE) {
+          const { data, error } = await db
+            .from("contact_tags")
+            .select("contact_id, tag_id")
+            .order("contact_id")
+            .order("tag_id")
+            .range(from, from + PAGE - 1);
+          if (error) return { data: null, error };
+          const page = (data ?? []) as { contact_id: string; tag_id: string }[];
+          rows.push(...page);
+          if (page.length < PAGE) break;
+        }
+        return { data: rows, error: null };
+      };
       const [tagsRes, contactTagsRes] = await Promise.all([
         db
           .from("tags")
@@ -307,7 +326,7 @@ function MonitoramentoBoard() {
           .eq("account_id", accountId)
           .eq("kind", "contact")
           .order("name"),
-        db.from("contact_tags").select("contact_id, tag_id"),
+        fetchAllContactTags(),
       ]);
       if (cancelled) return;
       if (tagsRes.error) {
