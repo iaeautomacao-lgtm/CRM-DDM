@@ -1,12 +1,13 @@
 'use client';
 
-// Formulário de criação/edição e teste de ferramenta de IA (catálogo, migration 176).
-// Compartilhado por Configurações → Ferramentas e pela aba Ferramentas do editor do
-// agente ("Criar ferramenta"). Credenciais nunca aparecem: só marcadores {{cred.NOME}}.
+// Formulário de criação/edição e teste de ferramenta de IA (catálogo, migration 176), no padrão do redesenho DDM:
+// gaveta à direita com as abas "Definição" e "Testar" (protótipo Integracoes.dc.html). Compartilhado por
+// Configurações → Integrações → Ferramentas e pela aba Ferramentas do editor do agente ("Criar ferramenta").
+// Credenciais nunca aparecem: só marcadores {{cred.NOME}}.
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Play } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { DetailDrawer } from '@/components/ddm/list-with-drawer';
 import { AiToolEditor } from '@/components/flows/forms/ai-tool-editor';
 import type { AiAgentTool } from '@/lib/flows/types';
 
@@ -48,6 +51,10 @@ const emptyTool = (): AiAgentTool => ({
   timeout_ms: 30000,
 });
 
+const TAB_CLASS =
+  'flex-none px-0 pb-2.5 pt-1 text-[13px] data-active:text-foreground after:bg-primary after:!bottom-[-1px]';
+
+/** Gaveta de criar/editar ferramenta. Para ferramenta já salva, a aba "Testar" chama a de verdade. */
 export function ToolDialog({
   item,
   onClose,
@@ -68,6 +75,7 @@ export function ToolDialog({
   );
   const [displayName, setDisplayName] = useState(item?.display_name ?? '');
   const [saving, setSaving] = useState(false);
+  const [tab, setTab] = useState<'definition' | 'test'>('definition');
 
   async function save() {
     setSaving(true);
@@ -103,48 +111,72 @@ export function ToolDialog({
     }
   }
 
+  const showTest = !isNew && tab === 'test';
+
   return (
-    <Dialog open onOpenChange={(open) => !open && !saving && onClose()}>
-      <DialogContent className="border-border bg-popover max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{isNew ? 'Nova ferramenta' : `Editar ${item.name}`}</DialogTitle>
-          <DialogDescription>
-            A URL precisa ser https. Não cole tokens: use {'{{cred.NOME}}'} (cadastre em Variáveis e credenciais).
-            {description ? ` ${description}` : ''}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
+    <DetailDrawer
+      open
+      onOpenChange={(open) => !open && !saving && onClose()}
+      title={isNew ? 'Nova ferramenta' : item.display_name || item.name}
+      description={`A URL precisa ser https. Não cole tokens: use {{cred.NOME}} (cadastre em Variáveis e credenciais).${description ? ` ${description}` : ''}`}
+      size="xl"
+      footer={
+        showTest ? (
+          <Button variant="outline" onClick={onClose}>
+            Fechar
+          </Button>
+        ) : (
+          <>
+            <Button variant="outline" onClick={onClose} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void save()} disabled={saving}>
+              {saving && <Loader2 className="size-4 animate-spin" />}
+              {isNew ? 'Criar ferramenta' : 'Salvar'}
+            </Button>
+          </>
+        )
+      }
+    >
+      {!isNew && (
+        <Tabs value={tab} onValueChange={(v) => setTab(v as 'definition' | 'test')} className="mb-4">
+          <div className="border-b">
+            <TabsList variant="line" className="h-auto justify-start gap-5 p-0">
+              <TabsTrigger value="definition" className={TAB_CLASS}>
+                Definição
+              </TabsTrigger>
+              <TabsTrigger value="test" className={TAB_CLASS}>
+                Testar
+              </TabsTrigger>
+            </TabsList>
+          </div>
+        </Tabs>
+      )}
+      {showTest ? (
+        <div className="animate-ddm-fade">
+          <ToolTestPanel item={{ id: item.id, name: item.name, parameters: item.parameters }} />
+        </div>
+      ) : (
+        <div className="animate-ddm-fade flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="tool-display">Nome de exibição</Label>
             <Input id="tool-display" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Buscar CPF" maxLength={80} disabled={saving} />
           </div>
           <AiToolEditor tool={tool} onChange={setTool} showTimeout lockName={!isNew} />
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancelar
-          </Button>
-          <Button onClick={() => void save()} disabled={saving}>
-            {saving && <Loader2 className="size-4 animate-spin" />}
-            Salvar
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      )}
+    </DetailDrawer>
   );
 }
 
-export function TestDialog({
-  item,
-  onClose,
-}: {
-  item: Pick<ToolItem, 'id' | 'name' | 'parameters'>;
-  onClose: () => void;
-}) {
+type TestResult = { ok: boolean; status?: number; body?: string; error?: string };
+
+/** Formulário de teste (argumentos + resultado), usado na gaveta e no diálogo de teste. */
+export function ToolTestPanel({ item }: { item: Pick<ToolItem, 'id' | 'name' | 'parameters'> }) {
   const props = Object.keys(item.parameters.properties ?? {});
   const [args, setArgs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; status?: number; body?: string; error?: string } | null>(null);
+  const [result, setResult] = useState<TestResult | null>(null);
 
   async function run() {
     setRunning(true);
@@ -165,43 +197,69 @@ export function TestDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && !running && onClose()}>
-      <DialogContent className="border-border bg-popover sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Testar {item.name}</DialogTitle>
-          <DialogDescription>
-            Chama a ferramenta de verdade. Mostramos só o status HTTP e o início da resposta (credenciais nunca aparecem).
-          </DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3">
-          {props.map((p) => (
-            <div key={p} className="space-y-1">
-              <Label htmlFor={`arg-${p}`}>{p}</Label>
-              <Input id={`arg-${p}`} value={args[p] ?? ''} placeholder="(vazio = valor de exemplo)" onChange={(e) => setArgs((a) => ({ ...a, [p]: e.target.value }))} disabled={running} />
-            </div>
-          ))}
-          {result && (
-            <div className="bg-muted rounded-md p-2 text-xs">
-              {result.error ? (
-                <span className="text-destructive">{result.error}</span>
-              ) : (
-                <>
-                  <div className="font-semibold">
-                    HTTP {result.status} {result.ok ? '— ok' : '— erro'}
-                  </div>
-                  <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all">{result.body}</pre>
-                </>
-              )}
-            </div>
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted-foreground">
+        Chama a ferramenta de verdade. Mostramos só o status HTTP e o início da resposta (credenciais nunca aparecem).
+      </p>
+      {props.map((p) => (
+        <div key={p} className="flex flex-col gap-1">
+          <Label htmlFor={`arg-${p}`}>{p}</Label>
+          <Input
+            id={`arg-${p}`}
+            value={args[p] ?? ''}
+            placeholder="(vazio = valor de exemplo)"
+            onChange={(e) => setArgs((a) => ({ ...a, [p]: e.target.value }))}
+            disabled={running}
+          />
+        </div>
+      ))}
+      <Button onClick={() => void run()} disabled={running} className="self-start">
+        {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+        Executar teste
+      </Button>
+      {result && (
+        <div
+          role="status"
+          className={
+            result.error || !result.ok
+              ? 'rounded-lg border border-destructive/40 bg-danger-soft p-2.5 text-xs'
+              : 'rounded-lg border bg-card-2 p-2.5 text-xs'
+          }
+        >
+          {result.error ? (
+            <span className="text-destructive">{result.error}</span>
+          ) : (
+            <>
+              <div className={result.ok ? 'font-semibold text-success' : 'font-semibold text-destructive'}>
+                HTTP {result.status} {result.ok ? '— ok' : '— erro'}
+              </div>
+              <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all text-foreground">{result.body}</pre>
+            </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+export function TestDialog({
+  item,
+  onClose,
+}: {
+  item: Pick<ToolItem, 'id' | 'name' | 'parameters'>;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Testar {item.name}</DialogTitle>
+          <DialogDescription>Execução real da ferramenta com argumentos de exemplo ou os que você preencher.</DialogDescription>
+        </DialogHeader>
+        <ToolTestPanel item={item} />
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={running}>
+          <Button variant="outline" onClick={onClose}>
             Fechar
-          </Button>
-          <Button onClick={() => void run()} disabled={running}>
-            {running && <Loader2 className="size-4 animate-spin" />}
-            Executar teste
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { aiProviderLabel } from "@/lib/ai/models";
+import { cn } from "@/lib/utils";
 import { KB_ACCEPT } from "@/lib/ai/knowledge/limits";
 import {
   AgentApiError,
@@ -256,10 +258,11 @@ export function AiAgentSettings() {
   }
 
   return (
-    <section className="max-w-3xl space-y-6 animate-in fade-in-50 duration-200">
+    <section className="max-w-3xl space-y-6">
       <SettingsPanelHead
-        title="Agente de Atendimento com IA"
-        description="Configure um atendente virtual inteligente com multicanalidade, base de conhecimento e resposta de voz."
+        className="mb-0"
+        title="Provedores de IA"
+        description="Chave do provedor usada pelos agentes e pelo DDM Intelligence, resposta automática da conta, voz e base de conhecimento. Só o proprietário da conta altera."
       />
 
       <form onSubmit={handleSave} className="space-y-6">
@@ -284,8 +287,8 @@ export function AiAgentSettings() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-2 rounded-md border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-200">
-              <MessageSquare className="size-4 shrink-0 text-amber-400" />
+            <div className="flex items-center gap-2 rounded-lg border border-warning-border bg-warning-soft p-3 text-xs text-foreground">
+              <MessageSquare className="size-4 shrink-0 text-warning" />
               <span>
                 <strong>Nota:</strong> O agente de IA responderá apenas as conversas que <strong>não possuírem</strong> um atendente humano atribuído.
               </span>
@@ -305,23 +308,32 @@ export function AiAgentSettings() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label className="text-muted-foreground">Provedor de IA</Label>
-                <select
-                  value={apiProvider}
-                  onChange={(e) => setApiProvider(e.target.value as any)}
-                  disabled={!enabled || !canEditSettings}
-                  className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary disabled:cursor-not-allowed"
-                >
-                  <option value="gemini">Google Gemini (Recomendado)</option>
-                  <option value="openai">OpenAI (ChatGPT)</option>
-                  <option value="claude">Anthropic Claude</option>
-                  <option value="hermes">Nous Hermes (Modo Billing)</option>
-                </select>
+            <div className="space-y-2">
+              <Label id="ai-provider-label" className="text-muted-foreground">Provedor ativo</Label>
+              <div role="radiogroup" aria-labelledby="ai-provider-label" className="flex flex-wrap gap-2">
+                {(["gemini", "openai", "claude", "hermes"] as const).map((p) => {
+                  const on = apiProvider === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      disabled={!enabled || !canEditSettings}
+                      onClick={() => setApiProvider(p)}
+                      className={cn(
+                        "h-9 rounded-md border px-3 text-[13px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60",
+                        on ? "border-primary bg-primary-soft text-primary-text" : "border-border bg-card text-foreground hover:bg-surface-hover",
+                      )}
+                    >
+                      {aiProviderLabel(p)}
+                    </button>
+                  );
+                })}
               </div>
-
-              <div className="space-y-2">
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2 md:col-span-2">
                 <Label className="text-muted-foreground">Chave de API (API Key)</Label>
                 <Input
                   type="password"

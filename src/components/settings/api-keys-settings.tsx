@@ -27,9 +27,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { Copy, KeyRound, Loader2, Plus, Trash2 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -49,6 +47,9 @@ import {
   type ApiScope,
 } from '@/lib/api-keys/scopes';
 import { SettingsPanelHead } from './settings-panel-head';
+import { ListCard, ListRow } from '@/components/ddm/list-with-drawer';
+import { StatusChip } from '@/components/ddm/status-chip';
+import { EmptyState, Skeleton } from '@/components/ddm/states';
 
 interface ApiKey {
   id: string;
@@ -152,16 +153,20 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="text-primary size-6 animate-spin" />
+      <div className="flex flex-col gap-2" aria-busy>
+        <Skeleton className="h-6 w-48" />
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-20 rounded-[10px]" />
+        ))}
       </div>
     );
   }
 
   return (
-    <section className="animate-in fade-in-50 space-y-6 duration-200">
+    <section className="flex flex-col gap-3.5">
       <SettingsPanelHead
-        title={personal ? 'Minhas chaves de API' : 'Chaves de API'}
+        className="mb-0"
+        title={personal ? 'Minhas chaves de API' : 'Chaves da API pública'}
         description={
           personal ? (
             <>
@@ -174,10 +179,10 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
           ) : (
             <>
               As chaves autenticam a REST API pública (
-              <code className="text-xs">/api/v1</code>) para que você possa criar suas
-              próprias automações. Envie-as no cabeçalho como{' '}
+              <code className="text-xs">/api/v1</code>). Cada chave tem só as permissões marcadas na criação; crie uma por
+              integração para poder revogar uma sem afetar as outras. Envie no cabeçalho{' '}
               <code className="text-xs">Authorization: Bearer &lt;chave&gt;</code>.{' '}
-              <Link href="/docs/api" target="_blank" className="underline">
+              <Link href="/docs/api" target="_blank" className="text-primary-text underline-offset-2 hover:underline">
                 Ver documentação da API
               </Link>
             </>
@@ -187,127 +192,92 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
           <Can permission={personal ? 'intelligence.personal_key' : 'api_keys.manage'}>
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="size-4" />
-              {personal ? 'Nova chave' : 'Nova chave de API'}
+              {personal ? 'Nova chave' : 'Nova chave'}
             </Button>
           </Can>
         }
       />
 
       {keys.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-10 text-center">
-            <KeyRound className="text-muted-foreground size-6" />
-            <p className="text-muted-foreground mt-2 text-sm">
-              {personal ? 'Você ainda não tem chave pessoal.' : 'Nenhuma chave de API ainda.'}
-            </p>
-            {personal ? null : canEditSettings ? (
-              <p className="text-muted-foreground mt-1 text-xs">
-                Clique em <span className="text-foreground">Nova chave de API</span> para
-                criar uma.
-              </p>
-            ) : (
-              <p className="text-muted-foreground mt-1 text-xs">
-                Peça a um proprietário ou supervisor para criar uma.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={KeyRound}
+          title={personal ? 'Você ainda não tem chave pessoal.' : 'Nenhuma chave de API ainda.'}
+          hint={
+            personal
+              ? undefined
+              : canEditSettings
+                ? 'Clique em “Nova chave” para criar uma.'
+                : 'Peça a um proprietário ou administrador para criar uma.'
+          }
+        />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <ul className="divide-border divide-y">
-              {keys.map((k) => {
-                const status = keyStatus(k);
-                const inactive = status !== 'active';
-                return (
-                  <li
-                    key={k.id}
-                    className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:gap-4"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`truncate text-sm font-medium ${
-                            inactive
-                              ? 'text-muted-foreground line-through'
-                              : 'text-foreground'
-                          }`}
-                        >
-                          {k.name}
-                        </span>
-                        {status === 'revoked' && (
-                          <Badge className="border-border bg-muted text-muted-foreground text-[10px] tracking-wide uppercase">
-                            Revogada
-                          </Badge>
-                        )}
-                        {status === 'expired' && (
-                          <Badge className="border-border bg-muted text-muted-foreground text-[10px] tracking-wide uppercase">
-                            Expirada
-                          </Badge>
-                        )}
-                        {k.user_id && !personal && (
-                          <Badge className="border-border bg-muted text-muted-foreground text-[10px] tracking-wide uppercase">
-                            Pessoal
-                          </Badge>
-                        )}
-                      </div>
-                      <p className="text-muted-foreground mt-0.5 font-mono text-xs">
-                        {k.key_prefix}…
-                      </p>
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {k.scopes.length === 0 ? (
-                          <span className="text-muted-foreground text-xs">
-                            Sem escopos
-                          </span>
-                        ) : (
-                          k.scopes.map((s) => (
-                            <Badge
-                              key={s}
-                              className="border-border bg-muted text-muted-foreground text-[10px]"
-                            >
-                              {s}
-                            </Badge>
-                          ))
-                        )}
-                      </div>
-                      <p className="text-muted-foreground mt-1.5 text-xs">
-                        Criada em {fmtDate(k.created_at)}
-                        {' · '}
-                        {k.last_used_at
-                          ? `último uso em ${fmtDate(k.last_used_at)}`
-                          : 'nunca usada'}
-                        {k.expires_at && status !== 'expired'
-                          ? ` · expira em ${fmtDate(k.expires_at)}`
-                          : ''}
-                      </p>
-                    </div>
-
-                    {status === 'active' && (
-                      // Modo pessoal: a lista só tem chaves do próprio
-                      // usuário, que pode revogá-las (supervisor incluso).
-                      <Can permission={personal ? 'intelligence.personal_key' : 'api_keys.manage'}>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRevoke(k)}
-                          disabled={revoking === k.id}
-                          className="self-start border-red-500/40 bg-red-500/10 text-red-300 hover:border-red-500/60 hover:bg-red-500/20 hover:text-red-200 sm:self-auto"
-                        >
-                          {revoking === k.id ? (
-                            <Loader2 className="size-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="size-4" />
-                          )}
-                          Revogar
-                        </Button>
-                      </Can>
+        <ListCard aria-label={personal ? 'Minhas chaves de API' : 'Chaves de API'}>
+          {keys.map((k, i) => {
+            const status = keyStatus(k);
+            const inactive = status !== 'active';
+            return (
+              <ListRow key={k.id} index={i} label={k.name} className="flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span
+                      className={`truncate text-[13.5px] font-semibold ${
+                        inactive ? 'text-muted-foreground line-through' : 'text-foreground'
+                      }`}
+                    >
+                      {k.name}
+                    </span>
+                    {status === 'active' && <StatusChip tone="ok">Ativa</StatusChip>}
+                    {status === 'revoked' && <StatusChip tone="mute">Revogada</StatusChip>}
+                    {status === 'expired' && <StatusChip tone="warn">Expirada</StatusChip>}
+                    {k.user_id && !personal && (
+                      <StatusChip tone="info" dot={false}>
+                        Pessoal
+                      </StatusChip>
                     )}
-                  </li>
-                );
-              })}
-            </ul>
-          </CardContent>
-        </Card>
+                  </div>
+                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">{k.key_prefix}…</p>
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {k.scopes.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">Sem escopos — só autentica (GET /api/v1/me)</span>
+                    ) : (
+                      k.scopes.map((s) => (
+                        <span
+                          key={s}
+                          className="inline-flex h-5 items-center rounded border bg-card-2 px-1.5 font-mono text-[11px] text-foreground-2"
+                        >
+                          {s}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Criada em {fmtDate(k.created_at)}
+                    {' · '}
+                    {k.last_used_at ? `último uso em ${fmtDate(k.last_used_at)}` : 'nunca usada'}
+                    {k.expires_at && status !== 'expired' ? ` · expira em ${fmtDate(k.expires_at)}` : ''}
+                  </p>
+                </div>
+
+                {status === 'active' && (
+                  // Modo pessoal: a lista só tem chaves do próprio
+                  // usuário, que pode revogá-las (supervisor incluso).
+                  <Can permission={personal ? 'intelligence.personal_key' : 'api_keys.manage'}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRevoke(k)}
+                      disabled={revoking === k.id}
+                      className="self-start border-destructive/40 text-destructive hover:bg-danger-soft hover:text-destructive sm:self-auto"
+                    >
+                      {revoking === k.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                      Revogar
+                    </Button>
+                  </Can>
+                )}
+              </ListRow>
+            );
+          })}
+        </ListCard>
       )}
 
       <CreateKeyDialog
