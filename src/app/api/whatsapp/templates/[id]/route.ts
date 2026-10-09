@@ -13,6 +13,7 @@ import {
 } from '@/lib/whatsapp/template-validators'
 import { buildMetaTemplatePayload } from '@/lib/whatsapp/template-components'
 import { ensureImageHeaderHandle } from '@/lib/whatsapp/template-header-handle'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 /**
  * Per-template lifecycle endpoint.
@@ -120,7 +121,7 @@ async function handleMetadataPatch(
     .maybeSingle()
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return internalErrorResponse('templates/[id]', error)
   }
   if (!template) {
     return NextResponse.json({ error: 'Template não encontrado.' }, { status: 404 })

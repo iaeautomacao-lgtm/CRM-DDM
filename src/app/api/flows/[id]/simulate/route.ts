@@ -139,6 +139,8 @@ export async function POST(
       flowName: (flow.name as string | null) ?? 'Fluxo',
       ...accountData,
       agents,
+      // Operadores fictícios do painel (menu de operadores online / handoff de equipe); sem isto ninguém ficava online na simulação.
+      operators: simRequest.operators,
       // Busca por trechos do conhecimento (só leitura, chave da conta), como na produção.
       knowledgeRetriever: createVectorRetriever({ db: admin }),
     })

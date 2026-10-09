@@ -41,7 +41,7 @@ import {
   type AuditLog,
 } from "@/lib/audit/labels";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
-import { loadSharedPeriod, saveSharedPeriod } from "@/lib/relatorios/period";
+import { loadSharedPeriod, rangeError, saveSharedPeriod } from "@/lib/relatorios/period";
 import { usePermissions } from "@/hooks/use-permission";
 import { PeriodFilter } from "@/components/relatorios/period-filter";
 
@@ -188,6 +188,7 @@ export default function AuditoriaPage() {
   }, [runSearch]);
 
   function handlePesquisar() {
+    if (rangeError({ dateFrom: draft.from, dateTo: draft.to })) return;
     // Objeto novo: refaz a busca mesmo com os mesmos filtros.
     setApplied({ ...draft });
     saveSharedPeriod({ dateFrom: draft.from, dateTo: draft.to });
@@ -272,7 +273,11 @@ export default function AuditoriaPage() {
               className="w-56"
             />
           </div>
-          <Button onClick={handlePesquisar} className="bg-primary text-primary-foreground hover:bg-primary/90">
+          <Button
+            onClick={handlePesquisar}
+            disabled={!!rangeError({ dateFrom: draft.from, dateTo: draft.to })}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
             <Search className="size-4" />
             Pesquisar
           </Button>

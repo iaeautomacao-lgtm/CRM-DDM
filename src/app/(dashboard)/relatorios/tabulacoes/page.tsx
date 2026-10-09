@@ -34,6 +34,7 @@ import {
   loadSharedPeriod,
   saveSharedPeriod,
   presetRange,
+  rangeError,
   type PeriodRange,
 } from '@/lib/relatorios/period';
 import { exportWithHistory } from '@/lib/relatorios/export-with-history';
@@ -252,7 +253,7 @@ export default function TabulacoesPage() {
             </Select>
           </div>
           <Button
-            disabled={!applied || !draft.dateFrom || !draft.dateTo || loading}
+            disabled={!applied || !!rangeError(draft) || loading}
             onClick={() => {
               saveSharedPeriod(draft);
               setApplied({ ...draft });
