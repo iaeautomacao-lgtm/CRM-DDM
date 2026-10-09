@@ -26,6 +26,7 @@ import type { TemplateButton, TemplateSampleValues } from '@/types'
 
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+const SYNC_PAGE_TIMEOUT_MS = 30_000
 
 interface MetaButton {
   type: string
@@ -278,9 +279,18 @@ async function fetchWabaTemplates(
 
   while (nextUrl && pageCount < PAGE_CAP) {
     pageCount++
-    const metaRes: Response = await fetch(nextUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    let metaRes: Response
+    try {
+      // Sem timeout, uma Meta lenta prendia a requisição (e um worker do Passenger) sem limite.
+      // 30 s por página, o mesmo padrão do metaFetch (src/lib/whatsapp/meta-api.ts).
+      metaRes = await fetch(nextUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        signal: AbortSignal.timeout(SYNC_PAGE_TIMEOUT_MS),
+      })
+    } catch (err) {
+      const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+      return { error: timedOut ? 'A Meta demorou demais para responder. Tente sincronizar de novo.' : 'Falha ao consultar a Meta.' }
+    }
 
     if (!metaRes.ok) {
       let metaErr = `Meta API error: ${metaRes.status}`
