@@ -29,17 +29,7 @@ import { AlertTriangle, MessageCircle, MoreVertical, Plus, Search, Trash2, Zap }
 import { useAuth } from "@/hooks/use-auth";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,12 +45,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { ChannelConfig } from "@/components/canais/types";
@@ -71,6 +55,16 @@ import { TestChannelDialog } from "@/components/canais/TestChannelDialog";
 import { ClientsDialog, type ClientOption } from "@/components/canais/ClientsDialog";
 import { SocialChannelsSection } from "@/components/canais/SocialChannelsSection";
 import { WebchatSettingsSection } from "@/components/canais/WebchatSettingsSection";
+import { Checkbox } from "@/components/ui/checkbox";
+import { CountUp } from "@/components/motion/count-up";
+import { KpiStrip } from "@/components/ddm/kpi-strip";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { Segmented } from "@/components/ddm/segmented";
+import { StatusChip } from "@/components/ddm/status-chip";
+import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
+import { DetailDrawer } from "@/components/ddm/list-with-drawer";
+import { usePermission } from "@/hooks/use-permission";
+import { cn } from "@/lib/utils";
 
 function channelName(c: ChannelConfig): string {
   if (c.provider === "waha") return c.waha_session || "Sessão WAHA";
@@ -241,8 +235,52 @@ export default function CanaisPage() {
     return configs.filter((c) => searchHaystack(c).includes(q) || channelName(c).toLowerCase().includes(q));
   }, [configs, search]);
 
+  // Filtro por provedor (Segmented do redesenho) sobre a busca.
+  const [providerFilter, setProviderFilter] = useState<"all" | "meta" | "waha">("all");
+  const visibleConfigs = useMemo(
+    () => (providerFilter === "all" ? filteredConfigs : filteredConfigs.filter((c) => (c.provider === "waha" ? "waha" : "meta") === providerFilter)),
+    [filteredConfigs, providerFilter],
+  );
+
+  // Linha aberta na gaveta de detalhe (clique na linha, como no protótipo).
+  const [detail, setDetail] = useState<ChannelConfig | null>(null);
+  const detailRow = detail ? configs.find((c) => c.id === detail.id) ?? null : null;
+
+  // Qualidade, faixa de limite e ritmo por número Meta — o mesmo dado do
+  // Disparador › Números (GET /api/disparador/rate-limits, migrations 190/221),
+  // só para quem tem campaigns.rate_limit. Sem leitura, a coluna mostra "—".
+  const canSeeQuality = usePermission("campaigns.rate_limit");
+  const [quality, setQuality] = useState<Map<string, ChannelQuality>>(new Map());
+  useEffect(() => {
+    if (!canSeeQuality) return;
+    let cancelled = false;
+    apiFetch("/api/disparador/rate-limits")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { channels?: Array<{ session_id: string; health: ChannelQuality | null; rate: { effective?: number | null } | null }> } | null) => {
+        if (cancelled || !json) return;
+        const map = new Map<string, ChannelQuality>();
+        for (const ch of json.channels ?? []) {
+          if (ch.health) map.set(ch.session_id, { ...ch.health, effective_rate: ch.rate?.effective ?? null });
+        }
+        setQuality(map);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [canSeeQuality]);
+
+  // KPIs só com o que existe: linhas ativas e linhas que pedem atenção.
+  const activeCount = configs.filter((c) => c.habilitado && c.connected).length;
+  const alertCount = configs.filter(
+    (c) => c.status === "warning" || invalidTokenLabel(c) !== null || (c.habilitado && !c.connected) || quality.get(c.id)?.quality_rating === "RED",
+  ).length;
+  const metaCount = configs.filter((c) => c.provider !== "waha").length;
+  const wahaCount = configs.length - metaCount;
+
+
   const allVisibleSelected =
-    filteredConfigs.length > 0 && filteredConfigs.every((c) => selected.has(c.id));
+    visibleConfigs.length > 0 && visibleConfigs.every((c) => selected.has(c.id));
 
   const hasInvalidTokenChannel = useMemo(
     () => configs.some((c) => invalidTokenLabel(c) !== null),
@@ -253,11 +291,11 @@ export default function CanaisPage() {
     setSelected((prev) => {
       if (allVisibleSelected) {
         const next = new Set(prev);
-        filteredConfigs.forEach((c) => next.delete(c.id));
+        visibleConfigs.forEach((c) => next.delete(c.id));
         return next;
       }
       const next = new Set(prev);
-      filteredConfigs.forEach((c) => next.add(c.id));
+      visibleConfigs.forEach((c) => next.add(c.id));
       return next;
     });
   }
@@ -347,264 +385,290 @@ export default function CanaisPage() {
   const selectedCount = selected.size;
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">Canais</h1>
-          <p className="text-sm text-muted-foreground">
-            WhatsApp, Instagram e Messenger conectados, com o cliente de cada linha.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setClientsOpen(true)}>
-            Clientes
-          </Button>
-          <Button onClick={() => setNewOpen(true)} className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90">
-            <Plus className="size-4" />
-            Novo canal
-          </Button>
-        </div>
+    <PageBody>
+      {/* Cabeçalho (redesenho DDM) */}
+      <div className="flex flex-col gap-1.5 pt-1">
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Canais</h2>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+          Linhas e canais conectados — WhatsApp, Instagram, Messenger e Webchat, com o cliente de cada linha.
+        </p>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="relative max-w-sm flex-1">
-          <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
+      {!loading && configs.length > 0 && (
+        <KpiStrip
+          ariaLabel="Resumo dos canais"
+          items={[
+            {
+              label: "Linhas ativas",
+              value: <CountUp value={activeCount} />,
+              note: `de ${configs.length}`,
+              info: "Linhas WhatsApp habilitadas e conectadas agora.",
+            },
+            {
+              label: "Com alerta",
+              value: <CountUp value={alertCount} className={alertCount > 0 ? "text-danger" : undefined} />,
+              note: alertCount > 0 ? "veja a coluna Situação" : "tudo em ordem",
+              noteTone: alertCount > 0 ? "bad" : "ok",
+              info: "Linhas com token inválido, desconectadas estando habilitadas, com aviso de degradação ou com qualidade vermelha na Meta.",
+            },
+            { label: "Meta Cloud", value: <CountUp value={metaCount} /> },
+            { label: "WAHA", value: <CountUp value={wahaCount} /> },
+          ]}
+        />
+      )}
+
+      <PageToolbar
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setClientsOpen(true)}>
+              Clientes
+            </Button>
+            <Button onClick={() => setNewOpen(true)}>
+              <Plus className="size-3.5" />
+              Conectar canal
+            </Button>
+          </>
+        }
+      >
+        <label className="relative flex min-w-0 flex-[1_1_240px] items-center sm:max-w-[360px]">
+          <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+          <input
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Pesquisar por canal"
-            className="pl-8"
+            placeholder="Buscar canal ou número"
+            aria-label="Buscar canais"
+            className="h-[34px] w-full rounded-md border border-border bg-card pl-[34px] pr-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
           />
-        </div>
-        {selectedCount > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">{selectedCount} selecionado(s)</span>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setDeleteTargets(configs.filter((c) => selected.has(c.id)))}
-            >
-              <Trash2 className="size-4" />
-              Excluir selecionados
-            </Button>
-          </div>
-        )}
-      </div>
+        </label>
+        <Segmented
+          ariaLabel="Filtrar por provedor"
+          size="lg"
+          value={providerFilter}
+          onChange={setProviderFilter}
+          options={[
+            { value: "all", label: "Todas", count: filteredConfigs.length },
+            { value: "meta", label: "Meta Cloud", count: filteredConfigs.filter((c) => c.provider !== "waha").length },
+            { value: "waha", label: "WAHA", count: filteredConfigs.filter((c) => c.provider === "waha").length },
+          ]}
+        />
+      </PageToolbar>
 
-      {hasInvalidTokenChannel && (
-        <div className="flex items-center gap-2 rounded-lg border border-[#FF5706]/30 bg-[#FF5706]/10 px-3 py-2 text-sm text-[#FF5706]">
-          <AlertTriangle className="size-4 shrink-0" />
-          <span>
-            ⚠️ Um ou mais canais Meta estão com token de acesso inválido. Edite o canal e
-            atualize o Token de acesso para restaurar o funcionamento.
+      {selectedCount > 0 && (
+        <div className="flex animate-ddm-up flex-wrap items-center gap-2.5 rounded-[10px] bg-foreground py-2 pl-4 pr-2.5 text-background">
+          <span className="text-[13px] font-semibold">
+            {selectedCount} {selectedCount === 1 ? "canal selecionado" : "canais selecionados"}
           </span>
+          <span className="flex-1" />
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteTargets(configs.filter((c) => selected.has(c.id)))}
+            className="bg-[#d8362f] text-white hover:bg-[#c42b24]"
+          >
+            <Trash2 className="size-3.5" />
+            Excluir
+          </Button>
+          <button type="button" onClick={() => setSelected(new Set())} className="h-[30px] rounded-md px-2.5 text-[12.5px] opacity-80 hover:opacity-100">
+            Limpar
+          </button>
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card">
+      {hasInvalidTokenChannel && (
+        <div className="flex animate-ddm-fade items-center gap-3 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3" role="status">
+          <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" />
+          <p className="text-[13px] text-foreground">
+            <span className="font-semibold">Token de acesso inválido.</span>{" "}
+            <span className="text-foreground-2">
+              Um ou mais canais Meta estão com o token inválido. Edite o canal e atualize o Token de acesso para restaurar o funcionamento.
+            </span>
+          </p>
+        </div>
+      )}
+
+      <TableCard label="Linhas WhatsApp">
         {loading ? (
-          <div className="space-y-3 p-4">
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-10 w-full rounded-lg" />
+          <div className="flex flex-col" aria-busy="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 border-b border-border px-[18px] py-3.5" aria-hidden="true">
+                <Skeleton className="size-[30px] rounded-full" />
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="ml-auto h-5 w-24 rounded-full" />
+              </div>
             ))}
           </div>
-        ) : filteredConfigs.length === 0 ? (
+        ) : visibleConfigs.length === 0 ? (
           <div className="p-4">
             <EmptyState
               icon={MessageCircle}
-              title={configs.length === 0 ? "Nenhum canal configurado" : "Nenhum canal encontrado"}
+              title={configs.length === 0 ? "Nenhum canal configurado" : "Nada encontrado"}
               hint={
                 configs.length === 0
-                  ? "Clique em “Novo canal” para conectar um número WhatsApp (WAHA ou Meta)."
-                  : "Ajuste a pesquisa para ver outros canais."
+                  ? "Clique em “Conectar canal” para conectar um número WhatsApp (WAHA ou Meta)."
+                  : "Ajuste a busca ou o filtro."
               }
             />
           </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-8">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-gray-300 cursor-pointer"
-                    checked={allVisibleSelected}
-                    onChange={toggleSelectAll}
-                    aria-label="Selecionar todos"
-                  />
-                </TableHead>
-                <TableHead>Canal</TableHead>
-                <TableHead>Provedor</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Sessão/Número</TableHead>
-                <TableHead>Fluxo</TableHead>
-                <TableHead>Equipe</TableHead>
-                <TableHead>Cliente</TableHead>
-                <TableHead>Receptivo</TableHead>
-                <TableHead>Habilitado</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredConfigs.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-gray-300 cursor-pointer"
-                      checked={selected.has(c.id)}
-                      onChange={() => toggleRow(c.id)}
-                      aria-label={`Selecionar ${channelName(c)}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <span className="inline-flex items-center gap-2">
-                      <MessageCircle className="size-4 text-[#25D366]" />
-                      <span className="font-medium text-foreground">{channelName(c)}</span>
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      className={
-                        c.provider === "waha"
-                          ? "border border-border bg-muted text-muted-foreground"
-                          : "bg-[#14532D] text-white"
-                      }
-                    >
-                      {c.provider === "waha" ? "WAHA" : "Meta"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    {c.status === "warning" ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <span className="inline-flex cursor-help items-center gap-1 rounded-full bg-[#FEF3C7] px-2 py-0.5 text-xs font-medium text-[#92400E]">
-                                <AlertTriangle className="size-3" />
-                                Atenção
-                              </span>
-                            }
-                          />
-                          <TooltipContent className="max-w-[260px] text-xs">
-                            {c.warning_message || "Sinal de degradação detectado neste canal."}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : c.connected ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#DCFCE7] px-2 py-0.5 text-xs font-medium text-[#14532D]">
-                        <span className="relative flex size-2">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#14532D] opacity-75" />
-                          <span className="relative inline-flex size-2 rounded-full bg-[#14532D]" />
+          <DenseTable>
+            <thead>
+              <tr>
+                <Th className="w-11 pl-4 pr-0">
+                  <Checkbox checked={allVisibleSelected} onCheckedChange={toggleSelectAll} aria-label="Selecionar todos" />
+                </Th>
+                <Th>Canal</Th>
+                <Th className="hidden md:table-cell">Situação</Th>
+                <Th className="hidden lg:table-cell">Número / sessão</Th>
+                <Th className="hidden xl:table-cell">Qualidade</Th>
+                <Th className="hidden xl:table-cell">Fluxo</Th>
+                <Th className="hidden 2xl:table-cell">Equipe</Th>
+                <Th className="hidden lg:table-cell">Cliente</Th>
+                <Th className="hidden sm:table-cell">Receptivo</Th>
+                <Th>Ativo</Th>
+                <Th className="w-11" />
+              </tr>
+            </thead>
+            <tbody className="ddm-stagger">
+              {visibleConfigs.map((c) => {
+                const q = quality.get(c.id);
+                return (
+                  <Tr key={c.id} onClick={() => setDetail(c)} className={cn("cursor-pointer", selected.has(c.id) && "bg-selected")}>
+                    <Td className="pl-4 pr-0" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selected.has(c.id)}
+                        onCheckedChange={() => toggleRow(c.id)}
+                        aria-label={`Selecionar ${channelName(c)}`}
+                      />
+                    </Td>
+                    <Td>
+                      <span className="flex min-w-0 items-center gap-2.5">
+                        <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-success-soft text-success" aria-hidden="true">
+                          <MessageCircle className="size-3.5" />
                         </span>
-                        Conectado
+                        <CellMain title={channelName(c)} sub={`WhatsApp · ${c.provider === "waha" ? "WAHA" : "Meta Cloud"}`} />
                       </span>
-                    ) : invalidTokenLabel(c) ? (
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <span className="inline-flex cursor-help items-center gap-1 rounded-full bg-[#FEE2E2] px-2 py-0.5 text-xs font-medium text-[#B91C1C]">
-                                <AlertTriangle className="size-3" />
-                                {invalidTokenLabel(c)}
-                              </span>
-                            }
-                          />
-                          <TooltipContent className="max-w-[260px] text-xs">
-                            O token de acesso deste canal está inválido ou expirado. Edite o
-                            canal e atualize o Token de acesso.
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-[#FEE2E2] px-2 py-0.5 text-xs font-medium text-[#B91C1C]">
-                        Desconectado
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>{sessionOrNumber(c)}</TableCell>
-                  <TableCell>{c.flow_id ? flowNameById.get(c.flow_id) ?? "—" : "—"}</TableCell>
-                  <TableCell>{c.team_id ? teamNameById.get(c.team_id) ?? "—" : "—"}</TableCell>
-                  <TableCell>
-                    <select
-                      value={c.client_id ?? ""}
-                      onChange={(e) => handleClientChange(c, e.target.value || null)}
-                      aria-label={`Cliente — ${channelName(c)}`}
-                      className="h-8 max-w-[160px] rounded-md border border-border bg-background px-2 text-xs text-foreground"
-                    >
-                      <option value="">—</option>
-                      {clients.map((cl) => (
-                        <option key={cl.id} value={cl.id}>
-                          {cl.name}
-                        </option>
-                      ))}
-                    </select>
-                  </TableCell>
-                  <TableCell>
-                    <Switch
-                      checked={c.receptivo}
-                      onCheckedChange={() => handleToggleField(c, "receptivo")}
-                      disabled={toggleBusyKey === `${c.id}:receptivo`}
-                      aria-label={`Receptivo — ${channelName(c)}`}
-                    />
-                  </TableCell>
-                  <TableCell>
-                    <Switch
-                      checked={c.habilitado}
-                      onCheckedChange={() => handleToggleField(c, "habilitado")}
-                      disabled={toggleBusyKey === `${c.id}:habilitado`}
-                      aria-label={`Habilitado — ${channelName(c)}`}
-                    />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                        aria-label="Mais ações"
+                    </Td>
+                    <Td className="hidden md:table-cell">
+                      <ChannelStatus c={c} />
+                    </Td>
+                    <Td className="hidden whitespace-nowrap tabular-nums text-foreground lg:table-cell">{sessionOrNumber(c)}</Td>
+                    <Td className="hidden xl:table-cell">
+                      {c.provider === "waha" ? (
+                        <span className="text-muted-foreground" title="Qualidade e limite são da Meta; não se aplicam ao WAHA.">—</span>
+                      ) : q ? (
+                        <QualityChip q={q} />
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </Td>
+                    <Td className="hidden max-w-[180px] truncate text-foreground-2 xl:table-cell">
+                      {c.flow_id ? flowNameById.get(c.flow_id) ?? "—" : "—"}
+                    </Td>
+                    <Td className="hidden max-w-[180px] truncate text-foreground-2 2xl:table-cell">
+                      {c.team_id ? teamNameById.get(c.team_id) ?? "—" : "—"}
+                    </Td>
+                    <Td className="hidden lg:table-cell" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={c.client_id ?? ""}
+                        onChange={(e) => handleClientChange(c, e.target.value || null)}
+                        aria-label={`Cliente — ${channelName(c)}`}
+                        className="h-8 max-w-[160px] rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
                       >
-                        <MoreVertical className="size-4" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="bg-popover text-popover-foreground">
-                        {c.provider === "waha" &&
-                          (c.connected ? (
-                            <DropdownMenuItem
-                              onClick={() => handleDisconnect(c)}
-                              disabled={stopBusyId === c.id}
-                              className="text-popover-foreground"
-                            >
-                              {stopBusyId === c.id ? "Desconectando…" : "Desconectar"}
-                            </DropdownMenuItem>
-                          ) : (
-                            <DropdownMenuItem
-                              onClick={() => setConnecting(c)}
-                              className="text-popover-foreground"
-                            >
-                              Conectar
-                            </DropdownMenuItem>
-                          ))}
-                        {c.provider === "waha" && <DropdownMenuSeparator className="bg-border" />}
-                        <DropdownMenuItem onClick={() => setTesting(c)} className="text-popover-foreground">
-                          <Zap className="size-4" />
-                          Testar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setEditing(c)} className="text-popover-foreground">
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          onClick={() => setDeleteTargets([c])}
-                          className="text-red-400 hover:bg-red-950/30 hover:text-red-400 focus:bg-red-950/30 focus:text-red-400"
-                        >
-                          Excluir
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                        <option value="">—</option>
+                        {clients.map((cl) => (
+                          <option key={cl.id} value={cl.id}>
+                            {cl.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Td>
+                    <Td className="hidden sm:table-cell" onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={c.receptivo}
+                        onCheckedChange={() => handleToggleField(c, "receptivo")}
+                        disabled={toggleBusyKey === `${c.id}:receptivo`}
+                        aria-label={`Receptivo — ${channelName(c)}`}
+                      />
+                    </Td>
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <Switch
+                        checked={c.habilitado}
+                        onCheckedChange={() => handleToggleField(c, "habilitado")}
+                        disabled={toggleBusyKey === `${c.id}:habilitado`}
+                        aria-label={`Ativo — ${channelName(c)}`}
+                      />
+                    </Td>
+                    <Td className="pr-2 text-right" onClick={(e) => e.stopPropagation()}>
+                      <ChannelActions
+                        c={c}
+                        stopBusy={stopBusyId === c.id}
+                        onConnect={() => setConnecting(c)}
+                        onDisconnect={() => handleDisconnect(c)}
+                        onTest={() => setTesting(c)}
+                        onEdit={() => setEditing(c)}
+                        onDelete={() => setDeleteTargets([c])}
+                      />
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </DenseTable>
         )}
-      </div>
+      </TableCard>
+
+      {/* Gaveta de detalhe da linha (primitivo DetailDrawer do redesenho). */}
+      <DetailDrawer
+        open={detailRow !== null}
+        onOpenChange={(open) => !open && setDetail(null)}
+        title={detailRow ? channelName(detailRow) : ""}
+        description={detailRow ? `WhatsApp · ${detailRow.provider === "waha" ? "WAHA" : "Meta Cloud"}` : undefined}
+        headerExtra={detailRow ? <ChannelStatus c={detailRow} /> : undefined}
+        footer={
+          detailRow ? (
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" onClick={() => setTesting(detailRow)}>
+                <Zap className="size-3.5" />
+                Testar
+              </Button>
+              <Button
+                onClick={() => {
+                  setEditing(detailRow);
+                  setDetail(null);
+                }}
+              >
+                Editar canal
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {detailRow && (
+          <dl className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-[13px]">
+            <dt className="text-muted-foreground">Número / sessão</dt>
+            <dd className="tabular-nums text-foreground">{sessionOrNumber(detailRow)}</dd>
+            <dt className="text-muted-foreground">Situação</dt>
+            <dd><ChannelStatus c={detailRow} /></dd>
+            {detailRow.provider !== "waha" && quality.get(detailRow.id) && (
+              <>
+                <dt className="text-muted-foreground">Qualidade (Meta)</dt>
+                <dd><QualityChip q={quality.get(detailRow.id)!} detailed /></dd>
+              </>
+            )}
+            <dt className="text-muted-foreground">Fluxo</dt>
+            <dd className="text-foreground">{detailRow.flow_id ? flowNameById.get(detailRow.flow_id) ?? "—" : "—"}</dd>
+            <dt className="text-muted-foreground">Equipe</dt>
+            <dd className="text-foreground">{detailRow.team_id ? teamNameById.get(detailRow.team_id) ?? "—" : "—"}</dd>
+            <dt className="text-muted-foreground">Cliente</dt>
+            <dd className="text-foreground">{clients.find((cl) => cl.id === detailRow.client_id)?.name ?? "—"}</dd>
+            <dt className="text-muted-foreground">Receptivo</dt>
+            <dd className="text-foreground">{detailRow.receptivo ? "Sim" : "Não"}</dd>
+            <dt className="text-muted-foreground">Ativo</dt>
+            <dd className="text-foreground">{detailRow.habilitado ? "Sim" : "Não"}</dd>
+          </dl>
+        )}
+      </DetailDrawer>
 
       <SocialChannelsSection flows={flows} teams={teams} clients={clients} />
 
@@ -681,6 +745,117 @@ export default function CanaisPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageBody>
+  );
+}
+/** Saúde do número Meta (GET /api/disparador/rate-limits). */
+interface ChannelQuality {
+  quality_rating: string;
+  messaging_limit_tier: string | null;
+  daily_limit: number | null;
+  effective_rate?: number | null;
+}
+
+const QUALITY_TONE: Record<string, { tone: "ok" | "warn" | "bad" | "mute"; label: string }> = {
+  GREEN: { tone: "ok", label: "Verde" },
+  YELLOW: { tone: "warn", label: "Amarela" },
+  RED: { tone: "bad", label: "Vermelha" },
+  UNKNOWN: { tone: "mute", label: "Sem leitura" },
+};
+
+/** Qualidade da Meta com rótulo (não só cor) e, no detalhe, limite e ritmo. */
+function QualityChip({ q, detailed = false }: { q: ChannelQuality; detailed?: boolean }) {
+  const t = QUALITY_TONE[q.quality_rating] ?? QUALITY_TONE.UNKNOWN;
+  const limit = q.daily_limit != null ? `${q.daily_limit.toLocaleString("pt-BR")}/dia` : q.messaging_limit_tier;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <StatusChip tone={t.tone} dot title={limit ? `Limite: ${limit}` : undefined}>
+        {t.label}
+      </StatusChip>
+      {detailed && limit && <span className="text-xs text-muted-foreground">Limite {limit}</span>}
+      {detailed && q.effective_rate != null && (
+        <span className="text-xs text-muted-foreground">· ritmo {q.effective_rate}/s</span>
+      )}
+    </span>
+  );
+}
+
+/** Situação da linha: conectada, aviso, token inválido ou desconectada. */
+function ChannelStatus({ c }: { c: ChannelConfig }) {
+  if (c.status === "warning") {
+    return (
+      <StatusChip tone="warn" dot title={c.warning_message || "Sinal de degradação detectado neste canal."}>
+        Atenção
+      </StatusChip>
+    );
+  }
+  if (c.connected) {
+    return (
+      <StatusChip tone="ok" dot>
+        Conectado
+      </StatusChip>
+    );
+  }
+  const invalid = invalidTokenLabel(c);
+  if (invalid) {
+    return (
+      <StatusChip tone="bad" dot title="O token de acesso deste canal está inválido ou expirado. Edite o canal e atualize o Token de acesso.">
+        {invalid}
+      </StatusChip>
+    );
+  }
+  return (
+    <StatusChip tone="bad" dot>
+      Desconectado
+    </StatusChip>
+  );
+}
+
+function ChannelActions({
+  c,
+  stopBusy,
+  onConnect,
+  onDisconnect,
+  onTest,
+  onEdit,
+  onDelete,
+}: {
+  c: ChannelConfig;
+  stopBusy: boolean;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onTest: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+        aria-label={`Ações — ${channelName(c)}`}
+      >
+        <MoreVertical className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {c.provider === "waha" &&
+          (c.connected ? (
+            <DropdownMenuItem onClick={onDisconnect} disabled={stopBusy}>
+              {stopBusy ? "Desconectando…" : "Desconectar"}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onClick={onConnect}>Conectar</DropdownMenuItem>
+          ))}
+        {c.provider === "waha" && <DropdownMenuSeparator />}
+        <DropdownMenuItem onClick={onTest}>
+          <Zap className="size-4" />
+          Testar
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={onEdit}>Editar</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onClick={onDelete}>
+          Excluir
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
