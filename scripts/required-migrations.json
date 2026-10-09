@@ -223,14 +223,6 @@
       "kind": "registry"
     },
     {
-      "version": "276_billing_permissions",
-      "kind": "registry"
-    },
-    {
-      "version": "277_billing_api_functions",
-      "kind": "registry"
-    },
-    {
       "version": "278_billing_event_stops",
       "kind": "registry"
     },
@@ -282,7 +274,7 @@
       "index": "idx_dmq_contact_scheduled"
     },
     {
-      "version": "297_history_export_jobs",
+      "version": "298_web_push",
       "kind": "registry"
     }
   ]
