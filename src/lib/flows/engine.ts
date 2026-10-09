@@ -1535,7 +1535,9 @@ export async function selectAgentForTeam(
     .from("profiles")
     .select("user_id, max_simultaneous_chats")
     .in("user_id", orderedMemberIds)
-    .eq("account_role", "agent");
+    .eq("account_role", "agent")
+    // Membro desativado (migration 311) não recebe handoff.
+    .is("deactivated_at", null);
 
   const agentProfileRows =
     (agentProfiles as { user_id: string; max_simultaneous_chats: number | null }[] | null) ?? [];

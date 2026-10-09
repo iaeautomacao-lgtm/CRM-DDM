@@ -88,6 +88,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   session("account/permission-catalog", "GET", "members.view"),
   pg("account/members/[userId]", "PATCH", "admin", "members.manage"),
   pg("account/members/[userId]", "DELETE", "admin", "members.manage"),
+  pg("account/members/[userId]/status", "POST", "admin", "members.manage"),
   pg("account/members/[userId]/reset-password", "POST", "owner", "members.reset_password"),
   pg("account/members/bulk-invite", "POST", "owner", "members.bulk_invite"),
   pg("account/transfer-ownership", "POST", "owner", "ownership.transfer"),

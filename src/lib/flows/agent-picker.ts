@@ -68,6 +68,7 @@ export async function listOnlineAgents(
       .select('user_id, full_name, max_simultaneous_chats')
       .eq('account_id', accountId)
       .eq('account_role', 'agent')
+      .is('deactivated_at', null)
       .in('user_id', candidateIds)
     const byId = new Map((profiles as Array<{ user_id: string; full_name: string | null; max_simultaneous_chats: number | null }> | null ?? []).map((p) => [p.user_id, p]))
     const ordered = candidateIds.filter((id) => byId.has(id))

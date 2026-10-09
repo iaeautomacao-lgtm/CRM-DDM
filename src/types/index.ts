@@ -71,6 +71,13 @@ export interface AccountMember {
   /** Cap on concurrent open/pending conversations for handoff routing
    *  (migration 116). Null = no limit. */
   max_simultaneous_chats: number | null;
+  /** Membro ativo (migration 311). Desativado não entra, não recebe conversas e não aparece na distribuição. */
+  active: boolean;
+  deactivated_at: string | null;
+  /** Último login (auth.users). Só para quem tem members.manage; null para os demais ou sem registro. */
+  last_sign_in_at: string | null;
+  /** Última atividade (renovação mais recente de sessão). Mesma regra de visibilidade. */
+  last_active_at: string | null;
 }
 
 /**
