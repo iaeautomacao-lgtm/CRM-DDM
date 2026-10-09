@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TableCard } from "@/components/ddm/table-card";
 import {
   DEFAULT_WEBCHAT_SETTINGS,
   WEBCHAT_BUTTON_MAX,
@@ -25,6 +27,9 @@ type Option = { id: string; name: string };
 
 export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
   const [form, setForm] = useState<WebchatSettings>(DEFAULT_WEBCHAT_SETTINGS);
+  // Último estado salvo: habilita "Descartar"/"Salvar" só quando algo mudou.
+  const [saved, setSaved] = useState<WebchatSettings>(DEFAULT_WEBCHAT_SETTINGS);
+  const dirty = JSON.stringify(form) !== JSON.stringify(saved);
   const [ready, setReady] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,7 +41,9 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
         const json = await res.json().catch(() => ({}));
         if (cancelled) return;
         if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-        setForm({ ...DEFAULT_WEBCHAT_SETTINGS, ...(json.settings ?? {}) });
+        const loaded = { ...DEFAULT_WEBCHAT_SETTINGS, ...(json.settings ?? {}) };
+        setForm(loaded);
+        setSaved(loaded);
         setReady(!!json.ready);
       })
       .catch(() => {
@@ -62,7 +69,9 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-      setForm({ ...DEFAULT_WEBCHAT_SETTINGS, ...json.settings });
+      const next = { ...DEFAULT_WEBCHAT_SETTINGS, ...json.settings };
+      setForm(next);
+      setSaved(next);
       toast.success("Configuração do Webchat salva.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao salvar");
@@ -71,30 +80,43 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
     }
   }
 
+  const selectClass =
+    "h-9 w-full rounded-md border border-border bg-card px-2 text-[13px] text-foreground outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]";
+
   return (
-    <div className="space-y-3">
-      <div>
-        <h2 className="flex items-center gap-2 text-base font-semibold text-foreground">
-          <Globe className="size-4 text-cyan-600 dark:text-cyan-400" />
+    <TableCard
+      title={
+        <span className="flex items-center gap-2">
+          <Globe className="size-4 text-cyan-600 dark:text-cyan-400" aria-hidden="true" />
           Webchat
-        </h2>
-        <p className="text-sm text-muted-foreground">
+        </span>
+      }
+      label="Webchat"
+      hint={
+        <>
           Página de atendimento que o cliente abre pelo link enviado no WhatsApp. É usada pela opção
           &quot;Enviar para o Webchat&quot; da campanha e pelo nó &quot;Enviar Webchat&quot; do fluxo.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       {ready === false && (
-        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
-          Configure <code>NEXT_PUBLIC_APP_URL</code> (https) no servidor: sem ela os links do Webchat não são gerados.
+        <div className="mx-[18px] mb-3.5 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3 text-[12.5px] text-foreground-2" role="status">
+          Configure <code className="font-mono text-foreground">NEXT_PUBLIC_APP_URL</code> (https) no servidor: sem ela os links do Webchat não são gerados.
         </div>
       )}
 
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div className="border-t border-border px-[18px] py-4">
         {loading ? (
-          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          <div className="grid gap-4 md:grid-cols-2" aria-busy="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex flex-col gap-1.5" aria-hidden="true">
+                <Skeleton className="h-3 w-28" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+            ))}
+          </div>
         ) : (
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid animate-ddm-fade gap-4 md:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="wc-name">Nome exibido</Label>
               <Input
@@ -113,7 +135,7 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
                   type="color"
                   value={form.accent_color ?? "#ff5706"}
                   onChange={(e) => set({ accent_color: e.target.value })}
-                  className="h-9 w-12 cursor-pointer rounded-md border border-border bg-background"
+                  className="h-9 w-12 cursor-pointer rounded-md border border-border bg-card"
                   aria-label="Cor do Webchat"
                 />
                 {form.accent_color && (
@@ -133,7 +155,7 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
                 placeholder="Olá, {nome}! Já vamos te atender."
                 onChange={(e) => set({ welcome_message: e.target.value })}
               />
-              <p className="text-[11px] text-muted-foreground">{"{nome}"} vira o primeiro nome do cliente.</p>
+              <p className="text-[11.5px] text-muted-foreground">{"{nome}"} vira o primeiro nome do cliente.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="wc-hours">Validade do link (horas)</Label>
@@ -159,7 +181,7 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
                 id="wc-flow"
                 value={form.default_flow_id ?? ""}
                 onChange={(e) => set({ default_flow_id: e.target.value || null })}
-                className="h-9 w-full rounded-md border border-border bg-background px-2 text-sm text-foreground"
+                className={selectClass}
               >
                 <option value="">— a campanha escolhe —</option>
                 {flows.map((f) => (
@@ -168,7 +190,7 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
                   </option>
                 ))}
               </select>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[11.5px] text-muted-foreground">
                 Só fluxos ativos. Campanhas com Webchat ligado e sem fluxo próprio passam a usar este.
               </p>
             </div>
@@ -195,15 +217,23 @@ export function WebchatSettingsSection({ flows }: { flows: Option[] }) {
                 onChange={(e) => set({ default_button_text: e.target.value })}
               />
             </div>
-            <div className="flex items-end justify-end md:col-span-2">
-              <Button onClick={save} disabled={saving}>
-                {saving && <Loader2 className="size-4 animate-spin" />}
-                Salvar Webchat
-              </Button>
-            </div>
           </div>
         )}
       </div>
-    </div>
+
+      {/* Rodapé de configurações (padrão do protótipo): só age com mudança. */}
+      {!loading && (
+        <div className="flex items-center justify-end gap-2 border-t border-border bg-card-2 px-[18px] py-3">
+          {dirty && <span className="mr-auto text-xs text-muted-foreground">Alterações não salvas</span>}
+          <Button variant="outline" onClick={() => setForm(saved)} disabled={!dirty || saving}>
+            Descartar
+          </Button>
+          <Button onClick={save} disabled={!dirty || saving}>
+            {saving && <Loader2 className="size-4 animate-spin" />}
+            Salvar alterações
+          </Button>
+        </div>
+      )}
+    </TableCard>
   );
 }
