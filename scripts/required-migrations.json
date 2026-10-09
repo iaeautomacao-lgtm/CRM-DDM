@@ -241,6 +241,15 @@
     {
       "version": "292_import_lists",
       "kind": "registry"
+    },
+    {
+      "version": "293_dashboard_aggregates",
+      "kind": "registry"
+    },
+    {
+      "version": "293b_messages_account_created_idx",
+      "kind": "index",
+      "index": "idx_messages_account_created"
     }
   ]
 }

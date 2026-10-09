@@ -20,13 +20,16 @@ import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { ContactSearchPicker } from "@/components/inbox/contact-search-picker";
 import { TemplatePicker, type TemplateSendValues } from "@/components/inbox/template-picker";
 import { toast } from "sonner";
-import { WifiOff } from "lucide-react";
+import { PanelLeftOpen, WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isStaleConversationUpdateAfterClose } from "@/lib/inbox/realtime-guard";
+import { enteredWaiting } from "@/lib/inbox/waiting-alert";
+import { useWaitingAlerts } from "@/hooks/use-waiting-alerts";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
 const CONTACT_PANEL_STORAGE_KEY = "wacrm:inbox:contact-panel-open";
+const LIST_COLLAPSED_STORAGE_KEY = "wacrm:inbox:list-collapsed";
 
 export default function InboxPage() {
   const router = useRouter();
@@ -39,6 +42,15 @@ export default function InboxPage() {
   const deepLinkConvId = searchParams.get("c");
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  // Aviso de conversa em espera (PRD 23, item 14): lista atual em ref para o
+  // handler do realtime comparar o antes/depois sem depender do render.
+  const conversationsRef = useRef<Conversation[]>([]);
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+  const waitingAlerts = useWaitingAlerts();
+  const notifyWaiting = waitingAlerts.notify;
+  const openConversationRef = useRef<(id: string) => void>(() => {});
   const [activeConversation, setActiveConversation] =
     useState<Conversation | null>(null);
   const [activeContact, setActiveContact] = useState<Contact | null>(null);
@@ -65,6 +77,9 @@ export default function InboxPage() {
    * below reconciles to the stored value right after mount instead.
    */
   const [contactPanelOpen, setContactPanelOpen] = useState(true);
+  // Lista de conversas recolhida no desktop (PRD 23, item 9 — "aumentar o
+  // chat"): mesma estratégia do painel (lê o salvo depois de montar).
+  const [listCollapsed, setListCollapsed] = useState(false);
 
   // "Nova conversa" flow: pick a contact, then pick + fill a template
   // to send it with — mirrors message-thread.tsx's handleSendTemplate,
@@ -78,9 +93,22 @@ export default function InboxPage() {
     try {
       const stored = localStorage.getItem(CONTACT_PANEL_STORAGE_KEY);
       if (stored !== null) setContactPanelOpen(stored === "true");
+      if (localStorage.getItem(LIST_COLLAPSED_STORAGE_KEY) === "true") setListCollapsed(true);
     } catch {
       // localStorage can throw in private-browsing / sandboxed contexts.
     }
+  }, []);
+
+  const handleToggleList = useCallback(() => {
+    setListCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(LIST_COLLAPSED_STORAGE_KEY, String(next));
+      } catch {
+        // Persistence is best-effort; ignore storage failures.
+      }
+      return next;
+    });
   }, []);
 
   const handleToggleContactPanel = useCallback(() => {
@@ -293,6 +321,18 @@ export default function InboxPage() {
     }) => {
       const conv = event.new;
 
+      const prevConv = conversationsRef.current.find((c) => c.id === conv.id);
+      const alertWaiting = () => {
+        if (conv.id === activeConversation?.id) return;
+        notifyWaiting({
+          id: conv.id,
+          name: prevConv?.contact?.name ?? prevConv?.contact?.phone ?? null,
+          onOpen: () => openConversationRef.current(conv.id),
+        });
+      };
+
+      if (event.eventType === "INSERT" && enteredWaiting(null, conv, true)) alertWaiting();
+
       if (event.eventType === "INSERT") {
         // Prepend immediately for snappy UX so the new conv shows in the
         // list right away, then hydrate to fill in the `contact` join
@@ -325,6 +365,8 @@ export default function InboxPage() {
             Number.isFinite(incomingUpdatedAt) ? incomingUpdatedAt : Date.now(),
           );
         }
+
+        if (enteredWaiting(prevConv, conv, false)) alertWaiting();
 
         if (knownConvIdsRef.current.has(conv.id)) {
           // If this UPDATE is for the conv the user is currently viewing,
@@ -363,7 +405,7 @@ export default function InboxPage() {
         }
       }
     },
-    [activeConversation, hydrateConversation]
+    [activeConversation, hydrateConversation, notifyWaiting]
   );
 
   // Subscribe to realtime. The `isConnected` flag below feeds the
@@ -525,6 +567,16 @@ export default function InboxPage() {
     [activeConversation?.id, router]
   );
 
+  // "Abrir" do aviso de espera: a conversa já carregada abre como um clique
+  // na lista; se ela não está na aba atual, abre pelo link direto (?c=).
+  useEffect(() => {
+    openConversationRef.current = (id: string) => {
+      const match = conversationsRef.current.find((c) => c.id === id);
+      if (match) handleSelectConversation(match);
+      else router.replace(`/inbox?c=${id}`, { scroll: false });
+    };
+  }, [handleSelectConversation, router]);
+
   // Mobile "back" — deselect the conversation so the list pane comes
   // back. Also clears the ?c= param so a refresh lands on the list
   // instead of re-opening the thread the user just backed out of.
@@ -638,10 +690,25 @@ export default function InboxPage() {
     [router]
   );
 
+  // PRD 23, item 7 — escolher a linha ao iniciar conversa. A nova conversa
+  // começa por template (Meta), então a lista são as linhas WhatsApp Meta que
+  // o operador enxerga (/api/lines, sem sessão WAHA). O servidor valida de
+  // novo (acesso e linha habilitada) no channel_id do /api/whatsapp/send.
+  const [newConvLines, setNewConvLines] = useState<{ id: string; name: string }[]>([]);
+  const [newConvLineId, setNewConvLineId] = useState<string | null>(null);
+
   const handleContactPicked = useCallback((contact: Contact) => {
     setNewConvContact(contact);
     setContactPickerOpen(false);
     setNewConvTemplatePickerOpen(true);
+    void apiFetch("/api/lines")
+      .then((r) => (r.ok ? r.json() : { lines: [] }))
+      .then((json: { lines?: { id: string; name: string; channel_type: string; waha_session: string | null }[] }) => {
+        const metaLines = (json.lines ?? []).filter((l) => l.channel_type === "whatsapp" && !l.waha_session);
+        setNewConvLines(metaLines.map((l) => ({ id: l.id, name: l.name })));
+        setNewConvLineId((prev) => (prev && metaLines.some((l) => l.id === prev) ? prev : metaLines[0]?.id ?? null));
+      })
+      .catch(() => setNewConvLines([]));
   }, []);
 
   const handleSendNewConversationTemplate = useCallback(
@@ -663,6 +730,9 @@ export default function InboxPage() {
               buttonParams: values.buttonParams,
             },
             template_params: values.body,
+            // Só manda a linha quando há escolha real (mais de uma): com uma
+            // só, o servidor usa a padrão como sempre.
+            ...(newConvLines.length > 1 && newConvLineId ? { channel_id: newConvLineId } : {}),
           }),
         });
         const payload = await res.json().catch(() => ({}));
@@ -680,7 +750,7 @@ export default function InboxPage() {
         setSendingNewConvTemplate(false);
       }
     },
-    [newConvContact, sendingNewConvTemplate]
+    [newConvContact, sendingNewConvTemplate, newConvLines.length, newConvLineId]
   );
 
   // On mobile (<lg) we show a SINGLE pane — either the list or the
@@ -709,13 +779,31 @@ export default function InboxPage() {
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
             thread can occupy the full width. Always visible on lg+. */}
+        {/* Lista recolhida (item 9): trilho fino com o botão de mostrar. */}
+        {listCollapsed && (
+          <div className="hidden w-11 shrink-0 animate-ddm-drawer-l flex-col items-center border-r border-border bg-card py-3 lg:flex">
+            <button
+              type="button"
+              onClick={handleToggleList}
+              aria-label="Mostrar lista de conversas"
+              title="Mostrar lista de conversas"
+              className="flex size-8 items-center justify-center rounded-md text-foreground-2 hover:bg-surface-hover hover:text-foreground"
+            >
+              <PanelLeftOpen className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+        )}
         <div
           className={cn(
             "flex h-full flex-1 lg:flex-none",
             hasActiveConv ? "hidden lg:flex" : "flex",
+            listCollapsed && "lg:hidden",
           )}
         >
           <ConversationList
+            onCollapse={handleToggleList}
+            alertsEnabled={waitingAlerts.enabled}
+            onToggleAlerts={() => void waitingAlerts.setEnabled(!waitingAlerts.enabled)}
             activeConversationId={activeConversation?.id ?? null}
             onSelect={handleSelectConversation}
             conversations={conversations}
@@ -779,6 +867,7 @@ export default function InboxPage() {
             <ContactSidebar
               contact={activeContact}
               conversation={activeConversation}
+              onClose={handleToggleContactPanel}
               onUpdateConversation={handleUpdateActiveConversation}
               onUpdateContact={(updatedContact) => {
                 setActiveContact(updatedContact);
@@ -807,6 +896,10 @@ export default function InboxPage() {
         open={newConvTemplatePickerOpen}
         onOpenChange={setNewConvTemplatePickerOpen}
         onSelect={handleSendNewConversationTemplate}
+        contact={newConvContact}
+        lineOptions={newConvLines}
+        lineId={newConvLineId}
+        onLineChange={setNewConvLineId}
       />
     </div>
   );

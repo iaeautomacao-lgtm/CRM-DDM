@@ -1,7 +1,8 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
-import { ConversationOriginCard } from "@/components/inbox/conversation-origin";
+import { ConversationOriginCard, useConversationOrigin } from "@/components/inbox/conversation-origin";
+import { maskCpf } from "@/lib/privacy/mask";
 
 import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import Link from "next/link";
@@ -21,11 +22,17 @@ import {
   RefreshCw,
   History,
   Loader2,
-  ChevronRight,
+  ChevronDown,
+  X,
+  Pencil,
+  IdCard,
+  PhoneOff,
+  Undo2,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { Contact, ContactNote, Tag, Conversation } from "@/types";
 import { format } from "date-fns";
 import { toast } from "sonner";
@@ -53,6 +60,8 @@ interface ContactSidebarProps {
   conversation: Conversation | null;
   onUpdateConversation?: (updates: Partial<Conversation>) => void;
   onUpdateContact?: (contact: Contact) => void;
+  /** Fecha o painel (botão X da barra "Detalhes"). */
+  onClose?: () => void;
 }
 
 export function ContactSidebar({
@@ -60,13 +69,27 @@ export function ContactSidebar({
   conversation,
   onUpdateConversation,
   onUpdateContact,
+  onClose,
 }: ContactSidebarProps) {
   const { accountId } = useAuth();
+  const origin = useConversationOrigin(conversation?.id ?? null);
   // Card "Fluxo" só para owner/admin (o agente não vê o fluxo da conversa).
   // O link para o editor depende de quem pode abrir /flows (ROUTE_ALLOWLIST).
   const { can, canOpen } = usePermissions();
   const canViewFlows = can("flows.view_runs");
   const canOpenFlowEditor = canOpen("/flows");
+  const canEditContact = can("contacts.edit");
+  const [isEditingCpf, setIsEditingCpf] = useState(false);
+  const [cpfDraft, setCpfDraft] = useState("");
+  const [savingCpf, setSavingCpf] = useState(false);
+  // Nomes do atendente e da equipe para o bloco "Atendimento" (RLS da conta).
+  const [assigneeName, setAssigneeName] = useState<string | null>(null);
+  // Etiquetas pela API (PRD 23, item 20): `available` = as que o operador
+  // pode pôr/tirar (a API já exclui as automáticas da conversa).
+  const [availableTags, setAvailableTags] = useState<Tag[] | null>(null);
+  const [tagQuery, setTagQuery] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
+  const [teamName, setTeamName] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [notes, setNotes] = useState<ContactNote[]>([]);
   const [tags, setTags] = useState<(Tag & { contact_tag_id: string })[]>([]);
@@ -86,28 +109,189 @@ export function ContactSidebar({
     }
   }, [contact]);
 
+  // Nome e CPF pela PATCH /api/contacts/[id] (PRD 23, item 4): contacts.edit,
+  // validação (CPF com dígito verificador) e auditoria no servidor. O CPF
+  // nunca volta em claro da API; a tela guarda o que o próprio operador digitou.
+  const patchContact = async (body: { name?: string; cpf?: string | null }): Promise<boolean> => {
+    if (!contact) return false;
+    const res = await apiFetch(`/api/contacts/${contact.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      toast.error(json.error ?? "Não foi possível salvar o contato");
+      return false;
+    }
+    return true;
+  };
+
   const handleSaveName = async () => {
     if (!contact || !editName.trim()) return;
-    try {
-      const supabase = createClient();
-      const { error } = await supabase
-        .from("contacts")
-        .update({ name: editName.trim() })
-        .eq("id", contact.id);
-
-      if (error) throw error;
-
-      onUpdateContact?.({
-        ...contact,
-        name: editName.trim(),
-      });
+    if (await patchContact({ name: editName.trim() })) {
+      onUpdateContact?.({ ...contact, name: editName.trim() });
       setIsEditingName(false);
-      toast.success("Nome do contato atualizado!");
-    } catch (err: any) {
-      console.error("Failed to update contact name:", err);
-      toast.error("Erro ao atualizar nome do contato");
+      toast.success("Nome do contato atualizado");
     }
   };
+
+  const handleSaveCpf = async () => {
+    if (!contact || savingCpf) return;
+    setSavingCpf(true);
+    try {
+      const digits = cpfDraft.replace(/\D/g, "");
+      if (await patchContact({ cpf: digits || null })) {
+        onUpdateContact?.({ ...contact, cpf: digits || null });
+        setIsEditingCpf(false);
+        toast.success(digits ? "CPF salvo" : "CPF removido");
+      }
+    } finally {
+      setSavingCpf(false);
+    }
+  };
+
+  // Telefones do contato e o status de cada um (contact_phones, RLS 087) —
+  // PRD 23, item 8: o operador marca "número errado" e a escada do
+  // disparador deixa de usar (migration 086).
+  const [phones, setPhones] = useState<{ ordem: number; phone: string; phone_normalized: string; status: string | null }[]>([]);
+  const [phoneBusy, setPhoneBusy] = useState<number | null>(null);
+  const phonesContactId = contact?.id ?? null;
+  useEffect(() => {
+    if (!phonesContactId) return;
+    let cancelled = false;
+    void createClient()
+      .from("contact_phones")
+      .select("ordem, phone, phone_normalized, status")
+      .eq("contact_id", phonesContactId)
+      .order("ordem")
+      .then(({ data }) => {
+        if (!cancelled) setPhones((data ?? []) as typeof phones);
+      });
+    return () => {
+      cancelled = true;
+      setPhones([]);
+    };
+  }, [phonesContactId]);
+  const principalRow = phones.find(
+    (p) => (contact?.phone_normalized && p.phone_normalized === contact.phone_normalized) || p.ordem === 1,
+  );
+  const principalInvalid = principalRow?.status === "invalido";
+  const altPhones = phones.filter((p) => p !== principalRow && p.ordem > 1);
+
+  const handleFlagPhone = async (ordem: number, invalid: boolean) => {
+    if (!contact || phoneBusy !== null) return;
+    setPhoneBusy(ordem);
+    try {
+      const res = await apiFetch(`/api/contacts/${contact.id}/phones/invalid`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ordem, status: invalid ? "invalido" : "ativo" }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(json.error ?? "Não foi possível atualizar o telefone");
+        return;
+      }
+      const status = invalid ? "invalido" : "ativo";
+      setPhones((prev) => {
+        const target = ordem === 1 ? principalRow : prev.find((p) => p.ordem === ordem);
+        if (target) return prev.map((p) => (p === target ? { ...p, status } : p));
+        // Principal ainda sem linha: a API criou com a ordem 1.
+        return [...prev, { ordem: 1, phone: contact.phone ?? "", phone_normalized: contact.phone_normalized ?? "", status }];
+      });
+      toast.success(invalid ? "Marcado como número errado" : "Número voltou a ser usado");
+    } finally {
+      setPhoneBusy(null);
+    }
+  };
+
+  // Etiquetas disponíveis do contato (GET /api/contacts/[id]/tags), só para
+  // quem pode editar — é a lista do seletor e diz quais chips têm "×".
+  const tagsContactId = canEditContact ? contact?.id ?? null : null;
+  useEffect(() => {
+    if (!tagsContactId) return;
+    let cancelled = false;
+    apiFetch(`/api/contacts/${tagsContactId}/tags`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json: { available?: Tag[] } | null) => {
+        if (!cancelled) setAvailableTags(json?.available ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableTags([]);
+      });
+    return () => {
+      cancelled = true;
+      setAvailableTags(null);
+    };
+  }, [tagsContactId]);
+
+  const editableTagIds = new Set((availableTags ?? []).map((t) => t.id));
+  const appliedTagIds = new Set(tags.map((t) => t.id));
+  const tagNeedle = tagQuery.trim().toLowerCase();
+  const addableTags = (availableTags ?? []).filter(
+    (t) => !appliedTagIds.has(t.id) && (!tagNeedle || t.name.toLowerCase().includes(tagNeedle)),
+  );
+
+  const handleAddTag = async (tag: Tag) => {
+    if (!contact || tagBusy) return;
+    setTagBusy(true);
+    try {
+      const res = await apiFetch(`/api/contacts/${contact.id}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag_id: tag.id }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(json.error ?? "Não foi possível adicionar a etiqueta");
+        return;
+      }
+      setTags((prev) => (prev.some((t) => t.id === tag.id) ? prev : [...prev, { ...tag, contact_tag_id: tag.id }]));
+      setTagQuery("");
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  const handleRemoveTag = async (tag: Tag) => {
+    if (!contact || tagBusy) return;
+    setTagBusy(true);
+    try {
+      const res = await apiFetch(`/api/contacts/${contact.id}/tags/${tag.id}`, { method: "DELETE" });
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(json.error ?? "Não foi possível remover a etiqueta");
+        return;
+      }
+      setTags((prev) => prev.filter((t) => t.id !== tag.id));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    const agentId = conversation?.assigned_agent_id ?? null;
+    const teamId = conversation?.team_id ?? null;
+    let cancelled = false;
+    const supabase = createClient();
+    void Promise.all([
+      agentId
+        ? supabase.from("profiles").select("full_name, email").eq("user_id", agentId).limit(1)
+        : Promise.resolve({ data: [] as { full_name: string | null; email: string | null }[] }),
+      teamId
+        ? supabase.from("teams").select("name").eq("id", teamId).limit(1)
+        : Promise.resolve({ data: [] as { name: string }[] }),
+    ]).then(([agent, team]) => {
+      if (cancelled) return;
+      const a = (agent.data ?? [])[0] as { full_name: string | null; email: string | null } | undefined;
+      setAssigneeName(a ? a.full_name || a.email || "Atendente" : null);
+      setTeamName(((team.data ?? [])[0] as { name: string } | undefined)?.name ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation?.assigned_agent_id, conversation?.team_id]);
 
   // Conversa aberta agora — a análise leva alguns segundos e o atendente
   // pode trocar de conversa no meio: o resultado só vale para a conversa
@@ -308,6 +492,20 @@ export function ContactSidebar({
 
   return (
     <div className="flex h-full w-full flex-col bg-card">
+      {/* Barra do painel (redesenho DDM): rótulo + fechar. */}
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border pl-4 pr-2.5">
+        <span className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">Detalhes</span>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar detalhes"
+            className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+          >
+            <X className="size-3.5" aria-hidden="true" />
+          </button>
+        )}
+      </div>
       {/* `min-h-0` is load-bearing: a flex child defaults to
           min-height:auto, so without it this ScrollArea grows to fit
           all sections (Sentimento/Etiquetas/Notas) instead of
@@ -316,19 +514,20 @@ export function ContactSidebar({
           with no scrollbar, hiding whatever's below the fold. Same
           fix as conversation-list.tsx's ScrollArea. */}
       <ScrollArea className="min-h-0 flex-1">
-        <div className="p-3">
-          <div className="flex items-start gap-3 pb-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted/60 text-sm font-semibold text-foreground">
+        <div className="flex flex-col gap-3 border-b border-border p-4">
+          <div className="flex items-center gap-3">
+            <span className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-sm font-semibold text-foreground-2">
               {contact.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={contact.phone && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
                   alt={displayName}
-                  className="h-11 w-11 rounded-full object-cover"
+                  className="size-11 object-cover"
                 />
               ) : (
                 initials
               )}
-            </div>
+            </span>
 
             <div className="min-w-0 flex-1">
               {isEditingName ? (
@@ -346,83 +545,180 @@ export function ContactSidebar({
                         setEditName(displayName);
                       }
                     }}
-                    className="min-w-0 flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="h-8 min-w-0 flex-1 rounded-md border border-border-strong bg-card px-2 text-[13px] text-foreground outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
                     autoFocus
                   />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-xs text-primary"
-                    onClick={handleSaveName}
-                  >
+                  <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-primary-text" onClick={handleSaveName}>
                     Salvar
                   </Button>
                 </div>
-              ) : (
+              ) : canEditContact ? (
                 <button
                   type="button"
-                  className="group flex max-w-full items-center gap-1.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                  className="group flex max-w-full items-center gap-1.5 rounded-sm text-left"
                   onClick={() => setIsEditingName(true)}
                   title="Clique para editar o nome"
                   aria-label={`Editar nome: ${displayName}`}
                 >
-                  <span className="truncate text-sm font-semibold text-foreground group-hover:text-primary">
+                  <span className="truncate font-heading text-[15px] font-semibold text-foreground group-hover:text-primary-text">
                     {displayName}
                   </span>
-                  <svg
-                    className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
-                    fill="none"
+                  <Pencil
+                    className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
                     aria-hidden="true"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                  </svg>
+                  />
                 </button>
+              ) : (
+                <p className="truncate font-heading text-[15px] font-semibold text-foreground">{displayName}</p>
               )}
-              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                {contact.company || "Contato"}
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted-foreground">
+                {origin?.client ? (
+                  <>
+                    <span className="size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: origin.client.color }} aria-hidden="true" />
+                    <span className="truncate">{origin.client.name}</span>
+                  </>
+                ) : (
+                  <span className="truncate">{contact.company || "Contato"}</span>
+                )}
               </p>
             </div>
           </div>
 
-          <div className="border-t border-border/70 py-1.5">
-            <button
-              onClick={handleCopyPhone}
-              className="flex h-8 w-full items-center gap-2 px-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <Phone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate text-left">{contact.phone ?? "Sem telefone"}</span>
-              {contact.phone && (
-                copied ? (
-                  <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                )
+          <div className="flex flex-col gap-0.5">
+            <div className="-mx-2 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleCopyPhone}
+                disabled={!contact.phone}
+                title={contact.phone ? "Copiar telefone" : undefined}
+                className="flex h-8 min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-left text-[13px] text-foreground hover:bg-surface-hover disabled:hover:bg-transparent"
+              >
+                <Phone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className={cn("min-w-0 flex-1 truncate tabular-nums", principalInvalid && "text-muted-foreground line-through")}>
+                  {contact.phone ?? "Sem telefone"}
+                </span>
+                {contact.phone && (
+                  <span className={cn("inline-flex items-center gap-1 text-[11.5px] font-semibold", copied ? "text-success" : "text-muted-foreground")}>
+                    {copied ? <Check className="size-3.5" aria-hidden="true" /> : <Copy className="size-3.5" aria-hidden="true" />}
+                    {copied ? "Copiado" : "Copiar"}
+                  </span>
+                )}
+              </button>
+              {contact.phone && canEditContact && (
+                <WrongNumberButton invalid={principalInvalid} busy={phoneBusy === 1} onToggle={() => void handleFlagPhone(1, !principalInvalid)} />
               )}
-            </button>
+            </div>
+            {principalInvalid && (
+              <p className="-mt-0.5 pl-6 text-[11.5px] font-medium text-destructive">Marcado como número errado</p>
+            )}
+            {altPhones.map((p) => {
+              const invalid = p.status === "invalido";
+              return (
+                <div key={p.ordem} className="-mx-2 flex items-center gap-1">
+                  <span className="flex h-8 min-w-0 flex-1 items-center gap-2.5 px-2 text-[13px] text-foreground-2">
+                    <Phone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className={cn("min-w-0 flex-1 truncate tabular-nums", invalid && "text-muted-foreground line-through")}>{p.phone}</span>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">{invalid ? "número errado" : `alternativo ${p.ordem - 1}`}</span>
+                  </span>
+                  {canEditContact && (
+                    <WrongNumberButton invalid={invalid} busy={phoneBusy === p.ordem} onToggle={() => void handleFlagPhone(p.ordem, !invalid)} />
+                  )}
+                </div>
+              );
+            })}
 
             {contact.email && (
-              <div className="flex h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
-                <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <div className="flex h-8 min-w-0 items-center gap-2.5 text-[13px] text-foreground-2">
+                <Mail className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="truncate">{contact.email}</span>
+              </div>
+            )}
+
+            {/* CPF (PRD 23, item 4): sempre mascarado na tela; edição pela
+                PATCH /api/contacts/[id] (contacts.edit, valida dígito e audita). */}
+            {isEditingCpf ? (
+              <div className="flex items-center gap-1.5 py-0.5">
+                <IdCard className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  aria-label="CPF do contato"
+                  placeholder="000.000.000-00"
+                  value={cpfDraft}
+                  onChange={(e) => setCpfDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleSaveCpf();
+                    else if (e.key === "Escape") setIsEditingCpf(false);
+                  }}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border-strong bg-card px-2 text-[13px] tabular-nums text-foreground outline-none focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
+                  autoFocus
+                />
+                <Button size="sm" variant="ghost" className="h-8 px-2 text-xs text-primary-text" onClick={() => void handleSaveCpf()} disabled={savingCpf}>
+                  {savingCpf ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : "Salvar"}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex h-8 items-center gap-2.5 text-[13px]">
+                <IdCard className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className={cn("min-w-0 flex-1 truncate tabular-nums", contact.cpf ? "text-foreground" : "text-muted-foreground")}>
+                  {contact.cpf ? maskCpf(contact.cpf) : "Sem CPF"}
+                  <span className="sr-only"> (CPF)</span>
+                </span>
+                {canEditContact && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCpfDraft("");
+                      setIsEditingCpf(true);
+                    }}
+                    className="rounded px-1 text-[11.5px] font-semibold text-primary-text hover:underline"
+                  >
+                    {contact.cpf ? "Alterar" : "Adicionar"}
+                  </button>
+                )}
               </div>
             )}
           </div>
 
-          <div className="mt-3">
+          <div className="mt-1">
             <ContactChannelsCard
               key={contact.id}
               contact={contact}
-              canEdit={can("contacts.edit")}
+              canEdit={canEditContact}
               onLinked={(result, merged) => {
                 if (merged) onUpdateConversation?.({ contact_id: result.id, contact: result });
                 onUpdateContact?.(result);
               }}
             />
           </div>
+        </div>
 
+        {conversation && (
+          <div className="flex flex-col gap-2.5 border-b border-border px-4 py-3.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Atendimento</p>
+            <dl className="grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-2 text-[12.5px]">
+              <dt className="text-muted-foreground">Atendente</dt>
+              <dd className="truncate font-medium text-foreground">{assigneeName ?? "Sem atendente"}</dd>
+              {teamName && (
+                <>
+                  <dt className="text-muted-foreground">Equipe</dt>
+                  <dd className="truncate text-foreground">{teamName}</dd>
+                </>
+              )}
+              {origin?.channel && (
+                <>
+                  <dt className="text-muted-foreground">Linha</dt>
+                  <dd className="truncate text-foreground">{origin.line ? `${origin.channel} · ${origin.line}` : origin.channel}</dd>
+                </>
+              )}
+              <dt className="text-muted-foreground">Aberta em</dt>
+              <dd className="tabular-nums text-foreground">{format(new Date(conversation.created_at), "dd/MM/yyyy HH:mm")}</dd>
+            </dl>
+          </div>
+        )}
+
+        <div>
           {conversation && (
             <SidebarSection
               id="sentimento"
@@ -545,19 +841,81 @@ export function ContactSidebar({
             sections={sections}
             onToggle={toggleSection}
           >
-            <div className="flex flex-wrap gap-1">
-              {tags.length === 0 ? (
-                <p className="px-1 text-xs text-muted-foreground">Sem etiquetas</p>
-              ) : (
-                tags.map((tag) => (
+            {/* PRD 23, item 20: etiquetas pela API (contacts.edit; as automáticas
+                da conversa aparecem, mas não saem — a API devolve 409). */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {tags.length === 0 && !canEditContact && (
+                <p className="text-xs text-muted-foreground">Sem etiquetas</p>
+              )}
+              {tags.map((tag) => {
+                const removable = canEditContact && editableTagIds.has(tag.id);
+                return (
                   <span
                     key={tag.contact_tag_id}
-                    className="inline-flex items-center gap-1 rounded-full border border-border px-2 text-xs text-foreground"
+                    className="inline-flex h-[22px] animate-ddm-pop items-center gap-1.5 rounded-full border border-border pl-[9px] pr-[9px] text-xs text-foreground"
                   >
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
+                    <span className="size-[7px] rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
                     {tag.name}
+                    {removable && (
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoveTag(tag)}
+                        disabled={tagBusy}
+                        aria-label={`Remover etiqueta ${tag.name}`}
+                        className="-mr-1 rounded-full p-0.5 text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+                      >
+                        <X className="size-3" aria-hidden="true" />
+                      </button>
+                    )}
                   </span>
-                ))
+                );
+              })}
+              {canEditContact && (
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        className="inline-flex h-6 items-center gap-1 rounded-full border border-dashed border-border-strong px-[9px] text-xs text-foreground-2 hover:border-muted-foreground hover:text-foreground"
+                      />
+                    }
+                  >
+                    <Plus className="size-3" aria-hidden="true" />
+                    Etiqueta
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-64 gap-2 p-2">
+                    <input
+                      type="search"
+                      value={tagQuery}
+                      onChange={(e) => setTagQuery(e.target.value)}
+                      placeholder="Buscar etiqueta"
+                      aria-label="Buscar etiqueta"
+                      className="h-8 w-full rounded-md border border-border bg-card px-2 text-[13px] outline-none focus:border-primary"
+                    />
+                    <div className="max-h-56 overflow-y-auto" role="listbox" aria-label="Etiquetas disponíveis">
+                      {addableTags.length === 0 ? (
+                        <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                          {availableTags === null ? "Carregando…" : "Nenhuma etiqueta para adicionar"}
+                        </p>
+                      ) : (
+                        addableTags.map((tag) => (
+                          <button
+                            key={tag.id}
+                            type="button"
+                            role="option"
+                            aria-selected={false}
+                            disabled={tagBusy}
+                            onClick={() => void handleAddTag(tag)}
+                            className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-foreground hover:bg-surface-hover"
+                          >
+                            <span className="size-[7px] shrink-0 rounded-full" style={{ backgroundColor: tag.color }} aria-hidden="true" />
+                            <span className="truncate">{tag.name}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               )}
             </div>
           </SidebarSection>
@@ -737,47 +1095,56 @@ function SidebarSection({
   const open = sections[id];
   const contentId = `sidebar-section-${id}`;
   return (
-    <section
-      className={cn(
-        "py-1",
-        emphasis
-          ? "my-2 rounded-lg border border-primary/20 bg-primary/[0.04] px-2"
-          : "border-t border-border/70",
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
+    <section className={cn("border-b border-border", emphasis && "bg-primary-soft/40")}>
+      <div className="flex items-center justify-between gap-2 pr-3">
         <button
           type="button"
           onClick={() => onToggle(id)}
           aria-expanded={open}
           aria-controls={contentId}
-          className={cn(
-            "flex h-9 min-w-0 flex-1 items-center gap-2 px-1 text-left text-xs font-medium transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary",
-            emphasis ? "text-foreground" : "text-foreground",
-          )}
+          data-no-ripple
+          className="flex h-11 min-w-0 flex-1 items-center gap-2 pl-4 text-left hover:bg-surface-hover"
         >
-          <ChevronRight
-            aria-hidden="true"
-            className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
-          />
           {Icon && (
             <Icon
-              className={cn("h-4 w-4 shrink-0", emphasis ? "text-primary" : "text-muted-foreground")}
+              className={cn("size-3.5 shrink-0", emphasis ? "text-primary-text" : "text-muted-foreground")}
               aria-hidden="true"
             />
           )}
-          <span className="truncate">{title}</span>
+          <span className="flex-1 truncate text-[13px] font-semibold text-foreground">{title}</span>
           {count !== undefined && count > 0 && (
-            <span className="text-[10px] tabular-nums text-muted-foreground/75">{count}</span>
+            <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
           )}
+          <ChevronDown
+            aria-hidden="true"
+            className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ease-ddm", !open && "-rotate-90")}
+          />
         </button>
         {action}
       </div>
       {open && (
-        <div id={contentId} className="px-1 pb-3 pt-1">
+        <div id={contentId} className="animate-ddm-fade px-4 pb-3.5">
           {children}
         </div>
       )}
     </section>
+  );
+}
+/** Marca/desmarca "número errado" (PRD 23, item 8). */
+function WrongNumberButton({ invalid, busy, onToggle }: { invalid: boolean; busy: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={busy}
+      title={invalid ? "Desfazer: o número volta a ser usado" : "Marcar como número errado (o disparador deixa de usar)"}
+      aria-label={invalid ? "Desfazer número errado" : "Marcar como número errado"}
+      className={cn(
+        "flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-surface-hover",
+        invalid ? "text-destructive" : "text-muted-foreground hover:text-foreground",
+      )}
+    >
+      {busy ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : invalid ? <Undo2 className="size-3.5" aria-hidden="true" /> : <PhoneOff className="size-3.5" aria-hidden="true" />}
+    </button>
   );
 }
