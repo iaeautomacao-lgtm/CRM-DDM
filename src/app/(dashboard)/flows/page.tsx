@@ -98,6 +98,9 @@ const TEMPLATE_ICONS = {
   UserPlus,
 } as const;
 
+/** Fluxos por página; "Carregar mais" busca a próxima. */
+const FLOWS_PAGE = 100;
+
 export default function FlowsPage() {
   const router = useRouter();
   const canCreate = usePermission("flows.edit");
@@ -116,20 +119,27 @@ export default function FlowsPage() {
   const [deleteTarget, setDeleteTarget] = useState<FlowRow | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Paginação: a API devolve `has_more` quando pedimos ?limit; sem ela (versão antiga) a lista vem inteira.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const [flowsRes, tmplRes] = await Promise.all([
-          apiFetch("/api/flows"),
+          apiFetch(`/api/flows?limit=${FLOWS_PAGE}&offset=0`),
           apiFetch("/api/flows/templates"),
         ]);
         if (!flowsRes.ok) {
           throw new Error(`Failed to load flows: ${flowsRes.status}`);
         }
-        const flowsJson = (await flowsRes.json()) as { flows: FlowRow[] };
-        if (!cancelled) setFlows(flowsJson.flows ?? []);
+        const flowsJson = (await flowsRes.json()) as { flows: FlowRow[]; has_more?: boolean };
+        if (!cancelled) {
+          setFlows(flowsJson.flows ?? []);
+          setHasMore(flowsJson.has_more === true);
+        }
         // Templates endpoint is forward-looking — if it 404s on an
         // older deployment, gracefully fall through.
         if (tmplRes.ok) {
@@ -151,6 +161,26 @@ export default function FlowsPage() {
       cancelled = true;
     };
   }, [reloadKey]);
+
+  async function loadMoreFlows() {
+    setLoadingMore(true);
+    setMoreError(false);
+    try {
+      const res = await apiFetch(`/api/flows?limit=${FLOWS_PAGE}&offset=${flows.length}`);
+      if (!res.ok) throw new Error(`Falha ao carregar mais fluxos: ${res.status}`);
+      const json = (await res.json()) as { flows: FlowRow[]; has_more?: boolean };
+      setFlows((prev) => {
+        const known = new Set(prev.map((f) => f.id));
+        return [...prev, ...(json.flows ?? []).filter((f) => !known.has(f.id))];
+      });
+      setHasMore(json.has_more === true);
+    } catch (err) {
+      console.error(err);
+      setMoreError(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -351,7 +381,7 @@ export default function FlowsPage() {
         <KpiStrip
           ariaLabel="Resumo dos fluxos"
           items={[
-            { label: "Fluxos", value: <CountUp value={counts.all} /> },
+            { label: "Fluxos", value: <CountUp value={counts.all} />, note: hasMore ? "há mais" : undefined, info: hasMore ? "Há mais fluxos além dos carregados: use Carregar mais, abaixo da lista." : undefined },
             { label: "Ativos", value: <CountUp value={counts.active} className="text-success" />, note: `de ${counts.all}` },
             { label: "Rascunhos", value: <CountUp value={counts.draft} /> },
             {
@@ -371,14 +401,14 @@ export default function FlowsPage() {
             <GatedButton
               variant="outline"
               canAct={canCreate}
-              gateReason="import flows"
+              gateReason="importar fluxos"
               disabled={importing}
               onClick={() => importInputRef.current?.click()}
             >
               {importing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
               Importar fluxo
             </GatedButton>
-            <GatedButton canAct={canCreate} gateReason="create flows" onClick={() => setCreateOpen(true)}>
+            <GatedButton canAct={canCreate} gateReason="criar fluxos" onClick={() => setCreateOpen(true)}>
               <Plus className="size-3.5" />
               Novo fluxo
             </GatedButton>
@@ -488,6 +518,19 @@ export default function FlowsPage() {
             </DenseTable>
           )}
         </TableCard>
+      )}
+
+      {hasMore && !loading && !loadError && (
+        <div className="flex flex-col items-center gap-2">
+          {moreError && (
+            <p role="alert" className="text-xs text-danger">
+              Não foi possível carregar mais fluxos. Tente de novo.
+            </p>
+          )}
+          <Button type="button" variant="outline" disabled={loadingMore} onClick={() => void loadMoreFlows()}>
+            {loadingMore ? "Carregando…" : "Carregar mais"}
+          </Button>
+        </div>
       )}
 
       {/* Gaveta de detalhe (primitivo DetailDrawer). */}
@@ -690,7 +733,7 @@ function EmptyState({
       </p>
       <GatedButton
         canAct={canCreate}
-        gateReason="create flows"
+        gateReason="criar fluxos"
         onClick={onCreate}
         className="mt-5"
       >

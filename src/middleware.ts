@@ -202,7 +202,7 @@ export function middleware(request: NextRequest) {
     !pathname.includes('/webhook')
   ) {
     return finalizeAuthFx(
-      NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     )
   }
 
@@ -214,7 +214,7 @@ export function middleware(request: NextRequest) {
     !pathname.includes('/cron')
   ) {
     return finalizeAuthFx(
-      NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     )
   }
 

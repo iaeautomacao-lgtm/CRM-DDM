@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     } = await supabase.auth.getUser()
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
     const { data: profile } = await supabase
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     const accountId = profile?.account_id as string | undefined
     if (!accountId) {
       return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
+        { error: 'Seu perfil não está vinculado a uma conta.' },
         { status: 403 },
       )
     }
@@ -42,14 +42,14 @@ export async function POST(request: Request) {
     // sessão + service role. Os demais papéis seguem como antes.
     const role = (profile as { account_role?: string } | null)?.account_role
     if (!role || !isAccountRole(role) || !can({ role }, 'inbox.reply')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
     }
 
     const body = await request.json()
     const conversationId = body?.conversation_id as string | undefined
     const requestedReason = body?.reason as string | undefined
     if (!conversationId) {
-      return NextResponse.json({ error: 'conversation_id is required' }, { status: 400 })
+      return NextResponse.json({ error: 'conversation_id é obrigatório' }, { status: 400 })
     }
 
     // A conversa precisa ser VISÍVEL para quem pede: leitura pelo cliente de
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
       .eq('account_id', accountId)
       .maybeSingle()
     if (!visible) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
     }
 
     // Defense in depth — scoped by account_id, same rationale as every
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       .eq('account_id', accountId)
       .maybeSingle()
     if (!conversation) {
-      return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
     }
 
     // Motivo real: antes, sem reason, gravava "conversation_closed" mesmo
@@ -91,6 +91,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('[flows/end-run] failed:', err)
-    return NextResponse.json({ error: 'Internal error' }, { status: 500 })
+    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
   }
 }

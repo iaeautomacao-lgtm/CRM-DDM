@@ -1,6 +1,18 @@
-import type { ReactNode } from 'react';
+'use client';
+
+import { createContext, useContext, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
+
+/**
+ * Nível do título dos painéis. O cabeçalho do app já tem o h1 (título da rota); a página usa h2 para o próprio título
+ * e, quando ela mostra painéis abaixo desse h2 (Configurações, Meu perfil), os painéis devem ser h3. Padrão: h2.
+ */
+const PanelHeadingLevelContext = createContext<2 | 3>(2);
+
+export function PanelHeadingLevel({ level, children }: { level: 2 | 3; children: ReactNode }) {
+  return <PanelHeadingLevelContext.Provider value={level}>{children}</PanelHeadingLevelContext.Provider>;
+}
 
 /**
  * Section header shown at the top of every settings panel — a title,
@@ -18,6 +30,7 @@ export function SettingsPanelHead({
   action?: ReactNode;
   className?: string;
 }) {
+  const Heading = useContext(PanelHeadingLevelContext) === 3 ? 'h3' : 'h2';
   return (
     <div
       className={cn(
@@ -26,9 +39,9 @@ export function SettingsPanelHead({
       )}
     >
       <div className="min-w-0">
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">
+        <Heading className="text-lg font-semibold tracking-tight text-foreground">
           {title}
-        </h2>
+        </Heading>
         {description ? (
           <p className="mt-1 max-w-[62ch] text-sm text-muted-foreground">
             {description}
