@@ -18,12 +18,14 @@ import {
   X,
   Bell,
   BellOff,
+  History,
   PanelLeftClose,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { CONVERSATION_STATUS_LABELS_PLURAL } from "./status-labels";
+import { MyHandledDrawer } from "./my-handled-drawer";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -205,6 +207,7 @@ export function ConversationList({
   const isAgent = accountRole === "agent";
   const canReply = usePermission("inbox.reply");
   const router = useRouter();
+  const [myHandledOpen, setMyHandledOpen] = useState(false);
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const filters = useMemo(() => parseInboxFilters(new URLSearchParams(searchParams.toString())), [searchParams]);
@@ -565,6 +568,16 @@ export function ConversationList({
               {alertsEnabled ? <Bell className="size-4" aria-hidden="true" /> : <BellOff className="size-4" aria-hidden="true" />}
             </button>
           )}
+          {/* Item 17 do PRD 23: o que eu atendi e transferi (só consulta). */}
+          <button
+            type="button"
+            onClick={() => setMyHandledOpen(true)}
+            aria-label="Meus atendidos: conversas que você transferiu"
+            title="Meus atendidos (conversas que você transferiu)"
+            className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+          >
+            <History className="size-4" aria-hidden="true" />
+          </button>
           {onCollapse && (
             <button
               type="button"
@@ -821,6 +834,7 @@ export function ConversationList({
           </div>
         )}
       </ScrollArea>
+      <MyHandledDrawer open={myHandledOpen} onOpenChange={setMyHandledOpen} />
     </section>
   );
 }
