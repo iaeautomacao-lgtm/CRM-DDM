@@ -777,7 +777,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
   const submitLabel = form.startMode === "agendar" ? "Agendar campanha" : editing ? "Salvar alterações" : "Salvar rascunho";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex animate-ddm-fade items-stretch justify-center bg-scrim p-0 sm:items-center sm:p-4">
       <div
         ref={a11y.ref}
         tabIndex={-1}
@@ -785,56 +785,73 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
         role="dialog"
         aria-modal="true"
         aria-labelledby="nc-title"
-        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl outline-none sm:max-h-[90vh]"
+        className="flex h-full w-full max-w-5xl animate-ddm-pop flex-col overflow-hidden bg-background shadow-overlay outline-none sm:h-auto sm:max-h-[92vh] sm:rounded-[10px] sm:border sm:border-border"
       >
-        <header className="border-b border-border bg-muted/20 px-4 py-3 sm:px-6 sm:py-4">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 id="nc-title" className="font-bold text-foreground">
+        {/* Barra de passos (protótipo): número em círculo, separador e o passo atual em destaque. */}
+        <header className="shrink-0 border-b border-border bg-card px-4 py-3 sm:px-6">
+          <div className="flex items-center gap-3">
+            <h3 id="nc-title" className="m-0 shrink-0 font-sans text-sm font-semibold text-foreground">
               {editing ? `Editar campanha${editing.status === "agendado" ? " agendada" : ""}` : "Nova campanha"}
             </h3>
-            <Button size="icon" variant="ghost" onClick={onClose} aria-label="Fechar" className="h-9 w-9 shrink-0 text-muted-foreground">
-              <X className="h-5 w-5" aria-hidden="true" />
+            <span aria-hidden="true" className="hidden h-5 w-px bg-border sm:block" />
+            <nav aria-label="Passos do assistente" className="min-w-0 flex-1">
+              <ol className="m-0 flex list-none items-center gap-1.5 overflow-x-auto p-0 [scrollbar-width:none]">
+                {WIZARD_STEPS.map(({ step: s, label }, i) => {
+                  const current = step === s;
+                  const done = s < step;
+                  return (
+                    <li key={s} className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => goTo(s)}
+                        aria-current={current ? "step" : undefined}
+                        className={cn(
+                          "flex h-8 items-center gap-2 rounded-[6px] pl-1.5 pr-2.5 transition-colors",
+                          current ? "bg-selected" : "hover:bg-surface-hover",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "flex size-[22px] items-center justify-center rounded-full text-[11.5px] font-bold tabular-nums",
+                            current
+                              ? "bg-primary text-primary-foreground"
+                              : done
+                                ? "bg-success-soft text-success"
+                                : s <= maxVisited
+                                  ? "bg-surface-3 text-foreground"
+                                  : "bg-surface-3 text-muted-foreground",
+                          )}
+                        >
+                          {done ? <CheckCircle2 className="size-3.5" aria-hidden="true" /> : s}
+                        </span>
+                        <span
+                          className={cn(
+                            "whitespace-nowrap text-[13px]",
+                            current ? "font-semibold text-foreground" : "font-medium text-foreground-2",
+                          )}
+                        >
+                          {label}
+                        </span>
+                      </button>
+                      {i < WIZARD_STEPS.length - 1 && <span aria-hidden="true" className="h-px w-5 bg-border-strong" />}
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
+            <Button size="icon" variant="ghost" onClick={onClose} aria-label="Fechar" className="shrink-0 text-muted-foreground">
+              <X className="size-4" aria-hidden="true" />
             </Button>
           </div>
-          <nav aria-label="Passos do assistente" className="flex flex-wrap gap-2">
-            {WIZARD_STEPS.map(({ step: s, label }) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => goTo(s)}
-                aria-current={step === s ? "step" : undefined}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                  step === s
-                    ? "bg-primary text-primary-foreground"
-                    : s <= maxVisited
-                      ? "bg-muted text-foreground hover:bg-muted/70"
-                      : "bg-muted text-muted-foreground hover:text-foreground"
-                )}
-              >
-                <span
-                  className={cn(
-                    "flex h-4 w-4 items-center justify-center rounded-full text-xs font-bold",
-                    step === s ? "bg-primary-foreground/20" : "bg-muted-foreground/20"
-                  )}
-                >
-                  {s < step ? <CheckCircle2 className="h-3 w-3" aria-hidden="true" /> : s}
-                </span>
-                {label}
-              </button>
-            ))}
-          </nav>
         </header>
 
         {pendingDraft && !editing && (
-          <div className="mx-4 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-700 dark:text-amber-400 sm:mx-6">
+          <div className="mx-4 mt-4 flex shrink-0 animate-ddm-fade flex-wrap items-center justify-between gap-3 rounded-lg bg-warning-soft px-3.5 py-2.5 text-[12.5px] text-foreground sm:mx-6">
             <span>Rascunho anterior encontrado (o arquivo da base precisa ser escolhido de novo).</span>
             <div className="flex shrink-0 gap-2">
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
-                className="h-9 text-xs"
                 onClick={() => {
                   const key = draftKey(accountId);
                   if (key) localStorage.removeItem(key);
@@ -845,8 +862,6 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
               </Button>
               <Button
                 type="button"
-                size="sm"
-                className="h-9 text-xs"
                 onClick={() => {
                   // Datas salvas podem ter ficado no passado: a validação avisa.
                   setForm({ ...emptyWizardForm(now), ...pendingDraft });
@@ -861,11 +876,11 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
         )}
 
         {currentErrors.length > 0 && (
-          <div role="alert" className="mx-4 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-600 dark:text-red-400 sm:mx-6">
-            <p className="mb-1 flex items-center gap-1.5 font-medium">
-              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> Corrija antes de avançar:
+          <div role="alert" className="mx-4 mt-4 shrink-0 animate-ddm-fade rounded-lg bg-danger-soft px-3.5 py-2.5 text-[12.5px] text-foreground sm:mx-6">
+            <p className="m-0 mb-1 flex items-center gap-1.5 font-semibold text-danger">
+              <AlertTriangle className="size-3.5" aria-hidden="true" /> Corrija antes de avançar:
             </p>
-            <ul className="list-disc space-y-0.5 pl-5">
+            <ul className="m-0 list-disc space-y-0.5 pl-5">
               {currentErrors.map((err, i) => (
                 <li key={i}>{err}</li>
               ))}
@@ -873,7 +888,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
           </div>
         )}
 
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div key={step} className="min-h-0 flex-1 animate-ddm-fade overflow-y-auto px-4 py-5 sm:px-6">
           {step === 1 && (
             <StepOrigem
               form={form}
@@ -942,7 +957,11 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
           )}
         </div>
 
-        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-muted/20 px-4 py-3 sm:px-6 sm:py-4">
+        <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-4 py-3 sm:px-6">
+          <span className="text-xs tabular-nums text-muted-foreground">
+            Passo {step} de {WIZARD_STEPS.length}
+          </span>
+          <span className="flex-1" />
           <Button type="button" variant="outline" onClick={() => (step === 1 ? onClose() : goTo((step - 1) as WizardStep))}>
             {step === 1 ? "Cancelar" : "Voltar"}
           </Button>
@@ -955,9 +974,8 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
               type="button"
               onClick={() => void submit()}
               disabled={submitting || reviewErrors.length > 0 || serverCheck.state === "error"}
-              className="gap-1.5"
             >
-              {submitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+              {submitting && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
               {submitting
                 ? importProgress
                   ? `Importando contatos… ${importProgress.done.toLocaleString("pt-BR")} de ${importProgress.total.toLocaleString("pt-BR")}`

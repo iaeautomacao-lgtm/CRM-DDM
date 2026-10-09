@@ -28,7 +28,9 @@ export function DisparadorTabs() {
   return (
     <nav
       aria-label="Seções do Disparador"
-      className="flex h-11 shrink-0 items-stretch gap-1 overflow-x-auto border-b border-border bg-background px-3 lg:px-6"
+      // Faixa de largura total colada no topo (protótipo DDM): anula o
+      // padding do <main> do shell e fica fixa ao rolar.
+      className="sticky -top-4 z-20 -mx-4 -mt-4 mb-4 flex h-11 shrink-0 items-stretch gap-1 overflow-x-auto border-b border-border bg-card px-4 [scrollbar-width:none] sm:-top-6 sm:-mx-6 sm:-mt-6 sm:mb-6"
     >
       {DISPARADOR_TABS.map(({ href, label, icon: Icon }) => {
         const active = isTabActive(pathname, href);
@@ -38,13 +40,13 @@ export function DisparadorTabs() {
             href={href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 text-sm font-medium transition-colors",
+              "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border-b-2 px-2.5 text-[13px] transition-colors",
               active
-                ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "border-primary font-semibold text-foreground"
+                : "border-transparent font-medium text-foreground-2 hover:text-foreground",
             )}
           >
-            <Icon className="h-4 w-4" aria-hidden="true" />
+            <Icon className={cn("size-3.5", active ? "text-primary-text" : "text-muted-foreground")} aria-hidden="true" />
             {label}
           </Link>
         );

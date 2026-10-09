@@ -1,25 +1,33 @@
 "use client";
 
+// /disparador/blacklist — visual do redesenho DDM: grupos de origem como faixa clicável, refinamento
+// segmentado, tabela densa e diálogos do design system. Regras de classificação e de bloqueio inalteradas.
+
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getDisparadorScope } from "@/lib/disparador/scope";
-import { 
-  ShieldAlert, 
-  Plus, 
-  Trash2, 
-  X,
-  Search,
-  CheckCircle2,
-  AlertOctagon,
-  Users,
-  RadioTower,
-  Settings2,
-  ListFilter
-} from "lucide-react";
+import { Plus, Trash2, Search, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { KpiStrip } from "@/components/ddm/kpi-strip";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { Segmented } from "@/components/ddm/segmented";
+import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
+import { DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { toast } from "sonner";
 import { formatBrazilianPhone } from "@/lib/disparador/phone-key";
-import { useDialogA11y } from "@/hooks/use-dialog-a11y";
 
 interface BlacklistEntry {
   id: string;
@@ -95,11 +103,12 @@ function classifyBlacklistEntry(entry: BlacklistEntry): BlacklistClassification 
   };
 }
 
-function severityClass(severity: BlacklistClassification["severity"]): string {
-  if (severity === "Forte") return "bg-red-500/10 text-red-600 border-red-500/20";
-  if (severity === "Preventivo") return "bg-amber-500/10 text-amber-600 border-amber-500/20";
-  return "bg-zinc-500/10 text-zinc-600 border-zinc-500/20";
-}
+const SEVERITY_TONE: Record<BlacklistClassification["severity"], StatusTone> = {
+  Forte: "bad",
+  Preventivo: "warn",
+  Indefinida: "mute",
+};
+
 
 function groupForClassification(classification: BlacklistClassification): Exclude<BlacklistGroup, "all"> {
   if (classification.type === "opt_out" || classification.type === "manual") return "human";
@@ -125,8 +134,6 @@ export default function BlacklistPage() {
   const [telefone, setTelefone] = useState("");
   const [motivo, setMotivo] = useState("bloqueio_manual");
   const [mensagemDetectada, setMensagemDetectada] = useState("");
-  // Foco no modal ao abrir, Esc fecha e o foco volta ao botão de origem.
-  const modalA11y = useDialogA11y(showModal, () => setShowModal(false));
 
   useEffect(() => {
     loadBlacklist();
@@ -207,16 +214,11 @@ export default function BlacklistPage() {
     [blacklist.length, originCounts],
   );
 
-  const groupFilters: Array<{
-    key: BlacklistGroup;
-    label: string;
-    description: string;
-    icon: typeof Users;
-  }> = [
-    { key: "all", label: "Todos", description: "Toda a blacklist", icon: ListFilter },
-    { key: "human", label: "Solicitações / Humano", description: "Opt-out e bloqueios manuais", icon: Users },
-    { key: "meta", label: "Erros Meta", description: "Falhas técnicas confirmadas", icon: RadioTower },
-    { key: "system", label: "Sistema / Outros", description: "Automáticos não Meta", icon: Settings2 },
+  const groupFilters: Array<{ key: BlacklistGroup; label: string; description: string }> = [
+    { key: "all", label: "Todos", description: "Toda a blacklist" },
+    { key: "human", label: "Solicitações / Humano", description: "Opt-out e bloqueios manuais" },
+    { key: "meta", label: "Erros Meta", description: "Falhas técnicas confirmadas" },
+    { key: "system", label: "Sistema / Outros", description: "Automáticos não Meta" },
   ];
 
   const visibleOriginFilters: Array<{ key: BlacklistType | "all"; label: string }> =
@@ -239,22 +241,20 @@ export default function BlacklistPage() {
             ]
           : [];
 
-  // Remove from Blacklist
+
+  // Remove from Blacklist — confirmação num AlertDialog (antes, confirm()), mesmas mensagens.
+  const [removeTarget, setRemoveTarget] = useState<BlacklistEntry | null>(null);
+  const removeIsOptOut = removeTarget ? classifyBlacklistEntry(removeTarget).type === "opt_out" : false;
+
   const handleRemove = async (id: string) => {
-    const entry = blacklist.find((item) => item.id === id);
-    const classification = entry ? classifyBlacklistEntry(entry) : null;
-    const confirmation =
-      classification?.type === "opt_out"
-        ? "Este contato pediu para não receber mensagens. Remover este bloqueio pode causar envio indevido. Deseja continuar?"
-        : "Tem certeza que deseja remover este número da blacklist? Ele voltará a receber disparos.";
-    if (!confirm(confirmation)) return;
+    setRemoveTarget(null);
     try {
       const supabase = createClient();
       const { error } = await supabase.from("blacklist").delete().eq("id", id);
       if (error) throw error;
       toast.success("Número removido da blacklist!");
       loadBlacklist();
-    } catch (err: any) {
+    } catch {
       toast.error("Erro ao remover da blacklist.");
     }
   };
@@ -300,278 +300,231 @@ export default function BlacklistPage() {
       setTelefone("");
       setMensagemDetectada("");
       loadBlacklist();
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao adicionar à blacklist.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao adicionar à blacklist.");
     }
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-500/10 text-red-500">
-              <ShieldAlert className="h-5 w-5" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              Blacklist de Números
-            </h1>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Evite spam e bloqueios protegendo contatos que pediram opt-out ou são inválidos.
-          </p>
+    <PageBody>
+      <PageToolbar
+        actions={
+          <Button onClick={() => setShowModal(true)}>
+            <Plus className="size-3.5" aria-hidden="true" /> Bloquear número
+          </Button>
+        }
+      >
+        <div className="relative w-full sm:w-72">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            type="search"
+            aria-label="Buscar na blacklist"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por telefone ou palavra bloqueada"
+            className="h-8 pl-8 text-[12.5px]"
+          />
         </div>
-        <Button onClick={() => setShowModal(true)} variant="destructive" className="gap-1.5 self-start">
-          <Plus className="h-4 w-4" /> Bloquear Número
-        </Button>
-      </div>
+      </PageToolbar>
 
-      {/* Search Input */}
-      <div className="relative">
-        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-        <input
-          type="search"
-          aria-label="Buscar na blacklist"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por telefone ou palavra bloqueada..."
-          className="w-full rounded-md border border-input bg-background pl-9 pr-4 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+      {/* Grupos de origem: cada célula filtra a lista (contagens reais da blacklist da conta). */}
+      <KpiStrip
+        ariaLabel="Separar blacklist por origem"
+        loading={loading}
+        minWidth={180}
+        items={groupFilters.map((f) => ({
+          label: f.label,
+          value: groupCounts[f.key].toLocaleString("pt-BR"),
+          note: f.description,
+          active: groupFilter === f.key,
+          onClick: () => {
+            setGroupFilter(f.key);
+            setOriginFilter("all");
+          },
+        }))}
+      />
+
+      {visibleOriginFilters.length > 1 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Refinar</span>
+          <Segmented
+            ariaLabel="Refinar por origem"
+            value={originFilter}
+            onChange={setOriginFilter}
+            options={visibleOriginFilters.map((f) => ({
+              value: f.key,
+              label: f.label,
+              count: f.key === "all" ? groupCounts[groupFilter] : originCounts[f.key],
+            }))}
+          />
+        </div>
+      )}
+
+      <p className="m-0 text-xs text-muted-foreground">
+        Solicitações humanas ficam separadas das falhas técnicas. Opt-out e bloqueios manuais são imediatos; Meta 131026 só
+        entra definitivamente após ocorrer em 3 campanhas diferentes para o mesmo número.
+      </p>
+
+      {loading ? (
+        <div className="flex flex-col gap-2" aria-busy="true" aria-label="Carregando blacklist">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      ) : loadError ? (
+        <ErrorState title="Não foi possível carregar a blacklist" onRetry={loadBlacklist} />
+      ) : filteredList.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle2}
+          title={blacklist.length === 0 ? "Sua blacklist está vazia" : "Nenhum registro neste filtro"}
+          hint={
+            blacklist.length === 0
+              ? "Nenhum número foi bloqueado ainda. Adicione contatos manualmente se necessário."
+              : "Ajuste a categoria, o refinamento ou a busca para ver outros registros."
+          }
         />
-      </div>
-
-      <div className="space-y-3">
-        <div role="tablist" aria-label="Separar blacklist por origem" className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {groupFilters.map((filter) => {
-            const active = groupFilter === filter.key;
-            const Icon = filter.icon;
-            return (
-              <button
-                key={filter.key}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => {
-                  setGroupFilter(filter.key);
-                  setOriginFilter("all");
-                }}
-                className={
-                  active
-                    ? "flex items-center gap-3 rounded-lg border border-primary/50 bg-primary/10 px-3 py-2.5 text-left ring-1 ring-primary/20"
-                    : "flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 text-left transition-colors hover:bg-muted/40"
-                }
-              >
-                <span className={active ? "flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary" : "flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"}>
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-foreground">{filter.label}</span>
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                      {groupCounts[filter.key].toLocaleString("pt-BR")}
-                    </span>
-                  </span>
-                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{filter.description}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {visibleOriginFilters.length > 1 && (
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-medium text-muted-foreground">Refinar:</span>
-            {visibleOriginFilters.map((filter) => {
-              const count = filter.key === "all" ? groupCounts[groupFilter] : originCounts[filter.key];
-              const active = originFilter === filter.key;
-              return (
-                <Button
-                  key={filter.key}
-                  type="button"
-                  size="sm"
-                  variant={active ? "secondary" : "outline"}
-                  onClick={() => setOriginFilter(filter.key)}
-                  aria-pressed={active}
-                  className="h-7 gap-1.5 px-2.5 text-xs"
-                >
-                  {filter.label}
-                  <span className="text-[10px] text-muted-foreground">({count})</span>
-                </Button>
-              );
-            })}
-          </div>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          Solicitações humanas ficam separadas das falhas técnicas. Opt-out e bloqueios manuais são imediatos; Meta 131026 só entra definitivamente após ocorrer em 3 campanhas diferentes para o mesmo número.
-        </p>
-      </div>
-
-      {/* Blacklist List */}
-      <div className="flex-1 overflow-y-auto pr-2">
-        {loading ? (
-          <div className="flex h-48 items-center justify-center text-muted-foreground">
-            Carregando blacklist...
-          </div>
-        ) : loadError ? (
-          <div className="flex h-48 flex-col items-center justify-center text-center text-muted-foreground border border-dashed border-border rounded-xl">
-            <AlertOctagon className="h-10 w-10 text-amber-500/50 mb-2" />
-            <h4 className="font-semibold text-foreground">Não foi possível carregar a blacklist</h4>
-            <p className="text-xs max-w-xs mt-1">Tente novamente.</p>
-            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={loadBlacklist}>
-              Tentar novamente
-            </Button>
-          </div>
-        ) : filteredList.length === 0 ? (
-          <div className="flex h-48 flex-col items-center justify-center text-center text-muted-foreground border border-dashed border-border rounded-xl">
-            <CheckCircle2 className="h-10 w-10 text-emerald-500/30 mb-2" />
-            <h4 className="font-semibold text-foreground">
-              {blacklist.length === 0 ? "Sua blacklist está vazia" : "Nenhum registro neste filtro"}
-            </h4>
-            <p className="text-xs max-w-xs mt-1">
-              {blacklist.length === 0
-                ? "Nenhum número foi bloqueado ainda. Adicione contatos manualmente se necessário."
-                : "Ajuste a categoria, o refinamento ou a busca para ver outros registros."}
-            </p>
-          </div>
-        ) : (
-          // Rolagem horizontal só dentro da tabela (celular), nunca na página.
-          <div className="border border-border rounded-xl bg-card overflow-x-auto shadow-sm">
-            <table className="w-full min-w-[640px] border-collapse text-left text-xs">
-              <thead className="border-b border-border bg-muted/30 text-muted-foreground font-semibold uppercase tracking-wider">
-                <tr>
-                  <th className="px-5 py-3.5">Telefone</th>
-                  <th className="px-5 py-3.5">Motivo</th>
-                  <th className="px-5 py-3.5">Origem</th>
-                  <th className="px-5 py-3.5">Data do bloqueio</th>
-                  <th className="px-5 py-3.5 text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/60">
-                {filteredList.map((entry) => (
-                  <tr key={entry.id} className="hover:bg-muted/10">
-                    <td className="px-5 py-4 font-mono font-semibold text-foreground">{entry.telefone}</td>
-                    <td className="px-5 py-4">
-                      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[10px] font-medium text-red-500 border border-red-500/15">
-                        <AlertOctagon className="h-3 w-3" aria-hidden="true" /> {MOTIVO_LABELS[entry.motivo] || entry.motivo}
+      ) : (
+        <TableCard
+          title="Números bloqueados"
+          hint={`${filteredList.length.toLocaleString("pt-BR")} de ${blacklist.length.toLocaleString("pt-BR")} registros`}
+        >
+          <DenseTable minWidth={720}>
+            <thead>
+              <tr>
+                <Th>Telefone</Th>
+                <Th>Motivo</Th>
+                <Th>Origem</Th>
+                <Th>Data do bloqueio</Th>
+                <Th align="right">
+                  <span className="sr-only">Ações</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredList.map((entry) => {
+                const c = classifyBlacklistEntry(entry);
+                return (
+                  <Tr key={entry.id}>
+                    <Td className="whitespace-nowrap font-mono font-semibold text-foreground">{entry.telefone}</Td>
+                    <Td>
+                      <StatusChip tone="bad">{MOTIVO_LABELS[entry.motivo] || entry.motivo}</StatusChip>
+                    </Td>
+                    <Td className="max-w-xs">
+                      <span className="flex flex-col gap-1">
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-semibold text-foreground">{c.label}</span>
+                          <StatusChip tone={SEVERITY_TONE[c.severity]} dot={false}>
+                            {c.severity}
+                          </StatusChip>
+                        </span>
+                        <span className="text-[11.5px] text-muted-foreground">{c.description}</span>
+                        {c.type === "opt_out" && entry.mensagem_detectada && (
+                          <span className="truncate text-[11.5px] italic text-muted-foreground">“{entry.mensagem_detectada}”</span>
+                        )}
                       </span>
-                    </td>
-                    <td className="px-5 py-4 max-w-xs">
-                      {(() => {
-                        const classification = classifyBlacklistEntry(entry);
-                        return (
-                          <div className="space-y-1">
-                            <div className="font-medium text-foreground">{classification.label}</div>
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${severityClass(classification.severity)}`}>
-                                {classification.severity}
-                              </span>
-                              <span className="text-[10px] text-muted-foreground">
-                                {classification.description}
-                              </span>
-                            </div>
-                            {classification.type === "opt_out" && entry.mensagem_detectada && (
-                              <p className="truncate text-[10px] italic text-muted-foreground">
-                                “{entry.mensagem_detectada}”
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-5 py-4 text-muted-foreground">
+                    </Td>
+                    <Td className="whitespace-nowrap text-xs text-muted-foreground">
                       {new Date(entry.data_bloqueio).toLocaleString("pt-BR")}
-                    </td>
-                    <td className="px-5 py-4 text-right">
+                    </Td>
+                    <Td align="right">
                       <Button
                         size="icon"
                         variant="ghost"
-                        onClick={() => handleRemove(entry.id)}
+                        onClick={() => setRemoveTarget(entry)}
                         aria-label={`Remover ${entry.telefone} da blacklist`}
                         title="Remover da blacklist"
-                        className="h-9 w-9 text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
+                        className="text-muted-foreground hover:bg-danger-soft hover:text-danger"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="size-4" aria-hidden="true" />
                       </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Creation Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div
-            ref={modalA11y.ref}
-            tabIndex={-1}
-            onKeyDown={modalA11y.onKeyDown}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="blacklist-modal-title"
-            className="bg-card border border-border w-full max-w-md max-h-[calc(100dvh-2rem)] rounded-xl shadow-2xl flex flex-col overflow-y-auto outline-none"
-          >
-            <header className="px-6 py-4 border-b border-border flex justify-between items-center bg-muted/20">
-              <h3 id="blacklist-modal-title" className="font-bold text-foreground">Adicionar à Blacklist</h3>
-              <Button size="icon" variant="ghost" onClick={() => setShowModal(false)} aria-label="Fechar" className="h-9 w-9 text-muted-foreground">
-                <X className="h-5 w-5" aria-hidden="true" />
-              </Button>
-            </header>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div className="space-y-1">
-                <label htmlFor="blacklist-telefone" className="text-xs font-medium text-muted-foreground font-semibold">Telefone do Contato</label>
-                <input
-                  id="blacklist-telefone"
-                  type="tel"
-                  autoFocus
-                  aria-describedby="blacklist-telefone-hint"
-                  value={telefone}
-                  onChange={(e) => setTelefone(e.target.value)}
-                  placeholder="Ex: 5521999999999"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-                />
-                <p id="blacklist-telefone-hint" className="text-[10px] text-muted-foreground">Insira o código do país + DDD + Número.</p>
-              </div>
-
-              <div className="space-y-1">
-                <label htmlFor="blacklist-motivo" className="text-xs font-medium text-muted-foreground font-semibold">Motivo</label>
-                <select
-                  id="blacklist-motivo"
-                  value={motivo}
-                  onChange={(e) => setMotivo(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-                >
-                  {Object.entries(MOTIVO_LABELS).map(([k, label]) => (
-                    <option key={k} value={k}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label htmlFor="blacklist-mensagem" className="text-xs font-medium text-muted-foreground font-semibold">Mensagem Opcional (Opt-out recebido)</label>
-                <textarea
-                  id="blacklist-mensagem"
-                  value={mensagemDetectada}
-                  onChange={(e) => setMensagemDetectada(e.target.value)}
-                  placeholder="Ex: 'Não quero mais receber mensagens'"
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 resize-none h-16"
-                />
-              </div>
-
-              <footer className="pt-4 border-t border-border flex justify-end gap-3 -mx-6 -mb-6 p-6 bg-muted/10">
-                <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancelar</Button>
-                <Button type="submit" variant="destructive">Bloquear</Button>
-              </footer>
-            </form>
-          </div>
-        </div>
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </DenseTable>
+        </TableCard>
       )}
-    </div>
+
+      {/* Remover: confirmação. Opt-out tem aviso próprio (envio indevido). */}
+      <AlertDialog open={removeTarget !== null} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover {removeTarget?.telefone} da blacklist?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {removeIsOptOut
+                ? "Este contato pediu para não receber mensagens. Remover este bloqueio pode causar envio indevido. Deseja continuar?"
+                : "Tem certeza que deseja remover este número da blacklist? Ele voltará a receber disparos."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => removeTarget && handleRemove(removeTarget.id)}>
+              Remover da blacklist
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Adicionar à blacklist */}
+      <Dialog open={showModal} onOpenChange={setShowModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adicionar à blacklist</DialogTitle>
+            <DialogDescription>O número deixa de receber disparos de todas as campanhas desta conta.</DialogDescription>
+          </DialogHeader>
+          <form id="blacklist-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+              Telefone do contato
+              <Input
+                id="blacklist-telefone"
+                type="tel"
+                autoFocus
+                aria-describedby="blacklist-telefone-hint"
+                value={telefone}
+                onChange={(e) => setTelefone(e.target.value)}
+                placeholder="Ex: 5521999999999"
+              />
+              <span id="blacklist-telefone-hint" className="font-normal text-muted-foreground">
+                Insira o código do país + DDD + Número.
+              </span>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+              Motivo
+              <select
+                id="blacklist-motivo"
+                value={motivo}
+                onChange={(e) => setMotivo(e.target.value)}
+                className="h-8 w-full rounded-[6px] border border-input bg-background px-2 text-[13px] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {Object.entries(MOTIVO_LABELS).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-foreground-2">
+              Mensagem opcional (opt-out recebido)
+              <Textarea
+                id="blacklist-mensagem"
+                rows={2}
+                value={mensagemDetectada}
+                onChange={(e) => setMensagemDetectada(e.target.value)}
+                placeholder="Ex: 'Não quero mais receber mensagens'"
+              />
+            </label>
+          </form>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowModal(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" form="blacklist-form" variant="destructive">
+              Bloquear
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </PageBody>
   );
 }

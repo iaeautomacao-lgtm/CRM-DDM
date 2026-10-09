@@ -72,7 +72,7 @@ export function CampaignWebchatSettings({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-1.5 text-xs font-medium text-foreground">
-            <Globe className="h-3.5 w-3.5 text-cyan-500" />
+            <Globe className="h-3.5 w-3.5 text-primary-text" />
             Ao responder, enviar para o Webchat
           </p>
           <p className="mt-0.5 text-[10px] text-muted-foreground">
@@ -138,7 +138,7 @@ export function CampaignWebchatSettings({
             />
           </div>
           {!value.webchat_flow_id && (
-            <p className="text-[10px] text-amber-500">
+            <p className="text-[10px] text-warning">
               Sem fluxo aqui, vale o fluxo padrão do Webchat em /canais. Se não houver padrão, o convite não é enviado.
             </p>
           )}

@@ -73,7 +73,7 @@ export function StepRevisao({
   return (
     <div className="space-y-4">
       {errors.length > 0 ? (
-        <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-600 dark:text-red-400">
+        <div role="alert" className="rounded-lg bg-danger-soft px-4 py-3 text-xs text-foreground">
           <p className="mb-1 flex items-center gap-1.5 font-medium">
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" /> Corrija antes de salvar:
           </p>
@@ -85,7 +85,7 @@ export function StepRevisao({
         </div>
       ) : (
         <p
-          className="flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-700 dark:text-emerald-400"
+          className="flex items-center gap-1.5 rounded-lg bg-success-soft px-4 py-2 text-xs text-success"
           aria-live="polite"
         >
           {serverCheck.state === "checking" ? (
@@ -93,7 +93,7 @@ export function StepRevisao({
               <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> Conferindo no servidor…
             </>
           ) : serverCheck.state === "error" ? (
-            <span className="text-red-600 dark:text-red-400">Servidor recusou: {serverCheck.error}</span>
+            <span className="text-danger">Servidor recusou: {serverCheck.error}</span>
           ) : (
             <>
               <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> Tudo certo

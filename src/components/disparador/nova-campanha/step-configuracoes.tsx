@@ -173,7 +173,7 @@ export function StepConfiguracoes({
               )}
             </>
           ) : (
-            <span className="text-red-600 dark:text-red-400">A hora final precisa ser depois da hora inicial.</span>
+            <span className="text-danger">A hora final precisa ser depois da hora inicial.</span>
           )}
         </p>
       </section>
@@ -182,7 +182,7 @@ export function StepConfiguracoes({
       <section className="space-y-3">
         <h4 className="text-sm font-semibold text-foreground">Modo de disparo</h4>
         {form.dispatchMode === null && (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
+          <p className="text-xs text-warning">
             Esta campanha usava um modo antigo (Balanceado, Cauteloso ou Personalizado). Escolha Imediato ou Segmentado.
           </p>
         )}

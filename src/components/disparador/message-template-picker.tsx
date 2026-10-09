@@ -417,7 +417,7 @@ export function MessageTemplatePicker({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          className="h-9 w-9 shrink-0 text-red-500 hover:bg-red-500/10"
+                          className="h-9 w-9 shrink-0 text-danger hover:bg-danger-soft"
                           onClick={() => handleDelete(t)}
                           aria-label={`Excluir template ${t.nome}`}
                           title="Excluir template"

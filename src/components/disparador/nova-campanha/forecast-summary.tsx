@@ -77,20 +77,20 @@ export function ForecastSummary({ forecast, unavailableReason, endTarget, compac
         </ul>
       )}
       {forecast.roundsOverlap && (
-        <p className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+        <p className="flex items-start gap-1.5 text-warning">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           Cada rodada leva de {forecast.roundDrainMinutes.min} a {forecast.roundDrainMinutes.max} min para sair, mais que o
           intervalo escolhido: as rodadas vão sair uma atrás da outra. Diminua o percentual ou aumente o intervalo.
         </p>
       )}
       {forecast.sequentialFallback && (
-        <p className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+        <p className="flex items-start gap-1.5 text-warning">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           Base pequena: cada rodada tem 1 contato, então sai 1 mensagem por intervalo.
         </p>
       )}
       {exceeds && (
-        <p className="flex items-start gap-1.5 text-amber-700 dark:text-amber-400">
+        <p className="flex items-start gap-1.5 text-warning">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {exceedsAlways ? "A base não termina" : "A base pode não terminar"} até a data final escolhida. O envio continua
           nos próximos dias úteis, no mesmo horário, até acabar.

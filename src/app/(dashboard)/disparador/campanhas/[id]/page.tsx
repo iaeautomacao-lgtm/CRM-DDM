@@ -27,26 +27,21 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Send,
   Eye,
+  X,
 } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+import { KpiStrip } from "@/components/ddm/kpi-strip";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { Segmented } from "@/components/ddm/segmented";
+import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
+import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
+import { EmptyState, Skeleton } from "@/components/ddm/states";
 
 interface QueueRow {
   id: string;
@@ -58,14 +53,25 @@ interface QueueRow {
   contacts?: { name: string | null; phone: string | null } | null;
 }
 
-const STATUS_BADGE: Record<string, string> = {
-  agendado: "bg-zinc-500/10 text-zinc-500",
-  enviando: "bg-primary/10 text-primary",
-  enviado: "bg-emerald-500/10 text-emerald-500",
-  entregue: "bg-emerald-500/10 text-emerald-500",
-  lido: "bg-blue-500/10 text-blue-500",
-  erro: "bg-red-500/10 text-red-500",
-  pausado: "bg-amber-500/10 text-amber-500",
+/** Linha de campaign_metrics_live (totais acumulados da campanha). */
+interface CampaignMetrics {
+  total_contatos: number;
+  total_enviados: number;
+  total_entregues: number;
+  total_lidos: number;
+  total_respostas: number;
+  total_blacklist: number;
+  total_erros: number;
+}
+
+const STATUS_TONE: Record<string, StatusTone> = {
+  agendado: "mute",
+  enviando: "brand",
+  enviado: "info",
+  entregue: "ok",
+  lido: "ok",
+  erro: "bad",
+  pausado: "warn",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -114,6 +120,8 @@ export default function CampanhaContatosPage({
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [totalCount, setTotalCount] = useState<number | null>(null);
+  // Totais da campanha para a barra e os KPIs (mesma fonte dos cartões da lista).
+  const [metrics, setMetrics] = useState<CampaignMetrics | null>(null);
 
   // Confirma que a campanha pertence à conta do usuário logado — ver
   // comentário de segurança no topo do arquivo.
@@ -134,6 +142,12 @@ export default function CampanhaContatosPage({
         .eq("id", campaignId)
         .maybeSingle();
       if (!cancelled) setCampaignName(data?.nome ?? "Campanha");
+      const { data: m } = await supabase
+        .from("campaign_metrics_live")
+        .select("total_contatos, total_enviados, total_entregues, total_lidos, total_respostas, total_blacklist, total_erros")
+        .eq("campaign_id", campaignId)
+        .limit(1);
+      if (!cancelled) setMetrics(((m ?? [])[0] as CampaignMetrics | undefined) ?? null);
     })();
     return () => {
       cancelled = true;
@@ -190,174 +204,196 @@ export default function CampanhaContatosPage({
 
   if (allowed === false) {
     return (
-      <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col items-center justify-center gap-3 p-6 text-center">
-        <AlertCircle className="h-10 w-10 text-red-500" />
-        <p className="text-sm text-muted-foreground">
-          Campanha não encontrada ou fora da sua conta.
-        </p>
-        <Link
-          href="/disparador/campanhas"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-        >
+      <PageBody>
+        <EmptyState
+          icon={AlertCircle}
+          title="Campanha não encontrada ou fora da sua conta"
+          hint="Volte para a lista de campanhas."
+        />
+        <Link href="/disparador/campanhas" className={cn(buttonVariants({ variant: "outline" }), "self-center")}>
           Voltar para Campanhas
         </Link>
-      </div>
+      </PageBody>
     );
   }
 
+  const m = metrics;
+  const total = m?.total_contatos ?? 0;
+  // Barra segmentada: os totais de campaign_metrics_live são acumulados
+  // (lido ⊂ entregue ⊂ enviado), então cada faixa é a diferença entre eles.
+  const segments = m && total > 0
+    ? [
+        { key: "lido", label: "Lidos", value: m.total_lidos, cls: "bg-primary" },
+        { key: "entregue", label: "Entregues (sem leitura)", value: Math.max(0, m.total_entregues - m.total_lidos), cls: "bg-success" },
+        { key: "enviado", label: "Enviados (sem confirmação)", value: Math.max(0, m.total_enviados - m.total_entregues), cls: "bg-[#5B8DEF] [html[data-mode=light]_&]:bg-[#3B6FD8]" },
+        { key: "erro", label: "Erros", value: m.total_erros, cls: "bg-danger" },
+        { key: "restante", label: "Ainda não enviados", value: Math.max(0, total - m.total_enviados - m.total_erros - m.total_blacklist), cls: "bg-surface-3" },
+      ]
+    : [];
+
   return (
-    <div className="flex h-[calc(100vh-4rem-2.75rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
-      {/* Header */}
-      <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Link
-              href="/disparador/campanhas"
-              aria-label="Voltar para Campanhas"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground transition-colors mr-1"
-              title="Voltar para Campanhas"
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            </Link>
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
-              <ListChecks className="h-5 w-5" />
-            </div>
-            <h1 className="min-w-0 text-xl font-bold tracking-tight text-foreground sm:text-2xl truncate max-w-md">
-              {campaignName || "Carregando…"}
-            </h1>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Envios por contato{totalCount != null ? ` — ${totalCount} no total` : ""}
+    <PageBody>
+      <div className="flex flex-wrap items-center gap-3">
+        <Link
+          href="/disparador/campanhas"
+          aria-label="Voltar para Campanhas"
+          title="Voltar para Campanhas"
+          className="flex size-8 shrink-0 items-center justify-center rounded-[6px] border border-border bg-card text-foreground-2 transition-colors hover:bg-surface-hover hover:text-foreground"
+        >
+          <ArrowLeft className="size-3.5" aria-hidden="true" />
+        </Link>
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <h2 className="m-0 truncate text-[15px] font-semibold text-foreground">{campaignName || "Carregando…"}</h2>
+          <p className="m-0 text-[12.5px] text-muted-foreground">
+            Envios por contato{totalCount != null ? ` — ${totalCount.toLocaleString("pt-BR")} neste filtro` : ""}
           </p>
         </div>
-
-        <Select value={statusFilter} onValueChange={(v) => handleStatusFilterChange(v || "__all__")}>
-          <SelectTrigger className="w-full sm:w-48" aria-label="Filtrar por status">
-            <SelectValue>
-              {(v: string) => (v === "__all__" ? "Todos os status" : STATUS_LABEL[v] ?? v)}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__all__">Todos os status</SelectItem>
-            {Object.keys(STATUS_LABEL).map((s) => (
-              <SelectItem key={s} value={s}>
-                {STATUS_LABEL[s]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
       </div>
 
-      {codigoFilter !== null && (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/50 px-3 py-1">
-            Filtrando pelo código de erro <strong>{codigoFilter}</strong>
+      {/* Resumo da campanha (campaign_metrics_live, mesma fonte dos cartões da lista). */}
+      {m && (
+        <section aria-label="Resumo da campanha" className="flex flex-col gap-3 rounded-[10px] border border-border bg-card px-[18px] py-4">
+          {segments.length > 0 && (
+            <>
+              <div className="flex h-2.5 gap-0.5 overflow-hidden rounded-full bg-surface-3" role="img" aria-label="Distribuição dos envios">
+                {segments.map((s) =>
+                  s.value > 0 ? (
+                    <span
+                      key={s.key}
+                      title={`${s.label}: ${s.value.toLocaleString("pt-BR")}`}
+                      className={cn("origin-left animate-ddm-bar transition-[width] duration-500", s.cls)}
+                      style={{ width: `${(s.value / total) * 100}%` }}
+                    />
+                  ) : null,
+                )}
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-foreground-2">
+                {segments.map((s) => (
+                  <span key={s.key} className="inline-flex items-center gap-1.5 tabular-nums">
+                    <span aria-hidden="true" className={cn("size-2 rounded-[2px]", s.cls)} />
+                    {s.label} · {s.value.toLocaleString("pt-BR")}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+          <KpiStrip
+            ariaLabel="Totais da campanha"
+            minWidth={140}
+            items={[
+              { label: "Contatos", value: total.toLocaleString("pt-BR") },
+              { label: "Enviados", value: m.total_enviados.toLocaleString("pt-BR") },
+              { label: "Entregues", value: m.total_entregues.toLocaleString("pt-BR") },
+              { label: "Lidos", value: m.total_lidos.toLocaleString("pt-BR") },
+              { label: "Respostas", value: m.total_respostas.toLocaleString("pt-BR") },
+              { label: "Erros", value: m.total_erros.toLocaleString("pt-BR") },
+            ]}
+          />
+        </section>
+      )}
+
+      <PageToolbar>
+        <Segmented
+          ariaLabel="Filtrar envios por status"
+          value={statusFilter}
+          onChange={handleStatusFilterChange}
+          options={[
+            { value: "__all__", label: "Todos" },
+            ...Object.keys(STATUS_LABEL).map((s) => ({ value: s, label: STATUS_LABEL[s] })),
+          ]}
+        />
+        {codigoFilter !== null && (
+          <span className="inline-flex h-7 items-center gap-2 rounded-full bg-surface-3 pl-3 pr-1 text-[12.5px] text-foreground">
+            Código de erro <strong className="font-mono">{codigoFilter}</strong>
             <button
               type="button"
               onClick={() => {
                 setCodigoFilter(null);
                 setPage(0);
               }}
-              className="text-muted-foreground hover:text-foreground"
+              className="flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-surface-hover hover:text-foreground"
               aria-label="Limpar filtro de código"
             >
-              ✕
+              <X className="size-3" aria-hidden="true" />
             </button>
           </span>
-        </div>
-      )}
+        )}
+      </PageToolbar>
 
-      {/* Table */}
-      <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card">
+      <TableCard>
         {loading ? (
-          <div className="flex h-48 items-center justify-center text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin mr-2" /> Carregando envios...
+          <div className="flex flex-col gap-2 p-4" aria-busy="true" aria-label="Carregando envios">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
           </div>
         ) : rows.length === 0 ? (
-          <div className="flex h-48 flex-col items-center justify-center text-center text-muted-foreground">
-            <ListChecks className="h-10 w-10 opacity-20 mb-2" />
-            <h4 className="font-semibold">Nenhum envio encontrado</h4>
-            <p className="text-xs max-w-xs mt-1">
-              {statusFilter === "__all__"
-                ? "Esta campanha ainda não tem itens na fila."
-                : "Nenhum item com este status."}
-            </p>
-          </div>
+          <EmptyState
+            className="m-4"
+            icon={ListChecks}
+            title="Nenhum envio encontrado"
+            hint={statusFilter === "__all__" ? "Esta campanha ainda não tem itens na fila." : "Nenhum item com este status."}
+          />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Telefone</TableHead>
-                <TableHead>Nome</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Erro</TableHead>
-                <TableHead className="text-right">Data de envio</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <DenseTable minWidth={720}>
+            <thead>
+              <tr>
+                <Th>Contato</Th>
+                <Th>Status</Th>
+                <Th>Erro</Th>
+                <Th align="right">Data de envio</Th>
+              </tr>
+            </thead>
+            <tbody>
               {rows.map((r) => {
                 const isPending131026 = r.entrega_pendente_131026 === true;
                 const Icon = isPending131026 ? Clock : (STATUS_ICON[r.status] ?? Clock);
-                const badgeClass = isPending131026
-                  ? "bg-amber-500/10 text-amber-600"
-                  : (STATUS_BADGE[r.status] || STATUS_BADGE.agendado);
-                const badgeLabel = isPending131026
-                  ? "Aguardando confirmação"
-                  : (STATUS_LABEL[r.status] || r.status);
-                const badgeTitle = isPending131026
+                const tone: StatusTone = isPending131026 ? "warn" : (STATUS_TONE[r.status] ?? "mute");
+                const label = isPending131026 ? "Aguardando confirmação" : (STATUS_LABEL[r.status] || r.status);
+                const title = isPending131026
                   ? "A Meta informou 131026; pode ser aparelho offline. Confirmamos em até 24h."
                   : undefined;
                 return (
-                  <TableRow key={r.id}>
-                    <TableCell>{r.contacts?.phone || "—"}</TableCell>
-                    <TableCell>{r.contacts?.name || "—"}</TableCell>
-                    <TableCell>
-                      <span
-                        title={badgeTitle}
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${badgeClass}`}
-                      >
-                        <Icon aria-hidden="true" className={`h-3 w-3 ${!isPending131026 && r.status === "enviando" ? "animate-spin" : ""}`} />
-                        {badgeLabel}
-                      </span>
-                    </TableCell>
-                    <TableCell className="max-w-[280px] truncate text-xs text-red-500">
-                      {r.erro ? normalizarErroMeta(r.erro) : "—"}
-                    </TableCell>
-                    <TableCell className="text-right text-xs text-muted-foreground">
-                      {r.sent_at
-                        ? new Date(r.sent_at).toLocaleString("pt-BR")
-                        : new Date(r.scheduled_at).toLocaleString("pt-BR")}
-                    </TableCell>
-                  </TableRow>
+                  <Tr key={r.id}>
+                    <Td>
+                      <CellMain title={r.contacts?.name || "—"} sub={r.contacts?.phone || "—"} />
+                    </Td>
+                    <Td>
+                      <StatusChip tone={tone} dot={false} title={title}>
+                        <Icon
+                          aria-hidden="true"
+                          className={cn("size-3", !isPending131026 && r.status === "enviando" && "animate-spin")}
+                        />
+                        {label}
+                      </StatusChip>
+                    </Td>
+                    <Td className="max-w-[320px] truncate text-xs text-danger" title={r.erro ? normalizarErroMeta(r.erro) : undefined}>
+                      {r.erro ? normalizarErroMeta(r.erro) : <span className="text-muted-foreground">—</span>}
+                    </Td>
+                    <Td align="right" className="whitespace-nowrap text-xs text-muted-foreground">
+                      {r.sent_at ? new Date(r.sent_at).toLocaleString("pt-BR") : new Date(r.scheduled_at).toLocaleString("pt-BR")}
+                    </Td>
+                  </Tr>
                 );
               })}
-            </TableBody>
-          </Table>
+            </tbody>
+          </DenseTable>
         )}
-      </div>
-
-      {/* Pagination */}
-      {(page > 0 || hasMore) && (
-        <nav aria-label="Paginação" className="flex items-center justify-between text-xs text-muted-foreground">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page === 0}
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-          >
-            Anterior
-          </Button>
-          <span>Página {page + 1}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={!hasMore}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Próxima
-          </Button>
-        </nav>
-      )}
-    </div>
+        {(page > 0 || hasMore) && (
+          <nav aria-label="Paginação" className="flex items-center justify-between gap-3 border-t border-border px-[18px] py-3 text-xs text-muted-foreground">
+            <Button variant="outline" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+              <ChevronLeft className="size-3.5" aria-hidden="true" /> Anterior
+            </Button>
+            <span className="tabular-nums">
+              Página {page + 1}
+              {totalCount != null ? ` de ${Math.max(1, Math.ceil(totalCount / PAGE_SIZE)).toLocaleString("pt-BR")}` : ""}
+            </span>
+            <Button variant="outline" disabled={!hasMore} onClick={() => setPage((p) => p + 1)}>
+              Próxima <ChevronRight className="size-3.5" aria-hidden="true" />
+            </Button>
+          </nav>
+        )}
+      </TableCard>
+    </PageBody>
   );
 }
