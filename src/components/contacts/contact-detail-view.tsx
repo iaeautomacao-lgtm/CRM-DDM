@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { PageBody } from '@/components/ddm/page-toolbar';
 import { Segmented } from '@/components/ddm/segmented';
 import { StatusChip, type StatusTone } from '@/components/ddm/status-chip';
+import { ContactActivityFeed, ContactCampaignsList } from '@/components/contacts/contact-history-tabs';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
@@ -142,7 +143,7 @@ export function ContactDetailView({
   // Começa carregando: a página não pode piscar "não encontrado" antes do
   // primeiro fetch (a gaveta já mostra spinner enquanto não há contato).
   const [loading, setLoading] = useState(true);
-  const [pageTab, setPageTab] = useState<'deals' | 'notes'>('deals');
+  const [pageTab, setPageTab] = useState<'activity' | 'deals' | 'campaigns' | 'notes'>('activity');
   const [copiedPhone, setCopiedPhone] = useState(false);
 
   // Send template — lets the business initiate (or re-open) a conversation
@@ -1247,13 +1248,18 @@ export function ContactDetailView({
                 value={pageTab}
                 onChange={setPageTab}
                 options={[
+                  { value: 'activity', label: 'Atividade' },
                   { value: 'deals', label: 'Negócios', count: loadingDeals ? undefined : deals.length },
+                  { value: 'campaigns', label: 'Campanhas' },
                   { value: 'notes', label: 'Notas', count: loadingNotes ? undefined : notes.length },
                 ]}
               />
             </div>
             <div key={pageTab} className="flex flex-1 animate-ddm-fade flex-col p-[18px]">
-              {pageTab === 'deals' ? renderDeals() : renderNotes()}
+              {pageTab === 'activity' && <ContactActivityFeed contactId={contact.id} />}
+              {pageTab === 'deals' && renderDeals()}
+              {pageTab === 'campaigns' && <ContactCampaignsList contactId={contact.id} />}
+              {pageTab === 'notes' && renderNotes()}
             </div>
           </section>
         </div>
