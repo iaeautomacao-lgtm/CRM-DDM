@@ -336,6 +336,10 @@
       "kind": "registry"
     },
     {
+      "version": "322_report_rpcs_has_perm",
+      "kind": "registry"
+    },
+    {
       "version": "323_contacts_rls_has_perm",
       "kind": "registry"
     }
