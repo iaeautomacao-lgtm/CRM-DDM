@@ -74,3 +74,24 @@ export function apiKeyRevokedEvent(input: ApiKeyEventInput): AuditEventParams {
     metadata: apiKeyMetadata(input, {}),
   }
 }
+
+export interface FlowsKeyEventInput {
+  accountId: string
+  channelId: string
+  action: 'created' | 'rotated'
+}
+
+/** whatsapp_flows_key.created|rotated — gerou/trocou o par RSA do Data Exchange do canal. NUNCA material de chave. */
+export function flowsKeyEvent(input: FlowsKeyEventInput): AuditEventParams {
+  const created = input.action === 'created'
+  return {
+    accountId: input.accountId,
+    eventType: created ? 'created' : 'updated',
+    resourceType: 'whatsapp_flows_key',
+    resourceId: input.channelId,
+    resourceLabel: 'Chaves dos WhatsApp Flows',
+    action: `whatsapp_flows_key.${input.action}`,
+    summary: created ? 'Par de chaves do Data Exchange dos WhatsApp Flows gerado' : 'Par de chaves do Data Exchange dos WhatsApp Flows trocado',
+    metadata: { channel_id: input.channelId },
+  }
+}
