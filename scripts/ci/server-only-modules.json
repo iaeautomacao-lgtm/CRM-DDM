@@ -24,6 +24,7 @@
     "src/lib/audit/access-denied.ts",
     "src/lib/supabase/server.ts",
     "src/lib/billing/ddm-source.ts",
+    "src/lib/billing/engine.ts",
     "src/lib/billing/sync.ts",
     "src/lib/webhooks-out/endpoints.ts",
     "src/lib/webhooks-out/deliver.ts"
