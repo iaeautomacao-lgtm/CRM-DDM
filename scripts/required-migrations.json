@@ -286,6 +286,10 @@
       "kind": "registry"
     },
     {
+      "version": "301_quick_replies_visibility_usage",
+      "kind": "registry"
+    },
+    {
       "version": "302_message_origin_my_handled",
       "kind": "registry"
     },
