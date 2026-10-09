@@ -116,6 +116,7 @@ const PASSTHROUGH_TYPES = new Set([
   "send_message",
   "send_media",
   "send_template",
+  "send_flow",
 ]);
 
 function assignsExitCode(node: RoutingNode): boolean {
