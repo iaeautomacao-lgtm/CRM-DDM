@@ -13,6 +13,7 @@ import { RouteTransition } from "@/components/motion/route-transition";
 import { CommandPalette } from "@/components/command-palette/command-palette";
 import { getDefaultRoute } from "@/lib/role-utils";
 import { usePermissions } from "@/hooks/use-permission";
+import { useMfaGuard } from "@/hooks/use-mfa-guard";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -23,6 +24,8 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const permissions = usePermissions();
+  // 2FA obrigatório: sessão só com senha de quem tem fator verificado vai para /login/2fa.
+  useMfaGuard(!loading && !!user);
 
   // Sidebar drawer state — only used on mobile. On lg+ the sidebar is
   // always visible and this stays at `false` (ignored by the component).

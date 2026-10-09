@@ -32,6 +32,7 @@ import { createClient } from "@/lib/supabase/server";
 import { recordAccessDenied } from "@/lib/audit/access-denied";
 import { can, permissionsForRole, type Permission } from "./permissions";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
+import { MFA_REQUIRED_CODE } from "./mfa";
 
 // ------------------------------------------------------------
 // Errors
@@ -45,6 +46,16 @@ export class UnauthorizedError extends Error {
   constructor(message = "Unauthorized") {
     super(message);
     this.name = "UnauthorizedError";
+  }
+}
+
+/** Sessão só com senha de quem tem 2FA (src/lib/auth/mfa.ts): 401 com code 'mfa_required'. */
+export class MfaRequiredError extends Error {
+  readonly status = 401 as const;
+  readonly code = MFA_REQUIRED_CODE;
+  constructor(message = "Confirme o código de verificação em duas etapas.") {
+    super(message);
+    this.name = "MfaRequiredError";
   }
 }
 
@@ -72,6 +83,9 @@ export class ForbiddenError extends Error {
  * server internals out of the wire.
  */
 export function toErrorResponse(err: unknown): NextResponse {
+  if (err instanceof MfaRequiredError) {
+    return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+  }
   if (err instanceof ForbiddenError && err.permission) {
     // Campos extras são aditivos: quem lê só `error` (string) continua funcionando.
     return NextResponse.json(
@@ -129,6 +143,9 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser();
+  if ((userErr as { code?: string } | null)?.code === MFA_REQUIRED_CODE) {
+    throw new MfaRequiredError();
+  }
   if (userErr || !user) {
     throw new UnauthorizedError();
   }
