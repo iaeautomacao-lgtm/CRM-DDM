@@ -248,6 +248,9 @@ function KeywordsInput({
       .map((k) => k.trim())
       .filter(Boolean);
     setDraft(parsed.join(', '));
+    // Sem mudança real, não grava: antes cada blur criava um passo vazio
+    // no desfazer e marcava o fluxo como alterado.
+    if (parsed.length === keywords.length && parsed.every((k, i) => k === keywords[i])) return;
     onChange(parsed);
   }
 
@@ -455,11 +458,12 @@ function NodeCard({
       <button
         type="button"
         onClick={onToggle}
+        aria-expanded={expanded}
         className="flex w-full items-center gap-3 px-4 py-3 pl-5 text-left"
       >
         <NodeIconChip type={node.node_type} size={32} iconSize={16} />
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span
               className="truncate text-[11px] font-semibold tracking-wider uppercase"
               style={{ color: c.text }}
@@ -469,7 +473,7 @@ function NodeCard({
             {nodeLabel(node) && (
               <span className="text-foreground truncate text-sm font-medium">{nodeLabel(node)}</span>
             )}
-            <code className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[10px]">
+            <code className="bg-surface-3 text-muted-foreground max-w-full truncate rounded px-1.5 py-0.5 text-[10px]">
               {node.node_key}
             </code>
             {isEntry && (
@@ -491,9 +495,9 @@ function NodeCard({
           <CircleAlert className="h-3.5 w-3.5 shrink-0 text-danger" />
         )}
         {expanded ? (
-          <ChevronUp className="text-muted-foreground h-4 w-4" />
+          <ChevronUp className="text-muted-foreground h-4 w-4" aria-hidden="true" />
         ) : (
-          <ChevronDown className="text-muted-foreground h-4 w-4" />
+          <ChevronDown className="text-muted-foreground h-4 w-4" aria-hidden="true" />
         )}
       </button>
       {expanded && (
@@ -504,8 +508,8 @@ function NodeCard({
             onUpdate={onUpdate}
             onUpdateConfig={onUpdateConfig}
           />
-          <div className="border-border mt-4 flex items-center justify-between border-t pt-3">
-            <div className="flex items-center gap-2">
+          <div className="border-border mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+            <div className="flex flex-wrap items-center gap-2">
               {!isEntry && (
                 <Button variant="ghost" size="sm" onClick={onSetEntry}>
                   Definir como entrada
