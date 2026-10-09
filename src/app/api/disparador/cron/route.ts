@@ -48,6 +48,7 @@ import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { dispatchSchemaReady } from "@/lib/disparador/cron-preflight";
+import { fetchDueCandidates } from "@/lib/disparador/due-candidates";
 import { drainPushOutbox } from "@/lib/push/service";
 import { trackSend } from "@/lib/disparador/shutdown-gate";
 import { sweepStuckApiCampaigns } from "@/lib/disparador/api-v1-cleanup";
@@ -207,7 +208,6 @@ async function buildChannelWork(
   return { channels, defaultMaxInFlight, configs };
 }
 
-const CANDIDATE_PAGE_SIZE = 1000;
 
 // O retry de erros transitórios roda no máximo a cada ~5 ticks: o lock
 // expira sozinho (não é liberado) e só o tick que o adquire chama a RPC.
@@ -227,34 +227,6 @@ const METRICS_CONSOLIDATE_MAX_ROUNDS = 5;
 function meta131026ConfirmMinutes(): number {
   const parsed = Number(process.env.DISPARADOR_131026_CONFIRM_MINUTES);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 1440;
-}
-
-// Candidatos vencidos de uma campanha, na ordem (scheduled_at, id), em
-// páginas de 1.000 (o PostgREST corta cada resposta no max-rows, 1.000 por
-// padrão no Supabase). Nada é reservado aqui: o claim decide.
-async function fetchDueCandidates(db: AdminDb, campaignId: string, limit: number): Promise<QueueItem[]> {
-  const items: QueueItem[] = [];
-  const now = new Date().toISOString();
-  while (items.length < limit) {
-    const from = items.length;
-    const to = Math.min(limit, from + CANDIDATE_PAGE_SIZE) - 1;
-    const { data, error } = await db
-      .from("disp_message_queue")
-      .select("*, contacts(name, phone, company)")
-      .eq("campaign_id", campaignId)
-      .eq("status", "agendado")
-      .lte("scheduled_at", now)
-      // Desempate por id: a rodada inteira vence em < 2 s
-      // (roundSpreadOffsetMs), então muitos itens dividem o scheduled_at.
-      .order("scheduled_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to);
-    if (error) throw error;
-    const page = (data ?? []) as QueueItem[];
-    items.push(...page);
-    if (page.length < to - from + 1) break;
-  }
-  return items;
 }
 
 // Amostra dos itens vencidos mais antigos (sem OFFSET, sem contatos): só para o detector de reflow no caminho em lote (188).
