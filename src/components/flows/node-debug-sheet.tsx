@@ -59,14 +59,14 @@ function getEventIcon(ev: FlowDebugEvent): typeof Circle {
 
 function getEventColor(ev: FlowDebugEvent): string {
   if (ev.event_type === "node_error" || ev.event_type === "run_error") {
-    return "text-red-400";
+    return "text-danger";
   }
   if (
     ev.event_type === "node_completed" ||
     ev.event_type === "run_completed" ||
     ev.event_type === "completed"
   ) {
-    return "text-emerald-400";
+    return "text-success";
   }
   if (ev.event_type === "message_sent") return "text-blue-400";
   if (ev.event_type === "reply_received") return "text-sky-300";
@@ -163,7 +163,7 @@ export function NodeDebugEventsSheet({
                       </span>
                     </div>
                     {ev.error_message && (
-                      <p className="mt-1 text-[11px] text-red-300">
+                      <p className="mt-1 text-[11px] text-danger">
                         {ev.error_message}
                       </p>
                     )}
