@@ -7,6 +7,9 @@ const getMediaUrl = vi.fn(async () => ({ url: 'https://cdn.example/x', mimeType:
 const downloadMedia = vi.fn(async () => ({ buffer: new ArrayBuffer(8), contentType: 'image/jpeg' }))
 const findExistingContact = vi.fn()
 const dispatchInboundToFlows = vi.fn(async () => ({ consumed: true }))
+// PRD 21: run ativo do contato (flow_runs) e simulação de banco sem a coluna messages.flow_response (migration 260 ainda não aplicada)
+let activeRun: { id: string; vars: Record<string, unknown> } | null = null
+let missingFlowColumn = false
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
@@ -16,6 +19,7 @@ vi.mock('@supabase/supabase-js', () => ({
       let head = false
       let wamid: string | null = null
       let op = 'select'
+      let written: unknown
       const b: Record<string, unknown> = {}
       for (const m of ['order', 'neq', 'is', 'in']) b[m] = () => b
       b.select = (_c: string, opts?: { head?: boolean }) => {
@@ -26,13 +30,17 @@ vi.mock('@supabase/supabase-js', () => ({
         if (table === 'messages' && c === 'message_id') wamid = String(v)
         return b
       }
-      b.insert = (payload: unknown) => ((op = 'insert'), calls.push({ table, op, payload }), b)
-      b.update = (payload: unknown) => ((op = 'update'), calls.push({ table, op, payload }), b)
+      b.insert = (payload: unknown) => ((op = 'insert'), (written = payload), calls.push({ table, op, payload }), b)
+      b.update = (payload: unknown) => ((op = 'update'), (written = payload), calls.push({ table, op, payload }), b)
       b.single = async () => ({ data: { id: 'new-row' }, error: null })
       b.maybeSingle = async () => ({ data: null, error: null })
       b.limit = () => b
       b.then = (resolve: (v: unknown) => void) => {
+        if (op === 'insert' && table === 'messages' && missingFlowColumn && written && 'flow_response' in (written as object)) {
+          return resolve({ data: null, error: { code: '42703', message: 'column "flow_response" does not exist' } })
+        }
         if (op !== 'select') return resolve({ data: null, error: null })
+        if (table === 'flow_runs') return resolve({ data: activeRun ? [activeRun] : [], error: null })
         calls.push({ table, op: head ? 'count' : 'select', payload: wamid })
         if (table === 'messages' && head) return resolve({ count: 1, error: null })
         if (table === 'messages') return resolve({ data: wamid && storedWamids.has(wamid) ? [{ id: 'm1' }] : [], error: null })
@@ -73,6 +81,8 @@ beforeEach(() => {
   getMediaUrl.mockClear()
   downloadMedia.mockClear()
   dispatchInboundToFlows.mockClear()
+  activeRun = null
+  missingFlowColumn = false
   findExistingContact.mockReset()
   findExistingContact.mockResolvedValue({ id: 'contact-1', name: 'Fulano' })
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -160,5 +170,71 @@ describe('WH-06: conteúdo legível de button/order/contacts/system (efeitos a j
   it('tipo realmente desconhecido continua como marcador', async () => {
     await run({ id: 'w12', ...base, type: 'hologram' }, contactInfo)
     expect(stored().content_text).toBe('[Unsupported message type: hologram]')
+  })
+})
+
+describe('PRD 21 (PR-21.1): resposta de WhatsApp Flow (nfm_reply) não é mais descartada', () => {
+  const contactInfo = { profile: { name: 'Fulano' }, wa_id: '5511999990001' }
+  const nfm = (id: string, response_json: unknown, extra: Record<string, unknown> = {}) => ({
+    id,
+    from: '5511999990001',
+    timestamp: '1760000000',
+    type: 'interactive',
+    interactive: { type: 'nfm_reply', nfm_reply: { name: 'renegociacao', body: 'Opção selecionada', response_json, ...extra } },
+  })
+  const stored = () => calls.find((c) => c.table === 'messages' && c.op === 'insert')?.payload as Record<string, unknown>
+
+  it('grava o JSON em flow_response e um conteúdo legível; content_type continua interactive', async () => {
+    expect(await run(nfm('wamid.f1', '{"parcelas":3,"valor":150.00,"vencimento":"2026-10-25"}'), contactInfo)).toBe('processed')
+    expect(stored()).toMatchObject({
+      content_type: 'interactive',
+      content_text: 'Opção selecionada: parcelas: 3; valor: 150; vencimento: 2026-10-25',
+      flow_response: { parcelas: 3, valor: 150, vencimento: '2026-10-25' },
+      interactive_reply_id: null,
+    })
+  })
+
+  it('entrega as respostas ao fluxo ATIVO como variáveis e segue como texto comum (sem efetivar acordo)', async () => {
+    activeRun = { id: 'run-1', vars: { nome: 'Maria' } }
+    await run(nfm('wamid.f2', '{"parcelas":3}'), contactInfo)
+    const update = calls.find((c) => c.table === 'flow_runs' && c.op === 'update')
+    expect(update?.payload).toEqual({ vars: { nome: 'Maria', flow_name: 'renegociacao', flow_response_json: '{"parcelas":3}', flow_parcelas: '3' } })
+    expect(dispatchInboundToFlows).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.objectContaining({ kind: 'text', text: 'Opção selecionada: parcelas: 3' }) }),
+    )
+  })
+
+  it('sem fluxo ativo: grava a mensagem e não escreve variável', async () => {
+    await run(nfm('wamid.f3', '{"parcelas":3}'), contactInfo)
+    expect(calls.some((c) => c.table === 'flow_runs' && c.op === 'update')).toBe(false)
+    expect(stored().flow_response).toEqual({ parcelas: 3 })
+  })
+
+  it('JSON inválido: a mensagem entra com o texto e SEM a coluna flow_response', async () => {
+    expect(await run(nfm('wamid.f4', '{quebrado'), contactInfo)).toBe('processed')
+    expect(stored()).toMatchObject({ content_text: 'Opção selecionada' })
+    expect('flow_response' in stored()).toBe(false)
+  })
+
+  it('migration 260 ainda não aplicada: regrava SEM flow_response e não perde a mensagem', async () => {
+    missingFlowColumn = true
+    expect(await run(nfm('wamid.f5', '{"parcelas":3}'), contactInfo)).toBe('processed')
+    const inserts = calls.filter((c) => c.table === 'messages' && c.op === 'insert').map((c) => c.payload as Record<string, unknown>)
+    expect(inserts).toHaveLength(2)
+    expect('flow_response' in inserts[0]).toBe(true)
+    expect('flow_response' in inserts[1]).toBe(false)
+    expect(inserts[1].content_text).toBe('Opção selecionada: parcelas: 3')
+  })
+
+  it('mensagens comuns nunca levam a coluna flow_response (não dependem da migration)', async () => {
+    await run(text('wamid.c1'), contactInfo)
+    expect('flow_response' in stored()).toBe(false)
+    expect(calls.some((c) => c.table === 'flow_runs')).toBe(false)
+  })
+
+  it('botão e lista continuam como antes', async () => {
+    await run({ id: 'wamid.b1', from: '5511999990001', timestamp: '1760000000', type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'sim', title: 'Sim' } } }, contactInfo)
+    expect(stored()).toMatchObject({ content_text: 'Sim', interactive_reply_id: 'sim' })
+    expect('flow_response' in stored()).toBe(false)
   })
 })

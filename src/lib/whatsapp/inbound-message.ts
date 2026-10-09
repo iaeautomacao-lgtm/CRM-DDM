@@ -16,6 +16,8 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
 import { safeDbError } from '@/lib/privacy/mask'
+import { flowResponseVars, parseNfmReply, type ParsedFlowResponse } from '@/lib/whatsapp/flow-response'
+import { deliverFlowResponseToActiveRun } from '@/lib/flows/flow-response-vars'
 
 // Lazy-initialized to avoid build-time crash when env vars are missing
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,9 +81,11 @@ export interface WhatsAppMessage {
    * to advance the per-contact run.
    */
   interactive?: {
-    type: 'button_reply' | 'list_reply'
+    type: 'button_reply' | 'list_reply' | 'nfm_reply'
     button_reply?: { id: string; title: string }
     list_reply?: { id: string; title: string; description?: string }
+    /** Formulário (WhatsApp Flow) concluído pelo cliente — `response_json` é uma STRING JSON (PRD 21). */
+    nfm_reply?: { name?: string; body?: string; response_json?: string }
   }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
@@ -245,7 +249,7 @@ export async function processMessage(
   }
 
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId } =
+  const { contentText, mediaUrl, mediaType, interactiveReplyId, flowResponse } =
     await parseMessageContent(message, accessToken)
 
   // Resolve swipe-reply context if present. A missing parent is fine —
@@ -305,23 +309,38 @@ export async function processMessage(
     .eq('sender_type', 'customer')
   const isFirstInboundMessage = (priorCustomerMsgCount ?? 0) === 0
 
-  const { error: msgError } = await supabaseAdmin()
+  const messageRow = {
+    conversation_id: conversation.id,
+    sender_type: 'customer',
+    content_type: contentType,
+    content_text: contentText,
+    media_url: mediaUrl,
+    message_id: message.id,
+    status: 'delivered',
+    created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
+    reply_to_message_id: replyToInternalId,
+    // Only populated for content_type='interactive'. Migration 010 added
+    // the column; null for every other content_type so existing inserts
+    // behave identically.
+    interactive_reply_id: interactiveReplyId,
+  }
+  // PRD 21 (migration 260): a coluna `flow_response` só entra no INSERT de resposta de formulário — mensagem comum nunca depende
+  // da migration. Se a 260 ainda não foi aplicada, regrava SEM a coluna: o cliente não perde a mensagem (o texto legível fica).
+  let { error: msgError } = await supabaseAdmin()
     .from('messages')
-    .insert({
-      conversation_id: conversation.id,
-      sender_type: 'customer',
-      content_type: contentType,
-      content_text: contentText,
-      media_url: mediaUrl,
-      message_id: message.id,
-      status: 'delivered',
-      created_at: new Date(parseInt(message.timestamp) * 1000).toISOString(),
-      reply_to_message_id: replyToInternalId,
-      // Only populated for content_type='interactive'. Migration 010 added
-      // the column; null for every other content_type so existing inserts
-      // behave identically.
-      interactive_reply_id: interactiveReplyId,
+    .insert(flowResponse?.data ? { ...messageRow, flow_response: flowResponse.data } : messageRow)
+  if (msgError && flowResponse?.data && (msgError.code === '42703' || msgError.code === 'PGRST204')) {
+    console.error('[webhook] messages.flow_response ausente (aplique a migration 260); gravando a resposta só como texto')
+    void writeLog({
+      account_id: accountId,
+      level: 'error',
+      source: 'webhook_meta',
+      event: 'flow_response_column_missing',
+      message: 'Resposta de WhatsApp Flow gravada só como texto: falta a migration 260 (messages.flow_response)',
+      payload: { message_id: message.id },
     })
+    ;({ error: msgError } = await supabaseAdmin().from('messages').insert(messageRow))
+  }
 
   if (msgError) {
     // 23505 = unique_violation na migration 088 (idx_messages_message_id_unique)
@@ -418,6 +437,27 @@ export async function processMessage(
   // Webchat" ligada recebe o convite e conta como tratada (sem fluxo
   // receptivo, sem IA global) — ver src/lib/webchat/campaign.ts.
   // ============================================================
+  // Resposta de WhatsApp Flow (PRD 21): as respostas viram variáveis do fluxo ATIVO (`{{vars.flow_parcelas}}`…) ANTES do dispatch, para o
+  // próximo nó já enxergá-las. Só dados: nenhuma efetivação de acordo é chamada aqui (decisão do dono, 09/10). O texto legível segue
+  // para o fluxo como um texto comum (kind 'text').
+  if (flowResponse) {
+    const delivered = await deliverFlowResponseToActiveRun(supabaseAdmin(), {
+      accountId,
+      contactId: contactRecord.id,
+      vars: flowResponseVars(flowResponse),
+    })
+    void writeLog({
+      account_id: accountId,
+      level: flowResponse.issue ? 'warn' : 'info',
+      source: 'webhook_meta',
+      event: 'flow_response_received',
+      message: flowResponse.issue
+        ? `Resposta de WhatsApp Flow recebida com problema (${flowResponse.issue}); o texto foi gravado sem o JSON`
+        : 'Resposta de WhatsApp Flow recebida',
+      payload: { message_id: message.id, flow_name: flowResponse.flowName, issue: flowResponse.issue, delivered_to_flow: delivered },
+    })
+  }
+
   const movedToWebchat = await maybeStartCampaignWebchat({
     accountId,
     userId: configOwnerUserId,
@@ -511,7 +551,7 @@ export async function processMessage(
   // em menu/botão) — ver src/lib/ai/sentiment-trigger.ts.
   maybeScheduleSentiment(
     { accountId, contactId: contactRecord.id, conversationId: conversation.id },
-    { text: contentText, flowConsumed, isInteractiveReply: Boolean(interactiveReplyId) },
+    { text: contentText, flowConsumed, isInteractiveReply: Boolean(interactiveReplyId) || Boolean(flowResponse) },
   )
 
   // Fire any automations that react to this webhook event. All dispatches
@@ -691,6 +731,8 @@ async function parseMessageContent(
    * tap with the right affordance. Null for everything else.
    */
   interactiveReplyId: string | null
+  /** Resposta de WhatsApp Flow (`nfm_reply`): JSON preservado + texto legível. Null para todo o resto. */
+  flowResponse: ParsedFlowResponse | null
 }> {
   // getMediaUrl signature is (mediaId, accessToken) — earlier code had
   // the args swapped, so every verification hit an invalid Meta URL and
@@ -716,6 +758,7 @@ async function parseMessageContent(
     mediaUrl: null,
     mediaType: null,
     interactiveReplyId: null,
+    flowResponse: null as ParsedFlowResponse | null,
   }
 
   switch (message.type) {
@@ -823,6 +866,11 @@ async function parseMessageContent(
       // Use the human-readable title as contentText so the inbox bubble
       // renders the tap legibly ("Existing customer"), and stash the
       // stable id separately so the Flows engine can route on it.
+      // Formulário (WhatsApp Flow) concluído: preserva o JSON e deixa o conteúdo legível (PRD 21, FLOW-01).
+      if (message.interactive?.type === 'nfm_reply' || message.interactive?.nfm_reply) {
+        const flowResponse = parseNfmReply(message.interactive?.nfm_reply)
+        return { ...empty, contentText: flowResponse.text, flowResponse }
+      }
       const reply =
         message.interactive?.button_reply ?? message.interactive?.list_reply
       if (reply?.id) {

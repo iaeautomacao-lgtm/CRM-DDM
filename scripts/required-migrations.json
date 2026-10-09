@@ -148,6 +148,10 @@
     {
       "version": "248_audit_roles",
       "kind": "registry"
+    },
+    {
+      "version": "260_whatsapp_flows",
+      "kind": "registry"
     }
   ]
 }
