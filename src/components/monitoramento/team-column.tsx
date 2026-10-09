@@ -61,7 +61,7 @@ export function TeamColumn({
   const someSelected = conversationIds.some((id) => actions.selectedIds.has(id));
 
   return (
-    <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card">
+    <section className="flex min-h-0 flex-col rounded-[10px] border border-border bg-card">
       <header className="flex items-center gap-2 border-b border-border px-4 py-3">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <Users className="h-4 w-4" />
