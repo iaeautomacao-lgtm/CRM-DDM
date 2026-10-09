@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
@@ -43,6 +43,7 @@ function LoginPageInner() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const firstFieldRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(
     searchParams.get("error") === "auth-callback-failed"
       ? "Não foi possível validar o link. Solicite um novo link de acesso ou recuperação."
@@ -65,6 +66,8 @@ function LoginPageInner() {
 
     if (error) {
       setError(translateAuthError(error));
+      // O botão focado fica desabilitado no envio: devolve o foco ao primeiro campo para quem usa teclado.
+      setTimeout(() => firstFieldRef.current?.focus(), 0);
       setLoading(false);
       return;
     }
@@ -118,6 +121,7 @@ function LoginPageInner() {
           </Label>
           <Input
             id="email"
+            ref={firstFieldRef}
             type="email"
             autoComplete="email"
             placeholder="seu@exemplo.com"
@@ -159,6 +163,7 @@ function LoginPageInner() {
               type="button"
               onClick={() => setShowPassword((v) => !v)}
               aria-pressed={showPassword}
+              aria-label="Mostrar senha"
               aria-controls="password"
               className="absolute right-1.5 h-[30px] rounded-[6px] px-2 text-xs font-semibold text-foreground-2 hover:bg-surface-hover hover:text-foreground"
             >
