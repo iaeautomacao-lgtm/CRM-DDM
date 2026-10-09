@@ -57,7 +57,7 @@ export function variableSuggestions(
   const name = contact?.name?.trim();
   if (name) {
     out.push({ label: "Nome", value: name });
-    const first = name.split(/s+/)[0];
+    const first = name.split(/\s+/)[0];
     if (first && first !== name) out.push({ label: "Primeiro nome", value: first });
   }
   const inst = contact?.instituicao?.trim();

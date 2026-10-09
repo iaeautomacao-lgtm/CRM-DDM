@@ -104,7 +104,7 @@ function displayNameOf(p: ChatContact): string {
 }
 
 function normalizeQuery(text: string): string {
-  return text.trim().toLowerCase().normalize("NFD").replace(/[0300-036f]/g, "");
+  return text.trim().toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
 function kindOfMime(mime: string): StagedMediaKind {
