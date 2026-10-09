@@ -31,7 +31,7 @@ import {
   type ImportChunkResults,
 } from "@/lib/disparador/import-chunks";
 import { TEMPLATE_VALIDATION_COLUMNS } from "@/lib/disparador/template-validation";
-import { importTokenField } from "@/lib/disparador/import-client";
+import { importTokenField, type ReusedList } from "@/lib/disparador/import-client";
 import { utmCpfKey, utmPhoneKey } from "@/lib/disparador/utm-links";
 import { SAMPLE_PREVIEW_CONTACT } from "./message-preview";
 import { StepConfiguracoes } from "./step-configuracoes";
@@ -73,6 +73,11 @@ interface CampaignWizardProps {
   tags: Array<{ id: string; name: string }>;
   onClose: () => void;
   onSaved: () => void;
+  /**
+   * Lista importada reaproveitada (POST /imports/[id]/reuse): campanha NOVA cujo público é o rascunho devolvido
+   * pelo servidor (draft_id), tratado como base já importada — o mesmo caminho da edição com base existente.
+   */
+  reusedList?: ReusedList | null;
 }
 
 const DRAFT_VERSION = 2;
@@ -114,7 +119,9 @@ function isBlankForm(form: WizardForm): boolean {
 
 const UTM_LINK_TYPE = "utm_link";
 
-export function CampaignWizard({ open, editing, accountId, channels, teams, tags, onClose, onSaved }: CampaignWizardProps) {
+export function CampaignWizard({ open, editing, accountId, channels, teams, tags, onClose, onSaved, reusedList = null }: CampaignWizardProps) {
+  // Lista reaproveitada só vale para campanha nova.
+  const reuse = editing ? null : reusedList;
   const [form, setForm] = useState<WizardForm>(() => emptyWizardForm(new Date()));
   const update = useCallback((patch: Partial<WizardForm>) => setForm((prev) => ({ ...prev, ...patch })), []);
   const [step, setStep] = useState<WizardStep>(1);
@@ -155,9 +162,9 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
   const lastGroupRef = useRef<string | null>(null);
   const [serverCheck, setServerCheck] = useState<ServerCheck>({ state: "idle" });
 
-  const keepsExistingAudience = Boolean(
-    editing && (editing.audience_mode === "csv" || (editing.audience_mode == null && editing.import_draft_id))
-  );
+  const keepsExistingAudience =
+    Boolean(reuse) ||
+    Boolean(editing && (editing.audience_mode === "csv" || (editing.audience_mode == null && editing.import_draft_id)));
 
   // ---- Abertura / reinício ----
   useEffect(() => {
@@ -176,9 +183,10 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
     setUtmDone(false);
     setUtmProgress(null);
     setAudiencePreview(null);
-    setExistingAudience(null);
+    setExistingAudience(reuse ? reuse.contacts : null);
     setServerCheck({ state: "idle" });
-    setDraftId(crypto.randomUUID());
+    // Lista reaproveitada: o rascunho já existe no servidor (vínculos e VAR1–3 copiados pelo reuse).
+    setDraftId(reuse ? reuse.draftId : crypto.randomUUID());
     if (editing) {
       const team = inferTeamFromChannels(editing.session_ids ?? [], channels);
       const next = formFromCampaign(editing, at, team);
@@ -198,23 +206,24 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
           saved = null;
         }
       }
-      setPendingDraft(saved && !isBlankForm(saved) ? saved : null);
+      // Com lista reaproveitada não oferece restaurar o rascunho local (ele não tinha esse público).
+      setPendingDraft(saved && !isBlankForm(saved) && !reuse ? saved : null);
     }
     // Reinicia só quando o modal abre (ou troca a campanha em edição).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, editing?.id]);
+  }, [open, editing?.id, reuse?.draftId]);
 
   // Rascunho local (só criação): guarda o formulário inteiro, menos o arquivo.
   useEffect(() => {
     const key = draftKey(accountId);
-    if (!open || editing || pendingDraft || !key) return;
+    if (!open || editing || reuse || pendingDraft || !key) return;
     try {
       if (isBlankForm(form)) localStorage.removeItem(key);
       else localStorage.setItem(key, JSON.stringify(form));
     } catch {
       // Armazenamento indisponível (modo privado): segue sem rascunho.
     }
-  }, [open, editing, pendingDraft, accountId, form]);
+  }, [open, editing, reuse, pendingDraft, accountId, form]);
 
   // Relógio da validação de agendamento (data no passado) e da previsão.
   useEffect(() => {
@@ -777,7 +786,9 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
     audienceMode === "csv"
       ? importFile
         ? `base importada (${importFile.name})${form.tags.length ? ` com a tabulação ${form.tags.join(", ")}` : ""}`
-        : "base já importada na campanha"
+        : reuse
+          ? `lista “${reuse.name}”`
+          : "base já importada na campanha"
       : audienceMode === "tags"
         ? `contatos com a tabulação ${form.tags.join(", ")}`
         : "todos os contatos da conta";
@@ -918,6 +929,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
                 clear: clearImport,
               }}
               keepsExistingAudience={ctx.keepsExistingAudience}
+              reusedListName={reuse && !importFile ? reuse.name : null}
               audiencePreview={audiencePreview}
               utm={{ visible: utmVisible, loading: utmLoading, done: utmDone, progress: utmProgress, onGenerate: () => void handleGerarUTM() }}
             />
@@ -944,7 +956,8 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
               columnMap={columnMap}
               hasFile={Boolean(importFile)}
               csvAvailable={csvColumnsAvailable(ctx)}
-              utmAvailable={utmDone || ctx.keepsExistingAudience}
+              // O reuse não copia links UTM: com lista reaproveitada, só depois de gerar neste arquivo.
+              utmAvailable={utmDone || (ctx.keepsExistingAudience && !reuse)}
               previewTargets={previewTargets}
             />
           )}

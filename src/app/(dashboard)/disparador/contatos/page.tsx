@@ -3,12 +3,13 @@
 // /disparador/contatos — "Listas importadas" (PRD 22, PR 8). A importação deixa de ser um formulário síncrono e vira
 // um job em segundo plano (POST /api/disparador/imports, blocos, start; docs/disparador-importacao-assincrona.md):
 // importações em andamento com barra de progresso, listas concluídas (GET /imports/lists, paginado) e o detalhe de
-// cada uma com totais, erros por linha e renomear. "Usar em nova campanha" (POST /imports/[id]/reuse) fica para quando
-// o assistente aceitar uma lista reaproveitada como origem.
+// cada uma com totais, erros por linha, renomear e "Usar em nova campanha" (POST /imports/[id]/reuse → assistente
+// em Campanhas com o rascunho devolvido como público).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Download, FileSpreadsheet, Loader2, Pencil, RefreshCw, Search, Upload, Users } from "lucide-react";
+import { Download, FileSpreadsheet, Loader2, Megaphone, Pencil, RefreshCw, Search, Upload, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { apiFetch } from "@/lib/api-fetch";
@@ -29,6 +30,7 @@ import {
   isActiveImport,
   type PublicImportJob,
   type PublicImportList,
+  reuseCampaignHref,
 } from "@/lib/disparador/import-client";
 
 const POLL_MS = 3000;
@@ -288,6 +290,7 @@ function ImportDetailDrawer({ id, onClose, onRenamed }: { id: string | null; onC
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (!id) return;
@@ -307,6 +310,24 @@ function ImportDetailDrawer({ id, onClose, onRenamed }: { id: string | null; onC
       cancelled = true;
     };
   }, [id]);
+
+  // "Usar em nova campanha": o servidor copia vínculos e VAR1–3 para um rascunho novo (a lista de origem não muda) e
+  // o assistente abre em Campanhas com esse rascunho como público.
+  const [reusing, setReusing] = useState(false);
+  const reuse = async () => {
+    if (!job) return;
+    setReusing(true);
+    try {
+      const b = await getJson<{ draft_id: string; contacts: number; variables: number }>(
+        `/api/disparador/imports/${job.id}/reuse`,
+        { method: "POST" },
+      );
+      router.push(reuseCampaignHref({ draftId: b.draft_id, name: importListLabel(job), contacts: b.contacts, variables: b.variables }));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Não foi possível reutilizar a lista.");
+      setReusing(false);
+    }
+  };
 
   const rename = async () => {
     if (!job) return;
@@ -373,9 +394,17 @@ function ImportDetailDrawer({ id, onClose, onRenamed }: { id: string | null; onC
               </Button>
             </form>
           ) : (
-            <Button variant="outline" className="self-start" onClick={() => setEditing(true)}>
-              <Pencil className="size-3.5" aria-hidden="true" /> Renomear lista
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {job.state === "done" && (
+                <Button onClick={() => void reuse()} disabled={reusing}>
+                  {reusing ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <Megaphone className="size-3.5" aria-hidden="true" />}
+                  Usar em nova campanha
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => setEditing(true)}>
+                <Pencil className="size-3.5" aria-hidden="true" /> Renomear lista
+              </Button>
+            </div>
           )}
           {isActiveImport(job.state) && (
             <div className="flex flex-col gap-2">
