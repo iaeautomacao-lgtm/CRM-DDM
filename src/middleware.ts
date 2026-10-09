@@ -149,6 +149,7 @@ export function middleware(request: NextRequest) {
     '/relatorios',
     '/monitoramento',
     '/disparador',
+    '/regua',
     '/agente-de-ia',
     '/configuracoes',
     '/automacoes',

@@ -1,5 +1,6 @@
 import {
   Activity,
+  CalendarClock,
   Bot,
   Download,
   FileText,
@@ -56,6 +57,7 @@ export const navItems: NavItem[] = [
   { href: "/canais", label: "Canais", icon: Wifi, group: "relationship" },
 
   { href: "/disparador", label: "Disparador", icon: Megaphone, group: "campaigns" },
+  { href: "/regua", label: "Régua de cobrança", icon: CalendarClock, group: "campaigns" },
 
   { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation", beta: true },
   { href: "/settings?tab=ai", label: "Agente de IA", icon: Bot, group: "automation" },
