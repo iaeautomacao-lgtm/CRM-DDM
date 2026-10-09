@@ -2,123 +2,117 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import { Inbox } from 'lucide-react'
+import { Handshake, Inbox, MessageSquare, UserPlus, Zap, type LucideIcon } from 'lucide-react'
 import type { ActivityItem, ActivityKind } from '@/lib/dashboard/types'
+import { relativeShort } from '@/lib/dashboard/view'
+import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
+import { DashCard } from './dash-card'
 import { EmptyState } from './empty-state'
-import { Skeleton } from './skeleton'
 
-interface ActivityFeedProps {
+const KIND: Record<ActivityKind, { icon: LucideIcon; label: string }> = {
+  message: { icon: MessageSquare, label: 'Conversa' },
+  contact: { icon: UserPlus, label: 'Contato' },
+  deal: { icon: Handshake, label: 'Negócio' },
+  automation: { icon: Zap, label: 'Automação' },
+}
+
+const STEP = 8
+
+/**
+ * "Atividade recente": mensagens de clientes, contatos novos, negócios e
+ * automações, do mais novo para o mais antigo, com tempo relativo.
+ */
+export function ActivityFeed({
+  items,
+  loading,
+  nowMs,
+}: {
   items: ActivityItem[] | null
   loading: boolean
-}
-
-const PAGE_SIZES = [5, 10, 20, 50] as const
-type PageSize = (typeof PAGE_SIZES)[number]
-
-const KIND_LABEL: Record<ActivityKind, string> = {
-  message: 'Conversa',
-  contact: 'Contato',
-  deal: 'Negócio',
-  automation: 'Automação',
-}
-
-export function ActivityFeed({ items, loading }: ActivityFeedProps) {
-  const [pageSize, setPageSize] = useState<PageSize>(5)
-  const totalLoaded = items?.length ?? 0
-  const visible = items?.slice(0, pageSize) ?? []
-
-  const isSizeUseful = (size: PageSize, i: number) =>
-    i === 0 || totalLoaded > PAGE_SIZES[i - 1]
+  /** Relógio da página (atualiza o tempo relativo sem recarregar). */
+  nowMs: number
+}) {
+  const [limit, setLimit] = useState(STEP)
+  const visible = items?.slice(0, limit) ?? []
 
   return (
-    <section className="">
-      <header className="flex items-center justify-between gap-3 pb-3">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">Atividade recente</h2>
-          
-        </div>
-        <Link href="/inbox" className="text-xs font-medium text-primary hover:text-primary/80">
-          Ver tudo
+    <DashCard
+      title="Atividade recente"
+      className="flex-[2_1_560px] gap-2 pb-2.5"
+      action={
+        <Link href="/inbox" className="text-[12.5px] font-semibold text-primary-text hover:underline">
+          Ver conversas
         </Link>
-      </header>
-
+      }
+    >
       {loading || !items ? (
-        <div className="space-y-2 border-t border-border pt-4">
+        <div className="flex flex-col gap-2" aria-busy="true">
           {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-9 w-full" />
+            <Skeleton key={i} className="h-11 w-full" />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="border-t border-border pt-4">
-          <EmptyState
-            icon={Inbox}
-            title="Nenhuma atividade ainda"
-            hint="Mensagens, negócios, contatos e automações aparecerão aqui."
-          />
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="Nenhuma atividade ainda"
+          hint="Mensagens, negócios, contatos e automações aparecem aqui."
+        />
       ) : (
         <>
-          <ul className="divide-y divide-border border-t border-border">
+          <ul className="ddm-stagger m-0 flex list-none flex-col p-0">
             {visible.map((item) => {
+              const k = KIND[item.kind]
+              const failed = item.kind === 'automation' && item.text.includes('falhou')
+              const Icon = k.icon
               const row = (
-                <div className="grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 py-2.5 text-sm">
-                  <time className="text-xs tabular-nums text-muted-foreground">{shortTime(item.at)}</time>
-                  <span className="min-w-0 truncate text-foreground">{item.text}</span>
-                  <span className="text-xs text-muted-foreground">{KIND_LABEL[item.kind]}</span>
-                </div>
+                <>
+                  <span
+                    className={cn(
+                      'flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-3',
+                      failed ? 'text-danger' : item.kind === 'deal' ? 'text-success' : 'text-foreground-2',
+                    )}
+                  >
+                    <Icon className="size-3.5" aria-hidden="true" />
+                  </span>
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="text-[13px] leading-[1.45] text-foreground [text-wrap:pretty]">{item.text}</span>
+                    <span className="text-xs text-muted-foreground">{k.label}</span>
+                  </span>
+                  <time
+                    dateTime={item.at}
+                    title={new Date(item.at).toLocaleString('pt-BR')}
+                    className="shrink-0 text-xs tabular-nums text-muted-foreground"
+                  >
+                    {relativeShort(item.at, nowMs)}
+                  </time>
+                </>
               )
-
+              const cls = '-mx-2 flex items-start gap-3 rounded-[6px] px-2 py-2.5 text-foreground'
               return (
-                <li key={item.id} className="transition-colors hover:bg-muted/35">
+                <li key={item.id}>
                   {item.href ? (
-                    <Link href={item.href} className="block">
+                    <Link href={item.href} className={cn(cls, 'transition-colors hover:bg-surface-hover')}>
                       {row}
                     </Link>
                   ) : (
-                    row
+                    <div className={cls}>{row}</div>
                   )}
                 </li>
               )
             })}
           </ul>
-
-          <footer className="flex items-center justify-between border-t border-border py-3 text-xs">
-            <span className="text-muted-foreground tabular-nums">
-              Exibindo {visible.length} de {totalLoaded}{totalLoaded === 50 ? '+' : ''}
-            </span>
-            <div className="flex items-center gap-1">
-              <span className="mr-1 text-muted-foreground">Mostrar</span>
-              {PAGE_SIZES.map((size, i) => {
-                const disabled = !isSizeUseful(size, i)
-                return (
-                  <button
-                    key={size}
-                    type="button"
-                    onClick={() => setPageSize(size)}
-                    disabled={disabled}
-                    className={cn(
-                      'rounded px-2 py-1 font-medium tabular-nums transition-colors',
-                      pageSize === size
-                        ? 'bg-secondary text-secondary-foreground'
-                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-                      disabled && 'cursor-not-allowed opacity-40 hover:bg-transparent hover:text-muted-foreground',
-                    )}
-                  >
-                    {size}
-                  </button>
-                )
-              })}
-            </div>
-          </footer>
+          {items.length > limit && (
+            <button
+              type="button"
+              onClick={() => setLimit(limit + STEP)}
+              className="self-start pb-1 text-[12.5px] font-semibold text-primary-text hover:underline"
+            >
+              Mostrar mais
+            </button>
+          )}
         </>
       )}
-    </section>
+    </DashCard>
   )
-}
-
-function shortTime(iso: string): string {
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return '—'
-  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }

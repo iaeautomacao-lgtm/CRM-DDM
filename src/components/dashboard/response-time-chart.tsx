@@ -1,114 +1,113 @@
-"use client"
-
-import { Clock } from 'lucide-react'
+import { ArrowDown, ArrowUp, Clock, Minus } from 'lucide-react'
 import { DOW_SHORT_MON_FIRST } from '@/lib/dashboard/date-utils'
 import type { ResponseTimeSummary } from '@/lib/dashboard/types'
-import { BarChart } from '@/components/tremor/bar-chart'
+import { deltaTone, formatMinutes } from '@/lib/dashboard/view'
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
+import { DashCard } from './dash-card'
 import { EmptyState } from './empty-state'
-import { Skeleton } from './skeleton'
 
-interface ResponseTimeChartProps {
-  data: ResponseTimeSummary | null
-  loading: boolean
-  /** Minutes. Surfaced as a "target" pill in the header. The
-   *  hand-rolled SVG version drew this as a horizontal dashed
-   *  line on the chart; Tremor BarChart doesn't expose Recharts
-   *  primitives, so we promote it to the header for now. A
-   *  follow-up can introduce an overlay or extend the vendored
-   *  BarChart with a `referenceLines` prop. */
-  thresholdMinutes?: number
-}
-
-// Single category, single colour — the data is "average minutes
-// per weekday". Tremor expects categories as the second tuple in
-// the row object, so we shape the buckets into
-// `{ day: 'Mon', 'Avg minutes': 4.2 }` rows below.
-const CATEGORY = 'Média (min)'
-
+/**
+ * "Tempo de primeira resposta": média da semana, variação contra a semana
+ * anterior (descer é bom) e barras por dia da semana com a linha da meta.
+ * Dias acima da meta ficam em vermelho.
+ */
 export function ResponseTimeChart({
   data,
   loading,
   thresholdMinutes = 5,
-}: ResponseTimeChartProps) {
+}: {
+  data: ResponseTimeSummary | null
+  loading: boolean
+  /** Meta em minutos (linha tracejada). */
+  thresholdMinutes?: number
+}) {
   const hasData = data?.buckets.some((b) => b.avgMinutes != null) ?? false
 
-  // Map buckets → Tremor rows. Null `avgMinutes` (no samples)
-  // collapses to 0; the chart will render an empty slot for it.
-  // We attach `samples` on the row so a future customTooltip can
-  // surface "no samples" copy without losing the data shape.
-  const chartData =
-    data?.buckets.map((b, i) => ({
-      day: DOW_SHORT_MON_FIRST[i],
-      [CATEGORY]: b.avgMinutes ?? 0,
-      samples: b.samples,
-    })) ?? []
-
   return (
-    <section className="">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">
-            Tempo Médio de Primeira Resposta
-          </h2>
-          
+    <DashCard
+      title="Tempo de primeira resposta"
+      subtitle={`Média da semana · meta ${thresholdMinutes} min`}
+      className="flex-[1_1_300px]"
+    >
+      {loading || !data ? (
+        <div className="flex flex-col gap-3" aria-busy="true">
+          <Skeleton className="h-[30px] w-32" />
+          <Skeleton className="h-[140px] w-full" />
         </div>
-        {data && (data.thisWeekAvg != null || data.lastWeekAvg != null) ? (
-          <div className="flex items-center gap-4 rounded-lg border border-border/80 bg-card/25 px-4 py-3">
-            <div>
-              <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                Média atual
-              </p>
-              <p className="mt-1 text-xl font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
-                {fmt(data.thisWeekAvg)}
-              </p>
-            </div>
-            <div className="h-8 w-px bg-border" />
-            <div className="text-[11px] text-muted-foreground">
-              <p>Meta <span className="font-medium tabular-nums text-foreground">{thresholdMinutes}m</span></p>
-              <p className="mt-1">Anterior <span className="tabular-nums">{fmt(data.lastWeekAvg)}</span></p>
-            </div>
-          </div>
-        ) : null}
-      </header>
-
-      <div className="mt-4">
-        {loading || !data ? (
-          <Skeleton className="h-[260px] w-full" />
-        ) : !hasData ? (
-          <EmptyState
-            icon={Clock}
-            title="Nenhuma resposta registrada ainda"
-            hint="Este gráfico é preenchido conforme você responde às mensagens dos clientes."
-          />
-        ) : (
-          <BarChart
-            data={chartData}
-            index="day"
-            categories={[CATEGORY]}
-            // 'ddmOrange' maps to the DDM brand primary (#FF5706) — see
-            // chart-colors.ts.
-            colors={['ddmOrange']}
-            valueFormatter={(value) => `${value.toFixed(1)}m`}
-            showLegend={false}
-            borderRadius={2}
-            // Explicit floor at 0 + no fixed yAxisWidth override — let
-            // Tremor size the axis to whatever tick labels it computes,
-            // instead of a width tuned for a narrower label that could
-            // clip/duplicate ticks (e.g. "0.1m" appearing twice).
-            minValue={0}
-            // Compact height so the chart sits well inside the card
-            // without dominating the row alongside the donut + activity feed.
-            className="h-[260px]"
-          />
-        )}
-      </div>
-    </section>
+      ) : !hasData ? (
+        <EmptyState
+          icon={Clock}
+          title="Nenhuma resposta registrada ainda"
+          hint="Este gráfico é preenchido conforme a equipe responde às mensagens dos clientes."
+        />
+      ) : (
+        <Body data={data} meta={thresholdMinutes} />
+      )}
+    </DashCard>
   )
 }
 
-function fmt(mins: number | null): string {
-  if (mins == null) return '—'
-  if (mins < 1) return `${Math.max(1, Math.round(mins * 60))}s`
-  if (mins < 60) return `${mins.toFixed(1)}m`
-  return `${(mins / 60).toFixed(1)}h`
+function Body({ data, meta }: { data: ResponseTimeSummary; meta: number }) {
+  const values = data.buckets.map((b) => b.avgMinutes ?? 0)
+  // Escala com folga acima da meta e do maior valor, para a linha caber.
+  const scaleMax = Math.max(meta * 1.4, ...values) * 1.1
+  const metaPct = (meta / scaleMax) * 100
+  const delta =
+    data.thisWeekAvg != null && data.lastWeekAvg != null ? data.thisWeekAvg - data.lastWeekAvg : null
+  const tone = delta == null ? 'flat' : deltaTone(delta, false)
+  const Arrow = delta == null || delta === 0 ? Minus : delta > 0 ? ArrowUp : ArrowDown
+
+  return (
+    <>
+      <div className="flex flex-wrap items-baseline gap-2.5">
+        <span className="text-[30px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-foreground">
+          {formatMinutes(data.thisWeekAvg)}
+        </span>
+        {delta != null && (
+          <span
+            className={cn(
+              'inline-flex items-center gap-[3px] text-xs font-semibold tabular-nums',
+              tone === 'down-good' ? 'text-success' : tone === 'up-bad' ? 'text-danger' : 'text-muted-foreground',
+            )}
+          >
+            <Arrow className="size-3" aria-hidden="true" />
+            {formatMinutes(Math.abs(delta))} vs semana anterior
+          </span>
+        )}
+      </div>
+      <div className="relative flex min-h-[120px] flex-1 items-end gap-2 pb-5">
+        <div
+          className="absolute inset-x-0 border-t border-dashed border-danger"
+          style={{ bottom: `calc(20px + (100% - 20px) * ${metaPct / 100})` }}
+        >
+          <span className="absolute right-0 top-[-17px] text-[11px] font-semibold text-danger">
+            Meta {meta} min
+          </span>
+        </div>
+        {data.buckets.map((b, i) => {
+          const v = b.avgMinutes
+          const over = v != null && v > meta
+          return (
+            <div
+              key={b.dow}
+              title={`${DOW_SHORT_MON_FIRST[i]}: ${v == null ? 'sem respostas' : formatMinutes(v)}`}
+              className="relative flex h-full flex-1 flex-col items-center justify-end"
+            >
+              <span
+                className={cn(
+                  'w-full max-w-[26px] origin-bottom animate-ddm-col rounded-t-[3px] transition-[height] duration-300',
+                  v == null ? 'bg-surface-3' : over ? 'bg-danger' : 'bg-muted-foreground',
+                )}
+                style={{ height: v == null ? '3px' : `${(v / scaleMax) * 100}%` }}
+              />
+              <span className="absolute bottom-[-18px] text-[11px] text-muted-foreground">
+                {DOW_SHORT_MON_FIRST[i]}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
 }
