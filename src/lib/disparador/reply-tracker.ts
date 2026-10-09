@@ -178,6 +178,18 @@ async function countFirstReply(item: SentQueueItem): Promise<void> {
   const elapsed = Math.round((Date.now() - new Date(item.sent_at).getTime()) / 1000);
   if (elapsed <= 0) return; // sent_at no futuro ou igual a agora — dado inválido
 
+  // Migration 294: média num único UPDATE no banco (respostas simultâneas não se atropelam). Sem a função, cai na
+  // leitura + gravação abaixo (caminho antigo, sujeito à corrida).
+  const { error: atomicError } = await supabaseAdmin().rpc("record_campaign_reply_time", {
+    p_campaign_id: item.campaign_id,
+    p_elapsed_seconds: elapsed,
+  });
+  if (!atomicError) return;
+  if (!isMissingFunctionError(atomicError)) {
+    console.error("[recordCampaignReply] falha ao atualizar tempo_medio_resposta:", atomicError.message);
+    return;
+  }
+
   const { data: metricsRows, error: metricsError } = await supabaseAdmin()
     .from("campaign_metrics_live")
     .select("total_respostas, tempo_medio_resposta")
@@ -352,4 +364,12 @@ async function findMessageByProviderId(
     return null;
   }
   return data?.[0] ?? null;
+}
+
+function isMissingFunctionError(error: { code?: string; message?: string }): boolean {
+  return (
+    error.code === "PGRST202" ||
+    error.code === "42883" ||
+    /could not find the function|does not exist/i.test(error.message ?? "")
+  );
 }
