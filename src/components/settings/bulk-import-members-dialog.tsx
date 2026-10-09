@@ -21,14 +21,12 @@ import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
-  CheckCircle,
   Download,
   Eye,
   EyeOff,
   FileText,
   Loader2,
   Upload,
-  XCircle,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -43,6 +41,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { StatusChip } from '@/components/ddm/status-chip';
+import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import type { AccountRole } from '@/lib/auth/roles';
 import { ROLE_META } from './role-meta';
 
@@ -169,8 +169,10 @@ export function BulkImportMembersDialog({
   const [showPassword, setShowPassword] = useState(false);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<BulkImportResult | null>(null);
+  const [tried, setTried] = useState(false);
 
   function reset() {
+    setTried(false);
     setFile(null);
     setRows([]);
     setInternalDuplicateCount(0);
@@ -314,38 +316,23 @@ export function BulkImportMembersDialog({
     }
   }
 
+  const passwordTooShort = tried && password.length < MIN_PASSWORD_LENGTH;
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex max-h-[min(90vh,720px)] flex-col gap-0 overflow-hidden bg-popover border-border p-0 text-popover-foreground sm:max-w-2xl">
+      <DialogContent className="flex max-h-[min(90vh,720px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         <div className="shrink-0 space-y-4 border-b border-border px-6 pt-6 pb-5">
           <DialogHeader className="gap-1.5">
-            <DialogTitle className="text-lg text-popover-foreground">
-              Importar usuários
-            </DialogTitle>
-            <DialogDescription className="leading-relaxed text-muted-foreground">
-              Envie um CSV ou XLSX com as colunas{' '}
-              <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">
-                nome
-              </code>
-              ,{' '}
-              <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">
-                email
-              </code>{' '}
-              e, opcionalmente,{' '}
-              <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-muted-foreground">
-                role
-              </code>{' '}
-              (administrador, supervisor, operador ou visualizador — padrão: operador).
-              Cada linha recebe um login com a senha padrão abaixo.
+            <DialogTitle className="font-heading text-lg">Importar usuários</DialogTitle>
+            <DialogDescription className="leading-relaxed">
+              Envie um CSV ou XLSX com as colunas <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">nome</code>,{' '}
+              <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">email</code> e, opcionalmente,{' '}
+              <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">role</code> (administrador, supervisor, operador ou visualizador — padrão:
+              operador). Cada linha recebe um login com a senha padrão abaixo.
             </DialogDescription>
           </DialogHeader>
 
-          <Button
-            type="button"
-            variant="outline"
-            onClick={downloadTemplate}
-            className="border-border text-muted-foreground hover:bg-muted"
-          >
+          <Button type="button" variant="outline" onClick={downloadTemplate}>
             <Download className="size-4" />
             Baixar modelo
           </Button>
@@ -353,37 +340,37 @@ export function BulkImportMembersDialog({
           <div
             role="button"
             tabIndex={0}
+            aria-label="Escolher arquivo CSV ou XLSX"
             onClick={() => fileInputRef.current?.click()}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click();
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
             }}
             className={cn(
-              'group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-5 transition-all',
-              file
-                ? 'border-primary/35 bg-primary/[0.04]'
-                : 'hover:border-primary/40 border-border bg-background/40 hover:bg-background/70',
+              'group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-[10px] border border-dashed p-5 transition-colors focus-visible:outline-2 focus-visible:outline-primary',
+              file ? 'border-primary bg-primary-soft' : 'border-border bg-surface-2 hover:border-primary',
             )}
           >
             {file ? (
               <>
-                <div className="bg-primary/15 ring-primary/25 flex size-10 items-center justify-center rounded-lg ring-1">
-                  <FileText className="text-primary size-5" />
+                <div className="flex size-10 items-center justify-center rounded-lg bg-primary-soft">
+                  <FileText className="size-5 text-primary" />
                 </div>
-                <p className="max-w-full truncate px-2 text-sm font-medium text-popover-foreground" title={file.name}>
+                <p className="max-w-full truncate px-2 text-sm font-semibold text-foreground" title={file.name}>
                   {file.name}
                 </p>
-                <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                <StatusChip tone="brand" dot={false}>
                   {rows.length} linha{rows.length !== 1 ? 's' : ''} prontas
-                </span>
+                </StatusChip>
               </>
             ) : (
               <>
-                <div className="flex size-10 items-center justify-center rounded-lg bg-muted/80 ring-1 ring-border transition-colors group-hover:bg-muted">
+                <div className="flex size-10 items-center justify-center rounded-lg bg-surface-3">
                   <Upload className="size-5 text-muted-foreground group-hover:text-foreground" />
                 </div>
-                <p className="text-sm text-muted-foreground">
-                  Clique para escolher um arquivo CSV ou XLSX
-                </p>
+                <p className="text-sm text-muted-foreground">Clique para escolher um arquivo CSV ou XLSX</p>
               </>
             )}
           </div>
@@ -397,14 +384,17 @@ export function BulkImportMembersDialog({
           />
 
           <div className="space-y-2">
-            <Label className="text-muted-foreground">Senha padrão</Label>
+            <Label htmlFor="bulk-import-password">Senha padrão</Label>
             <div className="relative">
               <Input
+                id="bulk-import-password"
                 type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground pr-9"
+                aria-invalid={passwordTooShort || undefined}
+                className={cn('pr-9', passwordTooShort && 'border-danger')}
               />
               <button
                 type="button"
@@ -415,128 +405,117 @@ export function BulkImportMembersDialog({
                 {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Todos os usuários importados recebem esta senha inicial.
+            <p className={cn('text-xs', passwordTooShort ? 'text-danger' : 'text-muted-foreground')}>
+              {passwordTooShort
+                ? `A senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`
+                : 'Todos os usuários importados recebem esta senha inicial.'}
             </p>
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-          {rows.length > 0 && !result && (
-            <div className="overflow-hidden rounded-xl border border-border ring-1 ring-border/50">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[28rem] text-xs">
-                  <thead>
-                    <tr className="border-b border-border bg-background/60">
-                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground">
-                        Nome
-                      </th>
-                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground">
-                        E-mail
-                      </th>
-                      <th className="px-3 py-2 text-left font-medium whitespace-nowrap text-muted-foreground">
-                        Papel
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/70">
-                    {rows.map((row, i) => (
-                      <tr key={i} className="bg-popover/40 transition-colors hover:bg-muted/30">
-                        <td className="px-3 py-2 text-popover-foreground">{row.name || '—'}</td>
-                        <td className="px-3 py-2 text-muted-foreground">
-                          <span className="inline-flex items-center gap-1.5">
-                            {row.email || '—'}
-                            {row.existsInAccount && (
-                              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium whitespace-nowrap text-amber-400">
-                                Já existe
-                              </span>
-                            )}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground">{roleBadgeLabel(row.role)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+          {rows.length === 0 && !result && (
+            <p className="py-6 text-center text-sm text-muted-foreground">A prévia das linhas aparece aqui depois de escolher o arquivo.</p>
+          )}
 
+          {rows.length > 0 && !result && (
+            <TableCard title="Prévia" hint={`${rows.length} linha${rows.length !== 1 ? 's' : ''}`}>
+              <DenseTable minWidth={420}>
+                <thead>
+                  <tr>
+                    <Th>Nome</Th>
+                    <Th>E-mail</Th>
+                    <Th>Papel</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, i) => (
+                    <Tr key={i} interactive={false}>
+                      <Td>{row.name || '—'}</Td>
+                      <Td>
+                        <span className="inline-flex items-center gap-1.5 text-foreground-2">
+                          {row.email || '—'}
+                          {row.existsInAccount && (
+                            <StatusChip tone="warn" dot={false}>
+                              Já existe
+                            </StatusChip>
+                          )}
+                        </span>
+                      </Td>
+                      <Td className="text-foreground-2">{roleBadgeLabel(row.role)}</Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </DenseTable>
               {(internalDuplicateCount > 0 || existingDuplicateCount > 0) && (
-                <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-background/40 px-3 py-2 text-xs text-muted-foreground">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 px-[18px] py-2.5 text-xs text-muted-foreground">
                   {internalDuplicateCount > 0 && (
                     <span>
-                      {internalDuplicateCount} duplicata{internalDuplicateCount !== 1 ? 's' : ''} removida
-                      {internalDuplicateCount !== 1 ? 's' : ''}
+                      {internalDuplicateCount} duplicata{internalDuplicateCount !== 1 ? 's' : ''} removida{internalDuplicateCount !== 1 ? 's' : ''}
                     </span>
                   )}
                   {existingDuplicateCount > 0 && (
                     <span>
-                      {existingDuplicateCount} usuário{existingDuplicateCount !== 1 ? 's' : ''} já cadastrado
-                      {existingDuplicateCount !== 1 ? 's' : ''} ignorado{existingDuplicateCount !== 1 ? 's' : ''}
+                      {existingDuplicateCount} usuário{existingDuplicateCount !== 1 ? 's' : ''} já cadastrado{existingDuplicateCount !== 1 ? 's' : ''} ignorado
+                      {existingDuplicateCount !== 1 ? 's' : ''}
                     </span>
                   )}
                 </div>
               )}
-            </div>
+            </TableCard>
           )}
 
           {result && (
-            <div className="space-y-3">
-              <div className="rounded-xl border border-border bg-background/50 p-4">
-                <p className="text-sm font-medium text-popover-foreground">Importação concluída</p>
-                <div className="mt-3 flex flex-wrap gap-3">
+            <div className="animate-ddm-up space-y-3">
+              <div className="rounded-[10px] border border-border bg-surface-2 p-4">
+                <p className="text-sm font-semibold text-foreground">Importação concluída</p>
+                <div className="mt-3 flex flex-wrap gap-2">
                   {result.imported > 0 && (
-                    <div className="text-primary flex items-center gap-1.5 text-sm">
-                      <CheckCircle className="size-4 shrink-0" />
+                    <StatusChip tone="ok">
                       {result.imported} importado{result.imported !== 1 ? 's' : ''}
-                    </div>
+                    </StatusChip>
                   )}
                   {result.errors.length > 0 && (
-                    <div className="flex items-center gap-1.5 text-sm text-red-400">
-                      <XCircle className="size-4 shrink-0" />
+                    <StatusChip tone="bad">
                       {result.errors.length} falhou{result.errors.length !== 1 ? 'ram' : ''}
-                    </div>
+                    </StatusChip>
                   )}
                 </div>
               </div>
 
               {result.errors.length > 0 && (
-                <div className="overflow-hidden rounded-xl border border-amber-500/40">
-                  <ul className="divide-y divide-amber-500/20">
-                    {result.errors.map((err, i) => (
-                      <li key={i} className="flex items-start gap-2 bg-amber-500/[0.06] px-3 py-2 text-xs">
-                        <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-400" />
-                        <span className="text-popover-foreground">
-                          <span className="font-medium">{err.email}</span>
-                          {' — '}
-                          <span className="text-muted-foreground">{err.reason}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                <ul className="divide-y divide-border overflow-hidden rounded-[10px] border border-warning-border bg-warning-soft">
+                  {result.errors.map((err, i) => (
+                    <li key={i} className="flex items-start gap-2 px-3 py-2 text-xs">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden="true" />
+                      <span className="text-foreground">
+                        <span className="font-semibold">{err.email}</span>
+                        {' — '}
+                        <span className="text-foreground-2">{err.reason}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           )}
         </div>
 
-        <DialogFooter className="mt-0 shrink-0 gap-2 border-t border-border bg-background/50 px-6 py-4 sm:justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => handleOpenChange(false)}
-            className="border-border text-muted-foreground hover:bg-muted"
-          >
+        <DialogFooter className="mt-0 shrink-0 gap-2 border-t border-border px-6 py-4 sm:justify-end">
+          <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
             {result ? 'Fechar' : 'Cancelar'}
           </Button>
           {!result && (
             <Button
               type="button"
               disabled={rows.length === 0 || importing}
-              onClick={handleImport}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={() => {
+                setTried(true);
+                void handleImport();
+              }}
             >
               {importing && <Loader2 className="size-4 animate-spin" />}
-              Importar {rows.length > 0 ? rows.length : ''} usuário{rows.length !== 1 ? 's' : ''}
+              {importing ? 'Importando…' : `Importar ${rows.length > 0 ? rows.length : ''} usuário${rows.length !== 1 ? 's' : ''}`}
             </Button>
           )}
         </DialogFooter>

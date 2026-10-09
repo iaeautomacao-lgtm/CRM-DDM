@@ -2,12 +2,21 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { AlertTriangle, KeyRound, Loader2, MailX, Plus, Search, Trash2, Upload, UsersRound } from 'lucide-react';
+import { AlertTriangle, Crown, KeyRound, Loader2, MailX, Plus, Search, Trash2, Upload, UsersRound } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
 import { createClient } from '@/lib/supabase/client';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   Dialog,
   DialogContent,
@@ -118,6 +127,8 @@ export function UsuariosView() {
   const canInvite = can('members.invite');
   const canBulkInvite = can('members.bulk_invite');
   const canResetPassword = can('members.reset_password');
+  // Só o proprietário (ownership.transfer); o servidor revalida.
+  const canTransferOwnership = can('ownership.transfer');
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -138,6 +149,8 @@ export function UsuariosView() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resettingPassword, setResettingPassword] = useState(false);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(null);
+  const [transferTarget, setTransferTarget] = useState<Member | null>(null);
+  const [transferring, setTransferring] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -303,6 +316,33 @@ export function UsuariosView() {
     }
   }
 
+  async function handleTransferOwnership() {
+    if (!transferTarget) return;
+    setTransferring(true);
+    try {
+      const res = await apiFetch('/api/account/transfer-ownership', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newOwnerUserId: transferTarget.user_id }),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        toast.error(payload.error || 'Falha ao transferir a propriedade');
+        return;
+      }
+      toast.success(`Propriedade transferida para ${transferTarget.full_name || 'o usuário'}`);
+      setTransferTarget(null);
+      setSelectedId(null);
+      // Seu papel mudou para Administrador: recarrega para refazer as permissões.
+      window.location.reload();
+    } catch (err) {
+      console.error('[UsuariosView] transfer ownership error:', err);
+      toast.error('Não foi possível conectar ao servidor');
+    } finally {
+      setTransferring(false);
+    }
+  }
+
   async function handleRevoke(invite: Invitation) {
     try {
       const res = await apiFetch(`/api/account/invitations/${invite.id}`, { method: 'DELETE' });
@@ -328,6 +368,7 @@ export function UsuariosView() {
   ];
 
   const selectedCanEdit = !!selected && canManageMembers && selected.role !== 'owner' && selected.user_id !== user?.id;
+  const selectedCanTransfer = !!selected && canTransferOwnership && selected.role !== 'owner' && selected.user_id !== user?.id;
 
   return (
     <PageBody>
@@ -552,12 +593,18 @@ export function UsuariosView() {
         headerExtra={selected ? <RoleChip role={selected.role} /> : null}
         size="md"
         footer={
-          selected && (canResetPassword || selectedCanEdit) && selected.user_id !== user?.id ? (
+          selected && (canResetPassword || selectedCanEdit || selectedCanTransfer) && selected.user_id !== user?.id ? (
             <>
               {canResetPassword && (
                 <Button variant="outline" onClick={() => setResetPasswordMember(selected)}>
                   <KeyRound className="size-3.5" />
                   Redefinir senha
+                </Button>
+              )}
+              {selectedCanTransfer && (
+                <Button variant="outline" onClick={() => setTransferTarget(selected)}>
+                  <Crown className="size-3.5" />
+                  Transferir propriedade
                 </Button>
               )}
               {selectedCanEdit && (
@@ -621,6 +668,31 @@ export function UsuariosView() {
           </dl>
         )}
       </DetailDrawer>
+
+      <AlertDialog open={transferTarget !== null} onOpenChange={(open) => !open && !transferring && setTransferTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Transferir a propriedade da conta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {transferTarget?.full_name || 'Este usuário'} passa a ser o proprietário da conta e você passa a ser Administrador. Só o novo proprietário poderá
+              desfazer isso.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={transferring}>Voltar</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => void handleTransferOwnership()} disabled={transferring}>
+              {transferring ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Transferindo...
+                </>
+              ) : (
+                'Transferir propriedade'
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <InviteMemberDialog open={inviteOpen} onOpenChange={setInviteOpen} onCreated={load} />
       <BulkImportMembersDialog open={bulkImportOpen} onOpenChange={setBulkImportOpen} onImported={load} />
