@@ -598,14 +598,20 @@ export async function processQueueItem(
   // alternativo de wacrm.contact_phones, não o contacts.phone principal.
   let phone: string;
   if (item.contact_id && (item.phone_attempt_order ?? 1) > 1) {
-    const { data: altPhone } = await supabaseAdmin()
+    const { data: altPhone, error: altPhoneError } = await supabaseAdmin()
       .from("contact_phones")
       .select("phone")
       .eq("contact_id", item.contact_id)
       .eq("ordem", item.phone_attempt_order ?? 1)
       .maybeSingle();
-    // Contato do CRM: mensagem_final é texto, nunca telefone.
-    phone = altPhone?.phone || item.contacts?.phone || "";
+    if (altPhoneError) {
+      // Falha de leitura NÃO é "telefone esgotado": item volta como erro transitório (retentável).
+      await markQueueError(item.id, "Falha ao ler o telefone alternativo do contato", false, item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: "Falha ao ler o telefone alternativo do contato" };
+    }
+    // F23: linha do telefone alternativo ausente = escada esgotada. Nunca cai no telefone principal (que já falhou e
+    // reenviaria ao número inválido). Contato do CRM: mensagem_final é texto, nunca telefone.
+    phone = altPhone?.phone ?? "";
   } else {
     // Mesma regra que o cron usa para pré-carregar a blacklist.
     // Só itens externos (contact_id nulo, API v1) guardam o número em mensagem_final.
@@ -748,7 +754,8 @@ export async function processQueueItem(
     /{nome}/g,
     item.contacts?.name || "Cliente"
   );
-  const normalizedPhone = phone.replace("+", "");
+  // F23: só dígitos (replace("+") trocava apenas o 1º "+" e deixava máscara/espaços chegarem à Meta).
+  const normalizedPhone = phone.replace(/\D/g, "");
 
   let externalMessageId: string;
   const providerStartedAt = Date.now();

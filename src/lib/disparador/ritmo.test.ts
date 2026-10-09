@@ -113,3 +113,28 @@ describe("resolveProviderThroughput", () => {
     expect(wahaTp.latency.conservador).toBe(2.5);
   });
 });
+
+describe("F27: p95 ponderado por envios e slots somando números", () => {
+  const tick = (count: number, p95: number) => ({
+    id: `t-${count}`,
+    created_at: new Date().toISOString(),
+    payload: {
+      budget_ms: 35000,
+      knobs: { global_concurrency: 20, per_number: { meta: 4, waha: 2 } },
+      latency: { meta: { count, avg_ms: 800, p95_ms: p95 }, waha: { count: 0, avg_ms: 0, p95_ms: 0 } },
+    },
+  });
+
+  it("tick com poucos envios quase não pesa no p95", () => {
+    // (3 × 3000 + 997 × 1000) / 1000 = 1006 ms (média simples dos ticks daria 2000 ms)
+    const ritmo = computeRitmo([tick(3, 3000), tick(997, 1000)]);
+    expect(ritmo.latencia.meta.p95_s).toBe(1.01);
+  });
+
+  it("vários números somam os slots até o teto global; padrão continua 1 número", () => {
+    const ritmo = computeRitmo([tick(100, 1000)]);
+    expect(resolveProviderThroughput(ritmo, "meta").slots).toBe(4);
+    expect(resolveProviderThroughput(ritmo, "meta", 3).slots).toBe(12);
+    expect(resolveProviderThroughput(ritmo, "meta", 10).slots).toBe(20);
+  });
+});

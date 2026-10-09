@@ -236,3 +236,28 @@ describe("forecastFromCampaign (cards da lista)", () => {
     expect(iso(r.otimista.end)).toBe(iso(br("2026-10-06T09:00")));
   });
 });
+
+describe("A25: sequencial com muitas rodadas usa fórmula fechada (mesmo resultado da simulação)", () => {
+  const base = {
+    contacts: 3_000,
+    messagesPerContact: 1,
+    dispatch: { mode: "lote" as const, contactsPerRound: 1, pauseMinutes: 1 },
+    start: br("2026-10-06T09:00"),
+    janela,
+  };
+  it("fim e última rodada idênticos à simulação rodada a rodada", () => {
+    const exact = forecastCampaign(base, { closedFormFromRounds: Infinity });
+    const closed = forecastCampaign(base);
+    expect(closed.sequentialFallback).toBe(true);
+    expect(iso(closed.otimista.end)).toBe(iso(exact.otimista.end));
+    expect(iso(closed.conservador.end)).toBe(iso(exact.conservador.end));
+    expect(iso(closed.lastRoundAt)).toBe(iso(exact.lastRoundAt));
+    expect(closed.rounds).toBe(exact.rounds);
+  });
+  it("100 mil contatos terminam rápido e atravessam vários dias de janela", () => {
+    const t0 = Date.now();
+    const r = forecastCampaign({ ...base, contacts: 100_000 });
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(r.otimista.end.getTime()).toBeGreaterThan(base.start.getTime() + 30 * 24 * 3_600_000);
+  });
+});

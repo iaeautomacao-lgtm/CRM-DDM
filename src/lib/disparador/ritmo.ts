@@ -127,8 +127,9 @@ export function computeRitmo(
       metaTotalCount += meta.count!;
       metaAvgSum += meta.avg_ms! * meta.count!;
       if ((meta.p95_ms ?? 0) > 0) {
-        metaP95Sum += meta.p95_ms!;
-        metaTicksWithP95++;
+        // p95 ponderado pelo nº de envios do tick (F27): tick com 3 envios não pesa como tick com 3.000.
+        metaP95Sum += meta.p95_ms! * meta.count!;
+        metaTicksWithP95 += meta.count!;
       }
     }
 
@@ -138,8 +139,8 @@ export function computeRitmo(
       wahaTotalCount += waha.count!;
       wahaAvgSum += waha.avg_ms! * waha.count!;
       if ((waha.p95_ms ?? 0) > 0) {
-        wahaP95Sum += waha.p95_ms!;
-        wahaTicksWithP95++;
+        wahaP95Sum += waha.p95_ms! * waha.count!;
+        wahaTicksWithP95 += waha.count!;
       }
     }
   }
@@ -203,7 +204,9 @@ export function computeRitmo(
  */
 export function resolveProviderThroughput(
   ritmo: RitmoResponse,
-  provider: "meta" | "waha" | null
+  provider: "meta" | "waha" | null,
+  /** Números (canais) ativos da campanha no provedor: os limites por número SOMAM, até o teto global. Padrão 1. */
+  channels = 1,
 ): {
   slots: number;
   budgetSeconds: number;
@@ -213,7 +216,7 @@ export function resolveProviderThroughput(
 } {
   const p = provider === "waha" ? "waha" : "meta";
   const perNumber = ritmo.limites.per_number[p] ?? 4;
-  const slots = Math.min(perNumber, ritmo.limites.global_concurrency);
+  const slots = Math.min(perNumber * Math.max(1, Math.floor(channels)), ritmo.limites.global_concurrency);
   const budgetSeconds = ritmo.limites.budget_seconds;
   const lat = ritmo.latencia[p];
 
