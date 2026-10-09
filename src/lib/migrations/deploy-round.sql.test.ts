@@ -15,7 +15,7 @@ const PRE_DEPLOY = [
   "304", "305",
   "311", "312", "313", "314", "314b", "315", "316b", "317", "320",
   "322", "323", "324", "325", "326",
-  "330", "330b", "331b",
+  "330", "330b", "331b", "333", "334",
   "310",
 ] as const;
 /** Migrations que só rodam DEPOIS do deploy do código (o cabeçalho diz "FAZER O DEPLOY ... depois aplicar"): aplicar antes quebra o código antigo. */
@@ -303,7 +303,7 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
        WHERE n.nspname = 'wacrm' AND c.relkind IN ('r', 'p') AND c.relrowsecurity
          AND NOT EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'wacrm' AND p.tablename = c.relname AND p.policyname = 'mfa_aal2_required')`);
     expect(r.rows.map((x) => x.relname)).toEqual([]);
-    const NEW_RLS_TABLES: Array<[string, string]> = [["history_export_jobs", "297"], ["push_subscriptions", "298"], ["quick_reply_usage_daily", "301"], ["internal_chat_reads", "303"]];
+    const NEW_RLS_TABLES: Array<[string, string]> = [["history_export_jobs", "297"], ["push_subscriptions", "298"], ["quick_reply_usage_daily", "301"], ["internal_chat_reads", "303"], ["cron_heartbeat", "334"]];
     for (const [t] of NEW_RLS_TABLES.filter(([, mig]) => ROUND.includes(mig))) {
       const p = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM pg_policies WHERE schemaname = 'wacrm' AND tablename = '${t}' AND policyname = 'mfa_aal2_required'`);
       expect(p.rows[0].n, `${t} sem a policy de MFA`).toBe(1);

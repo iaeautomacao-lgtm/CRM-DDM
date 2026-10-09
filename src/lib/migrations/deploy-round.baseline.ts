@@ -222,6 +222,8 @@ GRANT EXECUTE ON FUNCTION wacrm.dashboard_ai_analytics() TO authenticated, servi
 -- Automações (a 317 acrescenta lease/tentativas e as funções de claim da fila de execuções pendentes).
 CREATE TABLE wacrm.automation_logs (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), status text, error_message text);
 CREATE TABLE wacrm.automation_pending_executions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), log_id uuid, status text NOT NULL DEFAULT 'pending', run_at timestamptz NOT NULL DEFAULT now());
+-- Falhas 131026 do Disparador (a 333 cria a contagem agrupada por campanha).
+CREATE TABLE wacrm.dispatch_meta_131026_failures (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, campaign_id uuid, status text NOT NULL DEFAULT 'pendente');
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wacrm TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA wacrm TO service_role;
 -- profiles: a 169 trocou o UPDATE de tabela inteira por UPDATE só nas colunas que o usuário edita (full_name, avatar_url).
