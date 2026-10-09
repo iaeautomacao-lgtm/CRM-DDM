@@ -1,5 +1,5 @@
 // PRD 15 — processMessage: WH-21 (dedupe barato antes do trabalho pesado) e WH-03 (contato/perfil ausente não derruba).
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const calls: Array<{ table: string; op: string; payload?: unknown }> = []
 let storedWamids = new Set<string>()
@@ -10,6 +10,9 @@ const dispatchInboundToFlows = vi.fn(async () => ({ consumed: true }))
 // PRD 21: run ativo do contato (flow_runs) e simulação de banco sem a coluna messages.flow_response (migration 260 ainda não aplicada)
 let activeRun: { id: string; vars: Record<string, unknown> } | null = null
 let missingFlowColumn = false
+// STT (migration 213): ai_config da conta e coluna de transcrição ausente
+let aiConfigRow: Record<string, unknown> | null = null
+let missingTranscriptionColumn = false
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
@@ -33,9 +36,12 @@ vi.mock('@supabase/supabase-js', () => ({
       b.insert = (payload: unknown) => ((op = 'insert'), (written = payload), calls.push({ table, op, payload }), b)
       b.update = (payload: unknown) => ((op = 'update'), (written = payload), calls.push({ table, op, payload }), b)
       b.single = async () => ({ data: { id: 'new-row' }, error: null })
-      b.maybeSingle = async () => ({ data: null, error: null })
+      b.maybeSingle = async () => ({ data: table === 'ai_config' ? aiConfigRow : null, error: null })
       b.limit = () => b
       b.then = (resolve: (v: unknown) => void) => {
+        if (op === 'insert' && table === 'messages' && missingTranscriptionColumn && written && 'transcription_status' in (written as object)) {
+          return resolve({ data: null, error: { code: '42703', message: 'column "transcription_status" does not exist' } })
+        }
         if (op === 'insert' && table === 'messages' && missingFlowColumn && written && 'flow_response' in (written as object)) {
           return resolve({ data: null, error: { code: '42703', message: 'column "flow_response" does not exist' } })
         }
@@ -83,6 +89,8 @@ beforeEach(() => {
   dispatchInboundToFlows.mockClear()
   activeRun = null
   missingFlowColumn = false
+  aiConfigRow = null
+  missingTranscriptionColumn = false
   findExistingContact.mockReset()
   findExistingContact.mockResolvedValue({ id: 'contact-1', name: 'Fulano' })
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -236,5 +244,70 @@ describe('PRD 21 (PR-21.1): resposta de WhatsApp Flow (nfm_reply) não é mais d
     await run({ id: 'wamid.b1', from: '5511999990001', timestamp: '1760000000', type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'sim', title: 'Sim' } } }, contactInfo)
     expect(stored()).toMatchObject({ content_text: 'Sim', interactive_reply_id: 'sim' })
     expect('flow_response' in stored()).toBe(false)
+  })
+})
+
+describe('STT na entrada (migration 213): áudio transcrito com a chave da CONTA', () => {
+  const audio = (id: string) => ({ id, from: '5511999990001', timestamp: '1760000000', type: 'audio', audio: { id: 'media-a', mime_type: 'audio/ogg' } })
+  const openaiConfig = { enabled: true, multimodal_enabled: true, api_provider: 'openai', api_key: 'sk-conta' }
+  const messageInsert = () => calls.find((c) => c.table === 'messages' && c.op === 'insert')?.payload as Record<string, unknown>
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: 'quero pagar amanhã' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    downloadMedia.mockResolvedValue({ buffer: new ArrayBuffer(8), contentType: 'audio/ogg' } as never)
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('conta com IA multimodal (openai): grava o texto bruto, o status e o content_text legível; usa a chave DA CONTA', async () => {
+    aiConfigRow = openaiConfig
+    await run(audio('wamid.a1'), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+    const row = messageInsert()
+    expect(row).toMatchObject({
+      content_type: 'audio',
+      content_text: '🎙️ _Áudio transcrito:_ "quero pagar amanhã"',
+      transcription_text: 'quero pagar amanhã',
+      transcription_status: 'done',
+    })
+    expect(row.transcribed_at).toBeTruthy()
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-conta')
+  })
+
+  it('conta sem chave/consentimento (ou provider que não é openai): NADA é enviado a terceiros; status skipped e sem texto', async () => {
+    for (const cfg of [null, { ...openaiConfig, multimodal_enabled: false }, { ...openaiConfig, api_provider: 'gemini' }, { ...openaiConfig, api_key: '' }, { ...openaiConfig, enabled: false }]) {
+      calls.length = 0
+      aiConfigRow = cfg
+      await run(audio('wamid.a2'), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+      expect(fetchMock).not.toHaveBeenCalled()
+      const row = messageInsert()
+      expect(row).toMatchObject({ content_type: 'audio', transcription_status: 'skipped', content_text: null })
+      expect(row).not.toHaveProperty('transcription_text')
+    }
+  })
+
+  it('falha do provedor: a mensagem entra normalmente com status failed', async () => {
+    aiConfigRow = openaiConfig
+    fetchMock.mockResolvedValue(new Response('erro', { status: 500 }))
+    await run(audio('wamid.a3'), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+    expect(messageInsert()).toMatchObject({ content_type: 'audio', transcription_status: 'failed', content_text: null })
+  })
+
+  it('migration 213 ausente: regrava SEM as colunas e não perde o áudio (o texto legível fica)', async () => {
+    aiConfigRow = openaiConfig
+    missingTranscriptionColumn = true
+    await run(audio('wamid.a4'), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+    const inserts = calls.filter((c) => c.table === 'messages' && c.op === 'insert').map((c) => c.payload as Record<string, unknown>)
+    expect(inserts).toHaveLength(2)
+    expect(inserts[1]).not.toHaveProperty('transcription_status')
+    expect(inserts[1]).toMatchObject({ content_type: 'audio', content_text: '🎙️ _Áudio transcrito:_ "quero pagar amanhã"' })
+  })
+
+  it('mensagens que não são áudio nunca levam as colunas da transcrição', async () => {
+    aiConfigRow = openaiConfig
+    await run(text('wamid.t1'), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+    expect(messageInsert()).not.toHaveProperty('transcription_status')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

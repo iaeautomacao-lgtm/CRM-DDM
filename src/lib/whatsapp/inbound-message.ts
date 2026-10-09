@@ -15,6 +15,7 @@ import { reopenConversationFields } from '@/lib/conversations/reopen'
 import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
+import { formatTranscript, transcribeInboundAudio, type TranscriptionResult } from '@/lib/ai/stt'
 import { safeDbError } from '@/lib/privacy/mask'
 import { flowResponseVars, parseNfmReply, type ParsedFlowResponse } from '@/lib/whatsapp/flow-response'
 import { deliverFlowResponseToActiveRun } from '@/lib/flows/flow-response-vars'
@@ -249,8 +250,8 @@ export async function processMessage(
   }
 
   // Parse message content based on type
-  const { contentText, mediaUrl, mediaType, interactiveReplyId, flowResponse } =
-    await parseMessageContent(message, accessToken)
+  const { contentText, mediaUrl, mediaType, interactiveReplyId, flowResponse, transcription } =
+    await parseMessageContent(message, accessToken, accountId)
 
   // Resolve swipe-reply context if present. A missing parent is fine —
   // we just store NULL and the UI renders the message without a quote.
@@ -326,9 +327,23 @@ export async function processMessage(
   }
   // PRD 21 (migration 260): a coluna `flow_response` só entra no INSERT de resposta de formulário — mensagem comum nunca depende
   // da migration. Se a 260 ainda não foi aplicada, regrava SEM a coluna: o cliente não perde a mensagem (o texto legível fica).
+  // Migration 213: as colunas da transcrição só entram quando há status (áudio); sem a migration, regrava sem elas (mesmo padrão).
+  const withTranscription = transcription
+    ? {
+        ...messageRow,
+        transcription_status: transcription.status,
+        ...(transcription.status === 'done' ? { transcription_text: transcription.text, transcribed_at: new Date().toISOString() } : {}),
+      }
+    : messageRow
   let { error: msgError } = await supabaseAdmin()
     .from('messages')
-    .insert(flowResponse?.data ? { ...messageRow, flow_response: flowResponse.data } : messageRow)
+    .insert(flowResponse?.data ? { ...withTranscription, flow_response: flowResponse.data } : withTranscription)
+  if (msgError && transcription && (msgError.code === '42703' || msgError.code === 'PGRST204')) {
+    console.error('[webhook] messages.transcription_* ausente (aplique a migration 213); gravando o áudio sem as colunas da transcrição')
+    ;({ error: msgError } = await supabaseAdmin()
+      .from('messages')
+      .insert(flowResponse?.data ? { ...messageRow, flow_response: flowResponse.data } : messageRow))
+  }
   if (msgError && flowResponse?.data && (msgError.code === '42703' || msgError.code === 'PGRST204')) {
     console.error('[webhook] messages.flow_response ausente (aplique a migration 260); gravando a resposta só como texto')
     void writeLog({
@@ -653,7 +668,8 @@ async function downloadAndStoreMetaMedia(
   mediaId: string,
   accessToken: string,
   maxBytes: number,
-  fallbackExt: string
+  fallbackExt: string,
+  onBuffer?: (buffer: Buffer, contentType: string) => void
 ): Promise<string | null> {
   try {
     const mediaInfo = await getMediaUrl({ mediaId, accessToken })
@@ -671,6 +687,7 @@ async function downloadAndStoreMetaMedia(
 
     const finalContentType =
       contentType || mediaInfo.mimeType || 'application/octet-stream'
+    onBuffer?.(buffer, finalContentType)
     const ext = extensionForMimeType(finalContentType, fallbackExt)
     const storagePath = `meta/${mediaId}.${ext}`
 
@@ -718,7 +735,8 @@ async function downloadAndStoreMetaMedia(
 
 async function parseMessageContent(
   message: WhatsAppMessage,
-  accessToken: string
+  accessToken: string,
+  accountId?: string
 ): Promise<{
   contentText: string | null
   mediaUrl: string | null
@@ -733,6 +751,8 @@ async function parseMessageContent(
   interactiveReplyId: string | null
   /** Resposta de WhatsApp Flow (`nfm_reply`): JSON preservado + texto legível. Null para todo o resto. */
   flowResponse: ParsedFlowResponse | null
+  /** Transcrição (STT) do áudio recebido, com a chave de IA da conta (migration 213). Null para tudo que não é áudio. */
+  transcription: TranscriptionResult | null
 }> {
   // getMediaUrl signature is (mediaId, accessToken) — earlier code had
   // the args swapped, so every verification hit an invalid Meta URL and
@@ -759,6 +779,7 @@ async function parseMessageContent(
     mediaType: null,
     interactiveReplyId: null,
     flowResponse: null as ParsedFlowResponse | null,
+    transcription: null as TranscriptionResult | null,
   }
 
   switch (message.type) {
@@ -815,16 +836,27 @@ async function parseMessageContent(
         // Mesmo fix da imagem — responder.ts:420-433 (transcrição Whisper)
         // depende de media_url ser uma URL pública, mesmo problema de
         // /api/whatsapp/media/[mediaId] exigir sessão de usuário.
+        let audioBuffer: Buffer | null = null
         const storedUrl = await downloadAndStoreMetaMedia(
           mediaId,
           accessToken,
           MAX_META_AUDIO_BYTES,
-          'ogg'
+          'ogg',
+          (buffer) => {
+            audioBuffer = buffer
+          }
         )
+        // STT na entrada, com a chave de IA da CONTA (sem chave/consentimento ⇒ 'skipped' e nada sai do sistema). Nunca derruba a mensagem.
+        const transcription =
+          audioBuffer && accountId
+            ? await transcribeInboundAudio(supabaseAdmin(), accountId, audioBuffer, message.audio.mime_type)
+            : null
         return {
           ...empty,
+          contentText: transcription?.status === 'done' && transcription.text ? formatTranscript(transcription.text) : null,
           mediaUrl: storedUrl ?? (await verifyAndBuildUrl(mediaId)),
           mediaType: message.audio.mime_type,
+          transcription,
         }
       }
       return empty
