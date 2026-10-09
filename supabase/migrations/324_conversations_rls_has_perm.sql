@@ -24,7 +24,13 @@
 --             SELECT key FROM wacrm.permission_catalog WHERE key IN ('conversations.scope_all','conversations.scope_team','inbox.view','channels.view'); -- 4 linhas
 -- VERIFICAÇÃO: como operador (JWT), SELECT count(*) FROM wacrm.conversations → igual a antes da migration; Inbox e contador de não lidas (Realtime) normais.
 -- ORDEM: antes ou depois do deploy. Idempotente.
--- ROLLBACK: recriar conversations_select/whatsapp_config_select com o corpo da migration 140 (coalesce((SELECT wacrm.current_user_role()), '') NOT IN ('agent','supervisor') …).
+-- ROLLBACK:   BEGIN;
+--             DROP POLICY IF EXISTS conversations_select ON wacrm.conversations;
+--             CREATE POLICY conversations_select ON wacrm.conversations FOR SELECT USING (wacrm.is_account_member(account_id) AND (coalesce((SELECT wacrm.current_user_role()), '') NOT IN ('agent', 'supervisor') OR ((SELECT wacrm.current_user_role()) = 'agent' AND (assigned_agent_id = (SELECT auth.uid()) OR (assigned_agent_id IS NULL AND status IN ('open', 'pending') AND team_id IN (SELECT wacrm.current_user_team_ids())))) OR ((SELECT wacrm.current_user_role()) = 'supervisor' AND (team_id IN (SELECT wacrm.current_user_team_ids()) OR assigned_agent_id = (SELECT auth.uid()) OR (team_id IS NULL AND assigned_agent_id IN (SELECT tm.user_id FROM wacrm.team_members tm WHERE tm.team_id IN (SELECT wacrm.current_user_team_ids())))))));
+--             DROP POLICY IF EXISTS whatsapp_config_select ON wacrm.whatsapp_config;
+--             CREATE POLICY whatsapp_config_select ON wacrm.whatsapp_config FOR SELECT USING (wacrm.is_account_member(account_id) AND (coalesce((SELECT wacrm.current_user_role()), '') NOT IN ('agent', 'supervisor') OR team_id IN (SELECT wacrm.current_user_team_ids()) OR team_id IS NULL));
+--             DELETE FROM wacrm.schema_migrations WHERE version = '324_conversations_rls_has_perm';
+--             COMMIT;
 -- ============================================================
 
 BEGIN;
