@@ -208,6 +208,10 @@
     {
       "version": "275_billing_sync_state",
       "kind": "registry"
+    },
+    {
+      "version": "278_billing_event_stops",
+      "kind": "registry"
     }
   ]
 }
