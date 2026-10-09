@@ -160,7 +160,7 @@ export function ConnectWahaDialog({
           <div className="space-y-3">
             <div className="flex items-center justify-center rounded-xl border border-border bg-muted/30 p-4">
               {status === "WORKING" ? (
-                <p className="text-sm font-medium text-[#14532D]">Conectado!</p>
+                <p className="text-sm font-medium text-success">Conectado!</p>
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -170,7 +170,7 @@ export function ConnectWahaDialog({
                 />
               )}
             </div>
-            <p className="text-center text-xs text-muted-foreground">Status: {status}</p>
+            <p role="status" aria-live="polite" className="text-center text-xs text-muted-foreground">Status: {status}</p>
             <Button variant="outline" className="w-full" onClick={() => setShowPairing(true)}>
               <KeyRound className="size-4" />
               Usar código de pareamento

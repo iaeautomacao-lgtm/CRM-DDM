@@ -36,7 +36,7 @@ export async function GET() {
     error: authError,
   } = await supabase.auth.getUser()
   if (authError || !user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
 
   // whatsapp_config is one-row-per-account post-017. Resolve the
@@ -52,7 +52,7 @@ export async function GET() {
     return NextResponse.json({
       live: false,
       checks: { config_exists: false },
-      message: 'Your profile is not linked to an account.',
+      message: 'Seu perfil não está vinculado a uma conta.',
     })
   }
 
@@ -65,7 +65,7 @@ export async function GET() {
     return NextResponse.json({
       live: false,
       checks: { config_exists: false },
-      message: 'No WhatsApp configuration saved yet.',
+      message: 'Nenhuma configuração de WhatsApp salva ainda.',
     })
   }
 
@@ -80,7 +80,7 @@ export async function GET() {
         token_decryptable: false,
       },
       message:
-        'Stored access token can\'t be decrypted — likely ENCRYPTION_KEY changed. Re-enter the token to repair.',
+        'O token de acesso salvo não pode ser decifrado — provavelmente a ENCRYPTION_KEY mudou. Informe o token novamente para reparar.',
     })
   }
 
@@ -108,7 +108,7 @@ export async function GET() {
     checks.phone_metadata_ok = true
   } catch (err) {
     errors.push(
-      `Phone metadata check failed: ${err instanceof Error ? err.message : String(err)}`,
+      `Falha ao verificar os metadados do telefone: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
 
@@ -126,17 +126,17 @@ export async function GET() {
       checks.waba_subscribed_to_app = subs.length > 0
       if (!checks.waba_subscribed_to_app) {
         errors.push(
-          'WABA has no subscribed apps. Re-save the configuration to subscribe.',
+          'A WABA não tem apps inscritos. Salve a configuração de novo para inscrever.',
         )
       }
     } catch (err) {
       errors.push(
-        `WABA subscription check failed: ${err instanceof Error ? err.message : String(err)}`,
+        `Falha ao verificar a assinatura da WABA: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
   } else {
     errors.push(
-      'No WABA ID on file — webhooks can\'t be wired without it. Add it in the form and re-save.',
+      'Não há ID da WABA salvo — os webhooks não funcionam sem ele. Informe-o no formulário e salve de novo.',
     )
   }
 

@@ -69,7 +69,7 @@ export async function GET(request: Request) {
     if (error) {
       console.error('[GET /api/account/api-keys] fetch error:', error);
       return NextResponse.json(
-        { error: 'Failed to load API keys' },
+        { error: 'Falha ao carregar as chaves de API' },
         { status: 500 }
       );
     }
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
     const canManage = can(ctx, 'api_keys.manage');
     const canPersonal = can(ctx, 'intelligence.personal_key');
     if (!canManage && !canPersonal) {
-      return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
+      return NextResponse.json({ error: 'Papel insuficiente para esta ação' }, { status: 403 });
     }
 
     const limit = await checkRateLimit(
@@ -107,13 +107,13 @@ export async function POST(request: Request) {
     const rawName = typeof body?.name === 'string' ? body.name.trim() : '';
     if (!rawName) {
       return NextResponse.json(
-        { error: "'name' is required" },
+        { error: "'name' é obrigatório" },
         { status: 400 }
       );
     }
     if (rawName.length > MAX_NAME_LEN) {
       return NextResponse.json(
-        { error: `Name must be ${MAX_NAME_LEN} characters or fewer` },
+        { error: `O nome deve ter no máximo ${MAX_NAME_LEN} caracteres` },
         { status: 400 }
       );
     }
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     if (error || !data) {
       console.error('[POST /api/account/api-keys] insert error:', error);
       return NextResponse.json(
-        { error: 'Failed to create API key' },
+        { error: 'Falha ao criar a chave de API' },
         { status: 500 }
       );
     }

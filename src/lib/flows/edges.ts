@@ -194,8 +194,20 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
       }
 
       case "ai_agent": {
-        const c = cfg as { mode?: string; next_node_key?: string };
-        // 'takeover' ends the run — no outgoing edge to render.
+        const c = cfg as { mode?: string; next_node_key?: string; agent_id?: string; failure_next_node_key?: string };
+        // Saída de falha (agente desligado/indisponível) — o motor segue por
+        // ela em qualquer modo, inclusive takeover (engine.ts leaveUnavailableAgent).
+        const failure = c.agent_id ? c.failure_next_node_key : undefined;
+        if (failure && knownKeys.has(failure)) {
+          edges.push({
+            id: `${node.node_key}--failure--${failure}`,
+            source: node.node_key,
+            target: failure,
+            sourceHandle: "failure",
+            label: "Se indisponível",
+          });
+        }
+        // 'takeover' ends the run — no "next" edge to render.
         if (c.mode === "takeover") break;
         const next = c.next_node_key;
         if (next && knownKeys.has(next)) {
@@ -328,8 +340,11 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     }
 
     case "ai_agent": {
-      const mode = (cfg as { mode?: string }).mode;
-      return mode === "takeover" ? [] : [{ id: "next", label: "Próximo" }];
+      const c = cfg as { mode?: string; agent_id?: string };
+      const slots: OutgoingSlot[] = c.mode === "takeover" ? [] : [{ id: "next", label: "Próximo" }];
+      // Só com agente vinculado: é quando o formulário oferece a saída de falha.
+      if (c.agent_id) slots.push({ id: "failure", label: "Se indisponível" });
+      return slots;
     }
 
     case "handoff":
@@ -380,6 +395,7 @@ export function applyEdgeConnection(
 
     case "ai_agent":
       if (sourceHandle === "next") return { next_node_key: targetKey };
+      if (sourceHandle === "failure") return { failure_next_node_key: targetKey };
       return null;
 
     case "condition":
@@ -536,9 +552,15 @@ function patchedConfigReplacingKey(
     }
 
     case "ai_agent": {
-      const next = (cfg as { next_node_key?: string }).next_node_key;
-      if (next !== deletedKey) return null;
-      return { ...cfg, next_node_key: replacement };
+      const c = cfg as { next_node_key?: string; failure_next_node_key?: string };
+      const nextMatch = c.next_node_key === deletedKey;
+      const failureMatch = c.failure_next_node_key === deletedKey;
+      if (!nextMatch && !failureMatch) return null;
+      return {
+        ...cfg,
+        ...(nextMatch ? { next_node_key: replacement } : {}),
+        ...(failureMatch ? { failure_next_node_key: replacement } : {}),
+      };
     }
 
     case "condition": {

@@ -9,6 +9,7 @@ import {
   validateStepsForActivation,
   validateTriggerForActivation,
 } from '@/lib/automations/validate'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 export async function GET() {
   const auth = await guardPermission('automations.view')
@@ -20,7 +21,7 @@ export async function GET() {
     .select('*')
     .eq('account_id', accountId)
     .order('created_at', { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return internalErrorResponse('automations', error)
   return NextResponse.json({ automations: data ?? [] })
 }
 
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
   const { userId, accountId } = auth.ctx
 
   const body = await request.json().catch(() => null)
-  if (!body) return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+  if (!body) return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
 
   const { name, description, trigger_type, trigger_config, is_active, steps, template } = body
   const lineIds = parseLineIds(body.line_ids)
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
 
   if (!effectiveName || !effectiveTriggerType) {
     return NextResponse.json(
-      { error: 'name and trigger_type are required' },
+      { error: 'name e trigger_type são obrigatórios' },
       { status: 400 },
     )
   }
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
     ]
     if (issues.length > 0) {
       return NextResponse.json(
-        { error: 'Cannot activate automation with invalid configuration', issues },
+        { error: 'Não é possível ativar a automação com configuração inválida', issues },
         { status: 400 },
       )
     }

@@ -673,7 +673,9 @@ export default function InboxPage() {
         .eq("id", conversationId);
 
       if (error) {
-        toast.error("Erro ao deletar conversa: " + error.message);
+        // Detalhe técnico do banco só no console; o operador vê a frase.
+        console.error("[inbox] delete conversation failed:", error);
+        toast.error("Não foi possível excluir a conversa. Tente de novo.");
         return;
       }
 
@@ -767,9 +769,9 @@ export default function InboxPage() {
       {/* WhatsApp connection banner — in the flex column, not absolute,
           so it pushes the panels down instead of overlapping them. */}
       {whatsappConnected === false && (
-        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2" role="status">
-          <WifiOff className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
-          <p className="text-xs text-amber-700 dark:text-amber-400">
+        <div className="flex shrink-0 items-center justify-center gap-2 border-b border-warning/30 bg-warning-soft px-4 py-2" role="status">
+          <WifiOff className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+          <p className="text-xs text-foreground">
             WhatsApp® não está conectado. Vá em Configurações para conectar sua conta.
           </p>
         </div>

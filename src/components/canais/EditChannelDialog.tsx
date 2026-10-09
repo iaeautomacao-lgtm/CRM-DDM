@@ -141,8 +141,9 @@ export function EditChannelDialog({
   // its diff check — the backend validates flow ownership on every
   // PATCH that includes it, so skipping when unchanged avoids that
   // extra cost on every save.
-  async function syncSettings() {
-    if (!config) return;
+  /** Grava fluxo, equipe e chaves. Devolve false na falha (o diálogo fica aberto, sem o "Canal atualizado"). */
+  async function syncSettings(): Promise<boolean> {
+    if (!config) return false;
     const nextFlowId = flowId === NO_FLOW ? null : flowId;
     const nextTeamId = teamId === NO_TEAM ? null : teamId;
     const patch: Record<string, unknown> = {
@@ -161,8 +162,10 @@ export function EditChannelDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao salvar configurações do canal");
+      return true;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao salvar configurações do canal");
+      return false;
     }
   }
 
@@ -192,7 +195,7 @@ export function EditChannelDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao salvar canal");
-      await syncSettings();
+      if (!(await syncSettings())) return;
       toast.success(data.message || "Canal atualizado.");
       onSaved();
     } catch (err) {
@@ -228,7 +231,7 @@ export function EditChannelDialog({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Falha ao salvar canal");
-      await syncSettings();
+      if (!(await syncSettings())) return;
       toast.success("Canal Meta atualizado.");
       onSaved();
     } catch (err) {
@@ -362,7 +365,6 @@ export function EditChannelDialog({
               <Button
                 onClick={handleSaveWaha}
                 disabled={saving}
-                className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
               >
                 {saving ? "Salvando…" : "Salvar"}
               </Button>
@@ -510,7 +512,6 @@ export function EditChannelDialog({
               <Button
                 onClick={handleSaveMeta}
                 disabled={saving}
-                className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
               >
                 {saving ? "Salvando…" : "Salvar"}
               </Button>

@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api-fetch";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { distinctFailures } from "@/lib/flows/run-log";
 
 export interface FlowDebugEvent {
   flow_run_id: string;
@@ -113,9 +114,11 @@ export function useFlowDebug(flowId: string | undefined): FlowDebugState {
     for (const e of events) {
       if (!e.node_key) continue;
       if (e.event_type === "node_completed") successKeys.add(e.node_key);
-      else if (e.event_type === "node_error") errorKeys.add(e.node_key);
       else if (e.event_type === "node_entered") enteredKeys.add(e.node_key);
     }
+    // Falha por nó pelo mesmo critério da página de execuções: inclui o
+    // `error` com node_key (antes só node_error) e ignora corridas inofensivas.
+    for (const f of distinctFailures(events)) if (f.node_key) errorKeys.add(f.node_key);
     return { successKeys, errorKeys, enteredKeys };
   }, [events]);
 

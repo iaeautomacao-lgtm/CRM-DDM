@@ -29,7 +29,7 @@ export async function GET() {
     if (error) {
       console.error("[tags] list error:", error);
       return NextResponse.json(
-        { error: "Failed to load tags" },
+        { error: "Falha ao carregar as tags" },
         { status: 500 },
       );
     }
