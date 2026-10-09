@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatAvgCharges,
   describeOffset,
   formatCents,
   formatCivilDate,
@@ -35,5 +36,14 @@ describe("regua client-types", () => {
     expect(variableKey({ type: "debt_field", field: "amount" })).toBe("debt:amount");
     expect(variableKey({ type: "static", value: "x" })).toBe("static");
     expect(variableKey(undefined)).toBe("");
+  });
+});
+
+
+describe("regua relatório", () => {
+  it("formata a média de cobranças até o pagamento", () => {
+    expect(formatAvgCharges(null)).toBe("—");
+    expect(formatAvgCharges(2)).toBe("2");
+    expect(formatAvgCharges(2.46)).toBe("2,5");
   });
 });
