@@ -21,6 +21,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { StatusChip } from '@/components/ddm/status-chip';
 import { ErrorState, Skeleton } from '@/components/ddm/states';
 import { LEGACY_AGENT_DEFAULTS } from '@/lib/ai/agents/schema';
@@ -160,6 +170,7 @@ function AgentEditor({
   const [tab, setTab] = useState<string>('general');
   const [convertPreview, setConvertPreview] = useState<{ before: string; after: string; form: AgentFormData } | null>(null);
   const [converting, setConverting] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<'save' | 'delete' | null>(null);
   const [catalog, setCatalog] = useState<ToolCatalogItem[]>([]);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [kbFiles, setKbFiles] = useState<KnowledgeBaseFileItem[]>([]);
@@ -215,7 +226,10 @@ function AgentEditor({
       setTab('general');
       return;
     }
-    if (!window.confirm(SAVE_CONFIRM)) return;
+    setConfirmAction('save');
+  }
+
+  async function doSave() {
     setSaving(true);
     try {
       const payload = formDataToSavePayload(form, existingConfig);
@@ -294,9 +308,13 @@ function AgentEditor({
     }
   }
 
-  async function remove() {
+  function remove() {
     if (!agentId || !detail) return;
-    if (!window.confirm(`Excluir o agente "${detail.agent.name}"? Não dá para desfazer.`)) return;
+    setConfirmAction('delete');
+  }
+
+  async function doRemove() {
+    if (!agentId || !detail) return;
     try {
       await deleteAgent(agentId);
       toast.success('Agente excluído.');
@@ -373,7 +391,7 @@ function AgentEditor({
             <StatusChip tone="warn">Sem versão publicada</StatusChip>
           ) : null}
           {canEdit && agentId && (
-            <Button variant="ghost" size="icon-sm" onClick={() => void remove()} aria-label="Excluir agente" title="Excluir agente">
+            <Button variant="ghost" size="icon-sm" onClick={() => remove()} aria-label="Excluir agente" title="Excluir agente">
               <Trash2 className="size-4" />
             </Button>
           )}
@@ -474,6 +492,33 @@ function AgentEditor({
           </TabsContent>
         )}
       </Tabs>
+
+      <AlertDialog open={confirmAction !== null} onOpenChange={(open) => !open && setConfirmAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmAction === 'delete' ? 'Excluir agente' : 'Publicar nova versão'}</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">
+              {confirmAction === 'delete'
+                ? `Excluir o agente "${detail?.agent.name ?? ''}"? Não dá para desfazer.`
+                : SAVE_CONFIRM}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className={confirmAction === 'delete' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20' : undefined}
+              onClick={() => {
+                const action = confirmAction;
+                setConfirmAction(null);
+                if (action === 'delete') void doRemove();
+                else if (action === 'save') void doSave();
+              }}
+            >
+              {confirmAction === 'delete' ? 'Excluir' : 'Salvar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={convertPreview !== null} onOpenChange={(open) => !open && setConvertPreview(null)}>
         <DialogContent className="max-w-4xl">

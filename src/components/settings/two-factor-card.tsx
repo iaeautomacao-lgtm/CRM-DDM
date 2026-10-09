@@ -23,7 +23,17 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StatusChip } from '@/components/ddm/status-chip';
-import { Skeleton } from '@/components/ddm/states';
+import { ErrorState, Skeleton } from '@/components/ddm/states';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface MfaFactor {
   id: string;
@@ -55,6 +65,7 @@ export function TwoFactorCard() {
   const [enrolling, setEnrolling] = useState<Enrollment | null>(null);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<null | 'start' | 'verify' | 'remove'>(null);
+  const [pendingRemove, setPendingRemove] = useState<MfaFactor | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -120,7 +131,6 @@ export function TwoFactorCard() {
   }
 
   async function remove(f: MfaFactor) {
-    if (!window.confirm('Desativar a verificação em duas etapas? Sua conta fica protegida só pela senha.')) return;
     setBusy('remove');
     try {
       const { error: err } = await supabase.auth.mfa.unenroll({ factorId: f.id });
@@ -169,7 +179,7 @@ export function TwoFactorCard() {
       </div>
 
       {error ? (
-        <p className="px-4 py-4 text-sm text-destructive">{error}</p>
+        <ErrorState title="Não foi possível carregar a verificação em duas etapas" hint={error} onRetry={() => void load()} />
       ) : !status ? (
         <div className="p-4" aria-busy>
           <Skeleton className="h-10 rounded-lg" />
@@ -187,7 +197,7 @@ export function TwoFactorCard() {
                   Ativado em {new Date(f.created_at).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
                 </div>
               </div>
-              <Button variant="outline" size="sm" onClick={() => void remove(f)} disabled={!!busy}>
+              <Button variant="outline" size="sm" onClick={() => setPendingRemove(f)} disabled={!!busy}>
                 {busy === 'remove' && <Loader2 className="size-3.5 animate-spin" />}
                 Desativar
               </Button>
@@ -195,6 +205,29 @@ export function TwoFactorCard() {
           ))}
         </ul>
       )}
+
+      <AlertDialog open={pendingRemove !== null} onOpenChange={(open) => !open && setPendingRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desativar verificação em duas etapas</AlertDialogTitle>
+            <AlertDialogDescription>
+              Desativar a verificação em duas etapas? Sua conta fica protegida só pela senha.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = pendingRemove;
+                setPendingRemove(null);
+                if (target) void remove(target);
+              }}
+            >
+              Desativar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={!!enrolling} onOpenChange={(o) => !o && busy !== 'verify' && void cancelEnrollment()}>
         <DialogContent className="sm:max-w-md">

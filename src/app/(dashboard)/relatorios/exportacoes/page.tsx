@@ -33,7 +33,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { usePermissions } from "@/hooks/use-permission";
-import { ForbiddenState } from "@/components/dashboard/error-state";
+import { toast } from "sonner";
+import { ErrorState, ForbiddenState } from "@/components/dashboard/error-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -127,6 +128,7 @@ export default function ExportacoesPage() {
   const [search, setSearch] = useState("");
   const [rows, setRows] = useState<ExportRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -135,6 +137,7 @@ export default function ExportacoesPage() {
   const runSearch = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc("get_export_history", {
@@ -145,6 +148,7 @@ export default function ExportacoesPage() {
       setRows(normalizeRows((data ?? []) as RawExportRow[]));
     } catch (err) {
       console.error("[exportacoes] failed to load export history:", err);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -176,6 +180,7 @@ export default function ExportacoesPage() {
       if (data?.signedUrl) window.open(data.signedUrl, "_blank");
     } catch (err) {
       console.error("[exportacoes] failed to create signed url:", err);
+      toast.error("Não foi possível gerar o link de download");
     } finally {
       setDownloadingId(null);
     }
@@ -185,11 +190,12 @@ export default function ExportacoesPage() {
     if (!pendingDeleteIds || pendingDeleteIds.length === 0) return;
     setDeleting(true);
     try {
-      await Promise.all(
+      const results = await Promise.all(
         pendingDeleteIds.map((id) =>
           apiFetch(`/api/relatorios/exports?id=${id}`, { method: "DELETE" }),
         ),
       );
+      if (results.some((res) => !res.ok)) throw new Error("delete_failed");
       setSelected((prev) => {
         const next = new Set(prev);
         pendingDeleteIds.forEach((id) => next.delete(id));
@@ -198,6 +204,7 @@ export default function ExportacoesPage() {
       await runSearch();
     } catch (err) {
       console.error("[exportacoes] failed to delete export(s):", err);
+      toast.error("Não foi possível excluir a exportação");
     } finally {
       setDeleting(false);
       setPendingDeleteIds(null);
@@ -261,6 +268,10 @@ export default function ExportacoesPage() {
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="p-4">
+            <ErrorState title="Não foi possível carregar as exportações" onRetry={() => runSearch()} />
           </div>
         ) : rows.length === 0 ? (
           <div className="p-4">

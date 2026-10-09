@@ -25,6 +25,7 @@ import {
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
+import { usePermission } from '@/hooks/use-permission';
 import { normalizeForSearch } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -49,7 +50,7 @@ import {
 import { PageToolbar } from '@/components/ddm/page-toolbar';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import { DetailDrawer } from '@/components/ddm/list-with-drawer';
-import { EmptyState, Skeleton } from '@/components/ddm/states';
+import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
 import type { Tag, Team } from '@/types';
 import { codigoInUseBy, codigoTabulacaoBloqueado, parseCodigoTabulacao } from '@/lib/tabulacoes/codigo';
 import { AiOutcomeMapSection } from './ai-outcome-map-table';
@@ -84,8 +85,11 @@ const EMPTY_FORM: TabulacaoFormState = {
 export function TabulacoesManager() {
   const supabase = createClient();
   const { user, accountId } = useAuth();
+  // RLS de tags exige admin; espelha a chave tags.manage.
+  const canManage = usePermission('tags.manage');
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [tabulacoes, setTabulacoes] = useState<Tag[]>([]);
   const [aiMappedTagIds, setAiMappedTagIds] = useState<Set<string>>(new Set());
   const [aiMapReady, setAiMapReady] = useState(false);
@@ -123,6 +127,7 @@ export function TabulacoesManager() {
   const fetchData = useCallback(async () => {
     if (!accountId) return;
     setLoading(true);
+    setLoadError(false);
     setAiMapReady(false);
     try {
       const [tagsRes, teamsRes, assignmentsRes, aiMappingsRes] =
@@ -173,6 +178,7 @@ export function TabulacoesManager() {
       }
     } catch (err) {
       console.error('[TabulacoesManager] fetch error:', err);
+      setLoadError(true);
       toast.error('Falha ao carregar tabulações');
     } finally {
       setLoading(false);
@@ -355,10 +361,12 @@ export function TabulacoesManager() {
       <section className="space-y-3.5">
         <PageToolbar
           actions={
-            <Button onClick={openCreate}>
-              <Plus className="size-4" aria-hidden="true" />
-              Nova tabulação
-            </Button>
+            canManage ? (
+              <Button onClick={openCreate}>
+                <Plus className="size-4" aria-hidden="true" />
+                Nova tabulação
+              </Button>
+            ) : null
           }
         >
           <div className="relative w-full max-w-xs">
@@ -408,6 +416,13 @@ export function TabulacoesManager() {
                 <Skeleton key={i} className="h-11 w-full" />
               ))}
             </div>
+          ) : loadError ? (
+            <ErrorState
+              className="m-4 mt-0"
+              title="Não foi possível carregar as tabulações"
+              hint="Verifique a conexão e tente novamente."
+              onRetry={() => void fetchData()}
+            />
           ) : filtered.length === 0 ? (
             <EmptyState
               className="m-4 mt-0"
@@ -478,6 +493,8 @@ export function TabulacoesManager() {
                       </Td>
                       <Td align="right">
                         <div className="flex shrink-0 items-center justify-end gap-1">
+                          {canManage ? (
+                          <>
                           <Button
                             variant="ghost"
                             size="icon-xs"
@@ -498,6 +515,8 @@ export function TabulacoesManager() {
                           >
                             <Trash2 className="size-4" />
                           </Button>
+                          </>
+                          ) : null}
                         </div>
                       </Td>
                     </Tr>
