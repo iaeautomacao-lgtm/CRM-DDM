@@ -305,6 +305,20 @@
     {
       "version": "311_member_deactivation_last_access",
       "kind": "registry"
+    },
+    {
+      "version": "330_api_v1_conversation_extract",
+      "kind": "registry"
+    },
+    {
+      "version": "330b_conversations_account_updated_idx",
+      "kind": "index",
+      "index": "idx_conversations_account_updated"
+    },
+    {
+      "version": "331b_conversations_account_closed_idx",
+      "kind": "index",
+      "index": "idx_conversations_account_closed"
     }
   ]
 }
