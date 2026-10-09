@@ -64,6 +64,7 @@ export function TwoFactorCard() {
   const [error, setError] = useState<string | null>(null);
   const [enrolling, setEnrolling] = useState<Enrollment | null>(null);
   const [code, setCode] = useState('');
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [busy, setBusy] = useState<null | 'start' | 'verify' | 'remove'>(null);
   const [pendingRemove, setPendingRemove] = useState<MfaFactor | null>(null);
 
@@ -101,6 +102,7 @@ export function TwoFactorCard() {
         return;
       }
       setCode('');
+      setCodeError(null);
       setEnrolling({ factorId: data.id, qr: data.totp.qr_code, secret: data.totp.secret });
     } finally {
       setBusy(null);
@@ -113,7 +115,8 @@ export function TwoFactorCard() {
     try {
       const { error: err } = await supabase.auth.mfa.challengeAndVerify({ factorId: enrolling.factorId, code });
       if (err) {
-        toast.error(mfaErrorMessage(err.message));
+        // Erro do código aparece junto do campo (role=alert), não só em toast.
+        setCodeError(mfaErrorMessage(err.message));
         return;
       }
       toast.success('Verificação em duas etapas ativada.');
@@ -253,14 +256,25 @@ export function TwoFactorCard() {
                   id="mfa-code"
                   inputMode="numeric"
                   autoComplete="one-time-code"
+                  maxLength={6}
                   value={code}
-                  onChange={(e) => setCode(normalizeTotpCode(e.target.value))}
+                  onChange={(e) => {
+                    setCode(normalizeTotpCode(e.target.value));
+                    setCodeError(null);
+                  }}
                   placeholder="000000"
-                  className="text-center font-mono text-lg tracking-[0.4em]"
+                  aria-invalid={codeError ? true : undefined}
+                  aria-describedby={codeError ? 'mfa-code-error' : undefined}
+                  className={`text-center font-mono text-lg tracking-[0.4em]${codeError ? ' border-danger' : ''}`}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') void verify();
                   }}
                 />
+                {codeError && (
+                  <p id="mfa-code-error" role="alert" className="text-xs text-danger">
+                    {codeError}
+                  </p>
+                )}
               </div>
             </div>
           )}

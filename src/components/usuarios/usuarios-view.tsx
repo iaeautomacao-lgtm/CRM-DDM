@@ -41,6 +41,7 @@ import { DetailDrawer } from '@/components/ddm/list-with-drawer';
 import { usePermissions } from '@/hooks/use-permission';
 import { useAuth } from '@/hooks/use-auth';
 import { usePresence } from '@/hooks/use-presence';
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth/auth-errors';
 import type { AccountRole } from '@/lib/auth/roles';
 import type { PresenceStatus } from '@/lib/presence';
 import { BulkImportMembersDialog } from '@/components/settings/bulk-import-members-dialog';
@@ -75,7 +76,7 @@ type StatusFilter = 'all' | 'active' | 'inactive';
 
 // Papéis editáveis no seletor. Proprietário nunca é opção: a promoção passa pela transferência de propriedade.
 const EDITABLE_ROLES: AccountRole[] = ['admin', 'supervisor', 'agent', 'viewer'];
-const MIN_RESET_PASSWORD_LENGTH = 8;
+const MIN_RESET_PASSWORD_LENGTH = MIN_PASSWORD_LENGTH;
 
 const ROLE_TONE: Record<AccountRole, StatusTone> = {
   owner: 'brand',
@@ -160,6 +161,9 @@ export function UsuariosView() {
   const [resetPasswordMember, setResetPasswordMember] = useState<Member | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetPwTried, setResetPwTried] = useState(false);
+  const resetPwTooShort = resetPwTried && newPassword.length < MIN_RESET_PASSWORD_LENGTH;
+  const resetPwMismatch = resetPwTried && !resetPwTooShort && newPassword !== confirmPassword;
   const [resettingPassword, setResettingPassword] = useState(false);
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(null);
   const [transferTarget, setTransferTarget] = useState<Member | null>(null);
@@ -300,18 +304,15 @@ export function UsuariosView() {
     setResetPasswordMember(null);
     setNewPassword('');
     setConfirmPassword('');
+    setResetPwTried(false);
   }
 
   async function handleResetPassword() {
     if (!resetPasswordMember) return;
-    if (newPassword.length < MIN_RESET_PASSWORD_LENGTH) {
-      toast.error(`A senha deve ter pelo menos ${MIN_RESET_PASSWORD_LENGTH} caracteres`);
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      toast.error('As senhas não coincidem');
-      return;
-    }
+    setResetPwTried(true);
+    // Os erros de tamanho e de confirmação aparecem junto dos campos (aria-invalid + role=alert).
+    if (newPassword.length < MIN_RESET_PASSWORD_LENGTH) return;
+    if (newPassword !== confirmPassword) return;
     setResettingPassword(true);
     try {
       const res = await apiFetch(`/api/account/members/${resetPasswordMember.user_id}/reset-password`, {
@@ -860,7 +861,19 @@ export function UsuariosView() {
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder={`Mínimo ${MIN_RESET_PASSWORD_LENGTH} caracteres`}
+                aria-invalid={resetPwTooShort || undefined}
+                aria-describedby="usr-new-pw-msg"
+                className={resetPwTooShort ? 'border-danger' : undefined}
               />
+              <p
+                id="usr-new-pw-msg"
+                role={resetPwTooShort ? 'alert' : undefined}
+                className={`text-xs ${resetPwTooShort ? 'text-danger' : 'text-muted-foreground'}`}
+              >
+                {resetPwTooShort
+                  ? `A senha deve ter pelo menos ${MIN_RESET_PASSWORD_LENGTH} caracteres.`
+                  : `Mínimo de ${MIN_RESET_PASSWORD_LENGTH} caracteres.`}
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="usr-confirm-pw">Confirmar senha</Label>
@@ -871,7 +884,15 @@ export function UsuariosView() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Repita a senha"
+                aria-invalid={resetPwMismatch || undefined}
+                aria-describedby={resetPwMismatch ? 'usr-confirm-pw-msg' : undefined}
+                className={resetPwMismatch ? 'border-danger' : undefined}
               />
+              {resetPwMismatch && (
+                <p id="usr-confirm-pw-msg" role="alert" className="text-xs text-danger">
+                  As senhas não coincidem.
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
