@@ -42,6 +42,7 @@ import { Segmented } from "@/components/ddm/segmented";
 import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
 import { EmptyState, Skeleton } from "@/components/ddm/states";
+import { CampaignExportsPanel } from "@/components/disparador/export/campaign-exports";
 
 interface QueueRow {
   id: string;
@@ -291,6 +292,8 @@ export default function CampanhaContatosPage({
           />
         </section>
       )}
+
+      {allowed && <CampaignExportsPanel campaignId={campaignId} />}
 
       <PageToolbar>
         <Segmented

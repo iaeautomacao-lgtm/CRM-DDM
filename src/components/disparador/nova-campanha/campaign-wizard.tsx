@@ -31,6 +31,7 @@ import {
   type ImportChunkResults,
 } from "@/lib/disparador/import-chunks";
 import { TEMPLATE_VALIDATION_COLUMNS } from "@/lib/disparador/template-validation";
+import { importTokenField } from "@/lib/disparador/import-client";
 import { utmCpfKey, utmPhoneKey } from "@/lib/disparador/utm-links";
 import { SAMPLE_PREVIEW_CONTACT } from "./message-preview";
 import { StepConfiguracoes } from "./step-configuracoes";
@@ -128,6 +129,8 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
 
   // Base importada nesta sessão
   const [importFile, setImportFile] = useState<File | null>(null);
+  // import_token (A15) do arquivo atual; null sem arquivo; vai em todos os blocos (importTokenField).
+  const [importToken, setImportToken] = useState<string | null>(null);
   const [table, setTable] = useState<ParsedImportTable | null>(null);
   const [columnMap, setColumnMapState] = useState<ImportColumnMap>({});
   const [importLoading, setImportLoading] = useState(false);
@@ -298,6 +301,8 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
         return;
       }
       setImportFile(file);
+      // Um import_token por arquivo escolhido (A15): o mesmo em todos os blocos e nos reenvios.
+      setImportToken(crypto.randomUUID());
       setTable(parsed);
       setBlacklistKeys(null);
       setColumnMap(suggestImportColumnMap(parsed.headers));
@@ -310,6 +315,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
 
   const clearImport = () => {
     setImportFile(null);
+    setImportToken(null);
     setTable(null);
     setColumnMapState({});
     setBlacklistKeys(null);
@@ -700,6 +706,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
             ...(editing ? { campaign_id: editing.id } : { draft_id: draftId }),
             column_map: columnMap,
             mapping_confirmed: true,
+            ...importTokenField(importToken),
           });
           r = mergeImportResults(r, json.results);
           sent += chunks[i].length;
