@@ -84,7 +84,7 @@ describe('cron: agendador por número', () => {
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: unknown } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in', 'not', 'is'])
+      for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in', 'not', 'is', 'or'])
         builder[m] = () => builder;
       builder.eq = (column: string, value: unknown) => {
         if (table === 'campaigns' && value === 'em_execucao') result = { data: campaigns, error: null };
@@ -489,7 +489,7 @@ describe('cron: agendador por número', () => {
       enableChain();
       mocks.from.mockImplementation((table: string) => {
         const builder: Record<string, unknown> = {};
-        for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in', 'not', 'is', 'eq', 'select', 'upsert'])
+        for (const m of ['lte', 'lt', 'gt', 'order', 'limit', 'range', 'update', 'in', 'not', 'is', 'or', 'eq', 'select', 'upsert'])
           builder[m] = () => builder;
         builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(resolve);
         return builder;
@@ -588,7 +588,7 @@ describe('cron: candidatos por campanha', () => {
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: null } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['lte', 'lt', 'order', 'limit', 'update', 'in', 'select', 'not', 'is']) builder[m] = () => builder;
+      for (const m of ['lte', 'lt', 'order', 'limit', 'update', 'in', 'select', 'not', 'is', 'or']) builder[m] = () => builder;
       builder.eq = (_column: string, value: unknown) => {
         if (table === 'campaigns' && value === 'em_execucao') result = { data: [campaign], error: null };
         return builder;
@@ -638,7 +638,7 @@ describe('cron: reflow da fila de campanha em lote', () => {
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: null } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['eq', 'lte', 'lt', 'order', 'limit', 'range', 'update', 'not', 'is'])
+      for (const m of ['eq', 'lte', 'lt', 'order', 'limit', 'range', 'update', 'not', 'is', 'or'])
         builder[m] = (...args: unknown[]) => {
           if (table === 'campaigns' && m === 'eq' && args[1] === 'em_execucao') result = { data: [campaign], error: null };
           return builder;

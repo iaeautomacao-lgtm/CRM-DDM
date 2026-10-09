@@ -32,6 +32,7 @@ segredo não bater (comparação em tempo constante). O segredo vai no header, n
 | `/api/channels/refresh-tokens` | `POST` | `AUTOMATION_CRON_SECRET` | 1 vez por dia | lote de 50 canais; renova tokens do Instagram que vencem em até 10 dias | Tokens longos do Instagram (60 dias) expiram e o canal vai para `error`. |
 | `/api/conversations/retry-assignment` | `POST` | `AUTOMATION_CRON_SECRET` | 5 min | sem lote próprio documentado; olha conversas `pending` sem agente há ≥5 min | Conversas sem agente não são redistribuídas automaticamente. |
 | `/api/disparador/imports/cron` | `POST` | `CRON_SECRET` | 1 min | `maxDuration` 120 s; orçamento 80 s; reserva por job (`FOR UPDATE SKIP LOCKED` + lease), sem lock global | Importações de contatos em segundo plano (migration 197) ficam paradas em `pending`/`running` — a campanha só fica com a lista completa depois que o job termina. Jobs abandonados (sem `start` em 24 h) também só são cancelados aqui. Contrato: `docs/disparador-importacao-assincrona.md`. |
+| `/api/webhooks-out/cron` | `POST` | `CRON_SECRET` | 1 min | `maxDuration` 120 s; orçamento 80 s; reserva por entrega (`FOR UPDATE SKIP LOCKED` + lease de 120 s), sem lock global; 5 entregas em paralelo | Webhooks de saída (migration 204) não são entregues: ficam `pending` na fila e saem quando o cron voltar (retry com backoff de até 12 tentativas, depois `dead` com replay manual). |
 
 Observações:
 

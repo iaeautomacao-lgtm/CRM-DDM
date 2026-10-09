@@ -1,3 +1,4 @@
+import { recordPrepareRetry, resetPrepareBackoff } from "@/lib/disparador/prepare-backoff";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { loadCampaignAudience } from "@/lib/disparador/audience";
 import { resolveUtmLink, type UtmLinkMaps } from "@/lib/disparador/utm-links";
@@ -92,9 +93,18 @@ export async function startCampaign(
       .eq("account_id", accountId)
       .eq("status", "preparando");
     if (error) console.error("[startCampaign] Recuperação de preparação pendente:", error.message);
-    if (!result.ok) await recordStartFailure(campaignId, accountId, state.agendamento, result.error);
+    if (!result.ok) {
+      if (retryable) {
+        // A3: falha transitória de campanha agendada — backoff (1, 2, 4… até 30 min), motivo com o nº da tentativa e alerta na 5ª.
+        await recordPrepareRetry(supabaseAdmin(), { campaignId, accountId, agendamento: state.agendamento, error: result.error });
+      } else {
+        await recordStartFailure(campaignId, accountId, state.agendamento, result.error);
+        await resetPrepareBackoff(supabaseAdmin(), campaignId); // voltou para rascunho: não há mais o que adiar
+      }
+    }
   } else if (result.ok) {
     await clearStartFailure(campaignId);
+    await resetPrepareBackoff(supabaseAdmin(), campaignId);
     // Vale tanto para retomada sequencial quanto para o reflow do lote.
     // Não reutilizar os erros que motivaram a pausa anterior.
     const { error } = await supabaseAdmin().from("campaigns")

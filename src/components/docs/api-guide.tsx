@@ -345,7 +345,65 @@ export function ApiGuide({ examples }: { examples: GuideExamples }) {
         <CodeTabs snippets={snippets.relatorio} title="Relatório de operação" />
       </Section>
 
-      {/* 6 ─ Erros */}
+      {/* 6 ─ Webhooks de saída */}
+      <Section
+        id="webhooks"
+        title="Webhooks de saída"
+        intro={
+          <>
+            Em vez de consultar o CRM de tempos em tempos, cadastre uma URL <strong>https</strong> pública em <C>POST /webhooks</C> (escopo <C>webhooks:write</C>) e o CRM avisa quando algo acontece. O
+            segredo <C>whsec_…</C> aparece <strong>uma única vez</strong>, na criação.
+          </>
+        }
+      >
+        <Table
+          head={['Evento', 'Quando acontece']}
+          rows={[
+            [<C key="1">message.received</C>, 'Chegou mensagem de cliente (texto, telefone, conversa e contato).'],
+            [<C key="2">message.status</C>, 'Mensagem enviada mudou de status: sent, delivered, read ou failed.'],
+            [<C key="3">conversation.closed</C>, 'Conversa encerrada, com a tabulação de encerramento quando houver.'],
+            [<C key="4">agreement.created</C>, "Tabulação 'Acordo Realizado' aplicada à conversa."],
+            [<C key="5">contact.opt_out</C>, 'Contato pediu para não receber mensagens.'],
+          ]}
+        />
+        <H3>Rotas</H3>
+        <Table
+          head={['Rota', 'Para quê', 'Escopo']}
+          rows={[
+            [<C key="r1">GET /webhooks</C>, 'Listar os webhooks da conta (o segredo nunca volta).', <>webhooks:read ou write</>],
+            [<C key="r2">POST /webhooks</C>, 'Cadastrar: url https pública + eventos. Devolve o segredo uma vez.', <>webhooks:write</>],
+            [<C key="r3">{'GET /webhooks/{id}'}</C>, 'Ler um webhook.', <>webhooks:read ou write</>],
+            [<C key="r4">{'PATCH /webhooks/{id}'}</C>, 'Alterar url, eventos, descrição ou pausar/reativar (status).', <>webhooks:write</>],
+            [<C key="r5">{'DELETE /webhooks/{id}'}</C>, 'Apagar o webhook e o histórico de entregas.', <>webhooks:write</>],
+            [<C key="r6">{'GET /webhooks/{id}/deliveries'}</C>, 'Histórico de entregas (filtre por state; cursor).', <>webhooks:read ou write</>],
+            [<C key="r7">{'POST /webhooks/{id}/deliveries/{deliveryId}/replay'}</C>, 'Reenviar uma entrega esgotada (dead).', <>webhooks:write</>],
+            [<C key="r8">{'POST /webhooks/{id}/rotate-secret'}</C>, 'Gerar novo segredo (o anterior deixa de valer).', <>webhooks:write</>],
+            [<C key="r9">{'POST /webhooks/{id}/test'}</C>, 'Enviar um evento webhook.test.', <>webhooks:write</>],
+          ]}
+        />
+        <H3>Como validar a assinatura</H3>
+        <P>
+          Cada chamada traz <C>X-CRM-Signature: t=&lt;unix&gt;,v1=&lt;hex&gt;</C>, onde <C>v1</C> é o HMAC-SHA256 do texto <C>t + &quot;.&quot; + corpo</C> com o seu segredo. Calcule sobre o corpo{' '}
+          <strong>bruto</strong>, compare em tempo constante e <strong>rejeite se |agora − t| passar de 5 minutos</strong>.
+        </P>
+        <ul className="max-w-[68ch] list-disc space-y-1.5 pl-5 text-sm text-foreground/90">
+          <li>
+            Responda <strong>2xx em até 10 segundos</strong>. Redirecionamentos não são seguidos.
+          </li>
+          <li>
+            Falhou? O CRM tenta de novo com intervalo crescente (30 s, 1 min, 2 min… até 1 h) por <strong>12 tentativas</strong>; depois a entrega fica <C>dead</C> em{' '}
+            <C>GET /webhooks/{'{id}'}/deliveries?state=dead</C> e você reenvia com <C>POST …/replay</C>.
+          </li>
+          <li>
+            Pelo menos uma vez, sem ordem garantida: <strong>deduplique pelo <C>id</C> do evento</strong>.
+          </li>
+          <li>
+            Teste antes de valer: <C>POST /webhooks/{'{id}'}/test</C> envia um <C>webhook.test</C>. Trate o endpoint como dado sensível — <C>message.received</C> traz telefone e texto do cliente.
+          </li>
+        </ul>
+      </Section>
+
+      {/* 7 ─ Erros */}
       <Section
         id="erros"
         title="Erros e limites"

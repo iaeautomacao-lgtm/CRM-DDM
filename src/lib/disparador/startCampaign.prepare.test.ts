@@ -196,6 +196,52 @@ describe("startCampaign — preparação (B9)", () => {
     expect(state.queueInserts).toEqual([]);
   });
 
+  it("falha TRANSITÓRIA da preparação (agendada): backoff — prepare_attempts, next_prepare_at no futuro e motivo com o nº da tentativa (A3)", async () => {
+    state.failInsertAt = 1;
+    const before = Date.now();
+    const result = await startCampaign("camp-1", "acc");
+    expect(result).toMatchObject({ ok: false, status: 500 });
+    expect(state.campaignUpdates.some((u) => u.status === "agendado")).toBe(true);
+    const backoff = state.campaignUpdates.find((u) => u.prepare_attempts !== undefined);
+    expect(backoff).toMatchObject({ prepare_attempts: 1 });
+    expect(Date.parse(backoff!.next_prepare_at as string)).toBeGreaterThanOrEqual(before + 55_000); // 1ª falha: ~1 min
+    expect(String(backoff!.motivo_falha_inicio)).toMatch(/tentativa 1.*nova tentativa em 1 min/);
+    expect(String(backoff!.motivo_falha_inicio)).not.toMatch(/voltou para rascunho/);
+  });
+
+  it("falha de VALIDAÇÃO (4xx, volta a rascunho): sem backoff — zera o contador e mantém o texto de rascunho (A3)", async () => {
+    setCampaign({ mensagens: [] });
+    const result = await startCampaign("camp-1", "acc");
+    expect(result.ok).toBe(false);
+    expect(state.campaignUpdates.some((u) => u.status === "rascunho")).toBe(true);
+    expect(state.campaignUpdates.some((u) => typeof u.prepare_attempts === "number" && u.prepare_attempts > 0)).toBe(false);
+  });
+
+  it("sucesso: zera o backoff", async () => {
+    const result = await startCampaign("camp-1", "acc");
+    expect(result.ok).toBe(true);
+    expect(state.campaignUpdates.some((u) => u.prepare_attempts === 0 && u.next_prepare_at === null)).toBe(true);
+  });
+
+  it("falha TRANSITÓRIA da preparação (agendada): backoff — prepare_attempts, next_prepare_at no futuro e motivo com o nº da tentativa (A3)", async () => {
+    state.failInsertAt = 1;
+    const before = Date.now();
+    const result = await startCampaign("camp-1", "acc");
+    expect(result).toMatchObject({ ok: false, status: 500 });
+    expect(state.campaignUpdates.some((u) => u.status === "agendado")).toBe(true);
+    const backoff = state.campaignUpdates.find((u) => u.prepare_attempts !== undefined);
+    expect(backoff).toMatchObject({ prepare_attempts: 1 });
+    expect(Date.parse(backoff!.next_prepare_at as string)).toBeGreaterThanOrEqual(before + 55_000); // 1ª falha: ~1 min
+    expect(String(backoff!.motivo_falha_inicio)).toMatch(/tentativa 1.*nova tentativa em 1 min/);
+    expect(String(backoff!.motivo_falha_inicio)).not.toMatch(/voltou para rascunho/);
+  });
+
+  it("sucesso: zera o backoff", async () => {
+    const result = await startCampaign("camp-1", "acc");
+    expect(result.ok).toBe(true);
+    expect(state.campaignUpdates.some((u) => u.prepare_attempts === 0 && u.next_prepare_at === null)).toBe(true);
+  });
+
   it("campanha realmente inexistente: 404 (sem confundir com erro de leitura)", async () => {
     state.campaignMissing = true;
     const result = await startCampaign("camp-1", "acc");
