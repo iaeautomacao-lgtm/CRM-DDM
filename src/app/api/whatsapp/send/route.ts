@@ -200,7 +200,7 @@ export async function POST(request: Request) {
 
         if (contactErr || !contactRow) {
           return NextResponse.json(
-            { error: 'Contact not found' },
+            { error: 'Contato não encontrado' },
             { status: 404 }
           )
         }

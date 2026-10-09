@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     .single()
   if (flowErr || !flow) {
     return NextResponse.json(
-      { error: flowErr?.message ?? 'flow insert failed' },
+      { error: flowErr?.message ?? 'Falha ao criar o fluxo' },
       { status: 500 },
     )
   }
