@@ -354,7 +354,9 @@ export type TemplateButton =
   | { type: 'QUICK_REPLY'; text: string }
   | { type: 'URL'; text: string; url: string; example?: string }
   | { type: 'PHONE_NUMBER'; text: string; phone_number: string }
-  | { type: 'COPY_CODE'; text: string; example: string };
+  | { type: 'COPY_CODE'; text: string; example: string }
+  /** Botão que abre um WhatsApp Flow (PRD 21). O flow_token é gerado POR ENVIO (correlação com o contato), não vive no template. */
+  | { type: 'FLOW'; text: string; flow_id?: string; flow_name?: string; flow_action?: 'navigate' | 'data_exchange'; navigate_screen?: string };
 
 export interface TemplateSampleValues {
   body?: string[];

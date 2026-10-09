@@ -49,6 +49,11 @@ export interface SendTimeParams {
    * override at send time.
    */
   buttonParams?: Record<number, string>;
+  /**
+   * Botão FLOW (PRD 21): token de correlação deste envio (o Data Exchange e o nfm_reply devolvem o mesmo valor). Obrigatório quando o
+   * template tem botão FLOW — sem ele a Meta recusa o envio.
+   */
+  flowToken?: string;
 }
 
 export type MetaSendComponent =
@@ -56,7 +61,7 @@ export type MetaSendComponent =
   | { type: 'body'; parameters: MetaSendParameter[] }
   | {
       type: 'button';
-      sub_type: 'url' | 'quick_reply' | 'copy_code';
+      sub_type: 'url' | 'quick_reply' | 'copy_code' | 'flow';
       index: string;
       parameters: MetaSendParameter[];
     };
@@ -67,7 +72,8 @@ type MetaSendParameter =
   | { type: 'video'; video: { link?: string; id?: string } }
   | { type: 'document'; document: { link?: string; id?: string } }
   | { type: 'coupon_code'; coupon_code: string }
-  | { type: 'payload'; payload: string };
+  | { type: 'payload'; payload: string }
+  | { type: 'action'; action: { flow_token: string } };
 
 function buildHeaderComponent(
   template: MessageTemplate,
@@ -149,6 +155,8 @@ function buttonNeedsSendParam(
   override: string | undefined,
 ): boolean {
   switch (button.type) {
+    case 'FLOW':
+      return true; // a Meta exige o flow_token em todo envio
     case 'URL':
       return extractVariableIndices(button.url).length > 0;
     case 'COPY_CODE':
@@ -166,10 +174,22 @@ function buildButtonComponent(
   button: TemplateButton,
   index: number,
   override: string | undefined,
+  flowToken?: string,
 ): MetaSendComponent | null {
   if (!buttonNeedsSendParam(button, override)) return null;
 
   switch (button.type) {
+    case 'FLOW': {
+      if (!flowToken || !flowToken.trim()) {
+        throw new Error(`FLOW button #${index + 1} requires a flowToken — pass flowToken.`);
+      }
+      return {
+        type: 'button',
+        sub_type: 'flow',
+        index: String(index),
+        parameters: [{ type: 'action', action: { flow_token: flowToken } }],
+      };
+    }
     case 'URL': {
       // Each URL button is its own component with sub_type=url and
       // the button's index in the template's buttons array.
@@ -228,7 +248,7 @@ export function buildSendComponents(
   if (template.buttons?.length) {
     template.buttons.forEach((btn, i) => {
       const override = params.buttonParams?.[i];
-      const component = buildButtonComponent(btn, i, override);
+      const component = buildButtonComponent(btn, i, override, params.flowToken);
       if (component) out.push(component);
     });
   }

@@ -175,6 +175,7 @@ const BUTTON_TYPE_LABELS: Record<TemplateButton['type'], string> = {
   URL: 'Link',
   PHONE_NUMBER: 'Ligar',
   COPY_CODE: 'Copiar código',
+  FLOW: 'Formulário (Flow)',
 };
 
 const COMMON_LANGUAGE_CODES = [
@@ -207,6 +208,8 @@ function emptyButton(type: TemplateButton['type']): TemplateButton {
       return { type: 'PHONE_NUMBER', text: '', phone_number: '' };
     case 'COPY_CODE':
       return { type: 'COPY_CODE', text: '', example: '' };
+    case 'FLOW':
+      return { type: 'FLOW', text: '' };
   }
 }
 

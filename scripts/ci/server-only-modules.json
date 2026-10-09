@@ -30,6 +30,7 @@
     "src/lib/billing/engine.ts",
     "src/lib/billing/ruler-api.ts",
     "src/lib/billing/route-helpers.ts",
+    "src/lib/disparador/flow-button.ts",
     "src/lib/billing/enqueuer.ts",
     "src/lib/billing/sync.ts",
     "src/lib/webhooks-out/endpoints.ts",
