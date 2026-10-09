@@ -282,7 +282,7 @@
       "index": "idx_dmq_contact_scheduled"
     },
     {
-      "version": "297_history_export_jobs",
+      "version": "301_quick_replies_visibility_usage",
       "kind": "registry"
     }
   ]
