@@ -284,6 +284,15 @@
     {
       "version": "297_history_export_jobs",
       "kind": "registry"
+    },
+    {
+      "version": "303_internal_chat_reads",
+      "kind": "registry"
+    },
+    {
+      "version": "303b_internal_messages_unread_idx",
+      "kind": "index",
+      "index": "idx_internal_messages_unread"
     }
   ]
 }
