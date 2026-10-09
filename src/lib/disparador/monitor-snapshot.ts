@@ -466,6 +466,7 @@ export function buildMonitorSnapshot(input: MonitorInput): MonitorSnapshot {
   const EVENT_TITLES: Record<string, { title: string; level: AlertLevel }> = {
     campaign_auto_paused: { title: "Campanha pausada automaticamente", level: "critical" },
     campaign_start_failed: { title: "Falha ao iniciar campanha", level: "critical" },
+    campaign_prepare_alert: { title: "Campanha agendada não consegue ser preparada", level: "critical" },
     campaign_finished: { title: "Campanha finalizada", level: "info" },
     dispatch_stale_sending_recovered: { title: "Itens presos em 'enviando' resolvidos automaticamente", level: "info" },
     message_blocked_meta_131026: { title: "Número bloqueado após 131026 em 3 campanhas", level: "warning" },
@@ -541,6 +542,7 @@ type Db = Pick<SupabaseClient, "from" | "rpc">;
 export const MONITOR_LOG_EVENTS = [
   "campaign_auto_paused",
   "campaign_start_failed",
+  "campaign_prepare_alert",
   "campaign_finished",
   "dispatch_stale_sending_recovered",
   "message_blocked_meta_131026",

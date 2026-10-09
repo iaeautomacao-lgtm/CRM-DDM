@@ -13,7 +13,7 @@ vi.mock("@/lib/audit/log-event", () => ({ logAuditEvent: (...a: unknown[]) => au
 vi.mock("@/lib/audit/context", () => ({ registerAuditActor: async () => {} }));
 vi.mock("@/lib/disparador/admin-client", () => ({
   supabaseAdmin: () => ({
-    rpc: async () => ({ data: [], error: null }),
+    rpc: async (fn: string) => (fn === "dispatch_import_set_block" ? { data: null, error: { message: "function does not exist" } } : { data: [], error: null }),
     storage: {
       from: () => ({
         upload: async (path: string, body: Buffer) => (files.set(path, body.toString("utf8")), { error: null }),

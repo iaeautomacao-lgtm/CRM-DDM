@@ -135,6 +135,15 @@ export async function putImportBlock(db: Db, job: ImportJob, n: number, rawRows:
   }
   const { error: uploadError } = await db.storage.from(IMPORT_BUCKET).upload(blockPath(job, n), Buffer.from(JSON.stringify(rows), "utf8"), { contentType: "application/octet-stream", upsert: true });
   if (uploadError) throw new Error(`Falha ao guardar o bloco ${n}: ${uploadError.message}`);
+  // Atômico (migration 196): blocks/rows_total atualizados NUMA instrução — dois PUTs simultâneos não perdem contador.
+  if (typeof db.rpc === "function") {
+    const { data: atomic, error: rpcError } = await db.rpc("dispatch_import_set_block", { p_job_id: job.id, p_n: n, p_rows: rows.length });
+    if (!rpcError) {
+      if (!atomic) return fail("not_receiving", "A importação não aceita mais blocos.", 409);
+      return { ok: true, job: atomic as ImportJob };
+    }
+    // Sem a função (migration 196 ausente) ou falha dela: cai no caminho de antes (ler-modificar-gravar).
+  }
   const blocks = { ...job.blocks, [String(n)]: rows.length };
   const rowsTotal = Object.values(blocks).reduce((a, b) => a + b, 0);
   const { data, error } = await db
