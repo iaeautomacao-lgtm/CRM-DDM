@@ -16,6 +16,7 @@ import {
 import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
+import { lineMismatch, resolveSendLine, type SendLine } from '@/lib/whatsapp/send-line'
 import { persistOutboundMessage } from '@/lib/messages/persist-outbound'
 import { sendWebchatMessage } from '@/lib/webchat/send'
 import { hasActiveWebchatSession } from '@/lib/webchat/sessions'
@@ -67,6 +68,8 @@ export async function POST(request: Request) {
         template_message_params,
         reply_to_message_id,
         waha_session,
+        // PRD 23 (item 7): linha (whatsapp_config.id) escolhida pelo operador ao iniciar a conversa. Validada contra as linhas que ELE enxerga.
+        channel_id,
       } = body
 
       // Duas URLs para o mesmo anexo:
@@ -147,6 +150,16 @@ export async function POST(request: Request) {
         )
       }
 
+      // Linha escolhida (PRD 23, item 7): só vale se o operador a enxerga (RLS de whatsapp_config) e está habilitada.
+      let chosenLine: SendLine | null = null
+      if (channel_id !== undefined && channel_id !== null && channel_id !== '') {
+        const resolvedLine = await resolveSendLine(supabase, accountId, channel_id)
+        if (!resolvedLine.ok) {
+          return NextResponse.json({ error: resolvedLine.error, code: resolvedLine.code }, { status: resolvedLine.status })
+        }
+        chosenLine = resolvedLine.line
+      }
+
       // Resolve the target conversation. With `conversation_id` we load the
       // existing thread; with `contact_id` we find-or-create one for the
       // contact so a business-initiated template send (Contact detail view)
@@ -170,6 +183,10 @@ export async function POST(request: Request) {
             { status: 404 }
           )
         }
+        const mismatch = chosenLine ? lineMismatch(data as { config_id?: string | null; waha_session?: string | null }, chosenLine) : null
+        if (mismatch) {
+          return NextResponse.json({ error: mismatch, code: 'line_mismatch' }, { status: 409 })
+        }
         conversation = data
       } else {
         // contact_id path: verify the contact is in this account first so a
@@ -188,8 +205,8 @@ export async function POST(request: Request) {
           )
         }
 
-        let targetSession = waha_session
-        if (!targetSession) {
+        let targetSession = chosenLine?.provider === 'waha' ? (chosenLine.waha_session ?? undefined) : waha_session
+        if (!targetSession && chosenLine?.provider !== 'meta') {
           const { data: configs } = await supabase
             .from('whatsapp_config')
             .select('waha_session')
@@ -206,7 +223,8 @@ export async function POST(request: Request) {
           accountId,
           userId,
           contact_id,
-          targetSession
+          targetSession,
+          chosenLine?.provider === 'meta' ? chosenLine.id : undefined
         )
         if (!resolved) {
           return NextResponse.json(
@@ -748,7 +766,9 @@ async function findOrCreateConversation(
   accountId: string,
   userId: string,
   contactId: string,
-  wahaSession?: string
+  wahaSession?: string,
+  // Linha Meta escolhida pelo operador (PRD 23, item 7): uma conversa por contato E linha.
+  metaConfigId?: string
 ) {
   let query = supabase
     .from('conversations')
@@ -759,7 +779,9 @@ async function findOrCreateConversation(
     // contato é sempre WhatsApp.
     .eq('channel_type', 'whatsapp')
 
-  if (wahaSession) {
+  if (metaConfigId) {
+    query = query.eq('config_id', metaConfigId)
+  } else if (wahaSession) {
     query = query.eq('waha_session', wahaSession)
   } else {
     query = query.is('waha_session', null)
@@ -774,7 +796,9 @@ async function findOrCreateConversation(
     user_id: userId,
     contact_id: contactId,
   }
-  if (wahaSession) {
+  if (metaConfigId) {
+    insertObj.config_id = metaConfigId
+  } else if (wahaSession) {
     insertObj.waha_session = wahaSession
   }
 
