@@ -277,6 +277,8 @@ export const RATE_LIMITS = {
   webchatWrite: { limit: 30, windowMs: 60_000 },
   /** IA no composer (reescrever/variações de tom): cada chamada gasta a chave de IA da CONTA; 20/min por operador cobre o uso humano. */
   aiRewrite: { limit: 20, windowMs: 60_000 },
+  /** API v1: criar campanha (cada chamada pode enfileirar 20k itens); 6/min por chave (decisão do dono, PRD 11 A9). */
+  apiV1CampaignCreate: { limit: 6, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

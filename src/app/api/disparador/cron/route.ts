@@ -46,6 +46,7 @@ import {
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
+import { sweepStuckApiCampaigns } from "@/lib/disparador/api-v1-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
 import { drainMessageInboxLive } from "@/lib/whatsapp/message-inbox-runner";
@@ -772,6 +773,10 @@ async function runTick(request: Request, chain: ChainContext) {
     // encerradas neste tick).
     if (maintenanceHop && !lostLease && Date.now() < stopAt - 5_000) await drainCallbackOutbox();
     if (maintenanceHop) await cleanupOrphanReceipts(db, stopAt, () => lostLease);
+    // A7: libera criações da API v1 interrompidas (rascunho sem ativar > 15 min). Best-effort, só com sobra de tempo.
+    if (maintenanceHop && !lostLease && Date.now() < stopAt - 10_000) {
+      try { await sweepStuckApiCampaigns(db); } catch (error) { console.error("[Cron] Falha ao varrer rascunhos da API v1:", error); }
+    }
     tickStatus = results.length ? "processed" : "idle";
     return NextResponse.json({
       status: tickStatus,
