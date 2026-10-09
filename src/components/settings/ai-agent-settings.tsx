@@ -15,8 +15,14 @@ import {
   Sparkles 
 } from "lucide-react";
 
-import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api-fetch";
+import { KB_ACCEPT } from "@/lib/ai/knowledge/limits";
+import {
+  AgentApiError,
+  fetchKnowledgeBaseFiles,
+  removeKnowledgeFile,
+  uploadKnowledgeFile,
+} from "./agents/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -94,7 +100,6 @@ Você é exclusivamente um assistente financeiro de acordos e suporte do Grupo D
 4. Apenas nestes casos do item 3, encerre sua resposta educadamente com a tag \`#EQUIPEHUMANA\` para que o operador humano assuma. Caso contrário, continue conduzindo a negociação normalmente.`;
 
 export function AiAgentSettings() {
-  const supabase = createClient();
   const { accountId, canEditSettings } = useAuth();
 
   const [enabled, setEnabled] = useState(false);
@@ -155,16 +160,10 @@ export function AiAgentSettings() {
     }
   }
 
+  // Base de conhecimento: leitura, envio e remoção SÓ pelo servidor (migration 214; texto extraído lá).
   async function loadKbFiles() {
     try {
-      const { data, error } = await supabase
-        .from("knowledge_base_files")
-        .select("id, name, created_at")
-        .eq("account_id", accountId)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setKbFiles(data || []);
+      setKbFiles(await fetchKnowledgeBaseFiles());
     } catch (err) {
       console.error("Failed to load knowledge base files:", err);
     }
@@ -221,92 +220,30 @@ export function AiAgentSettings() {
 
   async function handleKbUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file || !accountId) return;
 
     setUploadingKb(true);
     try {
-      let content = "";
-      if (file.name.endsWith(".txt") || file.name.endsWith(".csv")) {
-        content = await file.text();
-      } else if (file.name.endsWith(".pdf")) {
-        content = await parsePdfClientSide(file);
-      } else {
-        throw new Error("Formato de arquivo não suportado. Use PDF, TXT ou CSV.");
-      }
-
-      if (!content.trim()) {
-        throw new Error("O arquivo está vazio ou não pôde ser extraído texto.");
-      }
-
-      const { error } = await supabase
-        .from("knowledge_base_files")
-        .insert({
-          account_id: accountId,
-          name: file.name,
-          content: content,
-        });
-
-      if (error) throw error;
+      await uploadKnowledgeFile(file);
       toast.success("Documento adicionado à base de conhecimento!");
       loadKbFiles();
-    } catch (err: any) {
+    } catch (err) {
       console.error("Failed to upload file:", err);
-      toast.error(err.message || "Erro ao fazer upload do arquivo");
+      toast.error(err instanceof AgentApiError ? err.message : "Erro ao fazer upload do arquivo");
     } finally {
       setUploadingKb(false);
-      e.target.value = "";
     }
   }
 
-  // Client-side PDF parser using pdf.js from CDN
-  const parsePdfClientSide = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      if ((window as any)["pdfjs-dist/build/pdf"]) {
-        runParser((window as any)["pdfjs-dist/build/pdf"]);
-        return;
-      }
-
-      const script = document.createElement("script");
-      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js";
-      script.onload = () => {
-        const pdfjsLib = (window as any)["pdfjs-dist/build/pdf"];
-        pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js";
-        runParser(pdfjsLib);
-      };
-      script.onerror = () => reject(new Error("Falha ao carregar biblioteca de leitura de PDF."));
-      document.head.appendChild(script);
-
-      async function runParser(pdfjsLib: any) {
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-          let fullText = "";
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map((item: any) => item.str).join(" ");
-            fullText += pageText + "\n";
-          }
-          resolve(fullText);
-        } catch (err) {
-          reject(err);
-        }
-      }
-    });
-  };
-
   async function handleKbDelete(id: string) {
     try {
-      const { error } = await supabase
-        .from("knowledge_base_files")
-        .delete()
-        .eq("id", id);
-      if (error) throw error;
+      await removeKnowledgeFile(id);
       toast.success("Documento removido!");
       loadKbFiles();
     } catch (err) {
       console.error("Failed to delete document:", err);
-      toast.error("Erro ao remover documento");
+      toast.error(err instanceof AgentApiError ? err.message : "Erro ao remover documento");
     }
   }
 
@@ -582,13 +519,13 @@ export function AiAgentSettings() {
                 ) : (
                   <>
                     <Upload className="size-5 text-muted-foreground shrink-0" />
-                    <span className="text-sm font-medium text-muted-foreground">Carregar Documento (.pdf, .txt, .csv)</span>
+                    <span className="text-sm font-medium text-muted-foreground">Carregar Documento (.pdf, .docx, .txt, .md, .csv)</span>
                   </>
                 )}
                 <input
                   id="kb-upload"
                   type="file"
-                  accept=".pdf,.txt,.csv"
+                  accept={KB_ACCEPT}
                   onChange={handleKbUpload}
                   disabled={uploadingKb || !enabled || !canEditSettings}
                   className="hidden"

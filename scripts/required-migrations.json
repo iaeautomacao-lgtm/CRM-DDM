@@ -141,6 +141,10 @@
       "kind": "registry"
     },
     {
+      "version": "214_knowledge_base_files",
+      "kind": "registry"
+    },
+    {
       "version": "220_export_history_policy",
       "kind": "registry"
     },

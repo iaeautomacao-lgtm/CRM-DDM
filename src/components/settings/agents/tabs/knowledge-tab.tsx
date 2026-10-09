@@ -1,5 +1,16 @@
-import { useState } from 'react';
-import { Database, FileText, Globe, Search, AlertCircle } from 'lucide-react';
+'use client';
+
+import { useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Database, FileText, Globe, Search, AlertCircle, Loader2, Trash2, Upload } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  KB_ACCEPT,
+  KB_ACCEPT_LABEL,
+  KB_MAX_FILE_BYTES,
+  formatBytes,
+} from '@/lib/ai/knowledge/limits';
+import { AgentApiError, removeKnowledgeFile, uploadKnowledgeFile } from '../api';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -22,18 +33,29 @@ interface KnowledgeTabProps {
   data: AgentFormData;
   onChange: (patch: Partial<AgentFormData>) => void;
   kbFiles: KnowledgeBaseFileItem[];
+  /** Lista de arquivos da conta mudou (envio/remoção). */
+  onFilesChange: (files: KnowledgeBaseFileItem[]) => void;
+  /** Teto de caracteres da base deste agente (knowledge.max_chars). */
+  maxChars: number;
   secrets: SecretItem[];
   readOnly?: boolean;
 }
+
+const NUMBER = new Intl.NumberFormat('pt-BR');
 
 export function KnowledgeTab({
   data,
   onChange,
   kbFiles,
+  onFilesChange,
+  maxChars,
   secrets,
   readOnly,
 }: KnowledgeTabProps) {
   const [fileFilter, setFileFilter] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const knowledge = data.knowledge;
   const rag = knowledge.rag_external;
@@ -44,6 +66,54 @@ export function KnowledgeTab({
   const filteredFiles = kbFiles.filter((f) =>
     f.name.toLowerCase().includes(fileFilter.toLowerCase()),
   );
+  const explicit = knowledge.selection_mode === 'explicit';
+  // Arquivos que este agente consulta: todos (modo da conta) ou só os escolhidos.
+  const inUse = explicit ? kbFiles.filter((f) => selectedFileIds.has(f.id)) : kbFiles;
+  const usedChars = inUse.reduce((sum, f) => sum + (f.char_count ?? 0), 0);
+  const unknownChars = inUse.some((f) => f.char_count == null);
+  const usedPct = maxChars > 0 ? Math.round((usedChars / maxChars) * 100) : 0;
+  const overLimit = usedChars > maxChars;
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > KB_MAX_FILE_BYTES) {
+      toast.error('Arquivo maior que 10 MB.');
+      return;
+    }
+    setUploading(true);
+    try {
+      const saved = await uploadKnowledgeFile(file);
+      onFilesChange([saved, ...kbFiles.filter((f) => f.id !== saved.id)]);
+      // Já vincula ao agente quando ele usa arquivos escolhidos (vale ao publicar a nova versão).
+      if (explicit && !selectedFileIds.has(saved.id)) {
+        onChange({ knowledge: { ...knowledge, file_ids: [...knowledge.file_ids, saved.id] } });
+      }
+      toast.success(`${saved.name} enviado (${NUMBER.format(saved.char_count ?? 0)} caracteres).`);
+    } catch (err) {
+      toast.error(err instanceof AgentApiError ? err.message : 'Não foi possível enviar o arquivo.');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleRemove(file: KnowledgeBaseFileItem) {
+    if (!window.confirm(`Remover o arquivo "${file.name}" da base de conhecimento da conta?`)) return;
+    setRemoving(file.id);
+    try {
+      await removeKnowledgeFile(file.id);
+      onFilesChange(kbFiles.filter((f) => f.id !== file.id));
+      if (selectedFileIds.has(file.id)) {
+        onChange({ knowledge: { ...knowledge, file_ids: knowledge.file_ids.filter((id) => id !== file.id) } });
+      }
+      toast.success(`${file.name} removido.`);
+    } catch (err) {
+      toast.error(err instanceof AgentApiError ? err.message : 'Não foi possível remover o arquivo.');
+    } finally {
+      setRemoving(null);
+    }
+  }
 
   function handleModeChange(mode: 'legacy_account_all' | 'explicit') {
     onChange({
@@ -166,78 +236,139 @@ export function KnowledgeTab({
           </label>
         </div>
 
-        {/* Lista de seleção manual de arquivos */}
-        {knowledge.selection_mode === 'explicit' && (
-          <div className="rounded-lg border border-border bg-card p-4 space-y-3 max-w-2xl">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div className="relative flex-1 max-w-sm">
-                <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
-                <Input
-                  value={fileFilter}
-                  onChange={(e) => setFileFilter(e.target.value)}
-                  placeholder="Filtrar arquivos..."
-                  className="pl-8 text-xs h-8"
-                  disabled={readOnly}
-                />
-              </div>
-
-              {!readOnly && kbFiles.length > 0 && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSelectAllFiles}
-                    className="text-xs text-primary hover:underline font-medium"
-                  >
-                    Marcar todos
-                  </button>
-                  <span className="text-muted-foreground text-xs">•</span>
-                  <button
-                    type="button"
-                    onClick={handleDeselectAllFiles}
-                    className="text-xs text-muted-foreground hover:underline"
-                  >
-                    Desmarcar todos
-                  </button>
-                </div>
-              )}
+        {/* Arquivos da conta: envio, uso do teto, vínculo (modo escolhido) e remoção */}
+        <div className="rounded-lg border border-border bg-card p-4 space-y-3 max-w-2xl">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+              <Input
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value)}
+                placeholder="Filtrar arquivos..."
+                className="pl-8 text-xs h-8"
+              />
             </div>
-
-            {kbFiles.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-4 text-center">
-                Nenhum arquivo cadastrado na base de conhecimento da conta.
-              </p>
-            ) : filteredFiles.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-4 text-center">
-                Nenhum arquivo corresponde ao filtro de busca.
-              </p>
-            ) : (
-              <div className="max-h-56 overflow-y-auto space-y-1.5 divide-y divide-border/40 pr-1">
-                {filteredFiles.map((file) => {
-                  const isChecked = selectedFileIds.has(file.id);
-                  return (
-                    <label
-                      key={file.id}
-                      className="flex items-center gap-2.5 py-1.5 px-2 rounded hover:bg-muted/40 cursor-pointer text-xs"
+            {!readOnly && (
+              <div className="flex items-center gap-3">
+                {explicit && kbFiles.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllFiles}
+                      className="text-xs text-primary hover:underline font-medium"
                     >
+                      Marcar todos
+                    </button>
+                    <span className="text-muted-foreground text-xs">•</span>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllFiles}
+                      className="text-xs text-muted-foreground hover:underline"
+                    >
+                      Desmarcar todos
+                    </button>
+                  </div>
+                )}
+                <input ref={inputRef} type="file" accept={KB_ACCEPT} className="hidden" onChange={(e) => void handleUpload(e)} />
+                <Button type="button" size="sm" onClick={() => inputRef.current?.click()} disabled={uploading}>
+                  {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+                  {uploading ? 'Extraindo texto…' : 'Enviar arquivo'}
+                </Button>
+              </div>
+            )}
+          </div>
+          {!readOnly && (
+            <p className="text-[11px] text-muted-foreground">
+              {KB_ACCEPT_LABEL}, até {formatBytes(KB_MAX_FILE_BYTES)}. O texto é extraído no servidor; PDF digitalizado
+              (imagem) ou protegido por senha não tem texto aproveitável.
+              {explicit ? ' O arquivo enviado já fica marcado para este agente.' : ''}
+            </p>
+          )}
+
+          {kbFiles.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              Nenhum arquivo cadastrado na base de conhecimento da conta.
+            </p>
+          ) : filteredFiles.length === 0 ? (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              Nenhum arquivo corresponde ao filtro de busca.
+            </p>
+          ) : (
+            <div className="max-h-72 overflow-y-auto divide-y divide-border/40 pr-1">
+              {filteredFiles.map((file) => {
+                const isChecked = selectedFileIds.has(file.id);
+                return (
+                  <div key={file.id} className="flex items-center gap-2.5 py-1.5 px-2 rounded hover:bg-muted/40 text-xs">
+                    {explicit && (
                       <Checkbox
+                        id={`kb-file-${file.id}`}
                         checked={isChecked}
                         onCheckedChange={(checked) => handleFileToggle(file.id, !!checked)}
                         disabled={readOnly}
+                        aria-label={`Usar ${file.name} neste agente`}
                       />
-                      <FileText className="size-3.5 text-muted-foreground shrink-0" />
-                      <span className="flex-1 font-medium text-foreground truncate">{file.name}</span>
-                      {isChecked && <Badge variant="secondary" className="text-[10px] py-0">Selecionado</Badge>}
+                    )}
+                    <FileText className="size-3.5 text-muted-foreground shrink-0" />
+                    <label htmlFor={explicit ? `kb-file-${file.id}` : undefined} className="min-w-0 flex-1 cursor-pointer">
+                      <span className="block font-medium text-foreground truncate">{file.name}</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {formatBytes(file.size_bytes)} ·{' '}
+                        {file.char_count == null ? 'caracteres: —' : `${NUMBER.format(file.char_count)} caracteres`}
+                      </span>
                     </label>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="text-xs text-muted-foreground pt-1 border-t border-border flex justify-between">
-              <span>{knowledge.file_ids.length} de {kbFiles.length} arquivos selecionados</span>
+                    {explicit && isChecked && <Badge variant="secondary" className="text-[10px] py-0">Selecionado</Badge>}
+                    {!readOnly && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void handleRemove(file)}
+                        disabled={removing === file.id}
+                        aria-label={`Remover ${file.name}`}
+                      >
+                        {removing === file.id ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          )}
+
+          <div className="space-y-1.5 pt-2 border-t border-border">
+            <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+              <span>
+                {explicit
+                  ? `${knowledge.file_ids.length} de ${kbFiles.length} arquivos selecionados`
+                  : `Todos os ${kbFiles.length} arquivos da conta`}
+              </span>
+              <span className={overLimit ? 'text-amber-600 font-medium' : undefined}>
+                {NUMBER.format(usedChars)}
+                {unknownChars ? '+' : ''} de {NUMBER.format(maxChars)} caracteres do teto ({usedPct}%)
+              </span>
+            </div>
+            <div
+              className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(usedPct, 100)}
+              aria-label="Uso do teto de caracteres da base"
+            >
+              <div
+                className={`h-full rounded-full ${overLimit ? 'bg-amber-500' : 'bg-primary'}`}
+                style={{ width: `${Math.min(usedPct, 100)}%` }}
+              />
+            </div>
+            {overLimit && (
+              <p className="flex items-start gap-1.5 text-[11px] text-amber-600">
+                <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                Acima do teto: a cada resposta entram só os arquivos mais relevantes para a conversa, até o teto (o último
+                pode ser cortado).
+              </p>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {/* 2. Bloco RAG Externo */}

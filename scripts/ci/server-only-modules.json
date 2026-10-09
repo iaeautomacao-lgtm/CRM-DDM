@@ -29,7 +29,9 @@
     "src/lib/billing/engine.ts",
     "src/lib/billing/sync.ts",
     "src/lib/webhooks-out/endpoints.ts",
-    "src/lib/webhooks-out/deliver.ts"
+    "src/lib/webhooks-out/deliver.ts",
+    "src/lib/ai/knowledge/extract.ts",
+    "src/lib/ai/knowledge/files.ts"
   ],
   "clientOnlyDirs": [
     "src/components",
