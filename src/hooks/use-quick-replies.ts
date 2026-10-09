@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
 import type { QuickReply } from "@/lib/quick-replies";
 
@@ -67,4 +68,12 @@ export function useQuickReplies(): { replies: QuickReply[]; loading: boolean; re
 
   const reload = useCallback(() => invalidateQuickReplies(), []);
   return { replies, loading, reload };
+}
+
+/**
+ * Registra que o operador USOU a resposta (alimenta "Usos (30 d)" na tela de cadastro). Telemetria: não bloqueia o envio
+ * nem avisa erro — falhou, só não conta.
+ */
+export function trackQuickReplyUse(id: string): void {
+  void apiFetch(`/api/quick-replies/${id}/use`, { method: "POST" }).catch(() => {});
 }

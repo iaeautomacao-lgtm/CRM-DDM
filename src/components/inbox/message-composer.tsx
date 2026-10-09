@@ -43,7 +43,7 @@ import {
 } from "@/lib/storage/upload-media";
 import { ReplyQuote } from "./reply-quote";
 import { QuickReplyMenu, QUICK_REPLY_MENU_ID } from "./quick-reply-menu";
-import { useQuickReplies } from "@/hooks/use-quick-replies";
+import { trackQuickReplyUse, useQuickReplies } from "@/hooks/use-quick-replies";
 import { useAuth } from "@/hooks/use-auth";
 import {
   filterQuickReplies,
@@ -351,6 +351,7 @@ export function MessageComposer({
       setText(next);
       saveDraft(next);
       closeQuickReplies();
+      trackQuickReplyUse(reply.id);
       requestAnimationFrame(() => {
         const t = textareaRef.current;
         if (!t) return;
