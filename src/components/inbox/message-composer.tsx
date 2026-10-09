@@ -21,6 +21,7 @@ import {
   Loader2,
   Zap,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -33,6 +34,8 @@ import {
 import { usePermissions } from "@/hooks/use-permission";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-fetch";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   uploadAccountMedia,
   deleteAccountMedia,
@@ -194,6 +197,60 @@ export function MessageComposer({
   const readOnly = !canSend;
   // Media (like free-form text) is only allowed inside the 24h window.
   const inputsDisabled = readOnly || sessionExpired;
+
+  // PRD 23, item 18 — IA no texto do operador (POST /api/ai/rewrite, #220):
+  // devolve o rascunho corrigido + uma variação por tom. Nada é enviado: a
+  // escolha só troca o rascunho, o operador revisa e envia. Usa a chave de IA
+  // da conta (409 ai_not_configured quando não há) e tem limite por usuário.
+  const canRewrite = can("inbox.ai_assist");
+  const [rewriting, setRewriting] = useState(false);
+  const [rewriteOpen, setRewriteOpen] = useState(false);
+  const [rewriteOptions, setRewriteOptions] = useState<{ key: string; label: string; text: string }[]>([]);
+
+  const requestRewrite = async () => {
+    const draft = text.trim();
+    if (!draft || rewriting) return;
+    setRewriting(true);
+    try {
+      const res = await apiFetch("/api/ai/rewrite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: draft, tones: ["formal", "cordial", "objetivo"] }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        corrected?: string;
+        variations?: { tone: string; label: string; text: string }[];
+        error?: string;
+        code?: string;
+      };
+      if (!res.ok) {
+        toast.error(
+          json.code === "ai_not_configured"
+            ? "A IA não está configurada nesta conta. Peça a um administrador para cadastrar a chave."
+            : json.error ?? "Não foi possível revisar o texto agora",
+        );
+        return;
+      }
+      const options = [
+        ...(json.corrected ? [{ key: "corrected", label: "Corrigido", text: json.corrected }] : []),
+        ...(json.variations ?? []).map((v) => ({ key: v.tone, label: v.label, text: v.text })),
+      ];
+      if (options.length === 0) {
+        toast.error("A IA não devolveu sugestões para este texto");
+        return;
+      }
+      setRewriteOptions(options);
+      setRewriteOpen(true);
+    } finally {
+      setRewriting(false);
+    }
+  };
+
+  const applyRewrite = (value: string) => {
+    setText(value);
+    setRewriteOpen(false);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  };
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== null) {
@@ -797,6 +854,56 @@ export function MessageComposer({
                 >
                   <Zap className="h-4 w-4" aria-hidden="true" />
                 </Button>
+
+                {canRewrite && (
+                  <Popover
+                    open={rewriteOpen}
+                    // Abre só quando a IA responde (requestRewrite); daqui só fecha.
+                    onOpenChange={(next) => {
+                      if (!next) setRewriteOpen(false);
+                    }}
+                  >
+                    <PopoverTrigger
+                      render={
+                        <button
+                          type="button"
+                          disabled={inputsDisabled || rewriting || !text.trim()}
+                          onClick={(e) => {
+                            // Abre só depois que a IA responder (requestRewrite).
+                            e.preventDefault();
+                            void requestRewrite();
+                          }}
+                          title="Revisar com IA (corrigir e sugerir tons)"
+                          aria-label="Revisar texto com IA"
+                          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      }
+                    >
+                      {rewriting ? (
+                        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Sparkles className="size-4" aria-hidden="true" />
+                      )}
+                    </PopoverTrigger>
+                    <PopoverContent align="start" side="top" className="w-[360px] max-w-[calc(100vw-2rem)] gap-1.5 p-2">
+                      <p className="px-1.5 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                        Sugestões da IA · escolha para editar
+                      </p>
+                      {rewriteOptions.map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => applyRewrite(opt.text)}
+                          className="flex flex-col gap-1 rounded-md border border-border px-2.5 py-2 text-left hover:border-primary-soft-2 hover:bg-primary-soft"
+                        >
+                          <span className="text-[11.5px] font-semibold text-primary-text">{opt.label}</span>
+                          <span className="line-clamp-4 whitespace-pre-wrap text-[13px] text-foreground">{opt.text}</span>
+                        </button>
+                      ))}
+                      <p className="px-1.5 pt-0.5 text-[11px] text-muted-foreground">Nada é enviado sem você clicar em Enviar.</p>
+                    </PopoverContent>
+                  </Popover>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
