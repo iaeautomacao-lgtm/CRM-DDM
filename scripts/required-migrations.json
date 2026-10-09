@@ -309,6 +309,10 @@
     {
       "version": "311_member_deactivation_last_access",
       "kind": "registry"
+    },
+    {
+      "version": "322_report_rpcs_has_perm",
+      "kind": "registry"
     }
   ]
 }
