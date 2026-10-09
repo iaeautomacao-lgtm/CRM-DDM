@@ -50,6 +50,10 @@ jobs:
       - name: Client/server boundary scan
         run: node scripts/ci/client-scan.mjs
 
+      # Lista única dos módulos só de servidor (import "server-only" + client-scan + ESLint): sem divergência entre elas.
+      - name: Server-only modules list
+        run: node scripts/ci/server-only-modules.mjs --check
+
       # Migrations: nenhum número repetido e a lista exigida (scripts/required-migrations.json) em dia com os arquivos.
       - name: Migration numbers and registry list
         run: |

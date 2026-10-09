@@ -1,3 +1,4 @@
+import "server-only";
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 

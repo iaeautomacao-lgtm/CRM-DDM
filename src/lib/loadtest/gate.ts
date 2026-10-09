@@ -10,6 +10,7 @@
 // Função pura (recebe o env): testável.
 
 /** Refs do Supabase que a bancada NUNCA pode tocar (mantido igual a scripts/loadtest/lib/forbidden.mjs — há teste). */
+import "server-only";
 export const LOADTEST_FORBIDDEN_SUPABASE_REFS: readonly string[] = ['cyftbffhgjmsfogxawrl']
 
 export const META_REAL_BASE = 'https://graph.facebook.com'

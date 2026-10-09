@@ -9,6 +9,7 @@
  * instead of a runtime rejection from Meta.
  */
 
+import "server-only";
 import { resolveMetaApiBaseUrl } from '../loadtest/gate'
 import { getMetaDispatcher } from './meta-dispatcher'
 

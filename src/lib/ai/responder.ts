@@ -1,3 +1,4 @@
+import "server-only";
 import { maskCpfForLog } from '@/lib/privacy/mask';
 import { openAiUrl } from '@/lib/loadtest/gate';
 import { resolveProviderMedia } from '@/lib/storage/provider-media';

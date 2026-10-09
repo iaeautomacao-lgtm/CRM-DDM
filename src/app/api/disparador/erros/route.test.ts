@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { assertRowColumns } from "@/test/db-columns";
 
 const mocks = vi.hoisted(() => ({ account: vi.fn(), audit: vi.fn(), tables: [] as string[] }));
 
@@ -21,7 +22,7 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       const proxy: Record<string, unknown> = {};
       for (const m of ["select", "eq", "in", "is", "not", "gte", "or", "order", "limit"]) proxy[m] = () => proxy;
       proxy.then = (resolve: (v: unknown) => unknown) =>
-        resolve({ data: table === "whatsapp_config" ? [{ id: "s1", phone_number: "5511", display_name: "N1" }] : [], error: null });
+        resolve({ data: table === "whatsapp_config" ? assertRowColumns("whatsapp_config", [{ id: "s1", display_phone_number: "5511", waha_session: null, provider: "meta", habilitado: true }]) : [], error: null });
       return proxy;
     },
     rpc: async () => ({ data: { codes: [], total: 0, truncated: false }, error: null }),

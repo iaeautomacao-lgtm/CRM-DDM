@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { assertRowColumns } from '@/test/db-columns'
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/disparador/campaigns — idempotência opcional, teto de 20k,
@@ -17,9 +18,9 @@ const storageRemovals: Array<{ bucket: string; paths: string[] }> = []
 
 function resetDb() {
   for (const k of Object.keys(tables)) delete tables[k]
-  tables.whatsapp_config = [
+  tables.whatsapp_config = assertRowColumns('whatsapp_config', [
     { id: '11111111-1111-4111-8111-111111111111', account_id: 'ACC', provider: 'meta', habilitado: true, waba_id: 'W1', display_phone_number: '+55 21 3030-9159' },
-  ]
+  ])
   tables.message_templates = [{ id: 'T1', name: 'promo', language: 'pt_BR', waba_id: 'W1', status: 'APPROVED', account_id: 'ACC' }]
   tables.campaigns = []
   tables.disp_message_queue = []
@@ -316,14 +317,14 @@ describe('POST /api/v1/disparador/campaigns', () => {
 
   describe('WAHA', () => {
     beforeEach(() => {
-      tables.whatsapp_config = [{
+      tables.whatsapp_config = assertRowColumns('whatsapp_config', [{
         id: '22222222-2222-4222-8222-222222222222',
         account_id: 'ACC',
         provider: 'waha',
         habilitado: true,
         waha_session: 'brdid_2139551698',
         created_at: '2026-10-07T18:46:50.000Z',
-      }]
+      }])
     })
 
     const waha = (over: Record<string, unknown> = {}) => ({

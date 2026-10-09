@@ -1,3 +1,4 @@
+import "server-only";
 import { encrypt, ensureEncryptedSecret } from './encryption'
 
 /**
