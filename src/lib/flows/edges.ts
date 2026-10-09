@@ -54,6 +54,7 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
       case "smart_delay":
       case "anchor":
       case "send_template":
+      case "send_flow":
       case "add_note":
       case "receive_attachment":
       case "send_webchat": {
@@ -260,6 +261,7 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     case "anchor":
     case "go_to":
     case "send_template":
+    case "send_flow":
     case "add_note":
     case "receive_attachment":
     case "send_webchat":
@@ -365,6 +367,7 @@ export function applyEdgeConnection(
     case "smart_delay":
     case "anchor":
     case "send_template":
+    case "send_flow":
     case "add_note":
     case "receive_attachment":
     case "send_webchat":
@@ -517,6 +520,7 @@ function patchedConfigReplacingKey(
     case "smart_delay":
     case "anchor":
     case "send_template":
+    case "send_flow":
     case "add_note":
     case "receive_attachment":
     case "send_webchat": {

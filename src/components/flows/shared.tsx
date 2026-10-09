@@ -19,6 +19,7 @@
 import {
   Anchor as AnchorIcon,
   Bot,
+  ClipboardList,
   Clock,
   CornerDownRight,
   FileDown,
@@ -73,6 +74,7 @@ export type NodeType =
   | 'go_to'
   | 'go_to_flow'
   | 'send_template'
+  | 'send_flow'
   | 'add_note'
   | 'receive_attachment'
   | 'ai_agent'
@@ -263,6 +265,13 @@ export const NODE_META: Record<
     blurb: 'Envia um template aprovado pela Meta (HSM)',
     category: 'messaging',
   },
+  send_flow: {
+    label: 'Formulário (WhatsApp Flow)',
+    icon: ClipboardList,
+    color: 'text-teal-500',
+    blurb: 'Abre um formulário nativo do WhatsApp (só canal Meta)',
+    category: 'messaging',
+  },
   add_note: {
     label: 'Nota de atendimento',
     icon: StickyNote,
@@ -343,6 +352,7 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   go_to: { l: 0.65, c: 0.14, h: 125 }, // green — jumps to an anchor
   go_to_flow: { l: 0.62, c: 0.15, h: 232 }, // blue — leaves to another flow
   send_template: { l: 0.65, c: 0.14, h: 148 }, // green-emerald — an approved send
+  send_flow: { l: 0.64, c: 0.12, h: 185 }, // teal — a native WhatsApp form
   add_note: { l: 0.68, c: 0.16, h: 38 }, // orange — a flag for humans
   receive_attachment: { l: 0.65, c: 0.17, h: 335 }, // magenta-pink — inbound media
   ai_agent: { l: 0.65, c: 0.2, h: 32 }, // DDM brand orange (#FF5706) — the AI speaks
@@ -647,6 +657,10 @@ export function summarizeNode(node: BuilderNode): string | null {
     case 'send_template': {
       const name = typeof cfg.template_name === 'string' ? cfg.template_name : '';
       return name.length > 0 ? truncate(name) : null;
+    }
+    case 'send_flow': {
+      const flowId = typeof cfg.flow_id === 'string' ? cfg.flow_id : '';
+      return flowId.length > 0 ? `Flow ${truncate(flowId, 30)}` : null;
     }
     case 'add_note': {
       const text = typeof cfg.note_text === 'string' ? cfg.note_text : '';
