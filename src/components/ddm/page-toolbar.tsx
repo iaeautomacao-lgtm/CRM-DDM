@@ -25,10 +25,10 @@ export function PageToolbar({
   )
 }
 
-/** Contêiner de página do redesenho: largura máxima 1320px e espaçamento padrão. */
+/** Contêiner de página do redesenho: largura máxima 1320px (o respiro lateral já vem do <main> do shell). */
 export function PageBody({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn('mx-auto flex w-full max-w-[1320px] flex-col gap-3.5 px-4 pb-10 pt-4 md:px-7 md:pb-12 md:pt-6', className)}>
+    <div className={cn('mx-auto flex w-full max-w-[1320px] flex-col gap-3.5 pb-10 md:pb-12', className)}>
       {children}
     </div>
   )
