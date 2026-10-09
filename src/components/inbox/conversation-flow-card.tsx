@@ -34,15 +34,15 @@ interface FlowRunsResponse {
 }
 
 const STATUS_LABEL: Record<string, { label: string; className: string }> = {
-  active: { label: "Ativo", className: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" },
-  delayed: { label: "Aguardando", className: "bg-sky-500/10 text-sky-700 dark:text-sky-300" },
-  paused_by_agent: { label: "Pausado pelo atendente", className: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  handed_off: { label: "Transferido p/ atendente", className: "bg-violet-500/10 text-violet-700 dark:text-violet-300" },
-  transferred: { label: "Foi para outro fluxo", className: "bg-violet-500/10 text-violet-700 dark:text-violet-300" },
+  active: { label: "Ativo", className: "bg-emerald-500/10 text-emerald-400 [html[data-mode=light]_&]:text-emerald-700" },
+  delayed: { label: "Aguardando", className: "bg-sky-500/10 text-sky-300 [html[data-mode=light]_&]:text-sky-700" },
+  paused_by_agent: { label: "Pausado pelo atendente", className: "bg-amber-500/10 text-amber-400 [html[data-mode=light]_&]:text-amber-700" },
+  handed_off: { label: "Transferido p/ atendente", className: "bg-violet-500/10 text-violet-300 [html[data-mode=light]_&]:text-violet-700" },
+  transferred: { label: "Foi para outro fluxo", className: "bg-violet-500/10 text-violet-300 [html[data-mode=light]_&]:text-violet-700" },
   completed: { label: "Concluído", className: "bg-muted text-muted-foreground" },
   timed_out: { label: "Expirado", className: "bg-muted text-muted-foreground" },
-  failed: { label: "Falhou", className: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
-  error: { label: "Erro", className: "bg-rose-500/10 text-rose-700 dark:text-rose-400" },
+  failed: { label: "Falhou", className: "bg-rose-500/10 text-rose-400 [html[data-mode=light]_&]:text-rose-700" },
+  error: { label: "Erro", className: "bg-rose-500/10 text-rose-400 [html[data-mode=light]_&]:text-rose-700" },
 };
 
 function nodeLabel(run: ConversationFlowRun): string | null {
