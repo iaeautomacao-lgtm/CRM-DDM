@@ -62,3 +62,14 @@ describe("eventos de chave de API", () => {
     expect((e.metadata as { scopes: string[] }).scopes).toEqual(["a:b"]);
   });
 });
+
+describe('sessionRevokedEvent (PRD 24, item 7)', () => {
+  it('uma sessão: só o rótulo do aparelho, sem IP/user-agent; todas as outras: contagem', async () => {
+    const { sessionRevokedEvent } = await import('./security-events')
+    const one = sessionRevokedEvent({ accountId: 'A', userId: 'U', sessionId: 'S', device: 'Chrome em Windows', count: 1 })
+    expect(one).toMatchObject({ action: 'session.revoked', resourceType: 'session', resourceId: 'S', resourceLabel: 'Chrome em Windows', metadata: { user_id: 'U', count: 1 } })
+    const all = sessionRevokedEvent({ accountId: 'A', userId: 'U', sessionId: null, device: null, count: 3 })
+    expect(all).toMatchObject({ action: 'session.revoked_others', resourceId: 'U', summary: '3 outra(s) sessão(ões) encerrada(s)' })
+    expect(JSON.stringify([one, all])).not.toMatch(/ip|user_agent|token/i)
+  })
+})

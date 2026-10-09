@@ -212,6 +212,10 @@
     {
       "version": "278_billing_event_stops",
       "kind": "registry"
+    },
+    {
+      "version": "290_user_sessions_mfa",
+      "kind": "registry"
     }
   ]
 }
