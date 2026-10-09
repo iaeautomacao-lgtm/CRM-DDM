@@ -35,6 +35,14 @@ import {
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
+import {
+  formatThreadTime,
+  normalizeThreads,
+  previewLine,
+  sortWithThreads,
+  unreadBadge,
+  type ChatThread,
+} from "@/lib/internal-chat/threads";
 import { useAuth } from "@/hooks/use-auth";
 import { uploadAccountMedia, deleteAccountMedia, MEDIA_MAX_BYTES_BY_KIND } from "@/lib/storage/upload-media";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -190,6 +198,8 @@ export function InternalChatDialog({
   const [step, setStep] = useState<"list" | "thread">("list");
   const [contacts, setContacts] = useState<ChatContact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
+  // Prévia e não lidas por colega (RPC internal_chat_threads, migration 303). Sem a migration a lista segue como antes.
+  const [threads, setThreads] = useState<Map<string, ChatThread>>(() => new Map());
   const [contactQuery, setContactQuery] = useState("");
   const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
   const [messages, setMessages] = useState<InternalMessage[]>([]);
@@ -341,13 +351,47 @@ export function InternalChatDialog({
     }
   }, [myUserId, accountId, mode]);
 
+  // Prévia e não lidas. Falha (ex.: migration 303 ainda não aplicada, PGRST202) não é erro para o usuário:
+  // a lista segue sem prévia, como antes.
+  const loadThreads = useCallback(async () => {
+    if (!accountId) return;
+    try {
+      const { data, error } = await createClient().rpc("internal_chat_threads", { p_account_id: accountId, p_limit: 200 });
+      if (error) throw error;
+      setThreads(normalizeThreads(data));
+    } catch {
+      setThreads(new Map());
+    }
+  }, [accountId]);
+
+  // Marca a conversa com o colega como lida (grava o registro de leitura; o sino atualiza pelo Realtime).
+  const markPeerRead = useCallback(
+    async (peerId: string) => {
+      if (!accountId) return;
+      setThreads((prev) => {
+        const t = prev.get(peerId);
+        if (!t || t.unread_count === 0) return prev;
+        const next = new Map(prev);
+        next.set(peerId, { ...t, unread_count: 0 });
+        return next;
+      });
+      try {
+        await createClient().rpc("internal_chat_mark_read", { p_account_id: accountId, p_peer_id: peerId });
+      } catch {
+        // Sem a RPC, vale o cálculo antigo (update de read_at por mensagem).
+      }
+    },
+    [accountId],
+  );
+
   useEffect(() => {
     if (!open) return;
     setStep("list");
     setSelectedContact(null);
     setMessages([]);
     fetchContacts();
-  }, [open, fetchContacts]);
+    void loadThreads();
+  }, [open, fetchContacts, loadThreads]);
 
   // Step 2 — thread for the selected pair, plus marking any unread
   // messages from that contact as read now that they're visible. The
@@ -409,6 +453,7 @@ export function InternalChatDialog({
     if (!open || step !== "thread" || !selectedContact || !myUserId || !accountId) return;
     const supabase = createClient();
     const contactId = selectedContact.user_id;
+    void markPeerRead(contactId);
 
     const handleInsert = (payload: { new: InternalMessage }) => {
       const row = payload.new;
@@ -418,6 +463,7 @@ export function InternalChatDialog({
       if (!belongsToThread) return;
 
       setMessages((prev) => (prev.some((m) => m.id === row.id) ? prev : [...prev, row]));
+      if (row.sender_id === contactId) void markPeerRead(contactId);
 
       if (row.sender_id === contactId && row.recipient_id === myUserId) {
         supabase
@@ -459,7 +505,7 @@ export function InternalChatDialog({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [open, step, selectedContact, myUserId, accountId]);
+  }, [open, step, selectedContact, myUserId, accountId, markPeerRead]);
 
   useEffect(() => {
     // Only scroll while the dialog is actually open/visible — closing
@@ -500,6 +546,7 @@ export function InternalChatDialog({
     setSelectedContact(null);
     setMessages([]);
     resetMediaState();
+    void loadThreads();
   }
 
   function discardStagedMedia() {
@@ -656,9 +703,10 @@ export function InternalChatDialog({
 
   const listTitle = "Mensagens internas";
   const query = normalizeQuery(contactQuery);
-  const filteredContacts = query
+  const matchingContacts = query
     ? contacts.filter((c) => normalizeQuery(`${displayNameOf(c)} ${c.email ?? ""}`).includes(query))
     : contacts;
+  const filteredContacts = sortWithThreads(matchingContacts, threads);
   const emptyListMessage = query ? "Ninguém encontrado com esse nome." : "Ninguém disponível para conversar.";
   const composerDisabled = sending || uploading || recording;
 
@@ -698,6 +746,8 @@ export function InternalChatDialog({
                 ) : (
                   filteredContacts.map((c) => {
                     const name = displayNameOf(c);
+                    const thread = threads.get(c.user_id);
+                    const unread = thread?.unread_count ?? 0;
                     return (
                       <button
                         key={c.user_id}
@@ -712,11 +762,30 @@ export function InternalChatDialog({
                           </AvatarFallback>
                         </Avatar>
                         <span className="flex min-w-0 flex-1 flex-col">
-                          <span className="truncate text-sm text-foreground">{name}</span>
-                          <span className="truncate text-[11.5px] text-muted-foreground">
-                            {[c.account_role ? ROLE_LABEL[c.account_role] ?? null : null, c.teammate ? "Sua equipe" : null]
-                              .filter(Boolean)
-                              .join(" · ")}
+                          <span className="flex items-center gap-2">
+                            <span className={`truncate text-sm text-foreground ${unread > 0 ? "font-semibold" : ""}`}>{name}</span>
+                            {thread?.last_at && (
+                              <span className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                                {formatThreadTime(thread.last_at)}
+                              </span>
+                            )}
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span className={`min-w-0 flex-1 truncate text-[11.5px] ${unread > 0 ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+                              {previewLine(thread, myUserId) ||
+                                [c.account_role ? ROLE_LABEL[c.account_role] ?? null : null, c.teammate ? "Sua equipe" : null]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                            </span>
+                            {unread > 0 && (
+                              <span
+                                role="img"
+                                aria-label={`${unread} mensage${unread === 1 ? "m não lida" : "ns não lidas"}`}
+                                className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[10.5px] font-semibold text-primary-foreground"
+                              >
+                                {unreadBadge(unread)}
+                              </span>
+                            )}
                           </span>
                         </span>
                       </button>

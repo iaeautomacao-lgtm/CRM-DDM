@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/table';
 import { usePermissions } from '@/hooks/use-permission';
 import { ErrorState } from '@/components/dashboard/error-state';
+import { EmptyState } from '@/components/dashboard/empty-state';
 import { Skeleton } from '@/components/dashboard/skeleton';
 import { MetricCard } from '@/components/relatorios/MetricCard';
 import { PeriodFilter } from '@/components/relatorios/period-filter';
@@ -49,6 +50,9 @@ interface Filters extends PeriodRange {
   teamId: string;
   agentId: string;
 }
+// Colunas numéricas: alinhadas à direita, com algarismos tabulares.
+const NUMERIC_KEYS = new Set(['total', 'human', 'ai_auto', 'automation', 'com_sugestao', 'aceitas', 'trocadas']);
+
 const columns = [
   { key: 'codigo_tabulacao', label: 'Código' },
   { key: 'nome', label: 'Tabulação' },
@@ -314,17 +318,21 @@ export default function TabulacoesPage() {
             informadas entram no total, sem atribuição de origem. Equipe/agente
             refletem a atribuição atual.
           </p>
-          {summary.total === 0 && (
-            <p className="text-muted-foreground text-sm">
-              Nenhuma conversa encerrada neste período e escopo.
-            </p>
-          )}
-          <div className="border-border bg-card overflow-x-auto rounded-xl border">
+          {summary.total === 0 ? (
+            <EmptyState
+              icon={ListChecks}
+              title="Nenhuma conversa encerrada"
+              hint="Não há conversas encerradas neste período e escopo. Ajuste os filtros."
+            />
+          ) : (
+          <div className="border-border bg-card overflow-x-auto rounded-[10px] border">
             <Table>
               <TableHeader>
                 <TableRow>
                   {columns.map((column) => (
-                    <TableHead key={column.key}>{column.label}</TableHead>
+                    <TableHead key={column.key} className={NUMERIC_KEYS.has(column.key) ? 'text-right' : undefined}>
+                      {column.label}
+                    </TableHead>
                   ))}
                 </TableRow>
               </TableHeader>
@@ -334,7 +342,7 @@ export default function TabulacoesPage() {
                     key={`${row.codigo_tabulacao ?? 'custom'}:${row.nome}`}
                   >
                     {columns.map((column) => (
-                      <TableCell key={column.key}>
+                      <TableCell key={column.key} className={NUMERIC_KEYS.has(column.key) ? 'text-right tabular-nums' : undefined}>
                         {row[column.key] ?? '—'}
                       </TableCell>
                     ))}
@@ -343,6 +351,7 @@ export default function TabulacoesPage() {
               </TableBody>
             </Table>
           </div>
+          )}
         </>
       )}
     </div>

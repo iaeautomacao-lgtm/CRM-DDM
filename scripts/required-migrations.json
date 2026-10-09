@@ -320,6 +320,14 @@
       "index": "idx_internal_messages_unread"
     },
     {
+      "version": "304_view_permission_keys",
+      "kind": "registry"
+    },
+    {
+      "version": "305_campaigns_pipelines_rls_has_perm",
+      "kind": "registry"
+    },
+    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },
@@ -366,7 +374,7 @@
       "kind": "registry"
     },
     {
-      "version": "326_teams_templates_channels_rls_has_perm",
+      "version": "325_audit_admin_tables_rls_has_perm",
       "kind": "registry"
     }
   ]
