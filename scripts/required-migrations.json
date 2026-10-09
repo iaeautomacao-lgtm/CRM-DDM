@@ -328,6 +328,14 @@
       "kind": "registry"
     },
     {
+      "version": "312_custom_role_validation",
+      "kind": "registry"
+    },
+    {
+      "version": "313_custom_roles",
+      "kind": "registry"
+    },
+    {
       "version": "315_user_sessions_refreshed_at_utc",
       "kind": "registry"
     },
