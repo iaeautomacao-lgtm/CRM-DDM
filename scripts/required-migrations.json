@@ -153,6 +153,10 @@
       "kind": "registry"
     },
     {
+      "version": "231_account_settings",
+      "kind": "registry"
+    },
+    {
       "version": "240_roles_foundation",
       "kind": "registry"
     },
