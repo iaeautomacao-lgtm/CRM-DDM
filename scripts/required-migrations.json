@@ -164,6 +164,30 @@
     {
       "version": "260_whatsapp_flows",
       "kind": "registry"
+    },
+    {
+      "version": "270_billing_rulers",
+      "kind": "registry"
+    },
+    {
+      "version": "271_billing_debts",
+      "kind": "registry"
+    },
+    {
+      "version": "272_billing_enrollments",
+      "kind": "registry"
+    },
+    {
+      "version": "273_billing_step_sends",
+      "kind": "registry"
+    },
+    {
+      "version": "274_billing_functions",
+      "kind": "registry"
+    },
+    {
+      "version": "275_billing_sync_state",
+      "kind": "registry"
     }
   ]
 }
