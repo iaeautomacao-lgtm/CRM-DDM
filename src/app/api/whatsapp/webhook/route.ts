@@ -28,6 +28,7 @@ import {
   extractStatusEvents,
   ingestStatusEvents,
 } from '@/lib/whatsapp/status-inbox'
+import { extractPricingEvents, recordMessagePricing } from '@/lib/whatsapp/message-pricing'
 import { isWellFormedHubSignature, readCappedBody } from '@/lib/security/webhook-body'
 import {
   allowExpensiveRejection,
@@ -382,9 +383,15 @@ export async function POST(request: Request) {
     }
   }
 
+  // Custo Meta por envio (migration 195): o pricing de cada status vai para dispatch_message_pricing. Best-effort, depois do 200.
+  const pricingEvents = extractPricingEvents(body, verifiedChannels, (entry, change) =>
+    channelKeyForChange(entry, change, isTemplateWebhookField(change?.field ?? "")),
+  )
+
   after(async () => {
     // Drenar os inboxes e processar o resto do corpo são independentes: um não derruba o outro.
     await Promise.allSettled([
+      recordMessagePricing(supabaseAdmin(), pricingEvents),
       (async () => {
         try {
           await processWebhook(body, verifiedChannels, { statusesIngested, messagesIngested })

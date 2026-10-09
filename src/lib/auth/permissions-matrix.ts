@@ -142,6 +142,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   disp("disparador/imports/[id]/start", "POST"),
   disp("disparador/desempenho", "GET"),
   disp("disparador/desempenho/live", "GET"),
+  disp("disparador/desempenho/custo", "GET"),
   disp("disparador/erros", "GET"),
   disp("disparador/erros/[id]", "GET"),
   disp("disparador/exports", "POST"),
