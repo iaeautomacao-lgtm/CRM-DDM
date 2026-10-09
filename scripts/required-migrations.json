@@ -280,6 +280,10 @@
       "version": "296b_dmq_contact_scheduled_idx",
       "kind": "index",
       "index": "idx_dmq_contact_scheduled"
+    },
+    {
+      "version": "301_quick_replies_visibility_usage",
+      "kind": "registry"
     }
   ]
 }
