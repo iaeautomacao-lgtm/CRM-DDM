@@ -321,17 +321,21 @@ export default function PipelinesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex flex-col gap-4">
+      {/* Cabeçalho (redesenho DDM) */}
+      <div className="flex flex-col gap-1.5 pt-1">
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Pipelines</h2>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">Negócios por etapa · arraste para mover</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2.5">
         <div className="flex items-center gap-3">
           {/* Pipeline selector dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-muted transition-colors data-[popup-open]:bg-muted"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-[12.5px] font-semibold text-foreground hover:bg-surface-hover data-[popup-open]:bg-surface-hover"
             >
-              <GitBranch className="h-4 w-4 text-primary" />
-              <span className="font-semibold">
+              <GitBranch className="size-3.5 text-primary" />
+              <span>
                 {selectedPipeline?.name ?? "Selecionar Pipeline"}
               </span>
               <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -373,26 +377,25 @@ export default function PipelinesPage() {
           </DropdownMenu>
         </div>
 
+        <span className="flex-1" />
         <div className="flex items-center gap-2">
           <GatedButton
             variant="outline"
             canAct={canEditSettings}
             gateReason="criar pipelines"
             onClick={() => setNewPipelineOpen(true)}
-            className="border-border bg-card text-foreground hover:bg-muted"
           >
-            <Plus className="mr-1 h-4 w-4" />
-            Adicionar Pipeline
+            <Plus className="size-3.5" />
+            Adicionar pipeline
           </GatedButton>
           <GatedButton
             canAct={canCreateDeals}
             gateReason="criar negócios"
             disabled={!selectedPipelineId || stages.length === 0}
             onClick={() => handleAddDeal()}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            <Plus className="mr-1 h-4 w-4" />
-            Adicionar Negócio
+            <Plus className="size-3.5" />
+            Adicionar negócio
           </GatedButton>
         </div>
       </div>
