@@ -2,11 +2,17 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { PageBody } from '@/components/ddm/page-toolbar';
+import { Segmented } from '@/components/ddm/segmented';
+import { StatusChip, type StatusTone } from '@/components/ddm/status-chip';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/currency';
 import { toast } from 'sonner';
-import type { Contact, Tag, ContactTag, ContactNote, CustomField, ContactCustomValue, Deal, MessageTemplate } from '@/types';
+import type { Contact, Tag, ContactNote, CustomField, Deal, MessageTemplate } from '@/types';
 import {
   TemplatePicker,
   type TemplateSendValues,
@@ -24,8 +30,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone,
   Mail,
@@ -41,6 +45,8 @@ import {
   DollarSign,
   LayoutTemplate,
   MessageSquare,
+  ArrowLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { normalizeForSearch } from '@/lib/utils';
 import { normalizePhone } from '@/lib/whatsapp/phone-utils';
@@ -56,6 +62,8 @@ interface ContactDetailViewProps {
   onOpenChange: (open: boolean) => void;
   contactId: string | null;
   onUpdated: () => void;
+  /** 'sheet' (padrão) = gaveta da lista; 'page' = tela /contacts/[id]. */
+  variant?: 'sheet' | 'page';
 }
 
 // wacrm.contact_phones (migrations 077/086) — TELEFONE2/3+ de um contato.
@@ -74,11 +82,11 @@ interface ContactPhone {
 
 const PHONE_STATUS_BADGE: Record<
   ContactPhone['status'],
-  { label: string; className: string }
+  { label: string; tone: StatusTone }
 > = {
-  ativo: { label: 'Ativo', className: 'bg-muted text-muted-foreground' },
-  invalido: { label: 'Inválido', className: 'bg-red-500/10 text-red-400' },
-  respondeu: { label: 'Respondeu', className: 'bg-primary/10 text-primary' },
+  ativo: { label: 'Ativo', tone: 'mute' },
+  invalido: { label: 'Inválido', tone: 'bad' },
+  respondeu: { label: 'Respondeu', tone: 'ok' },
 };
 
 // Mesmo padrão de src/app/api/disparador/contacts/import/route.ts:
@@ -124,13 +132,17 @@ export function ContactDetailView({
   onOpenChange,
   contactId,
   onUpdated,
+  variant = 'sheet',
 }: ContactDetailViewProps) {
   const supabase = createClient();
   const router = useRouter();
   const { accountId, defaultCurrency, user } = useAuth();
 
   const [contact, setContact] = useState<Contact | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Começa carregando: a página não pode piscar "não encontrado" antes do
+  // primeiro fetch (a gaveta já mostra spinner enquanto não há contato).
+  const [loading, setLoading] = useState(true);
+  const [pageTab, setPageTab] = useState<'deals' | 'notes'>('deals');
   const [copiedPhone, setCopiedPhone] = useState(false);
 
   // Send template — lets the business initiate (or re-open) a conversation
@@ -705,6 +717,551 @@ export function ContactDetailView({
       .slice(0, 2);
   }
 
+  // ---- Seções (reaproveitadas pela gaveta e pela página /contacts/[id]) ----
+  // Só são chamadas com `contact` carregado.
+
+  const fieldInput = 'bg-card border-border text-foreground h-8 text-sm placeholder:text-muted-foreground';
+
+  const renderDetails = () => (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-xs">Nome</Label>
+        <Input value={editName} onChange={(e) => setEditName(e.target.value)} className={fieldInput} />
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-xs">
+          Telefone <span className="text-danger">*</span>
+        </Label>
+        <Input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} className={fieldInput} />
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-xs">CPF</Label>
+        <Input
+          value={formatCpf(editCpf)}
+          onChange={(e) => setEditCpf(onlyDigits(e.target.value).slice(0, CPF_DIGITS_LENGTH))}
+          placeholder="000.000.000-00"
+          inputMode="numeric"
+          className={fieldInput}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-xs">Instituição</Label>
+        <Input value={editInstituicao} onChange={(e) => setEditInstituicao(e.target.value)} className={fieldInput} />
+      </div>
+
+      <div className="space-y-1.5 pt-2 border-t border-border">
+        <Label className="text-muted-foreground text-xs">Dados do CSV importado</Label>
+      </div>
+      {CSV_VAR_INDICES.map((idx) => (
+        <div key={idx} className="space-y-1.5">
+          <Label className="text-muted-foreground text-xs">{CSV_VAR_LABELS[idx]}</Label>
+          <Input
+            value={loadingCsvVars ? '' : csvVars[idx] ?? ''}
+            readOnly
+            disabled
+            placeholder={loadingCsvVars ? 'Carregando...' : '—'}
+            className="bg-surface-3 border-border text-muted-foreground h-8 text-sm"
+          />
+        </div>
+      ))}
+
+      <Button onClick={saveDetails} disabled={savingDetails} className="w-full" size="sm">
+        {savingDetails ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+        Salvar Alterações
+      </Button>
+    </div>
+  );
+
+  const renderPhones = (c: Contact) => (
+    <div className="space-y-4">
+      {/* Seção 1 — telefone principal (contacts.phone / TELEFONE1) */}
+      <div className="space-y-1.5">
+        <Label className="text-muted-foreground text-xs">Telefone principal</Label>
+        <div className="flex items-center gap-2 rounded-lg bg-surface-3 border border-border px-3 py-2">
+          <span className="text-sm text-foreground flex-1 tabular-nums">{c.phone}</span>
+          <StatusChip tone="brand" dot={false}>Principal</StatusChip>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {variant === 'page' ? 'Editável em Dados.' : 'Editável na aba Detalhes.'}
+        </p>
+      </div>
+
+      {/* Seção 2 — telefones alternativos (contact_phones) */}
+      <div className="space-y-1.5 pt-2 border-t border-border">
+        <Label className="text-muted-foreground text-xs">Telefones alternativos</Label>
+
+        {loadingPhones ? (
+          <div className="space-y-2" aria-busy="true">
+            <Skeleton className="h-12 w-full rounded-lg" />
+          </div>
+        ) : phones.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-2">Nenhum telefone alternativo cadastrado.</p>
+        ) : (
+          <div className="space-y-2">
+            {phones.map((phone) => {
+              const badge = PHONE_STATUS_BADGE[phone.status];
+              const isEditing = editingPhoneId === phone.id;
+              return (
+                <div key={phone.id} className="rounded-lg bg-surface-3 border border-border p-3 group">
+                  {isEditing ? (
+                    <div className="space-y-2">
+                      <Input
+                        value={editPhoneNumber}
+                        onChange={(e) => setEditPhoneNumber(e.target.value)}
+                        placeholder="Número"
+                        className={fieldInput}
+                      />
+                      <Input
+                        value={editPhoneLabel}
+                        onChange={(e) => setEditPhoneLabel(e.target.value)}
+                        placeholder="Rótulo (opcional)"
+                        className={fieldInput}
+                      />
+                      <div className="flex items-center gap-2">
+                        <Button onClick={saveEditPhone} disabled={savingPhoneEdit || !editPhoneNumber.trim()} size="sm">
+                          {savingPhoneEdit ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                          Salvar
+                        </Button>
+                        <Button onClick={cancelEditPhone} disabled={savingPhoneEdit} size="sm" variant="outline">
+                          <X className="size-3.5" />
+                          Cancelar
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm text-foreground tabular-nums">{phone.phone}</span>
+                          <StatusChip tone={badge.tone}>{badge.label}</StatusChip>
+                        </div>
+                        {phone.label && <p className="text-xs text-muted-foreground">{phone.label}</p>}
+                        {phone.last_attempt_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Última tentativa:{' '}
+                            {new Date(phone.last_attempt_at).toLocaleDateString('pt-BR', {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-all shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => startEditPhone(phone)}
+                          aria-label={`Editar ${phone.phone}`}
+                          className="text-muted-foreground hover:text-primary-text transition-colors cursor-pointer p-1"
+                        >
+                          <Pencil className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (window.confirm('Remover este telefone?')) {
+                              deletePhone(phone.id);
+                            }
+                          }}
+                          disabled={deletingPhoneId === phone.id}
+                          aria-label={`Remover ${phone.phone}`}
+                          className="text-muted-foreground hover:text-danger transition-colors cursor-pointer p-1"
+                        >
+                          {deletingPhoneId === phone.id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="size-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Adicionar telefone */}
+      <div className="space-y-2 pt-2 border-t border-border">
+        <Input
+          value={newPhoneNumber}
+          onChange={(e) => setNewPhoneNumber(e.target.value)}
+          placeholder="Novo número"
+          className={fieldInput}
+        />
+        <Input
+          value={newPhoneLabel}
+          onChange={(e) => setNewPhoneLabel(e.target.value)}
+          placeholder="Rótulo (opcional)"
+          className={fieldInput}
+        />
+        <Button onClick={addPhone} disabled={!newPhoneNumber.trim() || addingPhone} variant="outline" className="w-full" size="sm">
+          {addingPhone ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+          Adicionar telefone
+        </Button>
+      </div>
+    </div>
+  );
+
+  const renderTags = () => (
+    <div className="space-y-3">
+      <p className="text-xs text-muted-foreground">
+        Clique em uma etiqueta para adicioná-la ou removê-la deste contato.
+      </p>
+      {allTags.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Nenhuma etiqueta disponível. Crie etiquetas nas Configurações.
+        </p>
+      ) : (
+        <TagPickerBox
+          searchRef={tagSearchRef}
+          query={tagQuery}
+          onQueryChange={setTagQuery}
+          onSearchArrowDown={() => focusFirstTagButton(tagButtonRefs)}
+          autoFocus
+          searchLabel="Buscar etiquetas"
+          isEmpty={filteredTags.length === 0}
+        >
+          {filteredTags.map((tag, index) => {
+            const selected = contactTagIds.includes(tag.id);
+            return (
+              <button
+                key={tag.id}
+                ref={(el) => {
+                  tagButtonRefs.current[index] = el;
+                }}
+                type="button"
+                onClick={() => toggleTag(tag.id)}
+                onKeyDown={makeTagButtonKeyDownHandler(index, tagButtonRefs, tagSearchRef)}
+                disabled={savingTags}
+                aria-pressed={selected}
+                className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
+                  selected ? 'ring-2 ring-primary ring-offset-1 ring-offset-border' : 'opacity-50 hover:opacity-80'
+                }`}
+                style={{ backgroundColor: tag.color + '20', color: tag.color }}
+              >
+                {selected && <Check className="size-3 mr-1" />}
+                {tag.name}
+              </button>
+            );
+          })}
+        </TagPickerBox>
+      )}
+    </div>
+  );
+
+  const renderNotes = () => (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="space-y-2 mb-3">
+        <Textarea
+          value={newNote}
+          onChange={(e) => setNewNote(e.target.value)}
+          placeholder="Escreva uma nota..."
+          className="bg-card border-border text-foreground placeholder:text-muted-foreground min-h-[60px] text-sm resize-none"
+        />
+        <Button onClick={addNote} disabled={!newNote.trim() || savingNote} size="sm">
+          {savingNote ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+          Adicionar Nota
+        </Button>
+      </div>
+
+      <div className="ddm-stagger flex-1 overflow-y-auto space-y-2">
+        {loadingNotes ? (
+          <div className="space-y-2" aria-busy="true">
+            <Skeleton className="h-16 w-full rounded-lg" />
+            <Skeleton className="h-16 w-full rounded-lg" />
+          </div>
+        ) : notes.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8">Nenhuma nota ainda.</p>
+        ) : (
+          notes.map((note) => (
+            <div key={note.id} className="rounded-lg bg-surface-3 border border-border p-3 group">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm text-foreground-2 whitespace-pre-wrap flex-1">{note.note_text}</p>
+                <button
+                  type="button"
+                  onClick={() => deleteNote(note.id)}
+                  aria-label="Excluir nota"
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-muted-foreground hover:text-danger transition-all cursor-pointer shrink-0"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1.5">
+                {new Date(note.created_at).toLocaleDateString('pt-BR', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const renderCustom = () =>
+    loadingCustom ? (
+      <div className="space-y-2" aria-busy="true">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+    ) : customFields.length === 0 ? (
+      <p className="text-sm text-muted-foreground text-center py-6">
+        Nenhum campo personalizado definido. Crie-os nas Configurações.
+      </p>
+    ) : (
+      <div className="space-y-3">
+        {customFields.map((field) => (
+          <div key={field.id} className="space-y-1.5">
+            <Label className="text-muted-foreground text-xs capitalize">{field.field_name}</Label>
+            <Input
+              value={customValues[field.id] ?? ''}
+              onChange={(e) =>
+                setCustomValues((prev) => ({
+                  ...prev,
+                  [field.id]: e.target.value,
+                }))
+              }
+              placeholder={`Insira ${field.field_name}...`}
+              className={fieldInput}
+            />
+          </div>
+        ))}
+        <Button onClick={saveCustomFields} disabled={savingCustom} className="w-full" size="sm">
+          {savingCustom ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+          Salvar Campos Personalizados
+        </Button>
+      </div>
+    );
+
+  const renderDeals = () =>
+    loadingDeals ? (
+      <div className="space-y-2" aria-busy="true">
+        <Skeleton className="h-16 w-full rounded-lg" />
+      </div>
+    ) : deals.length === 0 ? (
+      <p className="text-sm text-muted-foreground text-center py-8">Nenhum negócio ainda</p>
+    ) : (
+      <div className="ddm-stagger space-y-2">
+        {deals.map((deal) => (
+          <div key={deal.id} className="rounded-lg border border-border bg-surface-3 p-3">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm font-semibold text-foreground">{deal.title}</p>
+              {deal.stage && (
+                <span
+                  className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  style={{
+                    backgroundColor: `${deal.stage.color}20`,
+                    color: deal.stage.color,
+                  }}
+                >
+                  {deal.stage.name}
+                </span>
+              )}
+            </div>
+            <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-1 tabular-nums">
+                <DollarSign className="size-3" />
+                {formatCurrency(deal.value ?? 0, deal.currency || defaultCurrency)}
+              </span>
+              {deal.status && deal.status !== 'open' && (
+                <span className={deal.status === 'won' ? 'text-success' : 'text-danger'}>{deal.status}</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+
+  const actionButtons = (
+    <>
+      <Button
+        size="sm"
+        variant={variant === 'page' ? 'outline' : 'default'}
+        onClick={() => setTemplatePickerOpen(true)}
+        disabled={sendingTemplate || loadingChat}
+      >
+        {sendingTemplate ? <Loader2 className="size-4 animate-spin" /> : <LayoutTemplate className="size-4" />}
+        Enviar template
+      </Button>
+      <Button
+        size="sm"
+        variant={variant === 'page' ? 'default' : 'outline'}
+        onClick={handleGoToChat}
+        disabled={sendingTemplate || loadingChat}
+      >
+        {loadingChat ? <Loader2 className="size-4 animate-spin" /> : <MessageSquare className="size-4" />}
+        {variant === 'page' ? 'Abrir conversa' : 'Ir para o chat'}
+      </Button>
+    </>
+  );
+
+  const templatePicker = (
+    <TemplatePicker
+      open={templatePickerOpen}
+      onOpenChange={setTemplatePickerOpen}
+      onSelect={handleSendTemplate}
+      contact={contact}
+    />
+  );
+
+  if (variant === 'page') {
+    if (loading && !contact) {
+      return (
+        <PageBody>
+          <div className="flex items-center gap-4 pt-1" aria-busy="true">
+            <Skeleton className="size-14 rounded-full" />
+            <div className="flex flex-col gap-2">
+              <Skeleton className="h-6 w-56" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+          </div>
+          <div className="grid gap-3.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]" aria-hidden="true">
+            <Skeleton className="h-80 rounded-[10px]" />
+            <Skeleton className="h-80 rounded-[10px]" />
+          </div>
+        </PageBody>
+      );
+    }
+    if (!contact) {
+      return (
+        <PageBody>
+          <Link href="/contacts" className="inline-flex w-fit items-center gap-1 pt-1 text-xs text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-3" />
+            Contatos
+          </Link>
+          <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+            <p className="text-[13.5px] font-semibold text-foreground">Contato não encontrado</p>
+            <p className="text-[12.5px] text-muted-foreground">Ele pode ter sido excluído ou você não tem acesso.</p>
+          </div>
+        </PageBody>
+      );
+    }
+
+    const appliedTags = allTags.filter((t) => contactTagIds.includes(t.id));
+
+    return (
+      <PageBody>
+        <nav aria-label="Trilha" className="flex items-center gap-1 pt-1 text-xs text-muted-foreground">
+          <Link href="/contacts" className="hover:text-foreground">
+            Contatos
+          </Link>
+          <ChevronRight className="size-3" aria-hidden="true" />
+          <span className="truncate text-foreground-2">{contact.name || 'Desconhecido'}</span>
+        </nav>
+
+        {/* Cabeçalho do contato */}
+        <section className="flex animate-ddm-up flex-col gap-4 rounded-[10px] border border-border bg-card p-5 md:flex-row md:items-start">
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary-soft font-heading text-lg font-semibold text-primary-text" aria-hidden="true">
+            {getInitials(contact.name)}
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <h2 className="font-heading text-[24px] font-semibold leading-tight tracking-[-0.02em] text-foreground">
+              {contact.name || 'Desconhecido'}
+            </h2>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
+              <button
+                type="button"
+                onClick={copyPhone}
+                title="Copiar telefone"
+                className="flex items-center gap-1.5 tabular-nums hover:text-primary-text transition-colors"
+              >
+                <Phone className="size-3.5" />
+                {contact.phone}
+                {copiedPhone ? <Check className="size-3 text-success" /> : <Copy className="size-3" />}
+              </button>
+              {contact.email && (
+                <span className="flex items-center gap-1.5">
+                  <Mail className="size-3.5" />
+                  {contact.email}
+                </span>
+              )}
+              {contact.company && (
+                <span className="flex items-center gap-1.5">
+                  <Building2 className="size-3.5" />
+                  {contact.company}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {appliedTags.map((tag) => (
+                <span
+                  key={tag.id}
+                  className="inline-flex h-[22px] items-center gap-1 rounded-full pl-2 pr-1 text-[11.5px] font-semibold"
+                  style={{ backgroundColor: tag.color + '20', color: tag.color }}
+                >
+                  {tag.name}
+                  <button
+                    type="button"
+                    onClick={() => toggleTag(tag.id)}
+                    disabled={savingTags}
+                    aria-label={`Remover etiqueta ${tag.name}`}
+                    className="flex size-4 items-center justify-center rounded-full hover:bg-black/10"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+              <Popover>
+                <PopoverTrigger className="inline-flex h-[22px] items-center gap-1 rounded-full border border-dashed border-border-strong px-2 text-[11.5px] font-semibold text-muted-foreground hover:border-primary hover:text-primary-text">
+                  <Plus className="size-3" />
+                  Etiqueta
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80">
+                  {renderTags()}
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">{actionButtons}</div>
+        </section>
+
+        <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)]">
+          <div className="ddm-stagger flex flex-col gap-3.5">
+            <section className="rounded-[10px] border border-border bg-card p-[18px]">
+              <h3 className="mb-3 text-[13.5px] font-semibold text-foreground">Dados</h3>
+              {renderDetails()}
+            </section>
+            <section className="rounded-[10px] border border-border bg-card p-[18px]">
+              <h3 className="mb-3 text-[13.5px] font-semibold text-foreground">Telefones</h3>
+              {renderPhones(contact)}
+            </section>
+            <section className="rounded-[10px] border border-border bg-card p-[18px]">
+              <h3 className="mb-3 text-[13.5px] font-semibold text-foreground">Campos personalizados</h3>
+              {renderCustom()}
+            </section>
+          </div>
+
+          <section className="flex min-h-[420px] flex-col rounded-[10px] border border-border bg-card">
+            <div className="border-b border-border px-[18px] py-3">
+              <Segmented
+                ariaLabel="Seções do contato"
+                value={pageTab}
+                onChange={setPageTab}
+                options={[
+                  { value: 'deals', label: 'Negócios', count: loadingDeals ? undefined : deals.length },
+                  { value: 'notes', label: 'Notas', count: loadingNotes ? undefined : notes.length },
+                ]}
+              />
+            </div>
+            <div key={pageTab} className="flex flex-1 animate-ddm-fade flex-col p-[18px]">
+              {pageTab === 'deals' ? renderDeals() : renderNotes()}
+            </div>
+          </section>
+        </div>
+        {templatePicker}
+      </PageBody>
+    );
+  }
+
   return (
     <>
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -719,10 +1276,10 @@ export function ContactDetailView({
         ) : (
           <div className="flex flex-col h-full">
             {/* Header */}
-            <SheetHeader className="p-4 border-b border-border/50">
+            <SheetHeader className="p-4 border-b border-border">
               <div className="flex items-center gap-3">
                 <Avatar className="size-12 bg-muted border border-border">
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm font-medium">
+                  <AvatarFallback className="bg-primary-soft text-primary-text text-sm font-medium">
                     {getInitials(contact.name)}
                   </AvatarFallback>
                 </Avatar>
@@ -731,7 +1288,10 @@ export function ContactDetailView({
                     {contact.name || 'Desconhecido'}
                   </SheetTitle>
                   <SheetDescription className="text-muted-foreground text-xs mt-0.5">
-                    Detalhes do contato
+                    Detalhes do contato ·{' '}
+                    <Link href={`/contacts/${contact.id}`} className="text-primary-text hover:underline">
+                      Abrir página completa
+                    </Link>
                   </SheetDescription>
                   <div className="flex flex-wrap items-center gap-3 mt-1.5 text-xs text-muted-foreground">
                     <button
@@ -761,552 +1321,56 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-              <div className="mt-3 flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => setTemplatePickerOpen(true)}
-                  disabled={sendingTemplate || loadingChat}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90"
-                >
-                  {sendingTemplate ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <LayoutTemplate className="size-4" />
-                  )}
-                  Enviar template
-                </Button>
-
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleGoToChat}
-                  disabled={sendingTemplate || loadingChat}
-                  className="border-border text-foreground hover:bg-muted"
-                >
-                  {loadingChat ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <MessageSquare className="size-4" />
-                  )}
-                  Ir para o chat
-                </Button>
-              </div>
+              <div className="mt-3 flex items-center gap-2">{actionButtons}</div>
             </SheetHeader>
 
             {/* Tabs */}
             <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
               <TabsList className="bg-muted/50 border-b border-border mx-4 mt-3">
-                <TabsTrigger
-                  value="details"
-                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-                >
+                <TabsTrigger value="details" className="data-active:bg-muted data-active:text-primary text-muted-foreground">
                   Detalhes
                 </TabsTrigger>
-                <TabsTrigger
-                  value="phones"
-                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-                >
+                <TabsTrigger value="phones" className="data-active:bg-muted data-active:text-primary text-muted-foreground">
                   Telefones
                 </TabsTrigger>
-                <TabsTrigger
-                  value="tags"
-                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-                >
+                <TabsTrigger value="tags" className="data-active:bg-muted data-active:text-primary text-muted-foreground">
                   Etiquetas
                 </TabsTrigger>
-                <TabsTrigger
-                  value="notes"
-                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-                >
+                <TabsTrigger value="notes" className="data-active:bg-muted data-active:text-primary text-muted-foreground">
                   Notas
                 </TabsTrigger>
-                <TabsTrigger
-                  value="custom"
-                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-                >
+                <TabsTrigger value="custom" className="data-active:bg-muted data-active:text-primary text-muted-foreground">
                   Campos Personalizados
                 </TabsTrigger>
-                <TabsTrigger
-                  value="deals"
-                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-                >
+                <TabsTrigger value="deals" className="data-active:bg-muted data-active:text-primary text-muted-foreground">
                   Negócios
                 </TabsTrigger>
               </TabsList>
 
-              {/* Details Tab */}
               <TabsContent value="details" className="flex-1 overflow-y-auto px-4 py-3">
-                <div className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">Nome</Label>
-                    <Input
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="bg-muted border-border text-foreground h-8 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">
-                      Telefone <span className="text-red-400">*</span>
-                    </Label>
-                    <Input
-                      value={editPhone}
-                      onChange={(e) => setEditPhone(e.target.value)}
-                      className="bg-muted border-border text-foreground h-8 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">CPF</Label>
-                    <Input
-                      value={formatCpf(editCpf)}
-                      onChange={(e) => setEditCpf(onlyDigits(e.target.value).slice(0, CPF_DIGITS_LENGTH))}
-                      placeholder="000.000.000-00"
-                      inputMode="numeric"
-                      className="bg-muted border-border text-foreground h-8 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">Instituição</Label>
-                    <Input
-                      value={editInstituicao}
-                      onChange={(e) => setEditInstituicao(e.target.value)}
-                      className="bg-muted border-border text-foreground h-8 text-sm"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5 pt-2 border-t border-border/50">
-                    <Label className="text-muted-foreground text-xs">Dados do CSV importado</Label>
-                  </div>
-                  {CSV_VAR_INDICES.map((idx) => (
-                    <div key={idx} className="space-y-1.5">
-                      <Label className="text-muted-foreground text-xs">{CSV_VAR_LABELS[idx]}</Label>
-                      <Input
-                        value={loadingCsvVars ? '' : csvVars[idx] ?? ''}
-                        readOnly
-                        disabled
-                        placeholder={loadingCsvVars ? 'Carregando...' : '—'}
-                        className="bg-muted/50 border-border text-muted-foreground h-8 text-sm"
-                      />
-                    </div>
-                  ))}
-
-                  <Button
-                    onClick={saveDetails}
-                    disabled={savingDetails}
-                    className="bg-primary hover:bg-primary/90 text-primary-foreground w-full"
-                    size="sm"
-                  >
-                    {savingDetails ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <Save className="size-3.5" />
-                    )}
-                    Salvar Alterações
-                  </Button>
-                </div>
+                {renderDetails()}
               </TabsContent>
-
-              {/* Phones Tab */}
               <TabsContent value="phones" className="flex-1 overflow-y-auto px-4 py-3">
-                <div className="space-y-4">
-                  {/* Seção 1 — telefone principal (contacts.phone / TELEFONE1) */}
-                  <div className="space-y-1.5">
-                    <Label className="text-muted-foreground text-xs">Telefone principal</Label>
-                    <div className="flex items-center gap-2 rounded-lg bg-muted/50 border border-border/50 px-3 py-2">
-                      <span className="text-sm text-foreground flex-1">{contact.phone}</span>
-                      <span className="rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-medium shrink-0">
-                        Principal
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Editável na aba Detalhes.
-                    </p>
-                  </div>
-
-                  {/* Seção 2 — telefones alternativos (contact_phones) */}
-                  <div className="space-y-1.5 pt-2 border-t border-border/50">
-                    <Label className="text-muted-foreground text-xs">Telefones alternativos</Label>
-
-                    {loadingPhones ? (
-                      <div className="flex items-center justify-center py-6">
-                        <Loader2 className="size-5 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : phones.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-2">
-                        Nenhum telefone alternativo cadastrado.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {phones.map((phone) => {
-                          const badge = PHONE_STATUS_BADGE[phone.status];
-                          const isEditing = editingPhoneId === phone.id;
-                          return (
-                            <div
-                              key={phone.id}
-                              className="rounded-lg bg-muted/50 border border-border/50 p-3 group"
-                            >
-                              {isEditing ? (
-                                <div className="space-y-2">
-                                  <Input
-                                    value={editPhoneNumber}
-                                    onChange={(e) => setEditPhoneNumber(e.target.value)}
-                                    placeholder="Número"
-                                    className="bg-muted border-border text-foreground h-8 text-sm"
-                                  />
-                                  <Input
-                                    value={editPhoneLabel}
-                                    onChange={(e) => setEditPhoneLabel(e.target.value)}
-                                    placeholder="Rótulo (opcional)"
-                                    className="bg-muted border-border text-foreground h-8 text-sm"
-                                  />
-                                  <div className="flex items-center gap-2">
-                                    <Button
-                                      onClick={saveEditPhone}
-                                      disabled={savingPhoneEdit || !editPhoneNumber.trim()}
-                                      size="sm"
-                                      className="bg-primary hover:bg-primary/90 text-primary-foreground"
-                                    >
-                                      {savingPhoneEdit ? (
-                                        <Loader2 className="size-3.5 animate-spin" />
-                                      ) : (
-                                        <Save className="size-3.5" />
-                                      )}
-                                      Salvar
-                                    </Button>
-                                    <Button
-                                      onClick={cancelEditPhone}
-                                      disabled={savingPhoneEdit}
-                                      size="sm"
-                                      variant="outline"
-                                      className="border-border text-foreground hover:bg-muted"
-                                    >
-                                      <X className="size-3.5" />
-                                      Cancelar
-                                    </Button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="flex-1 min-w-0 space-y-1">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span className="text-sm text-foreground">{phone.phone}</span>
-                                      <span
-                                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0 ${badge.className}`}
-                                      >
-                                        {badge.label}
-                                      </span>
-                                    </div>
-                                    {phone.label && (
-                                      <p className="text-xs text-muted-foreground">{phone.label}</p>
-                                    )}
-                                    {phone.last_attempt_at && (
-                                      <p className="text-xs text-muted-foreground">
-                                        Última tentativa:{' '}
-                                        {new Date(phone.last_attempt_at).toLocaleDateString('pt-BR', {
-                                          month: 'short',
-                                          day: 'numeric',
-                                          year: 'numeric',
-                                          hour: '2-digit',
-                                          minute: '2-digit',
-                                        })}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all shrink-0">
-                                    <button
-                                      onClick={() => startEditPhone(phone)}
-                                      className="text-muted-foreground hover:text-primary transition-colors cursor-pointer p-1"
-                                    >
-                                      <Pencil className="size-3.5" />
-                                    </button>
-                                    <button
-                                      onClick={() => {
-                                        if (window.confirm('Remover este telefone?')) {
-                                          deletePhone(phone.id);
-                                        }
-                                      }}
-                                      disabled={deletingPhoneId === phone.id}
-                                      className="text-muted-foreground hover:text-red-400 transition-colors cursor-pointer p-1"
-                                    >
-                                      {deletingPhoneId === phone.id ? (
-                                        <Loader2 className="size-3.5 animate-spin" />
-                                      ) : (
-                                        <Trash2 className="size-3.5" />
-                                      )}
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Adicionar telefone */}
-                  <div className="space-y-2 pt-2 border-t border-border/50">
-                    <Input
-                      value={newPhoneNumber}
-                      onChange={(e) => setNewPhoneNumber(e.target.value)}
-                      placeholder="Novo número"
-                      className="bg-muted border-border text-foreground h-8 text-sm placeholder:text-muted-foreground"
-                    />
-                    <Input
-                      value={newPhoneLabel}
-                      onChange={(e) => setNewPhoneLabel(e.target.value)}
-                      placeholder="Rótulo (opcional)"
-                      className="bg-muted border-border text-foreground h-8 text-sm placeholder:text-muted-foreground"
-                    />
-                    <Button
-                      onClick={addPhone}
-                      disabled={!newPhoneNumber.trim() || addingPhone}
-                      className="bg-primary hover:bg-primary/90 text-primary-foreground w-full"
-                      size="sm"
-                    >
-                      {addingPhone ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <Plus className="size-3.5" />
-                      )}
-                      Adicionar telefone
-                    </Button>
-                  </div>
-                </div>
+                {renderPhones(contact)}
               </TabsContent>
-
-              {/* Tags Tab */}
               <TabsContent value="tags" className="flex-1 overflow-y-auto px-4 py-3">
-                <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">
-                    Clique em uma etiqueta para adicioná-la ou removê-la deste contato.
-                  </p>
-                  {allTags.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Nenhuma etiqueta disponível. Crie etiquetas nas Configurações.
-                    </p>
-                  ) : (
-                    <TagPickerBox
-                      searchRef={tagSearchRef}
-                      query={tagQuery}
-                      onQueryChange={setTagQuery}
-                      onSearchArrowDown={() => focusFirstTagButton(tagButtonRefs)}
-                      autoFocus
-                      searchLabel="Buscar etiquetas"
-                      isEmpty={filteredTags.length === 0}
-                    >
-                      {filteredTags.map((tag, index) => {
-                        const selected = contactTagIds.includes(tag.id);
-                        return (
-                          <button
-                            key={tag.id}
-                            ref={(el) => {
-                              tagButtonRefs.current[index] = el;
-                            }}
-                            type="button"
-                            onClick={() => toggleTag(tag.id)}
-                            onKeyDown={makeTagButtonKeyDownHandler(index, tagButtonRefs, tagSearchRef)}
-                            disabled={savingTags}
-                            aria-pressed={selected}
-                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-all cursor-pointer ${
-                              selected
-                                ? 'ring-2 ring-primary ring-offset-1 ring-offset-border'
-                                : 'opacity-50 hover:opacity-80'
-                            }`}
-                            style={{
-                              backgroundColor: tag.color + '20',
-                              color: tag.color,
-                            }}
-                          >
-                            {selected && <Check className="size-3 mr-1" />}
-                            {tag.name}
-                          </button>
-                        );
-                      })}
-                    </TagPickerBox>
-                  )}
-                </div>
+                {renderTags()}
               </TabsContent>
-
-              {/* Notes Tab */}
               <TabsContent value="notes" className="flex-1 flex flex-col min-h-0 px-4 py-3">
-                <div className="space-y-2 mb-3">
-                  <Textarea
-                    value={newNote}
-                    onChange={(e) => setNewNote(e.target.value)}
-                    placeholder="Escreva uma nota..."
-                    className="bg-muted border-border text-foreground placeholder:text-muted-foreground min-h-[60px] text-sm resize-none"
-                  />
-                  <Button
-                    onClick={addNote}
-                    disabled={!newNote.trim() || savingNote}
-                    className="bg-primary hover:bg-primary/90 text-primary-foreground"
-                    size="sm"
-                  >
-                    {savingNote ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <Plus className="size-3.5" />
-                    )}
-                    Adicionar Nota
-                  </Button>
-                </div>
-
-                <div className="flex-1 overflow-y-auto space-y-2">
-                  {loadingNotes ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="size-5 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : notes.length === 0 ? (
-                    <p className="text-sm text-muted-foreground text-center py-8">
-                      Nenhuma nota ainda.
-                    </p>
-                  ) : (
-                    notes.map((note) => (
-                      <div
-                        key={note.id}
-                        className="rounded-lg bg-muted/50 border border-border/50 p-3 group"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm text-muted-foreground whitespace-pre-wrap flex-1">
-                            {note.note_text}
-                          </p>
-                          <button
-                            onClick={() => deleteNote(note.id)}
-                            className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-all cursor-pointer shrink-0"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1.5">
-                          {new Date(note.created_at).toLocaleDateString('pt-BR', {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
+                {renderNotes()}
               </TabsContent>
-
-              {/* Custom Fields Tab */}
               <TabsContent value="custom" className="flex-1 overflow-y-auto px-4 py-3">
-                {loadingCustom ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : customFields.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    Nenhum campo personalizado definido. Crie-os nas Configurações.
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    {customFields.map((field) => (
-                      <div key={field.id} className="space-y-1.5">
-                        <Label className="text-muted-foreground text-xs capitalize">
-                          {field.field_name}
-                        </Label>
-                        <Input
-                          value={customValues[field.id] ?? ''}
-                          onChange={(e) =>
-                            setCustomValues((prev) => ({
-                              ...prev,
-                              [field.id]: e.target.value,
-                            }))
-                          }
-                          placeholder={`Insira ${field.field_name}...`}
-                          className="bg-muted border-border text-foreground h-8 text-sm placeholder:text-muted-foreground"
-                        />
-                      </div>
-                    ))}
-                    <Button
-                      onClick={saveCustomFields}
-                      disabled={savingCustom}
-                      className="bg-primary hover:bg-primary/90 text-primary-foreground w-full"
-                      size="sm"
-                    >
-                      {savingCustom ? (
-                        <Loader2 className="size-3.5 animate-spin" />
-                      ) : (
-                        <Save className="size-3.5" />
-                      )}
-                      Salvar Campos Personalizados
-                    </Button>
-                  </div>
-                )}
+                {renderCustom()}
               </TabsContent>
-
-              {/* Deals Tab */}
               <TabsContent value="deals" className="flex-1 overflow-y-auto px-4 py-3">
-                {loadingDeals ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="size-5 animate-spin text-primary" />
-                  </div>
-                ) : deals.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">Nenhum negócio ainda</p>
-                ) : (
-                  <div className="space-y-2">
-                    {deals.map((deal) => (
-                      <div
-                        key={deal.id}
-                        className="rounded-lg border border-border bg-muted/50 p-3"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-medium text-foreground">
-                            {deal.title}
-                          </p>
-                          {deal.stage && (
-                            <span
-                              className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium"
-                              style={{
-                                backgroundColor: `${deal.stage.color}20`,
-                                color: deal.stage.color,
-                              }}
-                            >
-                              {deal.stage.name}
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <DollarSign className="size-3" />
-                            {formatCurrency(
-                              deal.value ?? 0,
-                              deal.currency || defaultCurrency,
-                            )}
-                          </span>
-                          {deal.status && deal.status !== 'open' && (
-                            <span
-                              className={
-                                deal.status === 'won'
-                                  ? 'text-primary'
-                                  : 'text-red-400'
-                              }
-                            >
-                              {deal.status}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {renderDeals()}
               </TabsContent>
             </Tabs>
           </div>
         )}
       </SheetContent>
     </Sheet>
-    <TemplatePicker
-      open={templatePickerOpen}
-      onOpenChange={setTemplatePickerOpen}
-      onSelect={handleSendTemplate}
-      contact={contact}
-    />
+    {templatePicker}
     </>
   );
 }
