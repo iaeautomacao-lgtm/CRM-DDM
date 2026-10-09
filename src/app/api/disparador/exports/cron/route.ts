@@ -4,6 +4,7 @@ import { registerAuditActor } from "@/lib/audit/context";
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { runExportCron } from "@/lib/disparador/export-jobs";
+import { runHistoryExportCron } from "@/lib/historico/export-jobs";
 
 // POST /api/disparador/exports/cron — processa os jobs de exportação da fila em blocos retomáveis (stateless) e apaga os
 // arquivos vencidos. Chamada pelo agendador externo (a cada minuto), com o mesmo segredo dos demais crons do Disparador:
@@ -23,8 +24,13 @@ export async function POST(request: Request) {
   }
   try {
     const startedAt = Date.now();
-    const summary = await runExportCron(supabaseAdmin(), { owner: randomUUID(), budgetMs: 80_000 });
-    return NextResponse.json({ status: summary.processed ? "processed" : "idle", ...summary, duration_ms: Date.now() - startedAt });
+    const summary = await runExportCron(supabaseAdmin(), { owner: randomUUID(), budgetMs: 60_000 });
+    // Exportação do Histórico (TASK36): mesmo agendador; sem a migration 297 é no-op.
+    const history = await runHistoryExportCron(supabaseAdmin(), { owner: randomUUID(), budgetMs: 20_000 }).catch((error) => {
+      console.error("[ExportCron] Histórico:", error);
+      return null;
+    });
+    return NextResponse.json({ status: summary.processed || history?.processed ? "processed" : "idle", ...summary, history, duration_ms: Date.now() - startedAt });
   } catch (error) {
     console.error("[ExportCron] Falha operacional:", error);
     return NextResponse.json({ error: "Export processing unavailable" }, { status: 503 });

@@ -269,9 +269,8 @@
       "kind": "registry"
     },
     {
-      "version": "296b_dmq_contact_scheduled_idx",
-      "kind": "index",
-      "index": "idx_dmq_contact_scheduled"
+      "version": "297_history_export_jobs",
+      "kind": "registry"
     }
   ]
 }
