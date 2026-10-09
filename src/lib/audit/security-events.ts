@@ -74,3 +74,28 @@ export function apiKeyRevokedEvent(input: ApiKeyEventInput): AuditEventParams {
     metadata: apiKeyMetadata(input, {}),
   }
 }
+
+export interface SessionEventInput {
+  accountId: string
+  userId: string
+  /** id da sessão encerrada (auth.sessions.id) ou null quando foram "todas as outras". */
+  sessionId: string | null
+  device: string | null
+  /** Quantas sessões foram encerradas ("todas as outras"). */
+  count: number
+}
+
+/** session.revoked — o usuário encerrou um dispositivo (ou todos os outros). Sem IP nem user-agent completo: só o rótulo do aparelho. */
+export function sessionRevokedEvent(input: SessionEventInput): AuditEventParams {
+  const single = input.sessionId !== null
+  return {
+    accountId: input.accountId,
+    eventType: 'action',
+    resourceType: 'session',
+    resourceId: input.sessionId ?? input.userId,
+    resourceLabel: input.device ?? 'Sessões',
+    action: single ? 'session.revoked' : 'session.revoked_others',
+    summary: single ? `Sessão encerrada (${input.device ?? 'dispositivo'})` : `${input.count} outra(s) sessão(ões) encerrada(s)`,
+    metadata: { user_id: input.userId, count: input.count },
+  }
+}

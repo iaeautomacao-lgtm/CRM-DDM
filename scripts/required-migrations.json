@@ -196,6 +196,10 @@
     {
       "version": "275_billing_sync_state",
       "kind": "registry"
+    },
+    {
+      "version": "290_user_sessions_mfa",
+      "kind": "registry"
     }
   ]
 }

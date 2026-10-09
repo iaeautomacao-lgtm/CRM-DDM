@@ -65,6 +65,11 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("account/members", "GET", "viewer", "members.view"),
   // PRD 20, 20.10: contrato de permissões para o front (derivado do que o servidor já decide)
   session("me/permissions", "GET", "account.view"),
+  // PRD 24, item 7: sessões e 2FA do PRÓPRIO usuário (qualquer membro autenticado)
+  session("me/sessions", "GET", "account.view"),
+  session("me/sessions/[id]", "DELETE", "account.view"),
+  session("me/sessions/revoke-others", "POST", "account.view"),
+  session("me/mfa", "GET", "account.view"),
   session("account/permission-catalog", "GET", "members.view"),
   pg("account/members/[userId]", "PATCH", "admin", "members.manage"),
   pg("account/members/[userId]", "DELETE", "admin", "members.manage"),
