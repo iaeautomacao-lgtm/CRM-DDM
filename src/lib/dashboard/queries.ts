@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
+  browserTimeZone,
   daysAgoStart,
   DOW_SHORT_MON_FIRST,
   lastNDayKeys,
@@ -19,14 +20,26 @@ import type {
 } from './types'
 
 // ------------------------------------------------------------
-// All client-side aggregation. RLS scopes every query to the
-// signed-in user automatically, so we never pass user_id explicitly
-// here. Perf is acceptable for the current scale (low thousands of
-// messages) — if a tenant's dataset outgrows this, we'd migrate the
-// heavy aggregations to SQL RPCs. Noted in the PR.
+// RLS scopes every query to the signed-in user automatically, so we
+// never pass user_id explicitly here.
+//
+// As agregações pesadas (série de mensagens, tempo de resposta, situação
+// das conversas e análises) rodam no BANCO — migration 293, funções
+// SECURITY INVOKER (a RLS continua valendo). Antes baixavam as linhas e
+// somavam aqui, e o PostgREST corta em 1000 linhas: os totais saíam
+// errados em contas grandes. Sem a migration (função inexistente) cai na
+// leitura antiga (legacy*), que mantém aquele limite.
 // ------------------------------------------------------------
 
 type DB = SupabaseClient
+
+function isMissingRpc(error: { code?: string; message?: string } | null): boolean {
+  return (
+    error?.code === 'PGRST202' ||
+    error?.code === '42883' ||
+    /could not find the function|does not exist/i.test(error?.message ?? '')
+  )
+}
 
 // --- 1. Metric cards ---------------------------------------------------
 
@@ -121,6 +134,27 @@ export async function loadConversationsSeries(
   rangeDays: number,
 ): Promise<ConversationsSeriesPoint[]> {
   const start = daysAgoStart(rangeDays - 1).toISOString()
+  const { data, error } = await db.rpc('dashboard_conversations_series', { p_start: start, p_tz: browserTimeZone() })
+  if (error) {
+    if (isMissingRpc(error)) return legacyLoadConversationsSeries(db, rangeDays)
+    throw error
+  }
+  const byDay = new Map(
+    ((data ?? []) as { day: string; incoming: number | string; outgoing: number | string }[]).map((r) => [r.day, r]),
+  )
+  // Dias sem movimento continuam aparecendo com 0 (a linha do gráfico não "pula" dias).
+  return lastNDayKeys(rangeDays).map((day) => ({
+    day,
+    incoming: Number(byDay.get(day)?.incoming ?? 0),
+    outgoing: Number(byDay.get(day)?.outgoing ?? 0),
+  }))
+}
+
+export async function legacyLoadConversationsSeries(
+  db: DB,
+  rangeDays: number,
+): Promise<ConversationsSeriesPoint[]> {
+  const start = daysAgoStart(rangeDays - 1).toISOString()
   const { data, error } = await db
     .from('messages')
     .select('created_at, sender_type')
@@ -146,13 +180,20 @@ export async function loadConversationsSeries(
 // --- 3. Current operational conversation status -----------------------
 
 export async function loadConversationsStatusDonut(db: DB): Promise<ConversationsStatusData> {
-  const { data, error } = await db.from('conversations').select('status')
-  if (error) throw error
-
   const counts = { open: 0, pending: 0 }
-  for (const row of (data ?? []) as { status: string }[]) {
-    if (row.status === 'open') counts.open += 1
-    else if (row.status === 'pending') counts.pending += 1
+  const { data: agg, error: aggError } = await db.rpc('dashboard_conversations_status')
+  if (!aggError && agg) {
+    counts.open = Number((agg as { open?: number }).open ?? 0)
+    counts.pending = Number((agg as { pending?: number }).pending ?? 0)
+  } else if (aggError && !isMissingRpc(aggError)) {
+    throw aggError
+  } else {
+    const { data, error } = await db.from('conversations').select('status')
+    if (error) throw error
+    for (const row of (data ?? []) as { status: string }[]) {
+      if (row.status === 'open') counts.open += 1
+      else if (row.status === 'pending') counts.pending += 1
+    }
   }
 
   // "Situação atual" representa somente o que ainda está em operação.
@@ -171,6 +212,30 @@ export async function loadConversationsStatusDonut(db: DB): Promise<Conversation
 // --- 4. Response time by day of week ----------------------------------
 
 export async function loadResponseTime(db: DB): Promise<ResponseTimeSummary> {
+  const now = new Date()
+  const { data, error } = await db.rpc('dashboard_response_time', {
+    p_start: daysAgoStart(13).toISOString(),
+    p_tz: browserTimeZone(),
+    p_this_week: daysAgoStart(mondayIndex(now)).toISOString(),
+    p_last_week: daysAgoStart(mondayIndex(now) + 7).toISOString(),
+  })
+  if (error) {
+    if (isMissingRpc(error)) return legacyLoadResponseTime(db)
+    throw error
+  }
+  const agg = (data ?? {}) as {
+    buckets?: { dow: number; avgMinutes: number | null; samples: number }[]
+    thisWeekAvg?: number | null
+    lastWeekAvg?: number | null
+  }
+  const buckets: ResponseTimeBucket[] = Array.from({ length: 7 }, (_, dow) => {
+    const b = agg.buckets?.find((x) => x.dow === dow)
+    return { dow, avgMinutes: b?.avgMinutes ?? null, samples: Number(b?.samples ?? 0) }
+  })
+  return { buckets, thisWeekAvg: agg.thisWeekAvg ?? null, lastWeekAvg: agg.lastWeekAvg ?? null }
+}
+
+export async function legacyLoadResponseTime(db: DB): Promise<ResponseTimeSummary> {
   // Pull the last 14 days of messages in one shot, then walk per
   // conversation to find each "first inbound" → "first subsequent
   // outbound" pair. 14 days gives us both "this week" + "last week"
@@ -374,6 +439,15 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
 }
 
 export async function loadAiAnalytics(db: DB): Promise<AiAnalyticsData> {
+  const { data, error } = await db.rpc('dashboard_ai_analytics')
+  if (error) {
+    if (isMissingRpc(error)) return legacyLoadAiAnalytics(db)
+    throw error
+  }
+  return data as AiAnalyticsData
+}
+
+export async function legacyLoadAiAnalytics(db: DB): Promise<AiAnalyticsData> {
   const [convs, msgs, deals, profiles] = await Promise.all([
     db.from('conversations').select('sentiment'),
     db.from('messages').select('sender_type').in('sender_type', ['agent', 'bot']),
