@@ -35,7 +35,8 @@ export async function POST(request: Request) {
 
   if (error) {
     console.error("[RetryAssignment] Query error:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // O detalhe do Postgres fica no log acima; não vai na resposta.
+    return NextResponse.json({ error: "Falha ao ler as conversas pendentes." }, { status: 500 });
   }
 
   if (!conversations || conversations.length === 0) {
@@ -60,14 +61,18 @@ export async function POST(request: Request) {
         continue;
       }
 
-      await db
+      const { data: updated, error: assignError } = await db
         .from("conversations")
         .update({
           assigned_agent_id: agentId,
           updated_at: new Date().toISOString(),
         })
         .eq("id", conv.id)
-        .is("assigned_agent_id", null); // guard: só atualiza se ainda null
+        .is("assigned_agent_id", null) // guard: só atualiza se ainda null
+        .select("id");
+      if (assignError) throw assignError;
+      // Outra execução (ou um operador) pegou a conversa antes: o guard não atualizou nada.
+      if (!updated || updated.length === 0) continue;
 
       assigned++;
       console.log(

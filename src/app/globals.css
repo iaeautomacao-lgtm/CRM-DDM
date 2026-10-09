@@ -2,7 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* O tema é marcado por data-mode no <html> (layout.tsx + theme-boot); antes
+   esta variante esperava a classe .dark, que nunca é aplicada, e nenhum dark:
+   tinha efeito. */
+@custom-variant dark (&:is([data-mode=dark] *));
 
 @theme inline {
   --color-background: var(--background);

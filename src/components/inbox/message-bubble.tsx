@@ -71,7 +71,7 @@ function StatusIcon({ status }: { status: Message["status"] }) {
     case "delivered":
       return <CheckCheck role="img" aria-label="Entregue" className="h-3 w-3 text-muted-foreground" />;
     case "read":
-      return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-sky-600 dark:text-sky-400" />;
+      return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-sky-400 [html[data-mode=light]_&]:text-sky-600" />;
     case "failed":
       return (
         <span className="inline-flex items-center gap-0.5 rounded bg-red-500 px-1 text-xs font-medium text-white">

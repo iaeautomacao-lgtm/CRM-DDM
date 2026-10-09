@@ -371,14 +371,14 @@ export default function FlowsPage() {
             <GatedButton
               variant="outline"
               canAct={canCreate}
-              gateReason="import flows"
+              gateReason="importar fluxos"
               disabled={importing}
               onClick={() => importInputRef.current?.click()}
             >
               {importing ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
               Importar fluxo
             </GatedButton>
-            <GatedButton canAct={canCreate} gateReason="create flows" onClick={() => setCreateOpen(true)}>
+            <GatedButton canAct={canCreate} gateReason="criar fluxos" onClick={() => setCreateOpen(true)}>
               <Plus className="size-3.5" />
               Novo fluxo
             </GatedButton>
@@ -690,7 +690,7 @@ function EmptyState({
       </p>
       <GatedButton
         canAct={canCreate}
-        gateReason="create flows"
+        gateReason="criar fluxos"
         onClick={onCreate}
         className="mt-5"
       >
