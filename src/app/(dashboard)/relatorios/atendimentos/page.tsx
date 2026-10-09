@@ -21,7 +21,7 @@ import { apiFetch } from "@/lib/api-fetch";
 // "never cycle past N categorical slots" rule.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { format, startOfMonth } from "date-fns";
 import { Bot, Headphones, Search } from "lucide-react";
 import {
@@ -469,6 +469,7 @@ function defaultFilters(): Filters {
 }
 
 export default function AtendimentosPage() {
+  const uid = useId();
   const { accountId } = useAuth();
 
   const [teams, setTeams] = useState<Team[]>([]);
@@ -582,7 +583,7 @@ export default function AtendimentosPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Atendimentos</h1>
+        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Atendimentos</h2>
         <p className="text-sm text-muted-foreground">
           Métricas de tempo e volume de atendimento por equipe e agente.
         </p>
@@ -595,9 +596,9 @@ export default function AtendimentosPage() {
             onChange={(r) => setDraft((d) => ({ ...d, ...r }))}
           />
           <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Equipes</label>
+            <label htmlFor={`${uid}-equipe`} className="text-xs font-medium text-muted-foreground">Equipes</label>
             <Select value={draft.teamId} onValueChange={(v) => v && setDraft((d) => ({ ...d, teamId: v }))}>
-              <SelectTrigger className="w-44">
+              <SelectTrigger id={`${uid}-equipe`} className="w-44">
                 <SelectValue>
                   {(v: string) => (v === ALL ? "Todas" : teams.find((t) => t.id === v)?.name ?? v)}
                 </SelectValue>
