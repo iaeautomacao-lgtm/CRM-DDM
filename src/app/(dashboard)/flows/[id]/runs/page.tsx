@@ -846,11 +846,13 @@ function RunCard({
           checked={selected}
           onCheckedChange={onToggleSelect}
           onClick={(e) => e.stopPropagation()}
-          aria-label="Selecionar execução"
+          aria-label={`Selecionar execução de ${contactLabel}`}
         />
         <button
           type="button"
           onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={`run-${run.id}-details`}
           className="flex min-w-0 flex-1 items-center gap-3 text-left"
         >
         {expanded ? (
@@ -910,7 +912,7 @@ function RunCard({
       )}
       </div>
       {expanded && (
-        <div className="border-t border-border px-4 py-3">
+        <div id={`run-${run.id}-details`} className="border-t border-border px-4 py-3">
           {summary && (
             <div className="mb-3 rounded-md border border-border bg-surface-3 px-3 py-2">
               <p className="text-sm font-medium text-foreground">{summary.headline}</p>
@@ -994,7 +996,7 @@ function NotExecutedSection({ nodes }: { nodes: FlowNodeDef[] }) {
             key={n.node_key}
             className="flex items-center gap-2 rounded-md px-2 py-1 text-xs"
           >
-            <MinusCircle className="h-3 w-3 shrink-0 text-amber-400" />
+            <MinusCircle className="h-3 w-3 shrink-0 text-warning" />
             <code className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
               {n.node_key} ({n.node_type})
             </code>
@@ -1036,24 +1038,24 @@ const EVENT_ICON: Record<string, typeof Clock> = {
 };
 
 const EVENT_COLOR: Record<string, string> = {
-  started: "text-emerald-600",
-  run_started: "text-emerald-600",
+  started: "text-success",
+  run_started: "text-success",
   node_entered: "text-muted-foreground",
-  node_completed: "text-emerald-400",
-  message_sent: "text-blue-400",
-  reply_received: "text-sky-300",
-  fallback_fired: "text-amber-300",
-  handoff: "text-amber-300",
+  node_completed: "text-success",
+  message_sent: "text-primary-text",
+  reply_received: "text-foreground-2",
+  fallback_fired: "text-warning",
+  handoff: "text-warning",
   timeout: "text-muted-foreground",
-  error: "text-red-400",
-  node_error: "text-red-400",
-  completed: "text-emerald-400",
-  run_completed: "text-emerald-400",
-  run_error: "text-red-400",
+  error: "text-danger",
+  node_error: "text-danger",
+  completed: "text-success",
+  run_completed: "text-success",
+  run_error: "text-danger",
   tool_called: "text-violet-500",
   tool_result: "text-violet-500",
   ai_agent_takeover: "text-violet-500",
-  ai_agent_failed: "text-red-400",
+  ai_agent_failed: "text-danger",
 };
 
 function getEventIcon(ev: EventRow): typeof Clock {
@@ -1062,8 +1064,8 @@ function getEventIcon(ev: EventRow): typeof Clock {
 }
 
 function getEventColor(ev: EventRow): string {
-  if (ev.event_type === "node_completed" && ev.status === "error") return "text-red-400";
-  if (ev.event_type === "tool_result" && ev.status === "error") return "text-red-400";
+  if (ev.event_type === "node_completed" && ev.status === "error") return "text-danger";
+  if (ev.event_type === "tool_result" && ev.status === "error") return "text-danger";
   return EVENT_COLOR[ev.event_type] ?? "text-muted-foreground";
 }
 
@@ -1091,25 +1093,20 @@ function EventLine({
     <button
       type="button"
       onClick={onSelect}
-      style={
-        isNodeError
-          ? { backgroundColor: `rgba(239,68,68,${selected ? 0.18 : 0.1})` }
-          : undefined
-      }
       className={cn(
         "flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1 text-left text-xs transition-colors",
         !isNodeError && (selected ? "bg-muted" : "hover:bg-muted/50"),
-        isNodeError && "hover:brightness-110"
+        isNodeError && (selected ? "bg-danger-soft brightness-95" : "bg-danger-soft hover:brightness-95")
       )}
     >
-      <div className="flex items-start gap-2">
+      <div className="flex flex-wrap items-start gap-x-2 gap-y-0.5 sm:flex-nowrap">
         {createElement(iconComponent, {
           className: cn("mt-0.5 h-3 w-3 shrink-0", cls),
         })}
-        <span className="w-28 shrink-0 text-[10px] text-muted-foreground">
+        <span className="shrink-0 text-[10px] text-muted-foreground sm:w-28">
           {format(new Date(ev.created_at), "HH:mm:ss")}
         </span>
-        <span className={cn("w-36 shrink-0 text-[11px] font-medium", cls)} title={ev.event_type}>
+        <span className={cn("shrink-0 text-[11px] font-medium sm:w-36", cls)} title={ev.event_type}>
           {EVENT_LABEL[ev.event_type] ?? ev.event_type}
         </span>
         {ev.node_key && (
@@ -1129,7 +1126,7 @@ function EventLine({
           </span>
         )}
       </div>
-      {isError && <p className="ml-9 text-[11px] text-red-500 dark:text-red-400">{sentence}</p>}
+      {isError && <p className="ml-9 text-[11px] text-danger">{sentence}</p>}
     </button>
   );
 }
@@ -1149,12 +1146,12 @@ const STATUS_BADGE: Record<
 > = {
   success: {
     label: "Sucesso",
-    classes: "border-emerald-600/40 bg-emerald-500/10 text-emerald-300",
+    classes: "border-success/40 bg-success-soft text-success",
     icon: CircleCheck,
   },
   error: {
     label: "Erro",
-    classes: "border-red-600/40 bg-red-500/10 text-red-300",
+    classes: "border-danger/40 bg-danger-soft text-danger",
     icon: CircleAlert,
   },
   skipped: {
@@ -1205,10 +1202,10 @@ function EventPayloadBody({ ev }: { ev: EventRow }) {
     <div className="flex flex-col gap-4">
       {errorMessage && (
         <div>
-          <p className="mb-1 text-[11px] font-semibold tracking-wide text-red-400 uppercase">
+          <p className="mb-1 text-[11px] font-semibold tracking-wide text-danger uppercase">
             Erro
           </p>
-          <p className="rounded-md bg-red-500/10 p-2 text-xs text-red-300">
+          <p className="rounded-md bg-danger-soft p-2 text-xs text-danger">
             {errorMessage}
           </p>
           {errorStack && (
@@ -1239,13 +1236,7 @@ function EventDetailSheet({
   onClose: () => void;
 }) {
   const open = ev !== null;
-  if (!ev) {
-    return (
-      <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-        <SheetContent side="right" className="w-full sm:max-w-md" />
-      </Sheet>
-    );
-  }
+  if (!ev) return null;
   const iconComponent = getEventIcon(ev);
   const cls = getEventColor(ev);
   const statusMeta = ev.status ? STATUS_BADGE[ev.status] : null;

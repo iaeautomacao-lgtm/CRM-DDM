@@ -17,7 +17,7 @@
  * concept). User can switch to List to address them.
  */
 
-import { CircleAlert, CircleCheck, X } from "lucide-react";
+import { CircleCheck, CircleX, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ValidationIssue } from "@/lib/flows/validate";
 import { useFlowEditor } from "./flow-editor-state";
@@ -63,11 +63,11 @@ export function ValidationPanel({ onClose }: { onClose: () => void }) {
       )}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite">
           {errors.length > 0 ? (
-            <CircleAlert className="h-4 w-4 text-danger" />
+            <CircleX className="h-4 w-4 text-danger" aria-hidden="true" />
           ) : (
-            <CircleAlert className="h-4 w-4 text-warning" />
+            <TriangleAlert className="h-4 w-4 text-warning" aria-hidden="true" />
           )}
           {errors.length} erro{errors.length === 1 ? "" : "s"},{" "}
           {warnings.length} aviso{warnings.length === 1 ? "" : "s"}
@@ -111,12 +111,11 @@ export function ValidationPanelBadge({ onClick }: { onClick: () => void }) {
       {errors === 0 && warnings === 0 ? (
         <CircleCheck className="h-3.5 w-3.5 shrink-0" />
       ) : (
-        <CircleAlert
-          className={cn(
-            "h-3.5 w-3.5 shrink-0",
-            errors > 0 ? "text-danger" : "text-warning",
-          )}
-        />
+        errors > 0 ? (
+          <CircleX className="h-3.5 w-3.5 shrink-0 text-danger" aria-hidden="true" />
+        ) : (
+          <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
+        )
       )}
       {errors} erro{errors === 1 ? "" : "s"}, {warnings} aviso
       {warnings === 1 ? "" : "s"}
@@ -137,14 +136,14 @@ export function IssueLine({
   issue: ValidationIssue;
   onJump?: (key: string) => void;
 }) {
-  const tone =
-    issue.severity === "error" ? "text-danger" : "text-warning";
-  const iconTone =
-    issue.severity === "error" ? "text-danger" : "text-warning";
+  const isError = issue.severity === "error";
+  const tone = isError ? "text-danger" : "text-warning";
+  const SeverityIcon = isError ? CircleX : TriangleAlert;
   const body = (
     <>
-      <CircleAlert className={cn("mt-0.5 h-3 w-3 shrink-0", iconTone)} />
+      <SeverityIcon className={cn("mt-0.5 h-3 w-3 shrink-0", tone)} aria-hidden="true" />
       <span className="min-w-0 flex-1">
+        <span className="mr-1 font-semibold">{isError ? "Erro:" : "Aviso:"}</span>
         {issue.node_key && (
           <code className="mr-1 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
             {issue.node_key}
@@ -167,7 +166,7 @@ export function IssueLine({
           "flex w-full items-start gap-2 rounded-md px-2 py-1 text-left text-xs transition-colors hover:bg-muted/60",
           tone,
         )}
-        aria-label={`Ir para o nó ${issue.node_key}`}
+        title={`Ir para o nó ${issue.node_key}`}
       >
         {body}
       </button>
