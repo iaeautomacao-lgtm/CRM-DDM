@@ -2,29 +2,41 @@ import { NextResponse } from 'next/server'
 import { guardFlowAccess } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { getFlowTemplate } from '@/lib/flows/templates'
+import { pageRange, parsePageParams, splitPage } from '@/lib/pagination'
 
 /**
- * GET /api/flows — list the caller's flows.
+ * GET /api/flows — list the caller's flows. Sem parâmetros devolve todos (compatível com quem já consome a lista);
+ * com `?limit=N&offset=M` (N até 200) devolve uma página e `has_more`, para a tela carregar "mais" sob demanda.
  * POST /api/flows — create a new (draft) flow.
  *
  * Owner/admin only (mesmo papel da página /flows). Tudo escopado pela
  * conta do chamador.
  */
 
-export async function GET() {
+export async function GET(request?: Request) {
   const guard = await guardFlowAccess()
   if (!guard.ok) return guard.response
   const { supabase, accountId } = guard.ctx
 
-  const { data, error } = await supabase
+  const { limit, offset } = parsePageParams(new URL(request?.url ?? 'http://localhost/').searchParams, { defaultLimit: null, maxLimit: 200 })
+
+  let query = supabase
     .from('flows')
     .select('*')
     .eq('account_id', accountId)
     .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+  if (limit !== null) {
+    const [from, to] = pageRange({ limit, offset })
+    query = query.range(from, to)
+  }
+  const { data, error } = await query
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
-  return NextResponse.json({ flows: data ?? [] })
+  if (limit === null) return NextResponse.json({ flows: data ?? [], has_more: false })
+  const page = splitPage(data ?? [], limit)
+  return NextResponse.json({ flows: page.rows, has_more: page.hasMore })
 }
 
 export async function POST(request: Request) {

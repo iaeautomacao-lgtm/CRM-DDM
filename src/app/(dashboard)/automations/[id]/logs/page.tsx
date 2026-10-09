@@ -19,6 +19,11 @@ import { PageBody } from "@/components/ddm/page-toolbar"
 import { StatusChip, type StatusTone } from "@/components/ddm/status-chip"
 import { ErrorState } from "@/components/dashboard/error-state"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { pageRange, splitPage } from "@/lib/pagination"
+
+/** Execuções por página; "Carregar mais" busca a próxima. */
+const LOGS_PAGE = 50
 
 export default function AutomationLogsPage({
   params,
@@ -32,6 +37,9 @@ export default function AutomationLogsPage({
   const [logs, setLogs] = useState<AutomationLog[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [openLogId, setOpenLogId] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [moreError, setMoreError] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -47,12 +55,15 @@ export default function AutomationLogsPage({
           .select("*, contact:contacts(id, name, phone)")
           .eq("automation_id", id)
           .order("created_at", { ascending: false })
-          .limit(100),
+          .order("id", { ascending: false })
+          .range(...pageRange({ limit: LOGS_PAGE, offset: 0 })),
       ])
       if (autRes.error) throw autRes.error
       if (logRes.error) throw logRes.error
       setAutomation(autRes.data as Automation | null)
-      setLogs((logRes.data ?? []) as AutomationLog[])
+      const page = splitPage((logRes.data ?? []) as AutomationLog[], LOGS_PAGE)
+      setLogs(page.rows)
+      setHasMore(page.hasMore)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao carregar os logs")
     }
@@ -61,6 +72,29 @@ export default function AutomationLogsPage({
   useEffect(() => {
     void load()
   }, [load])
+
+  async function loadMore() {
+    if (!logs) return
+    setLoadingMore(true)
+    setMoreError(false)
+    try {
+      const { data, error: err } = await createClient()
+        .from("automation_logs")
+        .select("*, contact:contacts(id, name, phone)")
+        .eq("automation_id", id)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(...pageRange({ limit: LOGS_PAGE, offset: logs.length }))
+      if (err) throw err
+      const page = splitPage((data ?? []) as AutomationLog[], LOGS_PAGE)
+      setLogs((prev) => [...(prev ?? []), ...page.rows])
+      setHasMore(page.hasMore)
+    } catch {
+      setMoreError(true)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   const back = (
     <button
@@ -136,7 +170,7 @@ export default function AutomationLogsPage({
         <KpiStrip
           ariaLabel="Resumo das execuções"
           items={[
-            { label: "Execuções", value: <CountUp value={logs.length} />, info: "As 100 execuções mais recentes desta automação." },
+            { label: "Execuções", value: <CountUp value={logs.length} />, info: "Execuções carregadas nesta lista, da mais recente para a mais antiga. Use Carregar mais para ver as anteriores." },
             { label: "Sucesso", value: <CountUp value={counts.success} className="text-success" /> },
             { label: "Parciais", value: <CountUp value={counts.partial} className={counts.partial > 0 ? "text-warning" : undefined} /> },
             { label: "Falhas", value: <CountUp value={counts.failed} className={counts.failed > 0 ? "text-danger" : undefined} /> },
@@ -208,6 +242,19 @@ export default function AutomationLogsPage({
             )
           })}
         </ul>
+      )}
+
+      {hasMore && (
+        <div className="flex flex-col items-center gap-2">
+          {moreError && (
+            <p role="alert" className="text-xs text-danger">
+              Não foi possível carregar mais execuções. Tente de novo.
+            </p>
+          )}
+          <Button type="button" variant="outline" disabled={loadingMore} onClick={() => void loadMore()}>
+            {loadingMore ? "Carregando…" : "Carregar mais"}
+          </Button>
+        </div>
       )}
     </PageBody>
   )
