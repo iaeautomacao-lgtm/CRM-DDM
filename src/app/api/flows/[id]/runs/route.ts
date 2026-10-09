@@ -58,7 +58,7 @@ export async function GET(
     .eq('account_id', accountId)
     .maybeSingle()
   if (!flow) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
   }
 
   // Resolve the contact filter to a set of contact_ids up front. Empty
@@ -178,10 +178,10 @@ export async function DELETE(
       ? body.ids.filter((v: unknown): v is string => typeof v === 'string')
       : []
   } catch {
-    return NextResponse.json({ error: 'Invalid body' }, { status: 400 })
+    return NextResponse.json({ error: 'Corpo da requisição inválido' }, { status: 400 })
   }
   if (ids.length === 0) {
-    return NextResponse.json({ error: 'ids is required' }, { status: 400 })
+    return NextResponse.json({ error: 'ids é obrigatório' }, { status: 400 })
   }
 
   // Re-scope the caller-supplied ids to this flow_id + account_id via
