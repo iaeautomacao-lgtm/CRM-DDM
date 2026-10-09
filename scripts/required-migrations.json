@@ -267,6 +267,10 @@
     {
       "version": "295_import_links_token",
       "kind": "registry"
+    },
+    {
+      "version": "297_history_export_jobs",
+      "kind": "registry"
     }
   ]
 }
