@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentAccount, requirePermission, toErrorResponse } from '@/lib/auth/account'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 const NAME_MAX_LENGTH = 50
 
@@ -14,7 +15,7 @@ export async function GET() {
       .order('position', { ascending: true })
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return internalErrorResponse('templates/folders', error)
     }
 
     return NextResponse.json({ folders: data ?? [] })
@@ -31,16 +32,16 @@ export async function POST(request: Request) {
     try {
       body = (await request.json()) as { name?: string }
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+      return NextResponse.json({ error: 'Corpo JSON inválido.' }, { status: 400 })
     }
 
     const name = body.name?.trim() ?? ''
     if (!name) {
-      return NextResponse.json({ error: 'Folder name is required.' }, { status: 400 })
+      return NextResponse.json({ error: 'O nome da pasta é obrigatório.' }, { status: 400 })
     }
     if (name.length > NAME_MAX_LENGTH) {
       return NextResponse.json(
-        { error: `Folder name exceeds ${NAME_MAX_LENGTH} characters.` },
+        { error: `O nome da pasta excede ${NAME_MAX_LENGTH} caracteres.` },
         { status: 400 },
       )
     }
@@ -66,7 +67,7 @@ export async function POST(request: Request) {
       .single()
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 })
+      return internalErrorResponse('templates/folders', error)
     }
 
     return NextResponse.json({ folder })

@@ -31,7 +31,7 @@ export async function guardFlow(flowId: string, permission: FlowPermission = "fl
   if (!data || data.length === 0) {
     return {
       ok: false,
-      response: NextResponse.json({ error: "Not found" }, { status: 404 }),
+      response: NextResponse.json({ error: "Não encontrado" }, { status: 404 }),
     };
   }
   return auth;

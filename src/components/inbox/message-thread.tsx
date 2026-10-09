@@ -196,7 +196,7 @@ function groupMessagesByDate(messages: Message[]) {
 
 const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string }[] = [
   { label: CONVERSATION_STATUS_LABELS.open, value: "open", color: "text-primary" },
-  { label: CONVERSATION_STATUS_LABELS.pending, value: "pending", color: "text-amber-700 dark:text-amber-400" },
+  { label: CONVERSATION_STATUS_LABELS.pending, value: "pending", color: "text-warning" },
   { label: CONVERSATION_STATUS_LABELS.closed, value: "closed", color: "text-muted-foreground" },
 ];
 
@@ -211,12 +211,12 @@ const STATUS_DOT: Record<string, string> = {
 // Cores do rótulo de autor por atendente (item 21 do PRD 23): fixas por
 // sender_id (hash), legíveis no claro e no escuro. "Você" usa a cor da marca.
 const AUTHOR_COLORS = [
-  "text-sky-700 dark:text-sky-400",
-  "text-violet-700 dark:text-violet-400",
-  "text-emerald-700 dark:text-emerald-400",
-  "text-rose-700 dark:text-rose-400",
-  "text-teal-700 dark:text-teal-400",
-  "text-amber-800 dark:text-amber-400",
+  "text-sky-400 [html[data-mode=light]_&]:text-sky-700",
+  "text-violet-400 [html[data-mode=light]_&]:text-violet-700",
+  "text-emerald-400 [html[data-mode=light]_&]:text-emerald-700",
+  "text-rose-400 [html[data-mode=light]_&]:text-rose-700",
+  "text-teal-400 [html[data-mode=light]_&]:text-teal-700",
+  "text-amber-400 [html[data-mode=light]_&]:text-amber-800",
 ];
 
 function authorColor(senderId: string): string {
@@ -1755,7 +1755,16 @@ export function MessageThread({
       <ConversationOriginBanner key={conversation.id} conversationId={conversation.id} />
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-5 sm:px-6">
+        <div
+          ref={scrollRef}
+          onScroll={handleThreadScroll}
+          // Mensagens novas anunciadas ao leitor de tela (só as adicionadas).
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Mensagens da conversa"
+          className="flex-1 overflow-y-auto px-3 py-5 sm:px-6"
+        >
           {/* key: a thread entra de novo (fade + sobe) ao trocar de conversa, como no protótipo. */}
           <div key={conversation.id} className="mx-auto w-full max-w-[760px] animate-ddm-up">
           {loading ? (
@@ -1856,13 +1865,17 @@ export function MessageThread({
           )}
           </div>
         </div>
+        <span role="status" className="sr-only">
+          {showNewMessages ? "Há novas mensagens abaixo." : ""}
+        </span>
         {showNewMessages && (
           <button
             type="button"
             onClick={scrollToBottom}
+            aria-label="Novas mensagens: ir para o fim da conversa"
             className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-md transition-colors hover:bg-primary/90"
           >
-            ↓ Novas mensagens
+            <span aria-hidden="true">↓</span> Novas mensagens
           </button>
         )}
       </div>

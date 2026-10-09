@@ -206,7 +206,9 @@ export function rateLimitResponse(result: RateLimitResult): NextResponse {
   const retryAfterSec = Math.max(1, Math.ceil((result.reset - Date.now()) / 1000));
   return NextResponse.json(
     {
-      error: 'Rate limit exceeded',
+      error: 'Limite de requisições excedido. Aguarde um instante e tente de novo.',
+      // Código estável: quem precisa reagir (ex.: a tela de Inteligência) compara o code, nunca o texto.
+      code: 'rate_limited',
       retry_after_seconds: retryAfterSec,
     },
     {

@@ -317,7 +317,7 @@ export default function ExportacoesPage() {
                     <TableCell>
                       <input
                         type="checkbox"
-                        className="h-4 w-4 rounded border-gray-300 cursor-pointer"
+                        className="size-4 cursor-pointer rounded border-border accent-primary"
                         checked={selected.has(row.id)}
                         onChange={(e) => {
                           setSelected((prev) => {
@@ -349,7 +349,7 @@ export default function ExportacoesPage() {
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => setPendingDeleteIds([row.id])}
-                            className="text-red-500 focus:bg-red-50 focus:text-red-500"
+                            className="text-danger focus:bg-danger-soft focus:text-danger"
                           >
                             <Trash2 className="size-4" />
                             Excluir

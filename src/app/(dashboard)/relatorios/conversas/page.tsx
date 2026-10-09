@@ -54,7 +54,7 @@ import { ErrorState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { AccountMember, Team } from "@/types";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
-import { loadSharedPeriod, saveSharedPeriod } from "@/lib/relatorios/period";
+import { loadSharedPeriod, rangeError, saveSharedPeriod } from "@/lib/relatorios/period";
 import { PeriodFilter } from "@/components/relatorios/period-filter";
 import { buildPageList } from "@/lib/relatorios/pagination";
 import { exportWithHistory } from "@/lib/relatorios/export-with-history";
@@ -410,6 +410,7 @@ export default function ConversasPage() {
   const rangeEnd = Math.min(page * PAGE_SIZE, totalCount);
 
   function handlePesquisar() {
+    if (rangeError({ dateFrom: draft.dateFrom, dateTo: draft.dateTo })) return;
     setApplied(draft);
     saveSharedPeriod({ dateFrom: draft.dateFrom, dateTo: draft.dateTo });
     setPage(1);
@@ -611,7 +612,11 @@ export default function ConversasPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <Button onClick={handlePesquisar} className="bg-primary text-primary-foreground hover:bg-primary/90">
+                <Button
+            onClick={handlePesquisar}
+            disabled={!!rangeError({ dateFrom: draft.dateFrom, dateTo: draft.dateTo })}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
                   <Search className="size-4" />
                   Pesquisar
                 </Button>

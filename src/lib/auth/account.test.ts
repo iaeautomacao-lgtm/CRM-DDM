@@ -144,7 +144,7 @@ describe("getCurrentAccount", () => {
     });
     createClient.mockReturnValue(client);
     await expect(getCurrentAccount()).rejects.toThrow(
-      "Could not load account context",
+      "Não foi possível carregar o contexto da conta",
     );
   });
 
@@ -164,7 +164,7 @@ describe("getCurrentAccount", () => {
     createClient.mockReturnValue(client);
     const err = await getCurrentAccount().catch((e) => e);
     expect(err).toBeInstanceOf(ForbiddenError);
-    expect(err.message).toBe("Could not load account context");
+    expect(err.message).toBe("Não foi possível carregar o contexto da conta");
   });
 
   it("rejects a profile not linked to an account", async () => {
@@ -176,7 +176,7 @@ describe("getCurrentAccount", () => {
     });
     createClient.mockReturnValue(client);
     await expect(getCurrentAccount()).rejects.toThrow(
-      "Profile is not linked to an account",
+      "O perfil não está vinculado a uma conta",
     );
   });
 
@@ -193,7 +193,7 @@ describe("getCurrentAccount", () => {
     });
     createClient.mockReturnValue(client);
     await expect(getCurrentAccount()).rejects.toThrow(
-      "Profile is not linked to an account",
+      "O perfil não está vinculado a uma conta",
     );
   });
 });
@@ -239,7 +239,7 @@ describe("requirePermission", () => {
     const res = toErrorResponse(err);
     expect(res.status).toBe(403);
     expect(await res.json()).toEqual({
-      error: "This action requires the 'members.manage' permission",
+      error: "Esta ação exige a permissão 'members.manage'",
       code: "forbidden",
       permission: "members.manage",
     });
