@@ -930,6 +930,7 @@ const ADD_NODE_TYPES: NodeType[] = [
   'send_message',
   'send_media',
   'send_template',
+  'send_flow',
   'receive_attachment',
   'ai_agent',
   'collect_input',

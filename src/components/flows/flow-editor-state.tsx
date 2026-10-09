@@ -365,6 +365,16 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
         fallback_text: "",
         next_node_key: "",
       };
+    case "send_flow":
+      return {
+        flow_id: "",
+        cta_text: "",
+        body_text: "",
+        flow_action: "navigate",
+        screen_id: "",
+        fallback_text: "",
+        next_node_key: "",
+      };
     case "add_note":
       return { note_text: "", next_node_key: "" };
     case "receive_attachment":
