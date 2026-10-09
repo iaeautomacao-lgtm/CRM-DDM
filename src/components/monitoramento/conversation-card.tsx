@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -19,7 +20,9 @@ import { usePermissions } from "@/hooks/use-permission";
 import type { MonitorConversation } from "@/lib/monitoramento/queries";
 import { PHASE_META, type MonitorPhase } from "@/lib/monitoramento/phases";
 
-export function ConversationCard({
+// React.memo: cada evento realtime re-renderiza a página; cartões com as
+// mesmas props (e handlers estáveis) não precisam renderizar de novo.
+export const ConversationCard = memo(function ConversationCard({
   conversation,
   phase,
   teamName,
@@ -142,8 +145,8 @@ export function ConversationCard({
 
       <DropdownMenu>
         <DropdownMenuTrigger
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label="Mais ações"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 sm:h-7 sm:w-7"
+          aria-label={`Ações da conversa com ${displayName}`}
         >
           <MoreVertical className="size-4" />
         </DropdownMenuTrigger>
@@ -179,7 +182,8 @@ export function ConversationCard({
               <DropdownMenuSeparator className="bg-border" />
               <DropdownMenuItem
                 onClick={() => onFinalizeClick(conversation)}
-                className="whitespace-nowrap text-red-500 focus:bg-red-50 focus:text-red-500"
+                variant="destructive"
+                className="whitespace-nowrap"
               >
                 <XCircle className="size-4" />
                 Finalizar atendimento
@@ -190,4 +194,4 @@ export function ConversationCard({
       </DropdownMenu>
     </div>
   );
-}
+});

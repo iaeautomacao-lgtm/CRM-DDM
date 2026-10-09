@@ -44,7 +44,7 @@ export function AuthShell({
         {(brandTitle || brandText) && (
           <div className="flex max-w-[440px] flex-col gap-3.5">
             {brandTitle && (
-              <h1 className="m-0 font-heading text-[34px] font-semibold leading-[1.15] tracking-[-0.02em]">{brandTitle}</h1>
+              <p className="m-0 font-heading text-[34px] font-semibold leading-[1.15] tracking-[-0.02em]">{brandTitle}</p>
             )}
             {brandText && <p className="m-0 text-[15px] leading-relaxed text-[#B4B9C0]">{brandText}</p>}
           </div>
@@ -56,7 +56,7 @@ export function AuthShell({
           <div className="min-[900px]:hidden">{icon ?? <OmniDdmLogo className="w-[120px]" priority />}</div>
           {icon && <div className="hidden min-[900px]:block">{icon}</div>}
           <div className="flex flex-col gap-1.5">
-            <h2 className="m-0 font-heading text-2xl font-semibold tracking-[-0.015em] text-foreground">{title}</h2>
+            <h1 className="m-0 font-heading text-2xl font-semibold tracking-[-0.015em] text-foreground">{title}</h1>
             {description && <p className="m-0 text-sm leading-relaxed text-foreground-2">{description}</p>}
           </div>
           {notice}
@@ -87,7 +87,7 @@ export function AuthNotice({ tone = "info", id, children }: { tone?: "ok" | "bad
 /** Erro de um campo (abaixo do input; ligue com aria-describedby). */
 export function AuthFieldError({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <span id={id} className="text-[12.5px] font-medium text-danger">
+    <span id={id} role="alert" className="text-[12.5px] font-medium text-danger">
       {children}
     </span>
   );
@@ -95,7 +95,7 @@ export function AuthFieldError({ id, children }: { id: string; children: ReactNo
 
 /** Classes do campo de acesso (42px, raio 8, foco laranja) para usar no <Input>. */
 export const AUTH_INPUT_CLASS =
-  "h-[42px] rounded-lg bg-card px-3 text-sm focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/20 aria-invalid:border-danger";
+  "h-[42px] rounded-lg bg-card px-3 text-base md:text-sm focus-visible:border-primary focus-visible:ring-[3px] focus-visible:ring-primary/20 aria-invalid:border-danger";
 
 /** Classes do botão principal (44px, largura total). */
 export const AUTH_SUBMIT_CLASS = "h-11 w-full rounded-lg text-sm font-semibold";

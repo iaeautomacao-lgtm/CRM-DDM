@@ -474,7 +474,6 @@ export default function CanaisPage() {
             variant="destructive"
             size="sm"
             onClick={() => setDeleteTargets(configs.filter((c) => selected.has(c.id)))}
-            className="bg-[#d8362f] text-white hover:bg-[#c42b24]"
           >
             <Trash2 className="size-3.5" />
             Excluir

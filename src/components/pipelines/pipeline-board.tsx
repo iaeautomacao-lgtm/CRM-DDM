@@ -13,6 +13,8 @@ import {
   closestCorners,
   type DragEndEvent,
   type DragStartEvent,
+  type Announcements,
+  type ScreenReaderInstructions,
 } from "@dnd-kit/core";
 import type { Deal, PipelineStage } from "@/types";
 import { DealCard } from "./deal-card";
@@ -20,6 +22,11 @@ import { cn } from "@/lib/utils";
 import { Plus } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { formatCurrency } from "@/lib/currency";
+
+const screenReaderInstructions: ScreenReaderInstructions = {
+  draggable:
+    "Para pegar um negócio, pressione Espaço ou Enter. Use as setas para escolher a etapa de destino, pressione Espaço ou Enter para soltar, ou Esc para cancelar.",
+};
 
 interface PipelineBoardProps {
   stages: PipelineStage[];
@@ -92,6 +99,34 @@ export function PipelineBoard({
     setActiveDealId(null);
   }
 
+  const dealTitle = (id: string | number) =>
+    deals.find((d) => d.id === String(id))?.title ?? "negócio";
+  const stageName = (id: string | number | undefined) =>
+    id === undefined
+      ? undefined
+      : sortedStages.find((s) => s.id === String(id))?.name;
+
+  const announcements: Announcements = {
+    onDragStart({ active }) {
+      return `Negócio "${dealTitle(active.id)}" selecionado.`;
+    },
+    onDragOver({ active, over }) {
+      const name = stageName(over?.id);
+      return name
+        ? `Negócio "${dealTitle(active.id)}" está sobre a etapa "${name}".`
+        : `Negócio "${dealTitle(active.id)}" não está sobre nenhuma etapa.`;
+    },
+    onDragEnd({ active, over }) {
+      const name = stageName(over?.id);
+      return name
+        ? `Negócio "${dealTitle(active.id)}" solto na etapa "${name}".`
+        : `Negócio "${dealTitle(active.id)}" solto fora de uma etapa.`;
+    },
+    onDragCancel({ active }) {
+      return `Movimento cancelado. O negócio "${dealTitle(active.id)}" voltou à posição original.`;
+    },
+  };
+
   return (
     <DndContext
       sensors={sensors}
@@ -99,6 +134,7 @@ export function PipelineBoard({
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
+      accessibility={{ announcements, screenReaderInstructions }}
     >
       {/* snap-x + snap-mandatory on mobile so swipes land the next
           stage cleanly at the viewport edge instead of mid-column.
@@ -290,7 +326,7 @@ function DraggableDealCard({
       {...attributes}
       style={{ opacity: isDragging ? 0.3 : 1, touchAction: canDrag ? "none" : undefined }}
     >
-      <DealCard deal={deal} stage={stage} onEdit={onEdit} />
+      <DealCard deal={deal} stage={stage} onEdit={onEdit} canDrag={canDrag} />
     </div>
   );
 }

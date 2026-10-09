@@ -840,7 +840,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
                                 ? "bg-success-soft text-success"
                                 : s <= maxVisited
                                   ? "bg-surface-3 text-foreground"
-                                  : "bg-surface-3 text-muted-foreground",
+                                  : "bg-surface-3 text-foreground-2",
                           )}
                         >
                           {done ? <CheckCircle2 className="size-3.5" aria-hidden="true" /> : s}

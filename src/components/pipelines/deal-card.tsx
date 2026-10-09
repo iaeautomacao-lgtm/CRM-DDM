@@ -10,6 +10,8 @@ interface DealCardProps {
   stage: PipelineStage | null;
   onEdit: (deal: Deal) => void;
   isOverlay?: boolean;
+  /** Sem permissão de mover: o cursor de arrastar não é exibido. */
+  canDrag?: boolean;
 }
 
 function formatDate(dateStr: string) {
@@ -30,7 +32,7 @@ function initials(name?: string, fallback?: string) {
 }
 
 /** Cartão de negócio no quadro do funil (redesenho DDM). */
-export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
+export function DealCard({ deal, stage, onEdit, isOverlay, canDrag = true }: DealCardProps) {
   const contactLabel = deal.contact?.name || deal.contact?.phone || "Sem contato";
   const assigneeLabel = deal.assignee?.full_name || null;
 
@@ -47,10 +49,13 @@ export function DealCard({ deal, stage, onEdit, isOverlay }: DealCardProps) {
       aria-label={`${deal.title} — ${contactLabel}`}
       data-no-ripple
       className={cn(
-        "relative flex w-full cursor-grab flex-col gap-2 rounded-lg border border-border bg-card py-[11px] pl-[15px] pr-3 text-left shadow-[0_1px_2px_rgba(20,16,12,.06)] transition-[border-color,box-shadow,transform] duration-200 ease-ddm",
+        "relative flex w-full flex-col gap-2 rounded-lg border border-border bg-card py-[11px] pl-[15px] pr-3 text-left shadow-[0_1px_2px_rgba(20,16,12,.06)] transition-[border-color,box-shadow,transform] duration-200 ease-ddm",
         isOverlay
           ? "rotate-[1.5deg] cursor-grabbing border-border-strong shadow-overlay"
-          : "hover:border-border-strong hover:shadow-overlay",
+          : cn(
+              "hover:border-border-strong hover:shadow-overlay",
+              canDrag ? "cursor-grab" : "cursor-pointer",
+            ),
       )}
     >
       {/* Fio de 3px na cor da etapa */}

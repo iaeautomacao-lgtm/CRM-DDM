@@ -596,8 +596,8 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                 </div>
 
                 {addAutoClose && (
-                  <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-300">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <div className="flex items-start gap-2 rounded-md border border-warning/30 bg-warning-soft p-2.5 text-xs text-warning">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
                     <span>
                       Aviso: Ao emitir esta tag, a conversa será encerrada e
                       tabulada imediatamente.
@@ -639,7 +639,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <AlertTriangle className="size-5 text-amber-600 dark:text-amber-400" />
+                <AlertTriangle className="size-5 text-warning" aria-hidden="true" />
                 Confirmar encerramento automático?
               </DialogTitle>
               <DialogDescription className="text-muted-foreground space-y-2 pt-2 text-left text-sm">
@@ -657,7 +657,7 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                     : ''}
                   &quot; <strong>sem passar por um atendente humano</strong>.
                 </span>
-                <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">
+                <span className="block text-xs font-medium text-warning">
                   Certifique-se de que o fluxo do bot já envia todas as
                   mensagens de despedida e conclusão necessárias antes de emitir
                   a tag.
