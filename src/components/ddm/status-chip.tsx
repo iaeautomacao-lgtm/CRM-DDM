@@ -4,11 +4,12 @@ import { cn } from '@/lib/utils'
 export type StatusTone = 'ok' | 'warn' | 'bad' | 'mute' | 'info' | 'brand'
 
 const TONE: Record<StatusTone, string> = {
-  ok: 'bg-success-soft text-success',
+  // No claro, o verde/azul dos tokens fica abaixo de 4,5:1 sobre o fundo suave do chip (11,5px): texto mais escuro.
+  ok: 'bg-success-soft text-success [html[data-mode=light]_&]:text-[#147443]',
   warn: 'bg-warning-soft text-warning',
   bad: 'bg-danger-soft text-danger',
   mute: 'bg-surface-3 text-foreground-2',
-  info: 'bg-[rgba(91,141,239,.14)] text-[#5B8DEF] [html[data-mode=light]_&]:bg-[#EAF0FC] [html[data-mode=light]_&]:text-[#3B6FD8]',
+  info: 'bg-[rgba(91,141,239,.14)] text-[#5B8DEF] [html[data-mode=light]_&]:bg-[#EAF0FC] [html[data-mode=light]_&]:text-[#2d5cc0]',
   brand: 'bg-primary-soft text-primary-text',
 }
 
