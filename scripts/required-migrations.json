@@ -286,8 +286,13 @@
       "kind": "registry"
     },
     {
-      "version": "301_quick_replies_visibility_usage",
+      "version": "302_message_origin_my_handled",
       "kind": "registry"
+    },
+    {
+      "version": "302b_conversation_assignments_from_agent_idx",
+      "kind": "index",
+      "index": "idx_conversation_assignments_from_agent"
     }
   ]
 }

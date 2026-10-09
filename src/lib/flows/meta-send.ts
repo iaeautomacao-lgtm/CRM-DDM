@@ -138,6 +138,7 @@ export async function engineSendText(
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: args.conversationId,
     sender_type: 'bot',
+    origin: 'flow',
     content_type: 'text',
     content_text: args.text,
     message_id: waMessageId,
@@ -261,6 +262,7 @@ export async function engineSendMedia(
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: args.conversationId,
     sender_type: 'bot',
+    origin: 'flow',
     content_type: args.kind,
     content_text: args.caption ?? null,
     message_id: waMessageId,
@@ -461,6 +463,7 @@ export async function engineMetaSendTemplate(
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: args.conversationId,
     sender_type: 'bot',
+    origin: 'flow',
     content_type: 'template',
     content_text: `[template: ${args.templateName}]`,
     message_id: waMessageId,
@@ -599,6 +602,7 @@ async function sendInteractiveViaMeta(
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: input.conversationId,
     sender_type: 'bot',
+    origin: 'flow',
     content_type: 'interactive',
     content_text: input.bodyText,
     message_id: waMessageId,
