@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { LogLevel, LogSource } from "@/lib/logger";
+import { SystemHealthCard } from "@/components/ops/system-health-card";
 
 // Logs use the signed-in CRM session; remove reusable legacy credentials.
 const AUTH_STORAGE_KEY = "ddm-logs-auth";
@@ -1001,6 +1002,9 @@ export default function DdmLogsPage() {
           </button>
         </div>
       </header>
+
+      {/* Saúde do sistema (PRD 24, item 5): migrations, cron e fila de mensagens recebidas */}
+      <SystemHealthCard className="px-4 pt-4" />
 
       {/* Abas */}
       <div className="flex items-center gap-1 border-b border-border bg-surface-3/40 px-4 pt-2">
