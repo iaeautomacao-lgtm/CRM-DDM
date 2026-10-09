@@ -141,3 +141,25 @@ export async function closeConversationWithOutcomeTag(
 }
 
 import { apiFetch } from "@/lib/api-fetch";
+/**
+ * "Assumir" uma conversa da fila (PRD 24, item 1): POST
+ * /api/conversations/[id]/assign-self. O servidor só aceita conversa SEM
+ * atendente, visível para o usuário e não encerrada — atômico: se outra
+ * pessoa assumiu antes, volta `already_assigned`. A mensagem de "assumi o
+ * atendimento" ao cliente segue no cliente, como na transferência, e só sai
+ * quando a conversa passou de fato para quem clicou (não em already_mine).
+ */
+export async function assignSelf(
+  conversationId: string,
+  myFullName?: string | null,
+): Promise<{ error: string | null; code?: string }> {
+  try {
+    const res = await apiFetch(`/api/conversations/${conversationId}/assign-self`, { method: "POST" });
+    const json = (await res.json().catch(() => ({}))) as { error?: string; code?: string; already_mine?: boolean };
+    if (!res.ok) return { error: json.error ?? `HTTP ${res.status}`, code: json.code };
+    if (!json.already_mine) await sendTakeoverMessage(conversationId, myFullName);
+    return { error: null };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "erro de rede" };
+  }
+}
