@@ -1,7 +1,10 @@
 // PRD 21.4 — handler de dados DDM do Data Exchange: token → conta/contato → dívidas da DDM; nada de proposta/desconto/efetivação.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDdmFlowDataHandler, ensureDdmFlowDataHandler, resetDdmFlowDataRegistration } from "./flows-data-ddm";
+const ddm = vi.hoisted(() => ({ listDdmDebts: vi.fn(async () => [] as Array<{ external_ref: string; label: string }>), ddmAllowance: vi.fn(() => async () => true) }));
+vi.mock("@/lib/billing/ddm-source", () => ddm);
+
+import { DATA_EXCHANGE_DDM_TIMEOUT_MS, createDdmFlowDataHandler, ensureDdmFlowDataHandler, resetDdmFlowDataRegistration } from "./flows-data-ddm";
 import { FLOW_UNAVAILABLE_MESSAGE, handleFlowData } from "./flows-data";
 
 const A = "00000000-0000-0000-0000-00000000000a";
@@ -123,5 +126,16 @@ describe("registro no despacho", () => {
     const bad = await handleFlowData(req({ flow_token: "xx" }), ctx);
     expect(bad.response).toEqual({ screen: "SELECAO", data: { error_message: FLOW_UNAVAILABLE_MESSAGE } });
     expect(reads).toEqual([]);
+  });
+});
+
+describe("consulta padrão à DDM (sem listDebts injetado)", () => {
+  it("usa o teto de 2,5 s da Meta (RNF-01): a consulta NUNCA espera os 10 s padrão da DDM", async () => {
+    expect(DATA_EXCHANGE_DDM_TIMEOUT_MS).toBeLessThan(3_000);
+    ddm.listDdmDebts.mockClear();
+    const out = await createDdmFlowDataHandler({ db: fakeDb })(req(), ctx);
+    expect(out).toMatchObject({ screen: "SELECAO", data: { has_debt: false } });
+    expect(ddm.listDdmDebts).toHaveBeenCalledWith("12345678909", expect.objectContaining({ timeoutMs: DATA_EXCHANGE_DDM_TIMEOUT_MS }));
+    expect(ddm.ddmAllowance).toHaveBeenCalledWith(A);
   });
 });
