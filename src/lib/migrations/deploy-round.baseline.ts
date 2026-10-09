@@ -55,7 +55,7 @@ CREATE TABLE wacrm.member_presence (user_id uuid PRIMARY KEY, account_id uuid, l
 CREATE TABLE wacrm.teams (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 CREATE TABLE wacrm.team_members (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), team_id uuid NOT NULL REFERENCES wacrm.teams(id), user_id uuid NOT NULL);
 CREATE TABLE wacrm.tags (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, name text, kind text NOT NULL DEFAULT 'contact');
-CREATE TABLE wacrm.contacts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid);
+CREATE TABLE wacrm.contacts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid, phone_normalized text);
 CREATE TABLE wacrm.conversations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), contact_id uuid,
   status text DEFAULT 'open', assigned_agent_id uuid, team_id uuid, created_at timestamptz DEFAULT now(), first_response_at timestamptz,
   closed_at timestamptz, last_customer_message_at timestamptz, outcome_tag_id uuid, outcome_source text, suggested_outcome_tag_id uuid, updated_at timestamptz DEFAULT now(), channel_type text);
@@ -219,6 +219,11 @@ CREATE FUNCTION wacrm.dashboard_ai_analytics() RETURNS jsonb LANGUAGE sql STABLE
            'userName', COALESCE(NULLIF(p.full_name, ''), NULLIF(p.email, ''), 'Operador')) ORDER BY p.user_id), '[]'::jsonb)
          FROM wacrm.profiles p WHERE p.account_id = wacrm.current_account_id() $$;
 GRANT EXECUTE ON FUNCTION wacrm.dashboard_ai_analytics() TO authenticated, service_role;
+-- Automações (a 317 acrescenta lease/tentativas e as funções de claim da fila de execuções pendentes).
+CREATE TABLE wacrm.automation_logs (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), status text, error_message text);
+CREATE TABLE wacrm.automation_pending_executions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), log_id uuid, status text NOT NULL DEFAULT 'pending', run_at timestamptz NOT NULL DEFAULT now());
+-- Falhas 131026 do Disparador (a 333 cria a contagem agrupada por campanha).
+CREATE TABLE wacrm.dispatch_meta_131026_failures (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, campaign_id uuid, status text NOT NULL DEFAULT 'pendente');
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wacrm TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA wacrm TO service_role;
 -- profiles: a 169 trocou o UPDATE de tabela inteira por UPDATE só nas colunas que o usuário edita (full_name, avatar_url).
