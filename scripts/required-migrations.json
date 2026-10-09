@@ -218,7 +218,15 @@
       "kind": "registry"
     },
     {
+      "version": "280_teams_color",
+      "kind": "registry"
+    },
+    {
       "version": "290_user_sessions_mfa",
+      "kind": "registry"
+    },
+    {
+      "version": "291_whatsapp_flows_keys",
       "kind": "registry"
     }
   ]

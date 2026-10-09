@@ -21,7 +21,7 @@ import {
 } from "lucide-react"
 
 import { createClient } from "@/lib/supabase/client"
-import { useCan } from "@/hooks/use-can"
+import { usePermission } from "@/hooks/use-permission"
 import type { Automation } from "@/types"
 import { Button } from "@/components/ui/button"
 import { GatedButton } from "@/components/ui/gated-button"
@@ -63,7 +63,8 @@ import { PipelineAutomations } from "@/components/automations/pipeline-automatio
 
 export default function AutomationsPage() {
   const router = useRouter()
-  const canCreate = useCan("send-messages")
+  // Criar/editar automação: automations.edit no servidor (admin+).
+  const canCreate = usePermission("automations.edit")
   const [automations, setAutomations] = useState<Automation[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null)

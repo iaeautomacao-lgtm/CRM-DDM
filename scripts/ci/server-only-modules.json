@@ -23,6 +23,7 @@
     "src/lib/audit/context.ts",
     "src/lib/audit/access-denied.ts",
     "src/lib/supabase/server.ts",
+    "src/lib/whatsapp/flows-keys.ts",
     "src/lib/ops/system-health.ts",
     "src/lib/auth/sessions.ts",
     "src/lib/billing/ddm-source.ts",

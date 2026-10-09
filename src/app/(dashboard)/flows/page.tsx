@@ -21,7 +21,7 @@ import {
   Upload,
 } from "lucide-react";
 
-import { useCan } from "@/hooks/use-can";
+import { usePermission } from "@/hooks/use-permission";
 import { apiFetch } from "@/lib/api-fetch";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -87,7 +87,7 @@ const TEMPLATE_ICONS = {
 
 export default function FlowsPage() {
   const router = useRouter();
-  const canCreate = useCan("send-messages");
+  const canCreate = usePermission("flows.edit");
   const [flows, setFlows] = useState<FlowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);

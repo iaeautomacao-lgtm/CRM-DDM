@@ -10,8 +10,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { ArrowLeft, Loader2, Plus, Save, Sparkles, Trash2 } from 'lucide-react';
 
-import { can } from '@/lib/auth/permissions';
-import { hasMinRole } from '@/lib/auth/roles';
+import { usePermissions } from '@/hooks/use-permission';
 import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -66,6 +65,7 @@ import { BehaviorTab } from './tabs/behavior-tab';
 import { ProtectionsTab } from './tabs/protections-tab';
 import { VersionsTab } from './tabs/versions-tab';
 import { PreviewTab } from './tabs/preview-tab';
+import { TestTab, type TestTabTool } from './tabs/test-tab';
 
 const TABS = [
   ['general', 'Geral'],
@@ -78,6 +78,7 @@ const TABS = [
   ['protections', 'Proteções'],
   ['versions', 'Versões'],
   ['preview', 'Prévia'],
+  ['test', 'Testar'],
 ] as const;
 
 const SAVE_CONFIRM = 'Salvar publica uma nova versão do agente.\n\nConversas em andamento continuam na versão anterior.';
@@ -97,9 +98,14 @@ function errorMessage(err: unknown, fallback: string): string {
 }
 
 export function AgentsSettings() {
-  const { accountRole, accountId } = useAuth();
-  const canEdit = !!accountRole && hasMinRole(accountRole, 'admin');
-  const canManageTools = !!accountRole && can({ role: accountRole }, 'ai.tools.edit');
+  const { accountId } = useAuth();
+  const { can } = usePermissions();
+  const canEdit = can('ai.agents.edit');
+  // Criar/vincular ferramenta na aba do agente (Farol, #217): ai.tools.edit.
+  const canManageTools = can('ai.tools.edit');
+  // "Testar agente" usa o simulador de fluxo: flows.simulate + ai.agents.view; consulta real exige secrets.write.
+  const canSimulate = can('flows.simulate') && can('ai.agents.view');
+  const canRealRead = can('secrets.write');
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedId = searchParams.get('id');
@@ -122,6 +128,8 @@ export function AgentsSettings() {
         agentId={selectedId === 'new' ? null : selectedId}
         canEdit={canEdit}
         canManageTools={canManageTools}
+        canSimulate={canSimulate}
+        canRealRead={canRealRead}
         accountId={accountId}
         onBack={() => select(null)}
         onCreated={(id) => select(id)}
@@ -244,6 +252,8 @@ function AgentEditor({
   agentId,
   canEdit,
   canManageTools,
+  canSimulate,
+  canRealRead,
   accountId,
   onBack,
   onCreated,
@@ -251,6 +261,8 @@ function AgentEditor({
   agentId: string | null;
   canEdit: boolean;
   canManageTools: boolean;
+  canSimulate: boolean;
+  canRealRead: boolean;
   accountId: string | null;
   onBack: () => void;
   onCreated: (id: string) => void;
@@ -410,6 +422,24 @@ function AgentEditor({
     }
   }
 
+  /** Rascunho atual no formato de "Publicar nova versão" (sem o nome): o que o teste usa. */
+  function testDraft(): Record<string, unknown> {
+    const { name: _name, ...draft } = formDataToSavePayload(form, existingConfig);
+    void _name;
+    return draft as Record<string, unknown>;
+  }
+
+  const testTools = useMemo<TestTabTool[]>(() => {
+    const byId = new Map(catalog.map((t) => [t.id, t]));
+    const out: TestTabTool[] = [];
+    for (const link of form.tools) {
+      const tool = byId.get(link.tool_id);
+      if (link.enabled && tool?.enabled) out.push({ name: tool.name, method: tool.http?.method ?? 'GET' });
+    }
+    for (const legacy of form.legacyTools) if (legacy.enabled) out.push({ name: legacy.name, method: legacy.method });
+    return out;
+  }, [catalog, form.tools, form.legacyTools]);
+
   async function preview(): Promise<string> {
     const result = await previewAgentPrompt(formDataToPreviewPayload(form, existingConfig));
     return result.system_prompt;
@@ -466,7 +496,7 @@ function AgentEditor({
 
       <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
         <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
-          {TABS.map(([value, label]) => (
+          {TABS.filter(([value]) => value !== 'test' || canSimulate).map(([value, label]) => (
             <TabsTrigger key={value} value={value}>
               {label}
             </TabsTrigger>
@@ -524,6 +554,11 @@ function AgentEditor({
         <TabsContent value="preview" className="pt-4">
           <PreviewTab onPreview={preview} readOnly={readOnly} />
         </TabsContent>
+        {canSimulate && (
+          <TabsContent value="test" className="pt-4">
+            <TestTab agentId={agentId} buildDraft={testDraft} tools={testTools} canRealRead={canRealRead} />
+          </TabsContent>
+        )}
       </Tabs>
 
       <Dialog open={convertPreview !== null} onOpenChange={(open) => !open && setConvertPreview(null)}>

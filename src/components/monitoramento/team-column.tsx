@@ -2,7 +2,7 @@
 
 import { useDroppable } from "@dnd-kit/core";
 import { Pencil, Users } from "lucide-react";
-import { RequireRole } from "@/components/auth/require-role";
+import { Can } from "@/components/auth/can";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/dashboard/empty-state";
@@ -77,7 +77,7 @@ export function TeamColumn({
             </div>
           )}
         </div>
-        <RequireRole min="admin">
+        <Can permission="teams.manage">
           <Button
             variant="ghost"
             size="sm"
@@ -87,7 +87,7 @@ export function TeamColumn({
           >
             <Pencil className="size-4" />
           </Button>
-        </RequireRole>
+        </Can>
         {conversationIds.length > 0 && (
           <Checkbox
             checked={allSelected}

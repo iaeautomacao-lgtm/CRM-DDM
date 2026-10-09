@@ -84,6 +84,7 @@ import { simulateTurn, type SimulationSeed } from "./run";
 import { effectiveSimToolMode, type SimulateRequest, type SimState } from "./types";
 import type { AiAgentTool } from "../types";
 import { convertAiAgentNode } from "@/lib/ai/agents/convert";
+import { buildAgentTestFlow, summarizeAgentTestTimeline } from "./agent-test";
 
 // ------------------------------------------------------------
 // Fixture: fluxo oficial (mesma forma do exit-tag-routing.test.ts),
@@ -547,5 +548,76 @@ describe("simulador de fluxo — nós com agent_id", () => {
     stubOpenAi([]);
     const turn = await simulateTurn(req("Oi", nodes({ failure_next_node_key: "fila" })), { ...SEED });
     expect(turn.timeline.some((e) => e.type === "handoff")).toBe(true);
+  });
+});
+
+describe("Testar agente (TASK1-C) — fluxo sintético de um nó com o rascunho do agente", () => {
+  const AGENT = "22222222-2222-4222-8222-222222222222";
+  // efetiva_acordo como na DDM real: GET COM efeito. Nunca pode rodar de verdade, nem se o usuário pedir.
+  const GET_EFFECT_TOOLS = TOOLS.map((t) =>
+    t.name === "efetiva_acordo" ? { ...t, http: { url: `${DDM}/CalculaDebitos.php?idDev={{idDev}}`, method: "GET" as const } } : t,
+  );
+  const seed = (): SimulationSeed => {
+    const config = convertAiAgentNode(
+      { mode: "loop", max_turns: 20, system_prompt_override: "PROMPT DO RASCUNHO DO AGENTE", tools: GET_EFFECT_TOOLS } as never,
+      { account_id: "11111111-1111-4111-8111-111111111111", enabled: true, api_provider: "openai", api_model: "gpt-4o-mini" },
+      { node_key: "agente" },
+    ).config;
+    return {
+      ...SEED,
+      flowId: AGENT,
+      flowName: "Teste do agente Agente Teste",
+      agents: {
+        agents: [{ id: AGENT, name: "Agente Teste", enabled: true, published_version_id: "rascunho" }],
+        versions: [
+          { id: "rascunho", agent_id: AGENT, version: 4, config, prompt_content: "PROMPT DO RASCUNHO DO AGENTE", composition: "legacy_v1", config_hash: "h" },
+        ],
+        ruleVersions: [],
+      },
+    };
+  };
+  const req = (text: string, state: SimState | null, extra: Partial<SimulateRequest> = {}) =>
+    request(text, state, { draft: buildAgentTestFlow(AGENT), ...extra });
+
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("o agente responde pelo nó sintético com o prompt do rascunho, sem nenhum efeito real", async () => {
+    const ai = stubOpenAi([{ content: "Olá! Sou o agente de teste." }, { content: "Pode me passar o CPF?" }]);
+    const t1 = await simulateTurn(req("Oi", null), seed());
+    expect(t1.outbound.map((o) => o.text)).toEqual(["Olá! Sou o agente de teste."]);
+    expect(t1.path).toEqual(["inicio", "agente"]);
+    expect(t1.run?.current_node_key).toBe("agente");
+    const t2 = await simulateTurn(req("Quero negociar", t1.state), seed());
+    expect(t2.outbound.map((o) => o.text)).toEqual(["Pode me passar o CPF?"]);
+    expect(ai.systemPrompts.every((p) => p.includes("PROMPT DO RASCUNHO DO AGENTE"))).toBe(true);
+    expectNoRealEffects();
+  });
+
+  it("efetiva_acordo (GET com efeito) é sempre simulada, mesmo marcada para consulta real; o resumo não mostra CPF", async () => {
+    stubOpenAi([
+      { tool: { name: "localizar_devedor", args: { cpf: "529.982.247-25" } } },
+      { tool: { name: "efetiva_acordo", args: { idDev: "777" } } },
+      { content: "Acordo feito para o CPF 529.982.247-25." },
+    ]);
+    const realFetch = vi.fn(async () => {
+      throw new Error("tool real chamada");
+    });
+    const turn = await simulateTurn(req("Meu CPF é 52998224725", null, { realReadOnlyTools: ["efetiva_acordo"] }), seed(), { realFetch });
+    expect(realFetch).not.toHaveBeenCalled();
+    expect(effectiveSimToolMode("efetiva_acordo", "GET", ["efetiva_acordo"])).toBe("mock");
+    expect(turn.timeline.some((e) => e.label.includes("efetiva_acordo: resposta simulada"))).toBe(true);
+
+    const shown = summarizeAgentTestTimeline(turn.timeline);
+    const text = JSON.stringify(shown);
+    expect(text).not.toContain("529.982.247-25");
+    expect(text).not.toContain("52998224725");
+    expect(shown.find((e) => e.label === "Tool chamada: localizar_devedor")?.detail).toEqual({ cpf: "***.***.***-25" });
+    expectNoRealEffects();
   });
 });

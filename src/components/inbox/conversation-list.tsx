@@ -2,6 +2,7 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermission } from "@/hooks/use-permission";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -176,6 +177,7 @@ export function ConversationList({
 }: ConversationListProps) {
   const { accountRole, accountId, user } = useAuth();
   const isAgent = accountRole === "agent";
+  const canReply = usePermission("inbox.reply");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -398,7 +400,7 @@ export function ConversationList({
             <p className="text-sm font-semibold text-foreground">Atendimentos</p>
             <p className="mt-0.5 text-[11px] text-muted-foreground">Priorize e encontre conversas rapidamente</p>
           </div>
-          {onCreateConversation && accountRole !== "viewer" && (
+          {onCreateConversation && canReply && (
             <Button
               type="button"
               variant="ghost"
