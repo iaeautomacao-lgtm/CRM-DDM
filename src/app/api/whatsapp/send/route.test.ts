@@ -18,6 +18,8 @@ const messageInserts: Array<Record<string, unknown>> = []
 let existingConversation: Record<string, unknown> | null = null
 let contactRow: Record<string, unknown> | null = null
 let messageInsertError: { message: string } | null = null
+// Erro na busca de conversa por contato (lista com .limit(1)).
+let conversationListError: { message: string } | null = null
 // Linhas que o operador enxerga (RLS, cliente de sessão) e a linha completa lida pelo service role.
 let sessionLines: Array<{ id: string }> = [{ id: 'cfg-1' }]
 let adminLine: Record<string, unknown> = {}
@@ -34,6 +36,8 @@ const CONTACT = {
 function makeSupabaseMock() {
   function builder(table: string) {
     let didInsert = false
+    // .limit() = consulta em lista (findOrCreateConversation): devolve array, como o PostgREST.
+    let limited = false
 
     const selectResult = () => {
       switch (table) {
@@ -44,6 +48,11 @@ function makeSupabaseMock() {
         case 'contacts':
           return { data: contactRow, error: null }
         case 'conversations':
+          if (limited) {
+            return conversationListError
+              ? { data: null, error: conversationListError }
+              : { data: existingConversation ? [existingConversation] : [], error: null }
+          }
           return { data: existingConversation, error: null }
         case 'whatsapp_config':
           // Migration 200b: o cliente de sessão só enxerga os ids (RLS); os
@@ -88,13 +97,16 @@ function makeSupabaseMock() {
       'eq',
       'in',
       'order',
-      'limit',
       'update',
       'delete',
       'is',
     ]) {
       b[m] = vi.fn(chain)
     }
+    b.limit = vi.fn(() => {
+      limited = true
+      return b
+    })
     b.insert = vi.fn((payload: Record<string, unknown>) => {
       didInsert = true
       if (table === 'conversations') conversationInserts.push(payload)
@@ -272,6 +284,31 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
     expect(messageInserts[0]).toMatchObject({
       conversation_id: 'conv-existing',
     })
+  })
+
+  it('várias conversas do contato: pede a mais recente (order desc + limit 1) e reaproveita, sem criar outra', async () => {
+    existingConversation = { id: 'conv-recente', account_id: 'acct-1', contact_id: 'contact-1', contact: CONTACT }
+    const res = await postContactTemplate()
+    expect(res.status).toBe(200)
+    expect(conversationInserts).toHaveLength(0)
+    expect(messageInserts[0]).toMatchObject({ conversation_id: 'conv-recente' })
+    const convBuilders = supabaseMock.from.mock.results
+      .map((r) => r.value as Record<string, ReturnType<typeof vi.fn>>)
+      .filter((b) => b.limit.mock.calls.length > 0)
+    expect(convBuilders.some((b) => b.order.mock.calls.some((c) => c[0] === 'created_at' && c[1]?.ascending === false))).toBe(true)
+  })
+
+  it('erro ao buscar a conversa: 500 sem criar conversa duplicada', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    conversationListError = { message: 'boom' }
+    try {
+      const res = await postContactTemplate()
+      expect(res.status).toBe(500)
+      expect(conversationInserts).toHaveLength(0)
+      expect(sendTemplateMessage).not.toHaveBeenCalled()
+    } finally {
+      conversationListError = null
+    }
   })
 
   it('404s when the contact is not in the caller account', async () => {

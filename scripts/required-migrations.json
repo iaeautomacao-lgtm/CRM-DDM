@@ -320,10 +320,6 @@
       "index": "idx_internal_messages_unread"
     },
     {
-      "version": "306_profiles_email_hidden",
-      "kind": "registry"
-    },
-    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },
@@ -332,16 +328,22 @@
       "kind": "registry"
     },
     {
-      "version": "312_custom_role_validation",
+      "version": "314_contacts_phone_suffix_lookup",
       "kind": "registry"
     },
     {
-      "version": "313_custom_roles",
-      "kind": "registry"
+      "version": "314b_contacts_phone_suffix_idx",
+      "kind": "index",
+      "index": "idx_contacts_account_phone_suffix8"
     },
     {
       "version": "315_user_sessions_refreshed_at_utc",
       "kind": "registry"
+    },
+    {
+      "version": "316b_conversations_account_created_idx",
+      "kind": "index",
+      "index": "idx_conversations_account_created"
     },
     {
       "version": "320_billing_reports",

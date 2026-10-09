@@ -213,6 +213,12 @@ ALTER TABLE wacrm.team_members ENABLE ROW LEVEL SECURITY;
 CREATE POLICY team_members_select ON wacrm.team_members FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.teams t WHERE t.id = team_members.team_id AND wacrm.is_account_member(t.account_id)));
 ALTER TABLE wacrm.accounts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY accounts_select ON wacrm.accounts FOR SELECT USING (wacrm.is_account_member(id));
+-- O dashboard_ai_analytics de hoje (293), reduzido ao trecho que lê profiles.email (a 306 o reescreve pela definição VIVA); SECURITY INVOKER como o original.
+CREATE FUNCTION wacrm.dashboard_ai_analytics() RETURNS jsonb LANGUAGE sql STABLE SECURITY INVOKER SET search_path = ''
+  AS $$ SELECT COALESCE(jsonb_agg(jsonb_build_object('userId', p.user_id,
+           'userName', COALESCE(NULLIF(p.full_name, ''), NULLIF(p.email, ''), 'Operador')) ORDER BY p.user_id), '[]'::jsonb)
+         FROM wacrm.profiles p WHERE p.account_id = wacrm.current_account_id() $$;
+GRANT EXECUTE ON FUNCTION wacrm.dashboard_ai_analytics() TO authenticated, service_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wacrm TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA wacrm TO service_role;
 -- profiles: a 169 trocou o UPDATE de tabela inteira por UPDATE só nas colunas que o usuário edita (full_name, avatar_url).

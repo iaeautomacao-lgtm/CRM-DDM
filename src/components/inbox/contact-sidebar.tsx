@@ -750,7 +750,7 @@ export function ContactSidebar({
                   { color: string; dot: string; label: string; desc: string }
                 > = {
                   positive: {
-                    color: "text-emerald-700 dark:text-emerald-400",
+                    color: "text-emerald-400 [html[data-mode=light]_&]:text-emerald-700",
                     dot: "bg-emerald-500",
                     label: "Positivo",
                     desc: "Aproveite a boa receptividade. Mantenha o atendimento ágil e conduza para o fechamento de forma objetiva."
@@ -762,13 +762,13 @@ export function ContactSidebar({
                     desc: "Cliente direto e formal. Responda de forma clara, profissional e focada na resolução."
                   },
                   negative: {
-                    color: "text-rose-700 dark:text-rose-400",
+                    color: "text-rose-400 [html[data-mode=light]_&]:text-rose-700",
                     dot: "bg-rose-500",
                     label: "Negativo",
                     desc: "Cliente insatisfeito. Priorize empatia, clareza e resolução antes de avançar na negociação."
                   },
                   mixed: {
-                    color: "text-amber-700 dark:text-amber-400",
+                    color: "text-amber-400 [html[data-mode=light]_&]:text-amber-700",
                     dot: "bg-amber-500",
                     label: "Misto",
                     desc: "Há sinais variados na conversa. Esclareça dúvidas e confirme entendimento antes de avançar."
