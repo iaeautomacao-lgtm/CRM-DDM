@@ -105,6 +105,24 @@ describe('queue provider outcomes', () => {
     expect(mocks.send).not.toHaveBeenCalled();
     expect(mocks.updates.some((u) => u.status === 'erro' && u.erro_permanente === true)).toBe(true);
   });
+  it('F23: telefone alternativo sem linha em contact_phones = escada esgotada (não reenvia ao principal)', async () => {
+    const altItem: QueueItem = {
+      ...item,
+      contact_id: 'contact',
+      mensagem_final: 'texto',
+      phone_attempt_order: 2,
+      contacts: { phone: '5511999999999' },
+    };
+    const result = await processQueueItem(altItem, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'error', error: 'Contato sem telefone válido' });
+    expect(mocks.send).not.toHaveBeenCalled();
+  });
+  it('F23: telefone com máscara chega ao provedor só com dígitos', async () => {
+    const masked: QueueItem = { ...item, mensagem_final: '+55 (11) 99999-9999' };
+    const result = await processQueueItem(masked, { id: 'campaign', status: 'em_execucao' });
+    expect(result).toMatchObject({ outcome: 'sent' });
+    expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ to: '5511999999999' }));
+  });
   it('item externo (API v1, contact_id nulo) continua usando mensagem_final como telefone', async () => {
     const result = await processQueueItem(item, { id: 'campaign', status: 'em_execucao' });
     expect(result).toMatchObject({ outcome: 'sent' });
