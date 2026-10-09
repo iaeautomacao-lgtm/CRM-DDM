@@ -66,6 +66,18 @@ export interface SendListNodeConfig {
       next_node_key: string;
     }>;
   }>;
+  /**
+   * Menu dinâmico "escolha seu atendente" (PRD 23, item 16): as linhas do menu são geradas na hora, uma por operador ONLINE da equipe
+   * (reply_id "agent:<user_id>"). As linhas de `sections` servem só de topologia — ver src/lib/flows/agent-picker.ts. Ninguém online ⇒ segue
+   * pela linha "__no_agent" (ou, sem ela, pela fila normal da equipe). O destino de quem escolheu deve ser um handoff_agent com
+   * `assign_from_var: "chosen_agent_id"`.
+   */
+  agent_picker?: {
+    /** Equipe dos operadores oferecidos. Sem ela: operadores da conta. */
+    team_id?: string;
+    /** Máximo de operadores no menu (1–10; teto da lista do WhatsApp). */
+    max_options?: number;
+  };
 }
 
 /**
@@ -128,6 +140,11 @@ export interface HandoffAgentNodeConfig {
   note?: string;
   /** Optional agent user_id to assign. Leave unset for "any available operator". */
   assign_to?: string;
+  /**
+   * Atribui ao operador guardado em `run.vars[assign_from_var]` (ex.: "chosen_agent_id", gravado pelo menu de operadores do send_list).
+   * Só vale se o id for Operador da conta do run; `assign_to` fixo tem prioridade.
+   */
+  assign_from_var?: string;
 }
 
 /** 'handoff_team' — transfers to a specific team (or any team). */
