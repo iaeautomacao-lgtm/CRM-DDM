@@ -62,6 +62,7 @@ describe('migrations 240/241/241b — papéis como linhas, sincronia e has_perm'
     await db.exec(migration('240_roles_foundation.sql'))
     await db.exec(migration('241_roles_functions.sql'))
     await db.exec(migration('241b_profiles_role_id_idx.sql'))
+    await db.exec(migration('276_billing_permissions.sql')) // billing.view/manage (PRD 17.5): o catálogo do código já os tem
   }, 60_000)
   afterAll(async () => {
     await db.close()
@@ -335,6 +336,7 @@ describe('migrations 240/241/241b — papéis como linhas, sincronia e has_perm'
       await db.exec(migration('240_roles_foundation.sql'))
       await db.exec(migration('241_roles_functions.sql'))
       await db.exec(migration('241b_profiles_role_id_idx.sql'))
+      await db.exec(migration('276_billing_permissions.sql'))
       expect(await count()).toEqual(before)
     })
 
