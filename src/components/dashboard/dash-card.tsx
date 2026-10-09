@@ -41,48 +41,8 @@ export function DashCard({
   )
 }
 
-/**
- * Seletor segmentado (7/30/90 dias, Valor/Acordos): trilho em surface-3,
- * opção ativa em card com sombra fina.
- */
-export function Segmented<T extends string | number>({
-  options,
-  value,
-  onChange,
-  ariaLabel,
-  size = 'md',
-}: {
-  options: ReadonlyArray<{ value: T; label: string }>
-  value: T
-  onChange: (v: T) => void
-  ariaLabel: string
-  size?: 'sm' | 'md'
-}) {
-  return (
-    <div role="group" aria-label={ariaLabel} className="flex shrink-0 gap-0.5 rounded-lg bg-surface-3 p-[3px]">
-      {options.map((o) => {
-        const on = o.value === value
-        return (
-          <button
-            key={String(o.value)}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onChange(o.value)}
-            className={cn(
-              'whitespace-nowrap rounded-[6px] font-semibold transition-colors',
-              size === 'sm' ? 'h-6 px-[9px] text-xs' : 'h-[26px] px-2.5 text-xs',
-              on
-                ? 'bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,.12),0_0_0_1px_var(--border)]'
-                : 'text-foreground-2 hover:text-foreground',
-            )}
-          >
-            {o.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
+// Seletor segmentado: movido para o design system (components/ddm).
+export { Segmented } from '@/components/ddm/segmented'
 
 /** Quadradinho de legenda. */
 export function Swatch({ className }: { className?: string }) {
