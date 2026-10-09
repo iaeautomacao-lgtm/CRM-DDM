@@ -82,6 +82,8 @@ export const ROUTE_ALLOWLIST: Record<string, UserRole[]> = {
   "/pipelines": ["owner"],
   "/flows": ["owner", "admin"],
   "/disparador": ["owner", "admin"],
+  // Régua de cobrança (PRD 17): ver = billing.view (supervisor+); editar = billing.manage (admin+, conferido na tela e nas rotas).
+  "/regua": ["owner", "admin", "supervisor"],
   "/ajuda": ["owner"],
 
   "/settings": ["owner", "admin"],
