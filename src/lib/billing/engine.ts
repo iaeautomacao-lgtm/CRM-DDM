@@ -42,8 +42,12 @@ export interface EnqueueResult {
   sendId: string;
   /** id do item na fila do disparador (sucesso). */
   queueItemId?: string;
-  /** motivo curto (falha) — a reserva é desfeita e tenta de novo. */
+  /** motivo curto (falha transitória) — a reserva é desfeita e tenta de novo em 5 min. */
   error?: string;
+  /** a etapa NÃO deve sair (variável vazia, template não aprovado…): é cancelada com este motivo. */
+  cancelled?: string;
+  /** número em qualidade vermelha: a régua não confirma RED sozinha — a reserva é desfeita e tenta de novo em 30 min. */
+  blocked?: "quality";
 }
 
 /** Entrega ao disparador (PR 17.4): campanha-sistema `origem='regua'`, mesma fila, mesma janela/qualidade/blacklist/pausa. */
@@ -66,7 +70,9 @@ export interface TickSummary {
   enrolled: number;
   precheck: PrecheckSummary;
   dry_run: Record<string, number>;
-  live: { claimed: number; enqueued: number; cancelled: number; released: number };
+  live: { claimed: number; enqueued: number; cancelled: number; released: number; blocked_quality: number };
+  /** envios da régua cujo resultado voltou da fila do disparador neste tick. */
+  reconciled: number;
   skipped_live_no_enqueuer: number;
   skipped_live_no_source: number;
   errors: number;
@@ -75,6 +81,8 @@ export interface TickSummary {
 /** Atraso até a inscrição tentar de novo quando a fonte falha / o enqueue falha. */
 export const RETRY_SOURCE_MS = 15 * 60_000;
 export const RETRY_ENQUEUE_MS = 5 * 60_000;
+/** Número vermelho: tenta de novo daqui a 30 min (o owner pode confirmar numa campanha manual; a régua nunca confirma). */
+export const RETRY_QUALITY_MS = 30 * 60_000;
 const MAX_LIVE_BATCHES = 5;
 
 const emptySummary = (): TickSummary => ({
@@ -84,7 +92,8 @@ const emptySummary = (): TickSummary => ({
   enrolled: 0,
   precheck: { candidates: 0, checked: 0, stopped: 0, deferred: 0, fresh: 0 },
   dry_run: {},
-  live: { claimed: 0, enqueued: 0, cancelled: 0, released: 0 },
+  live: { claimed: 0, enqueued: 0, cancelled: 0, released: 0, blocked_quality: 0 },
+  reconciled: 0,
   skipped_live_no_enqueuer: 0,
   skipped_live_no_source: 0,
   errors: 0,
@@ -166,9 +175,15 @@ async function runLive(deps: BillingDeps, accountId: string, source: DebtSource,
       const byId = new Map(results.map((r) => [r.sendId, r]));
       for (const step of verified) {
         const r = byId.get(step.send_id);
-        if (r?.queueItemId && !r.error) {
+        if (r?.queueItemId && !r.error && !r.cancelled && !r.blocked) {
           await markEnqueued(db, step.send_id, r.queueItemId, now);
           summary.live.enqueued++;
+        } else if (r?.cancelled) {
+          await cancelSend(db, step.send_id, r.cancelled, now);
+          summary.live.cancelled++;
+        } else if (r?.blocked === "quality") {
+          await releaseSend(db, step, RETRY_QUALITY_MS, now);
+          summary.live.blocked_quality++;
         } else {
           await releaseSend(db, step, RETRY_ENQUEUE_MS, now);
           summary.live.released++;
@@ -219,6 +234,11 @@ export async function runBillingTick(deps: BillingDeps, options: { budgetMs?: nu
         summary.dry_run[ruler.id] = ((rows ?? []) as Array<{ debts: number | string }>).reduce((n, r) => n + Number(r.debts), 0);
       }
 
+      // resultado da fila do disparador → billing_step_sends (entregue/erro permanente/cancelado); barato e sempre seguro
+      const { data: reconciled, error: reconcileError } = await deps.db.rpc("billing_reconcile_sends", { p_account: accountId });
+      if (reconcileError) throw reconcileError;
+      summary.reconciled += Number(reconciled ?? 0);
+
       const live = accountRulers.filter((r) => !r.dry_run);
       if (live.length > 0) {
         if (!deps.enqueuer) summary.skipped_live_no_enqueuer++;
@@ -238,7 +258,7 @@ export async function runBillingTick(deps: BillingDeps, options: { budgetMs?: nu
     }
   }
 
-  const activity = summary.stopped_blacklist + summary.enrolled + summary.precheck.checked + summary.live.claimed + summary.live.cancelled + summary.live.released;
+  const activity = summary.stopped_blacklist + summary.enrolled + summary.precheck.checked + summary.live.claimed + summary.live.cancelled + summary.live.released + summary.live.blocked_quality + summary.reconciled;
   if (activity > 0 || summary.errors > 0) {
     void writeLog({ level: summary.errors ? "warn" : "info", source: "system", event: "billing_tick", message: "Tick da régua de cobrança", payload: { ...summary } });
   }

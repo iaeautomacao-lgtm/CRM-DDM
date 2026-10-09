@@ -218,6 +218,10 @@
       "kind": "registry"
     },
     {
+      "version": "279_billing_enqueue",
+      "kind": "registry"
+    },
+    {
       "version": "290_user_sessions_mfa",
       "kind": "registry"
     }

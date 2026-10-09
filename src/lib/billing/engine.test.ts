@@ -11,7 +11,7 @@ vi.mock("./sync", () => ({
   precheckUpcoming: (...a: unknown[]) => (precheckUpcoming as unknown as (...x: unknown[]) => unknown)(...a),
 }));
 
-const { brasiliaDate, previewRuler, runBillingTick, RETRY_ENQUEUE_MS, RETRY_SOURCE_MS } = await import("./engine");
+const { brasiliaDate, previewRuler, runBillingTick, RETRY_ENQUEUE_MS, RETRY_QUALITY_MS, RETRY_SOURCE_MS } = await import("./engine");
 
 const A = "A";
 const NOW = new Date("2026-10-19T12:00:00Z");
@@ -78,7 +78,7 @@ describe("runBillingTick", () => {
     rpcs.billing_dry_run = () => ({ data: [{ step_id: "x", offset_days: 0, debts: 4 }, { step_id: "y", offset_days: 2, debts: "6" }] });
     const out = await runBillingTick(deps());
     expect(out).toMatchObject({ accounts: 1, rulers: 1, stopped_blacklist: 3, enrolled: 2, dry_run: { R1: 10 }, precheck: { checked: 2, stopped: 1 } });
-    expect(rpcCalls.map((c) => c.fn)).toEqual(["billing_stop_blacklisted", "billing_dry_run"]);
+    expect(rpcCalls.map((c) => c.fn)).toEqual(["billing_stop_blacklisted", "billing_dry_run", "billing_reconcile_sends"]);
     expect(rpcCalls[1].args).toEqual({ p_account: A, p_ruler: "R1", p_date: "2026-10-19" });
     expect(rpcCalls.some((c) => c.fn === "billing_claim_due_steps")).toBe(false);
     expect(writeLog).toHaveBeenCalledTimes(1); // um log por tick com atividade, só contagens
@@ -108,7 +108,7 @@ describe("runBillingTick", () => {
       checkDebtById.mockResolvedValue({ send: true, reason: "open" });
       const eq = enqueuer((steps) => (steps as Array<{ send_id: string }>).map((s) => ({ sendId: s.send_id, queueItemId: `q-${s.send_id}` })));
       const out = await runBillingTick(deps({ enqueuer: eq }));
-      expect(out.live).toEqual({ claimed: 2, enqueued: 2, cancelled: 0, released: 0 });
+      expect(out.live).toEqual({ claimed: 2, enqueued: 2, cancelled: 0, released: 0, blocked_quality: 0 });
       expect(eq.enqueue).toHaveBeenCalledTimes(1);
       expect(rpcCalls.filter((c) => c.fn === "billing_should_send").map((c) => c.args)).toEqual([{ p_send_id: "s-1" }, { p_send_id: "s-2" }]);
       const marks = tableCalls.filter((c) => c.table === "billing_step_sends" && c.op === "update");
@@ -123,7 +123,7 @@ describe("runBillingTick", () => {
       checkDebtById.mockResolvedValueOnce({ send: false, reason: "paid" }).mockResolvedValueOnce({ send: false, reason: "invalid_document" }).mockResolvedValueOnce({ send: false, reason: "debt_not_found" });
       const eq = enqueuer(() => []);
       const out = await runBillingTick(deps({ enqueuer: eq }));
-      expect(out.live).toEqual({ claimed: 3, enqueued: 0, cancelled: 3, released: 0 });
+      expect(out.live).toEqual({ claimed: 3, enqueued: 0, cancelled: 3, released: 0, blocked_quality: 0 });
       expect(eq.enqueue).not.toHaveBeenCalled();
       const cancels = tableCalls.filter((c) => c.op === "update").map((c) => (c.payload as { status: string; error_code: string }));
       expect(cancels.map((c) => c.error_code)).toEqual(["paid", "invalid_document", "debt_not_found"]);
@@ -136,7 +136,7 @@ describe("runBillingTick", () => {
       checkDebtById.mockResolvedValueOnce({ send: false, reason: "source_unavailable", retryable: true });
       const eq = enqueuer(() => []);
       const out = await runBillingTick(deps({ enqueuer: eq }));
-      expect(out.live).toEqual({ claimed: 3, enqueued: 0, cancelled: 0, released: 3 });
+      expect(out.live).toEqual({ claimed: 3, enqueued: 0, cancelled: 0, released: 3, blocked_quality: 0 });
       expect(checkDebtById).toHaveBeenCalledTimes(1); // as outras nem consultaram a fonte
       const deletes = tableCalls.filter((c) => c.op === "delete");
       expect(deletes).toHaveLength(3);
@@ -161,10 +161,41 @@ describe("runBillingTick", () => {
       checkDebtById.mockResolvedValue({ send: true, reason: "open" });
       const eq = enqueuer(() => [{ sendId: "s-1", error: "campanha indisponível" }]); // s-2 nem veio na resposta
       const out = await runBillingTick(deps({ enqueuer: eq }));
-      expect(out.live).toEqual({ claimed: 2, enqueued: 0, cancelled: 0, released: 2 });
+      expect(out.live).toEqual({ claimed: 2, enqueued: 0, cancelled: 0, released: 2, blocked_quality: 0 });
       const retry = tableCalls.filter((c) => c.table === "billing_enrollments" && c.op === "update");
       expect((retry[0].payload as { next_step_at: string }).next_step_at).toBe(new Date(NOW.getTime() + RETRY_ENQUEUE_MS).toISOString());
       expect(tableCalls.some((c) => c.table === "billing_step_sends" && c.op === "update")).toBe(false);
+    });
+
+    it("entregador cancela a etapa (variável vazia, template não aprovado…): cancela com o motivo, sem desfazer a reserva", async () => {
+      rpcs.billing_claim_due_steps = (() => { const once = [step("1")]; return () => ({ data: once.splice(0) }); })();
+      checkDebtById.mockResolvedValue({ send: true, reason: "open" });
+      const eq = enqueuer(() => [{ sendId: "s-1", cancelled: "empty_variable_2" }]);
+      const out = await runBillingTick(deps({ enqueuer: eq }));
+      expect(out.live).toEqual({ claimed: 1, enqueued: 0, cancelled: 1, released: 0, blocked_quality: 0 });
+      const update = tableCalls.find((c) => c.table === "billing_step_sends" && c.op === "update")!;
+      expect(update.payload).toMatchObject({ status: "cancelled", error_code: "empty_variable_2" });
+      expect(tableCalls.some((c) => c.op === "delete")).toBe(false);
+    });
+
+    it("número em qualidade VERMELHA: a régua não confirma RED — desfaz a reserva e tenta de novo em 30 min", async () => {
+      rpcs.billing_claim_due_steps = (() => { const once = [step("1")]; return () => ({ data: once.splice(0) }); })();
+      checkDebtById.mockResolvedValue({ send: true, reason: "open" });
+      const eq = enqueuer(() => [{ sendId: "s-1", blocked: "quality" }]);
+      const out = await runBillingTick(deps({ enqueuer: eq }));
+      expect(out.live).toEqual({ claimed: 1, enqueued: 0, cancelled: 0, released: 0, blocked_quality: 1 });
+      const retry = tableCalls.find((c) => c.table === "billing_enrollments" && c.op === "update")!;
+      expect((retry.payload as { next_step_at: string }).next_step_at).toBe(new Date(NOW.getTime() + RETRY_QUALITY_MS).toISOString());
+      expect(tableCalls.filter((c) => c.op === "delete")).toHaveLength(1);
+    });
+
+    it("reconcilia o resultado da fila a cada tick (conta o que voltou)", async () => {
+      rulersResult = [{ id: "R1", account_id: A, dry_run: true }];
+      rpcs.billing_stop_blacklisted = () => ({ data: 0 });
+      rpcs.billing_dry_run = () => ({ data: [] });
+      rpcs.billing_reconcile_sends = () => ({ data: 7 });
+      expect((await runBillingTick(deps())).reconciled).toBe(7);
+      expect(rpcCalls.find((c) => c.fn === "billing_reconcile_sends")?.args).toEqual({ p_account: A });
     });
 
     it("lote cheio puxa outro lote; vazio encerra; no máximo 5 lotes por tick", async () => {
