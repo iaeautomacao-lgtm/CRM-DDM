@@ -254,6 +254,15 @@
       "version": "293b_messages_account_created_idx",
       "kind": "index",
       "index": "idx_messages_account_created"
+    },
+    {
+      "version": "294_campaign_reply_time_atomic",
+      "kind": "registry"
+    },
+    {
+      "version": "294b_dmq_auto_pause_rejected_idx",
+      "kind": "index",
+      "index": "idx_dmq_auto_pause_rejected"
     }
   ]
 }
