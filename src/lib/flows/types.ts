@@ -381,6 +381,29 @@ export interface SendTemplateNodeConfig {
 }
 
 /**
+ * Envia um WhatsApp Flow (formulário nativo) ao cliente (PRD 21.4). Só canal Meta: nos demais vai o `fallback_text`.
+ * `flow_action`: 'navigate' abre direto na `screen_id`; 'data_exchange' pede os dados ao CRM (endpoint de Data Exchange do canal).
+ * O `flow_token` é gerado POR EXECUÇÃO (`fr:<id do run>`) e volta no Data Exchange e na resposta do formulário. A resposta vai ao fluxo como
+ * VARIÁVEIS (`flow_*`, PR 21.1) — o código NUNCA chama efetivação de acordo: o que fazer com ela é desenho da operação neste fluxo.
+ * `body_text`/`header_text`/`fallback_text` aceitam `{{vars.X}}`.
+ */
+export interface SendFlowNodeConfig {
+  /** id do Flow na Meta (só números). */
+  flow_id: string;
+  /** Texto do botão que abre o formulário (≤ 30). */
+  cta_text: string;
+  body_text: string;
+  header_text?: string;
+  footer_text?: string;
+  /** Tela inicial (obrigatória em 'navigate'). */
+  screen_id?: string;
+  flow_action: "navigate" | "data_exchange";
+  /** Texto enviado em canais sem Flow (WAHA, Webchat…). Sem ele, o nó apenas avança. */
+  fallback_text?: string;
+  next_node_key: string;
+}
+
+/**
  * Writes an internal note (not delivered to the customer) onto the
  * conversation, e.g. for agents picking up a handoff later. Supports
  * `{{vars.X}}` interpolation.
@@ -500,6 +523,7 @@ export type FlowNodeConfig =
   | { node_type: "go_to"; config: GoToNodeConfig }
   | { node_type: "go_to_flow"; config: GoToFlowNodeConfig }
   | { node_type: "send_template"; config: SendTemplateNodeConfig }
+  | { node_type: "send_flow"; config: SendFlowNodeConfig }
   | { node_type: "add_note"; config: AddNoteNodeConfig }
   | { node_type: "receive_attachment"; config: ReceiveAttachmentNodeConfig }
   | { node_type: "ai_agent"; config: AiAgentNodeConfig }

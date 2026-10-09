@@ -1,6 +1,7 @@
 import {
   sendInteractiveButtons,
   sendInteractiveCtaUrl,
+  sendInteractiveFlow,
   sendInteractiveList,
   sendMediaMessage,
   sendTemplateMessage,
@@ -361,6 +362,33 @@ export async function engineSendCtaUrl(
   return sendInteractiveViaMeta({ ...args, kind: 'cta_url' })
 }
 
+interface SendFlowEngineArgs {
+  accountId: string
+  userId: string
+  conversationId: string
+  contactId: string
+  bodyText: string
+  headerText?: string
+  footerText?: string
+  flowId: string
+  flowToken: string
+  ctaText: string
+  flowAction: 'navigate' | 'data_exchange'
+  screenId?: string
+  /** See SendTextEngineArgs.configId. */
+  configId?: string
+}
+
+/**
+ * Convite para um WhatsApp Flow (nó `send_flow`, PRD 21.4). Mesmo caminho das outras interativas: lookup por conta, retry de variantes de
+ * telefone e gravação em `messages` como `interactive` do bot.
+ */
+export async function engineSendFlow(
+  args: SendFlowEngineArgs
+): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
+  return sendInteractiveViaMeta({ ...args, kind: 'flow' })
+}
+
 interface SendTemplateEngineArgs {
   accountId: string
   /** See SendTextEngineArgs.configId. */
@@ -487,6 +515,7 @@ type SendInput =
   | (SendInteractiveButtonsEngineArgs & { kind: 'buttons' })
   | (SendInteractiveListEngineArgs & { kind: 'list' })
   | (SendCtaUrlEngineArgs & { kind: 'cta_url' })
+  | (SendFlowEngineArgs & { kind: 'flow' })
 
 async function sendInteractiveViaMeta(
   input: SendInput
@@ -533,6 +562,22 @@ async function sendInteractiveViaMeta(
         to: phone,
         bodyText: input.bodyText,
         buttons: input.buttons,
+        headerText: input.headerText,
+        footerText: input.footerText,
+      })
+      return r.messageId
+    }
+    if (input.kind === 'flow') {
+      const r = await sendInteractiveFlow({
+        phoneNumberId: config.phone_number_id,
+        accessToken,
+        to: phone,
+        bodyText: input.bodyText,
+        flowId: input.flowId,
+        flowToken: input.flowToken,
+        ctaText: input.ctaText,
+        flowAction: input.flowAction,
+        screenId: input.screenId,
         headerText: input.headerText,
         footerText: input.footerText,
       })
