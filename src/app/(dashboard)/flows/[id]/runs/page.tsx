@@ -233,8 +233,8 @@ const STATUS_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 
 export default function FlowRunsPage() {
-  // DELETE /api/flows/[id]/runs exige flows.view_runs.
-  const canDelete = usePermission("flows.view_runs");
+  // Apagar histórico é escrita: DELETE /api/flows/[id]/runs exige flows.edit (ver as execuções segue com flows.view_runs).
+  const canDelete = usePermission("flows.edit");
   const router = useRouter();
   const params = useParams<{ id: string }>();
   // ?run_id= (atalho "Fluxo" do inbox): abre já expandida e rolada até ela.

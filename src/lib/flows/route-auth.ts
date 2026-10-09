@@ -4,7 +4,7 @@ import type { Permission } from "@/lib/auth/permissions";
 import { guardPermission, type GuardResult } from "@/lib/auth/route-guard";
 
 // Permissão para mexer em fluxos (PRD 20, 20.3d): `flows.edit` (criar, editar, ativar, apagar, importar) ou
-// `flows.view_runs` (ver/limpar execuções) — hoje ambas owner/admin, os mesmos da página /flows.
+// `flows.view_runs` (ver execuções; apagar o histórico é escrita e pede `flows.edit`) — hoje ambas owner/admin, os mesmos da página /flows.
 // Antes as rotas só pediam sessão e escreviam com service role, então um
 // viewer/agente chamando a API direto editava fluxos e prompts de IA.
 
