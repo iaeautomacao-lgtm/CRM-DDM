@@ -39,6 +39,17 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { isBuilderDirty } from "@/lib/automations/dirty"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -488,6 +499,26 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const [state, setState] = useState<BuilderInitial>(initial)
   const [saving, setSaving] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  // Último estado salvo (ou aberto): base da guarda de "alterações não salvas".
+  const [savedState, setSavedState] = useState<BuilderInitial>(initial)
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false)
+  const dirty = !readOnly && isBuilderDirty(savedState, state)
+
+  // Fechar a aba ou recarregar com alterações pendentes pede confirmação do navegador (o texto é do navegador).
+  useEffect(() => {
+    if (!dirty) return
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", onBeforeUnload)
+    return () => window.removeEventListener("beforeunload", onBeforeUnload)
+  }, [dirty])
+
+  function goBack() {
+    if (dirty) setConfirmLeaveOpen(true)
+    else router.push("/automations")
+  }
 
   function patchTop<K extends keyof BuilderInitial>(key: K, value: BuilderInitial[K]) {
     setState((s) => ({ ...s, [key]: value }))
@@ -560,6 +591,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         return
       }
       toast.success(isEditing ? "Automação salva" : "Automação criada")
+      setSavedState(state)
       if (!isEditing && body?.automation?.id) {
         router.replace(`/automations/${body.automation.id}/edit`)
       }
@@ -576,7 +608,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
       <header className="flex flex-shrink-0 items-center gap-2 border-b border-border bg-card/80 px-3 py-3 sm:gap-3 sm:px-4">
         <button
           type="button"
-          onClick={() => router.push("/automations")}
+          onClick={goBack}
           className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           aria-label="Voltar para automações"
         >
@@ -604,6 +636,11 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
             aria-label="Ativar ao salvar"
           />
         </div>
+        {dirty && (
+          <span role="status" className="hidden whitespace-nowrap text-xs font-medium text-warning sm:inline">
+            Alterações não salvas
+          </span>
+        )}
         {readOnly ? (
           <span className="rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
             Somente leitura
@@ -649,6 +686,28 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           </ReadOnlyContext.Provider>
         </div>
       </div>
+
+      <AlertDialog open={confirmLeaveOpen} onOpenChange={setConfirmLeaveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sair sem salvar?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Há alterações nesta automação que ainda não foram salvas. Se sair agora, elas serão perdidas.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Continuar editando</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmLeaveOpen(false)
+                router.push("/automations")
+              }}
+            >
+              Sair sem salvar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

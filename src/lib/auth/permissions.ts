@@ -62,7 +62,7 @@ export const PERMISSION_CATALOG = {
   "contacts.edit": { label: "Editar contatos", description: "Criar, editar e vincular contatos.", group: "Contatos", scope: "none", roles: atLeast("agent"), dependsOn: ["contacts.view"] },
   "contacts.import": { label: "Importar contatos", description: "Importar contatos (cria tags).", group: "Contatos", scope: "none", roles: atLeast("admin"), dependsOn: ["contacts.edit"] },
   "tags.manage": { label: "Gerenciar tags e tabulações", description: "Tags, tabulações e campos personalizados.", group: "Contatos", scope: "none", roles: atLeast("admin") },
-  "pipelines.manage": { label: "Gerenciar funis", description: "Funis, etapas e regras de negócio do CRM.", group: "Contatos", scope: "none", roles: atLeast("admin") },
+  "pipelines.manage": { label: "Gerenciar funis", description: "Funis, etapas e regras de negócio do CRM.", group: "Contatos", scope: "none", roles: atLeast("admin"), dependsOn: ["pipelines.view"] },
 
   // ── Acompanhamento ──────────────────────────────────────
   "dashboard.view": { label: "Dashboard", description: "Ver o dashboard.", group: "Acompanhamento", scope: "account", roles: ["owner", "admin", "supervisor", "viewer"] },
@@ -81,7 +81,7 @@ export const PERMISSION_CATALOG = {
   "intelligence.personal_key": { label: "Chave pessoal do MCP", description: "Criar a própria chave de acesso ao Intelligence.", group: "Intelligence", scope: "own", roles: atLeast("supervisor"), dependsOn: ["intelligence.use"] },
 
   // ── Disparador ──────────────────────────────────────────
-  "campaigns.manage": { label: "Disparador", description: "Criar, editar, iniciar e pausar campanhas; listas, métricas, erros e UTM.", group: "Disparador", scope: "none", roles: atLeast("admin"), dependsOn: ["channels.view"] },
+  "campaigns.manage": { label: "Disparador", description: "Criar, editar, iniciar e pausar campanhas; listas, métricas, erros e UTM.", group: "Disparador", scope: "none", roles: atLeast("admin"), dependsOn: ["channels.view", "campaigns.view"] },
   "campaigns.rate_limit": { label: "Limites de envio", description: "Vagas e limite por segundo por número; reconhecer avisos de qualidade.", group: "Disparador", scope: "none", roles: atLeast("admin"), dependsOn: ["campaigns.manage"] },
   "campaigns.red_quality_override": { label: "Número em qualidade vermelha", description: "Iniciar campanha em número vermelho e alterar a política de qualidade.", group: "Disparador", scope: "none", roles: ["owner"], ownerOnly: true, dependsOn: ["campaigns.manage"] },
 
@@ -128,6 +128,10 @@ export const PERMISSION_CATALOG = {
   // ── Cobrança (PRD 17) ───────────────────────────────────
   "billing.view": { label: "Ver a régua de cobrança", description: "Ver réguas, etapas, inscrições e métricas da régua de cobrança.", group: "Cobrança", scope: "account", roles: atLeast("supervisor") },
   "billing.manage": { label: "Gerir a régua de cobrança", description: "Criar e alterar réguas e etapas, simular, pausar e parar inscrições.", group: "Cobrança", scope: "none", roles: atLeast("admin"), dependsOn: ["billing.view"] },
+
+  // ── Chaves de leitura (RLS fase 2, migration 304): todos os papéis; as policies de SELECT de campanhas e funis passam a perguntar o catálogo (305) ──
+  "campaigns.view": { label: "Ver campanhas", description: "Ler campanhas, métricas e fila de envio (leitura direta; o Inbox mostra a origem da conversa).", group: "Leitura de campanhas e funis", scope: "account", roles: ALL },
+  "pipelines.view": { label: "Ver funis e negócios", description: "Ler funis, etapas e negócios (leitura direta do CRM).", group: "Leitura de campanhas e funis", scope: "account", roles: ALL },
 } as const satisfies Record<string, PermissionDef>;
 
 export type Permission = keyof typeof PERMISSION_CATALOG;

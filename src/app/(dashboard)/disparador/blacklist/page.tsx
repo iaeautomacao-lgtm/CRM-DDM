@@ -132,6 +132,7 @@ export default function BlacklistPage() {
   // Modal Form States
   const [showModal, setShowModal] = useState(false);
   const [telefone, setTelefone] = useState("");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("bloqueio_manual");
   const [mensagemDetectada, setMensagemDetectada] = useState("");
 
@@ -263,7 +264,9 @@ export default function BlacklistPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!telefone.trim()) {
-      toast.error("Insira o número do telefone.");
+      // Erro no próprio campo (antes só toast, longe do campo e sem aria-invalid).
+      setPhoneError("Insira o número do telefone.");
+      document.getElementById("blacklist-telefone")?.focus();
       return;
     }
     if (!accountId) {
@@ -309,7 +312,12 @@ export default function BlacklistPage() {
     <PageBody>
       <PageToolbar
         actions={
-          <Button onClick={() => setShowModal(true)}>
+          <Button
+            onClick={() => {
+              setPhoneError(null);
+              setShowModal(true);
+            }}
+          >
             <Plus className="size-3.5" aria-hidden="true" /> Bloquear número
           </Button>
         }
@@ -480,11 +488,20 @@ export default function BlacklistPage() {
                 id="blacklist-telefone"
                 type="tel"
                 autoFocus
-                aria-describedby="blacklist-telefone-hint"
+                aria-describedby={phoneError ? "blacklist-telefone-erro blacklist-telefone-hint" : "blacklist-telefone-hint"}
+                aria-invalid={phoneError ? true : undefined}
                 value={telefone}
-                onChange={(e) => setTelefone(e.target.value)}
+                onChange={(e) => {
+                  setTelefone(e.target.value);
+                  if (phoneError) setPhoneError(null);
+                }}
                 placeholder="Ex: 5521999999999"
               />
+              {phoneError && (
+                <span id="blacklist-telefone-erro" role="alert" className="font-medium text-danger">
+                  {phoneError}
+                </span>
+              )}
               <span id="blacklist-telefone-hint" className="font-normal text-muted-foreground">
                 Insira o código do país + DDD + Número.
               </span>

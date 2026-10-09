@@ -320,7 +320,11 @@
       "index": "idx_internal_messages_unread"
     },
     {
-      "version": "306_profiles_email_hidden",
+      "version": "304_view_permission_keys",
+      "kind": "registry"
+    },
+    {
+      "version": "305_campaigns_pipelines_rls_has_perm",
       "kind": "registry"
     },
     {
@@ -329,14 +333,6 @@
     },
     {
       "version": "311_member_deactivation_last_access",
-      "kind": "registry"
-    },
-    {
-      "version": "312_custom_role_validation",
-      "kind": "registry"
-    },
-    {
-      "version": "313_custom_roles",
       "kind": "registry"
     },
     {
@@ -358,11 +354,27 @@
       "index": "idx_conversations_account_created"
     },
     {
+      "version": "317_automation_pending_lease",
+      "kind": "registry"
+    },
+    {
       "version": "320_billing_reports",
       "kind": "registry"
     },
     {
+      "version": "322_report_rpcs_has_perm",
+      "kind": "registry"
+    },
+    {
       "version": "323_contacts_rls_has_perm",
+      "kind": "registry"
+    },
+    {
+      "version": "324_conversations_rls_has_perm",
+      "kind": "registry"
+    },
+    {
+      "version": "325_audit_admin_tables_rls_has_perm",
       "kind": "registry"
     }
   ]
