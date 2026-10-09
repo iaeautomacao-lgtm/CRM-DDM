@@ -656,10 +656,22 @@ export async function processQueueItem(
   }
 
   if (blacklisted) {
-    await supabaseAdmin()
+    // D-17: confere o resultado e exige que o item ainda esteja 'enviando'. Antes, uma falha aqui passava em silêncio: o item ficava
+    // 'enviando' até o watchdog o fechar como "incerto" e a métrica contava um bloqueio que não foi gravado.
+    const { data: blocked, error: blockError } = await supabaseAdmin()
       .from("disp_message_queue")
       .update({ status: "bloqueado", erro: "Número na Blacklist" })
-      .eq("id", item.id);
+      .eq("id", item.id)
+      .eq("status", "enviando")
+      .select("id");
+    if (blockError) {
+      // Nada foi enviado e o bloqueio não ficou gravado: erro técnico retentável (o próximo tick confere a blacklist de novo).
+      const message = `Falha ao registrar o bloqueio por blacklist: ${blockError.message}`;
+      await markQueueError(item.id, message, false, item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: message };
+    }
+    // Outro caminho já mudou o item (devolvido pelo watchdog, encerrado...): não conta o bloqueio duas vezes.
+    if (!blocked || blocked.length === 0) return { outcome: "blocked", reason: "blacklisted" };
     // Antes desta correção, nada incrementava total_blacklist —
     // campaign_metrics nunca refletia quantos itens foram bloqueados.
     const { error: metricError } = await supabaseAdmin().rpc("increment_campaign_metric", {
