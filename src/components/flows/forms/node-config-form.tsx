@@ -58,6 +58,7 @@ import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
 import { useFlowEditor } from "../flow-editor-state";
 import { AiToolEditor } from "./ai-tool-editor";
 import { AgentPicker } from "./agent-picker";
+import { PICKER_CHOSEN_VAR, PICKER_MAX_OPTIONS, PICKER_NO_AGENT_REPLY_ID } from "@/lib/flows/agent-picker";
 import { ToolCatalogPicker } from "./tool-catalog-picker";
 import { PromptHistoryButton } from "@/components/ai/prompt-history-button";
 import {
@@ -582,6 +583,8 @@ interface SendListCfg {
   text?: string;
   button_label?: string;
   footer_text?: string;
+  /** Menu de operadores online (PRD 23, item 16). */
+  agent_picker?: { team_id?: string; max_options?: number } | null;
   sections?: Array<{
     title?: string;
     rows: Array<{
@@ -701,6 +704,14 @@ function SendListForm({
         />
       </div>
 
+      {/* Menu de operadores online (PRD 23, item 16): o cliente escolhe numa
+          lista do WhatsApp entre os operadores ONLINE da equipe; ninguém online
+          ⇒ destino de "ninguém online" (fila). As linhas são geradas na hora. */}
+      <AgentPickerToggle cfg={cfg} onUpdateConfig={onUpdateConfig} />
+
+      {cfg.agent_picker ? (
+        <AgentPickerEditor cfg={cfg} allNodes={allNodes} currentKey={currentKey} onUpdateConfig={onUpdateConfig} />
+      ) : (
       <div className="mt-2">
         <label className="mb-2 block text-xs text-muted-foreground">
           Linhas (1–10 no total, em todas as seções)
@@ -807,7 +818,176 @@ function SendListForm({
           </Button>
         )}
       </div>
+      )}
     </>
+  );
+}
+
+// ============================================================
+// send_list › menu de operadores online (PRD 23, item 16)
+// Contrato em src/lib/flows/agent-picker.ts: config.agent_picker liga o modo;
+// as linhas viram só TOPOLOGIA — a 1ª (modelo) aponta para onde vai quem
+// escolheu um operador (um handoff_agent com assign_from_var
+// "chosen_agent_id"); a "__no_agent" aponta para onde vai quando ninguém
+// está online. O menu real é gerado na hora, um item por operador online.
+// ============================================================
+
+const PICKER_TEMPLATE_REPLY_ID = "agent_choice";
+
+function AgentPickerToggle({
+  cfg,
+  onUpdateConfig,
+}: {
+  cfg: SendListCfg;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const on = Boolean(cfg.agent_picker);
+  const toggle = (next: boolean) => {
+    const rows = (cfg.sections ?? []).flatMap((s) => s.rows);
+    if (next) {
+      const firstNext = rows.find((r) => r.reply_id !== PICKER_NO_AGENT_REPLY_ID)?.next_node_key ?? "";
+      onUpdateConfig({
+        agent_picker: { max_options: PICKER_MAX_OPTIONS },
+        sections: [
+          {
+            title: "",
+            rows: [
+              { reply_id: PICKER_TEMPLATE_REPLY_ID, title: "Operador", next_node_key: firstNext },
+              { reply_id: PICKER_NO_AGENT_REPLY_ID, title: "Ninguém online", next_node_key: "" },
+            ],
+          },
+        ],
+      });
+    } else {
+      // Volta às linhas comuns: a linha modelo vira uma opção editável e a
+      // "__no_agent" (que nunca aparece no menu) sai.
+      onUpdateConfig({
+        agent_picker: null,
+        sections: (cfg.sections ?? []).map((s) => ({
+          ...s,
+          rows: s.rows.filter((r) => r.reply_id !== PICKER_NO_AGENT_REPLY_ID),
+        })),
+      });
+    }
+  };
+  return (
+    <label className="mt-2 flex items-start gap-3 rounded-md border border-border bg-card-2 p-3">
+      <Switch checked={on} onCheckedChange={toggle} className="mt-0.5" />
+      <span className="min-w-0">
+        <span className="block text-[13px] font-medium text-foreground">Menu de operadores online</span>
+        <span className="block text-xs text-muted-foreground">
+          O cliente escolhe na lista com quem quer falar, entre os operadores online da equipe. Se ninguém estiver
+          online, segue pelo destino de &ldquo;ninguém online&rdquo;.
+        </span>
+      </span>
+    </label>
+  );
+}
+
+function AgentPickerEditor({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: SendListCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const { teams, loading } = useHandoffOptions();
+  const picker = cfg.agent_picker ?? {};
+  const sections = cfg.sections ?? [];
+  const rows = sections.flatMap((s) => s.rows);
+  const templateRow = rows.find((r) => r.reply_id !== PICKER_NO_AGENT_REPLY_ID);
+  const noAgentRow = rows.find((r) => r.reply_id === PICKER_NO_AGENT_REPLY_ID);
+
+  const setRowNext = (replyId: string, nextKey: string) =>
+    onUpdateConfig({
+      sections: sections.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => (r.reply_id === replyId ? { ...r, next_node_key: nextKey } : r)),
+      })),
+    });
+  const setPicker = (patch: { team_id?: string; max_options?: number }) =>
+    onUpdateConfig({ agent_picker: { ...picker, ...patch } });
+
+  // O destino de quem escolheu precisa ser um "Transferir para atendente"
+  // com "atribuir ao operador escolhido" ligado — senão o cliente escolhe e
+  // ninguém recebe a conversa.
+  const target = templateRow?.next_node_key ? allNodes.find((n) => n.node_key === templateRow.next_node_key) : null;
+  const targetOk =
+    target?.node_type === "handoff_agent" &&
+    (target.config as { assign_from_var?: string } | undefined)?.assign_from_var === PICKER_CHOSEN_VAR;
+
+  return (
+    <div className="mt-2 flex flex-col gap-3 rounded-md border border-border p-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Equipe dos operadores</label>
+          <Select
+            value={picker.team_id ?? HANDOFF_ANY_TEAM}
+            onValueChange={(v) => setPicker({ team_id: v && v !== HANDOFF_ANY_TEAM ? v : undefined })}
+            disabled={loading}
+          >
+            <SelectTrigger className="w-full bg-muted">
+              <SelectValue placeholder="Toda a conta">
+                {picker.team_id ? teams.find((t) => t.id === picker.team_id)?.name ?? "Equipe" : "Toda a conta"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={HANDOFF_ANY_TEAM}>Toda a conta</SelectItem>
+              {teams.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  {t.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Máximo de operadores no menu (1–10)</label>
+          <Input
+            type="number"
+            min={1}
+            max={PICKER_MAX_OPTIONS}
+            value={picker.max_options ?? PICKER_MAX_OPTIONS}
+            onChange={(e) => {
+              const n = Math.round(Number(e.target.value));
+              if (Number.isFinite(n)) setPicker({ max_options: Math.min(PICKER_MAX_OPTIONS, Math.max(1, n)) });
+            }}
+            className="bg-muted"
+          />
+        </div>
+      </div>
+      {templateRow && (
+        <div>
+          <NextNodeRow
+            label="Quem escolheu um operador vai para"
+            value={templateRow.next_node_key}
+            allNodes={allNodes}
+            currentKey={currentKey}
+            onChange={(v) => setRowNext(templateRow.reply_id, v)}
+          />
+          {!targetOk && (
+            <p className="mt-1.5 text-xs text-warning">
+              Use um nó &ldquo;Transferir para atendente&rdquo; com &ldquo;Atribuir ao operador escolhido no menu&rdquo; ligado.
+            </p>
+          )}
+        </div>
+      )}
+      {noAgentRow ? (
+        <NextNodeRow
+          label="Se ninguém estiver online, vai para"
+          value={noAgentRow.next_node_key}
+          allNodes={allNodes}
+          currentKey={currentKey}
+          onChange={(v) => setRowNext(PICKER_NO_AGENT_REPLY_ID, v)}
+        />
+      ) : (
+        <p className="text-xs text-muted-foreground">Sem destino para &ldquo;ninguém online&rdquo;: a conversa vai para a fila normal da equipe.</p>
+      )}
+    </div>
   );
 }
 
@@ -1725,6 +1905,8 @@ interface HandoffAgentCfg {
   reason_subcode?: string;
   note?: string;
   assign_to?: string;
+  /** "chosen_agent_id" = atribui ao operador escolhido no menu de operadores (PRD 23, item 16). */
+  assign_from_var?: string;
 }
 
 function HandoffAgentForm({
@@ -1774,6 +1956,21 @@ function HandoffAgentForm({
           </SelectContent>
         </Select>
       </div>
+      {/* Destino do "Menu de operadores online" (item 16 do PRD 23): atribui ao
+          operador que o cliente escolheu na lista. Um agente fixo acima vence. */}
+      <label className="flex items-start gap-3 rounded-md border border-border bg-card-2 p-3">
+        <Switch
+          checked={cfg.assign_from_var === PICKER_CHOSEN_VAR}
+          onCheckedChange={(on) => onUpdateConfig({ assign_from_var: on ? PICKER_CHOSEN_VAR : undefined })}
+          className="mt-0.5"
+        />
+        <span className="min-w-0">
+          <span className="block text-[13px] font-medium text-foreground">Atribuir ao operador escolhido no menu</span>
+          <span className="block text-xs text-muted-foreground">
+            Use como destino de um &ldquo;Menu de operadores online&rdquo; (lista). Se um agente fixo estiver escolhido acima, ele vale.
+          </span>
+        </span>
+      </label>
       <TextRow
         label="Nota interna (para o agente que assumir)"
         value={cfg.note ?? ""}
