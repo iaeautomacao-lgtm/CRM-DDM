@@ -3,7 +3,7 @@
 // Recuperar senha — visual do Acesso redesenhado (AuthShell). Mesma lógica: resetPasswordForEmail com o
 // retorno por /auth/callback?next=/reset-password.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { Loader2, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -18,6 +18,7 @@ import { AUTH_INPUT_CLASS, AUTH_SUBMIT_CLASS, AuthNotice, AuthShell, BackToLogin
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const supabase = createClient();
@@ -33,6 +34,7 @@ export default function ForgotPasswordPage() {
 
     if (error) {
       setError(translateAuthError(error));
+      setTimeout(() => firstFieldRef.current?.focus(), 0);
       setLoading(false);
       return;
     }
@@ -84,6 +86,7 @@ export default function ForgotPasswordPage() {
           </Label>
           <Input
             id="email"
+            ref={firstFieldRef}
             type="email"
             autoComplete="email"
             placeholder="seu@exemplo.com"

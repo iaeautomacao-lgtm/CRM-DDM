@@ -74,6 +74,17 @@ import { socialWindow } from "@/lib/channels/graph";
 import { TransferDialog } from "@/components/monitoramento/transfer-dialog";
 import { CHANNEL_BADGE } from "./conversation-list";
 import { toast } from "sonner";
+import { automatedAuthor } from "@/lib/inbox/message-origin";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ReplyDraft {
   id: string;
@@ -311,10 +322,15 @@ export function MessageThread({
       refreshTimerRef.current = null;
     }, 700);
   }, [isRefreshing, onRefresh]);
-  const handleDeleteClick = useCallback(async () => {
+  // Excluir conversa: confirmação no AlertDialog (antes era window.confirm).
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const handleDeleteClick = useCallback(() => {
     if (!conversation || !onDeleteConversation) return;
-    const confirmed = window.confirm("Deseja mesmo excluir esta conversa e todas as suas mensagens?");
-    if (!confirmed) return;
+    setDeleteConfirmOpen(true);
+  }, [conversation, onDeleteConversation]);
+  const confirmDelete = useCallback(async () => {
+    if (!conversation || !onDeleteConversation) return;
+    setDeleteConfirmOpen(false);
     setIsDeleting(true);
     try {
       await onDeleteConversation(conversation.id);
@@ -1376,12 +1392,21 @@ export function MessageThread({
   }
 
   // Rótulo de autor acima das mensagens enviadas (item 21 do PRD 23):
-  // "Você", o nome do colega na cor dele ou "Automação" (IA, fluxo,
-  // disparo). Só quando o autor muda em relação à mensagem anterior.
+  // "Você", o nome do colega na cor dele, ou a origem automática (IA,
+  // Fluxo, Disparo, Automação, API — messages.origin, migration 302; sem
+  // origem = "Automação"). Só quando o autor muda em relação à anterior.
   const authorFor = (msg: Message, prev: Message | undefined) => {
     if (msg.sender_type !== "agent" && msg.sender_type !== "bot") return null;
-    if (prev && prev.sender_type === msg.sender_type && (prev.sender_id ?? null) === (msg.sender_id ?? null)) return null;
-    if (msg.sender_type === "bot") return { label: "Automação", className: "text-muted-foreground", bot: true };
+    if (
+      prev &&
+      prev.sender_type === msg.sender_type &&
+      (prev.sender_id ?? null) === (msg.sender_id ?? null) &&
+      (prev.origin ?? null) === (msg.origin ?? null)
+    ) {
+      return null;
+    }
+    const automated = automatedAuthor(msg.origin, msg.sender_type);
+    if (automated) return automated;
     if (msg.sender_id && msg.sender_id === user?.id) return { label: "Você", className: "text-primary-text", bot: false };
     const name = msg.sender_id ? profiles.find((p) => p.user_id === msg.sender_id)?.full_name : null;
     return {
@@ -1698,6 +1723,26 @@ export function MessageThread({
           })()}
         </div>
       </div>
+
+      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir conversa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Deseja mesmo excluir esta conversa e todas as suas mensagens? Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmDelete()}
+              className="bg-danger text-white hover:bg-danger/90"
+            >
+              Excluir conversa
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <TransferDialog
         conversation={transferOpen ? transferTarget : null}

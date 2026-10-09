@@ -25,7 +25,17 @@ import { Switch } from '@/components/ui/switch';
 import { DetailDrawer, ListCard, ListRow } from '@/components/ddm/list-with-drawer';
 import { Segmented } from '@/components/ddm/segmented';
 import { StatusChip, type StatusTone } from '@/components/ddm/status-chip';
-import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
+import { EmptyState, ErrorState, ForbiddenState, Skeleton } from '@/components/ddm/states';
+import { usePermissions } from '@/hooks/use-permission';
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export interface WebhookEndpoint {
   id: string;
@@ -95,7 +105,24 @@ async function readJson<T>(res: Response): Promise<T & { error?: string }> {
   return (await res.json().catch(() => ({}))) as T & { error?: string };
 }
 
+// Todas as rotas /api/settings/webhooks/* (inclusive a listagem) exigem api_keys.manage: sem ela, o 403 explicado
+// no lugar da tela — nenhum botão de criar, trocar segredo, testar, reenviar ou remover fica à mostra.
 export function WebhooksSettings() {
+  const { can, loading } = usePermissions();
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-2" aria-busy>
+        <Skeleton className="h-16 rounded-[10px]" />
+      </div>
+    );
+  }
+  if (!can('api_keys.manage')) {
+    return <ForbiddenState title="Você não pode gerenciar webhooks" hint="Webhooks de saída são configurados por quem gerencia as chaves de API da organização." />;
+  }
+  return <WebhooksPanel />;
+}
+
+function WebhooksPanel() {
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[] | null>(null);
   const [events, setEvents] = useState<EventOption[]>([]);
   const [max, setMax] = useState(10);
@@ -432,6 +459,8 @@ function WebhookDetail({
   const [description, setDescription] = useState(endpoint.description ?? '');
   const [chosen, setChosen] = useState<string[]>(endpoint.events);
   const [busy, setBusy] = useState<null | 'save' | 'rotate' | 'test' | 'delete'>(null);
+  // Confirmação de trocar segredo / remover (antes window.confirm).
+  const [confirm, setConfirm] = useState<null | 'rotate' | 'delete'>(null);
 
   const dirty =
     url.trim() !== endpoint.url ||
@@ -473,7 +502,7 @@ function WebhookDetail({
   }
 
   async function rotate() {
-    if (!window.confirm('Trocar o segredo? O atual deixa de valer na hora: atualize o sistema que recebe.')) return;
+    setConfirm(null);
     const body = await call<{ secret: string }>(`/api/settings/webhooks/${endpoint.id}/rotate-secret`, { method: 'POST' }, 'rotate');
     if (body?.secret) onSecret(body.secret);
   }
@@ -484,7 +513,7 @@ function WebhookDetail({
   }
 
   async function remove() {
-    if (!window.confirm(`Remover o webhook ${displayUrl(endpoint.url)}? Os eventos deixam de ser enviados.`)) return;
+    setConfirm(null);
     const body = await call<{ deleted: boolean }>(`/api/settings/webhooks/${endpoint.id}`, { method: 'DELETE' }, 'delete');
     if (body) {
       toast.success('Webhook removido.');
@@ -527,7 +556,7 @@ function WebhookDetail({
           evento <code>webhook.test</code> só para este endereço.
         </p>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => void rotate()} disabled={!!busy}>
+          <Button variant="outline" onClick={() => setConfirm('rotate')} disabled={!!busy}>
             {busy === 'rotate' ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
             Trocar segredo
           </Button>
@@ -535,7 +564,7 @@ function WebhookDetail({
             {busy === 'test' ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
             Enviar teste
           </Button>
-          <Button variant="ghost" onClick={() => void remove()} disabled={!!busy} className="text-destructive hover:text-destructive">
+          <Button variant="ghost" onClick={() => setConfirm('delete')} disabled={!!busy} className="text-destructive hover:text-destructive">
             {busy === 'delete' ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
             Remover
           </Button>
@@ -544,6 +573,28 @@ function WebhookDetail({
       </section>
 
       <DeliveriesSection endpointId={endpoint.id} />
+
+      <AlertDialog open={confirm !== null} onOpenChange={(o) => !o && setConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm === 'rotate' ? 'Trocar o segredo?' : `Remover o webhook ${displayUrl(endpoint.url)}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm === 'rotate'
+                ? 'O atual deixa de valer na hora: atualize o sistema que recebe.'
+                : 'Os eventos deixam de ser enviados.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <Button
+              variant={confirm === 'delete' ? 'destructive' : 'default'}
+              onClick={() => void (confirm === 'rotate' ? rotate() : remove())}
+            >
+              {confirm === 'rotate' ? 'Trocar segredo' : 'Remover webhook'}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

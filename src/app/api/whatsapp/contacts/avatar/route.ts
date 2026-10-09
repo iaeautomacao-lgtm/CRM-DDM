@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   const phone = searchParams.get('phone')
 
   if (!phone) {
-    return NextResponse.json({ error: 'phone required' }, { status: 400 })
+    return NextResponse.json({ error: 'phone é obrigatório' }, { status: 400 })
   }
 
   const db = supabaseAdmin()

@@ -149,8 +149,10 @@ export function InviteMemberDialog({
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label className="text-muted-foreground">Nome</Label>
+            <Label htmlFor="invite-member-name" className="text-muted-foreground">Nome</Label>
             <Input
+              id="invite-member-name"
+              autoComplete="off"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="ex: Sara Almeida"
@@ -159,9 +161,12 @@ export function InviteMemberDialog({
           </div>
 
           <div className="space-y-2">
-            <Label className="text-muted-foreground">E-mail</Label>
+            <Label htmlFor="invite-member-email" className="text-muted-foreground">E-mail</Label>
             <Input
+              id="invite-member-email"
               type="email"
+              inputMode="email"
+              autoComplete="off"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="sara@empresa.com"
@@ -170,12 +175,12 @@ export function InviteMemberDialog({
           </div>
 
           <div className="space-y-2">
-            <Label className="text-muted-foreground">Papel</Label>
+            <Label htmlFor="invite-member-role" className="text-muted-foreground">Papel</Label>
             <Select
               value={role}
               onValueChange={(v) => v && setRole(v as AccountRole)}
             >
-              <SelectTrigger className="w-full bg-muted border-border text-foreground">
+              <SelectTrigger id="invite-member-role" className="w-full bg-muted border-border text-foreground">
                 <SelectValue>
                   {(value: AccountRole | null) =>
                     value ? ROLE_META[value].label : ''
@@ -193,9 +198,12 @@ export function InviteMemberDialog({
           </div>
 
           <div className="space-y-2">
-            <Label className="text-muted-foreground">Senha</Label>
+            <Label htmlFor="invite-member-password" className="text-muted-foreground">Senha</Label>
             <div className="relative">
               <Input
+                id="invite-member-password"
+                autoComplete="new-password"
+                aria-describedby="invite-member-password-hint"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -211,6 +219,9 @@ export function InviteMemberDialog({
                 {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               </button>
             </div>
+            <p id="invite-member-password-hint" className="text-xs text-muted-foreground">
+              A senha precisa ter pelo menos {MIN_PASSWORD_LENGTH} caracteres.
+            </p>
           </div>
         </div>
 

@@ -29,6 +29,12 @@ export interface DdmFlowDeps {
   now?: () => number;
 }
 
+/**
+ * A Meta espera a resposta do endpoint em ~3 s (RNF-01 do PRD 21): depois disso o cliente vê "não foi possível carregar o formulário". A API da DDM
+ * pode levar até 10 s (DDM_TIMEOUT_MS); aqui o teto é 2,5 s — melhor devolver o erro padrão da tela na hora (e deixar o cache de 5 min ajudar na
+ * tentativa seguinte) do que prender a conexão por mais tempo do que a Meta espera.
+ */
+export const DATA_EXCHANGE_DDM_TIMEOUT_MS = 2_500;
 const CACHE_TTL_MS = 5 * 60_000; // FLOW-05: a Meta espera ≤ 3 s; telas seguintes do mesmo formulário não refazem a consulta
 const CACHE_MAX = 500;
 const ACTIONS = new Set(["INIT", "BACK", "data_exchange"]);
@@ -53,7 +59,7 @@ async function resolveToken(db: Db, token: unknown, accountId: string): Promise<
 export function createDdmFlowDataHandler(deps: DdmFlowDeps): FlowDataHandler {
   const now = deps.now ?? Date.now;
   const cache = new Map<string, { at: number; debts: DdmDebtListItem[] }>();
-  const listDebts = deps.listDebts ?? ((accountId, cpf) => listDdmDebts(cpf, { allow: ddmAllowance(accountId) }));
+  const listDebts = deps.listDebts ?? ((accountId, cpf) => listDdmDebts(cpf, { allow: ddmAllowance(accountId), timeoutMs: DATA_EXCHANGE_DDM_TIMEOUT_MS }));
 
   return async (request, ctx) => {
     const action = typeof request.action === "string" ? request.action : "";

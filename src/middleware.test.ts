@@ -74,14 +74,14 @@ describe("middleware auth", () => {
     const res = await middleware(new NextRequest("https://app.test/api/whatsapp/send"));
 
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "Unauthorized" });
+    expect(await res.json()).toEqual({ error: "Não autorizado" });
   });
 
   it("returns 401 for protected Disparador API routes when signed out", async () => {
     const res = await middleware(new NextRequest("https://app.test/api/disparador/campaigns/1"));
 
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "Unauthorized" });
+    expect(await res.json()).toEqual({ error: "Não autorizado" });
   });
 
   it("allows an authenticated protected route", async () => {

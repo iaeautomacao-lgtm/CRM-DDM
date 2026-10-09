@@ -15,7 +15,10 @@
 -- A "não lida" continua definida por internal_messages.read_at IS NULL (fonte única); internal_chat_reads é o registro por conversa.
 -- Nada muda nas tabelas existentes. Sem esta migration o front mantém o cálculo antigo.
 --
--- PRÉ-CHECK: SELECT to_regclass('wacrm.internal_messages'), to_regprocedure('wacrm.is_account_member(uuid)');   -- não nulos
+-- PRÉ-CHECK: SELECT to_regclass('wacrm.internal_messages');   -- não nulo
+--             SELECT p.oid::regprocedure FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+--              WHERE n.nspname = 'wacrm' AND p.proname = 'is_account_member';   -- 1 linha: is_account_member(uuid, account_role_enum DEFAULT 'viewer')
+--             (NÃO existe overload de 1 argumento: to_regprocedure('wacrm.is_account_member(uuid)') devolve NULL em produção.)
 -- VERIFICAÇÃO: SELECT proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='wacrm' AND proname LIKE 'internal_chat_%';  -- 2 funções
 -- ORDEM: antes ou depois do deploy. O índice de apoio das não lidas é a 303b (CONCURRENTLY, rodar sozinha); as funções funcionam sem ele.
 -- ROLLBACK: DROP FUNCTION IF EXISTS wacrm.internal_chat_threads(uuid, integer); DROP FUNCTION IF EXISTS wacrm.internal_chat_mark_read(uuid, uuid);
@@ -29,8 +32,11 @@ BEGIN
   IF to_regclass('wacrm.internal_messages') IS NULL THEN
     RAISE EXCEPTION '303: falta wacrm.internal_messages (migration 109)';
   END IF;
-  IF to_regprocedure('wacrm.is_account_member(uuid)') IS NULL THEN
-    RAISE EXCEPTION '303: falta wacrm.is_account_member(uuid)';
+  -- Pelo NOME: a assinatura real é is_account_member(uuid, account_role_enum DEFAULT 'viewer') (017/140); as chamadas com 1 argumento
+  -- das policies continuam válidas por causa do default.
+  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                  WHERE n.nspname = 'wacrm' AND p.proname = 'is_account_member') THEN
+    RAISE EXCEPTION '303: falta wacrm.is_account_member';
   END IF;
 END $$;
 

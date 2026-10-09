@@ -158,8 +158,8 @@ export function ContactForm({
         data: { session },
       } = await supabase.auth.getSession();
       const user = session?.user;
-      if (!user) throw new Error('Not authenticated');
-      if (!accountId) throw new Error('Your profile is not linked to an account.');
+      if (!user) throw new Error('Você não está autenticado.');
+      if (!accountId) throw new Error('Seu perfil não está vinculado a uma conta.');
 
       let contactId = contact?.id;
 
@@ -260,6 +260,7 @@ export function ContactForm({
             </Label>
             <Input
               id="cf-name"
+              autoComplete="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Maria da Silva"
@@ -269,10 +270,15 @@ export function ContactForm({
 
           <div className="space-y-2">
             <Label htmlFor="cf-phone" className="text-muted-foreground">
-              Telefone <span className="text-red-400">*</span>
+              Telefone <span className="text-danger" aria-hidden="true">*</span>
             </Label>
             <Input
               id="cf-phone"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              aria-invalid={dupMatch?.exact ? true : undefined}
+              aria-describedby={dupMatch ? 'cf-phone-dup' : 'cf-phone-hint'}
               value={phone}
               onChange={(e) => {
                 setPhone(e.target.value);
@@ -284,10 +290,12 @@ export function ContactForm({
             />
             {dupMatch ? (
               <div
+                id="cf-phone-dup"
+                role="alert"
                 className={`flex items-start gap-2 rounded-md border px-2.5 py-2 text-xs ${
                   dupMatch.exact
-                    ? 'border-red-500/40 bg-red-500/10 text-red-300'
-                    : 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                    ? 'border-danger/40 bg-danger-soft text-danger'
+                    : 'border-warning/40 bg-warning-soft text-warning'
                 }`}
               >
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -309,7 +317,7 @@ export function ContactForm({
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">
+              <p id="cf-phone-hint" className="text-xs text-muted-foreground">
                 Inclua o código do país, ex: +55 para Brasil
               </p>
             )}
@@ -322,6 +330,7 @@ export function ContactForm({
             <Input
               id="cf-email"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="maria@exemplo.com.br"

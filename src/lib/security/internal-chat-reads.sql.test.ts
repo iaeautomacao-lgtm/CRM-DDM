@@ -26,9 +26,11 @@ beforeAll(async () => {
     GRANT EXECUTE ON FUNCTION auth.uid() TO authenticated;
     CREATE TABLE wacrm.accounts (id uuid PRIMARY KEY);
     CREATE TABLE wacrm.members (user_id uuid, account_id uuid);
-    CREATE FUNCTION wacrm.is_account_member(a uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+    -- Assinatura REAL de produção (017/140): (uuid, account_role_enum DEFAULT 'viewer'); NÃO há overload de 1 argumento.
+    CREATE TYPE wacrm.account_role_enum AS ENUM ('owner', 'admin', 'supervisor', 'agent', 'viewer');
+    CREATE FUNCTION wacrm.is_account_member(a uuid, min_role wacrm.account_role_enum DEFAULT 'viewer') RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
       AS $$ SELECT EXISTS (SELECT 1 FROM wacrm.members m WHERE m.account_id = a AND m.user_id = auth.uid()) $$;
-    GRANT EXECUTE ON FUNCTION wacrm.is_account_member(uuid) TO authenticated;
+    GRANT EXECUTE ON FUNCTION wacrm.is_account_member(uuid, wacrm.account_role_enum) TO authenticated;
     INSERT INTO auth.users VALUES ('${ANA}'), ('${BIA}'), ('${CAIO}');
     INSERT INTO wacrm.accounts VALUES ('${ACC}'), ('${OTHER_ACC}');
     INSERT INTO wacrm.members VALUES ('${ANA}', '${ACC}'), ('${BIA}', '${ACC}'), ('${CAIO}', '${ACC}');
@@ -90,6 +92,12 @@ it('lista uma linha por colega, da mais recente à mais antiga, com prévia, rem
   expect(rows.map((r) => r.peer_id)).toEqual([CAIO, BIA])
   expect(rows[0]).toMatchObject({ last_preview: '[imagem]', last_sender_id: CAIO, unread_count: 1 })
   expect(rows[1]).toMatchObject({ last_preview: 'urgente', last_sender_id: BIA, unread_count: 3, last_read_at: null })
+})
+
+it('o pré-check da migration usa a assinatura real (sem overload de 1 argumento)', async () => {
+  const { rows } = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_proc p JOIN pg_namespace ns ON ns.oid = p.pronamespace WHERE ns.nspname = 'wacrm' AND p.proname = 'is_account_member' AND p.pronargs = 1")
+  expect(rows[0].n).toBe(0)
+  expect((await db.query("SELECT to_regprocedure('wacrm.is_account_member(uuid)') AS f")).rows[0]).toEqual({ f: null })
 })
 
 it('a RLS esconde conversa alheia: Ana não vê Bia↔Caio, e cada um só conta as próprias não lidas', async () => {

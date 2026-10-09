@@ -59,6 +59,8 @@ export default function PipelinesPage() {
   const [loading, setLoading] = useState(true);
   // Falha ao ler os pipelines: mostra erro com retry em vez de "nenhum pipeline" (e não tenta criar o padrão).
   const [loadError, setLoadError] = useState(false);
+  // Falha ao ler etapas/negócios do funil selecionado.
+  const [boardError, setBoardError] = useState(false);
 
   // Dialog / sheet state
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
@@ -89,26 +91,45 @@ export default function PipelinesPage() {
     return data ?? [];
   }, [supabase]);
 
+  // Retorna null em caso de erro (o chamador mostra ErrorState em vez de um quadro vazio).
   const loadStages = useCallback(
-    async (pipelineId: string) => {
-      const { data } = await supabase
+    async (pipelineId: string): Promise<PipelineStage[] | null> => {
+      const { data, error } = await supabase
         .from("pipeline_stages")
         .select("*")
         .eq("pipeline_id", pipelineId)
         .order("position");
+      if (error) {
+        console.error("Failed to load stages:", error.message);
+        return null;
+      }
       return data ?? [];
     },
     [supabase],
   );
 
+  // Paginado com .range(): o PostgREST corta em 1000 linhas sem avisar.
   const loadDeals = useCallback(
-    async (pipelineId: string) => {
-      const { data } = await supabase
-        .from("deals")
-        .select("*, contact:contacts(*), assignee:profiles!deals_assigned_to_fkey(*)")
-        .eq("pipeline_id", pipelineId)
-        .order("created_at", { ascending: false });
-      return (data ?? []) as Deal[];
+    async (pipelineId: string): Promise<Deal[] | null> => {
+      const PAGE = 1000;
+      const all: Deal[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("deals")
+          .select("*, contact:contacts(*), assignee:profiles!deals_assigned_to_fkey(*)")
+          .eq("pipeline_id", pipelineId)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, from + PAGE - 1);
+        if (error) {
+          console.error("Failed to load deals:", error.message);
+          return null;
+        }
+        const rows = (data ?? []) as Deal[];
+        all.push(...rows);
+        if (rows.length < PAGE) break;
+      }
+      return all;
     },
     [supabase],
   );
@@ -204,6 +225,11 @@ export default function PipelinesPage() {
         loadDeals(selectedPipelineId),
       ]);
       if (cancelled) return;
+      if (s === null || d === null) {
+        setBoardError(true);
+        return;
+      }
+      setBoardError(false);
       setStages(s);
       setDeals(d);
     })();
@@ -223,12 +249,24 @@ export default function PipelinesPage() {
 
   const refreshStages = useCallback(async () => {
     if (!selectedPipelineId) return;
-    setStages(await loadStages(selectedPipelineId));
+    const s = await loadStages(selectedPipelineId);
+    if (s === null) {
+      setBoardError(true);
+      return;
+    }
+    setBoardError(false);
+    setStages(s);
   }, [loadStages, selectedPipelineId]);
 
   const refreshDeals = useCallback(async () => {
     if (!selectedPipelineId) return;
-    setDeals(await loadDeals(selectedPipelineId));
+    const d = await loadDeals(selectedPipelineId);
+    if (d === null) {
+      setBoardError(true);
+      return;
+    }
+    setBoardError(false);
+    setDeals(d);
   }, [loadDeals, selectedPipelineId]);
 
   const handleDealMoved = useCallback(
@@ -442,6 +480,14 @@ export default function PipelinesPage() {
             Criar Pipeline
           </GatedButton>
         </div>
+      ) : boardError ? (
+        <ErrorState
+          title="Não foi possível carregar as etapas e os negócios"
+          onRetry={() => {
+            void refreshStages();
+            void refreshDeals();
+          }}
+        />
       ) : (
         <>
           <PipelineAnalytics stages={stages} deals={deals} />
@@ -463,8 +509,9 @@ export default function PipelinesPage() {
             <DialogTitle className="text-popover-foreground">Novo Pipeline</DialogTitle>
           </DialogHeader>
           <div className="py-2">
-            <Label className="text-muted-foreground">Nome do Pipeline</Label>
+            <Label htmlFor="new-pipeline-name" className="text-muted-foreground">Nome do Pipeline</Label>
             <Input
+              id="new-pipeline-name"
               value={newPipelineName}
               onChange={(e) => setNewPipelineName(e.target.value)}
               placeholder="ex.: Vendas Corporativas"

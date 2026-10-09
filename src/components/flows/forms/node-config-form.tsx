@@ -2726,7 +2726,7 @@ function SendTemplateForm({
 }) {
   return (
     <>
-      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-400">
+      <p className="rounded-md border border-warning/30 bg-warning-soft p-2 text-[11px] text-foreground">
         Templates (HSM) só funcionam em canais Meta. Em canais WAHA, o texto
         de fallback abaixo é enviado como mensagem comum.
       </p>
@@ -2795,7 +2795,7 @@ function SendFlowForm({
   const vars = "Aceita {{vars.nome_da_variavel}}.";
   return (
     <>
-      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-400">
+      <p className="rounded-md border border-warning/30 bg-warning-soft p-2 text-[11px] text-foreground">
         O formulário (WhatsApp Flow) só funciona em canais Meta. Nos demais canais (WAHA, Webchat…) é enviado o texto
         alternativo abaixo; sem texto alternativo, o fluxo apenas avança. A resposta do cliente volta ao fluxo como
         variáveis (flow_*).

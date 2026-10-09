@@ -30,6 +30,7 @@ import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { StatusChip } from "@/components/ddm/status-chip";
 import { ListCard, ListRow } from "@/components/ddm/list-with-drawer";
 import { EmptyState, ErrorState, ForbiddenState } from "@/components/ddm/states";
+import { AlertsBanner } from "@/components/regua/alerts-banner";
 import { EnrollmentsTab } from "@/components/regua/enrollments-tab";
 import { RulerDrawer, STATE_TONE, type LineChoice } from "@/components/regua/ruler-drawer";
 import { billingFetch, errorMessage } from "@/lib/billing/client-api";
@@ -153,6 +154,8 @@ function ReguaBoard({ canManage }: { canManage: boolean }) {
           Etapas automáticas por vencimento, que param sozinhas quando a dívida é paga ou o devedor pede para sair.
         </p>
       </div>
+
+      <AlertsBanner />
 
       <PageToolbar
         actions={

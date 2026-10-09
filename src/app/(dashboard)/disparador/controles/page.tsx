@@ -75,13 +75,13 @@ function RateBlock(props: {
   const { number: n, info, available, ceiling, draft } = props;
   if (!available) {
     return (
-      <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-muted-foreground">
+      <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-foreground-2">
         Limite por segundo indisponível: aplique a migration 190 (limite por qualidade da Meta).
       </p>
     );
   }
   if (!info) {
-    return <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-muted-foreground">Sem leitura de qualidade para este número ainda.</p>;
+    return <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-foreground-2">Sem leitura de qualidade para este número ainda.</p>;
   }
   const quality = info.quality ?? "UNKNOWN";
   const above = info.autoTargetPerSecond !== null && Number(draft.rate.replace(",", ".")) > info.autoTargetPerSecond;

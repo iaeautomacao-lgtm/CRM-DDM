@@ -18,6 +18,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { createClient } from "@/lib/supabase/client";
 import { useDialogA11y } from "@/hooks/use-dialog-a11y";
 import { trackAction } from "@/hooks/use-telemetry";
+import { usePermission } from "@/hooks/use-permission";
 import { campaignChannelGroupKey } from "@/lib/disparador/campaign-validation";
 import { inferTeamFromChannels, keepChannelsInTeam } from "@/lib/disparador/channel-filter";
 import { suggestImportColumnMap, type ImportColumnMap } from "@/lib/disparador/import-mapping";
@@ -130,6 +131,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
   const [draftId, setDraftId] = useState<string>(() => crypto.randomUUID());
   const [pendingDraft, setPendingDraft] = useState<WizardForm | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const canManage = usePermission("campaigns.manage");
   // Progresso do envio da base em blocos (linhas já enviadas / total).
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [now, setNow] = useState(() => new Date());
@@ -684,7 +686,8 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
   }, [reviewOk, payloadKey]);
 
   const submit = async () => {
-    if (submitting) return;
+    // Criar/editar campanha: campaigns.manage (o servidor também recusa sem ela).
+    if (submitting || !canManage) return;
     const bad = firstInvalidStep(4, form, ctx);
     if (bad) {
       setStep(bad);
@@ -837,7 +840,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
                                 ? "bg-success-soft text-success"
                                 : s <= maxVisited
                                   ? "bg-surface-3 text-foreground"
-                                  : "bg-surface-3 text-muted-foreground",
+                                  : "bg-surface-3 text-foreground-2",
                           )}
                         >
                           {done ? <CheckCircle2 className="size-3.5" aria-hidden="true" /> : s}
@@ -993,7 +996,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
             <Button
               type="button"
               onClick={() => void submit()}
-              disabled={submitting || reviewErrors.length > 0 || serverCheck.state === "error"}
+              disabled={!canManage || submitting || reviewErrors.length > 0 || serverCheck.state === "error"}
             >
               {submitting && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
               {submitting

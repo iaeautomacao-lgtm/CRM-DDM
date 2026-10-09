@@ -49,6 +49,7 @@ import { processMessage, resolveCallContext, type WhatsAppMessage } from '@/lib/
 import { extractMessageEvents, ingestMessageEvents, messageInboxMode } from '@/lib/whatsapp/message-inbox'
 import { drainMessageInboxLive } from '@/lib/whatsapp/message-inbox-runner'
 import { maskTextForLog } from '@/lib/privacy/mask'
+import { drainPushOutbox } from '@/lib/push/service'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -405,6 +406,9 @@ export async function POST(request: Request) {
         ? drainMessageInboxLive(supabaseAdmin(), { ids: ownMessageIds, requireTurn: true })
         : Promise.resolve(),
     ])
+    // Push "Nova conversa em espera" (migration 298): só DEPOIS do processamento (é ele que coloca a conversa em espera). Nunca
+    // lança nem bloqueia o 200 (já devolvido); sem a migration é no-op.
+    await drainPushOutbox(supabaseAdmin(), { limit: 20 })
   })
 
   return NextResponse.json({ status: 'received' }, { status: 200 })

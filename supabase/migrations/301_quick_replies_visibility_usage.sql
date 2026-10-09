@@ -14,10 +14,21 @@
 --
 -- PRÉ-CHECK:  SELECT column_name FROM information_schema.columns WHERE table_schema='wacrm' AND table_name='quick_replies' AND column_name='visibility';  -- 0 linhas
 --             SELECT conname FROM pg_constraint WHERE conrelid='wacrm.quick_replies'::regclass AND contype='u';  -- confira o nome do UNIQUE (account_id, shortcut)
--- ROLLBACK:   DROP FUNCTION IF EXISTS wacrm.quick_reply_usage_30d(), wacrm.bump_quick_reply_use(uuid, uuid, uuid);
+-- ROLLBACK:   (ATENÇÃO: apaga as respostas personal/team — sem a coluna visibility elas virariam da conta toda e vazariam; reverta o código ANTES)
+--             DROP FUNCTION IF EXISTS wacrm.quick_reply_usage_30d(), wacrm.bump_quick_reply_use(uuid, uuid, uuid);
 --             DROP TABLE IF EXISTS wacrm.quick_reply_usage_daily;
---             (volte as políticas da 142; DROP INDEX wacrm.idx_quick_replies_scope_shortcut; recrie UNIQUE (account_id, shortcut) —
---              antes apague/renomeie as personal/team duplicadas; DROP COLUMN visibility, team_id)
+--             DELETE FROM wacrm.quick_replies WHERE visibility IN ('personal', 'team');
+--             DROP POLICY IF EXISTS quick_replies_select ON wacrm.quick_replies;
+--             DROP POLICY IF EXISTS quick_replies_insert ON wacrm.quick_replies;
+--             DROP POLICY IF EXISTS quick_replies_update ON wacrm.quick_replies;
+--             DROP POLICY IF EXISTS quick_replies_delete ON wacrm.quick_replies;
+--             CREATE POLICY quick_replies_select ON wacrm.quick_replies FOR SELECT USING (wacrm.is_account_member(account_id));
+--             CREATE POLICY quick_replies_insert ON wacrm.quick_replies FOR INSERT WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
+--             CREATE POLICY quick_replies_update ON wacrm.quick_replies FOR UPDATE USING (wacrm.is_account_member(account_id, 'admin')) WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
+--             CREATE POLICY quick_replies_delete ON wacrm.quick_replies FOR DELETE USING (wacrm.is_account_member(account_id, 'admin'));
+--             DROP INDEX IF EXISTS wacrm.idx_quick_replies_scope_shortcut;
+--             ALTER TABLE wacrm.quick_replies DROP COLUMN IF EXISTS visibility, DROP COLUMN IF EXISTS team_id;
+--             ALTER TABLE wacrm.quick_replies ADD CONSTRAINT quick_replies_account_id_shortcut_key UNIQUE (account_id, shortcut);
 --             DELETE FROM wacrm.schema_migrations WHERE version = '301_quick_replies_visibility_usage';
 -- Idempotente — pode rodar mais de uma vez.
 -- ============================================================

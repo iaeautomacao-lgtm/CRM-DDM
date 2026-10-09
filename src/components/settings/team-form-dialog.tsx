@@ -284,7 +284,7 @@ export function TeamFormDialog({
         await onSaved();
         onOpenChange(false);
       } else {
-        if (!accountId) throw new Error('Not authenticated');
+        if (!accountId) throw new Error('Você não está autenticado.');
         const { data: created, error } = await supabase
           .from('teams')
           .insert({

@@ -5,7 +5,7 @@
 // verificação pelo supabase.auth.mfa.* da própria sessão; sucesso eleva a sessão para aal2 e volta para ?next=.
 // "Sair" encerra a sessão aal1. Sem loop: esta página não usa o shell do painel nem rotas que exigem aal2.
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, ShieldCheck } from "lucide-react";
 
@@ -33,6 +33,12 @@ function TwoFactorLoginInner() {
 
   const [factorId, setFactorId] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  const codeRef = useRef<HTMLInputElement>(null);
+  // No erro, volta o foco ao campo com o código selecionado (o botão focado fica desabilitado durante a verificação).
+  const focusCode = () => setTimeout(() => {
+    codeRef.current?.focus();
+    codeRef.current?.select();
+  }, 0);
   const [checking, setChecking] = useState(true);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +79,7 @@ function TwoFactorLoginInner() {
     e.preventDefault();
     if (!factorId || code.length !== 6) {
       setError("Digite os 6 dígitos do aplicativo autenticador.");
+      focusCode();
       return;
     }
     setVerifying(true);
@@ -80,6 +87,7 @@ function TwoFactorLoginInner() {
     const { error: err } = await supabase.auth.mfa.challengeAndVerify({ factorId, code });
     if (err) {
       setError(verifyErrorMessage(err.message));
+      focusCode();
       setVerifying(false);
       return;
     }
@@ -104,8 +112,9 @@ function TwoFactorLoginInner() {
       }
     >
       {checking ? (
-        <div className="flex justify-center py-6" aria-busy>
-          <Loader2 className="size-5 animate-spin text-primary" />
+        <div role="status" className="flex justify-center py-6" aria-busy="true">
+          <Loader2 className="size-5 animate-spin text-primary" aria-hidden="true" />
+          <span className="sr-only">Verificando sua sessão…</span>
         </div>
       ) : fatal ? null : (
         <form onSubmit={(e) => void verify(e)} className="flex flex-col gap-4" noValidate>
@@ -113,10 +122,10 @@ function TwoFactorLoginInner() {
             <Label htmlFor="totp-code">Código</Label>
             <Input
               id="totp-code"
+              ref={codeRef}
               inputMode="numeric"
               autoComplete="one-time-code"
               autoFocus
-              maxLength={6}
               value={code}
               onChange={(e) => setCode(normalizeTotpCode(e.target.value))}
               placeholder="000000"
@@ -126,8 +135,9 @@ function TwoFactorLoginInner() {
             />
             {error && <AuthFieldError id="totp-error">{error}</AuthFieldError>}
           </div>
-          <Button type="submit" disabled={verifying || code.length !== 6} className={AUTH_SUBMIT_CLASS}>
-            {verifying && <Loader2 className="size-4 animate-spin" />}
+          {/* Habilitado mesmo incompleto: o envio mostra o erro em vez de um botão apagado sem explicação. */}
+          <Button type="submit" disabled={verifying} className={AUTH_SUBMIT_CLASS}>
+            {verifying && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
             {verifying ? "Verificando…" : "Verificar e entrar"}
           </Button>
         </form>
