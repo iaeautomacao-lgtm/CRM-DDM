@@ -7,7 +7,7 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { Loader2, MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { translateAuthError } from "@/lib/auth/auth-errors";
+import { RECOVERY_SENT_MESSAGE, recoveryOutcome } from "@/lib/auth/auth-errors";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,8 +32,10 @@ export default function ForgotPasswordPage() {
       redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
     });
 
-    if (error) {
-      setError(translateAuthError(error));
+    // Só erros que não dependem de a conta existir aparecem; o resto cai na mesma tela neutra de "enviado".
+    const outcome = recoveryOutcome(error);
+    if (outcome.kind === "error") {
+      setError(outcome.message);
       setTimeout(() => firstFieldRef.current?.focus(), 0);
       setLoading(false);
       return;
@@ -54,8 +56,8 @@ export default function ForgotPasswordPage() {
         title="Verifique seu e-mail"
         description={
           <span role="status">
-            Enviamos um link de redefinição de senha para <span className="font-semibold text-foreground">{email}</span>. Por
-            favor, verifique sua caixa de entrada.
+            {RECOVERY_SENT_MESSAGE} Verifique a caixa de entrada de{" "}
+            <span className="font-semibold text-foreground">{email}</span>.
           </span>
         }
       >
