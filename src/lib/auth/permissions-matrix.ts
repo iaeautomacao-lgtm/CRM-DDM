@@ -55,6 +55,18 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("account", "GET", "viewer", "account.view"),
   pg("account", "PATCH", "admin", "settings.account"),
   pg("settings/account-config", "GET", "viewer", "account.view"), // PRD 24, item 6
+  pg("billing/rulers", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/rulers", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/rulers/[id]", "PATCH", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]", "DELETE", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]/steps", "PUT", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]/dry-run", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/rulers/[id]/metrics", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/enrollments", "GET", "supervisor", "billing.view"), // PRD 17.5
+  pg("billing/enrollments/[id]/pause", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/enrollments/[id]/resume", "POST", "admin", "billing.manage"), // PRD 17.5
+  pg("billing/enrollments/[id]/stop", "POST", "admin", "billing.manage"), // PRD 17.5
   pg("settings/account-config/[key]", "PUT", "admin", "settings.account"),
   pg("settings/account-config/[key]", "DELETE", "admin", "settings.account"),
   pg("account/ai-config", "GET", "admin", "ai.config"),
