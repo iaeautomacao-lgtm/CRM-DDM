@@ -452,7 +452,7 @@ export async function legacyLoadAiAnalytics(db: DB): Promise<AiAnalyticsData> {
     db.from('conversations').select('sentiment'),
     db.from('messages').select('sender_type').in('sender_type', ['agent', 'bot']),
     db.from('deals').select('status, value, user_id'),
-    db.from('profiles').select('user_id, full_name, email')
+    db.from('profiles').select('user_id, full_name')
   ]);
 
   const sentiment = { positive: 0, neutral: 0, negative: 0, mixed: 0, total: 0 };
@@ -509,7 +509,7 @@ export async function legacyLoadAiAnalytics(db: DB): Promise<AiAnalyticsData> {
     const prof = (profiles.data ?? []).find((p: any) => p.user_id === userId);
     return {
       userId,
-      userName: prof?.full_name || prof?.email || 'Operador',
+      userName: prof?.full_name || 'Operador',
       totalWon: stats.totalWon,
       dealCount: stats.dealCount
     };

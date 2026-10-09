@@ -277,15 +277,15 @@ export function ContactSidebar({
     const supabase = createClient();
     void Promise.all([
       agentId
-        ? supabase.from("profiles").select("full_name, email").eq("user_id", agentId).limit(1)
-        : Promise.resolve({ data: [] as { full_name: string | null; email: string | null }[] }),
+        ? supabase.from("profiles").select("full_name").eq("user_id", agentId).limit(1)
+        : Promise.resolve({ data: [] as { full_name: string | null }[] }),
       teamId
         ? supabase.from("teams").select("name").eq("id", teamId).limit(1)
         : Promise.resolve({ data: [] as { name: string }[] }),
     ]).then(([agent, team]) => {
       if (cancelled) return;
-      const a = (agent.data ?? [])[0] as { full_name: string | null; email: string | null } | undefined;
-      setAssigneeName(a ? a.full_name || a.email || "Atendente" : null);
+      const a = (agent.data ?? [])[0] as { full_name: string | null } | undefined;
+      setAssigneeName(a ? a.full_name || "Atendente" : null);
       setTeamName(((team.data ?? [])[0] as { name: string } | undefined)?.name ?? null);
     });
     return () => {
