@@ -22,6 +22,9 @@ export const API_SCOPES = [
   'campaigns:write',
   'campaigns:read',
   'reports:read',
+  // Webhooks de saída (PRD 15, 15.14): cadastrar endpoints assinados e ler o histórico de entregas.
+  'webhooks:read',
+  'webhooks:write',
   // Chave PESSOAL (exige api_keys.user_id, migration 154): leitura do DDM
   // Intelligence via MCP (/api/mcp), com o escopo de equipes do dono da
   // chave recalculado a cada requisição. Regras em ./personal.ts.
@@ -40,6 +43,8 @@ export const SCOPE_DESCRIPTIONS: Record<ApiScope, string> = {
   'campaigns:write': 'Create and enqueue Disparador campaigns',
   'campaigns:read': 'Read Disparador campaign status and metrics',
   'reports:read': 'Read aggregated CRM reporting and operational metrics',
+  'webhooks:read': 'Read outbound webhook endpoints and their delivery history',
+  'webhooks:write': 'Create, change and delete outbound webhook endpoints (and replay failed deliveries)',
   'intelligence:read':
     'Inteligência (leitura): ferramentas do DDM Intelligence via MCP. Chave pessoal — vê só o que você vê no CRM.',
 };
