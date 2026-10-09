@@ -19,7 +19,9 @@
 --   SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns
 --    WHERE table_schema = 'wacrm' AND table_name = 'knowledge_base_files' ORDER BY ordinal_position;
 --   SELECT policyname, cmd FROM pg_policies WHERE schemaname = 'wacrm' AND tablename = 'knowledge_base_files';
---   SELECT to_regprocedure('wacrm.has_perm(text)'), to_regprocedure('wacrm.is_account_member(uuid)');   -- não nulos
+--   SELECT to_regprocedure('wacrm.has_perm(text)');   -- não nulo
+--   SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+--    WHERE n.nspname = 'wacrm' AND p.proname = 'is_account_member';   -- >= 1 (assinatura real: (uuid, account_role_enum) com padrão)
 --   SELECT count(*), max(char_length(content)) FROM wacrm.knowledge_base_files;
 -- VERIFICAÇÃO:
 --   SELECT version FROM wacrm.schema_migrations WHERE version = '214_knowledge_base_files';
@@ -46,8 +48,13 @@ BEGIN
   IF to_regprocedure('wacrm.has_perm(text)') IS NULL THEN
     RAISE EXCEPTION '214: falta wacrm.has_perm(text) (migration 241) — aplique a 240 e a 241 antes';
   END IF;
-  IF to_regprocedure('wacrm.is_account_member(uuid)') IS NULL THEN
-    RAISE EXCEPTION '214: falta wacrm.is_account_member(uuid)';
+  -- A assinatura real é is_account_member(uuid, account_role_enum DEFAULT ...): procurar pelo NOME,
+  -- não por to_regprocedure('...(uuid)'), que dá NULL mesmo com a função existindo.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'wacrm' AND p.proname = 'is_account_member'
+  ) THEN
+    RAISE EXCEPTION '214: falta wacrm.is_account_member (migrations 017/140)';
   END IF;
   IF to_regclass('wacrm.knowledge_base_files') IS NOT NULL THEN
     SELECT string_agg(c, ', ') INTO missing
