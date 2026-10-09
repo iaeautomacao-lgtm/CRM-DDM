@@ -149,6 +149,10 @@ export interface AccountContext {
  * Use `requireRole(min)` instead when the route also needs a
  * minimum-role check — it's a thin wrapper over this.
  */
+/** O que o contexto da conta lê do perfil (nunca `*`: ver migration 306). Papel personalizado (312/313) acrescenta o que precisar aqui. */
+const PROFILE_CONTEXT_COLUMNS = "user_id, account_id, account_role, role_id, deactivated_at";
+const PROFILE_CONTEXT_COLUMNS_PRE_311 = "user_id, account_id, account_role, role_id";
+
 export async function getCurrentAccount(): Promise<AccountContext> {
   const supabase = await createClient();
 
@@ -163,11 +167,21 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     throw new UnauthorizedError();
   }
 
-  const { data, error } = await supabase
+  // Colunas explícitas, SEM e-mail: profiles.email é escondido de quem não tem members.view_emails (migration 306) e um
+  // select("*") do cliente do usuário passaria a falhar com "permission denied for column email". deactivated_at é da 311:
+  // sem ela (42703, coluna inexistente) a leitura repete sem a coluna, como o "*" tolerava.
+  let { data, error } = await supabase
     .from("profiles")
-    .select("*")
+    .select(PROFILE_CONTEXT_COLUMNS)
     .eq("user_id", user.id)
     .maybeSingle();
+  if ((error as { code?: string } | null)?.code === "42703") {
+    ({ data, error } = await supabase
+      .from("profiles")
+      .select(PROFILE_CONTEXT_COLUMNS_PRE_311)
+      .eq("user_id", user.id)
+      .maybeSingle());
+  }
 
   if (error) {
     console.error("[getCurrentAccount] profile fetch error:", error);
