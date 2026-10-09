@@ -80,6 +80,7 @@ import { Can } from '@/components/auth/can';
 import { usePermissions } from '@/hooks/use-permission';
 import { useAuth } from '@/hooks/use-auth';
 import { usePresence } from '@/hooks/use-presence';
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth/auth-errors';
 import type { AccountRole } from '@/lib/auth/roles';
 import { presenceLabel, summarize } from '@/lib/presence';
 import {
@@ -114,7 +115,7 @@ interface Invitation {
 // chips / invite dialog.
 const EDITABLE_ROLES: AccountRole[] = ['admin', 'supervisor', 'agent', 'viewer'];
 
-const MIN_RESET_PASSWORD_LENGTH = 8;
+const MIN_RESET_PASSWORD_LENGTH = MIN_PASSWORD_LENGTH;
 
 // Role filter options for the roster search bar. 'all' is a UI-only
 // sentinel, not an AccountRole.
@@ -575,6 +576,7 @@ export function MembersTab() {
                       >
                         <SelectTrigger
                           className="w-32 bg-muted border-border text-foreground"
+                          aria-label={`Papel de ${member.full_name || 'usuário'}`}
                           disabled={isBusy}
                         >
                           <SelectValue>
@@ -613,9 +615,10 @@ export function MembersTab() {
                         size="sm"
                         onClick={() => setRemovingMember(member)}
                         disabled={isBusy}
-                        className="border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:border-red-500/60 hover:text-red-200"
+                        aria-label={`Remover ${member.full_name || 'usuário'}`}
+                        className="border-danger/40 bg-danger-soft text-danger hover:bg-danger-soft hover:border-danger/60 hover:text-danger"
                       >
-                        <Trash2 className="size-4" />
+                        <Trash2 className="size-4" aria-hidden="true" />
                       </Button>
                     )}
 
@@ -734,7 +737,7 @@ export function MembersTab() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleRevoke(inv)}
-                        className="border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:border-red-500/60 hover:text-red-200"
+                        className="border-danger/40 bg-danger-soft text-danger hover:bg-danger-soft hover:border-danger/60 hover:text-danger"
                       >
                         <MailX className="size-4" />
                         Revogar
@@ -770,7 +773,7 @@ export function MembersTab() {
         <DialogContent className="bg-popover border-border sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-popover-foreground">
-              <AlertTriangle className="size-4 text-amber-400" />
+              <AlertTriangle className="size-4 text-warning" />
               Remover usuário
             </DialogTitle>
             <DialogDescription className="text-muted-foreground">
@@ -794,7 +797,7 @@ export function MembersTab() {
             <Button
               onClick={handleRemove}
               disabled={!!pendingMemberAction}
-              className="bg-red-600 hover:bg-red-700 text-white"
+              className="bg-destructive hover:bg-destructive/90 text-white"
             >
               {pendingMemberAction ? (
                 <>

@@ -10,13 +10,14 @@ import { useAuth } from '@/hooks/use-auth';
 import { RequireRole } from '@/components/auth/require-role';
 import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { EmptyState } from '@/components/dashboard/empty-state';
 import { ErrorState } from '@/components/dashboard/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -40,6 +41,15 @@ function countBy<T>(rows: T[] | null, key: (r: T) => string): CountMap {
   return m;
 }
 
+function CountUnknown() {
+  return (
+    <span title="Não foi possível carregar esta contagem" className="text-muted-foreground">
+      <span aria-hidden="true">—</span>
+      <span className="sr-only">Contagem indisponível</span>
+    </span>
+  );
+}
+
 export function EquipesView() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -59,6 +69,9 @@ export function EquipesView() {
   const [deleteTarget, setDeleteTarget] = useState<Team | null>(null);
   const [deleteCounts, setDeleteCounts] = useState<DeleteCounts | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteCheckFailed, setDeleteCheckFailed] = useState(false);
+  // Contagens que falharam na última carga: a célula mostra "—" em vez de 0.
+  const [countErrors, setCountErrors] = useState({ members: false, channels: false, tags: false, templates: false });
 
   const fetchTeams = useCallback(async () => {
     if (!accountId) return;
@@ -97,11 +110,13 @@ export function EquipesView() {
           supabase.from('team_outcome_tags').select('team_id, tag_id').in('team_id', ids),
           supabase.from('team_allowed_templates').select('team_id, template_id').in('team_id', ids),
         ]);
+        setCountErrors({ members: !!m.error, channels: !!c.error, tags: !!t.error, templates: !!tp.error });
         if (!m.error) setMembers(countBy(m.data, (r) => r.team_id as string));
         if (!c.error) setChannels(countBy(c.data, (r) => r.team_id as string));
         if (!t.error) setTags(countBy(t.data, (r) => r.team_id as string));
         if (!tp.error) setTemplates(countBy(tp.data, (r) => r.team_id as string));
       } else {
+        setCountErrors({ members: false, channels: false, tags: false, templates: false });
         setMembers(new Map());
         setChannels(new Map());
         setTags(new Map());
@@ -123,15 +138,22 @@ export function EquipesView() {
   async function confirmDelete(team: Team) {
     setDeleteTarget(team);
     setDeleteCounts(null);
+    setDeleteCheckFailed(false);
     try {
       const [agentsRes, convRes] = await Promise.all([
         supabase.from('profiles').select('user_id', { count: 'exact', head: true }).eq('team_id', team.id),
         supabase.from('conversations').select('id', { count: 'exact', head: true }).eq('team_id', team.id),
       ]);
-      setDeleteCounts({ agents: agentsRes.count ?? 0, conversations: convRes.count ?? 0 });
+      if (agentsRes.error || convRes.error || agentsRes.count === null || convRes.count === null) {
+        // Não afirma "nenhum vínculo" quando a consulta falhou.
+        console.error('[EquipesView] delete-count error:', agentsRes.error ?? convRes.error);
+        setDeleteCheckFailed(true);
+        return;
+      }
+      setDeleteCounts({ agents: agentsRes.count, conversations: convRes.count });
     } catch (err) {
-      // Não fatal: o diálogo funciona sem a dica de vínculos.
       console.error('[EquipesView] delete-count error:', err);
+      setDeleteCheckFailed(true);
     }
   }
 
@@ -178,8 +200,8 @@ export function EquipesView() {
               ariaLabel="Resumo das equipes"
               items={[
                 { label: 'Equipes', value: <CountUp value={teams.length} /> },
-                { label: 'Vínculos de usuários', value: <CountUp value={sum(members)} />, info: 'Soma dos usuários em cada equipe.' },
-                { label: 'Canais vinculados', value: <CountUp value={sum(channels)} /> },
+                { label: 'Vínculos de usuários', value: countErrors.members ? <CountUnknown /> : <CountUp value={sum(members)} />, info: 'Soma dos usuários em cada equipe.' },
+                { label: 'Canais vinculados', value: countErrors.channels ? <CountUnknown /> : <CountUp value={sum(channels)} /> },
               ]}
             />
           )}
@@ -270,10 +292,10 @@ export function EquipesView() {
                             <CellMain title={team.name} />
                           </span>
                         </Td>
-                        <Td align="right">{members.get(team.id) ?? 0}</Td>
-                        <Td align="right">{channels.get(team.id) ?? 0}</Td>
-                        <Td align="right" className="hidden md:table-cell">{tags.get(team.id) ?? 0}</Td>
-                        <Td align="right" className="hidden md:table-cell">{templates.get(team.id) ?? 0}</Td>
+                        <Td align="right">{countErrors.members ? <CountUnknown /> : (members.get(team.id) ?? 0)}</Td>
+                        <Td align="right">{countErrors.channels ? <CountUnknown /> : (channels.get(team.id) ?? 0)}</Td>
+                        <Td align="right" className="hidden md:table-cell">{countErrors.tags ? <CountUnknown /> : (tags.get(team.id) ?? 0)}</Td>
+                        <Td align="right" className="hidden md:table-cell">{countErrors.templates ? <CountUnknown /> : (templates.get(team.id) ?? 0)}</Td>
                         <Td className="hidden text-foreground-2 lg:table-cell">
                           {team.session_timeout_minutes ? `${team.session_timeout_minutes} min` : '—'}
                         </Td>
@@ -325,24 +347,28 @@ export function EquipesView() {
         onSaved={fetchTeams}
       />
 
-      <Dialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Excluir equipe</DialogTitle>
-            <DialogDescription>
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && !deleting && setDeleteTarget(null)}>
+        <AlertDialogContent className="sm:max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir equipe</AlertDialogTitle>
+            <AlertDialogDescription>
               Excluir &quot;{deleteTarget?.name}&quot;?{' '}
               {deleteCounts
                 ? deleteCounts.agents > 0 || deleteCounts.conversations > 0
                   ? `Essa equipe tem ${plural(deleteCounts.agents, 'agente', 'agentes')} e ${plural(deleteCounts.conversations, 'conversa', 'conversas')} vinculados: eles ficam sem equipe, não são excluídos.`
                   : 'Nenhum agente ou conversa está vinculado a ela.'
-                : 'Verificando agentes e conversas vinculados…'}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>
+                : deleteCheckFailed
+                  ? 'Não foi possível verificar os vínculos (agentes e conversas). Você ainda pode excluir; o que estiver vinculado fica sem equipe.'
+                  : 'Verificando agentes e conversas vinculados…'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={deleting || (deleteCounts === null && !deleteCheckFailed)}
+            >
               {deleting ? (
                 <>
                   <Loader2 className="size-4 animate-spin" />
@@ -352,9 +378,9 @@ export function EquipesView() {
                 'Excluir equipe'
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageBody>
   );
 }
