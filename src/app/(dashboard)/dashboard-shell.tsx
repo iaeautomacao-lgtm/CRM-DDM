@@ -12,6 +12,7 @@ import { FeedbackButton } from "@/components/feedback-button";
 import { RouteTransition } from "@/components/motion/route-transition";
 import { CommandPalette } from "@/components/command-palette/command-palette";
 import { getDefaultRoute } from "@/lib/role-utils";
+import { getPageTitle } from "@/lib/nav";
 import { usePermissions } from "@/hooks/use-permission";
 import { useMfaGuard } from "@/hooks/use-mfa-guard";
 
@@ -63,6 +64,14 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
       }
     }
   }, [accountRole, loading, pathname, permissions, profileLoading, router, user, authError]);
+
+  // Título do documento por rota (WCAG 2.4.2). Fica antes do efeito de page
+  // view para que a telemetria já leia o título atualizado.
+  const pageTitle = pathname ? getPageTitle(pathname) : "";
+  useEffect(() => {
+    if (!pageTitle) return;
+    document.title = `${pageTitle} - OmniDDM`;
+  }, [pageTitle]);
 
   // Page views — dispara a cada troca de rota dentro do dashboard.
   // duration_ms enviado aqui é o tempo gasto na página ANTERIOR (por
@@ -139,12 +148,22 @@ function DashboardShellInner({ children }: { children: React.ReactNode }) {
       {/* Reports this tab's online/away presence once we know a user is
           signed in. Headless — renders nothing. */}
       <PresenceHeartbeat />
+      <a
+        href="#conteudo"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-[100] focus:rounded-md focus:bg-card focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-foreground focus:shadow-overlay focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        Pular para o conteúdo
+      </a>
+      {/* Anuncia a nova página a leitores de tela sem mover o foco de quem está digitando. */}
+      <div role="status" aria-live="polite" className="sr-only">
+        {pageTitle}
+      </div>
       <FeedbackButton />
       <Sidebar open={sidebarOpen} onClose={closeSidebar} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header onOpenSidebar={() => setSidebarOpen(true)} />
         {/* Thinner horizontal padding on mobile so cards have room to breathe. */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <main id="conteudo" tabIndex={-1} className="flex-1 overflow-y-auto p-4 outline-none sm:p-6">
           <RouteTransition className="h-full">{children}</RouteTransition>
         </main>
         <CommandPalette />
