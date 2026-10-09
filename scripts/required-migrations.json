@@ -199,6 +199,10 @@
       "kind": "registry"
     },
     {
+      "version": "262_flow_send_flow_node",
+      "kind": "registry"
+    },
+    {
       "version": "270_billing_rulers",
       "kind": "registry"
     },
