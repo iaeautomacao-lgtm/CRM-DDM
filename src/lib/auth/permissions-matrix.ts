@@ -77,6 +77,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("ai/prompt-versions", "GET", "admin", "ai.config"),
   pg("audit-logs", "GET", "admin", "audit.view"),
   pg("ddm-logs", "GET", "admin", "audit.view"),
+  pg("ops/status", "GET", "admin", "audit.view"), // PRD 24, item 5: saúde do sistema
 
   // ── Canais, WhatsApp, templates, webchat ─────────────────
   pg("channels", "GET", "viewer", "channels.view"),
