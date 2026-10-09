@@ -125,11 +125,11 @@ export function DealForm({
     (async () => {
       const [c, p] = await Promise.all([
         supabase.from("contacts").select("*").order("name"),
-        supabase.from("profiles").select("*").order("full_name"),
+        supabase.from("profiles").select("id, user_id, full_name, avatar_url, account_role").order("full_name"),
       ]);
       if (cancelled) return;
       setContacts((c.data ?? []) as Contact[]);
-      setProfiles((p.data ?? []) as Profile[]);
+      setProfiles((p.data ?? []) as unknown as Profile[]);
     })();
     return () => {
       cancelled = true;
@@ -371,7 +371,7 @@ export function DealForm({
                 <option value="">Sem responsável</option>
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.full_name || p.email}
+                    {p.full_name || "Sem nome"}
                   </option>
                 ))}
               </select>

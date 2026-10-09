@@ -65,7 +65,6 @@ interface InternalChatDialogProps {
 interface ChatContact {
   user_id: string;
   full_name: string | null;
-  email: string | null;
   avatar_url: string | null;
   account_role?: string | null;
   /** Está numa equipe do usuário logado (aparece primeiro). */
@@ -101,7 +100,7 @@ interface StagedMedia {
 }
 
 function displayNameOf(p: ChatContact): string {
-  return p.full_name || p.email || "Sem nome";
+  return p.full_name || "Sem nome";
 }
 
 function normalizeQuery(text: string): string {
@@ -292,7 +291,7 @@ export function InternalChatDialog({
       // consultas separadas + junção em JS, como no resto do código.
       const { data: members, error: membersError } = await supabase
         .from("profiles")
-        .select("user_id, full_name, email, avatar_url, account_role")
+        .select("user_id, full_name, avatar_url, account_role")
         .eq("account_id", accountId)
         .neq("user_id", myUserId);
       if (membersError) throw membersError;
@@ -657,7 +656,7 @@ export function InternalChatDialog({
   const listTitle = "Mensagens internas";
   const query = normalizeQuery(contactQuery);
   const filteredContacts = query
-    ? contacts.filter((c) => normalizeQuery(`${displayNameOf(c)} ${c.email ?? ""}`).includes(query))
+    ? contacts.filter((c) => normalizeQuery(displayNameOf(c)).includes(query))
     : contacts;
   const emptyListMessage = query ? "Ninguém encontrado com esse nome." : "Ninguém disponível para conversar.";
   const composerDisabled = sending || uploading || recording;

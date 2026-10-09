@@ -147,7 +147,7 @@ function useFilterOptions(accountId: string | null) {
         apiFetch("/api/lines").then((r) => (r.ok ? r.json() : { lines: [] })).catch(() => ({ lines: [] })),
         supabase
           .from("profiles")
-          .select("user_id, full_name, email")
+          .select("user_id, full_name")
           .eq("account_id", accountId)
           .in("account_role", ["agent", "supervisor", "admin", "owner"])
           .order("full_name"),
@@ -166,9 +166,9 @@ function useFilterOptions(accountId: string | null) {
       if (cancelled) return;
       setLines(linesRes.lines ?? []);
       setAgents(
-        (agentsRes.data ?? []).map((p: { user_id: string; full_name: string | null; email: string | null }) => ({
+        (agentsRes.data ?? []).map((p: { user_id: string; full_name: string | null }) => ({
           id: p.user_id,
-          name: p.full_name || p.email || "Atendente",
+          name: p.full_name || "Atendente",
         }))
       );
       // teams.color (migration 280) pode ainda não existir no banco: sem ela,
