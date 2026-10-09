@@ -1,5 +1,6 @@
 "use client";
 
+import { validateStepDrafts } from "@/lib/billing/client-validation";
 import { useEffect, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -100,10 +101,15 @@ export function StepsEditor({
   const templateById = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates]);
   const dirty = useMemo(() => JSON.stringify(drafts.map(comparable)) !== JSON.stringify(steps.map(toDraft).map(comparable)), [drafts, steps]);
 
+  // Erros junto do campo (espelham o servidor); com erro, não envia.
+  const fieldErrors = useMemo(() => validateStepDrafts(drafts), [drafts]);
+  const hasFieldErrors = fieldErrors.size > 0;
+
   const update = (key: string, patch: Partial<StepDraft>) =>
     setDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
 
   async function save() {
+    if (hasFieldErrors) return;
     setSaving(true);
     setProblems([]);
     try {
@@ -205,7 +211,14 @@ export function StepsEditor({
                     value={d.offset}
                     disabled={!canManage}
                     onChange={(e) => update(d.key, { offset: e.target.value })}
+                    aria-invalid={fieldErrors.get(d.key)?.offset ? true : undefined}
+                    aria-describedby={fieldErrors.get(d.key)?.offset ? `${d.key}-offset-err` : undefined}
                   />
+                  {fieldErrors.get(d.key)?.offset && (
+                    <span id={`${d.key}-offset-err`} role="alert" className="text-danger">
+                      {fieldErrors.get(d.key)?.offset}
+                    </span>
+                  )}
                 </label>
               ) : (
                 <label className="flex flex-col gap-1 text-xs text-foreground-2">
@@ -215,7 +228,14 @@ export function StepsEditor({
                     maxLength={60}
                     disabled={!canManage}
                     onChange={(e) => update(d.key, { status_trigger: e.target.value })}
+                    aria-invalid={fieldErrors.get(d.key)?.status_trigger ? true : undefined}
+                    aria-describedby={fieldErrors.get(d.key)?.status_trigger ? `${d.key}-trigger-err` : undefined}
                   />
+                  {fieldErrors.get(d.key)?.status_trigger && (
+                    <span id={`${d.key}-trigger-err`} role="alert" className="text-danger">
+                      {fieldErrors.get(d.key)?.status_trigger}
+                    </span>
+                  )}
                 </label>
               )}
             </div>
@@ -324,7 +344,7 @@ export function StepsEditor({
             Adicionar etapa
           </Button>
           <span className="flex-1" />
-          <Button type="button" disabled={!dirty || saving} onClick={() => void save()}>
+          <Button type="button" disabled={!dirty || saving || hasFieldErrors} onClick={() => void save()}>
             {saving ? "Salvando…" : "Salvar etapas"}
           </Button>
         </div>
