@@ -293,6 +293,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/pipelines", roles: ["owner"], permission: "pipelines.manage", aligned: false, note: "página só owner; RLS admin (G7)" },
   { prefix: "/flows", roles: ["owner", "admin"], permission: "flows.edit", aligned: true },
   { prefix: "/disparador", roles: ["owner", "admin"], permission: "campaigns.manage", aligned: true },
+  { prefix: "/regua", roles: ["owner", "admin", "supervisor"], permission: "billing.view", aligned: true },
   { prefix: "/ajuda", roles: ["owner"], permission: null, aligned: false, note: "sem capacidade correspondente" },
   { prefix: "/settings", roles: ["owner", "admin"], permission: "settings.account", aligned: true },
   { prefix: "/equipes", roles: ["owner", "admin"], permission: "teams.manage", aligned: true, note: "a tela é só leitura para admin; a API deixa gerir (G6)" },
