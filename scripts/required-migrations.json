@@ -320,6 +320,14 @@
       "index": "idx_internal_messages_unread"
     },
     {
+      "version": "304_view_permission_keys",
+      "kind": "registry"
+    },
+    {
+      "version": "305_campaigns_pipelines_rls_has_perm",
+      "kind": "registry"
+    },
+    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },
