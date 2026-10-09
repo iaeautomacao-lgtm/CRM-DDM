@@ -39,7 +39,7 @@ export async function DELETE(
     // Gerencia as chaves da conta (api_keys.manage) ou revoga só a pessoal (intelligence.personal_key).
     const isAdmin = can(ctx, 'api_keys.manage');
     if (!isAdmin && !can(ctx, 'intelligence.personal_key')) {
-      return NextResponse.json({ error: 'Insufficient role' }, { status: 403 });
+      return NextResponse.json({ error: 'Papel insuficiente para esta ação' }, { status: 403 });
     }
 
     const limit = await checkRateLimit(
@@ -67,14 +67,14 @@ export async function DELETE(
     if (error) {
       console.error('[DELETE /api/account/api-keys/[id]] error:', error);
       return NextResponse.json(
-        { error: 'Failed to revoke API key' },
+        { error: 'Falha ao revogar a chave de API' },
         { status: 500 }
       );
     }
     if (!data) {
       // Either no such key in this account, or it was already revoked.
       return NextResponse.json(
-        { error: 'API key not found or already revoked' },
+        { error: 'Chave de API não encontrada ou já revogada' },
         { status: 404 }
       );
     }

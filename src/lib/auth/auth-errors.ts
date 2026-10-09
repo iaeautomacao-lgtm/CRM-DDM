@@ -25,21 +25,16 @@ type AuthErrorLike =
   | undefined;
 
 // Ordem importa: o primeiro que casar vence.
+/** Mensagem única de credencial: não diz se o e-mail existe (OWASP ASVS V2, enumeração de contas). */
+export const INVALID_CREDENTIALS_MESSAGE = "E-mail ou senha incorretos.";
+
 const RULES: Array<{ codes?: string[]; pattern?: RegExp; message: string }> = [
   {
-    codes: ["invalid_credentials"],
-    pattern: /invalid login credentials/i,
-    message: "E-mail ou senha incorretos.",
-  },
-  {
-    codes: ["email_not_confirmed"],
-    pattern: /email not confirmed/i,
-    message: "Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.",
-  },
-  {
-    codes: ["user_already_exists", "email_exists"],
-    pattern: /user already registered|already been registered/i,
-    message: "Já existe uma conta com este e-mail.",
+    // "E-mail não confirmado" e "já existe uma conta" revelavam que o e-mail está cadastrado: viram a mesma
+    // mensagem de credencial errada. (O cadastro público está desligado; usuários são criados pelo admin.)
+    codes: ["invalid_credentials", "email_not_confirmed", "user_already_exists", "email_exists"],
+    pattern: /invalid login credentials|email not confirmed|user already registered|already been registered/i,
+    message: INVALID_CREDENTIALS_MESSAGE,
   },
   {
     // weak_password também cobre senha vazada/sem caracteres exigidos:
@@ -112,4 +107,23 @@ export function translateAuthError(error: AuthErrorLike): string {
     return "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
   }
   return GENERIC_MESSAGE;
+}
+
+/** Texto neutro da recuperação de senha: igual exista ou não a conta (não confirma o e-mail cadastrado). */
+export const RECOVERY_SENT_MESSAGE = "Se houver uma conta com este e-mail, enviamos o link de redefinição.";
+
+const RATE_LIMIT_MESSAGE = "Muitas tentativas. Aguarde alguns minutos e tente novamente.";
+const RECOVERY_VISIBLE_ERRORS = new Set([RATE_LIMIT_MESSAGE, "E-mail inválido.", "Falha de conexão. Verifique sua internet e tente novamente."]);
+
+export type RecoveryOutcome = { kind: "sent" } | { kind: "error"; message: string };
+
+/**
+ * Resultado de resetPasswordForEmail para a tela. Só limite de tentativas, e-mail mal formatado e falha de rede
+ * aparecem como erro (nenhum deles depende de a conta existir); qualquer outra resposta mostra a mesma tela
+ * neutra de "enviado", para a tela não servir para descobrir quem tem conta.
+ */
+export function recoveryOutcome(error: AuthErrorLike): RecoveryOutcome {
+  if (!error) return { kind: "sent" };
+  const message = translateAuthError(error);
+  return RECOVERY_VISIBLE_ERRORS.has(message) ? { kind: "error", message } : { kind: "sent" };
 }

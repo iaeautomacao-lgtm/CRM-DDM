@@ -1,5 +1,6 @@
 "use client";
 
+import { windowError } from "@/lib/billing/client-validation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -217,6 +218,7 @@ function ConfigForm({
 }) {
   const [form, setForm] = useState(ruler);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => setForm(ruler), [ruler]);
@@ -240,8 +242,10 @@ function ConfigForm({
   ] as const;
   const patch = Object.fromEntries(FIELDS.filter((k) => JSON.stringify(form[k]) !== JSON.stringify(ruler[k])).map((k) => [k, form[k]]));
   const dirty = Object.keys(patch).length > 0;
+  const windowProblem = windowError(form.window_start, form.window_end);
 
   async function save() {
+    if (windowProblem) return;
     setSaving(true);
     try {
       const res = await billingFetch<{ ruler: Ruler }>(`/rulers/${ruler.id}`, { method: "PATCH", body: patch });
@@ -255,6 +259,7 @@ function ConfigForm({
   }
 
   async function remove() {
+    setDeleting(true);
     try {
       await billingFetch(`/rulers/${ruler.id}`, { method: "DELETE" });
       toast.success("Régua apagada");
@@ -263,6 +268,8 @@ function ConfigForm({
     } catch (err) {
       toast.error(errorMessage(err));
       setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -291,13 +298,18 @@ function ConfigForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-xs text-foreground-2">
           Janela: início (Brasília)
-          <Input type="time" value={form.window_start} disabled={!canManage} onChange={(e) => set("window_start", e.target.value)} />
+          <Input type="time" value={form.window_start} disabled={!canManage} aria-invalid={windowProblem ? true : undefined} aria-describedby={windowProblem ? "ruler-window-err" : undefined} onChange={(e) => set("window_start", e.target.value)} />
         </label>
         <label className="flex flex-col gap-1 text-xs text-foreground-2">
           Janela: fim (Brasília)
-          <Input type="time" value={form.window_end} disabled={!canManage} onChange={(e) => set("window_end", e.target.value)} />
+          <Input type="time" value={form.window_end} disabled={!canManage} aria-invalid={windowProblem ? true : undefined} aria-describedby={windowProblem ? "ruler-window-err" : undefined} onChange={(e) => set("window_end", e.target.value)} />
         </label>
       </div>
+      {windowProblem && (
+        <p id="ruler-window-err" role="alert" className="-mt-2 text-xs text-danger">
+          {windowProblem}
+        </p>
+      )}
 
       <fieldset className="flex flex-col gap-1.5">
         <legend className="mb-1 text-xs text-foreground-2">Dias de envio</legend>
@@ -380,7 +392,7 @@ function ConfigForm({
           <Button type="button" variant="ghost" disabled={!dirty || saving} onClick={() => setForm(ruler)}>
             Descartar
           </Button>
-          <Button type="button" disabled={!dirty || saving} onClick={() => void save()}>
+          <Button type="button" disabled={!dirty || saving || !!windowProblem} onClick={() => void save()}>
             {saving ? "Salvando…" : "Salvar"}
           </Button>
         </div>
@@ -395,8 +407,10 @@ function ConfigForm({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void remove()}>Apagar</AlertDialogAction>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void remove()} disabled={deleting}>
+              {deleting ? "Apagando…" : "Apagar"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -501,6 +515,20 @@ function SimulatePanel({ ruler, canManage }: { ruler: Ruler; canManage: boolean 
 
 // ── Métricas ───────────────────────────────────────────────────────────────
 
+// Tom por situação do envio (o texto sempre acompanha a cor): ok = chegou, bad = falhou/bloqueado, warn = não saiu, info = a caminho.
+const SEND_STATUS_TONE: Record<string, StatusTone> = {
+  reserved: "info",
+  enqueued: "info",
+  sent: "ok",
+  delivered: "ok",
+  read: "ok",
+  error: "bad",
+  quality_blocked: "bad",
+  cancelled: "mute",
+  expired: "warn",
+  deferred: "warn",
+};
+
 const SEND_STATUS_LABEL: Record<string, string> = {
   reserved: "Reservada",
   enqueued: "Na fila",
@@ -552,7 +580,7 @@ function MetricsPanel({ ruler }: { ruler: Ruler }) {
               {!s.active && <StatusChip tone="mute">Inativa</StatusChip>}
               <span className="flex-1" />
               {Object.entries(s.by_status).map(([status, n]) => (
-                <StatusChip key={status} tone="mute" dot={false}>
+                <StatusChip key={status} tone={SEND_STATUS_TONE[status] ?? "mute"} dot={false}>
                   {SEND_STATUS_LABEL[status] ?? status}: {n.toLocaleString("pt-BR")}
                 </StatusChip>
               ))}

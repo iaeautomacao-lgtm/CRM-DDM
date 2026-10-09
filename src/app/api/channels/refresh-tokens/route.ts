@@ -23,7 +23,7 @@ async function handler(request: Request) {
   const expected = process.env.AUTOMATION_CRON_SECRET
   if (!expected) return NextResponse.json({ error: 'cron not configured' }, { status: 503 })
   if (!matchesOperationalSecret(expected, request.headers.get('x-cron-secret'))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
 
   const db = supabaseAdmin()

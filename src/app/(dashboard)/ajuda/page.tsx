@@ -44,7 +44,7 @@ export default function HelpPage() {
   return (
     <PageBody className="gap-4">
       <div className="flex animate-ddm-up flex-col gap-1.5 pt-1">
-        <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Ajuda</h1>
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Ajuda</h2>
         <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
           Guia do usuário e primeiros passos.
         </p>
@@ -98,9 +98,9 @@ export default function HelpPage() {
         {activeTab === "whatsapp" && (
           <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Smartphone className="h-5 w-5 text-primary" aria-hidden /> Conectando o seu WhatsApp no CRM
-              </h2>
+              </h3>
               <p className="text-xs text-muted-foreground">
                 Siga as etapas abaixo para vincular o seu aparelho celular ao painel.
               </p>
@@ -148,9 +148,9 @@ export default function HelpPage() {
         {activeTab === "ai" && (
           <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Bot className="h-5 w-5 text-primary" aria-hidden /> Configurando o Agente de IA (Auto-responder)
-              </h2>
+              </h3>
               <p className="text-xs text-muted-foreground">
                 Treine a Inteligência Artificial para atender seus clientes 24/7 de forma personalizada.
               </p>
@@ -194,9 +194,9 @@ export default function HelpPage() {
         {activeTab === "campaigns" && (
           <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Megaphone className="h-5 w-5 text-primary" aria-hidden /> Disparador de Campanhas e Ligações Automatizadas
-              </h2>
+              </h3>
               <p className="text-xs text-muted-foreground">
                 Como enviar mensagens em massa de texto, imagens, áudios ou realizar chamadas de voz reais.
               </p>
@@ -239,9 +239,9 @@ export default function HelpPage() {
         {activeTab === "pipeline" && (
           <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <GitBranch className="h-5 w-5 text-primary" aria-hidden /> Kanban e Funis de Venda (CRM)
-              </h2>
+              </h3>
               <p className="text-xs text-muted-foreground">
                 Entenda o fluxo comercial e a automatização de negócios integrados.
               </p>
@@ -278,9 +278,9 @@ export default function HelpPage() {
         {activeTab === "faq" && (
           <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
-              <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+              <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <HelpCircle className="h-5 w-5 text-primary" aria-hidden /> Perguntas Frequentes & Solução de Problemas
-              </h2>
+              </h3>
               <p className="text-xs text-muted-foreground">
                 Respostas rápidas para as dúvidas mais comuns.
               </p>

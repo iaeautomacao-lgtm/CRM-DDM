@@ -67,7 +67,7 @@ vi.mock('@/lib/auth/route-guard', () => ({
   guardPermission: async (permission: Permission) =>
     can({ role: state.role as AccountRole }, permission)
       ? { ok: true, ctx: { accountId: state.accountId, userId: `USER-${state.role}`, role: state.role } }
-      : { ok: false, response: Response.json({ error: 'Forbidden' }, { status: 403 }) },
+      : { ok: false, response: Response.json({ error: 'Acesso negado' }, { status: 403 }) },
 }))
 vi.mock('@/lib/ai/account-secrets', () => ({
   listAccountSecretNames: async () => state.names,

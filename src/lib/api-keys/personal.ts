@@ -80,5 +80,5 @@ export function planKeyCreation(
     }
     return { ok: true, scopes, userId: creatorId, personal };
   }
-  return { ok: false, status: 403, error: 'Insufficient role' };
+  return { ok: false, status: 403, error: 'Papel insuficiente para esta ação' };
 }

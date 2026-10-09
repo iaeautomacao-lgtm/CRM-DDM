@@ -49,11 +49,7 @@ export async function findExistingContact(
 
   const suffix = normalized.length >= 8 ? normalized.slice(-8) : normalized;
 
-  const { data, error } = await db
-    .from("contacts")
-    .select("*")
-    .eq("account_id", accountId)
-    .like("phone", `%${suffix}`);
+  const { data, error } = await findCandidatesBySuffix(db, accountId, suffix);
 
   if (error || !data) return null;
 
@@ -84,6 +80,35 @@ export async function findExistingContact(
   if (contactError || !contactRow) return null;
 
   return contactRow as ExistingContact;
+}
+
+const MISSING_FUNCTION = new Set(["42883", "PGRST202"]);
+
+/**
+ * Candidatos com o mesmo sufixo de 8 dígitos. Com 8 dígitos usa a RPC da migration 314
+ * (igualdade em `right(phone_normalized, 8)`, com índice — 314b); antes era `phone LIKE '%sufixo'`,
+ * que varria todos os contatos da conta a cada mensagem recebida. Sem a 314 aplicada (ou sufixo
+ * curto, caso raro de número inválido), mantém a consulta antiga.
+ */
+async function findCandidatesBySuffix(
+  db: SupabaseClient,
+  accountId: string,
+  suffix: string,
+): Promise<{ data: ExistingContact[] | null; error: unknown }> {
+  if (suffix.length === 8) {
+    const { data, error } = await db.rpc("find_contacts_by_phone_suffix", {
+      p_account: accountId,
+      p_suffix: suffix,
+    });
+    if (!error) return { data: (data ?? []) as ExistingContact[], error: null };
+    if (!MISSING_FUNCTION.has((error as { code?: string }).code ?? "")) return { data: null, error };
+  }
+  const { data, error } = await db
+    .from("contacts")
+    .select("*")
+    .eq("account_id", accountId)
+    .like("phone", `%${suffix}`);
+  return { data: (data ?? null) as ExistingContact[] | null, error };
 }
 
 /**
