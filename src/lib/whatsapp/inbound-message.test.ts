@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const calls: Array<{ table: string; op: string; payload?: unknown }> = []
+const uploadedPaths: string[] = []
 let storedWamids = new Set<string>()
 const getMediaUrl = vi.fn(async () => ({ url: 'https://cdn.example/x', mimeType: 'image/jpeg' }))
 const downloadMedia = vi.fn(async () => ({ buffer: new ArrayBuffer(8), contentType: 'image/jpeg' }))
@@ -17,7 +18,14 @@ let missingTranscriptionColumn = false
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     rpc: async () => ({ data: null, error: null }),
-    storage: { from: () => ({ upload: async () => ({ error: null }) }) },
+    storage: {
+      from: () => ({
+        upload: async (path: string) => {
+          uploadedPaths.push(path)
+          return { error: null }
+        },
+      }),
+    },
     from: (table: string) => {
       let head = false
       let wamid: string | null = null
@@ -83,6 +91,7 @@ const run = (message: unknown, contact: unknown) =>
 
 beforeEach(() => {
   calls.length = 0
+  uploadedPaths.length = 0
   storedWamids = new Set()
   getMediaUrl.mockClear()
   downloadMedia.mockClear()
@@ -109,9 +118,10 @@ describe('WH-21: wamid já gravado vira duplicata antes do trabalho pesado', () 
     expect(calls.map((c) => c.table)).toEqual(['messages'])
   })
 
-  it('wamid novo segue o caminho normal (processa e baixa a mídia)', async () => {
+  it('wamid novo segue o caminho normal e grava mídia na pasta da conta', async () => {
     expect(await run(image('wamid.new'), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })).toBe('processed')
     expect(getMediaUrl).toHaveBeenCalled()
+    expect(uploadedPaths).toEqual(['account-ACC-1/meta/media-1.jpg'])
     expect(calls.some((c) => c.table === 'messages' && c.op === 'insert')).toBe(true)
   })
 
