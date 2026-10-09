@@ -7,16 +7,11 @@
 // users are sender+recipient of each other, queried directly
 // (symmetric — doesn't care which side of the pair is "me").
 //
-// `mode` picks who step 1 offers as contacts:
-//   'operator'   (agent)          — supervisors reachable from my team
-//                                    (team_members-derived, falling back
-//                                    to account-wide admins/owners for
-//                                    an agent with no team)
-//   'supervisor' (admin/owner)    — operators who have actually messaged
-//                                    me (DISTINCT sender_id from rows
-//                                    where I'm recipient), since a
-//                                    supervisor has no fixed "my team"
-//                                    the way an operator does
+// `mode` picks who step 1 offers as contacts (PRD 23, item 1):
+//   'operator'   (agent)                     — teammates of my teams (any role),
+//                                               account leadership and anyone
+//                                               who already wrote to me
+//   'supervisor' (owner/admin/supervisor) — every member of the account
 //
 // Media: reuses uploadAccountMedia/deleteAccountMedia against the same
 // `chat-media` bucket the inbox composer already writes to (its RLS is
@@ -71,6 +66,28 @@ interface ChatContact {
   full_name: string | null;
   email: string | null;
   avatar_url: string | null;
+  account_role?: string | null;
+  /** Está numa equipe do usuário logado (aparece primeiro). */
+  teammate?: boolean;
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  owner: "Proprietário",
+  admin: "Administrador",
+  supervisor: "Supervisor",
+  agent: "Operador",
+  viewer: "Visualizador",
+};
+
+/** Colegas de equipe primeiro; depois por nome. */
+function sortContacts(list: ChatContact[], teammateIds: Set<string>): ChatContact[] {
+  return list
+    .map((p) => ({ ...p, teammate: teammateIds.has(p.user_id) }))
+    .sort(
+      (a, b) =>
+        Number(b.teammate) - Number(a.teammate) ||
+        displayNameOf(a).localeCompare(displayNameOf(b), "pt-BR"),
+    );
 }
 
 interface StagedMedia {
@@ -84,6 +101,10 @@ interface StagedMedia {
 
 function displayNameOf(p: ChatContact): string {
   return p.full_name || p.email || "Sem nome";
+}
+
+function normalizeQuery(text: string): string {
+  return text.trim().toLowerCase().normalize("NFD").replace(/[0300-036f]/g, "");
 }
 
 function kindOfMime(mime: string): StagedMediaKind {
@@ -168,6 +189,7 @@ export function InternalChatDialog({
   const [step, setStep] = useState<"list" | "thread">("list");
   const [contacts, setContacts] = useState<ChatContact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactQuery, setContactQuery] = useState("");
   const [selectedContact, setSelectedContact] = useState<ChatContact | null>(null);
   const [messages, setMessages] = useState<InternalMessage[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -254,77 +276,59 @@ export function InternalChatDialog({
     setContactsLoading(true);
     try {
       const supabase = createClient();
+      // PRD 23, item 1 — conversar com outro operador. A RLS de
+      // internal_messages (109) já permite qualquer membro da conta; aqui
+      // só se decide QUEM a lista oferece:
+      //   'supervisor' (admin/owner/supervisor): todos os membros da conta;
+      //   'operator'   (agent): colegas das equipes dele (qualquer papel),
+      //                 a gestão da conta (owner/admin/supervisor) e quem já
+      //                 lhe escreveu (para sempre poder responder).
+      // team_members.user_id não tem FK para profiles (PGRST200), então são
+      // consultas separadas + junção em JS, como no resto do código.
+      const { data: members, error: membersError } = await supabase
+        .from("profiles")
+        .select("user_id, full_name, email, avatar_url, account_role")
+        .eq("account_id", accountId)
+        .neq("user_id", myUserId);
+      if (membersError) throw membersError;
+      const all = (members ?? []) as (ChatContact & { account_role: string | null })[];
 
       if (mode === "supervisor") {
-        const { data: sent, error } = await supabase
-          .from("internal_messages")
-          .select("sender_id")
-          .eq("recipient_id", myUserId);
-        if (error) throw error;
-
-        const senderIds = Array.from(
-          new Set((sent ?? []).map((r) => r.sender_id as string)),
-        );
-        if (senderIds.length === 0) {
-          setContacts([]);
-          return;
-        }
-
-        const { data, error: profilesError } = await supabase
-          .from("profiles")
-          .select("user_id, full_name, email, avatar_url")
-          .in("user_id", senderIds);
-        if (profilesError) throw profilesError;
-        setContacts((data ?? []) as ChatContact[]);
+        setContacts(sortContacts(all, new Set()));
         return;
       }
 
-      const { data: myTeams, error: myTeamsError } = await supabase
-        .from("team_members")
-        .select("team_id")
-        .eq("user_id", myUserId);
+      const [{ data: myTeams, error: myTeamsError }, { data: wrote, error: wroteError }] = await Promise.all([
+        supabase.from("team_members").select("team_id").eq("user_id", myUserId),
+        supabase.from("internal_messages").select("sender_id").eq("recipient_id", myUserId),
+      ]);
       if (myTeamsError) throw myTeamsError;
+      if (wroteError) throw wroteError;
 
       const teamIds = (myTeams ?? []).map((t) => t.team_id as string);
-
-      if (teamIds.length === 0) {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("user_id, full_name, email, avatar_url")
-          .eq("account_id", accountId)
-          .in("account_role", ["admin", "owner"])
-          .neq("user_id", myUserId);
-        if (error) throw error;
-        setContacts((data ?? []) as ChatContact[]);
-        return;
+      let teammateIds = new Set<string>();
+      if (teamIds.length > 0) {
+        const { data: teammates, error: teammatesError } = await supabase
+          .from("team_members")
+          .select("user_id")
+          .in("team_id", teamIds);
+        if (teammatesError) throw teammatesError;
+        teammateIds = new Set((teammates ?? []).map((t) => t.user_id as string));
       }
+      const wroteIds = new Set((wrote ?? []).map((r) => r.sender_id as string));
+      const leadership = new Set(["owner", "admin", "supervisor"]);
 
-      const { data: teammates, error: teammatesError } = await supabase
-        .from("team_members")
-        .select("user_id")
-        .in("team_id", teamIds);
-      if (teammatesError) throw teammatesError;
-
-      const candidateIds = Array.from(
-        new Set((teammates ?? []).map((t) => t.user_id as string)),
-      ).filter((id) => id !== myUserId);
-      if (candidateIds.length === 0) {
-        setContacts([]);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("user_id, full_name, email, avatar_url")
-        .in("user_id", candidateIds)
-        .eq("account_role", "admin");
-      if (error) throw error;
-      setContacts((data ?? []) as ChatContact[]);
+      setContacts(
+        sortContacts(
+          all.filter(
+            (p) => teammateIds.has(p.user_id) || wroteIds.has(p.user_id) || leadership.has(p.account_role ?? ""),
+          ),
+          teammateIds,
+        ),
+      );
     } catch (err) {
       console.error("[InternalChatDialog] failed to load contacts:", err);
-      toast.error(
-        mode === "supervisor" ? "Falha ao carregar operadores" : "Falha ao carregar supervisores",
-      );
+      toast.error("Falha ao carregar as pessoas da conta");
       setContacts([]);
     } finally {
       setContactsLoading(false);
@@ -642,9 +646,12 @@ export function InternalChatDialog({
     }
   }
 
-  const listTitle = mode === "supervisor" ? "Mensagens internas" : "Conversar com supervisor";
-  const emptyListMessage =
-    mode === "supervisor" ? "Nenhuma mensagem recebida ainda." : "Nenhum supervisor disponível.";
+  const listTitle = "Mensagens internas";
+  const query = normalizeQuery(contactQuery);
+  const filteredContacts = query
+    ? contacts.filter((c) => normalizeQuery(`${displayNameOf(c)} ${c.email ?? ""}`).includes(query))
+    : contacts;
+  const emptyListMessage = query ? "Ninguém encontrado com esse nome." : "Ninguém disponível para conversar.";
   const composerDisabled = sending || uploading || recording;
 
   return (
@@ -652,8 +659,16 @@ export function InternalChatDialog({
       <DialogContent className="flex h-[32rem] flex-col border-border bg-background p-0 sm:max-w-sm">
         {step === "list" ? (
           <>
-            <DialogHeader className="border-b border-border px-4 pb-3 pt-4">
+            <DialogHeader className="gap-2.5 border-b border-border px-4 pb-3 pt-4">
               <DialogTitle className="text-foreground">{listTitle}</DialogTitle>
+              <input
+                type="search"
+                value={contactQuery}
+                onChange={(e) => setContactQuery(e.target.value)}
+                placeholder="Buscar pessoa"
+                aria-label="Buscar pessoa da conta"
+                className="h-[34px] w-full rounded-md border border-border bg-card px-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
+              />
             </DialogHeader>
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-0.5 p-2">
@@ -661,12 +676,12 @@ export function InternalChatDialog({
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                   </div>
-                ) : contacts.length === 0 ? (
+                ) : filteredContacts.length === 0 ? (
                   <p className="px-2 py-6 text-center text-xs text-muted-foreground">
                     {emptyListMessage}
                   </p>
                 ) : (
-                  contacts.map((c) => {
+                  filteredContacts.map((c) => {
                     const name = displayNameOf(c);
                     return (
                       <button
@@ -681,8 +696,13 @@ export function InternalChatDialog({
                             {name.charAt(0).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
-                        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                          {name}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="truncate text-sm text-foreground">{name}</span>
+                          <span className="truncate text-[11.5px] text-muted-foreground">
+                            {[c.account_role ? ROLE_LABEL[c.account_role] ?? null : null, c.teammate ? "Sua equipe" : null]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </span>
                         </span>
                       </button>
                     );
