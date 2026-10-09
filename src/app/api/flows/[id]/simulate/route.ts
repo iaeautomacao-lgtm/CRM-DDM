@@ -82,7 +82,7 @@ export async function POST(
     .eq('id', id)
     .maybeSingle()
   if (!flow || flow.account_id !== account.accountId) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
   }
 
   const rawText = await request.text()
@@ -96,7 +96,7 @@ export async function POST(
   try {
     raw = JSON.parse(rawText)
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
   }
   const parsed = parseSimulateRequest(raw)
   if (typeof parsed === 'string') {
@@ -139,6 +139,8 @@ export async function POST(
       flowName: (flow.name as string | null) ?? 'Fluxo',
       ...accountData,
       agents,
+      // Operadores fictícios do painel (menu de operadores online / handoff de equipe); sem isto ninguém ficava online na simulação.
+      operators: simRequest.operators,
       // Busca por trechos do conhecimento (só leitura, chave da conta), como na produção.
       knowledgeRetriever: createVectorRetriever({ db: admin }),
     })

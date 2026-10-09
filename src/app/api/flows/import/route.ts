@@ -77,7 +77,7 @@ export async function POST(request: Request) {
 
   const body = (await request.json().catch(() => null)) as ImportPayload | null
   if (!body || typeof body !== 'object') {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    return NextResponse.json({ error: 'JSON inválido' }, { status: 400 })
   }
   if (body.version !== '1.0') {
     return NextResponse.json(
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     .single()
   if (flowErr || !flow) {
     return NextResponse.json(
-      { error: flowErr?.message ?? 'flow insert failed' },
+      { error: flowErr?.message ?? 'Falha ao criar o fluxo' },
       { status: 500 },
     )
   }

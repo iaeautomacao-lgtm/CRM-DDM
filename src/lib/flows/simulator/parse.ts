@@ -3,6 +3,7 @@ import {
   SIM_STATE_TABLES,
   type SimDraftNode,
   type SimInboundMessage,
+  type SimOperator,
   type SimState,
   type SimulateRequest,
 } from "./types";
@@ -92,7 +93,33 @@ export function parseSimulateRequest(raw: unknown): SimulateRequest | string {
       ? raw.realReadOnlyTools.filter((t): t is string => typeof t === "string")
       : [],
     httpMocks: stringRecord(raw.httpMocks, MAX_MOCK),
+    operators: parseOperators(raw.operators),
   };
+}
+
+export const MAX_SIM_OPERATORS = 20;
+
+/** Operadores fictícios do painel: até 20, id e nome obrigatórios; o resto tem padrão seguro (offline, sem equipe, sem teto). Entrada inválida é descartada. */
+export function parseOperators(raw: unknown): SimOperator[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SimOperator[] = [];
+  const seen = new Set<string>();
+  for (const o of raw) {
+    if (!isObject(o) || typeof o.user_id !== "string" || !o.user_id.trim() || typeof o.name !== "string" || !o.name.trim()) continue;
+    const user_id = o.user_id.trim().slice(0, 64);
+    if (seen.has(user_id)) continue;
+    seen.add(user_id);
+    out.push({
+      user_id,
+      name: o.name.trim().slice(0, 80),
+      team_id: typeof o.team_id === "string" && o.team_id.trim() ? o.team_id.trim().slice(0, 64) : null,
+      online: o.online === true,
+      away: o.away === true && o.online !== true,
+      max: typeof o.max === "number" && Number.isInteger(o.max) && o.max >= 1 && o.max <= 1000 ? o.max : null,
+    });
+    if (out.length >= MAX_SIM_OPERATORS) break;
+  }
+  return out;
 }
 
 /**

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
 
     if (!configId || !phone) {
       return NextResponse.json(
-        { error: 'configId and phone are required' },
+        { error: 'configId e phone são obrigatórios' },
         { status: 400 },
       )
     }
@@ -48,13 +48,13 @@ export async function POST(request: Request) {
     const config = (configRows?.[0] ?? null) as any
 
     if (configError || !config) {
-      return NextResponse.json({ error: 'Channel not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Canal não encontrado' }, { status: 404 })
     }
 
     const sanitizedPhone = sanitizePhoneForMeta(phone)
     if (!isValidE164(sanitizedPhone)) {
       return NextResponse.json(
-        { error: 'Invalid phone number format' },
+        { error: 'Formato de telefone inválido' },
         { status: 400 },
       )
     }
@@ -78,7 +78,7 @@ export async function POST(request: Request) {
         .maybeSingle()
 
       if (templateError || !template) {
-        return NextResponse.json({ error: 'Template not found' }, { status: 404 })
+        return NextResponse.json({ error: 'Template não encontrado' }, { status: 404 })
       }
 
       let messageId: string
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
         })
         messageId = result.messageId
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown Meta API error'
+        const message = err instanceof Error ? err.message : 'Erro desconhecido da API da Meta'
         console.error('[channel-test] Meta send failed:', message)
         console.error('[channel-test] Meta error details:', {
           message: err instanceof Error ? err.message : String(err),
@@ -132,7 +132,7 @@ export async function POST(request: Request) {
     try {
       await sendWahaTextMessage(wahaConfig, sanitizedPhone, text)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown WAHA API error'
+      const message = err instanceof Error ? err.message : 'Erro desconhecido da API do WAHA'
       console.error('[channel-test] WAHA send failed:', message)
       return NextResponse.json(
         { error: 'Falha ao enviar o teste pelo WAHA. Confira se a sessão está conectada.' },
@@ -144,7 +144,7 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error('Error in WhatsApp channel-test POST:', error)
     return NextResponse.json(
-      { error: 'Failed to test channel' },
+      { error: 'Falha ao testar o canal' },
       { status: 500 },
     )
   }
