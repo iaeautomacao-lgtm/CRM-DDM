@@ -14,6 +14,9 @@ export default defineConfig({
     // PGlite sobe um Postgres inteiro no beforeAll: com a máquina carregada (CI, vários agentes)
     // os 10 s padrão estouram. Só afeta hooks; o timeout de cada teste segue o padrão.
     hookTimeout: 60_000,
+    // Idem para testes que geram muitos dados ou sobem servidores simulados: 5 s estourava sob carga
+    // (cron do disparador, exportação retomável, varredura de src). Teste lento de verdade continua visível.
+    testTimeout: 20_000,
     environment: "node",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     // Dummy secrets — encryption.ts / webhook-signature.ts read these
