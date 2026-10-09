@@ -75,6 +75,7 @@ export const PALETTE_ITEMS: readonly PaletteItem[] = [
   { label: "Variáveis e credenciais", group: "Integrações", href: "/settings?tab=secrets", settingsSection: "secrets", keywords: "segredos" },
   { label: "Ferramentas dos agentes", group: "Integrações", href: "/settings?tab=tools", settingsSection: "tools" },
   { label: "Documentação da API", group: "Integrações", href: "/settings?tab=api-docs", settingsSection: "api-docs" },
+  { label: "Webhooks de saída", group: "Integrações", href: "/settings?tab=webhooks", settingsSection: "webhooks", keywords: "eventos assinatura" },
   { label: "Logs do sistema", group: "Administração", href: "/ddm-logs", permission: "audit.view" },
 
   { label: "Meu perfil", group: "Conta", href: "/perfil" },

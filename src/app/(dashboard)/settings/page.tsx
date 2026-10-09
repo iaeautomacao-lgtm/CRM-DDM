@@ -10,15 +10,13 @@ import { SettingsOverview } from '@/components/settings/settings-overview';
 import { ProfileForm } from '@/components/settings/profile-form';
 import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
-import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
-import { AiAgentSettings } from '@/components/settings/ai-agent-settings';
-import { SecretsSettings } from '@/components/settings/secrets-settings';
-import { ToolsSettings } from '@/components/settings/tools-settings';
 import { AgentsSettings } from '@/components/settings/agents/agents-settings';
-import { ApiDocsPanel } from '@/components/settings/api-docs-panel';
+import { IntegrationsSettings } from '@/components/settings/integrations/integrations-settings';
 import {
   canSeeSection,
+  isIntegrationTab,
   resolveSection,
+  visibleIntegrationTabs,
   type SettingsSection,
 } from '@/components/settings/settings-sections';
 
@@ -32,7 +30,11 @@ function SettingsContent() {
   // section — deep-linkable, and it keeps the existing links in the
   // app sidebar/header working. Legacy tab values (tags, custom-fields)
   // resolve onto their new home; unknown/empty → the Overview landing.
-  const rawSection = resolveSection(searchParams.get('tab'));
+  const requested = resolveSection(searchParams.get('tab'));
+  // "Integrações" no menu abre a primeira aba visível; as abas têm URL própria (?tab=api|secrets|…).
+  const integrationTabs = visibleIntegrationTabs(accountRole);
+  const rawSection: SettingsSection =
+    requested === 'integrations' ? (integrationTabs[0] ?? (profileLoading ? 'integrations' : 'overview')) : requested;
 
   // "ai" is owner-only (SECTION_META.ai.ownerOnly) — a non-owner who
   // deep-links ?tab=ai (or clicked it before this rolled out) lands on
@@ -61,18 +63,14 @@ function SettingsContent() {
     [mode, defaultCurrency],
   );
 
-  const panel: Record<SettingsSection, ReactNode> = {
+  const panel: Partial<Record<SettingsSection, ReactNode>> = {
     overview: <SettingsOverview onSelect={go} />,
     profile: <ProfileForm />,
     security: <SecurityPanel />,
     appearance: <AppearancePanel />,
-    api: <ApiKeysSettings />,
-    secrets: <SecretsSettings />,
-    tools: <ToolsSettings />,
     agents: <AgentsSettings />,
-    'api-docs': <ApiDocsPanel />,
-    ai: <AiAgentSettings />,
   };
+  const integrationActive = isIntegrationTab(section);
 
   return (
     <div>
@@ -87,8 +85,14 @@ function SettingsContent() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
-        <SettingsRail active={section} onSelect={go} hints={hints} role={accountRole} />
-        <div className="min-w-0">{panel[section]}</div>
+        <SettingsRail active={integrationActive ? 'integrations' : section} onSelect={go} hints={hints} role={accountRole} />
+        <div className="min-w-0">
+          {isIntegrationTab(section) ? (
+            <IntegrationsSettings active={section} tabs={integrationTabs} onSelect={go} />
+          ) : (
+            panel[section] ?? null
+          )}
+        </div>
       </div>
     </div>
   );

@@ -1,22 +1,23 @@
 'use client';
 
-// Configurações → Ferramentas (migration 176): catálogo de ferramentas HTTP
+// Configurações → Integrações → Ferramentas (migration 176): catálogo de ferramentas HTTP
 // reutilizáveis dos agentes de IA, com liga/desliga. Owner/admin criam,
 // editam, testam e apagam; supervisor só vê. Credenciais nunca aparecem aqui:
 // a ferramenta guarda só marcadores {{cred.NOME}} / {{var.NOME}}.
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Pencil, Play, Plus, Trash2, Wrench } from 'lucide-react';
+import { Plus, Trash2, Wrench } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
 import { usePermission } from '@/hooks/use-permission';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { SettingsPanelHead } from './settings-panel-head';
-import { TestDialog, ToolDialog, type ToolItem } from './tool-dialogs';
+import { ToolDialog, type ToolItem } from './tool-dialogs';
+import { ListCard, ListRow } from '@/components/ddm/list-with-drawer';
+import { StatusChip } from '@/components/ddm/status-chip';
+import { EmptyState, Skeleton } from '@/components/ddm/states';
 
 export function ToolsSettings() {
   const canEdit = usePermission('ai.tools.edit');
@@ -24,7 +25,6 @@ export function ToolsSettings() {
   const [items, setItems] = useState<ToolItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<ToolItem | 'new' | null>(null);
-  const [testing, setTesting] = useState<ToolItem | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -81,20 +81,24 @@ export function ToolsSettings() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="text-primary size-6 animate-spin" />
+      <div className="flex flex-col gap-2" aria-busy>
+        <Skeleton className="h-6 w-48" />
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-16 rounded-[10px]" />
+        ))}
       </div>
     );
   }
 
   return (
-    <section className="animate-in fade-in-50 space-y-6 duration-200">
+    <section className="flex flex-col gap-3.5">
       <SettingsPanelHead
-        title="Ferramentas"
+        className="mb-0"
+        title="Ferramentas dos agentes"
         description={
           <>
-            Chamadas HTTP que os agentes de IA podem fazer (consultar CPF, buscar dados). Cadastre uma vez e use em vários
-            fluxos; desligue para o agente parar de usar. Para tokens use{' '}
+            Chamadas HTTP que os agentes de IA podem fazer durante a conversa. Cadastre uma vez e escolha quais cada agente
+            usa em Agentes de IA → Ferramentas; desligue para nenhum agente usar. Para tokens use{' '}
             <code className="text-xs">{'{{cred.NOME}}'}</code> (Variáveis e credenciais) — nunca cole o valor aqui.
           </>
         }
@@ -109,60 +113,58 @@ export function ToolsSettings() {
       />
 
       {!canEdit && (
-        <p className="text-muted-foreground text-sm">Você pode ver as ferramentas. Só owner e admin criam, editam ou testam.</p>
+        <p className="text-sm text-muted-foreground">Você pode ver as ferramentas. Só quem tem permissão cria, edita ou testa.</p>
       )}
 
       {items.length === 0 ? (
-        <Card>
-          <CardContent className="text-muted-foreground flex flex-col items-center gap-2 py-10 text-sm">
-            <Wrench className="size-6" />
-            Nenhuma ferramenta cadastrada.
-          </CardContent>
-        </Card>
+        <EmptyState icon={Wrench} title="Nenhuma ferramenta cadastrada." hint={canEdit ? 'Crie a primeira em “Nova ferramenta”.' : undefined} />
       ) : (
-        <div className="space-y-2">
-          {items.map((item) => (
-            <Card key={item.id}>
-              <CardContent className="flex flex-wrap items-center gap-3 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold">{item.display_name || item.name}</span>
-                    <code className="text-muted-foreground text-xs">{item.name}</code>
-                    <Badge variant="secondary">{item.http.method}</Badge>
-                    {!item.enabled && <Badge variant="outline">Desligada</Badge>}
-                  </div>
-                  <div className="text-muted-foreground mt-1 truncate text-sm">{item.host || '—'}</div>
-                  <div className="text-muted-foreground mt-0.5 text-xs">
-                    Usada em {item.used_in_flows} fluxo{item.used_in_flows === 1 ? '' : 's'}
-                  </div>
+        <ListCard aria-label="Ferramentas dos agentes">
+          {items.map((item, i) => (
+            <ListRow
+              key={item.id}
+              index={i}
+              label={item.display_name || item.name}
+              onSelect={canEdit ? () => setEditing(item) : undefined}
+              className={item.enabled ? undefined : 'opacity-80'}
+            >
+              <Switch
+                checked={item.enabled}
+                onCheckedChange={(v) => void toggle(item, v)}
+                disabled={!canEdit}
+                aria-label={`${item.enabled ? 'Desligar' : 'Ligar'} ${item.name}`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[13.5px] font-semibold text-foreground">{item.display_name || item.name}</span>
+                  <code className="text-xs text-muted-foreground">{item.name}</code>
+                  {!item.enabled && <StatusChip tone="mute">Desligada</StatusChip>}
                 </div>
-                <div className="flex items-center gap-2">
-                  <Switch
-                    checked={item.enabled}
-                    onCheckedChange={(v) => void toggle(item, v)}
-                    disabled={!canEdit}
-                    aria-label={`${item.enabled ? 'Desligar' : 'Ligar'} ${item.name}`}
-                  />
-                  {canEdit && (
-                    <>
-                      <Button variant="outline" size="sm" onClick={() => setTesting(item)}>
-                        <Play className="size-4" />
-                        Testar
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setEditing(item)}>
-                        <Pencil className="size-4" />
-                        Editar
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => void remove(item)} aria-label={`Apagar ${item.name}`}>
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </>
-                  )}
+                {item.description && <p className="mt-0.5 line-clamp-2 text-xs text-foreground-2">{item.description}</p>}
+                <p className="mt-0.5 text-xs text-muted-foreground md:hidden">
+                  <strong className="font-semibold">{item.http.method}</strong> {item.host || '—'} · usada em {item.used_in_flows} fluxo
+                  {item.used_in_flows === 1 ? '' : 's'}
+                </p>
+              </div>
+              <span className="hidden w-48 shrink-0 truncate text-xs text-muted-foreground md:inline" title={item.host}>
+                <strong className="font-semibold text-foreground-2">{item.http.method}</strong> {item.host || '—'}
+              </span>
+              <span className="hidden w-28 shrink-0 text-xs text-muted-foreground md:inline">
+                Usada em {item.used_in_flows} fluxo{item.used_in_flows === 1 ? '' : 's'}
+              </span>
+              {canEdit && (
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button variant="outline" size="sm" onClick={() => setEditing(item)}>
+                    Editar
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" onClick={() => void remove(item)} aria-label={`Apagar ${item.name}`} title="Apagar">
+                    <Trash2 className="size-4" />
+                  </Button>
                 </div>
-              </CardContent>
-            </Card>
+              )}
+            </ListRow>
           ))}
-        </div>
+        </ListCard>
       )}
 
       {editing && (
@@ -175,7 +177,6 @@ export function ToolsSettings() {
           }}
         />
       )}
-      {testing && <TestDialog item={testing} onClose={() => setTesting(null)} />}
     </section>
   );
 }

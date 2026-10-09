@@ -224,6 +224,15 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("settings/secrets", "POST", "admin", "secrets.write"),
   pg("settings/secrets/[id]", "PATCH", "admin", "secrets.write"),
   pg("settings/secrets/[id]", "DELETE", "admin", "secrets.write"),
+  pg("settings/webhooks", "GET", "admin", "api_keys.manage"),
+  pg("settings/webhooks", "POST", "admin", "api_keys.manage"),
+  pg("settings/webhooks/[id]", "GET", "admin", "api_keys.manage"),
+  pg("settings/webhooks/[id]", "PATCH", "admin", "api_keys.manage"),
+  pg("settings/webhooks/[id]", "DELETE", "admin", "api_keys.manage"),
+  pg("settings/webhooks/[id]/rotate-secret", "POST", "admin", "api_keys.manage"),
+  pg("settings/webhooks/[id]/test", "POST", "admin", "api_keys.manage"),
+  pg("settings/webhooks/[id]/deliveries", "GET", "admin", "api_keys.manage"),
+  pg("settings/webhooks/[id]/deliveries/[deliveryId]/replay", "POST", "admin", "api_keys.manage"),
 
   // ── Monitoramento, relatórios, Intelligence ─────────────
   pg("monitoramento/dia", "GET", "supervisor", "monitoring.view_team"),

@@ -9,6 +9,8 @@ import {
   Wrench,
   Sparkles,
   BookOpen,
+  Plug,
+  Webhook,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -39,6 +41,8 @@ export const SETTINGS_SECTIONS = [
   'secrets',
   'tools',
   'agents',
+  'integrations',
+  'webhooks',
   'api-docs',
   'ai',
 ] as const;
@@ -58,6 +62,8 @@ export interface SectionMeta {
   ownerOnly?: boolean;
   /** Papel mínimo para ver a seção (some do menu e a URL volta à Visão geral). */
   minRole?: AccountRole;
+  /** Aba da página Integrações (redesenho DDM): não aparece no menu; o menu mostra "Integrações". */
+  integrationTab?: boolean;
 }
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
@@ -65,19 +71,21 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   profile: { id: 'profile', label: 'Seu perfil', icon: User, group: 'account' },
   security: { id: 'security', label: 'Login e segurança', icon: Shield, group: 'account' },
   appearance: { id: 'appearance', label: 'Aparência', icon: Palette, group: 'account' },
-  api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace' },
+  api: { id: 'api', label: 'Chaves de API', icon: KeyRound, group: 'workspace', integrationTab: true },
   secrets: {
     id: 'secrets',
     label: 'Variáveis e credenciais',
     icon: LockKeyhole,
     group: 'workspace',
     minRole: 'supervisor',
+    integrationTab: true,
   },
   tools: {
     id: 'tools',
     label: 'Ferramentas',
     icon: Wrench,
     group: 'workspace',
+    integrationTab: true,
     minRole: 'supervisor',
   },
   agents: {
@@ -87,8 +95,10 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     group: 'workspace',
     minRole: 'supervisor',
   },
-  'api-docs': { id: 'api-docs', label: 'Documentação da API', icon: BookOpen, group: 'workspace', minRole: 'supervisor' },
-  ai: { id: 'ai', label: 'Agente de IA', icon: Bot, group: 'workspace', ownerOnly: true },
+  integrations: { id: 'integrations', label: 'Integrações', icon: Plug, group: 'workspace' },
+  webhooks: { id: 'webhooks', label: 'Webhooks', icon: Webhook, group: 'workspace', minRole: 'admin', integrationTab: true },
+  'api-docs': { id: 'api-docs', label: 'Documentação da API', icon: BookOpen, group: 'workspace', minRole: 'supervisor', integrationTab: true },
+  ai: { id: 'ai', label: 'Provedores de IA', icon: Bot, group: 'workspace', ownerOnly: true, integrationTab: true },
 };
 
 export const RAIL_GROUPS: { label: string | null; group: SectionMeta['group'] }[] = [
@@ -103,6 +113,26 @@ export function canSeeSection(section: SettingsSection, role: AccountRole | null
   if (meta.ownerOnly && role !== 'owner') return false;
   if (meta.minRole && !(role && hasMinRole(role, meta.minRole))) return false;
   return true;
+}
+
+/** Abas da página Integrações, na ordem do protótipo. */
+export const INTEGRATION_TABS = ['api', 'secrets', 'tools', 'webhooks', 'ai', 'api-docs'] as const satisfies readonly SettingsSection[];
+export type IntegrationTab = (typeof INTEGRATION_TABS)[number];
+
+export function isIntegrationTab(section: SettingsSection): section is IntegrationTab {
+  return (INTEGRATION_TABS as readonly string[]).includes(section);
+}
+
+/** Abas de Integrações que o papel enxerga. */
+export function visibleIntegrationTabs(role: AccountRole | null | undefined): IntegrationTab[] {
+  return INTEGRATION_TABS.filter((t) => canSeeSection(t, role));
+}
+
+/** Seção aparece no menu lateral? As abas de Integrações não; "Integrações" só se alguma aba for visível. */
+export function showInRail(section: SettingsSection, role: AccountRole | null | undefined): boolean {
+  if (SECTION_META[section].integrationTab) return false;
+  if (section === 'integrations') return visibleIntegrationTabs(role).length > 0;
+  return canSeeSection(section, role);
 }
 
 function isSection(value: string | null): value is SettingsSection {
