@@ -65,7 +65,7 @@
     "date-fns": "^4.4.0",
     "lucide-react": "^1.18.0",
     "mammoth": "^1.12.0",
-    "next": "16.2.6",
+    "next": "16.2.12",
     "openai": "^6.45.0",
     "opus-recorder": "^8.0.5",
     "papaparse": "^5.5.4",
@@ -89,7 +89,7 @@
     "@types/react-dom": "^19",
     "axios": "^1.20.0",
     "eslint": "^9",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.2.12",
     "form-data": "^4.0.6",
     "prettier": "^3.8.4",
     "prettier-plugin-tailwindcss": "^0.8.0",
@@ -99,6 +99,7 @@
     "vitest": "^4.1.9"
   },
   "overrides": {
+    "@xmldom/xmldom": "0.8.15",
     "postcss": "^8.5.10",
     "ip-address": "^10.1.1",
     "fast-uri": "^3.1.2",
