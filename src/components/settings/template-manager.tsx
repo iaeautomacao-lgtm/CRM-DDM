@@ -30,6 +30,8 @@ import {
 } from '@/lib/storage/upload-media';
 import { useAuth } from '@/hooks/use-auth';
 import { cn } from '@/lib/utils';
+import { usePermission } from '@/hooks/use-permission';
+import { ErrorState } from '@/components/dashboard/error-state';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -219,6 +221,10 @@ export function TemplateManager() {
 
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Escrita (criar, sincronizar, editar, reenviar, apagar, pastas, mover, tags de canal): templates.manage, a chave que
+  // todas as rotas /api/whatsapp/templates/* exigem — inclusive a listagem de pastas.
+  const canManage = usePermission('templates.manage');
   const [folders, setFolders] = useState<TemplateFolder[]>([]);
   const [channels, setChannels] = useState<TemplateChannel[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
@@ -296,9 +302,13 @@ export function TemplateManager() {
       return;
     }
     fetchTemplates(accountId);
-    fetchFolders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user?.id, accountId]);
+
+  // Pastas: GET /api/whatsapp/templates/folders exige templates.manage; sem ela não há pastas para listar.
+  useEffect(() => {
+    if (canManage) void fetchFolders();
+  }, [canManage]);
 
   // Enabled Meta channels for the "Canal" select — direct Supabase
   // read (RLS already scopes whatsapp_config to account members), same
@@ -397,9 +407,10 @@ export function TemplateManager() {
         .order('created_at', { ascending: false });
       if (error) throw error;
       setTemplates(data || []);
+      setLoadError(null);
     } catch (err) {
       console.error('Failed to fetch templates:', err);
-      toast.error('Falha ao carregar templates');
+      setLoadError('Não foi possível carregar os templates.');
     } finally {
       setLoading(false);
     }
@@ -949,7 +960,7 @@ export function TemplateManager() {
             Crie templates e envie para aprovação da Meta. Use &ldquo;Sincronizar do Meta&rdquo; para importar os aprovados externamente.
           </p>
         </div>
-          <div className="flex items-center gap-2">
+          {canManage && <div className="flex items-center gap-2">
             <Button
               variant="outline"
               onClick={handleSyncFromMeta}
@@ -963,7 +974,7 @@ export function TemplateManager() {
               <Plus className="size-4" />
               Novo template
             </Button>
-          </div>
+          </div>}
       </div>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
@@ -1020,7 +1031,7 @@ export function TemplateManager() {
                 .map((folder) => (
                   <li
                     key={folder.id}
-                    draggable={renamingFolderId !== folder.id}
+                    draggable={canManage && renamingFolderId !== folder.id}
                     onDragStart={(e) => {
                       setDraggingFolder(folder.id);
                       e.dataTransfer.setData('text/plain', folder.id);
@@ -1080,6 +1091,7 @@ export function TemplateManager() {
                       <span
                         className="flex-1 truncate"
                         onDoubleClick={(e) => {
+                          if (!canManage) return;
                           e.stopPropagation();
                           setRenamingFolderId(folder.id);
                           setRenameValue(folder.name);
@@ -1091,6 +1103,7 @@ export function TemplateManager() {
                     <span className="text-xs text-muted-foreground shrink-0">
                       {folderCounts.get(folder.id) ?? 0}
                     </span>
+                    {canManage && (
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={
@@ -1123,11 +1136,12 @@ export function TemplateManager() {
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
+                    )}
                   </li>
                 ))}
             </ul>
 
-            {creatingFolder ? (
+            {!canManage ? null : creatingFolder ? (
               <Input
                 autoFocus
                 value={newFolderName}
@@ -1269,7 +1283,16 @@ export function TemplateManager() {
             </div>
 
             <TableCard label="Templates">
-              {filteredTemplates.length === 0 ? (
+              {loadError ? (
+                <div className="p-4">
+                  <ErrorState
+                    title={loadError}
+                    onRetry={() => {
+                      if (accountId) void fetchTemplates(accountId);
+                    }}
+                  />
+                </div>
+              ) : filteredTemplates.length === 0 ? (
                 <div className="flex animate-ddm-fade flex-col items-center gap-1.5 px-4 py-12 text-center">
                   <p className="text-[13.5px] font-semibold text-foreground">
                     {templates.length === 0 ? 'Nenhum template ainda' : 'Nada encontrado'}
@@ -1300,15 +1323,15 @@ export function TemplateManager() {
                       return (
                         <Tr
                           key={template.id}
-                          draggable
+                          draggable={canManage}
                           onDragStart={(e) => {
                             setDraggingTemplate(template.id);
                             e.dataTransfer.setData('text/plain', template.id);
                             e.dataTransfer.effectAllowed = 'move';
                           }}
                           onDragEnd={() => setDraggingTemplate(null)}
-                          title="Arraste para uma pasta"
-                          className={cn('group cursor-grab', draggingTemplate === template.id && 'opacity-50')}
+                          title={canManage ? 'Arraste para uma pasta' : undefined}
+                          className={cn('group', canManage && 'cursor-grab', draggingTemplate === template.id && 'opacity-50')}
                         >
                           <Td className="max-w-[420px]">
                             <span className="flex min-w-0 items-start gap-2">
@@ -1366,7 +1389,7 @@ export function TemplateManager() {
                                 <Eye className="size-3.5" />
                                 <span className="hidden sm:inline">Prévia</span>
                               </Button>
-                              {statusKey === 'APPROVED' && (
+                              {canManage && statusKey === 'APPROVED' && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1378,7 +1401,7 @@ export function TemplateManager() {
                                   <span className="hidden sm:inline">Editar</span>
                                 </Button>
                               )}
-                              {(statusKey === 'REJECTED' || statusKey === 'PAUSED') && (
+                              {canManage && (statusKey === 'REJECTED' || statusKey === 'PAUSED') && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1390,7 +1413,7 @@ export function TemplateManager() {
                                   <span className="hidden sm:inline">Reenviar</span>
                                 </Button>
                               )}
-                              <button
+                              {canManage && <button
                                 type="button"
                                 onClick={() => setTemplateToDelete(template)}
                                 disabled={deletingId === template.id}
@@ -1407,7 +1430,7 @@ export function TemplateManager() {
                                 ) : (
                                   <Trash2 className="size-4" />
                                 )}
-                              </button>
+                              </button>}
                             </span>
                           </Td>
                         </Tr>

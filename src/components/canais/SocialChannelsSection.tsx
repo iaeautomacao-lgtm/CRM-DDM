@@ -11,6 +11,17 @@ import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/ta
 import { StatusChip } from "@/components/ddm/status-chip";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { usePermission } from "@/hooks/use-permission";
+import { ErrorState } from "@/components/dashboard/error-state";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Linhas de Instagram e Messenger (wacrm.channels, migration 128). A
 // conexão é por OAuth da Meta (/api/channels/<tipo>/connect); aqui se
@@ -44,6 +55,10 @@ export function SocialChannelsSection({
 }) {
   const [channels, setChannels] = useState<SocialChannel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<SocialChannel | null>(null);
+  // Conectar, ligar/desligar, fluxo, equipe, cliente e desconectar: channels.manage (o mesmo de /api/channels/*).
+  const canManage = usePermission("channels.manage");
   // Variáveis que faltam no servidor por canal (GET /api/channels).
   const [setup, setSetup] = useState<{
     instagram: { missing: string[] };
@@ -54,11 +69,13 @@ export function SocialChannelsSection({
   const load = useCallback(async () => {
     try {
       const res = await apiFetch("/api/channels");
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || `Erro HTTP ${res.status}`);
       setChannels(json.channels ?? []);
       setSetup(json.setup ?? null);
+      setLoadError(null);
     } catch {
-      toast.error("Falha ao carregar Instagram/Messenger");
+      setLoadError("Não foi possível carregar Instagram e Messenger.");
     } finally {
       setLoading(false);
     }
@@ -83,7 +100,7 @@ export function SocialChannelsSection({
   }
 
   async function remove(c: SocialChannel) {
-    if (!window.confirm(`Desconectar ${c.name}? As conversas ficam no histórico.`)) return;
+    setRemoveTarget(null);
     const res = await apiFetch(`/api/channels/${c.id}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error("Falha ao remover canal");
@@ -101,6 +118,7 @@ export function SocialChannelsSection({
     <select
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
+      disabled={!canManage}
       aria-label={label}
       className="h-8 max-w-[180px] rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
     >
@@ -117,7 +135,7 @@ export function SocialChannelsSection({
     <TableCard
       title="Instagram e Messenger"
       hint="Conecte pela Meta. No Messenger, a própria Meta pergunta quais páginas liberar."
-      action={
+      action={canManage && (
         <div className="flex flex-wrap gap-2">
           {/* Navegação completa: o OAuth sai para a Meta e volta em /canais. */}
           <Button
@@ -139,7 +157,7 @@ export function SocialChannelsSection({
             Conectar Messenger
           </Button>
         </div>
-      }
+      )}
     >
       {setup && (setup.instagram.missing.length > 0 || setup.messenger.missing.length > 0 || !setup.webhook_verify_token) && (
         <div className="mx-[18px] mb-3.5 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3 text-[12.5px] text-foreground-2" role="status">
@@ -163,6 +181,10 @@ export function SocialChannelsSection({
               <Skeleton className="h-3 w-40" />
             </div>
           ))}
+        </div>
+      ) : loadError ? (
+        <div className="border-t border-border p-4">
+          <ErrorState className="min-h-0" title={loadError} onRetry={() => void load()} />
         </div>
       ) : channels.length === 0 ? (
         <p className="border-t border-border px-[18px] py-6 text-center text-[13px] text-muted-foreground">
@@ -220,19 +242,20 @@ export function SocialChannelsSection({
                     <Switch
                       checked={c.habilitado}
                       onCheckedChange={(checked) => patch(c.id, { habilitado: checked })}
+                      disabled={!canManage}
                       aria-label={`Ativo — ${c.name}`}
                     />
                   </Td>
                   <Td className="pr-2 text-right">
-                    <button
+                    {canManage && <button
                       type="button"
                       className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-danger-soft hover:text-danger"
-                      onClick={() => remove(c)}
+                      onClick={() => setRemoveTarget(c)}
                       aria-label={`Desconectar ${c.name}`}
                       title="Desconectar"
                     >
                       <Trash2 className="size-4" />
-                    </button>
+                    </button>}
                   </Td>
                 </Tr>
               );
@@ -240,6 +263,21 @@ export function SocialChannelsSection({
           </tbody>
         </DenseTable>
       )}
+
+      <AlertDialog open={removeTarget !== null} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desconectar {removeTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>As conversas ficam no histórico.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <Button variant="destructive" onClick={() => removeTarget && void remove(removeTarget)}>
+              Desconectar
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </TableCard>
   );
 }
