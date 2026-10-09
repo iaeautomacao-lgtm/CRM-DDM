@@ -28,7 +28,6 @@ import { useAuth } from '@/hooks/use-auth';
 import { normalizeForSearch } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
@@ -47,7 +46,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { SettingsPanelHead } from '@/components/settings/settings-panel-head';
+import { PageToolbar } from '@/components/ddm/page-toolbar';
+import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
+import { DetailDrawer } from '@/components/ddm/list-with-drawer';
+import { EmptyState, Skeleton } from '@/components/ddm/states';
 import type { Tag, Team } from '@/types';
 import { codigoInUseBy, codigoTabulacaoBloqueado, parseCodigoTabulacao } from '@/lib/tabulacoes/codigo';
 import { AiOutcomeMapSection } from './ai-outcome-map-table';
@@ -350,33 +352,33 @@ export function TabulacoesManager() {
 
   return (
     <div className="space-y-8">
-      <section className="space-y-4">
-        <SettingsPanelHead
-          title="Tabulações"
-          description='Tags de encerramento de conversa (kind="outcome") usadas para classificar o motivo do fechamento. O vínculo com uma equipe específica é feito na tela de cada equipe.'
-          action={
+      <section className="space-y-3.5">
+        <PageToolbar
+          actions={
             <Button onClick={openCreate}>
-              <Plus className="size-4" />
+              <Plus className="size-4" aria-hidden="true" />
               Nova tabulação
             </Button>
           }
-        />
-
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
-            <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
+        >
+          <div className="relative w-full max-w-xs">
+            <Search
+              className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+              aria-hidden="true"
+            />
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar tabulação..."
-              className="pl-8"
+              aria-label="Buscar tabulação"
+              className="h-8 pl-9"
             />
           </div>
           <Select
             value={teamFilter}
             onValueChange={(v) => v && setTeamFilter(v)}
           >
-            <SelectTrigger className="w-full sm:w-56">
+            <SelectTrigger className="w-full sm:w-56" aria-label="Filtrar por equipe">
               <SelectValue>
                 {(v: string) =>
                   v === ALL_TEAMS
@@ -394,212 +396,127 @@ export function TabulacoesManager() {
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </PageToolbar>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-10">
-            <Loader2 className="text-primary size-6 animate-spin" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-              <TagIcon className="text-muted-foreground size-6" />
-              <p className="text-muted-foreground text-sm">
-                {tabulacoes.length === 0
-                  ? 'Nenhuma tabulação ainda — crie a primeira acima.'
-                  : 'Nenhuma tabulação encontrada para esse filtro.'}
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <ul className="divide-border divide-y">
+        <TableCard
+          title="Tabulações"
+          hint="Tags de encerramento de conversa usadas para classificar o motivo do fechamento. O vínculo com uma equipe específica é feito na tela de cada equipe."
+        >
+          {loading ? (
+            <div className="flex flex-col gap-2 px-[18px] pb-4" aria-busy="true">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="h-11 w-full" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <EmptyState
+              className="m-4 mt-0"
+              icon={TagIcon}
+              title={
+                tabulacoes.length === 0
+                  ? 'Nenhuma tabulação ainda'
+                  : 'Nenhuma tabulação encontrada'
+              }
+              hint={
+                tabulacoes.length === 0
+                  ? 'Crie a primeira em "Nova tabulação".'
+                  : 'Ajuste a busca ou o filtro de equipe.'
+              }
+            />
+          ) : (
+            <DenseTable minWidth={620}>
+              <thead>
+                <tr>
+                  <Th>Tabulação</Th>
+                  <Th>Código</Th>
+                  <Th>Equipes vinculadas</Th>
+                  <Th align="right">
+                    <span className="sr-only">Ações</span>
+                  </Th>
+                </tr>
+              </thead>
+              <tbody>
                 {filtered.map((tag) => {
                   const teamIds = teamIdsByTag.get(tag.id) ?? [];
                   return (
-                    <li
-                      key={tag.id}
-                      className="flex flex-wrap items-center gap-3 px-4 py-3"
-                    >
-                      <span
-                        className="size-2.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: tag.color }}
-                      />
-                      <span className="text-foreground min-w-0 flex-1 truncate text-sm font-medium">
-                        {tag.name}
-                      </span>
-                      {tag.codigo_tabulacao !== undefined &&
-                        tag.codigo_tabulacao !== null && (
+                    <Tr key={tag.id}>
+                      <Td>
+                        <span className="flex min-w-0 items-center gap-2.5">
                           <span
-                            className="text-muted-foreground shrink-0 font-mono text-xs"
-                            title="Código da tabulação"
+                            className="size-2.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: tag.color }}
+                            aria-hidden="true"
+                          />
+                          <span className="text-foreground truncate font-semibold">
+                            {tag.name}
+                          </span>
+                        </span>
+                      </Td>
+                      <Td className="text-muted-foreground font-mono text-xs">
+                        {tag.codigo_tabulacao !== undefined &&
+                        tag.codigo_tabulacao !== null
+                          ? tag.codigo_tabulacao
+                          : '—'}
+                      </Td>
+                      <Td>
+                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          {teamIds.length === 0 ? (
+                            <span className="text-muted-foreground text-xs">
+                              Nenhuma equipe vinculada
+                            </span>
+                          ) : (
+                            teamIds.map((teamId) => (
+                              <Badge
+                                key={teamId}
+                                className="border-border bg-muted text-muted-foreground border text-xs"
+                              >
+                                {teamNameById.get(teamId) ?? 'Equipe removida'}
+                              </Badge>
+                            ))
+                          )}
+                        </div>
+                      </Td>
+                      <Td align="right">
+                        <div className="flex shrink-0 items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => openEdit(tag)}
+                            disabled={!aiMapReady}
+                            title="Editar tabulação"
+                            aria-label={`Editar tabulação ${tag.name}`}
                           >
-                            Cód. {tag.codigo_tabulacao}
-                          </span>
-                        )}
-                      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        {teamIds.length === 0 ? (
-                          <span className="text-muted-foreground text-xs">
-                            Nenhuma equipe vinculada
-                          </span>
-                        ) : (
-                          teamIds.map((teamId) => (
-                            <Badge
-                              key={teamId}
-                              className="border-border bg-muted text-muted-foreground border text-xs"
-                            >
-                              {teamNameById.get(teamId) ?? 'Equipe removida'}
-                            </Badge>
-                          ))
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => openEdit(tag)}
-                          disabled={!aiMapReady}
-                          title="Editar tabulação"
-                          aria-label="Editar tabulação"
-                        >
-                          <Pencil className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => setDeleteTarget(tag)}
-                          title="Excluir tabulação"
-                          aria-label="Excluir tabulação"
-                          className="text-muted-foreground hover:text-destructive"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </li>
+                            <Pencil className="size-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => setDeleteTarget(tag)}
+                            title="Excluir tabulação"
+                            aria-label={`Excluir tabulação ${tag.name}`}
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      </Td>
+                    </Tr>
                   );
                 })}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
+              </tbody>
+            </DenseTable>
+          )}
+        </TableCard>
 
         {/* Create / edit */}
-        <Dialog open={formOpen} onOpenChange={setFormOpen}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>
-                {editingTag ? 'Editar tabulação' : 'Nova tabulação'}
-              </DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="tabulacao-name">Nome</Label>
-                <Input
-                  id="tabulacao-name"
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, name: e.target.value }))
-                  }
-                  placeholder="ex.: Resolvido"
-                  maxLength={40}
-                  disabled={saving}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="tabulacao-codigo">
-                  Código{' '}
-                  <span className="text-muted-foreground text-xs">
-                    (opcional)
-                  </span>
-                </Label>
-                <div title={codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) ? CODIGO_BLOQUEADO_TOOLTIP : undefined}>
-                  <Input
-                    id="tabulacao-codigo"
-                    value={form.codigo}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, codigo: e.target.value }))
-                    }
-                    placeholder="ex.: 142"
-                    inputMode="numeric"
-                    maxLength={5}
-                    disabled={saving || (editingTag !== null && !aiMapReady) || codigoTabulacaoBloqueado(editingTag, aiMappedTagIds)}
-                    aria-describedby={codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) ? 'tabulacao-codigo-protegido' : undefined}
-                  />
-                </div>
-                {codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) && (
-                  <p id="tabulacao-codigo-protegido" className="text-xs text-muted-foreground">{CODIGO_BLOQUEADO_TOOLTIP}</p>
-                )}
-                <p className="text-muted-foreground text-xs">
-                  Código de negócio da tabulação. A IA usa este código para
-                  sugerir a tabulação a partir das tags de saída do fluxo.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label>Cor</Label>
-                <div className="flex items-center gap-1.5">
-                  {TABULACAO_COLORS.map((color) => (
-                    <button
-                      key={color.value}
-                      type="button"
-                      onClick={() =>
-                        setForm((f) => ({ ...f, color: color.value }))
-                      }
-                      aria-label={`Usar ${color.name}`}
-                      aria-pressed={form.color === color.value}
-                      className={`size-6 rounded-full border-2 transition-transform ${
-                        form.color === color.value
-                          ? 'border-foreground scale-110'
-                          : 'border-transparent'
-                      }`}
-                      style={{ backgroundColor: color.value }}
-                      title={color.name}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Create mode only — edit mode's team linkage stays owned
-                by /equipes/[id]'s own Tabulações tab. */}
-              {!editingTag && (
-                <div className="space-y-2">
-                  <Label>
-                    Vincular a equipes{' '}
-                    <span className="text-muted-foreground text-xs">
-                      (opcional)
-                    </span>
-                  </Label>
-                  {teams.length === 0 ? (
-                    <p className="text-muted-foreground text-xs">
-                      Nenhuma equipe criada ainda.
-                    </p>
-                  ) : (
-                    <div className="border-border max-h-40 space-y-0.5 overflow-y-auto rounded-lg border p-1.5">
-                      {teams.map((team) => {
-                        const checked = selectedTeamIds.has(team.id);
-                        return (
-                          <label
-                            key={team.id}
-                            className="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5"
-                          >
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={(next) =>
-                                toggleTeamSelection(team.id, next === true)
-                              }
-                            />
-                            <span className="text-foreground min-w-0 flex-1 truncate text-sm">
-                              {team.name}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <DialogFooter>
+        <DetailDrawer
+          open={formOpen}
+          onOpenChange={(open) => !saving && setFormOpen(open)}
+          size="md"
+          title={editingTag ? 'Editar tabulação' : 'Nova tabulação'}
+          description={editingTag ? editingTag.name : 'Tag de encerramento de conversa.'}
+          footer={
+            <>
               <Button
                 variant="outline"
                 onClick={() => setFormOpen(false)}
@@ -619,9 +536,117 @@ export function TabulacoesManager() {
                   'Criar tabulação'
                 )}
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="tabulacao-name">Nome</Label>
+              <Input
+                id="tabulacao-name"
+                value={form.name}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, name: e.target.value }))
+                }
+                placeholder="ex.: Resolvido"
+                maxLength={40}
+                disabled={saving}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tabulacao-codigo">
+                Código{' '}
+                <span className="text-muted-foreground text-xs">
+                  (opcional)
+                </span>
+              </Label>
+              <div title={codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) ? CODIGO_BLOQUEADO_TOOLTIP : undefined}>
+                <Input
+                  id="tabulacao-codigo"
+                  value={form.codigo}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, codigo: e.target.value }))
+                  }
+                  placeholder="ex.: 142"
+                  inputMode="numeric"
+                  maxLength={5}
+                  disabled={saving || (editingTag !== null && !aiMapReady) || codigoTabulacaoBloqueado(editingTag, aiMappedTagIds)}
+                  aria-describedby={codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) ? 'tabulacao-codigo-protegido' : undefined}
+                />
+              </div>
+              {codigoTabulacaoBloqueado(editingTag, aiMappedTagIds) && (
+                <p id="tabulacao-codigo-protegido" className="text-xs text-muted-foreground">{CODIGO_BLOQUEADO_TOOLTIP}</p>
+              )}
+              <p className="text-muted-foreground text-xs">
+                Código de negócio da tabulação. A IA usa este código para
+                sugerir a tabulação a partir das tags de saída do fluxo.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label>Cor</Label>
+              <div className="flex items-center gap-1.5">
+                {TABULACAO_COLORS.map((color) => (
+                  <button
+                    key={color.value}
+                    type="button"
+                    onClick={() =>
+                      setForm((f) => ({ ...f, color: color.value }))
+                    }
+                    aria-label={`Usar ${color.name}`}
+                    aria-pressed={form.color === color.value}
+                    className={`size-6 rounded-full border-2 transition-transform ${
+                      form.color === color.value
+                        ? 'border-foreground scale-110'
+                        : 'border-transparent'
+                    }`}
+                    style={{ backgroundColor: color.value }}
+                    title={color.name}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Create mode only — edit mode's team linkage stays owned
+              by /equipes/[id]'s own Tabulações tab. */}
+            {!editingTag && (
+              <div className="space-y-2">
+                <Label>
+                  Vincular a equipes{' '}
+                  <span className="text-muted-foreground text-xs">
+                    (opcional)
+                  </span>
+                </Label>
+                {teams.length === 0 ? (
+                  <p className="text-muted-foreground text-xs">
+                    Nenhuma equipe criada ainda.
+                  </p>
+                ) : (
+                  <div className="border-border max-h-40 space-y-0.5 overflow-y-auto rounded-lg border p-1.5">
+                    {teams.map((team) => {
+                      const checked = selectedTeamIds.has(team.id);
+                      return (
+                        <label
+                          key={team.id}
+                          className="hover:bg-muted flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={(next) =>
+                              toggleTeamSelection(team.id, next === true)
+                            }
+                          />
+                          <span className="text-foreground min-w-0 flex-1 truncate text-sm">
+                            {team.name}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </DetailDrawer>
 
         {/* Delete confirmation */}
         <Dialog
