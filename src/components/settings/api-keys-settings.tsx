@@ -49,7 +49,7 @@ import {
 import { SettingsPanelHead } from './settings-panel-head';
 import { ListCard, ListRow } from '@/components/ddm/list-with-drawer';
 import { StatusChip } from '@/components/ddm/status-chip';
-import { EmptyState, Skeleton } from '@/components/ddm/states';
+import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
 
 interface ApiKey {
   id: string;
@@ -100,7 +100,10 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const res = await apiFetch(
         personal ? '/api/account/api-keys?mine=1' : '/api/account/api-keys',
@@ -108,14 +111,14 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
       );
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
-        toast.error(payload.error || 'Erro ao carregar chaves de API');
+        setLoadError(payload.error || 'Erro ao carregar chaves de API');
         return;
       }
       const data = (await res.json()) as { keys: ApiKey[] };
       setKeys(data.keys);
     } catch (err) {
       console.error('[ApiKeysSettings] load error:', err);
-      toast.error('Não foi possível conectar ao servidor');
+      setLoadError('Não foi possível conectar ao servidor');
     } finally {
       setLoading(false);
     }
@@ -159,6 +162,19 @@ export function ApiKeysSettings({ personal = false }: { personal?: boolean }) {
           <Skeleton key={i} className="h-20 rounded-[10px]" />
         ))}
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Não foi possível carregar as chaves de API"
+        hint={loadError}
+        onRetry={() => {
+          setLoading(true);
+          void load();
+        }}
+      />
     );
   }
 

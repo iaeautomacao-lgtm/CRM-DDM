@@ -381,6 +381,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     flashKey,
     issues,
     requestFlash,
+    askConfirm,
   } = useFlowEditor();
   const [triggerOpen, setTriggerOpen] = useState(false);
   const reactFlow = useReactFlow();
@@ -651,12 +652,12 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     [selectedNodeKey, updateNodeConfig]
   );
 
-  const handleDeleteSelected = useCallback(() => {
+  const handleDeleteSelected = useCallback(async () => {
     if (!selectedNodeKey) return;
-    if (!confirmNodeRemoval(builderNodes, [selectedNodeKey])) return;
+    if (!(await confirmNodeRemoval(builderNodes, [selectedNodeKey], askConfirm))) return;
     removeNode(selectedNodeKey);
     setSelectedNodeKey(null);
-  }, [selectedNodeKey, removeNode, builderNodes]);
+  }, [selectedNodeKey, removeNode, builderNodes, askConfirm]);
 
   // Duplica e já abre a cópia para editar.
   const handleDuplicateSelected = useCallback(() => {
@@ -698,7 +699,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           onConnect={handleConnect}
           onBeforeDelete={async ({ nodes, edges }) =>
             nodes.length === 0 ||
-            confirmNodeRemoval(builderNodes, nodes.map((n) => n.id))
+            (await confirmNodeRemoval(builderNodes, nodes.map((n) => n.id), askConfirm))
               ? { nodes, edges }
               : false
           }

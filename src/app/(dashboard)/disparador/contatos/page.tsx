@@ -20,7 +20,8 @@ import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { StatusChip } from "@/components/ddm/status-chip";
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
-import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
+import { EmptyState, ErrorState, ForbiddenState, Skeleton } from "@/components/ddm/states";
+import { usePermissions } from "@/hooks/use-permission";
 import { ImportListDrawer, ProgressBar } from "@/components/disparador/import/import-list-drawer";
 import { ImportJobSummary } from "@/components/disparador/import/import-job-summary";
 import {
@@ -46,6 +47,8 @@ const fmtDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "—";
 
 export default function ListasImportadasPage() {
+  // As rotas /api/disparador/imports* exigem campaigns.manage (requireDisparadorAccess); o servidor revalida.
+  const perms = usePermissions();
   const [jobs, setJobs] = useState<PublicImportJob[] | null>(null);
   const [lists, setLists] = useState<PublicImportList[] | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -138,6 +141,17 @@ export default function ListasImportadasPage() {
       setLoadingMore(false);
     }
   };
+
+  if (!perms.loading && !perms.error && !perms.can("campaigns.manage")) {
+    return (
+      <PageBody>
+        <ForbiddenState
+          title="Você não tem permissão para ver as listas importadas"
+          hint="As listas importadas do disparador são restritas a administradores e ao proprietário."
+        />
+      </PageBody>
+    );
+  }
 
   return (
     <PageBody>

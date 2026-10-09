@@ -32,7 +32,17 @@ import { ListCard, ListRow } from '@/components/ddm/list-with-drawer';
 import { PageToolbar } from '@/components/ddm/page-toolbar';
 import { Segmented } from '@/components/ddm/segmented';
 import { StatusChip } from '@/components/ddm/status-chip';
-import { EmptyState, Skeleton } from '@/components/ddm/states';
+import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 interface SecretItem {
   id: string;
@@ -67,17 +77,21 @@ export function SecretsSettings() {
   const [query, setQuery] = useState('');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<SecretItem | null>(null);
+
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
       const res = await apiFetch('/api/settings/secrets', { cache: 'no-store' });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(payload.error || 'Não foi possível carregar as variáveis e credenciais.');
+        setLoadError(payload.error || 'Não foi possível carregar as variáveis e credenciais.');
         return;
       }
       setItems((payload as { secrets: SecretItem[] }).secrets);
     } catch {
-      toast.error('Não foi possível falar com o servidor.');
+      setLoadError('Não foi possível falar com o servidor.');
     } finally {
       setLoading(false);
     }
@@ -88,20 +102,18 @@ export function SecretsSettings() {
   }, [load]);
 
   async function handleDelete(item: SecretItem) {
-    if (
-      !window.confirm(
-        `Apagar ${item.name}? Ferramentas que usam {{${item.kind === 'credential' ? 'cred' : 'var'}.${item.name}}} vão falhar até você cadastrar de novo.`,
-      )
-    )
-      return;
-    const res = await apiFetch(`/api/settings/secrets/${item.id}`, { method: 'DELETE' });
-    if (!res.ok) {
-      const payload = await res.json().catch(() => ({}));
-      toast.error(payload.error || 'Não foi possível apagar.');
-      return;
+    try {
+      const res = await apiFetch(`/api/settings/secrets/${item.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        toast.error(payload.error || 'Não foi possível apagar.');
+        return;
+      }
+      toast.success(`${item.name} apagado`);
+      setItems((prev) => prev.filter((i) => i.id !== item.id));
+    } catch {
+      toast.error('Não foi possível falar com o servidor.');
     }
-    toast.success(`${item.name} apagado`);
-    setItems((prev) => prev.filter((i) => i.id !== item.id));
   }
 
   if (loading) {
@@ -112,6 +124,19 @@ export function SecretsSettings() {
           <Skeleton key={i} className="h-14 rounded-[10px]" />
         ))}
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Não foi possível carregar as variáveis e credenciais"
+        hint={loadError}
+        onRetry={() => {
+          setLoading(true);
+          void load();
+        }}
+      />
     );
   }
 
@@ -235,7 +260,7 @@ export function SecretsSettings() {
                   <Button variant="ghost" size="icon-sm" onClick={() => setEditing(item)} aria-label={`Editar ${item.name}`} title="Editar">
                     <Pencil className="size-4" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" onClick={() => void handleDelete(item)} aria-label={`Apagar ${item.name}`} title="Apagar">
+                  <Button variant="ghost" size="icon-sm" onClick={() => setPendingDelete(item)} aria-label={`Apagar ${item.name}`} title="Apagar">
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
@@ -244,6 +269,31 @@ export function SecretsSettings() {
           ))}
         </ListCard>
       )}
+
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Apagar {pendingDelete?.kind === 'credential' ? 'credencial' : 'variável'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete
+                ? `Apagar ${pendingDelete.name}? Ferramentas que usam {{${pendingDelete.kind === 'credential' ? 'cred' : 'var'}.${pendingDelete.name}}} vão falhar até você cadastrar de novo.`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = pendingDelete;
+                setPendingDelete(null);
+                if (target) void handleDelete(target);
+              }}
+            >
+              Apagar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {editing && (
         <SecretDialog

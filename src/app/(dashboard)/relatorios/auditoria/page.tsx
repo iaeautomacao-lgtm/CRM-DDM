@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/dashboard/empty-state";
+import { ErrorState, ForbiddenState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { AccountMember } from "@/types";
 import { AuditDetailModal, EVENT_BADGE } from "@/components/relatorios/AuditDetailModal";
@@ -117,7 +118,8 @@ function FilterSelect({
 
 export default function AuditoriaPage() {
   // Exportar exige reports.export; o servidor revalida.
-  const canExport = usePermissions().can("reports.export");
+  const perms = usePermissions();
+  const canExport = perms.can("reports.export");
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [draft, setDraft] = useState<AuditFilters>(defaultFilters);
   const [applied, setApplied] = useState<AuditFilters>(defaultFilters);
@@ -137,6 +139,7 @@ export default function AuditoriaPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [selectedLog, setSelectedLog] = useState<AuditLog | null>(null);
   // Só a resposta da busca mais recente vale (troca rápida de página).
@@ -158,6 +161,7 @@ export default function AuditoriaPage() {
   const runSearch = useCallback(async () => {
     const seq = ++requestSeq.current;
     setLoading(true);
+    setLoadError(false);
     try {
       const qs = toQuery(applied);
       qs.set("page", String(page));
@@ -171,6 +175,7 @@ export default function AuditoriaPage() {
     } catch (err) {
       if (seq !== requestSeq.current) return;
       console.error("[auditoria] failed to load audit logs:", err);
+      setLoadError(true);
       toast.error("Falha ao carregar a auditoria");
     } finally {
       if (seq === requestSeq.current) setLoading(false);
@@ -216,6 +221,16 @@ export default function AuditoriaPage() {
   ];
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const set = (patch: Partial<AuditFilters>) => setDraft((d) => ({ ...d, ...patch }));
+
+  // GET /api/audit-logs exige audit.view; o servidor revalida.
+  if (!perms.loading && !perms.error && !perms.can("audit.view")) {
+    return (
+      <ForbiddenState
+        title="Você não tem permissão para ver a auditoria"
+        hint="A auditoria é restrita a administradores e ao proprietário."
+      />
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -268,6 +283,10 @@ export default function AuditoriaPage() {
             {[0, 1, 2].map((i) => (
               <Skeleton key={i} className="h-10 w-full rounded-lg" />
             ))}
+          </div>
+        ) : loadError ? (
+          <div className="p-4">
+            <ErrorState title="Não foi possível carregar a auditoria" onRetry={() => runSearch()} />
           </div>
         ) : logs.length === 0 ? (
           <div className="p-4">

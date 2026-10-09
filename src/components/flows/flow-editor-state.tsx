@@ -78,6 +78,16 @@ import {
 } from "@/lib/flows/local-draft";
 import type { FlowNodeRow, FlowRow } from "@/lib/flows/types";
 import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // ============================================================
 // State shape
@@ -156,6 +166,13 @@ export function buildInitialState(flow: FlowRow, nodes: FlowNodeRow[]): BuilderS
   };
 }
 
+/** Pedido de confirmação do editor (renderizado como AlertDialog pelo provider). */
+export interface ConfirmRequest {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+}
+
 /** Rascunho local oferecido ao abrir o editor. */
 export interface DraftOffer {
   content: DraftContent;
@@ -218,6 +235,8 @@ export interface FlowEditorContextValue {
    * ativo / falha ao salvar). true = pode navegar.
    */
   confirmLeave: () => Promise<boolean>;
+  /** Abre o diálogo de confirmação do editor; true = confirmou. */
+  askConfirm: (request: ConfirmRequest) => Promise<boolean>;
   /** Rascunho local mais novo que o servidor, aguardando Recuperar/Descartar. */
   draftOffer: DraftOffer | null;
   recoverDraft: () => void;
@@ -455,6 +474,25 @@ export function FlowEditorProvider({
   children,
 }: ProviderProps) {
   const router = useRouter();
+
+  // Confirmação por diálogo (substitui window.confirm): devolve uma Promise
+  // para que guardas assíncronas (sair, publicar, excluir) sigam iguais.
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const confirmResolverRef = useRef<((ok: boolean) => void) | null>(null);
+  const settleConfirm = useCallback((ok: boolean) => {
+    const resolve = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    setConfirmRequest(null);
+    resolve?.(ok);
+  }, []);
+  const askConfirm = useCallback((request: ConfirmRequest): Promise<boolean> => {
+    // Pedido novo com outro aberto: o anterior conta como "não".
+    confirmResolverRef.current?.(false);
+    return new Promise<boolean>((resolve) => {
+      confirmResolverRef.current = resolve;
+      setConfirmRequest(request);
+    });
+  }, []);
 
   const [state, setStateRaw] = useState<BuilderState>(() =>
     buildInitialState(initialFlow, initialNodes),
@@ -721,9 +759,15 @@ export function FlowEditorProvider({
           const json = await res.json().catch(() => ({}));
           if (res.status === 409 && json.code === "orphan_runs") {
             // Confirmação explícita; "sim" reenvia já confirmado.
-            if (window.confirm(`${json.error}
+            if (
+              await askConfirm({
+                title: "Publicar mesmo assim?",
+                message: `${json.error}
 
-Publicar mesmo assim?`)) {
+Publicar mesmo assim?`,
+                confirmLabel: "Publicar",
+              })
+            ) {
               orphanConfirmRef.current = true;
             } else {
               toast.info("Alterações não publicadas.");
@@ -773,7 +817,7 @@ Publicar mesmo assim?`)) {
       if (success && revision !== revisionRef.current) return save(opts);
       return success;
     },
-    [initialFlow.id, state, writeDraftNow],
+    [initialFlow.id, state, writeDraftNow, askConfirm],
   );
 
   const reloadFromServer = useCallback(() => {
@@ -790,15 +834,21 @@ Publicar mesmo assim?`)) {
     if (!dirtyRef.current) return true;
     writeDraftNow();
     if (latestStateRef.current.status === "active") {
-      return window.confirm(
-        "Este fluxo está ativo e tem alterações não publicadas. Sair sem publicar?\n\nAs alterações ficam guardadas neste navegador para recuperar depois.",
-      );
+      return askConfirm({
+        title: "Sair sem publicar?",
+        message:
+          "Este fluxo está ativo e tem alterações não publicadas. Sair sem publicar?\n\nAs alterações ficam guardadas neste navegador para recuperar depois.",
+        confirmLabel: "Sair",
+      });
     }
     if (!conflictRef.current && (await save({ silent: true }))) return true;
-    return window.confirm(
-      "Não foi possível salvar as alterações deste fluxo. Sair mesmo assim?\n\nElas ficam guardadas neste navegador e podem ser recuperadas ao reabrir o fluxo.",
-    );
-  }, [save, writeDraftNow]);
+    return askConfirm({
+      title: "Sair mesmo assim?",
+      message:
+        "Não foi possível salvar as alterações deste fluxo. Sair mesmo assim?\n\nElas ficam guardadas neste navegador e podem ser recuperadas ao reabrir o fluxo.",
+      confirmLabel: "Sair",
+    });
+  }, [save, writeDraftNow, askConfirm]);
 
   // Protect internal links, including the dashboard sidebar, before unmount.
   useEffect(() => {
@@ -955,9 +1005,11 @@ Publicar mesmo assim?`)) {
 
   // ---- Delete ----
   const deleteFlow = useCallback(async () => {
-    const yes = window.confirm(
-      `Excluir "${state.name}"? Todas as execuções ativas serão encerradas imediatamente. Essa ação não pode ser desfeita.`,
-    );
+    const yes = await askConfirm({
+      title: "Excluir fluxo",
+      message: `Excluir "${state.name}"? Todas as execuções ativas serão encerradas imediatamente. Essa ação não pode ser desfeita.`,
+      confirmLabel: "Excluir",
+    });
     if (!yes) return;
     try {
       const res = await apiFetch(`/api/flows/${initialFlow.id}`, {
@@ -969,7 +1021,7 @@ Publicar mesmo assim?`)) {
       const msg = err instanceof Error ? err.message : "Falha ao excluir";
       toast.error(msg);
     }
-  }, [initialFlow.id, router, state.name]);
+  }, [initialFlow.id, router, state.name, askConfirm]);
 
   // ---- Node mutations ----
   const updateNode = useCallback(
@@ -1147,6 +1199,7 @@ Publicar mesmo assim?`)) {
       conflict,
       reloadFromServer,
       confirmLeave,
+      askConfirm,
       draftOffer,
       recoverDraft,
       discardDraft,
@@ -1183,6 +1236,7 @@ Publicar mesmo assim?`)) {
       conflict,
       reloadFromServer,
       confirmLeave,
+      askConfirm,
       draftOffer,
       recoverDraft,
       discardDraft,
@@ -1198,5 +1252,30 @@ Publicar mesmo assim?`)) {
     ],
   );
 
-  return <FlowEditorCtx.Provider value={value}>{children}</FlowEditorCtx.Provider>;
+  return (
+    <FlowEditorCtx.Provider value={value}>
+      {children}
+      <AlertDialog
+        open={confirmRequest !== null}
+        onOpenChange={(open) => {
+          // Adiado: se o clique em "confirmar" fechou o diálogo, a resposta
+          // "sim" já foi dada e este "não" não tem mais efeito.
+          if (!open) queueMicrotask(() => settleConfirm(false));
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmRequest?.title}</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-line">{confirmRequest?.message}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={() => settleConfirm(true)}>
+              {confirmRequest?.confirmLabel ?? "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </FlowEditorCtx.Provider>
+  );
 }
