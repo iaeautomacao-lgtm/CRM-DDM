@@ -27,8 +27,8 @@ import {
   drainStatusInbox,
   extractStatusEvents,
   ingestStatusEvents,
-  MAX_WEBHOOK_BODY_BYTES,
 } from '@/lib/whatsapp/status-inbox'
+import { isWellFormedHubSignature, readCappedBody } from '@/lib/security/webhook-body'
 import {
   allowExpensiveRejection,
   cacheChannel,
@@ -204,18 +204,21 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   // Auditoria: escritas desta requisição saem como "webhook" (webhook_meta_whatsapp).
   await registerAuditActor({ actorType: 'webhook', source: 'webhook_meta_whatsapp' })
-  // Teto de corpo (~1 MB): os POSTs da Meta são pequenos; recusa antes de ler/parsear.
-  const declaredLength = Number(request.headers.get('content-length'))
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_WEBHOOK_BODY_BYTES) {
+  // SW-5: teto de corpo (~1 MB) pelo Content-Length E durante a leitura do stream (chunked sem tamanho declarado não escapa).
+  const capped = await readCappedBody(request)
+  if (!capped.ok) {
     return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
   }
   // Read raw body first so we can HMAC-verify the exact bytes Meta
   // signed. request.json() would re-encode and break the signature.
-  const rawBody = await request.text()
-  if (rawBody.length > MAX_WEBHOOK_BODY_BYTES) {
-    return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
-  }
+  const rawBody = capped.text
   const signature = request.headers.get('x-hub-signature-256')
+  // 14.10: o segredo é POR CANAL e o canal vem do corpo, então o HMAC completo só dá para conferir depois de achar o canal.
+  // Mas sem uma assinatura bem formada (sha256=<64 hex>) nada é parseado nem chega ao banco.
+  if (!isWellFormedHubSignature(signature)) {
+    console.warn('[webhook] rejected request without a well-formed X-Hub-Signature-256')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
 
   let body: { entry?: WhatsAppWebhookEntry[] }
   try {

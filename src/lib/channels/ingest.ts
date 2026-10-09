@@ -37,7 +37,13 @@ export async function ingestSocialEvent(ev: SocialInboundEvent): Promise<void> {
 
   // Reentrega da Meta (retry/timeout): o índice único de message_id já
   // barraria o insert; checar antes evita baixar mídia de novo.
-  const { data: dupe } = await db.from("messages").select("id").eq("message_id", ev.mid).limit(1);
+  // SW-6: escopo da CONTA do canal — o mesmo mid em outro tenant não descarta esta mensagem.
+  const { data: dupe } = await db
+    .from("messages")
+    .select("id")
+    .eq("account_id", channel.account_id)
+    .eq("message_id", ev.mid)
+    .limit(1);
   if (dupe?.length) return;
 
   const { contactId, created } = await resolveContact(channel, ownerUserId, ev);

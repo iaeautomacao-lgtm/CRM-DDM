@@ -74,6 +74,26 @@ export function legacyWahaSecretAllowed(): boolean {
   return process.env.WAHA_WEBHOOK_ACCEPT_LEGACY_SECRET === 'true';
 }
 
+/**
+ * Alarme do segredo legado (SW-4): a flag existe só para a transição e deve ficar DESLIGADA (padrão). Enquanto estiver ligada e
+ * algum evento entrar por ela, o webhook grava um aviso em system_logs — no máximo 1× por sessão a cada 10 min (não inunda).
+ */
+const LEGACY_REPORT_WINDOW_MS = 10 * 60_000;
+const legacyReportedAt = new Map<string, number>();
+
+export function shouldReportLegacyWahaSecret(session: string, now: number = Date.now()): boolean {
+  const last = legacyReportedAt.get(session);
+  if (last !== undefined && now - last < LEGACY_REPORT_WINDOW_MS) return false;
+  if (legacyReportedAt.size >= 1_000) legacyReportedAt.clear();
+  legacyReportedAt.set(session, now);
+  return true;
+}
+
+/** Só para testes. */
+export function __resetLegacyWahaReportsForTests(): void {
+  legacyReportedAt.clear();
+}
+
 export function matchesLegacyWahaSecret(supplied: string | null): boolean {
   return legacyWahaSecretAllowed()
     && matchesOperationalSecret(process.env.WAHA_WEBHOOK_SECRET, supplied);

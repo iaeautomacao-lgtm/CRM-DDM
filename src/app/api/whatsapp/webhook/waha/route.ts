@@ -20,6 +20,8 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { writeLog, maskPhone } from '@/lib/logger'
+import { readCappedBody } from '@/lib/security/webhook-body'
+import { shouldReportLegacyWahaSecret } from '@/lib/whatsapp/waha-webhook-auth'
 import { phoneVariants } from '@/lib/disparador/phone-key'
 
 // Espera antes de gravar o eco de uma mensagem nossa (ver abaixo).
@@ -51,7 +53,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
   try {
-    const body = await request.json()
+    // SW-5: teto de corpo (Content-Length e leitura do stream); a autenticação (header) já passou ANTES de ler qualquer byte.
+    const capped = await readCappedBody(request)
+    if (!capped.ok) return NextResponse.json({ error: 'Payload too large' }, { status: 413 })
+    let body: { event?: string; session?: string; payload?: any }
+    try {
+      body = JSON.parse(capped.text)
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    }
     const { event, session, payload } = body
 
     // operacional — marcador leve de início de requisição (sem payload)
@@ -86,6 +96,19 @@ export async function POST(request: Request) {
     }
 
     const accountId = config.account_id
+
+    // SW-4: o segredo global legado só entra com WAHA_WEBHOOK_ACCEPT_LEGACY_SECRET=true (desligado por padrão). Cada uso deixa um
+    // aviso (amostrado) para o operador saber QUAL canal ainda precisa reiniciar a sessão e então desligar a flag.
+    if (!channelId && shouldReportLegacyWahaSecret(String(session))) {
+      void writeLog({
+        account_id: accountId,
+        level: 'warn',
+        source: 'webhook_waha',
+        event: 'waha_legacy_secret_used',
+        message: 'Webhook WAHA aceito pelo segredo global legado (WAHA_WEBHOOK_ACCEPT_LEGACY_SECRET=true): reinicie a sessão do canal e desligue a flag',
+        payload: { channel_id: config.id, session: String(session) },
+      })
+    }
 
     // ============================================================
     // 1. Message status updates
@@ -270,9 +293,11 @@ export async function POST(request: Request) {
       }
 
       // Check if message already exists in DB to prevent duplicates
+      // SW-6: escopo da CONTA do canal autenticado — o mesmo message_id em outro tenant não pode fazer descartar esta mensagem.
       const { data: existingMsg } = await db
         .from('messages')
         .select('id')
+        .eq('account_id', accountId)
         .eq('message_id', messageId)
         .maybeSingle()
 
@@ -287,6 +312,7 @@ export async function POST(request: Request) {
         const { data: recheck } = await db
           .from('messages')
           .select('id')
+          .eq('account_id', accountId)
           .eq('message_id', messageId)
           .limit(1)
         echoAlreadySaved = (recheck?.length ?? 0) > 0
@@ -638,6 +664,11 @@ export async function POST(request: Request) {
         waha_session: session,
       })
 
+      // SW-6: idempotência ATÔMICA — o select-then-insert acima tem corrida (duas entregas simultâneas); a violação de unicidade
+      // (23505) do índice é o desempate e vale como "já sincronizada", não como erro (o WAHA reenviaria sem parar).
+      if (msgInsertError?.code === '23505') {
+        return NextResponse.json({ success: true, message: 'Message already synchronized' })
+      }
       if (msgInsertError) {
         console.error(
           '[waha/webhook] Failed to insert message database error:',

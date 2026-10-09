@@ -174,10 +174,11 @@ async function handleReaction(
  * drenador de uma mensagem já gravada viram `duplicate` sem refazer nada. Erro na consulta = "não sei": segue o
  * caminho normal (o 23505 do insert continua sendo a garantia final contra a corrida).
  */
-async function messageAlreadyStored(wamid: string): Promise<boolean> {
+async function messageAlreadyStored(wamid: string, accountId: string): Promise<boolean> {
   const { data, error } = await supabaseAdmin()
     .from('messages')
     .select('id')
+    .eq('account_id', accountId)
     .eq('message_id', wamid)
     .limit(1)
   if (error) return false
@@ -207,7 +208,7 @@ export async function processMessage(
   configId: string
 ): Promise<ProcessMessageOutcome> {
   // Reação não vira linha em `messages` (o wamid dela nunca está lá): só as demais passam pelo dedupe.
-  if (message.type !== 'reaction' && message.id && (await messageAlreadyStored(message.id))) {
+  if (message.type !== 'reaction' && message.id && (await messageAlreadyStored(message.id, accountId))) {
     console.log('[webhook] Mensagem duplicada ignorada (já gravada):', message.id)
     return "duplicate"
   }
