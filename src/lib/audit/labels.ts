@@ -122,6 +122,8 @@ export const ACTION_LABEL: Record<string, string> = {
   "role.permissions_changed": "Permissões do papel alteradas",
   "access.denied": "Acesso negado",
   "audit.exported": "Exportação da auditoria",
+  "conversation.batch_transferred_to_self": "Transferência em lote para si",
+  "conversation.batch_closed": "Finalização em lote",
   "member.password_reset": "Senha do membro redefinida",
   "api_key.created": "Chave de API criada",
   "api_key.revoked": "Chave de API revogada",
