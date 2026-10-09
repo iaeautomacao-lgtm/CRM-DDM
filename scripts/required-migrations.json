@@ -340,6 +340,14 @@
       "kind": "registry"
     },
     {
+      "version": "332_dispatch_provider_call_marker",
+      "kind": "registry"
+    },
+    {
+      "version": "333_dispatch_131026_pending_counts",
+      "kind": "registry"
+    },
+    {
       "version": "334_cron_heartbeat",
       "kind": "registry"
     }
