@@ -164,13 +164,13 @@ export function WhatsAppConfig() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to request pairing code');
+        throw new Error(data.error || 'Falha ao solicitar o código de pareamento');
       }
 
       setPairingCode(data.code);
       toast.success('Código de pareamento gerado!');
     } catch (err: any) {
-      setPairingError(err.message || 'Failed to generate code');
+      setPairingError(err.message || 'Falha ao gerar o código');
       toast.error(err.message || 'Erro ao gerar código');
     } finally {
       setPairingLoading(false);
@@ -1303,8 +1303,8 @@ export function WhatsAppConfig() {
               <CardTitle className="text-foreground">Configuração de Webhook</CardTitle>
               <CardDescription className="text-muted-foreground font-light">
                 {provider === 'waha'
-                  ? 'Configure this URL in your WAHA settings to receive incoming chats.'
-                  : 'Use this URL as your webhook callback in the Meta App Dashboard.'}
+                  ? 'Configure esta URL nas configurações do seu WAHA para receber as conversas.'
+                  : 'Use esta URL como callback de webhook no painel do app da Meta (Meta App Dashboard).'}
               </CardDescription>
             </CardHeader>
             <CardContent>
