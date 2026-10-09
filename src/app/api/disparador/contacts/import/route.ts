@@ -70,6 +70,9 @@ export async function POST(request: Request) {
     }
     // Só o primeiro bloco limpa o vínculo anterior do rascunho/campanha; os
     // seguintes apenas acrescentam. Sem chunk_index (FormData) = bloco único.
+    // A15: identificador opcional da importação (o front manda o mesmo em todos os blocos); formato inválido é ignorado.
+    const rawToken = isJsonBody ? jsonBody?.import_token : null;
+    const importToken = typeof rawToken === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(rawToken) ? rawToken : null;
     const chunkIndex = isJsonBody ? Math.max(0, Math.floor(Number(jsonBody?.chunk_index ?? 0)) || 0) : 0;
     // campaign_id só vem preenchido quando o import acontece numa edição
     // de campanha já existente; draft_id cobre a criação de campanha nova
@@ -246,7 +249,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const outcome = await importContactBlock({ accountId, userId, rows, columnMap, campaignId: campaignIdRaw, draftId: draftIdRaw, chunkIndex });
+    const outcome = await importContactBlock({ accountId, userId, rows, columnMap, campaignId: campaignIdRaw, draftId: draftIdRaw, chunkIndex, importToken });
     if (outcome.failure) {
       return NextResponse.json({ error: outcome.failure.error }, { status: outcome.failure.status });
     }

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  foreignDraftTable: "", draftError: false, failContact: false,
+  foreignDraftTable: "", draftError: false, failContact: false, contactsReturn: null as null | Array<Record<string, unknown>>,
   calls: [] as { table: string; method: string; args: unknown[] }[],
 }));
 vi.mock("@/lib/disparador/route-auth", () => ({
@@ -15,7 +15,7 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       const b: Record<string, unknown> = {};
       let foreignCheck = false;
       let inserted = false;
-      for (const method of ["select", "eq", "neq", "in", "is", "not", "limit", "order", "range", "insert", "delete", "update", "upsert"]) {
+      for (const method of ["select", "eq", "neq", "in", "is", "not", "or", "limit", "order", "range", "insert", "delete", "update", "upsert"]) {
         b[method] = (...args: unknown[]) => {
           state.calls.push({ table, method, args });
           if (method === "neq") foreignCheck = true;
@@ -29,7 +29,7 @@ vi.mock("@/lib/disparador/admin-client", () => ({
           error: state.draftError ? { message: "segredo do banco" } : null,
         };
         if (inserted && table === "contacts") return {
-          data: state.failContact ? null : [{ id: "contact-1" }],
+          data: state.failContact ? null : state.contactsReturn ?? [{ id: "contact-1" }],
           error: state.failContact ? { message: "segredo do banco", code: "XX000" } : null,
         };
         return { data: [], error: null };
@@ -56,7 +56,7 @@ const post = (value: unknown) => POST(new Request("https://crm.test/api", {
 
 describe("import: escopo do rascunho e preservação dos blocos", () => {
   beforeEach(() => {
-    state.calls = []; state.foreignDraftTable = ""; state.draftError = false; state.failContact = false;
+    state.calls = []; state.foreignDraftTable = ""; state.draftError = false; state.failContact = false; state.contactsReturn = null;
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
   afterEach(() => vi.restoreAllMocks());
@@ -99,6 +99,44 @@ describe("import: escopo do rascunho e preservação dos blocos", () => {
     expect((await next.json()).linked).toBe(1);
     expect(state.calls.some((c) => c.method === "delete")).toBe(false);
     expect(state.calls.some((c) => c.table === "disp_import_contacts" && c.method === "insert")).toBe(true);
+  });
+
+  it("A14: vincula pelo telefone normalizado devolvido, mesmo com o RETURNING fora de ordem", async () => {
+    state.contactsReturn = [
+      { id: "c-bia", phone_normalized: "5511988888888" },
+      { id: "c-ana", phone_normalized: "5511999999999" },
+    ];
+    const res = await post(body({
+      rows: [
+        { nome: "Ana", telefone: "11999999999", var1: "A" },
+        { nome: "Bia", telefone: "11988888888", var1: "B" },
+      ],
+    }));
+    expect(res.status).toBe(200);
+    const varInsert = state.calls.find((c) => c.table === "contact_import_variables" && c.method === "upsert");
+    const rows = (varInsert?.args[0] ?? []) as Array<{ contact_id: string; value: string }>;
+    expect(Object.fromEntries(rows.map((r) => [r.contact_id, r.value]))).toEqual({ "c-ana": "A", "c-bia": "B" });
+  });
+
+  describe("A15: import_token", () => {
+    const orCalls = () => state.calls.filter((c) => c.table === "disp_import_contacts" && c.method === "or");
+    const linkInsert = () => state.calls.find((c) => c.table === "disp_import_contacts" && c.method === "insert");
+
+    it("com token, o bloco 0 só apaga vínculos de outra importação e grava o token nos vínculos", async () => {
+      const res = await post(body({ import_token: "tok-1234-abcd" }));
+      expect(res.status).toBe(200);
+      expect(orCalls()[0]?.args[0]).toBe("import_token.is.null,import_token.neq.tok-1234-abcd");
+      expect(linkInsert()?.args[0]).toEqual([expect.objectContaining({ import_token: "tok-1234-abcd" })]);
+    });
+
+    it("sem token (ou token em formato inválido) mantém o comportamento antigo: apaga tudo e não grava token", async () => {
+      for (const extra of [{}, { import_token: "x y;--" }]) {
+        state.calls = [];
+        expect((await post(body(extra))).status).toBe(200);
+        expect(orCalls()).toHaveLength(0);
+        expect(JSON.stringify(linkInsert()?.args[0])).not.toContain("import_token");
+      }
+    });
   });
 
   it("falha parcial de insert não vaza a mensagem do banco em results.erros", async () => {

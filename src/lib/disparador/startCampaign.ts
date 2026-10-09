@@ -678,6 +678,8 @@ async function prepareCampaign(
     let contactDelay = 0;
     let enqueued = 0;
     const queueRows = [];
+    // A17: o round-robin de canais conta só quem entra na fila (bloqueados/já enviados não consomem a vez de um canal).
+    let queuedContacts = 0;
 
     for (let i = 0; i < contacts.length; i++) {
       const contact = contacts[i];
@@ -692,7 +694,7 @@ async function prepareCampaign(
       // Distribuição round-robin entre os canais selecionados — cada canal
       // recebe uma fatia igual dos contatos, em vez do sorteio aleatório
       // anterior (só estatisticamente uniforme, sem garantia de balanço).
-      const sessionId = validSessionIds[i % validSessionIds.length];
+      const sessionId = validSessionIds[queuedContacts++ % validSessionIds.length];
 
       let contactBaseDelay: number;
       if (batchSize > 1) {

@@ -158,18 +158,28 @@ async function loadReflowItems(
 ): Promise<{ ok: true; items: ReflowSourceItem[] } | { ok: false; error: string }> {
   const db = supabaseAdmin();
   const items: ReflowSourceItem[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await db
+  // Keyset sobre (scheduled_at, id) em vez de OFFSET (A23): se um item sai do conjunto durante a leitura (pausa com
+  // envios em voo), as páginas seguintes não pulam itens. scheduled_at nulo ordena por último.
+  let cursor: ReflowSourceItem | null = null;
+  for (;;) {
+    let query = db
       .from("disp_message_queue")
       .select("id, contact_id, scheduled_at")
       .eq("campaign_id", campaignId)
       .eq("status", status)
       .order("scheduled_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
+      .order("id", { ascending: true });
+    if (cursor) {
+      query = cursor.scheduled_at
+        ? query.or(`scheduled_at.gt."${cursor.scheduled_at}",and(scheduled_at.eq."${cursor.scheduled_at}",id.gt."${cursor.id}"),scheduled_at.is.null`)
+        : query.is("scheduled_at", null).gt("id", cursor.id);
+    }
+    const { data, error } = await query.limit(PAGE_SIZE);
     if (error) return { ok: false, error: error.message };
-    items.push(...((data ?? []) as ReflowSourceItem[]));
-    if (!data || data.length < PAGE_SIZE) break;
+    const page = (data ?? []) as ReflowSourceItem[];
+    items.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    cursor = page[page.length - 1];
   }
   return { ok: true, items };
 }
