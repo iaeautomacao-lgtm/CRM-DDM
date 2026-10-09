@@ -6,6 +6,8 @@
 // painel mostra só a marca; `brandTitle`/`brandText` existem para quando a operação definir o texto.
 
 import Image from "next/image";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import type { ReactNode } from "react";
 import { OmniDdmLogo } from "@/components/ui/omniddm-logo";
 import { cn } from "@/lib/utils";
@@ -97,3 +99,16 @@ export const AUTH_INPUT_CLASS =
 
 /** Classes do botão principal (44px, largura total). */
 export const AUTH_SUBMIT_CLASS = "h-11 w-full rounded-lg text-sm font-semibold";
+
+/** Link "Voltar para o login" do rodapé das telas de acesso. */
+export function BackToLogin({ label = "Voltar para o login" }: { label?: string }) {
+  return (
+    <Link
+      href="/login"
+      className="inline-flex items-center gap-1.5 rounded-sm font-semibold text-primary-text hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      <ArrowLeft className="size-3.5" aria-hidden="true" />
+      {label}
+    </Link>
+  );
+}
