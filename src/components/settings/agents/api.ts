@@ -1,4 +1,5 @@
 import { apiFetch } from '@/lib/api-fetch';
+import type { SimOutbound, SimState, SimTimelineEvent } from '@/lib/flows/simulator/types';
 import type {
   AgentDetailResponse,
   AgentListItem,
@@ -279,4 +280,43 @@ export async function removeKnowledgeFile(id: string): Promise<void> {
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new AgentApiError(data?.error || 'Não foi possível remover o arquivo.', res.status);
+}
+
+export interface AgentSimulateResponse {
+  state: SimState;
+  outbound: SimOutbound[];
+  timeline: SimTimelineEvent[];
+  remaining: number;
+  agent: { name: string; version: number; disabled: boolean };
+  real_read_denied?: boolean;
+}
+
+/** Uma mensagem do "cliente" para o rascunho do agente (null = agente ainda não criado). Nada é salvo nem enviado. */
+export async function simulateAgent(
+  agentId: string | null,
+  body: {
+    agent: Record<string, unknown>;
+    message: { kind: 'text'; text: string };
+    state: SimState | null;
+    toolMocks: Record<string, string>;
+    realReadOnlyTools: string[];
+  },
+): Promise<AgentSimulateResponse> {
+  let res: Response;
+  try {
+    res = await apiFetch(`/api/settings/agents/${agentId ? encodeURIComponent(agentId) : 'new'}/simulate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new AgentApiError('Não foi possível conectar ao servidor para testar o agente.', 0);
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.state) {
+    const first = data?.issues?.[0];
+    const message = data?.error || 'Não foi possível testar o agente.';
+    throw new AgentApiError(first ? `${message} (${first.path}: ${first.message})` : message, res.status, data?.issues);
+  }
+  return data as AgentSimulateResponse;
 }
