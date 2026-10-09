@@ -32,6 +32,7 @@
     "src/lib/billing/route-helpers.ts",
     "src/lib/billing/enqueuer.ts",
     "src/lib/billing/sync.ts",
+    "src/lib/push/service.ts",
     "src/lib/webhooks-out/endpoints.ts",
     "src/lib/webhooks-out/deliver.ts",
     "src/lib/ai/knowledge/extract.ts",
