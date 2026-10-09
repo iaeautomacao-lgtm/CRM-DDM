@@ -320,6 +320,14 @@
       "index": "idx_internal_messages_unread"
     },
     {
+      "version": "304_view_permission_keys",
+      "kind": "registry"
+    },
+    {
+      "version": "305_campaigns_pipelines_rls_has_perm",
+      "kind": "registry"
+    },
+    {
       "version": "310_rls_mfa_aal2",
       "kind": "registry"
     },
@@ -346,7 +354,15 @@
       "index": "idx_conversations_account_created"
     },
     {
+      "version": "317_automation_pending_lease",
+      "kind": "registry"
+    },
+    {
       "version": "320_billing_reports",
+      "kind": "registry"
+    },
+    {
+      "version": "322_report_rpcs_has_perm",
       "kind": "registry"
     },
     {
@@ -354,15 +370,11 @@
       "kind": "registry"
     },
     {
-      "version": "332_dispatch_provider_call_marker",
+      "version": "324_conversations_rls_has_perm",
       "kind": "registry"
     },
     {
-      "version": "333_dispatch_131026_pending_counts",
-      "kind": "registry"
-    },
-    {
-      "version": "334_cron_heartbeat",
+      "version": "325_audit_admin_tables_rls_has_perm",
       "kind": "registry"
     }
   ]

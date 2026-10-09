@@ -17,6 +17,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { createClient } from "@/lib/supabase/client";
+import { canConfirmPipelineDelete, pipelineDeleteWarning } from "@/lib/pipelines/delete-warning";
 import type { Pipeline, PipelineStage } from "@/types";
 import {
   Dialog,
@@ -104,6 +105,10 @@ export function PipelineSettings({
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // Confirmação do Excluir pipeline: contagem real de negócios e nome digitado.
+  const [dealCount, setDealCount] = useState<number | null>(null);
+  const [dealCountLoading, setDealCountLoading] = useState(false);
+  const [typedName, setTypedName] = useState("");
   const [stageToDelete, setStageToDelete] = useState<PipelineStage | null>(null);
 
   // Reset form state when the dialog opens or its prop inputs change
@@ -208,7 +213,29 @@ export function PipelineSettings({
     setLocalStages(localStages.filter((s) => s.id !== stageId));
   }
 
+  function openDeleteConfirm() {
+    setTypedName("");
+    setDealCount(null);
+    setDealCountLoading(true);
+    setShowDeleteConfirm(true);
+    void supabase
+      .from("deals")
+      .select("id", { count: "exact", head: true })
+      .eq("pipeline_id", pipeline.id)
+      .then(({ count, error }) => {
+        // Falha na contagem: o aviso segue verdadeiro, só sem o número.
+        setDealCount(error ? null : (count ?? 0));
+        setDealCountLoading(false);
+      });
+  }
+
+  function closeDeleteConfirm() {
+    setShowDeleteConfirm(false);
+    setTypedName("");
+  }
+
   async function handleDeletePipeline() {
+    if (!canConfirmPipelineDelete(typedName, pipeline.name)) return;
     setDeleting(true);
     // ON DELETE CASCADE handles deals + stages.
     const { error } = await supabase
@@ -262,32 +289,46 @@ export function PipelineSettings({
 
         {showDeleteConfirm ? (
           <div className="py-4">
-            <div className="flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-4">
-              <AlertTriangle className="h-5 w-5 shrink-0 text-red-400" />
+            <div role="alert" className="flex items-center gap-3 rounded-lg border border-danger/30 bg-danger-soft p-4">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-danger" aria-hidden="true" />
               <div>
-                <p className="text-sm font-medium text-red-400">
-                  Excluir Pipeline
-                </p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Isso irá arquivar todos os negócios neste pipeline. Esta ação
-                  não pode ser desfeita.
+                <p className="text-sm font-semibold text-danger">Excluir pipeline definitivamente</p>
+                <p className="mt-1 text-xs text-foreground">
+                  {dealCountLoading
+                    ? "Contando os negócios deste funil…"
+                    : pipelineDeleteWarning({ name: pipeline.name, stages: localStages.length, deals: dealCount })}
                 </p>
               </div>
+            </div>
+            <div className="mt-4 grid gap-1.5">
+              <Label htmlFor="pipeline-delete-name" className="text-xs text-muted-foreground">
+                Para confirmar, digite o nome do funil: <span className="font-semibold text-foreground">{pipeline.name}</span>
+              </Label>
+              <Input
+                id="pipeline-delete-name"
+                value={typedName}
+                onChange={(e) => setTypedName(e.target.value)}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={deleting}
+              />
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <Button
                 variant="outline"
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={closeDeleteConfirm}
+                disabled={deleting}
                 className="border-border bg-transparent text-muted-foreground hover:bg-muted"
               >
                 Cancelar
               </Button>
               <Button
+                variant="destructive"
                 onClick={handleDeletePipeline}
-                disabled={deleting}
-                className="bg-red-600 text-white hover:bg-red-700"
+                disabled={deleting || dealCountLoading || !canConfirmPipelineDelete(typedName, pipeline.name)}
+                className="font-semibold"
               >
-                {deleting ? "Excluindo..." : "Excluir Pipeline"}
+                {deleting ? "Excluindo..." : "Excluir definitivamente"}
               </Button>
             </div>
           </div>
@@ -395,7 +436,7 @@ export function PipelineSettings({
             <DialogFooter className="border-border bg-popover/50">
               <Button
                 variant="destructive"
-                onClick={() => setShowDeleteConfirm(true)}
+                onClick={openDeleteConfirm}
                 className="mr-auto"
               >
                 Excluir Pipeline

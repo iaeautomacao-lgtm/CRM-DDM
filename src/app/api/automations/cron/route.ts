@@ -12,11 +12,35 @@ import type { AutomationContext } from '@/lib/automations/engine'
  * secret via the `x-cron-secret` header to match
  * `AUTOMATION_CRON_SECRET`.
  *
- * The claim step (status = 'running') serves as a simple lock so
- * overlapping invocations don't double-process rows. Best-effort
- * only; expensive SELECT ... FOR UPDATE is avoided in favor of a
- * two-step UPDATE-by-id.
+ * Migration 317 (auditoria B-07): o claim é a RPC claim_automation_pending — uma linha por vez,
+ * FOR UPDATE SKIP LOCKED (execuções sobrepostas nunca pegam a mesma linha), com lease. Ela também
+ * fecha como 'failed' a linha 'running' de lease vencido (restart no meio): não fica 'running' para
+ * sempre e NÃO é retomada (repetiria envios). Orçamento de tempo por chamada; sem a 317, o caminho
+ * antigo (claim em dois passos por UPDATE).
  */
+const LEASE_SECONDS = 300
+const MAX_PER_RUN = 50
+const BUDGET_MS = 45_000
+
+type PendingRow = Record<string, unknown> & { id: string }
+
+function toPending(row: PendingRow) {
+  return {
+    id: row.id,
+    automation_id: row.automation_id as string,
+    // account_id is NOT NULL on automation_pending_executions
+    // post-017; the engine uses it for tenant-scoped lookups.
+    account_id: row.account_id as string,
+    user_id: row.user_id as string,
+    contact_id: (row.contact_id as string | null) ?? null,
+    log_id: (row.log_id as string | null) ?? null,
+    parent_step_id: (row.parent_step_id as string | null) ?? null,
+    branch: (row.branch as 'yes' | 'no' | null) ?? null,
+    next_step_position: row.next_step_position as number,
+    context: (row.context as AutomationContext) ?? {},
+  }
+}
+
 async function handler(request: Request) {
   // Auditoria: escritas desta requisição saem como "automation" (cron_automacoes).
   await registerAuditActor({ actorType: 'automation', source: 'cron_automacoes' })
@@ -30,6 +54,28 @@ async function handler(request: Request) {
   }
 
   const admin = supabaseAdmin()
+  const startedAt = Date.now()
+  let processed = 0
+  let reaped = 0
+  for (let i = 0; i < MAX_PER_RUN && Date.now() - startedAt < BUDGET_MS; i++) {
+    const { data, error } = await admin.rpc('claim_automation_pending', { p_lease_seconds: LEASE_SECONDS })
+    if (error) {
+      if (i === 0 && (error.code === '42883' || error.code === 'PGRST202')) return legacyDrain(admin)
+      console.error('[automations/cron] claim failed:', error.message)
+      return NextResponse.json({ error: 'Falha ao reivindicar execuções pendentes.' }, { status: 500 })
+    }
+    const result = (Array.isArray(data) ? data[0] : data) as { claimed: PendingRow | null; reaped: number } | null
+    reaped += result?.reaped ?? 0
+    if (!result?.claimed) break
+    await resumePendingExecution(toPending(result.claimed))
+    processed++
+  }
+  if (reaped > 0) console.warn(`[automations/cron] ${reaped} execução(ões) interrompida(s) fechada(s) como falha (lease vencido)`)
+  return NextResponse.json({ processed, reaped })
+}
+
+/** Caminho antigo (banco sem a migration 317): claim em dois passos, sem lease. */
+async function legacyDrain(admin: ReturnType<typeof supabaseAdmin>) {
   const { data: due, error } = await admin
     .from('automation_pending_executions')
     .select('*')
@@ -38,7 +84,10 @@ async function handler(request: Request) {
     .order('run_at', { ascending: true })
     .limit(50)
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    console.error('[automations/cron] query failed:', error.message)
+    return NextResponse.json({ error: 'Falha ao ler execuções pendentes.' }, { status: 500 })
+  }
   if (!due || due.length === 0) return NextResponse.json({ processed: 0 })
 
   let processed = 0
@@ -52,20 +101,7 @@ async function handler(request: Request) {
       .maybeSingle()
     if (!claim) continue
 
-    await resumePendingExecution({
-      id: row.id as string,
-      automation_id: row.automation_id as string,
-      // account_id is NOT NULL on automation_pending_executions
-      // post-017; the engine uses it for tenant-scoped lookups.
-      account_id: row.account_id as string,
-      user_id: row.user_id as string,
-      contact_id: (row.contact_id as string | null) ?? null,
-      log_id: (row.log_id as string | null) ?? null,
-      parent_step_id: (row.parent_step_id as string | null) ?? null,
-      branch: (row.branch as 'yes' | 'no' | null) ?? null,
-      next_step_position: row.next_step_position as number,
-      context: (row.context as AutomationContext) ?? {},
-    })
+    await resumePendingExecution(toPending(row as PendingRow))
     processed++
   }
 
