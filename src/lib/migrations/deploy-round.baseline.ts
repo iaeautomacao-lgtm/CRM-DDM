@@ -22,6 +22,17 @@ AS $$
 $$;
 `;
 
+/** Migrations REAIS já aplicadas em produção que a baseline reaproveita (papéis/catálogo/has_perm e supervisor), em ordem. */
+export const BASELINE_REAL_MIGRATIONS = [
+  "169_profiles_lock_privileged_columns.sql",
+  "240_roles_foundation.sql",
+  "241_roles_functions.sql",
+  "241b_profiles_role_id_idx.sql",
+  "276_billing_permissions.sql",
+  "140_supervisor_role_access.sql",
+  "143_supervisor_report_scope.sql",
+] as const;
+
 export const BASELINE_SQL = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
 CREATE SCHEMA auth; CREATE SCHEMA wacrm;
@@ -37,17 +48,21 @@ CREATE FUNCTION auth.jwt() RETURNS jsonb LANGUAGE sql STABLE AS $$ SELECT coales
 GRANT EXECUTE ON FUNCTION auth.uid(), auth.jwt() TO anon, authenticated, service_role;
 
 CREATE TABLE wacrm.schema_migrations (version text PRIMARY KEY, applied_at timestamptz DEFAULT now());
-CREATE TABLE wacrm.accounts (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
-CREATE TABLE wacrm.profiles (user_id uuid PRIMARY KEY, account_id uuid REFERENCES wacrm.accounts(id), account_role text NOT NULL DEFAULT 'agent', full_name text, avatar_url text);
+CREATE TYPE wacrm.account_role_enum AS ENUM ('owner', 'admin', 'supervisor', 'agent', 'viewer');
+CREATE TABLE wacrm.accounts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name text DEFAULT 'conta', owner_user_id uuid);
+CREATE TABLE wacrm.profiles (user_id uuid PRIMARY KEY, account_id uuid REFERENCES wacrm.accounts(id), account_role wacrm.account_role_enum NOT NULL DEFAULT 'agent', full_name text, avatar_url text, email text, updated_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE wacrm.member_presence (user_id uuid PRIMARY KEY, account_id uuid, last_seen_at timestamptz);
 CREATE TABLE wacrm.teams (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 CREATE TABLE wacrm.team_members (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), team_id uuid NOT NULL REFERENCES wacrm.teams(id), user_id uuid NOT NULL);
+CREATE TABLE wacrm.tags (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, name text, kind text NOT NULL DEFAULT 'contact');
 CREATE TABLE wacrm.contacts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid);
 CREATE TABLE wacrm.conversations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), contact_id uuid,
   status text DEFAULT 'open', assigned_agent_id uuid, team_id uuid, created_at timestamptz DEFAULT now(), first_response_at timestamptz,
-  closed_at timestamptz, last_customer_message_at timestamptz);
+  closed_at timestamptz, last_customer_message_at timestamptz, outcome_tag_id uuid, outcome_source text, suggested_outcome_tag_id uuid, updated_at timestamptz DEFAULT now(), channel_type text);
+CREATE TABLE wacrm.whatsapp_config (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), team_id uuid);
 CREATE TABLE wacrm.messages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), conversation_id uuid REFERENCES wacrm.conversations(id),
-  sender_type text NOT NULL, sender_id uuid, created_at timestamptz DEFAULT now());
+  sender_type text NOT NULL, sender_id uuid, created_at timestamptz DEFAULT now(), account_id uuid, content_type text, content_text text, media_url text,
+  template_name text, status text, reply_to_message_id uuid, campaign_id uuid);
 CREATE TABLE wacrm.conversation_assignments (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, conversation_id uuid NOT NULL,
   from_agent_id uuid, to_agent_id uuid, from_team_id uuid, to_team_id uuid, actor_id uuid, reason text, created_at timestamptz NOT NULL DEFAULT now());
 CREATE TABLE wacrm.export_history (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id), file_name text);
@@ -73,12 +88,13 @@ CREATE TABLE wacrm.billing_debts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 
 CREATE FUNCTION wacrm.current_account_id() RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER
   AS $$ SELECT account_id FROM wacrm.profiles WHERE user_id = auth.uid() LIMIT 1 $$;
-CREATE FUNCTION wacrm.is_account_member(p_account uuid) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
-  AS $$ SELECT EXISTS (SELECT 1 FROM wacrm.profiles WHERE user_id = auth.uid() AND account_id = p_account) $$;
-CREATE FUNCTION wacrm.is_account_member(p_account uuid, p_min text) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
-  AS $$ SELECT EXISTS (SELECT 1 FROM wacrm.profiles WHERE user_id = auth.uid() AND account_id = p_account
-          AND CASE account_role WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'supervisor' THEN 2 ELSE 1 END
-            >= CASE p_min WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'supervisor' THEN 2 ELSE 1 END) $$;
+-- is_account_member como a 017 criou (ranks owner 4 · admin 3 · agent 2 · viewer 1; a 140 acrescenta supervisor).
+CREATE FUNCTION wacrm.is_account_member(target_account_id uuid, min_role wacrm.account_role_enum DEFAULT 'viewer') RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = wacrm, public
+AS $$ SELECT EXISTS (SELECT 1 FROM wacrm.profiles p WHERE p.user_id = auth.uid() AND p.account_id = target_account_id
+  AND CASE p.account_role WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'agent' THEN 2 WHEN 'viewer' THEN 1 END
+    >= CASE min_role WHEN 'owner' THEN 4 WHEN 'admin' THEN 3 WHEN 'agent' THEN 2 WHEN 'viewer' THEN 1 END) $$;
+GRANT EXECUTE ON FUNCTION wacrm.is_account_member(uuid, wacrm.account_role_enum) TO authenticated, service_role;
 
 ALTER TABLE wacrm.quick_replies ENABLE ROW LEVEL SECURITY;
 CREATE POLICY quick_replies_select ON wacrm.quick_replies FOR SELECT USING (wacrm.is_account_member(account_id));
@@ -91,6 +107,54 @@ ALTER TABLE wacrm.conversations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY conversations_member ON wacrm.conversations FOR ALL USING (wacrm.is_account_member(account_id));
 ALTER TABLE wacrm.profiles ENABLE ROW LEVEL SECURITY;
 CREATE POLICY profiles_own ON wacrm.profiles FOR SELECT USING (user_id = auth.uid());
+-- Tabelas de contatos (a 323 troca as policies de SELECT delas) com a policy de membership de hoje.
+CREATE TABLE wacrm.custom_fields (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL);
+CREATE TABLE wacrm.contact_tags (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contact_id uuid NOT NULL);
+CREATE TABLE wacrm.contact_custom_values (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contact_id uuid NOT NULL);
+CREATE TABLE wacrm.contact_import_variables (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contact_id uuid NOT NULL);
+CREATE TABLE wacrm.contact_phones (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), contact_id uuid NOT NULL);
+CREATE TABLE wacrm.contact_notes (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, contact_id uuid);
+CREATE TABLE wacrm.contact_identities (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, contact_id uuid);
+ALTER TABLE wacrm.contacts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY contacts_select ON wacrm.contacts FOR SELECT USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY tags_select ON wacrm.tags FOR SELECT USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.custom_fields ENABLE ROW LEVEL SECURITY;
+CREATE POLICY custom_fields_select ON wacrm.custom_fields FOR SELECT USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.contact_notes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY contact_notes_select ON wacrm.contact_notes FOR SELECT USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.contact_identities ENABLE ROW LEVEL SECURITY;
+CREATE POLICY contact_identities_select ON wacrm.contact_identities FOR SELECT TO authenticated USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.contact_tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY contact_tags_select ON wacrm.contact_tags FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_tags.contact_id AND wacrm.is_account_member(c.account_id)));
+ALTER TABLE wacrm.contact_custom_values ENABLE ROW LEVEL SECURITY;
+CREATE POLICY contact_custom_values_select ON wacrm.contact_custom_values FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_custom_values.contact_id AND wacrm.is_account_member(c.account_id)));
+ALTER TABLE wacrm.contact_phones ENABLE ROW LEVEL SECURITY;
+CREATE POLICY contact_phones_select ON wacrm.contact_phones FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_phones.contact_id AND wacrm.is_account_member(c.account_id)));
+ALTER TABLE wacrm.contact_import_variables ENABLE ROW LEVEL SECURITY;
+CREATE POLICY contact_import_variables_select ON wacrm.contact_import_variables FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_import_variables.contact_id AND wacrm.is_account_member(c.account_id)));
+
+-- RPCs de relatório (a 322 reescreve o guard is_account_member(p_account_id) pela definição VIVA). Aqui só reproduzem a ASSINATURA e o
+-- número de ocorrências do guard que a 322 confere; a lógica de cada relatório não é o objeto deste teste.
+CREATE FUNCTION wacrm.get_attendance_report_by_team(p_account_id uuid, p_from timestamptz, p_to timestamptz) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT (TRUE AND is_account_member(p_account_id)) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.get_attendance_report_by_agent(p_account_id uuid, p_from timestamptz, p_to timestamptz) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT (TRUE AND is_account_member(p_account_id)) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.get_attendance_summary(p_account_id uuid, p_from timestamptz, p_to timestamptz) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT (TRUE AND is_account_member(p_account_id)) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.get_conversations_report(p_account_id uuid, p_from timestamptz, p_to timestamptz, p_a text, p_b text, p_c uuid, p_d uuid, p_e text, p_f text, p_g integer, p_h integer) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT (TRUE AND is_account_member(p_account_id)) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.get_agent_sessions_report(p_account_id uuid, p_from timestamptz, p_to timestamptz, p_agent uuid) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT (TRUE AND is_account_member(p_account_id)) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.report_tabulacoes(p_account_id uuid, p_from timestamptz, p_to timestamptz, p_team uuid, p_agent uuid) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT wacrm.is_account_member(p_account_id) THEN RAISE EXCEPTION 'forbidden'; END IF; IF NOT wacrm.is_account_member(p_account_id) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.get_campaigns_for_report(p_account_id uuid) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT wacrm.is_account_member(p_account_id) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.get_campaign_report_detail(p_account_id uuid, p_campaign uuid) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT wacrm.is_account_member(p_account_id) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+CREATE FUNCTION wacrm.get_campaign_queue_items(p_account_id uuid, p_campaign uuid, p_a text, p_b text, p_c integer, p_d integer) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
+  AS $$ BEGIN IF NOT wacrm.is_account_member(p_account_id) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
+
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wacrm TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA wacrm TO service_role;
 -- profiles: a 169 trocou o UPDATE de tabela inteira por UPDATE só nas colunas que o usuário edita (full_name, avatar_url).
