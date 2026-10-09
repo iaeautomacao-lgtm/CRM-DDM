@@ -209,7 +209,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   flow("flows/[id]/activate", "POST"),
   flow("flows/[id]/export", "GET"),
   flow("flows/[id]/runs", "GET", "flows.view_runs"),
-  flow("flows/[id]/runs", "DELETE", "flows.view_runs"),
+  flow("flows/[id]/runs", "DELETE", "flows.edit"),
   pg("flows/[id]/simulate", "POST", "supervisor", "flows.simulate"),
   pg("automations", "GET", "agent", "automations.view"),
   pg("automations", "POST", "admin", "automations.edit"),
