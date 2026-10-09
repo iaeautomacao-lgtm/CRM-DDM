@@ -64,6 +64,7 @@ import {
 } from "@/components/ui/tooltip";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
+import { ErrorState } from "@/components/dashboard/error-state";
 import { buildPageList } from "@/lib/relatorios/pagination";
 import { exportWithHistory } from "@/lib/relatorios/export-with-history";
 import { MessageModal } from "@/components/relatorios/MessageModal";
@@ -242,6 +243,7 @@ export default function EnvioEmLotePage() {
 
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState(false);
 
   const [draft, setDraft] = useState<ItemFilters>(defaultItemFilters);
   const [applied, setApplied] = useState<ItemFilters>(defaultItemFilters);
@@ -253,6 +255,7 @@ export default function EnvioEmLotePage() {
   const [items, setItems] = useState<QueueItem[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const [viewingMessage, setViewingMessage] = useState<string | null>(null);
@@ -280,6 +283,7 @@ export default function EnvioEmLotePage() {
   const loadDetail = useCallback(async () => {
     if (!accountId || !campaignId) return;
     setDetailLoading(true);
+    setDetailError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc("get_campaign_report_detail", {
@@ -292,6 +296,7 @@ export default function EnvioEmLotePage() {
     } catch (err) {
       console.error("[envio-em-lote] failed to load campaign detail:", err);
       setDetail(null);
+      setDetailError(true);
     } finally {
       setDetailLoading(false);
     }
@@ -312,6 +317,7 @@ export default function EnvioEmLotePage() {
   const loadItems = useCallback(async () => {
     if (!accountId || !campaignId) return;
     setItemsLoading(true);
+    setItemsError(false);
     try {
       const db = createClient();
       const { data, error } = await db.rpc(
@@ -324,6 +330,7 @@ export default function EnvioEmLotePage() {
       setTotalCount(raw.length > 0 ? n(raw[0].total_count) : 0);
     } catch (err) {
       console.error("[envio-em-lote] failed to load queue items:", err);
+      setItemsError(true);
     } finally {
       setItemsLoading(false);
     }
@@ -441,8 +448,8 @@ export default function EnvioEmLotePage() {
         throw error;
       }
       toast.success("Número adicionado à blacklist!");
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao adicionar à blacklist.");
+    } catch (err: unknown) {
+      toast.error(err instanceof Error && err.message ? err.message : "Erro ao adicionar à blacklist.");
     }
   }
 
@@ -590,6 +597,8 @@ export default function EnvioEmLotePage() {
             <h2 className="mb-3 text-sm font-semibold text-foreground">Detalhes</h2>
             {detailLoading ? (
               <Skeleton className="h-32 w-full" />
+            ) : detailError ? (
+              <ErrorState title="Não foi possível carregar os detalhes da campanha" onRetry={() => void loadDetail()} />
             ) : !detail ? (
               <p className="text-sm text-muted-foreground">Campanha não encontrada.</p>
             ) : (
@@ -635,6 +644,10 @@ export default function EnvioEmLotePage() {
                 {[0, 1, 2].map((i) => (
                   <Skeleton key={i} className="h-10 w-full rounded-lg" />
                 ))}
+              </div>
+            ) : itemsError ? (
+              <div className="p-4">
+                <ErrorState title="Não foi possível carregar os itens da campanha" onRetry={() => void loadItems()} />
               </div>
             ) : visibleItems.length === 0 ? (
               <div className="p-4">
