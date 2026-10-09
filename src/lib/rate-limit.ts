@@ -279,6 +279,8 @@ export const RATE_LIMITS = {
   aiRewrite: { limit: 20, windowMs: 60_000 },
   /** API v1: criar campanha (cada chamada pode enfileirar 20k itens); 6/min por chave (decisão do dono, PRD 11 A9). */
   apiV1CampaignCreate: { limit: 6, windowMs: 60_000 },
+  /** API v1: extração de conversas e mensagens (TASK38); 60/min por chave nas três rotas, além do limite geral. */
+  apiV1Extract: { limit: 60, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

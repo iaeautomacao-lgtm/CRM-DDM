@@ -10,6 +10,7 @@
 // ============================================================
 
 import { webhookPaths, webhookSchemas, webhookTags, WEBHOOK_GUIDE } from './openapi-webhooks';
+import { extractPaths, extractSchemas, extractTags, EXTRACT_GUIDE } from './openapi-extract';
 
 type Json = Record<string, unknown>;
 
@@ -122,6 +123,7 @@ export const openApiSpec = {
       '- `campaigns:write` — `POST /disparador/campaigns` (também lê campanhas)',
       '- `campaigns:read` — `GET /disparador/campaigns/{id}`',
       '- `reports:read` — `GET /reports/*` (Reporting API: métricas agregadas para Power BI, Metabase e n8n).',
+      '- `conversations:read` / `messages:read` — `GET /conversations`, `GET /conversations/{id}/messages` e `GET /messages` (extração para BI/auditoria; veja a seção própria abaixo).',
       '- `webhooks:read` / `webhooks:write` — `/webhooks*` (webhooks de saída assinados; veja a seção própria abaixo).',
       '- `GET /me` não exige escopo.',
       '',
@@ -129,7 +131,7 @@ export const openApiSpec = {
       'Sucesso: `{ "data": … }`. Falha: `{ "error": { "code": "…", "message": "…" } }`. Ramifique pelo `code` (estável); a `message` é para humanos e pode mudar.',
       '',
       '## Limite de requisições',
-      '**120 requisições por minuto por chave.** Ao exceder: `429` com `Retry-After` (segundos) e `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.',
+      '**120 requisições por minuto por chave** (as rotas de extração têm ainda **60/min** próprios). Ao exceder: `429` com `Retry-After` (segundos) e `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.',
       '',
       '## Idempotência',
       '- `POST /whatsapp/send`: o header `Idempotency-Key` é **obrigatório**. Erros 400 de validação (antes de chamar o provedor) **não consomem** a chave: corrija e reenvie com a mesma chave.',
@@ -140,7 +142,7 @@ export const openApiSpec = {
       '',
       '## Relatórios (`/reports/*`)',
       'Somente leitura e agregados — nenhuma rota devolve mensagens, CPF ou credenciais. Datas históricas usam `from=YYYY-MM-DD&to=YYYY-MM-DD` (inclusivas, calendário de Brasília), no máximo **366 dias** por requisição (para períodos maiores, consulte em blocos). Filtros opcionais: `team_id` e `agent_id` (UUID). O `account_id` nunca é enviado: vem da chave.',
-    ].join('\n') + WEBHOOK_GUIDE,
+    ].join('\n') + WEBHOOK_GUIDE + EXTRACT_GUIDE,
   },
   servers: [{ url: '/api/v1', description: 'CRM DDM (a rota /api/v1/openapi.json usa NEXT_PUBLIC_APP_URL)' }],
   tags: [
@@ -149,10 +151,12 @@ export const openApiSpec = {
     { name: 'Disparador', description: 'Campanhas em massa (Meta com template, WAHA com texto livre).' },
     { name: 'Relatórios', description: 'Reporting API: métricas operacionais e históricas agregadas (escopo reports:read).' },
     ...webhookTags,
+    ...extractTags,
   ],
   security: SECURITY,
   paths: {
     ...webhookPaths,
+    ...extractPaths,
     '/me': {
       get: {
         tags: ['Conta'],
@@ -802,6 +806,7 @@ export const openApiSpec = {
     },
     schemas: {
       ...webhookSchemas,
+      ...extractSchemas,
       Scope: {
         type: 'string',
         enum: [
