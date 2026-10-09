@@ -238,6 +238,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("monitoramento/dia", "GET", "supervisor", "monitoring.view_team"),
   pg("monitoramento/conversations", "GET", "supervisor", "monitoring.view_team"),
   pg("monitoramento/sla", "GET", "supervisor", "monitoring.view_team"),
+  pg("monitoramento/agentes", "GET", "supervisor", "monitoring.view_team"),
   pg("relatorios/exports", "POST", "supervisor", "reports.export"),
   pg("relatorios/exports", "DELETE", "admin", "exports.manage"),
   { route: "intelligence/chat", method: "POST", guard: "scope", min: "supervisor", permission: "intelligence.use" },

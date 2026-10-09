@@ -267,6 +267,10 @@
     {
       "version": "295_import_links_token",
       "kind": "registry"
+    },
+    {
+      "version": "300_monitoring_agent_metrics",
+      "kind": "registry"
     }
   ]
 }
