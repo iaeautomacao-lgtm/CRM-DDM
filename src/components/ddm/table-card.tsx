@@ -68,14 +68,31 @@ export function Th({ className, align = 'left', ...props }: ComponentProps<'th'>
 }
 
 /** Linha com realce do protótipo (fundo + barra laranja à esquerda no hover). */
-export function Tr({ className, interactive = true, ...props }: ComponentProps<'tr'> & { interactive?: boolean }) {
+export function Tr({ className, interactive = true, onKeyDown, onClick, tabIndex, ...props }: ComponentProps<'tr'> & { interactive?: boolean }) {
+  // Linha clicável vira operável por teclado (Enter/Espaço); props do chamador prevalecem.
+  const keyboardRow = interactive && typeof onClick === 'function'
   return (
     <tr
       className={cn(
         interactive &&
           'transition-[background-color,box-shadow] duration-150 hover:bg-surface-hover hover:shadow-[inset_2px_0_0_var(--primary)]',
+        keyboardRow && 'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring',
         className,
       )}
+      onClick={onClick}
+      tabIndex={tabIndex ?? (keyboardRow ? 0 : undefined)}
+      onKeyDown={
+        onKeyDown ??
+        (keyboardRow
+          ? (e) => {
+              if (e.target !== e.currentTarget) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                e.currentTarget.click()
+              }
+            }
+          : undefined)
+      }
       {...props}
     />
   )
