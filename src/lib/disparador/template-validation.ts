@@ -80,6 +80,8 @@ export function templateComponentProblem(row: LocalTemplateRow): string | null {
     if (type === "URL" && HAS_PLACEHOLDER.test(button.url ?? "")) {
       return `${name} tem botão de link dinâmico ({{1}} na URL), que o disparador não preenche — a Meta recusaria todos os envios. Escolha um template com link fixo.`;
     }
+    // FLOW (PRD 21.3): o disparador preenche o botão com o flow_token de cada envio — compatível. O status do Flow (PUBLISHED) é conferido
+    // na Meta por flowPublishProblems (flow-button.ts), que precisa de I/O.
     if (type === "COPY_CODE") {
       return `${name} tem botão de copiar código, que exige um valor por envio que o disparador não preenche — a Meta recusaria todos os envios.`;
     }

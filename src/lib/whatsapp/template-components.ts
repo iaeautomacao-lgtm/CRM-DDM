@@ -27,11 +27,15 @@ export interface MetaComponent {
 }
 
 interface MetaButtonPayload {
-  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE';
+  type: 'QUICK_REPLY' | 'URL' | 'PHONE_NUMBER' | 'COPY_CODE' | 'FLOW';
   text: string;
   url?: string;
   phone_number?: string;
   example?: string[];
+  flow_id?: string;
+  flow_name?: string;
+  flow_action?: 'navigate' | 'data_exchange';
+  navigate_screen?: string;
 }
 
 function buildHeaderComponent(payload: TemplatePayload): MetaComponent | null {
@@ -103,6 +107,15 @@ function buildButtonPayload(b: TemplateButton): MetaButtonPayload {
       return { type: 'PHONE_NUMBER', text: b.text, phone_number: b.phone_number };
     case 'COPY_CODE':
       return { type: 'COPY_CODE', text: b.text, example: [b.example] };
+    case 'FLOW': {
+      // botão de Flow vem do WhatsApp Manager (sync); reenviar o template mantém o botão como está
+      const payload: MetaButtonPayload = { type: 'FLOW', text: b.text };
+      if (b.flow_id) payload.flow_id = b.flow_id;
+      else if (b.flow_name) payload.flow_name = b.flow_name;
+      if (b.flow_action) payload.flow_action = b.flow_action;
+      if (b.navigate_screen) payload.navigate_screen = b.navigate_screen;
+      return payload;
+    }
   }
 }
 

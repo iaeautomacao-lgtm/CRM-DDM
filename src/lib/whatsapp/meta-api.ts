@@ -179,6 +179,21 @@ export async function getPhoneNumberHealth(args: VerifyPhoneNumberArgs): Promise
   return response.json()
 }
 
+/**
+ * Status de um WhatsApp Flow na Meta (DRAFT | PUBLISHED | DEPRECATED | BLOCKED | THROTTLED). Usado antes de aceitar uma campanha com botão
+ * FLOW (FLOW-03): Flow em DRAFT faz a Meta recusar 100% dos envios (131009). Qualquer erro HTTP lança MetaApiError — quem chama decide
+ * (o disparador falha FECHADO: sem confirmar o status, a campanha não começa).
+ */
+export async function getFlowStatus(args: { flowId: string; accessToken: string }): Promise<{ id: string; status: string }> {
+  const url = `${META_API_BASE}/${encodeURIComponent(args.flowId)}?fields=id,status`
+  const response = await metaFetch(url, { headers: { Authorization: `Bearer ${args.accessToken}` } })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { id?: string; status?: string }
+  return { id: String(data.id ?? args.flowId), status: String(data.status ?? '').toUpperCase() }
+}
+
 // ============================================================
 // Cloud API registration (subscription for inbound webhooks)
 // ============================================================
@@ -555,6 +570,7 @@ export async function sendTemplateMessage(
       headerMediaUrl: messageParams?.headerMediaUrl,
       headerMediaId: messageParams?.headerMediaId,
       buttonParams: messageParams?.buttonParams,
+      flowToken: messageParams?.flowToken,
     })
     if (components.length > 0) {
       templatePayload.components = components
