@@ -140,6 +140,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("ai/rewrite", "POST", "agent", "inbox.ai_assist"),
   pg("conversations/[id]/assign-self", "POST", "agent", "inbox.reply"),
   pg("quick-replies/[id]/use", "POST", "agent", "inbox.reply"),
+  pg("inbox/meus-atendidos", "GET", "agent", "inbox.view"),
   pg("conversations/[id]/flow-runs", "GET", "admin", "flows.view_runs"),
   pg("contacts/[id]/link", "POST", "agent", "contacts.edit"),
   pg("contacts", "POST", "agent", "contacts.edit"),
