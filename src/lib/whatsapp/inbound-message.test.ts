@@ -14,10 +14,11 @@ let missingFlowColumn = false
 // STT (migration 213): ai_config da conta e coluna de transcrição ausente
 let aiConfigRow: Record<string, unknown> | null = null
 let missingTranscriptionColumn = false
+const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = []
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    rpc: async () => ({ data: null, error: null }),
+    rpc: async (fn: string, args?: Record<string, unknown>) => (rpcCalls.push({ fn, args: args ?? {} }), { data: null, error: null }),
     storage: {
       from: () => ({
         upload: async (path: string) => {
@@ -100,6 +101,7 @@ beforeEach(() => {
   missingFlowColumn = false
   aiConfigRow = null
   missingTranscriptionColumn = false
+  rpcCalls.length = 0
   findExistingContact.mockReset()
   findExistingContact.mockResolvedValue({ id: 'contact-1', name: 'Fulano' })
   vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -319,5 +321,31 @@ describe('STT na entrada (migration 213): áudio transcrito com a chave da CONTA
     await run(text('wamid.t1'), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
     expect(messageInsert()).not.toHaveProperty('transcription_status')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('WhatsApp Calling (PRD 18): resposta de permissão de ligação', () => {
+  const reply = (id: string, call_permission_reply: Record<string, unknown>) => ({
+    id, from: '5511999990001', timestamp: '1760000000', type: 'interactive', interactive: { type: 'call_permission_reply', call_permission_reply },
+  })
+  const messageInsert = () => calls.find((c) => c.table === 'messages' && c.op === 'insert')?.payload as Record<string, unknown>
+
+  it('aceitar grava a permissão (permanente = infinity) e a mensagem fica legível no inbox', async () => {
+    await run(reply('wamid.p1', { response: 'accept', is_permanent: true }), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+    const perm = rpcCalls.find((c) => c.fn === 'record_call_permission')
+    expect(perm?.args).toMatchObject({ p_account_id: 'ACC-1', p_phone: '5511999990001', p_expires_at: 'infinity', p_source: 'interactive_optin' })
+    expect(messageInsert()).toMatchObject({ content_type: 'interactive', content_text: 'Cliente autorizou receber ligações' })
+  })
+
+  it('recusar revoga (expira no passado)', async () => {
+    await run(reply('wamid.p2', { response: 'reject' }), { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+    const perm = rpcCalls.find((c) => c.fn === 'record_call_permission')
+    expect(Date.parse(String(perm?.args.p_expires_at))).toBeLessThan(Date.now())
+    expect(messageInsert()).toMatchObject({ content_text: 'Cliente recusou receber ligações' })
+  })
+
+  it('botão/lista comuns nunca tocam na permissão', async () => {
+    await run({ id: 'wamid.p3', from: '5511999990001', timestamp: '1760000000', type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'b1', title: 'Sim' } } }, { profile: { name: 'Fulano' }, wa_id: '5511999990001' })
+    expect(rpcCalls.some((c) => c.fn === 'record_call_permission')).toBe(false)
   })
 })

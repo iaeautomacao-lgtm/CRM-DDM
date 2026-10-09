@@ -153,6 +153,10 @@
       "kind": "registry"
     },
     {
+      "version": "231_account_settings",
+      "kind": "registry"
+    },
+    {
       "version": "240_roles_foundation",
       "kind": "registry"
     },
@@ -167,6 +171,14 @@
     },
     {
       "version": "248_audit_roles",
+      "kind": "registry"
+    },
+    {
+      "version": "250_calling_cdr",
+      "kind": "registry"
+    },
+    {
+      "version": "251_call_permissions",
       "kind": "registry"
     },
     {
