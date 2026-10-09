@@ -328,7 +328,7 @@ export function ImportListDrawer({
                   <thead>
                     <tr>
                       {table.headers.map((h) => (
-                        <th key={h} scope="col" className="whitespace-nowrap border-b border-border bg-surface-3 px-2.5 py-1.5 text-left font-semibold text-muted-foreground">
+                        <th key={h} scope="col" className="whitespace-nowrap border-b border-border bg-surface-3 px-2.5 py-1.5 text-left font-semibold text-foreground-2">
                           {h}
                         </th>
                       ))}

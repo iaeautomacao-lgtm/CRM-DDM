@@ -1817,7 +1817,7 @@ export default function CampanhasPage() {
               !queueDetailLoading &&
               metricsData &&
               queueDetailTotal < metricsData.total_respostas && (
-                <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-muted-foreground">
+                <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-foreground-2">
                   O card conta {metricsData.total_respostas} respostas; {metricsData.total_respostas - queueDetailTotal}{" "}
                   foram registradas antes do rastreio por envio e não aparecem nesta lista.
                 </p>
