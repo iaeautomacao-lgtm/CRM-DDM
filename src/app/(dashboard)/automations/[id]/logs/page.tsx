@@ -1,15 +1,10 @@
 "use client"
 
-import { use, useEffect, useState } from "react"
+import { use, useCallback, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import {
-  ArrowLeft,
-  Check,
-  Loader2,
-  X,
-  ChevronDown,
-  ChevronRight,
-} from "lucide-react"
+import { formatDistanceToNow } from "date-fns"
+import { ptBR } from "date-fns/locale"
+import { ArrowLeft, Check, X, ChevronDown, ChevronRight } from "lucide-react"
 
 import { createClient } from "@/lib/supabase/client"
 import type {
@@ -17,9 +12,13 @@ import type {
   AutomationLog,
   AutomationLogStepResult,
 } from "@/types"
-import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { CountUp } from "@/components/motion/count-up"
+import { KpiStrip } from "@/components/ddm/kpi-strip"
+import { PageBody } from "@/components/ddm/page-toolbar"
+import { StatusChip, type StatusTone } from "@/components/ddm/status-chip"
+import { ErrorState } from "@/components/dashboard/error-state"
 import { cn } from "@/lib/utils"
-import { formatRelative } from "@/lib/automations/trigger-meta"
 
 export default function AutomationLogsPage({
   params,
@@ -34,99 +33,149 @@ export default function AutomationLogsPage({
   const [error, setError] = useState<string | null>(null)
   const [openLogId, setOpenLogId] = useState<string | null>(null)
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const supabase = createClient()
-        const [autRes, logRes] = await Promise.all([
-          supabase
-            .from("automations")
-            .select("*")
-            .eq("id", id)
-            .maybeSingle(),
-          supabase
-            .from("automation_logs")
-            .select("*, contact:contacts(id, name, phone)")
-            .eq("automation_id", id)
-            .order("created_at", { ascending: false })
-            .limit(100),
-        ])
-        if (autRes.error) throw autRes.error
-        if (logRes.error) throw logRes.error
-        setAutomation(autRes.data as Automation | null)
-        setLogs((logRes.data ?? []) as AutomationLog[])
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Falha ao carregar os logs")
-      }
+  const load = useCallback(async () => {
+    try {
+      const supabase = createClient()
+      const [autRes, logRes] = await Promise.all([
+        supabase
+          .from("automations")
+          .select("*")
+          .eq("id", id)
+          .maybeSingle(),
+        supabase
+          .from("automation_logs")
+          .select("*, contact:contacts(id, name, phone)")
+          .eq("automation_id", id)
+          .order("created_at", { ascending: false })
+          .limit(100),
+      ])
+      if (autRes.error) throw autRes.error
+      if (logRes.error) throw logRes.error
+      setAutomation(autRes.data as Automation | null)
+      setLogs((logRes.data ?? []) as AutomationLog[])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Falha ao carregar os logs")
     }
-    load()
   }, [id])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const back = (
+    <button
+      type="button"
+      onClick={() => router.push("/automations")}
+      className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+    >
+      <ArrowLeft className="size-3" />
+      Automações
+    </button>
+  )
 
   if (error) {
     return (
-      <div className="flex h-64 flex-col items-center justify-center gap-3">
-        <p className="text-sm text-red-400">{error}</p>
-        <Button variant="outline" onClick={() => router.push("/automations")}>
-          Voltar
-        </Button>
-      </div>
+      <PageBody>
+        <div className="pt-1">{back}</div>
+        <ErrorState
+          title="Não foi possível carregar os logs"
+          hint={error}
+          onRetry={() => {
+            setError(null)
+            setLogs(null)
+            void load()
+          }}
+        />
+      </PageBody>
     )
   }
 
-  if (!automation || logs === null) {
+  if (logs === null) {
     return (
-      <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-      </div>
+      <PageBody>
+        <div className="flex flex-col gap-2 pt-1" aria-busy="true">
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-7 w-56" />
+        </div>
+        <div className="flex flex-col gap-2" aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-[58px] w-full rounded-[10px]" />
+          ))}
+        </div>
+      </PageBody>
     )
+  }
+
+  if (!automation) {
+    return (
+      <PageBody>
+        <div className="pt-1">{back}</div>
+        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+          <p className="text-[13.5px] font-semibold text-foreground">Automação não encontrada</p>
+          <p className="text-[12.5px] text-muted-foreground">Ela pode ter sido excluída.</p>
+        </div>
+      </PageBody>
+    )
+  }
+
+  const counts = {
+    success: logs.filter((l) => l.status === "success").length,
+    partial: logs.filter((l) => l.status === "partial").length,
+    failed: logs.filter((l) => l.status === "failed").length,
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => router.push("/automations")}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          aria-label="Voltar"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{automation.name}</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">Logs de execução</p>
-        </div>
+    <PageBody>
+      <div className="flex flex-col gap-1.5 pt-1">
+        {back}
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">{automation.name}</h2>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">Logs de execução</p>
       </div>
 
+      {logs.length > 0 && (
+        <KpiStrip
+          ariaLabel="Resumo das execuções"
+          items={[
+            { label: "Execuções", value: <CountUp value={logs.length} />, info: "As 100 execuções mais recentes desta automação." },
+            { label: "Sucesso", value: <CountUp value={counts.success} className="text-success" /> },
+            { label: "Parciais", value: <CountUp value={counts.partial} className={counts.partial > 0 ? "text-warning" : undefined} /> },
+            { label: "Falhas", value: <CountUp value={counts.failed} className={counts.failed > 0 ? "text-danger" : undefined} /> },
+          ]}
+        />
+      )}
+
       {logs.length === 0 ? (
-        <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40">
-          <p className="text-sm text-foreground">Nenhuma execução ainda</p>
-          <p className="mt-1 text-xs text-muted-foreground">
+        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+          <p className="text-[13.5px] font-semibold text-foreground">Nenhuma execução ainda</p>
+          <p className="text-[12.5px] text-muted-foreground">
             Dispare esta automação para ver as execuções aqui.
           </p>
         </div>
       ) : (
-        <ul className="space-y-2">
+        <ul className="ddm-stagger flex flex-col gap-2">
           {logs.map((log) => {
             const isOpen = openLogId === log.id
             return (
               <li
                 key={log.id}
-                className="rounded-xl border border-border bg-card"
+                className="rounded-[10px] border border-border bg-card transition-[border-color] duration-200 ease-ddm hover:border-border-strong"
               >
                 <button
                   type="button"
                   onClick={() => setOpenLogId(isOpen ? null : log.id)}
+                  aria-expanded={isOpen}
                   className="flex w-full items-center gap-3 px-4 py-3 text-left"
                 >
                   {isOpen ? (
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
                   ) : (
-                    <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
                   )}
-                  <StatusBadge status={log.status} />
+                  <StatusChip tone={STATUS_TONE[log.status] ?? "mute"}>
+                    {STATUS_LABEL[log.status] ?? log.status}
+                  </StatusChip>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-foreground">
+                    <div className="truncate text-[13.5px] font-semibold text-foreground">
                       {log.contact?.name ?? log.contact?.phone ?? "Contato desconhecido"}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
@@ -134,14 +183,14 @@ export default function AutomationLogsPage({
                       {log.steps_executed?.length === 1 ? "" : "s"}
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    {formatRelative(log.created_at)}
+                  <div className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                    {formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: ptBR })}
                   </div>
                 </button>
                 {isOpen && (
-                  <div className="border-t border-border px-4 py-3">
+                  <div className="animate-ddm-fade border-t border-border px-4 py-3">
                     {log.error_message && (
-                      <p className="mb-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                      <p className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
                         {log.error_message}
                       </p>
                     )}
@@ -160,7 +209,7 @@ export default function AutomationLogsPage({
           })}
         </ul>
       )}
-    </div>
+    </PageBody>
   )
 }
 
@@ -170,23 +219,10 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "Falhou",
 }
 
-function StatusBadge({ status }: { status: AutomationLog["status"] }) {
-  const classes =
-    status === "success"
-      ? "border-primary/30 bg-primary/10 text-primary"
-      : status === "partial"
-      ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-      : "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300"
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        classes,
-      )}
-    >
-      {STATUS_LABEL[status] ?? status}
-    </span>
-  )
+const STATUS_TONE: Record<string, StatusTone> = {
+  success: "ok",
+  partial: "warn",
+  failed: "bad",
 }
 
 function StepRow({ result }: { result: AutomationLogStepResult }) {
@@ -195,12 +231,12 @@ function StepRow({ result }: { result: AutomationLogStepResult }) {
     <li className="flex items-start gap-2 text-xs">
       <span
         className={cn(
-          "mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full",
-          ok ? "bg-primary/20 text-primary" : "bg-red-500/20 text-red-400",
+          "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full",
+          ok ? "bg-success-soft text-success" : "bg-danger-soft text-danger",
         )}
         aria-hidden
       >
-        {ok ? <Check className="h-3 w-3" /> : <X className="h-3 w-3" />}
+        {ok ? <Check className="size-3" /> : <X className="size-3" />}
       </span>
       <span className="text-muted-foreground">{result.step_type}</span>
       {result.detail && (

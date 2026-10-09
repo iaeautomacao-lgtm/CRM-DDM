@@ -29,6 +29,7 @@ import {
   Trash2,
   Wrench,
   Bot,
+  Search,
 } from "lucide-react";
 import { NODE_META, type NodeType } from "@/components/flows/shared";
 import {
@@ -72,6 +73,12 @@ import {
 import { CollapsibleJson, CopyJsonButton } from "@/components/flows/json-highlight";
 import { cn } from "@/lib/utils";
 import { usePermission } from "@/hooks/use-permission";
+import { Skeleton } from "@/components/ui/skeleton";
+import { CountUp } from "@/components/motion/count-up";
+import { KpiStrip } from "@/components/ddm/kpi-strip";
+import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
+import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
+import { ErrorState } from "@/components/dashboard/error-state";
 
 /**
  * Run history viewer.
@@ -158,51 +165,51 @@ function computeRunEventStats(
 // four called-out states.
 const STATUS_META: Record<
   RunRow["status"],
-  { label: string; classes: string; icon: typeof Clock }
+  { label: string; tone: StatusTone; icon: typeof Clock }
 > = {
   active: {
     label: "Ativo",
-    classes: "border-sky-600/40 bg-sky-500/10 text-sky-300",
+    tone: "info",
     icon: PlayCircle,
   },
   completed: {
     label: "Concluído",
-    classes: "border-emerald-600/40 bg-emerald-500/10 text-emerald-300",
+    tone: "ok",
     icon: CircleCheck,
   },
   handed_off: {
     label: "Transferido",
-    classes: "border-amber-600/40 bg-amber-500/10 text-amber-300",
+    tone: "warn",
     icon: UserPlus,
   },
   delayed: {
     label: "Aguardando",
-    classes: "border-amber-600/40 bg-amber-500/10 text-amber-300",
+    tone: "warn",
     icon: Clock,
   },
   timed_out: {
     label: "Expirado",
-    classes: "border-border bg-muted/60 text-muted-foreground",
+    tone: "mute",
     icon: Clock,
   },
   paused_by_agent: {
     label: "Pausado pelo agente",
-    classes: "border-border bg-muted text-muted-foreground",
+    tone: "mute",
     icon: PauseCircle,
   },
   failed: {
     label: "Falhou",
-    classes: "border-red-600/40 bg-red-500/10 text-red-300",
+    tone: "bad",
     icon: CircleAlert,
   },
   error: {
     label: "Erro",
-    classes: "border-red-600/40 bg-red-500/10 text-red-300",
+    tone: "bad",
     icon: CircleAlert,
   },
   transferred: {
     label: "Encaminhado a outro fluxo",
-    classes: "border-border bg-muted text-muted-foreground",
+    tone: "mute",
     icon: ArrowRightLeft,
   },
 };
@@ -289,12 +296,14 @@ export default function FlowRunsPage() {
   // Bumped after a successful delete to re-trigger the runs fetch below
   // without duplicating its fetch/error-handling logic in a callback.
   const [reloadKey, setReloadKey] = useState(0);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!params.id) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setLoadError(false);
       try {
         const qs = new URLSearchParams();
         if (statusFilter !== STATUS_FILTER_ALL) qs.set("status", statusFilter);
@@ -337,6 +346,7 @@ export default function FlowRunsPage() {
       } catch (err) {
         if (!cancelled) {
           console.error(err);
+          setLoadError(true);
           toast.error("Não foi possível carregar as execuções.");
         }
       } finally {
@@ -458,11 +468,30 @@ export default function FlowRunsPage() {
     setDeleteAllOpen(false);
   }
 
-  if (loading && !flow) {
+  if (loading && !flow && !loadError) {
     return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
+      <PageBody>
+        <div className="flex flex-col gap-2 pt-1" aria-busy="true">
+          <Skeleton className="h-3 w-32" />
+          <Skeleton className="h-7 w-48" />
+        </div>
+        <div className="flex flex-col gap-2" aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-[62px] w-full rounded-[10px]" />
+          ))}
+        </div>
+      </PageBody>
+    );
+  }
+  if (loadError && !flow) {
+    return (
+      <PageBody>
+        <ErrorState
+          title="Não foi possível carregar as execuções"
+          hint="Verifique a conexão e tente de novo."
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
+      </PageBody>
     );
   }
   if (notFound || !flow) {
@@ -472,7 +501,7 @@ export default function FlowRunsPage() {
         <button
           type="button"
           onClick={() => router.push("/flows")}
-          className="text-sm text-primary hover:opacity-80"
+          className="text-sm text-primary-text hover:opacity-80"
         >
           ← Voltar para fluxos
         </button>
@@ -480,89 +509,126 @@ export default function FlowRunsPage() {
     );
   }
 
+  // Contagens só das execuções listadas (as 50 mais recentes após os filtros).
+  const runCounts = {
+    completed: runs.filter((r) => r.status === "completed").length,
+    active: runs.filter((r) => r.status === "active" || r.status === "delayed").length,
+    failed: runs.filter((r) => r.status === "failed" || r.status === "error").length,
+  };
+
   return (
-    <div className="mx-auto max-w-4xl p-6">
-      <button
-        type="button"
-        onClick={() => router.push(`/flows/${flow.id}`)}
-        className="mb-2 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+    <PageBody>
+      <div className="flex flex-col gap-1.5 pt-1">
+        <button
+          type="button"
+          onClick={() => router.push(`/flows/${flow.id}`)}
+          className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-3" />
+          {flow.name}
+        </button>
+        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Execuções</h2>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+          As 50 execuções mais recentes deste fluxo (após os filtros abaixo).
+          Clique em uma linha para ver o log passo a passo do motor.
+        </p>
+      </div>
+
+      {runs.length > 0 && (
+        <KpiStrip
+          ariaLabel="Resumo das execuções listadas"
+          items={[
+            { label: "Listadas", value: <CountUp value={runs.length} />, info: "Execuções exibidas abaixo — até 50, após os filtros." },
+            { label: "Concluídas", value: <CountUp value={runCounts.completed} className="text-success" /> },
+            { label: "Em andamento", value: <CountUp value={runCounts.active} /> },
+            {
+              label: "Com erro",
+              value: <CountUp value={runCounts.failed} className={runCounts.failed > 0 ? "text-danger" : undefined} />,
+              onClick: () => setStatusFilter(statusFilter === "failed" ? STATUS_FILTER_ALL : "failed"),
+              active: statusFilter === "failed",
+              title: "Filtrar execuções que falharam",
+            },
+          ]}
+        />
+      )}
+
+      {/* Filtros */}
+      <PageToolbar
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearFilters}
+              disabled={!hasActiveFilters}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              Limpar filtros
+            </Button>
+            <GatedButton
+              variant="outline"
+              size="sm"
+              canAct={canDelete}
+              gateReason="excluir execuções"
+              disabled={runs.length === 0}
+              onClick={() => setDeleteAllOpen(true)}
+              className="text-danger hover:bg-danger-soft hover:text-danger"
+            >
+              <Trash2 className="size-3.5" />
+              Excluir todas
+            </GatedButton>
+          </>
+        }
       >
-        <ArrowLeft className="h-3 w-3" />
-        {flow.name}
-      </button>
-      <h1 className="text-xl font-semibold text-foreground">Execuções</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        As 50 execuções mais recentes deste fluxo (após os filtros abaixo).
-        Clique em uma linha para ver o log passo a passo do motor.
-      </p>
-
-      {/* Filters */}
-      <div className="mt-4 flex flex-wrap items-end gap-3">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Status</label>
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => v && setStatusFilter(v)}
-          >
-            <SelectTrigger className="w-40">
-              <SelectValue>
-                {(v: string) =>
-                  STATUS_FILTER_OPTIONS.find((o) => o.value === v)?.label ?? v
-                }
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {STATUS_FILTER_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="min-w-[200px] flex-1 space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Contato</label>
-          <Input
+        <label className="relative flex min-w-0 flex-[1_1_220px] items-center sm:max-w-[320px]">
+          <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+          <input
+            type="search"
             placeholder="Buscar por nome ou telefone"
+            aria-label="Filtrar por contato"
             value={contactInput}
             onChange={(e) => setContactInput(e.target.value)}
+            className="h-[34px] w-full rounded-md border border-border bg-card pl-[34px] pr-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
           />
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">De</label>
+        </label>
+        <Select value={statusFilter} onValueChange={(v) => v && setStatusFilter(v)}>
+          <SelectTrigger className="h-[34px] w-40 text-xs" aria-label="Filtrar por status">
+            <SelectValue>
+              {(v: string) => STATUS_FILTER_OPTIONS.find((o) => o.value === v)?.label ?? v}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {STATUS_FILTER_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          De
           <Input
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="w-36"
+            aria-label="Data inicial"
+            className="h-[34px] w-36 text-xs"
           />
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Até</label>
+        </span>
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          Até
           <Input
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="w-36"
+            aria-label="Data final"
+            className="h-[34px] w-36 text-xs"
           />
-        </div>
+        </span>
+      </PageToolbar>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={clearFilters}
-          disabled={!hasActiveFilters}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          Limpar filtros
-        </Button>
-      </div>
-
-      {/* Selection header + "excluir todas" */}
-      <div className="mt-6 flex items-center justify-between gap-2">
+      {/* Seleção + ações em massa */}
+      <div className="flex min-h-[38px] flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card px-4 py-1.5">
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           <Checkbox
             checked={allVisibleSelected}
@@ -571,30 +637,16 @@ export default function FlowRunsPage() {
             disabled={runs.length === 0}
             aria-label="Selecionar todas as execuções visíveis"
           />
-          Selecionar todos
+          {selected.size > 0 ? (
+            <span className="text-foreground">
+              <span className="font-semibold">{selected.size}</span> selecionado{selected.size === 1 ? "" : "s"}
+            </span>
+          ) : (
+            "Selecionar todos"
+          )}
         </label>
-        <GatedButton
-          variant="outline"
-          size="sm"
-          canAct={canDelete}
-          gateReason="excluir execuções"
-          disabled={runs.length === 0}
-          onClick={() => setDeleteAllOpen(true)}
-          className="text-destructive hover:bg-destructive/10"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-          Excluir todas
-        </GatedButton>
-      </div>
-
-      {/* Bulk action bar */}
-      {selected.size > 0 && (
-        <div className="mt-2 flex items-center justify-between gap-4 rounded-lg border border-border bg-muted/40 px-4 py-2">
-          <p className="text-sm text-foreground">
-            <span className="font-medium">{selected.size}</span>{" "}
-            selecionado{selected.size === 1 ? "" : "s"}
-          </p>
-          <div className="flex items-center gap-2">
+        {selected.size > 0 && (
+          <div className="flex animate-ddm-fade items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
@@ -610,24 +662,35 @@ export default function FlowRunsPage() {
               gateReason="excluir execuções"
               onClick={() => setBulkDeleteOpen(true)}
             >
-              <Trash2 className="h-4 w-4" />
+              <Trash2 className="size-3.5" />
               Excluir selecionados
             </GatedButton>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {runs.length === 0 ? (
-        <div className="mt-4 rounded-lg border border-dashed border-border bg-card/50 px-6 py-12 text-center text-sm text-muted-foreground">
-          {hasActiveFilters
-            ? "Nenhuma execução corresponde aos filtros aplicados."
-            : "Nenhuma execução ainda. Dispare o fluxo a partir de um número do WhatsApp para vê-lo aparecer aqui."}
+      {loadError ? (
+        <ErrorState
+          title="Não foi possível carregar as execuções"
+          hint="Verifique a conexão e tente de novo."
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
+      ) : runs.length === 0 ? (
+        <div className="flex animate-ddm-fade flex-col items-center gap-1.5 rounded-[10px] border border-dashed border-border bg-card px-6 py-12 text-center">
+          <p className="text-[13.5px] font-semibold text-foreground">
+            {hasActiveFilters ? "Nada encontrado" : "Nenhuma execução ainda"}
+          </p>
+          <p className="text-[12.5px] text-muted-foreground">
+            {hasActiveFilters
+              ? "Nenhuma execução corresponde aos filtros aplicados."
+              : "Dispare o fluxo a partir de um número do WhatsApp para vê-lo aparecer aqui."}
+          </p>
         </div>
       ) : (
-        <div className="relative mt-4 flex flex-col gap-2">
+        <div className="ddm-stagger relative flex flex-col gap-2">
           {loading && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/60">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[10px] bg-background/60">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
             </div>
           )}
           {runs.map((run) => (
@@ -719,7 +782,7 @@ export default function FlowRunsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageBody>
   );
 }
 
@@ -773,7 +836,10 @@ function RunCard({
   return (
     <div
       id={`run-${run.id}`}
-      className={cn("scroll-mt-4 rounded-lg border bg-card", focused ? "border-primary ring-1 ring-primary/40" : "border-border")}
+      className={cn(
+        "scroll-mt-4 rounded-[10px] border bg-card transition-[border-color,box-shadow] duration-200 ease-ddm",
+        focused ? "border-primary shadow-[0_0_0_3px_var(--primary-soft-2)]" : "border-border hover:border-border-strong",
+      )}
     >
       <div className="flex w-full items-center gap-2 px-4 py-3">
         <Checkbox
@@ -797,12 +863,12 @@ function RunCard({
             <span className="truncate text-sm font-medium text-foreground">
               {contactLabel}
             </span>
-            <Badge variant="outline" className={cn("gap-1", meta.classes)}>
-              <StatusIcon className="h-3 w-3" />
+            <StatusChip tone={meta.tone} dot={false}>
+              <StatusIcon className="size-3" aria-hidden="true" />
               {meta.label}
-            </Badge>
+            </StatusChip>
             {run.status === "active" && run.current_node_key && (
-              <code className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+              <code className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                 em {run.current_node_key}
               </code>
             )}
@@ -819,27 +885,14 @@ function RunCard({
           </div>
           {stats && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <Badge
-                variant="outline"
-                className="border-emerald-600/40 bg-emerald-500/10 text-[10px] text-emerald-300"
-              >
-                {stats.executedCount} executados
-              </Badge>
+              <StatusChip tone="ok">{stats.executedCount} executados</StatusChip>
               {stats.errorCount > 0 && (
-                <Badge
-                  variant="outline"
-                  className="border-red-600/40 bg-red-500/10 text-[10px] text-red-300"
-                >
+                <StatusChip tone="bad">
                   {stats.errorCount} {stats.errorCount === 1 ? "erro" : "erros"}
-                </Badge>
+                </StatusChip>
               )}
               {stats.notExecuted.length > 0 && (
-                <Badge
-                  variant="outline"
-                  className="border-amber-600/40 bg-amber-500/10 text-[10px] text-amber-300"
-                >
-                  {stats.notExecuted.length} não executados
-                </Badge>
+                <StatusChip tone="warn">{stats.notExecuted.length} não executados</StatusChip>
               )}
             </div>
           )}
@@ -849,8 +902,7 @@ function RunCard({
         <button
           type="button"
           onClick={onViewInDiagram}
-          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-opacity hover:opacity-80"
-          style={{ borderColor: "#FF5706", color: "#FF5706" }}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-primary px-2.5 py-1.5 text-[12px] font-medium text-primary-text transition-colors hover:bg-primary-soft"
         >
           <GitBranch className="h-3.5 w-3.5" />
           Ver no diagrama
@@ -860,7 +912,7 @@ function RunCard({
       {expanded && (
         <div className="border-t border-border px-4 py-3">
           {summary && (
-            <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2">
+            <div className="mb-3 rounded-md border border-border bg-surface-3 px-3 py-2">
               <p className="text-sm font-medium text-foreground">{summary.headline}</p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
                 {summary.messagesSent} mensage{summary.messagesSent === 1 ? "m enviada" : "ns enviadas"} ·{" "}
