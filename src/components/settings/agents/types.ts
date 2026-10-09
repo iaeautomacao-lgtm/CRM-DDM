@@ -1,4 +1,5 @@
 import type { AgentConfig, AgentComposition } from '@/lib/ai/agents/schema';
+import type { AiAgentTool } from '@/lib/flows/types';
 
 export interface AgentListItem {
   id: string;
@@ -104,6 +105,8 @@ export interface ToolCatalogItem {
     url: string;
     method: string;
   };
+  /** Esquema dos argumentos (usado pelo "Testar" da aba Ferramentas). */
+  parameters?: AiAgentTool['parameters'];
 }
 
 export interface KnowledgeBaseFileItem {
