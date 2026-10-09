@@ -1,12 +1,12 @@
 'use client';
 
 // ============================================================
-// QuickRepliesManager — cadastro das respostas rápidas da conta
-// (/respostas-rapidas, migration 142), no visual DDM: tabela + gaveta.
-// Escrita direto pelo cliente Supabase: a RLS só deixa owner/admin gravar;
-// todos os membros leem (o campo de mensagem do Inbox usa a mesma tabela).
-// Fora do desenho do protótipo por não existir no banco: "Visível para"
-// (a tabela só tem account_id/created_by) e "Usos (30 d)".
+// QuickRepliesManager — respostas rápidas (/respostas-rapidas, migrations 142 e 301), no visual DDM: tabela + gaveta.
+// Escrita direto pelo cliente Supabase; quem decide é a RLS:
+//   · Pessoal: o próprio dono cria/edita/exclui (operador incluso) e só ele vê;
+//   · Equipe e Conta: só quem tem inbox.quick_replies.manage (admin/proprietário); os demais veem em leitura.
+// Usos (30 d): RPC quick_reply_usage_30d (só das respostas visíveis ao usuário). O registro do uso é feito pelo Inbox
+// (POST /api/quick-replies/[id]/use).
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -23,10 +23,16 @@ import {
   QUICK_REPLY_SHORTCUT_MAX,
   QUICK_REPLY_TITLE_MAX,
   QUICK_REPLY_VARIABLES,
+  QUICK_REPLY_VISIBILITY_LABEL,
+  canEditQuickReply,
   isValidShortcut,
   normalizeShortcut,
   renderQuickReply,
+  shortcutTaken,
+  visibilityOf,
+  visibilityOptions,
   type QuickReply,
+  type QuickReplyVisibility,
 } from '@/lib/quick-replies';
 import { Button } from '@/components/ui/button';
 import {
@@ -42,6 +48,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PageBody, PageToolbar } from '@/components/ddm/page-toolbar';
 import { Segmented } from '@/components/ddm/segmented';
+import { StatusChip } from '@/components/ddm/status-chip';
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import { DetailDrawer } from '@/components/ddm/list-with-drawer';
 import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
@@ -50,11 +57,19 @@ interface FormState {
   shortcut: string;
   title: string;
   content: string;
+  visibility: QuickReplyVisibility;
+  teamId: string;
 }
 
-type Seg = 'all' | 'mine';
+type Seg = 'all' | 'mine' | 'team' | 'account';
 
-const EMPTY_FORM: FormState = { shortcut: '', title: '', content: '' };
+const EMPTY_FORM: FormState = { shortcut: '', title: '', content: '', visibility: 'personal', teamId: '' };
+
+const VISIBILITY_HINT: Record<QuickReplyVisibility, string> = {
+  personal: 'Só você vê e usa.',
+  team: 'Os membros da equipe escolhida veem e usam.',
+  account: 'Todos os atendentes da conta veem e usam.',
+};
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -65,10 +80,16 @@ export function QuickRepliesManager() {
   const supabase = useMemo(() => createClient(), []);
   const { user, accountId, profile } = useAuth();
   const canManage = usePermission('inbox.quick_replies.manage');
+  const canReply = usePermission('inbox.reply');
+  const canCreate = canManage || canReply;
+  const ctx = useMemo(() => ({ userId: user?.id, canManage }), [user?.id, canManage]);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [replies, setReplies] = useState<QuickReply[]>([]);
+  const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([]);
+  // null = a RPC de usos não respondeu (migration 301 ainda não aplicada, por exemplo): a coluna mostra "—".
+  const [usage, setUsage] = useState<Map<string, number> | null>(null);
   const [search, setSearch] = useState('');
   const [seg, setSeg] = useState<Seg>('all');
 
@@ -85,17 +106,29 @@ export function QuickRepliesManager() {
     if (!accountId) return;
     setLoading(true);
     setLoadError(false);
-    const { data, error } = await supabase
-      .from('quick_replies')
-      .select('*')
-      .eq('account_id', accountId)
-      .order('shortcut', { ascending: true })
-      .range(0, 499);
-    if (error) {
-      console.error('[QuickRepliesManager] fetch error:', error);
+    const [repliesRes, teamsRes, usageRes] = await Promise.all([
+      supabase
+        .from('quick_replies')
+        .select('*')
+        .eq('account_id', accountId)
+        .order('shortcut', { ascending: true })
+        .range(0, 499),
+      supabase.from('teams').select('id, name').eq('account_id', accountId).order('name', { ascending: true }),
+      supabase.rpc('quick_reply_usage_30d'),
+    ]);
+    if (repliesRes.error) {
+      console.error('[QuickRepliesManager] fetch error:', repliesRes.error);
       setLoadError(true);
     } else {
-      setReplies((data ?? []) as QuickReply[]);
+      setReplies((repliesRes.data ?? []) as QuickReply[]);
+    }
+    // Equipes e usos são complementos: sem eles a tela segue funcionando.
+    if (!teamsRes.error) setTeams((teamsRes.data ?? []) as Array<{ id: string; name: string }>);
+    if (usageRes.error) {
+      setUsage(null);
+    } else {
+      const rows = (usageRes.data ?? []) as Array<{ quick_reply_id: string; uses: number | string }>;
+      setUsage(new Map(rows.map((r) => [r.quick_reply_id, Number(r.uses)] as const)));
     }
     setLoading(false);
   }, [accountId, supabase]);
@@ -104,19 +137,32 @@ export function QuickRepliesManager() {
     void fetchData();
   }, [fetchData]);
 
-  const mineCount = useMemo(
-    () => replies.filter((r) => !!user && r.created_by === user.id).length,
-    [replies, user],
+  const teamNameById = useMemo(() => new Map(teams.map((t) => [t.id, t.name] as const)), [teams]);
+
+  const isMine = useCallback(
+    (r: QuickReply) => visibilityOf(r) === 'personal' && !!user && r.created_by === user.id,
+    [user],
+  );
+
+  const counts = useMemo(
+    () => ({
+      mine: replies.filter(isMine).length,
+      team: replies.filter((r) => visibilityOf(r) === 'team').length,
+      account: replies.filter((r) => visibilityOf(r) === 'account').length,
+    }),
+    [replies, isMine],
   );
 
   const filtered = useMemo(() => {
     const q = normalizeForSearch(search.trim());
     return replies.filter((r) => {
-      if (seg === 'mine' && r.created_by !== user?.id) return false;
+      if (seg === 'mine' && !isMine(r)) return false;
+      if (seg === 'team' && visibilityOf(r) !== 'team') return false;
+      if (seg === 'account' && visibilityOf(r) !== 'account') return false;
       if (!q) return true;
       return [r.shortcut, r.title, r.content].some((v) => normalizeForSearch(v).includes(q));
     });
-  }, [replies, search, seg, user]);
+  }, [replies, search, seg, isMine]);
 
   function openCreate() {
     setEditing(null);
@@ -126,12 +172,32 @@ export function QuickRepliesManager() {
 
   function openEdit(reply: QuickReply) {
     setEditing(reply);
-    setForm({ shortcut: reply.shortcut, title: reply.title, content: reply.content });
+    setForm({
+      shortcut: reply.shortcut,
+      title: reply.title,
+      content: reply.content,
+      visibility: visibilityOf(reply),
+      teamId: reply.team_id ?? '',
+    });
     setFormOpen(true);
   }
 
+  const editable = editing ? canEditQuickReply(editing, ctx) : canCreate;
+  const options = visibilityOptions(canManage);
   const shortcut = normalizeShortcut(form.shortcut);
-  const duplicate = replies.some((r) => r.shortcut === shortcut && r.id !== editing?.id);
+  const ownerId = editing && visibilityOf(editing) === 'personal' ? editing.created_by : user?.id;
+  const duplicate = shortcutTaken(
+    replies,
+    { shortcut, visibility: form.visibility, teamId: form.visibility === 'team' ? form.teamId || null : null, ownerId },
+    editing?.id,
+  );
+
+  function visibleFor(r: QuickReply): { tone: 'mute' | 'info' | 'brand'; label: string } {
+    const v = visibilityOf(r);
+    if (v === 'personal') return { tone: 'mute', label: isMine(r) ? 'Só eu' : 'Pessoal' };
+    if (v === 'team') return { tone: 'info', label: `Equipe · ${teamNameById.get(r.team_id ?? '') ?? 'sem acesso ao nome'}` };
+    return { tone: 'brand', label: 'Toda a conta' };
+  }
 
   async function handleSave() {
     const title = form.title.trim();
@@ -141,7 +207,7 @@ export function QuickRepliesManager() {
       return;
     }
     if (duplicate) {
-      toast.error(`Já existe uma resposta com o atalho /${shortcut}.`);
+      toast.error(`Já existe uma resposta com o atalho /${shortcut} neste escopo.`);
       return;
     }
     if (!title) {
@@ -152,14 +218,22 @@ export function QuickRepliesManager() {
       toast.error('Escreva o texto da resposta.');
       return;
     }
+    if (form.visibility === 'team' && !form.teamId) {
+      toast.error('Escolha a equipe que vai ver esta resposta.');
+      return;
+    }
     if (!accountId || !user) return;
 
     setSaving(true);
     try {
       if (editing) {
+        // Só quem tem manage muda a visibilidade; o dono de uma pessoal não a promove (a RLS também barra).
+        const scope = canManage
+          ? { visibility: form.visibility, team_id: form.visibility === 'team' ? form.teamId : null }
+          : {};
         const { data: updated, error } = await supabase
           .from('quick_replies')
-          .update({ shortcut, title, content, updated_at: new Date().toISOString() })
+          .update({ shortcut, title, content, ...scope, updated_at: new Date().toISOString() })
           .eq('id', editing.id)
           .eq('account_id', accountId)
           .select('id');
@@ -168,9 +242,15 @@ export function QuickRepliesManager() {
         if (!updated?.length) throw { code: '42501' };
         toast.success('Resposta rápida atualizada');
       } else {
-        const { error } = await supabase
-          .from('quick_replies')
-          .insert({ account_id: accountId, shortcut, title, content, created_by: user.id });
+        const { error } = await supabase.from('quick_replies').insert({
+          account_id: accountId,
+          shortcut,
+          title,
+          content,
+          created_by: user.id,
+          visibility: form.visibility,
+          team_id: form.visibility === 'team' ? form.teamId : null,
+        });
         if (error) throw error;
         toast.success('Resposta rápida criada');
       }
@@ -182,9 +262,9 @@ export function QuickRepliesManager() {
       const code = (err as { code?: string })?.code;
       toast.error(
         code === '23505'
-          ? `Já existe uma resposta com o atalho /${shortcut}.`
+          ? `Já existe uma resposta com o atalho /${shortcut} neste escopo.`
           : code === '42501'
-            ? 'Só administradores podem cadastrar respostas rápidas.'
+            ? 'Você não tem permissão para salvar esta resposta com essa visibilidade.'
             : 'Falha ao salvar a resposta rápida',
       );
     } finally {
@@ -230,7 +310,7 @@ export function QuickRepliesManager() {
     <PageBody>
       <PageToolbar
         actions={
-          canManage ? (
+          canCreate ? (
             <Button onClick={openCreate}>
               <Plus className="size-4" aria-hidden="true" />
               Nova resposta
@@ -258,17 +338,21 @@ export function QuickRepliesManager() {
           onChange={setSeg}
           options={[
             { value: 'all', label: 'Todas', count: replies.length },
-            { value: 'mine', label: 'Minhas', count: mineCount },
+            { value: 'mine', label: 'Minhas', count: counts.mine },
+            { value: 'team', label: 'Da equipe', count: counts.team },
+            { value: 'account', label: 'Da conta', count: counts.account },
           ]}
         />
       </PageToolbar>
 
       <p className="m-0 max-w-3xl text-[12.5px] text-muted-foreground">
         Textos prontos para o Inbox: o atendente digita <span className="font-mono">/atalho</span> no campo de
-        mensagem (ou clica no ⚡), o texto entra já com o nome do cliente e ele revisa antes de enviar.
+        mensagem (ou clica no ⚡), o texto entra já com o nome do cliente e ele revisa antes de enviar. Se o mesmo
+        atalho existir em mais de um lugar, vale a ordem pessoal, equipe, conta.
+        {!canManage && ' Você cria e edita as suas (pessoais); as da equipe e da conta aparecem só para consulta.'}
       </p>
 
-      <TableCard title="Respostas rápidas" hint="Disponíveis para todos os atendentes da conta.">
+      <TableCard title="Respostas rápidas" hint="Só aparecem as que você pode usar.">
         {loading ? (
           <div className="flex flex-col gap-2 px-[18px] pb-4" aria-busy="true">
             {Array.from({ length: 5 }).map((_, i) => (
@@ -288,7 +372,7 @@ export function QuickRepliesManager() {
             title={replies.length === 0 ? 'Nenhuma resposta rápida ainda' : 'Nada encontrado'}
             hint={
               replies.length === 0
-                ? canManage
+                ? canCreate
                   ? 'Crie a primeira para agilizar o atendimento no Inbox.'
                   : undefined
                 : search.trim()
@@ -297,42 +381,55 @@ export function QuickRepliesManager() {
             }
           />
         ) : (
-          <DenseTable minWidth={640}>
+          <DenseTable minWidth={760}>
             <thead>
               <tr>
                 <Th>Atalho</Th>
                 <Th>Texto</Th>
-                <Th className="hidden md:table-cell">Atualizada em</Th>
+                <Th>Visível para</Th>
+                <Th align="right">Usos (30 d)</Th>
+                <Th className="hidden lg:table-cell">Atualizada em</Th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
-                <Tr
-                  key={r.id}
-                  className={editing?.id === r.id && formOpen ? 'cursor-pointer bg-selected' : 'cursor-pointer'}
-                  onClick={() => openEdit(r)}
-                >
-                  <Td>
-                    <button
-                      type="button"
-                      className="block max-w-full text-left focus-visible:outline-2 focus-visible:outline-ring"
-                      aria-label={`Abrir /${r.shortcut}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEdit(r);
-                      }}
-                    >
-                      <CellMain title={<span className="font-mono text-primary-text">/{r.shortcut}</span>} sub={r.title} />
-                    </button>
-                  </Td>
-                  <Td className="max-w-[26rem]">
-                    <span className="line-clamp-2 whitespace-pre-line text-xs text-muted-foreground">{r.content}</span>
-                  </Td>
-                  <Td className="hidden whitespace-nowrap text-xs text-muted-foreground md:table-cell">
-                    {fmtDate(r.updated_at)}
-                  </Td>
-                </Tr>
-              ))}
+              {filtered.map((r) => {
+                const vis = visibleFor(r);
+                return (
+                  <Tr
+                    key={r.id}
+                    className={editing?.id === r.id && formOpen ? 'cursor-pointer bg-selected' : 'cursor-pointer'}
+                    onClick={() => openEdit(r)}
+                  >
+                    <Td>
+                      <button
+                        type="button"
+                        className="block max-w-full text-left focus-visible:outline-2 focus-visible:outline-ring"
+                        aria-label={`Abrir /${r.shortcut}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEdit(r);
+                        }}
+                      >
+                        <CellMain title={<span className="font-mono text-primary-text">/{r.shortcut}</span>} sub={r.title} />
+                      </button>
+                    </Td>
+                    <Td className="max-w-[24rem]">
+                      <span className="line-clamp-2 whitespace-pre-line text-xs text-muted-foreground">{r.content}</span>
+                    </Td>
+                    <Td>
+                      <StatusChip tone={vis.tone} dot={false}>
+                        {vis.label}
+                      </StatusChip>
+                    </Td>
+                    <Td align="right" className="text-foreground-2">
+                      {usage ? (usage.get(r.id) ?? 0).toLocaleString('pt-BR') : '—'}
+                    </Td>
+                    <Td className="hidden whitespace-nowrap text-xs text-muted-foreground lg:table-cell">
+                      {fmtDate(r.updated_at)}
+                    </Td>
+                  </Tr>
+                );
+              })}
             </tbody>
           </DenseTable>
         )}
@@ -344,13 +441,13 @@ export function QuickRepliesManager() {
         title={editing ? `/${editing.shortcut}` : 'Nova resposta rápida'}
         description={
           editing
-            ? canManage
-              ? 'Resposta rápida — disponível para todos os atendentes da conta.'
+            ? editable
+              ? `Resposta rápida · ${QUICK_REPLY_VISIBILITY_LABEL[visibilityOf(editing)]}`
               : 'Resposta rápida (somente leitura).'
-            : 'Disponível para todos os atendentes da conta.'
+            : VISIBILITY_HINT[form.visibility]
         }
         footer={
-          canManage ? (
+          editable ? (
             <>
               {editing && (
                 <Button
@@ -387,6 +484,43 @@ export function QuickRepliesManager() {
         }
       >
         <div className="space-y-4">
+          {/* Visibilidade: sem manage só existe "Pessoal"; quem não edita a resposta só lê. */}
+          <div className="space-y-2">
+            <Label>Visível para</Label>
+            <Segmented<QuickReplyVisibility>
+              ariaLabel="Visibilidade da resposta"
+              size="lg"
+              value={form.visibility}
+              onChange={(v) => editable && canManage && setForm((f) => ({ ...f, visibility: v }))}
+              options={(editable && canManage ? options : [form.visibility]).map((v) => ({
+                value: v,
+                label: QUICK_REPLY_VISIBILITY_LABEL[v],
+              }))}
+            />
+            <p className="text-xs text-muted-foreground">{VISIBILITY_HINT[form.visibility]}</p>
+            {form.visibility === 'team' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="qr-team">Equipe</Label>
+                <select
+                  id="qr-team"
+                  value={form.teamId}
+                  disabled={saving || !editable || !canManage}
+                  onChange={(e) => setForm((f) => ({ ...f, teamId: e.target.value }))}
+                  className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+                >
+                  <option value="">Selecione a equipe…</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                    </option>
+                  ))}
+                  {form.teamId && !teamNameById.has(form.teamId) && <option value={form.teamId}>Equipe atual</option>}
+                </select>
+                {teams.length === 0 && <p className="text-xs text-muted-foreground">Nenhuma equipe cadastrada.</p>}
+              </div>
+            )}
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
             <div className="space-y-2">
               <Label htmlFor="qr-shortcut">Atalho</Label>
@@ -402,11 +536,11 @@ export function QuickRepliesManager() {
                   placeholder="boleto"
                   maxLength={QUICK_REPLY_SHORTCUT_MAX + 5}
                   className="pl-6 font-mono"
-                  disabled={saving || !canManage}
+                  disabled={saving || !editable}
                   aria-invalid={duplicate || undefined}
                 />
               </div>
-              {duplicate && <p className="text-xs text-destructive">Já existe /{shortcut}.</p>}
+              {duplicate && <p className="text-xs text-destructive">Já existe /{shortcut} neste escopo.</p>}
             </div>
             <div className="space-y-2">
               <Label htmlFor="qr-title">Título</Label>
@@ -416,7 +550,7 @@ export function QuickRepliesManager() {
                 onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
                 placeholder="Segunda via do boleto"
                 maxLength={QUICK_REPLY_TITLE_MAX}
-                disabled={saving || !canManage}
+                disabled={saving || !editable}
               />
             </div>
           </div>
@@ -429,9 +563,9 @@ export function QuickRepliesManager() {
               placeholder="Olá, {primeiro_nome}! Segue a segunda via do seu boleto…"
               rows={6}
               maxLength={QUICK_REPLY_CONTENT_MAX}
-              disabled={saving || !canManage}
+              disabled={saving || !editable}
             />
-            {canManage && (
+            {editable && (
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <span>Inserir:</span>
                 {QUICK_REPLY_VARIABLES.map((v) => (
@@ -465,8 +599,12 @@ export function QuickRepliesManager() {
           <DialogHeader>
             <DialogTitle>Excluir resposta rápida</DialogTitle>
             <DialogDescription>
-              Excluir /{deleteTarget?.shortcut} — &quot;{deleteTarget?.title}&quot;? Ela some do Inbox de todos os
-              atendentes.
+              Excluir /{deleteTarget?.shortcut} — &quot;{deleteTarget?.title}&quot;?{' '}
+              {deleteTarget && visibilityOf(deleteTarget) === 'personal'
+                ? 'Ela some só para você.'
+                : deleteTarget && visibilityOf(deleteTarget) === 'team'
+                  ? 'Ela some do Inbox dos membros da equipe.'
+                  : 'Ela some do Inbox de todos os atendentes.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
