@@ -48,6 +48,13 @@ import { BatchReportPanel, BulkBar, failureMessage, type BatchReport } from "@/c
 import { MonitorKpiRow } from "@/components/monitoramento/kpi-row";
 import { MonitorFiltersPanel } from "@/components/monitoramento/monitor-filters-panel";
 import type { MultiSelectOption } from "@/components/monitoramento/multi-select-filter";
+import {
+  agentMetricsRange,
+  indexMetricsByAgent,
+  type AgentMetrics,
+  type AgentMetricsPeriod,
+  type AgentMetricsResponse,
+} from "@/lib/monitoramento/agent-metrics";
 import { PhaseColumn } from "@/components/monitoramento/phase-column";
 import { AgentColumn } from "@/components/monitoramento/agent-column";
 import { AgentDragCard } from "@/components/monitoramento/agent-drag-card";
@@ -102,6 +109,10 @@ function MonitoramentoBoard() {
   const canBulkTransfer = can("inbox.transfer");
   const canBulkFinalize = can("inbox.close");
   const [view, setView] = useState<MonitorView>("fases");
+  const [agentPeriod, setAgentPeriod] = useState<AgentMetricsPeriod>("hoje");
+  const [agentMetrics, setAgentMetrics] = useState<Map<string, AgentMetrics> | null>(null);
+  const [agentMetricsError, setAgentMetricsError] = useState(false);
+  const [agentMetricsTick, setAgentMetricsTick] = useState(0);
   const [conversations, setConversations] = useState<Map<string, MonitorConversation>>(
     () => new Map(),
   );
@@ -786,6 +797,32 @@ function MonitoramentoBoard() {
   // selectAgentForTeam/selectAnyAgentForAccount em src/lib/flows/engine.ts).
   // /api/account/members não é filtrado (é genérico, usado também pela
   // aba Membros), então o filtro é aplicado aqui no array resultante.
+  // Métricas por atendente (1ª resposta média e resolvidas) só são buscadas com a aba Agentes aberta;
+  // a lista de conversas e a presença continuam em tempo real, estes dois números são do período.
+  useEffect(() => {
+    if (view !== "agentes") return;
+    let cancelled = false;
+    const { from, to } = agentMetricsRange(agentPeriod);
+    apiFetch(`/api/monitoramento/agentes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return (await res.json()) as AgentMetricsResponse;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setAgentMetrics(indexMetricsByAgent(data.agents));
+        setAgentMetricsError(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[monitoramento] failed to load agent metrics:", err);
+        setAgentMetricsError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, agentPeriod, agentMetricsTick]);
+
   const agentOptions: MultiSelectOption[] = useMemo(
     () =>
       members
@@ -920,6 +957,37 @@ function MonitoramentoBoard() {
               }}
             />
           ) : (
+            <>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Segmented<AgentMetricsPeriod>
+                ariaLabel="Período das métricas por atendente"
+                options={[
+                  { value: "hoje", label: "Hoje" },
+                  { value: "7d", label: "7 dias" },
+                ]}
+                value={agentPeriod}
+                onChange={(p) => {
+                  setAgentMetrics(null);
+                  setAgentPeriod(p);
+                }}
+              />
+              {agentMetricsError && (
+                <span role="alert" className="text-xs text-danger">
+                  Não foi possível carregar as métricas.{" "}
+                  <button
+                    type="button"
+                    className="font-medium underline"
+                    onClick={() => {
+                      setAgentMetrics(null);
+                      setAgentMetricsError(false);
+                      setAgentMetricsTick((n) => n + 1);
+                    }}
+                  >
+                    Tentar de novo
+                  </button>
+                </span>
+              )}
+            </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {sortedAgents.map((agent) => (
                 <AgentColumn
@@ -930,9 +998,14 @@ function MonitoramentoBoard() {
                   now={now}
                   conversations={byAgent.get(agent.user_id) ?? []}
                   actions={agentesActions}
+                  metrics={agentMetrics?.get(agent.user_id)}
+                  metricsLoading={agentMetrics === null && !agentMetricsError}
+                  metricsUnavailable={agentMetricsError}
+                  metricsPeriodLabel={agentPeriod === "hoje" ? "hoje" : "em 7 dias"}
                 />
               ))}
             </div>
+            </>
           )}
         </div>
         )}
