@@ -44,6 +44,7 @@ import { StatusChip } from "@/components/ddm/status-chip";
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/table-card";
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/dashboard/error-state";
 
 /**
  * Flows list page.
@@ -101,6 +102,8 @@ export default function FlowsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | FlowRow["status"]>("all");
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +129,7 @@ export default function FlowsPage() {
       } catch (err) {
         if (!cancelled) {
           console.error(err);
-          toast.error("Não foi possível carregar os fluxos.");
+          setLoadError(true);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -135,7 +138,7 @@ export default function FlowsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -401,6 +404,15 @@ export default function FlowsPage() {
             ))}
           </div>
         </TableCard>
+      ) : loadError ? (
+        <ErrorState
+          title="Não foi possível carregar os fluxos"
+          onRetry={() => {
+            setLoadError(false);
+            setLoading(true);
+            setReloadKey((k) => k + 1);
+          }}
+        />
       ) : flows.length === 0 ? (
         <EmptyState onCreate={() => setCreateOpen(true)} canCreate={canCreate} />
       ) : (
