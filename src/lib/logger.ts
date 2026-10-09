@@ -50,16 +50,8 @@ export interface WriteLogParams {
   payload?: object
 }
 
-// Mascara telefone pros últimos 4 dígitos (ex: "+5511999998888" ->
-// "****8888") — nunca logar o número completo em payload. Aceita
-// qualquer formato de entrada (com/sem +, espaços, etc.), extrai só
-// dígitos antes de mascarar.
-export function maskPhone(phone: string | null | undefined): string | null {
-  if (!phone) return null
-  const digits = phone.replace(/\D/g, '')
-  if (digits.length <= 4) return '****'
-  return `****${digits.slice(-4)}`
-}
+// Telefone nunca vai inteiro para log/payload: o mascarador único mora em src/lib/privacy/mask.ts (PRD 14.7).
+export { maskPhone } from '@/lib/privacy/mask'
 
 // Grava uma linha em wacrm.system_logs. NUNCA lança — todo call site é
 // fire-and-forget por natureza (log que falha não pode derrubar o

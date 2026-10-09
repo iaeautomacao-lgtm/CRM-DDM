@@ -23,6 +23,7 @@ import { writeLog, maskPhone } from '@/lib/logger'
 import { readCappedBody } from '@/lib/security/webhook-body'
 import { shouldReportLegacyWahaSecret } from '@/lib/whatsapp/waha-webhook-auth'
 import { phoneVariants } from '@/lib/disparador/phone-key'
+import { safeDbError } from '@/lib/privacy/mask'
 
 // Espera antes de gravar o eco de uma mensagem nossa (ver abaixo).
 const OWN_SEND_ECHO_WAIT_MS = 3000
@@ -425,7 +426,7 @@ export async function POST(request: Request) {
           .single()
 
         if (contactCreateError) {
-          console.error('[waha/webhook] Failed to create contact:', contactCreateError)
+          console.error('[waha/webhook] Failed to create contact:', safeDbError(contactCreateError))
           void writeLog({
             account_id: accountId,
             level: 'error',
@@ -672,7 +673,7 @@ export async function POST(request: Request) {
       if (msgInsertError) {
         console.error(
           '[waha/webhook] Failed to insert message database error:',
-          JSON.stringify(msgInsertError)
+          safeDbError(msgInsertError)
         )
         return NextResponse.json(
           {

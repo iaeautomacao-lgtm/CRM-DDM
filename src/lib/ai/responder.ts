@@ -1,5 +1,5 @@
 import "server-only";
-import { maskCpfForLog } from '@/lib/privacy/mask';
+import { maskCpfForLog, maskTextForLog, safeDbError } from '@/lib/privacy/mask';
 import { openAiUrl } from '@/lib/loadtest/gate';
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { safeFetch, SsrfBlockedError } from "@/lib/security/ssrf-guard";
@@ -754,7 +754,7 @@ async function handleAiAutoResponseAttempt(
     .limit(10);
 
   if (messagesError) {
-    console.error("[AI Agent] failed to load messages context:", messagesError);
+    console.error("[AI Agent] failed to load messages context:", safeDbError(messagesError));
     return {
       outcome: "failed",
       reason: `history_load_failed:${messagesError.message}`,
@@ -778,7 +778,7 @@ async function handleAiAutoResponseAttempt(
       .maybeSingle();
 
     if (contactForBlockError) {
-      console.error("[AI Agent] Failed to load contact for suppression:", contactForBlockError);
+      console.error("[AI Agent] Failed to load contact for suppression:", safeDbError(contactForBlockError));
     } else if (contactForBlock?.phone) {
       const normalizedPhone = formatBrazilianPhone(contactForBlock.phone);
       if (normalizedPhone) {
@@ -796,7 +796,7 @@ async function handleAiAutoResponseAttempt(
             { onConflict: "telefone" },
           );
         if (blacklistError) {
-          console.error("[AI Agent] Failed to persist suppression:", blacklistError);
+          console.error("[AI Agent] Failed to persist suppression:", safeDbError(blacklistError));
         }
       }
     }
@@ -967,7 +967,7 @@ async function handleAiAutoResponseAttempt(
             const whisperData = await whisperRes.json();
             if (whisperData.text) {
               const transcribedText = whisperData.text;
-              console.log("[AI Agent] Whisper transcribed:", transcribedText);
+              console.log(`[AI Agent] Whisper transcribed: ${transcribedText.length} chars`);
               
               // Update local history
               lastMsg.content_text = transcribedText;
@@ -980,7 +980,7 @@ async function handleAiAutoResponseAttempt(
                 .eq("id", lastMsg.id);
             }
           } else {
-            console.error("[AI Agent] Whisper API error:", await whisperRes.text());
+            console.error(`[AI Agent] Whisper API error: status=${whisperRes.status}`, maskTextForLog(await whisperRes.text()));
           }
         }
       } catch (err) {
@@ -1425,7 +1425,8 @@ async function handleAiAutoResponseAttempt(
       const resFormalize = await boundedFetch(formalizeUrl);
       if (resFormalize.ok) {
         const resText = await resFormalize.text();
-        console.log(`[AI Agent] DDM formalize success. status=${resFormalize.status} bytes=${resText.length} failure=${classifyToolBodyFailure(resText)?.code ?? "none"}`);
+        const formalizeFailure = classifyToolBodyFailure(resText)?.code ?? "none";
+        console.log(`[AI Agent] DDM formalize success. status=${resFormalize.status} bytes=${resText.length} failure=${formalizeFailure}`);
         
         const match = resText.match(/https?:\/\/[^\s"']+/i);
         if (match) {
@@ -1539,7 +1540,7 @@ async function handleAiAutoResponseAttempt(
           console.error("[AI Agent] Failed to upload ElevenLabs audio to Storage:", uploadError.message);
         }
       } else {
-        console.error("[AI Agent] ElevenLabs TTS API failed:", await ttsRes.text());
+        console.error(`[AI Agent] ElevenLabs TTS API failed: status=${ttsRes.status}`, maskTextForLog(await ttsRes.text()));
       }
     } catch (err) {
       console.error("[AI Agent] ElevenLabs error:", err);
@@ -1770,7 +1771,7 @@ async function handleAiAutoResponseAttempt(
 
   const savedMessageId = persisted.id;
   if (newMsgErr || !savedMessageId) {
-    console.error("[AI Agent] Failed to save outbound message:", newMsgErr);
+    console.error("[AI Agent] Failed to save outbound message:", safeDbError(newMsgErr));
     void writeLog({
       account_id: accountId,
       level: "error",
