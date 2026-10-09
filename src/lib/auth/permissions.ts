@@ -116,7 +116,7 @@ export const PERMISSION_CATALOG = {
   "members.bulk_invite": { label: "Convite em lote", description: "Criar vários membros de uma vez.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
   "ownership.transfer": { label: "Transferir a propriedade", description: "Passar a organização a outro membro.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
   "account.delete": { label: "Excluir a organização", description: "Excluir a organização e seus dados.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
-  "roles.manage": { label: "Gerir papéis personalizados", description: "Criar, editar, apagar e atribuir papéis personalizados.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true, future: true },
+  "roles.manage": { label: "Gerir papéis personalizados", description: "Criar, editar, apagar e atribuir papéis personalizados.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
 
   // ── Organização ─────────────────────────────────────────
   "account.view": { label: "Ver a organização", description: "Ver nome e dados gerais da organização.", group: "Organização", scope: "none", roles: ALL },
@@ -209,16 +209,24 @@ export function canAll(subject: PermissionSubject, permissions: readonly Permiss
 export type RolePermissionError =
   | { code: "unknown_permission"; permission: string }
   | { code: "owner_only"; permission: Permission }
+  /** Ainda sem checagem no código (`future`): não entra em papel personalizado até existir. */
+  | { code: "not_grantable"; permission: Permission }
   | { code: "missing_dependency"; permission: Permission; requires: Permission };
 
-/** Pode entrar em papel personalizado? (teto: nada `ownerOnly`; nada fora do catálogo). */
+/** Limite de papéis personalizados por organização (decisão do dono, 09/10; o banco confere — migration 313). */
+export const MAX_CUSTOM_ROLES = 20;
+
+/**
+ * Pode entrar em papel personalizado? Teto: nada `ownerOnly`, nada `future` (sem checagem no código ainda) e nada
+ * fora do catálogo. Mesmo valor de permission_catalog.grantable (migration 312).
+ */
 export function isGrantableToCustomRole(permission: string): permission is Permission {
-  return isPermission(permission) && !DEFS[permission].ownerOnly;
+  return isPermission(permission) && !DEFS[permission].ownerOnly && !DEFS[permission].future;
 }
 
 /**
  * Valida o conjunto de um papel personalizado: chaves do catálogo, nenhuma
- * `ownerOnly` e todas as dependências presentes (explicitamente — não
+ * `ownerOnly` nem `future` e todas as dependências presentes (explicitamente — não
  * acrescenta nada sozinho). Devolve a lista de erros (vazia = válido).
  */
 export function validateCustomRolePermissions(permissions: readonly string[]): RolePermissionError[] {
@@ -231,6 +239,10 @@ export function validateCustomRolePermissions(permissions: readonly string[]): R
     }
     if (DEFS[key].ownerOnly) {
       errors.push({ code: "owner_only", permission: key });
+      continue;
+    }
+    if (DEFS[key].future) {
+      errors.push({ code: "not_grantable", permission: key });
       continue;
     }
     for (const dep of DEFS[key].dependsOn ?? []) {

@@ -21,8 +21,11 @@
 import { NextResponse } from "next/server";
 import type { PostgrestError } from "@supabase/supabase-js";
 
+import { supabaseAdmin } from "@/lib/account/admin-client";
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
+import { can } from "@/lib/auth/permissions";
 import { isAccountRole } from "@/lib/auth/roles";
+import { memberHasCustomRole } from "@/lib/roles/custom-roles";
 import {
   checkRateLimit,
   rateLimitResponse,
@@ -93,6 +96,14 @@ export async function PATCH(
               "Use POST /api/account/transfer-ownership to promote a member to owner",
           },
           { status: 400 },
+        );
+      }
+
+      // Papel personalizado (migration 313): só o proprietário (roles.manage) tira alguém dele.
+      if (!can(ctx, "roles.manage") && (await memberHasCustomRole(supabaseAdmin(), ctx.accountId, userId))) {
+        return NextResponse.json(
+          { error: "Este membro tem um papel personalizado; só o proprietário pode mudar o papel dele.", code: "forbidden" },
+          { status: 403 },
         );
       }
 
