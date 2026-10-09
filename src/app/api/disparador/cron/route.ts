@@ -46,6 +46,7 @@ import {
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
+import { mapWithConcurrency, resolvePlanConcurrency } from "@/lib/disparador/plan-concurrency";
 import { drainPushOutbox } from "@/lib/push/service";
 import { sweepStuckApiCampaigns } from "@/lib/disparador/api-v1-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
@@ -547,16 +548,18 @@ async function runTick(request: Request, chain: ChainContext) {
     // Claim em lote (migration 188, DISPARADOR_BATCH_CLAIM=0 desliga): fichas por campanha×número no planejamento e itens reivindicados
     // em lotes por número. Se as RPCs não existirem, volta sozinho ao caminho por item (fetchDueCandidates + claim unitário).
     let batchMode = isBatchClaimEnabled();
-    for (const campaign of (active ?? []) as Campaign[]) {
-      if (outOfTime()) break;
+    // D-08: planejamento por campanha com concorrência limitada (plan-concurrency.ts); a ordem do resultado é a da lista (fairness).
+    let tokenPlanned = 0;
+    const planCampaign = async (campaign: Campaign): Promise<PlannedCampaign | null> => {
+      if (outOfTime()) return null;
       // Avalia antes de planejar para não enviar outra rodada de uma
       // campanha que já passou do limite no tick anterior.
-      if (await checkCampaignAutoPause(db, campaign, autoPauseConfig)) continue;
-      if (outOfTime()) break;
+      if (await checkCampaignAutoPause(db, campaign, autoPauseConfig)) return null;
+      if (outOfTime()) return null;
       if (
         !canSendNow({ inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio })
       )
-        continue;
+        return null;
       // Sequential campaigns (batch_size=1) still use the database cadence
       // reservation. Batched/segmented campaigns already encode their logical
       // pause in disp_message_queue.scheduled_at when startCampaign builds the
@@ -568,7 +571,7 @@ async function runTick(request: Request, chain: ChainContext) {
           p_campaign_id: campaign.id,
         });
         if (reservationError) throw reservationError;
-        if (!reserved) continue;
+        if (!reserved) return null;
       }
 
       // This is a candidate-fetch limit, not provider concurrency (that is
@@ -585,11 +588,16 @@ async function runTick(request: Request, chain: ChainContext) {
       if (batchMode) {
         const plan = await planClaimTokens(db, campaign.id, batchSize);
         if (plan === null) {
+          // D-08: com planejamento concorrente, a RPC "sumir" depois de outra campanha já ter sido planejada por fichas misturaria os dois
+          // caminhos (claim em lote × por item) no mesmo tick. Não acontece em operação normal (a 1ª campanha decide sozinha); se
+          // acontecer, o tick falha inteiro e o próximo recomeça consistente.
+          if (tokenPlanned > 0) throw new Error("count_due_dispatch_items ficou indisponível no meio do planejamento do tick");
           batchMode = false;
           console.warn("[Cron] count_due_dispatch_items indisponível (migration 188 não aplicada); usando o claim por item.");
           items = await fetchDueCandidates(db, campaign.id, batchSize);
         } else {
           claimTokens = plan.tokens;
+          tokenPlanned++;
           items = plan.tokens.length ? await fetchDueSample(db, campaign.id) : [];
         }
       } else {
@@ -612,7 +620,7 @@ async function runTick(request: Request, chain: ChainContext) {
           if (recalcError)
             console.error("[Cron] Falha ao recalcular métricas:", recalcError.message);
         }
-        continue;
+        return null;
       }
       // Lote/"Segmentado": fila com rodadas agendadas em período fechado
       // (montada antes do relógio de janela, retomada…) é redistribuída uma
@@ -631,14 +639,25 @@ async function runTick(request: Request, chain: ChainContext) {
         if (reflow.ok)
           console.log("[Cron] Fila redistribuída na janela:", campaign.id, reflow.items, "itens via", reflow.via);
         else console.error("[Cron] Falha ao redistribuir a fila na janela:", campaign.id, reflow.error);
-        continue;
+        return null;
       }
-      planned.push({
+      return {
         campaign,
         items: claimTokens ?? items,
         result: { campaign_id: campaign.id, sent: 0, pending_confirmation: 0 },
-      });
+      };
+    };
+    const toPlan = (active ?? []) as Campaign[];
+    const planConcurrency = resolvePlanConcurrency();
+    let planResults: Array<PlannedCampaign | null>;
+    if (batchMode && planConcurrency > 1 && toPlan.length > 1) {
+      // A 1ª campanha decide SOZINHA se as RPCs do claim em lote existem (batchMode pode virar false); as demais seguem em paralelo.
+      const first = await planCampaign(toPlan[0]);
+      planResults = [first, ...(await mapWithConcurrency(toPlan.slice(1), planConcurrency, planCampaign))];
+    } else {
+      planResults = await mapWithConcurrency(toPlan, planConcurrency, planCampaign);
     }
+    for (const entry of planResults) if (entry) planned.push(entry);
     plannedCount = planned.length;
 
     // 3b) Envio, agendado por NÚMERO (dispatch-scheduler.ts): números em
