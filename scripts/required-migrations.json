@@ -263,6 +263,10 @@
       "version": "294b_dmq_auto_pause_rejected_idx",
       "kind": "index",
       "index": "idx_dmq_auto_pause_rejected"
+    },
+    {
+      "version": "295_import_links_token",
+      "kind": "registry"
     }
   ]
 }

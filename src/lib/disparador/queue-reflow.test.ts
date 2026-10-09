@@ -14,11 +14,26 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       const filters: Array<[string, unknown]> = [];
       let update: Record<string, unknown> | null = null;
       let range: [number, number] = [0, Number.MAX_SAFE_INTEGER];
+      let afterId: string | null = null; // keyset: a fila do mock já vem ordenada
+      let limitN = Number.MAX_SAFE_INTEGER;
       const builder: Record<string, unknown> = {};
       builder.select = () => builder;
       builder.order = () => builder;
       builder.eq = (column: string, value: unknown) => {
         filters.push([column, value]);
+        return builder;
+      };
+      builder.or = (expr: string) => {
+        afterId = /id\.gt\."([^"]+)"/.exec(expr)?.[1] ?? null;
+        return builder;
+      };
+      builder.is = () => builder;
+      builder.gt = (_column: string, value: string) => {
+        afterId = value;
+        return builder;
+      };
+      builder.limit = (n: number) => {
+        limitN = n;
         return builder;
       };
       builder.range = (from: number, to: number) => {
@@ -34,7 +49,10 @@ vi.mock("@/lib/disparador/admin-client", () => ({
           mocks.updates.push({ value: update, filters });
           return Promise.resolve({ error: null }).then(resolve);
         }
-        return Promise.resolve({ data: mocks.rows.slice(range[0], range[1] + 1), error: null }).then(resolve);
+        let data = mocks.rows;
+        if (afterId) data = data.slice(data.findIndex((r) => r.id === afterId) + 1);
+        data = afterId || limitN !== Number.MAX_SAFE_INTEGER ? data.slice(0, limitN) : data.slice(range[0], range[1] + 1);
+        return Promise.resolve({ data, error: null }).then(resolve);
       };
       return builder;
     },
