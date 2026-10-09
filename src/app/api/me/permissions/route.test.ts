@@ -19,7 +19,7 @@ vi.mock("@/lib/auth/account", async () => {
     toErrorResponse: (err: unknown) =>
       err instanceof UnauthorizedError || err instanceof ForbiddenError
         ? NextResponse.json({ error: err.message }, { status: err.status })
-        : NextResponse.json({ error: "Internal server error" }, { status: 500 }),
+        : NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 }),
   };
 });
 

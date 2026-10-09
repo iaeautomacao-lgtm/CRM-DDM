@@ -13,7 +13,7 @@ export async function POST(request: Request) {
     supplied.length !== secret.length ||
     !timingSafeEqual(Buffer.from(supplied), Buffer.from(secret))
   ) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   }
 
   const db = supabaseAdmin();
