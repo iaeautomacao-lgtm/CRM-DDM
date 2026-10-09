@@ -38,7 +38,7 @@ interface ActivityItem {
   actor: { name: string } | null;
   conversation_id: string | null;
   direction: 'in' | 'out' | null;
-  sender?: 'customer' | 'agent' | 'bot' | null;
+  sender: 'customer' | 'agent' | 'bot' | null;
 }
 
 type CampaignSendStatus =
@@ -55,9 +55,9 @@ type CampaignSendStatus =
 
 interface CampaignItem {
   id: string;
-  campaign_id: string;
-  campaign_name: string;
-  campaign_status: string;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  campaign_status: string | null;
   status: CampaignSendStatus | string;
   scheduled_at: string | null;
   sent_at: string | null;
@@ -305,12 +305,18 @@ export function ContactCampaignsList({ contactId }: { contactId: string }) {
           return (
             <li key={c.id} className="flex items-start gap-3 py-3 first:pt-0">
               <div className="min-w-0 flex-1">
-                <Link
-                  href={`/disparador/campanhas/${c.campaign_id}`}
-                  className="block truncate text-[13px] font-semibold text-foreground hover:text-primary-text"
-                >
-                  {c.campaign_name}
-                </Link>
+                {c.campaign_id ? (
+                  <Link
+                    href={`/disparador/campanhas/${c.campaign_id}`}
+                    className="block truncate text-[13px] font-semibold text-foreground hover:text-primary-text"
+                  >
+                    {c.campaign_name ?? 'Campanha sem nome'}
+                  </Link>
+                ) : (
+                  <span className="block truncate text-[13px] font-semibold text-foreground">
+                    {c.campaign_name ?? 'Campanha removida'}
+                  </span>
+                )}
                 <p className="truncate text-xs text-muted-foreground">
                   {c.template_name ? `Template ${c.template_name}` : 'Sem template'}
                   {when && ` · ${format(new Date(when), 'dd/MM/yyyy HH:mm', { locale: ptBR })}`}
