@@ -42,7 +42,9 @@ import {
   filterConversations,
   type MonitorFilters,
 } from "@/lib/monitoramento/filters";
-import { closeConversationWithOutcomeTag } from "@/lib/conversations/actions";
+import { closeConversationWithOutcomeTag, sendTakeoverMessage } from "@/lib/conversations/actions";
+import { newlyAssigned, runBatch, type BatchItemResult } from "@/lib/monitoramento/batch-client";
+import { BatchReportPanel, BulkBar, failureMessage, type BatchReport } from "@/components/monitoramento/bulk-bar";
 import { MonitorKpiRow } from "@/components/monitoramento/kpi-row";
 import { MonitorFiltersPanel } from "@/components/monitoramento/monitor-filters-panel";
 import type { MultiSelectOption } from "@/components/monitoramento/multi-select-filter";
@@ -93,7 +95,10 @@ export default function MonitoramentoPage() {
 }
 
 function MonitoramentoBoard() {
-  const { accountId, canManageMembers } = useAuth();
+  const { accountId, canManageMembers, profile } = useAuth();
+  const { can } = usePermissions();
+  const canBulkTransfer = can("inbox.transfer");
+  const canBulkFinalize = can("inbox.close");
   const [view, setView] = useState<MonitorView>("fases");
   const [conversations, setConversations] = useState<Map<string, MonitorConversation>>(
     () => new Map(),
@@ -529,6 +534,72 @@ function MonitoramentoBoard() {
     [finalizeTarget],
   );
 
+  // ----------------------------------------------------------
+  // Seleção em massa (APIs em lote do Monitoramento, até 50 ids por chamada;
+  // a tela divide em blocos). A barra age sobre a seleção da visão atual.
+  // Os itens que falham continuam selecionados para tentar de novo.
+  // ----------------------------------------------------------
+  const activeSelection =
+    view === "agentes" ? agentesSelection : view === "equipes" ? equipesSelection : view === "fases" ? fasesSelection : null;
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchReport, setBatchReport] = useState<BatchReport | null>(null);
+  const [batchPickerOpen, setBatchPickerOpen] = useState(false);
+
+  const finishBatch = useCallback(
+    (
+      title: string,
+      selection: ReturnType<typeof useSelection>,
+      done: { summary: { total: number; ok: number; failed: number }; results: BatchItemResult[] },
+      pending: string[],
+      error: string | null,
+    ) => {
+      const label = (id: string) => {
+        const c = conversations.get(id)?.contact;
+        return c?.name?.trim() || c?.phone || "Contato sem nome";
+      };
+      const okIds = done.results.filter((r) => r.ok).map((r) => r.conversation_id);
+      selection.setMany(okIds, false);
+      const failures = done.results
+        .filter((r) => !r.ok)
+        .map((r) => ({ id: r.conversation_id, label: label(r.conversation_id), message: failureMessage(r) }));
+      setBatchReport({ title, summary: done.summary, failures, pendingCount: pending.length, error });
+      if (error) toast.error(error);
+      else if (done.summary.failed > 0) toast.warning(`${done.summary.ok} ok, ${done.summary.failed} falharam`);
+      else toast.success(`${done.summary.ok} ${done.summary.ok === 1 ? "conversa" : "conversas"} concluída(s)`);
+    },
+    [conversations],
+  );
+
+  const handleBatchTransfer = useCallback(async () => {
+    if (!activeSelection || activeSelection.selected.size === 0) return;
+    setBatchBusy(true);
+    try {
+      const ids = [...activeSelection.selected];
+      const { done, pending, error } = await runBatch({ fetcher: apiFetch }, "transferir-para-mim", {}, ids);
+      // Como na ação unitária: a mensagem de "assumi o atendimento" sai do cliente, só para quem mudou de dono.
+      await Promise.all(newlyAssigned(done.results).map((id) => sendTakeoverMessage(id, profile?.full_name)));
+      finishBatch("Transferência para mim", activeSelection, done, pending, error);
+    } finally {
+      setBatchBusy(false);
+    }
+  }, [activeSelection, finishBatch, profile?.full_name]);
+
+  const handleBatchFinalize = useCallback(
+    async (tag: Tag) => {
+      setBatchPickerOpen(false);
+      if (!activeSelection || activeSelection.selected.size === 0) return;
+      setBatchBusy(true);
+      try {
+        const ids = [...activeSelection.selected];
+        const { done, pending, error } = await runBatch({ fetcher: apiFetch }, "finalizar", { outcome_tag_id: tag.id }, ids);
+        finishBatch("Finalização com tabulação", activeSelection, done, pending, error);
+      } finally {
+        setBatchBusy(false);
+      }
+    },
+    [activeSelection, finishBatch],
+  );
+
   // "Ver histórico" opens ContactTimeline in a modal overlaying the
   // board instead of navigating to /historico — the supervisor never
   // loses their place on Monitoramento (Fortics' "Linha do tempo").
@@ -754,6 +825,19 @@ function MonitoramentoBoard() {
         size="lg"
       />
 
+      {activeSelection && activeSelection.selected.size > 0 && (
+        <BulkBar
+          count={activeSelection.selected.size}
+          busy={batchBusy}
+          canTransfer={canBulkTransfer}
+          canFinalize={canBulkFinalize}
+          onTransfer={() => void handleBatchTransfer()}
+          onFinalize={() => setBatchPickerOpen(true)}
+          onClear={activeSelection.clear}
+        />
+      )}
+      {batchReport && <BatchReportPanel report={batchReport} onDismiss={() => setBatchReport(null)} />}
+
       <MonitorFiltersPanel
         agentOptions={agentOptions}
         teamOptions={teamOptions}
@@ -959,6 +1043,9 @@ function MonitoramentoBoard() {
         onSelect={handleOutcomeTagSelect}
         conversationId={finalizeTarget?.id}
       />
+
+      {/* Finalização em lote: a tabulação é obrigatória, como na ação unitária. */}
+      <OutcomeTagPicker open={batchPickerOpen} onOpenChange={setBatchPickerOpen} onSelect={handleBatchFinalize} />
 
       {timelineModal && (
         <ContactTimelineModal
