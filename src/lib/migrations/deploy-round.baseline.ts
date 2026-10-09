@@ -76,7 +76,7 @@ CREATE TABLE wacrm.quick_replies (
   UNIQUE (account_id, shortcut));
 CREATE TABLE wacrm.flow_nodes (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), node_type text NOT NULL,
   CONSTRAINT flow_nodes_node_type_check CHECK (node_type IN ('start'::text, 'send_message'::text, 'condition'::text, 'end'::text)));
-CREATE TABLE wacrm.disp_message_queue (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), sent_at timestamptz);
+CREATE TABLE wacrm.disp_message_queue (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), sent_at timestamptz, status text, account_id uuid, campaign_id uuid);
 CREATE TABLE wacrm.billing_rulers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, name text, channel_id uuid,
   priority integer DEFAULT 0, active boolean DEFAULT true, dry_run boolean DEFAULT false);
 CREATE TABLE wacrm.billing_ruler_steps (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, ruler_id uuid, position integer, offset_days integer, active boolean);
@@ -155,6 +155,64 @@ CREATE FUNCTION wacrm.get_campaign_report_detail(p_account_id uuid, p_campaign u
 CREATE FUNCTION wacrm.get_campaign_queue_items(p_account_id uuid, p_campaign uuid, p_a text, p_b text, p_c integer, p_d integer) RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = wacrm, public
   AS $$ BEGIN IF NOT wacrm.is_account_member(p_account_id) THEN RAISE EXCEPTION 'forbidden'; END IF; RETURN 0; END $$;
 
+-- Campanhas e funis (a 305 troca as policies de SELECT delas) com a policy de membership de hoje (040/085/017).
+CREATE TABLE wacrm.campaigns (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.campaign_metrics (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.pipelines (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+CREATE TABLE wacrm.pipeline_stages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), pipeline_id uuid NOT NULL REFERENCES wacrm.pipelines(id));
+CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.campaign_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.disp_message_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.pipelines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.pipeline_stages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE wacrm.deals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY campaigns_select ON wacrm.campaigns FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY campaign_metrics_select ON wacrm.campaign_metrics FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY disp_message_queue_select ON wacrm.disp_message_queue FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY pipelines_select ON wacrm.pipelines FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY deals_select ON wacrm.deals FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY pipeline_stages_select ON wacrm.pipeline_stages FOR SELECT USING (
+  EXISTS (SELECT 1 FROM wacrm.pipelines p WHERE p.id = pipeline_stages.pipeline_id AND wacrm.is_account_member(p.account_id)));
+-- Tabelas de auditoria, equipes, templates e canais auxiliares (as 325/326 trocam as policies de SELECT delas) com a policy de membership de hoje.
+CREATE TABLE wacrm.audit_logs (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.audit_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY audit_logs_select ON wacrm.audit_logs FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.intelligence_tool_calls (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.intelligence_tool_calls ENABLE ROW LEVEL SECURITY;
+CREATE POLICY intelligence_tool_calls_select ON wacrm.intelligence_tool_calls FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.ai_prompt_versions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.ai_prompt_versions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY ai_prompt_versions_select ON wacrm.ai_prompt_versions FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.account_invitations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.account_invitations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY account_invitations_select ON wacrm.account_invitations FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.message_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.message_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY message_templates_select ON wacrm.message_templates FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.disparador_message_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.disparador_message_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY disparador_message_templates_select ON wacrm.disparador_message_templates FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.clients (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.clients ENABLE ROW LEVEL SECURITY;
+CREATE POLICY clients_select ON wacrm.clients FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.whatsapp_test_sends (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.whatsapp_test_sends ENABLE ROW LEVEL SECURITY;
+CREATE POLICY whatsapp_test_sends_select ON wacrm.whatsapp_test_sends FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE POLICY account_invitations_modify ON wacrm.account_invitations FOR ALL USING (wacrm.is_account_member(account_id, 'admin')) WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
+CREATE POLICY clients_write ON wacrm.clients FOR ALL TO authenticated USING (wacrm.is_account_member(account_id, 'admin')) WITH CHECK (wacrm.is_account_member(account_id, 'admin'));
+CREATE TABLE wacrm.team_allowed_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), team_id uuid NOT NULL REFERENCES wacrm.teams(id));
+ALTER TABLE wacrm.team_allowed_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY team_allowed_templates_select ON wacrm.team_allowed_templates FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.teams t WHERE t.id = team_allowed_templates.team_id AND wacrm.is_account_member(t.account_id)));
+CREATE TABLE wacrm.team_outcome_tags (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), team_id uuid NOT NULL REFERENCES wacrm.teams(id));
+ALTER TABLE wacrm.team_outcome_tags ENABLE ROW LEVEL SECURITY;
+CREATE POLICY team_outcome_tags_select ON wacrm.team_outcome_tags FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.teams t WHERE t.id = team_outcome_tags.team_id AND wacrm.is_account_member(t.account_id)));
+ALTER TABLE wacrm.teams ENABLE ROW LEVEL SECURITY;
+CREATE POLICY teams_select ON wacrm.teams FOR SELECT USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.team_members ENABLE ROW LEVEL SECURITY;
+CREATE POLICY team_members_select ON wacrm.team_members FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.teams t WHERE t.id = team_members.team_id AND wacrm.is_account_member(t.account_id)));
+ALTER TABLE wacrm.accounts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY accounts_select ON wacrm.accounts FOR SELECT USING (wacrm.is_account_member(id));
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA wacrm TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA wacrm TO service_role;
 -- profiles: a 169 trocou o UPDATE de tabela inteira por UPDATE só nas colunas que o usuário edita (full_name, avatar_url).
