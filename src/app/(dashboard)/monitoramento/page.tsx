@@ -19,7 +19,11 @@ import { useAuth } from "@/hooks/use-auth";
 import { useRealtime } from "@/hooks/use-realtime";
 import { usePresence } from "@/hooks/use-presence";
 import { useSelection } from "@/hooks/use-selection";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Segmented } from "@/components/ddm/segmented";
+import { PageBody } from "@/components/ddm/page-toolbar";
+import { ForbiddenState } from "@/components/ddm/states";
+import { usePermissions } from "@/hooks/use-permission";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Can } from "@/components/auth/can";
 import { TeamFormDialog } from "@/components/settings/team-form-dialog";
@@ -53,8 +57,44 @@ import type { ConversationCardActions } from "@/components/monitoramento/card-ac
 import { ContactTimelineModal } from "@/components/contact-timeline/ContactTimelineModal";
 import { ErrorState } from "@/components/dashboard/error-state";
 
+type MonitorView = "fases" | "agentes" | "equipes" | "hoje" | "sla";
+
+const VIEW_OPTIONS = [
+  { value: "fases", label: "Fases" },
+  { value: "agentes", label: "Agentes" },
+  { value: "equipes", label: "Equipes" },
+  { value: "hoje", label: "Hoje" },
+  { value: "sla", label: "SLA" },
+] as const;
+
+/** Porta da página: o servidor decide quem abre /monitoramento (`pages` de /api/me/permissions). */
 export default function MonitoramentoPage() {
+  const { loading, canOpen } = usePermissions();
+  if (loading) {
+    return (
+      <PageBody>
+        <Skeleton className="h-9 w-56" />
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-64 w-full" />
+      </PageBody>
+    );
+  }
+  if (!canOpen("/monitoramento")) {
+    return (
+      <PageBody>
+        <ForbiddenState
+          title="Você não tem acesso ao Monitoramento"
+          hint="Este painel é de supervisores, administradores e proprietários. Se precisar dele, peça a um administrador da organização."
+        />
+      </PageBody>
+    );
+  }
+  return <MonitoramentoBoard />;
+}
+
+function MonitoramentoBoard() {
   const { accountId, canManageMembers } = useAuth();
+  const [view, setView] = useState<MonitorView>("fases");
   const [conversations, setConversations] = useState<Map<string, MonitorConversation>>(
     () => new Map(),
   );
@@ -680,13 +720,39 @@ export default function MonitoramentoPage() {
   );
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Monitoramento</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Painel operacional ao vivo — conversas abertas por fase de atendimento.
-        </p>
+    <PageBody className="gap-4">
+      <div className="flex animate-ddm-up flex-wrap items-start justify-between gap-3 pt-1">
+        <div className="flex flex-col gap-1.5">
+          <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">
+            Monitoramento
+          </h1>
+          <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+            Operadores, filas e conversas em tempo real.
+          </p>
+        </div>
+        <span
+          role="status"
+          className={
+            isConnected
+              ? "inline-flex h-[22px] items-center gap-1.5 rounded-full bg-success-soft px-2 text-[11.5px] font-semibold text-success"
+              : "inline-flex h-[22px] items-center gap-1.5 rounded-full bg-surface-3 px-2 text-[11.5px] font-semibold text-foreground-2"
+          }
+        >
+          <span
+            aria-hidden
+            className={isConnected ? "size-1.5 rounded-full bg-success" : "size-1.5 rounded-full bg-muted-foreground"}
+          />
+          {isConnected ? "Tempo real" : "Reconectando…"}
+        </span>
       </div>
+
+      <Segmented<MonitorView>
+        ariaLabel="Visão do monitoramento"
+        options={VIEW_OPTIONS}
+        value={view}
+        onChange={setView}
+        size="lg"
+      />
 
       <MonitorFiltersPanel
         agentOptions={agentOptions}
@@ -709,41 +775,9 @@ export default function MonitoramentoPage() {
         />
       )}
 
-      <Tabs defaultValue="fases" className="space-y-5">
-        <TabsList>
-          <TabsTrigger
-            value="fases"
-            className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-          >
-            Fases
-          </TabsTrigger>
-          <TabsTrigger
-            value="agentes"
-            className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-          >
-            Agentes
-          </TabsTrigger>
-          <TabsTrigger
-            value="equipes"
-            className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-          >
-            Equipes
-          </TabsTrigger>
-          <TabsTrigger
-            value="hoje"
-            className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-          >
-            Hoje
-          </TabsTrigger>
-          <TabsTrigger
-            value="sla"
-            className="data-active:bg-muted data-active:text-primary text-muted-foreground"
-          >
-            SLA
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="fases" className="space-y-5">
+      <div key={view} className="animate-ddm-fade">
+        {view === "fases" && (
+        <div className="space-y-4">
           <MonitorKpiRow
             total={filteredConversations.length}
             navegando={grouped.navegando.length}
@@ -763,13 +797,15 @@ export default function MonitoramentoPage() {
               />
             ))}
           </div>
-        </TabsContent>
+        </div>
+        )}
 
-        <TabsContent value="agentes">
+        {view === "agentes" && (
+        <div>
           {membersLoading ? (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-64 animate-pulse rounded-xl border border-border bg-card" />
+                <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
           ) : (
@@ -787,13 +823,15 @@ export default function MonitoramentoPage() {
               ))}
             </div>
           )}
-        </TabsContent>
+        </div>
+        )}
 
-        <TabsContent value="equipes" className="space-y-4">
+        {view === "equipes" && (
+        <div className="space-y-4">
           {teamsLoading || membersLoading || teamMembersLoading ? (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-64 animate-pulse rounded-xl border border-border bg-card" />
+                <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
           ) : teams.length === 0 ? (
@@ -873,21 +911,26 @@ export default function MonitoramentoPage() {
             accountId={accountId}
             onSaved={fetchTeams}
           />
-        </TabsContent>
+        </div>
+        )}
 
-        <TabsContent value="hoje">
+        {view === "hoje" && (
+        <div>
           <DayPanel
             agentNames={Object.fromEntries(
               members.map((m) => [m.user_id, m.full_name || m.email || "Sem nome"])
             )}
             teamNames={Object.fromEntries(teams.map((t) => [t.id, t.name]))}
           />
-        </TabsContent>
+        </div>
+        )}
 
-        <TabsContent value="sla">
+        {view === "sla" && (
+        <div>
           <SlaPanel teamNames={Object.fromEntries(teams.map((t) => [t.id, t.name]))} />
-        </TabsContent>
-      </Tabs>
+        </div>
+        )}
+      </div>
 
       {/* Shared across all three tabs — one dialog instance, opened from
           whichever card's ⋮ menu triggered it. Success is reflected back
@@ -925,6 +968,6 @@ export default function MonitoramentoPage() {
           contactName={timelineModal.contactName}
         />
       )}
-    </div>
+    </PageBody>
   );
 }

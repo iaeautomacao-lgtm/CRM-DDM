@@ -40,7 +40,7 @@ export function AgentColumn({
   const someSelected = ids.some((id) => actions.selectedIds.has(id));
 
   return (
-    <section className="flex min-h-0 flex-col rounded-xl border border-border bg-card">
+    <section className="flex min-h-0 flex-col rounded-[10px] border border-border bg-card">
       <header className="flex items-center gap-3 border-b border-border px-4 py-3">
         <div className="relative shrink-0">
           <Avatar>
