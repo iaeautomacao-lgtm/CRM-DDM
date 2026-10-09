@@ -364,6 +364,10 @@
     {
       "version": "324_conversations_rls_has_perm",
       "kind": "registry"
+    },
+    {
+      "version": "326_teams_templates_channels_rls_has_perm",
+      "kind": "registry"
     }
   ]
 }
