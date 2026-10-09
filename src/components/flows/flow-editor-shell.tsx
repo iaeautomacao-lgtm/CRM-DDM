@@ -108,7 +108,7 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
 
   // Same "read in the useState initializer" rationale as `view` above
   // — this subtree never renders during SSR, so there's no hydration
-  // mismatch to guard against. Defaults to open.
+  // mismatch to guard against. Defaults to open (closed on mobile).
   const [panelOpen, setPanelOpen] = useState<boolean>(() => {
     try {
       const saved = window.localStorage.getItem(VALIDATION_PANEL_STORAGE_KEY);
@@ -116,7 +116,9 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
     } catch {
       // Private browsing / disabled storage — fall through to default.
     }
-    return true;
+    // Sem escolha salva: aberto no desktop, fechado no celular (lá ele
+    // comia boa parte da altura útil da lista).
+    return !window.matchMedia(MOBILE_BREAKPOINT).matches;
   });
 
   // Painel "Testar fluxo" (simulador, PRD 05) — não persiste entre visitas.

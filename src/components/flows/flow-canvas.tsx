@@ -346,6 +346,41 @@ function FlowNodeCard({ data, selected }: NodeProps) {
 }
 
 const NODE_TYPES = { flow: FlowNodeCard };
+
+/** Nome acessível do nó: tipo, título, se é a entrada e os problemas. */
+function nodeAriaLabel(node: BuilderNode, isEntry: boolean, errors: number, warnings: number): string {
+  const parts = [`${NODE_META[node.node_type].label}: ${nodeLabel(node) || node.node_key}`];
+  if (isEntry) parts.push('nó de entrada');
+  if (errors > 0) parts.push(`${errors} erro${errors === 1 ? '' : 's'}`);
+  else if (warnings > 0) parts.push(`${warnings} aviso${warnings === 1 ? '' : 's'}`);
+  return parts.join(', ');
+}
+
+const ARROW_DIRECTION_PT: Record<string, string> = {
+  up: 'para cima',
+  down: 'para baixo',
+  left: 'para a esquerda',
+  right: 'para a direita',
+};
+
+// Textos do xyflow para leitor de tela e controles, em pt-BR (o padrão é inglês).
+const ARIA_LABELS_PT = {
+  'node.a11yDescription.default':
+    'Enter abre a edição do nó. Setas movem o nó selecionado. Delete remove e Esc cancela.',
+  'node.a11yDescription.keyboardDisabled':
+    'Enter abre a edição do nó. Delete remove e Esc cancela.',
+  'node.a11yDescription.ariaLiveMessage': ({ direction, x, y }: { direction: string; x: number; y: number }) =>
+    `Nó movido ${ARROW_DIRECTION_PT[direction] ?? direction}. Nova posição: x ${x}, y ${y}.`,
+  'edge.a11yDescription.default':
+    'Enter ou Espaço seleciona a conexão. Depois, Delete a remove e Esc cancela.',
+  'controls.ariaLabel': 'Controles do diagrama',
+  'controls.zoomIn.ariaLabel': 'Aproximar',
+  'controls.zoomOut.ariaLabel': 'Afastar',
+  'controls.fitView.ariaLabel': 'Enquadrar o fluxo',
+  'controls.interactive.ariaLabel': 'Travar ou destravar a edição',
+  'minimap.ariaLabel': 'Minimapa',
+  'handle.ariaLabel': 'Ponto de conexão',
+};
 // No custom EDGE_TYPES — see the DeletableEdge import comment above.
 // ReactFlow's built-in "default" bezier edge renders `label` out of the
 // box, so the slot labels (Yes / No / row titles) are unaffected.
@@ -450,6 +485,13 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       return {
         id: n.node_key,
         type: 'flow',
+        // Nome acessível em pt-BR (antes o leitor de tela não dizia nada).
+        ariaLabel: nodeAriaLabel(
+          n,
+          n.node_key === entryNodeId,
+          issueCounts.get(n.node_key)?.errors ?? 0,
+          issueCounts.get(n.node_key)?.warnings ?? 0
+        ),
         position: {
           x: fallback?.x ?? n.position_x ?? 0,
           y: fallback?.y ?? n.position_y ?? 0,
@@ -486,6 +528,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
 
   const rfEdges = useMemo(() => {
     const canvasEdges = deriveCanvasEdges(builderNodes);
+    const nodeTitleByKey = new Map(builderNodes.map((n) => [n.node_key, nodeLabel(n) || n.node_key]));
 
     // sourceHandle is now wired up — the FlowNodeCard renders a Handle
     // per slot whose id matches the scheme in edges.ts, so React-Flow
@@ -498,6 +541,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
       target: e.target,
       sourceHandle: e.sourceHandle,
       label: e.label,
+      ariaLabel: `Conexão de ${nodeTitleByKey.get(e.source) ?? e.source}${e.label ? ` (${e.label})` : ''} para ${nodeTitleByKey.get(e.target) ?? e.target}`,
       selected: e.id === selectedEdgeId,
       style:
         e.id === selectedEdgeId
@@ -508,11 +552,52 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
     return rfEdges;
   }, [builderNodes, selectedEdgeId]);
 
+  // Arraste com o mouse em andamento: a posição final é gravada no
+  // onNodeDragStop, não aqui.
+  const pointerDragRef = useRef(false);
+
   const handleNodesChange = useCallback(
     (changes: NodeChange<RfNode<NodeData>>[]) => {
       setRfNodes((nodes) => applyNodeChanges(changes, nodes));
+      // Setas do teclado movem o nó selecionado com dragging=false e sem
+      // disparar onNodeDragStop: sem isto o movimento não entrava no
+      // histórico, não era salvo e o nó voltava na próxima edição.
+      if (isDebugMode || pointerDragRef.current) return;
+      const moved: Record<string, { x: number; y: number }> = {};
+      for (const c of changes) {
+        if (c.type === 'position' && c.dragging === false && c.position) {
+          moved[c.id] = { x: c.position.x, y: c.position.y };
+        }
+      }
+      if (Object.keys(moved).length > 0) moveNodes(moved);
     },
-    []
+    [isDebugMode, moveNodes]
+  );
+
+  const handleNodeDragStart = useCallback(() => {
+    pointerDragRef.current = true;
+  }, []);
+
+  // Teclado no canvas: Enter no nó focado abre o painel de edição (o
+  // xyflow só seleciona) e Enter/Espaço na aresta focada a seleciona para
+  // o Delete apagar (a seleção de aresta é controlada por selectedEdgeId).
+  const handleCanvasKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      const target = event.target as Element;
+      if (event.key === 'Enter' && target.classList.contains('react-flow__node')) {
+        const id = target.getAttribute('data-id');
+        if (id) {
+          setSelectedNodeKey(id);
+          setSelectedEdgeId(null);
+        }
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === ' ') && !isDebugMode) {
+        const id = target.closest('.react-flow__edge')?.getAttribute('data-id');
+        if (id) setSelectedEdgeId(id);
+      }
+    },
+    [isDebugMode]
   );
 
   // Drag-to-position: React-Flow tracks the visual drag internally and
@@ -524,6 +609,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
   // the drag) keeps state updates cheap on long drags.
   const handleNodeDragStop = useCallback<OnNodeDrag<RfNode<NodeData>>>(
     (_event, node, dragged) => {
+      pointerDragRef.current = false;
       if (isDebugMode) return;
       // Seleção múltipla: grava todos os nós arrastados numa edição só
       // (antes só o nó sob o cursor ficava; os outros voltavam).
@@ -694,7 +780,13 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
           fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
           proOptions={{ hideAttribution: true }}
           onNodesChange={handleNodesChange}
+          onNodeDragStart={handleNodeDragStart}
           onNodeDragStop={handleNodeDragStop}
+          onKeyDown={handleCanvasKeyDown}
+          ariaLabelConfig={ARIA_LABELS_PT}
+          // Foco visível no nó e na aresta (o CSS do xyflow zera o outline
+          // e o stroke inline da aresta escondia o destaque).
+          className="[&_.react-flow__node:focus-visible]:outline-none [&_.react-flow__node:focus-visible>div]:ring-2 [&_.react-flow__node:focus-visible>div]:ring-primary [&_.react-flow__node:focus-visible>div]:ring-offset-2 [&_.react-flow__node:focus-visible>div]:ring-offset-background [&_.react-flow__edge:focus-visible_path]:!stroke-primary [&_.react-flow__edge:focus-visible_path]:![stroke-width:2.5]"
           onNodeClick={handleNodeClick}
           onConnect={handleConnect}
           onBeforeDelete={async ({ nodes, edges }) =>
