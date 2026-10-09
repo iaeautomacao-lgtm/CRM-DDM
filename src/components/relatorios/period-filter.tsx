@@ -4,12 +4,13 @@
 // rascunho do filtro — cada tela continua aplicando com o próprio botão.
 
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { Segmented } from "@/components/ddm/segmented";
 import {
   PERIOD_PRESETS,
   matchPreset,
   normalizeRange,
   presetRange,
+  type PeriodPreset,
   type PeriodRange,
 } from "@/lib/relatorios/period";
 
@@ -25,24 +26,14 @@ export function PeriodFilter({
     <div className="space-y-1">
       <span className="block text-xs font-medium text-muted-foreground">Período</span>
       <div className="flex flex-wrap items-center gap-2">
-        <div role="group" aria-label="Atalhos de período" className="flex flex-wrap gap-1">
-          {PERIOD_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              aria-pressed={active === p.id}
-              onClick={() => onChange(presetRange(p.id))}
-              className={cn(
-                "h-9 rounded-md border px-2.5 text-xs font-medium transition-colors",
-                active === p.id
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
-              )}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+        {/* Período personalizado (De/Até fora dos atalhos) não marca nenhum atalho. */}
+        <Segmented<PeriodPreset | "custom">
+          ariaLabel="Atalhos de período"
+          size="lg"
+          value={active ?? "custom"}
+          onChange={(v) => v !== "custom" && onChange(presetRange(v))}
+          options={PERIOD_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+        />
         <div className="flex items-center gap-1.5">
           <Input
             type="date"

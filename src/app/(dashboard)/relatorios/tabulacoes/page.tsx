@@ -178,9 +178,9 @@ export default function TabulacoesPage() {
   }
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold">Tabulações</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Tabulações</h1>
         <p className="text-muted-foreground text-sm">
           Conversas encerradas no período, por tabulação e origem.
         </p>

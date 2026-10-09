@@ -186,15 +186,15 @@ export default function AgentesPage() {
   }
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Agentes</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Agentes</h1>
         <p className="text-sm text-muted-foreground">
           Histórico de sessões (login/logout) por agente.
         </p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div className="rounded-[10px] border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
           <PeriodFilter
             value={{ dateFrom: draft.dateFrom, dateTo: draft.dateTo }}
@@ -225,7 +225,7 @@ export default function AgentesPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (
