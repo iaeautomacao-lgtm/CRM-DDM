@@ -21,6 +21,7 @@ const real = vi.hoisted(() => {
     engineSendInteractiveList: boom("meta engineSendInteractiveList"),
     engineSendCtaUrl: boom("meta engineSendCtaUrl"),
     engineMetaSendTemplate: boom("meta engineMetaSendTemplate"),
+    engineSendFlow: boom("meta engineSendFlow"),
     engineWahaSendText: boom("waha engineWahaSendText"),
     engineWahaSendMedia: boom("waha engineWahaSendMedia"),
     engineWahaSendButtons: boom("waha engineWahaSendButtons"),
@@ -49,6 +50,7 @@ vi.mock("@/lib/flows/meta-send", () => ({
   engineSendInteractiveList: real.engineSendInteractiveList,
   engineSendCtaUrl: real.engineSendCtaUrl,
   engineMetaSendTemplate: real.engineMetaSendTemplate,
+  engineSendFlow: real.engineSendFlow,
 }));
 vi.mock("@/lib/flows/waha-send", () => ({
   engineWahaSendText: real.engineWahaSendText,

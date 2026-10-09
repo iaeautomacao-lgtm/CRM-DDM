@@ -49,6 +49,9 @@ export function createSimulationEffects(ctx: SimContext): FlowEffects {
     engineMetaSendTemplate: async (args) =>
       captureOutbound(ctx, { kind: "template", text: `[template ${args.templateName} · ${args.languageCode}]`, source: "flow" }),
 
+    engineSendFlow: async (args) =>
+      captureOutbound(ctx, { kind: "text", text: `[formulário (Flow ${args.flowId}) · botão "${args.ctaText}"] ${args.bodyText}`, source: "flow" }),
+
     // WAHA
     engineWahaSendText: async (args) => captureOutbound(ctx, { kind: "text", text: args.text, source: "flow" }),
     engineWahaSendMedia: async (args) =>

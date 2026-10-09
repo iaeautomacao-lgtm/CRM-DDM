@@ -15,6 +15,7 @@ import {
 import { supabaseAdmin } from "./admin-client";
 import {
   engineMetaSendTemplate,
+  engineSendFlow,
   engineSendInteractiveButtons,
   engineSendInteractiveList,
   engineSendMedia,
@@ -56,6 +57,7 @@ export interface FlowEffects {
   engineSendInteractiveButtons: typeof engineSendInteractiveButtons;
   engineSendInteractiveList: typeof engineSendInteractiveList;
   engineMetaSendTemplate: typeof engineMetaSendTemplate;
+  engineSendFlow: typeof engineSendFlow;
   // Envio — WAHA
   engineWahaSendText: typeof engineWahaSendText;
   engineWahaSendMedia: typeof engineWahaSendMedia;
@@ -94,6 +96,7 @@ export const liveFlowEffects: FlowEffects = {
   engineSendInteractiveButtons: (args) => engineSendInteractiveButtons(args),
   engineSendInteractiveList: (args) => engineSendInteractiveList(args),
   engineMetaSendTemplate: (args) => engineMetaSendTemplate(args),
+  engineSendFlow: (args) => engineSendFlow(args),
   engineWahaSendText: (args) => engineWahaSendText(args),
   engineWahaSendMedia: (args) => engineWahaSendMedia(args),
   engineWahaSendButtons: (args) => engineWahaSendButtons(args),
