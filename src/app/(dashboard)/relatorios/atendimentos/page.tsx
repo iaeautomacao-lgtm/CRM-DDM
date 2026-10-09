@@ -336,6 +336,19 @@ function renderPieLabel({ percent }: { percent?: number }) {
 // structure (table + 2 pies + 1 bar chart); only the name column
 // header and the row set differ between the two callers.
 // ============================================================
+// Tooltip dos gráficos nos tokens do tema (o padrão do Recharts é branco, ilegível no escuro).
+const TOOLTIP_STYLE = {
+  background: "var(--popover)",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  color: "var(--popover-foreground)",
+} as const;
+
+/** Alternativa textual do gráfico de pizza (leitores de tela). */
+function describePie(items: { name: string; value: number }[], total: number): string {
+  return items.map((d) => `${d.name} ${pct(d.value, total)}%`).join("; ");
+}
+
 function AttendanceSection({
   title,
   nameHeader,
@@ -390,6 +403,7 @@ function AttendanceSection({
             <p className="mb-2 text-sm font-medium text-foreground">
               % de atendimentos por {nameHeader.toLowerCase()} (TOP 5)
             </p>
+            <div role="img" aria-label={`Gráfico de pizza, % de atendimentos por ${nameHeader.toLowerCase()}: ${describePie(pieAtendimentos, totalAtendimentos)}`}>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
                 <Pie
@@ -403,16 +417,18 @@ function AttendanceSection({
                     <Cell key={entry.name} fill={entry.color} />
                   ))}
                 </Pie>
-                <RechartsTooltip />
+                <RechartsTooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "var(--popover-foreground)" }} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
+            </div>
           </div>
 
           <div className="rounded-[10px] border border-border bg-card p-4">
             <p className="mb-2 text-sm font-medium text-foreground">
               % de mensagens por {nameHeader.toLowerCase()} (TOP 5)
             </p>
+            <div role="img" aria-label={`Gráfico de pizza, % de mensagens por ${nameHeader.toLowerCase()}: ${describePie(pieMensagens, totalMensagens)}`}>
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
                 <Pie
@@ -426,27 +442,30 @@ function AttendanceSection({
                     <Cell key={entry.name} fill={entry.color} />
                   ))}
                 </Pie>
-                <RechartsTooltip />
+                <RechartsTooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "var(--popover-foreground)" }} />
                 <Legend />
               </PieChart>
             </ResponsiveContainer>
+            </div>
           </div>
 
           <div className="rounded-[10px] border border-border bg-card p-4 lg:col-span-2">
             <p className="mb-2 text-sm font-medium text-foreground">
               Atendimentos e Mensagens % por {nameHeader.toLowerCase()}
             </p>
+            <div role="img" aria-label={`Gráfico de barras, atendimentos e mensagens em porcentagem por ${nameHeader.toLowerCase()}: ${barData.map((d) => `${d.name}, ${d["Atendimentos %"]}% dos atendimentos e ${d["Mensagens %"]}% das mensagens`).join("; ")}`}>
             <ResponsiveContainer width="100%" height={Math.max(200, barData.length * 44 + 40)}>
               <BarChart data={barData} layout="vertical" margin={{ left: 16, right: 16 }}>
-                <CartesianGrid horizontal={false} stroke="#e1e0d9" />
-                <XAxis type="number" domain={[0, 100]} unit="%" stroke="#898781" />
-                <YAxis type="category" dataKey="name" width={140} stroke="#898781" />
-                <RechartsTooltip />
+                <CartesianGrid horizontal={false} stroke="var(--border)" />
+                <XAxis type="number" domain={[0, 100]} unit="%" stroke="var(--muted-foreground)" />
+                <YAxis type="category" dataKey="name" width={140} stroke="var(--muted-foreground)" />
+                <RechartsTooltip contentStyle={TOOLTIP_STYLE} itemStyle={{ color: "var(--popover-foreground)" }} />
                 <Legend />
                 <Bar dataKey="Atendimentos %" fill={CATEGORICAL[0]} radius={[0, 4, 4, 0]} />
                 <Bar dataKey="Mensagens %" fill={CATEGORICAL[1]} radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            </div>
           </div>
         </div>
       )}
@@ -619,9 +638,10 @@ export default function AtendimentosPage() {
         </div>
       </div>
 
-      {loadError && !loading && (
+      {loadError && !loading ? (
         <ErrorState title="Não foi possível carregar o relatório" onRetry={() => runSearch()} />
-      )}
+      ) : (
+        <>
 
       {/* Card "Classificação" (Ativos/Receptivos) oculto: não há dado real
           de origem da conversa para preenchê-lo. */}
@@ -655,6 +675,8 @@ export default function AtendimentosPage() {
 
       <AttendanceSection title="Por Equipe" nameHeader="Equipe" rows={teamRows} loading={loading} />
       <AttendanceSection title="Por Agente" nameHeader="Agente" rows={filteredAgentRows} loading={loading} />
+        </>
+      )}
     </div>
   );
 }
