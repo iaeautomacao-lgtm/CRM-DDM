@@ -289,7 +289,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                             <>
                               {renderExtraButton(
                                 "supervisor",
-                                "Conversar com supervisor",
+                                "Mensagens internas",
                                 Headphones,
                                 () => setInternalChatOpen(true),
                                 unreadInternalMessages,
@@ -304,7 +304,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                           )}
 
                           {item.href === "/inbox" &&
-                            (accountRole === "admin" || accountRole === "owner") &&
+                            (accountRole === "admin" || accountRole === "owner" || accountRole === "supervisor") &&
                             renderExtraButton(
                               "internal",
                               "Mensagens internas",
