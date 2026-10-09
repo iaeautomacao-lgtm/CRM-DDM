@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/automations/admin-client'
+import { internalErrorResponse } from '@/lib/api/internal-error'
 
 export async function POST(
   _request: Request,
@@ -18,8 +19,8 @@ export async function POST(
     .eq('id', id)
     .eq('account_id', accountId)
     .maybeSingle()
-  if (origErr) return NextResponse.json({ error: origErr.message }, { status: 500 })
-  if (!original) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (origErr) return internalErrorResponse('automations/duplicate', origErr)
+  if (!original) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
 
   const { data: copy, error: copyErr } = await admin
     .from('automations')
@@ -66,7 +67,7 @@ export async function POST(
       position: row.position,
     }))
     const { error: insErr } = await admin.from('automation_steps').insert(rows)
-    if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 })
+    if (insErr) return internalErrorResponse('automations/duplicate', insErr)
   }
 
   return NextResponse.json({ automation: copy }, { status: 201 })

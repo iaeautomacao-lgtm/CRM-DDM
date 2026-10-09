@@ -64,7 +64,7 @@ vi.mock('@/lib/auth/route-guard', () => ({
   guardPermission: async (permission: Permission) =>
     can({ role: state.role as AccountRole }, permission)
       ? { ok: true, ctx: { accountId: state.accountId, userId: 'USER-1', role: state.role } }
-      : { ok: false, response: Response.json({ error: 'Forbidden' }, { status: 403 }) },
+      : { ok: false, response: Response.json({ error: 'Acesso negado' }, { status: 403 }) },
 }))
 
 const { GET, POST } = await import('./route')

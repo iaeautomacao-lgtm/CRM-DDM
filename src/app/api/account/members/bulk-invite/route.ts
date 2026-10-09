@@ -145,7 +145,7 @@ export async function POST(request: Request) {
     if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
       return NextResponse.json(
         {
-          error: `'password' must be a string with at least ${MIN_PASSWORD_LENGTH} characters`,
+          error: `'password' deve ser um texto com pelo menos ${MIN_PASSWORD_LENGTH} caracteres`,
         },
         { status: 400 },
       );
@@ -154,14 +154,14 @@ export async function POST(request: Request) {
     const rawMembers = body?.members;
     if (!Array.isArray(rawMembers) || rawMembers.length === 0) {
       return NextResponse.json(
-        { error: "'members' must be a non-empty array" },
+        { error: "'members' deve ser uma lista não vazia" },
         { status: 400 },
       );
     }
     if (rawMembers.length > MAX_MEMBERS_PER_IMPORT) {
       return NextResponse.json(
         {
-          error: `A single import is capped at ${MAX_MEMBERS_PER_IMPORT} members`,
+          error: `Uma importação aceita no máximo ${MAX_MEMBERS_PER_IMPORT} membros`,
         },
         { status: 400 },
       );

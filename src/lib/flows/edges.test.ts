@@ -619,3 +619,38 @@ describe("replaceNodeReferences / countIncomingReferences", () => {
     expect(countIncomingReferences(nodes, "start")).toBe(0);
   });
 });
+
+describe("ai_agent — saída de falha (agente indisponível)", () => {
+  const ai = (config: Record<string, unknown>): BuilderNode => ({ node_key: "ia", node_type: "ai_agent", config });
+  const end = (key: string): BuilderNode => ({ node_key: key, node_type: "end", config: {} });
+
+  it("desenha a seta de falha só com agente vinculado, inclusive em takeover", () => {
+    const withAgent = deriveCanvasEdges(
+      nodes(ai({ agent_id: "ag", mode: "takeover", failure_next_node_key: "f" }), end("f")),
+    );
+    expect(withAgent).toEqual([
+      expect.objectContaining({ source: "ia", target: "f", sourceHandle: "failure", label: "Se indisponível" }),
+    ]);
+    const legacy = deriveCanvasEdges(nodes(ai({ mode: "once", failure_next_node_key: "f" }), end("f")));
+    expect(legacy.some((e) => e.sourceHandle === "failure")).toBe(false);
+  });
+
+  it("oferece o slot de falha e conecta/desconecta pelo canvas", () => {
+    const n = ai({ agent_id: "ag", mode: "once" });
+    expect(outgoingSlots(n).map((s) => s.id)).toEqual(["next", "failure"]);
+    expect(outgoingSlots(ai({ agent_id: "ag", mode: "takeover" })).map((s) => s.id)).toEqual(["failure"]);
+    expect(applyEdgeConnection(n, "failure", "f")).toEqual({ failure_next_node_key: "f" });
+    expect(applyEdgeConnection(n, "failure", "")).toEqual({ failure_next_node_key: "" });
+  });
+
+  it("apagar ou renomear o destino atualiza a saída de falha", () => {
+    const list = nodes(ai({ agent_id: "ag", mode: "once", next_node_key: "f", failure_next_node_key: "f" }), end("f"));
+    // Conta nós de origem (não setas): o ai_agent aponta duas vezes, conta 1.
+    expect(countIncomingReferences(list, "f")).toBe(1);
+    expect(countIncomingReferences(nodes(ai({ agent_id: "ag", failure_next_node_key: "f" }), end("f")), "f")).toBe(1);
+    const unlinked = unlinkNodeReferences(list, "f").find((x) => x.node_key === "ia")!;
+    expect(unlinked.config).toMatchObject({ next_node_key: "", failure_next_node_key: "" });
+    const renamed = replaceNodeReferences(list, "f", "g").find((x) => x.node_key === "ia")!;
+    expect(renamed.config).toMatchObject({ next_node_key: "g", failure_next_node_key: "g" });
+  });
+});

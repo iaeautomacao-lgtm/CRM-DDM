@@ -188,6 +188,10 @@ function slotColor(nodeType: NodeType, slotId: string, fallback: string) {
   if (nodeType === 'condition' && slotId === 'false') {
     return nodeColors('handoff').solid;
   }
+  // Saída de falha do agente de IA: mesmo tom de alerta do ramo falso.
+  if (nodeType === 'ai_agent' && slotId === 'failure') {
+    return nodeColors('handoff').solid;
+  }
   return fallback;
 }
 

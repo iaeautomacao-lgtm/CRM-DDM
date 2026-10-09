@@ -23,6 +23,9 @@ import {
   Pencil,
   Play,
   XCircle,
+  Clock,
+  UserPlus,
+  Wrench,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -39,6 +42,7 @@ import { cn } from "@/lib/utils";
 import type { FlowDebugEvent } from "@/hooks/use-flow-debug";
 import { NODE_META, NodeIconChip, nodeColors, type NodeType } from "./shared";
 import { JsonHighlight } from "./json-highlight";
+import { describeEvent, EVENT_LABEL } from "@/lib/flows/run-log";
 
 const EVENT_ICON: Record<string, typeof Circle> = {
   started: Play,
@@ -51,6 +55,13 @@ const EVENT_ICON: Record<string, typeof Circle> = {
   run_completed: CheckCircle2,
   node_error: XCircle,
   run_error: XCircle,
+  error: XCircle,
+  ai_agent_failed: XCircle,
+  handoff: UserPlus,
+  tool_called: Wrench,
+  tool_result: Wrench,
+  fallback_fired: Clock,
+  timeout: Clock,
 };
 
 function getEventIcon(ev: FlowDebugEvent): typeof Circle {
@@ -58,7 +69,7 @@ function getEventIcon(ev: FlowDebugEvent): typeof Circle {
 }
 
 function getEventColor(ev: FlowDebugEvent): string {
-  if (ev.event_type === "node_error" || ev.event_type === "run_error") {
+  if (["node_error", "run_error", "error", "ai_agent_failed"].includes(ev.event_type) || (ev.event_type === "tool_result" && ev.status === "error")) {
     return "text-danger";
   }
   if (
@@ -68,8 +79,9 @@ function getEventColor(ev: FlowDebugEvent): string {
   ) {
     return "text-success";
   }
-  if (ev.event_type === "message_sent") return "text-blue-400";
-  if (ev.event_type === "reply_received") return "text-sky-300";
+  if (ev.event_type === "message_sent") return "text-primary-text";
+  if (ev.event_type === "reply_received") return "text-foreground-2";
+  if (ev.event_type === "handoff" || ev.event_type === "fallback_fired") return "text-warning";
   return "text-muted-foreground";
 }
 
@@ -145,13 +157,13 @@ export function NodeDebugEventsSheet({
                 const cls = getEventColor(ev);
                 return (
                   <div
-                    key={ix}
+                    key={`${ev.created_at}-${ev.event_type}-${ix}`}
                     className="border-border rounded-md border p-2.5"
                   >
                     <div className="flex items-center gap-2 text-xs">
                       <Icon className={cn("h-3.5 w-3.5 shrink-0", cls)} />
-                      <span className={cn("font-mono text-[11px]", cls)}>
-                        {ev.event_type}
+                      <span className={cn("text-[11px] font-medium", cls)} title={ev.event_type}>
+                        {EVENT_LABEL[ev.event_type] ?? ev.event_type}
                       </span>
                       {typeof ev.duration_ms === "number" && (
                         <span className="text-muted-foreground text-[10px]">
@@ -162,11 +174,14 @@ export function NodeDebugEventsSheet({
                         {format(new Date(ev.created_at), "HH:mm:ss")}
                       </span>
                     </div>
-                    {ev.error_message && (
-                      <p className="mt-1 text-[11px] text-danger">
-                        {ev.error_message}
-                      </p>
-                    )}
+                    <p
+                      className={cn(
+                        "mt-1 text-[11px]",
+                        ev.error_message ? "text-danger" : "text-foreground-2",
+                      )}
+                    >
+                      {describeEvent(ev)}
+                    </p>
                     {ev.payload && (
                       <div className="mt-1.5">
                         <EventPayloadPreview value={ev.payload} />

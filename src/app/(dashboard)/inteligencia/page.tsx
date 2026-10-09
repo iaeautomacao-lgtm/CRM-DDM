@@ -49,8 +49,9 @@ function fmtWhen(iso: string): string {
 
 async function readError(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { error?: string };
-    if (body.error === "Rate limit exceeded") return "Muitas perguntas seguidas. Aguarde um minuto e tente de novo.";
+    const body = (await res.json()) as { error?: string; code?: string };
+    // Compara pelo code estável da API, não pelo texto (que pode ser traduzido).
+    if (body.code === "rate_limited") return "Muitas perguntas seguidas. Aguarde um minuto e tente de novo.";
     return body.error ?? "Não foi possível enviar a pergunta.";
   } catch {
     return "Não foi possível enviar a pergunta.";

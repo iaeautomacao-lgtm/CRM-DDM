@@ -37,7 +37,7 @@ export async function POST(
   const status = body?.status
   if (!status || !['draft', 'active', 'archived'].includes(status)) {
     return NextResponse.json(
-      { error: "status must be one of 'draft' | 'active' | 'archived'" },
+      { error: "status deve ser 'draft', 'active' ou 'archived'" },
       { status: 400 },
     )
   }
@@ -61,7 +61,7 @@ export async function POST(
         .eq('flow_id', id),
     ])
     if (!flow) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
     }
     activatedNodes = nodes ?? []
     const { data: aiConfig } = await admin
@@ -93,7 +93,7 @@ export async function POST(
     if (blockers.length > 0) {
       return NextResponse.json(
         {
-          error: 'Cannot activate flow — fix the issues below first.',
+          error: 'Não é possível ativar o fluxo — corrija primeiro os problemas abaixo.',
           issues,
         },
         { status: 422 },

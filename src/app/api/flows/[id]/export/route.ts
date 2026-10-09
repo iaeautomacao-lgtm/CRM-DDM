@@ -39,7 +39,7 @@ export async function GET(
       .order('created_at', { ascending: true }),
   ])
   if (!flow) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
   }
 
   const payload = {
