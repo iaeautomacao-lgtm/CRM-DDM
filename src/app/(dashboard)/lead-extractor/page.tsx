@@ -2,9 +2,10 @@
 
 import { apiFetch } from "@/lib/api-fetch";
 
-import { Globe, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { PageBody } from "@/components/ddm/page-toolbar";
 
 export default function LeadExtractorPage() {
   const [iframeKey, setIframeKey] = useState(0);
@@ -26,45 +27,29 @@ export default function LeadExtractorPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col space-y-4 p-4 lg:p-6 overflow-hidden">
-      {/* Premium Header */}
-      <div className="flex flex-col justify-between gap-4 border-b border-border/40 pb-4 sm:flex-row sm:items-center">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Globe className="h-5 w-5" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              Extrator de Leads
-            </h1>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
+    <PageBody className="h-[calc(100vh-8rem)] min-h-[480px] pb-0 md:pb-0">
+      <div className="flex flex-wrap items-end gap-3 pt-1">
+        <div className="flex min-w-[240px] flex-1 flex-col gap-1.5">
+          <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Extrator de leads</h2>
+          <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
             Extraia contatos diretamente da web e envie para o seu CRM utilizando o fluxo do n8n.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRefresh}
-            className="gap-2 text-xs"
-          >
-            <RefreshCw className="h-3 w-3" />
-            Recarregar Extrator
-          </Button>
-        </div>
+        <Button variant="outline" onClick={handleRefresh}>
+          <RefreshCw className="size-3.5" />
+          Recarregar extrator
+        </Button>
       </div>
 
-      {/* Glassmorphic Iframe Container */}
-      <div className="relative flex-1 w-full overflow-hidden rounded-xl border border-border/50 bg-card/30 backdrop-blur-sm shadow-xl">
+      <div className="relative min-h-0 w-full flex-1 animate-ddm-fade overflow-hidden rounded-[10px] border border-border bg-card">
         <iframe
           key={iframeKey}
           src={leadExtractorUrl}
-          className="absolute inset-0 h-full w-full border-0 rounded-xl bg-background"
+          className="absolute inset-0 h-full w-full border-0 bg-background"
           allow="clipboard-write; camera; microphone"
           title="Extrator de Leads Lovable"
         />
       </div>
-    </div>
+    </PageBody>
   );
 }
