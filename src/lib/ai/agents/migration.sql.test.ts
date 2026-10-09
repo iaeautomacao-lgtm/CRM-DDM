@@ -5,6 +5,9 @@ import { convertGlobalResponder } from "./convert";
 import { AGENT_CONFIG_SPEC, validateAgentConfig } from "./schema";
 
 const migration = readFileSync("supabase/migrations/177_ai_agent_profiles.sql", "utf8").replace(/NOTIFY pgrst[^;]*;/g, "");
+// A 215 (RAG vetorial) troca o descritor (knowledge.vector opcional); o resto da 215 exige a extensão vector.
+const m215 = readFileSync("supabase/migrations/215_knowledge_vector.sql", "utf8");
+const descriptor215 = m215.slice(m215.indexOf("-- >>> descritor 215"), m215.indexOf("-- <<< descritor 215"));
 const A = "00000000-0000-0000-0000-00000000000a";
 const B = "00000000-0000-0000-0000-00000000000b";
 const AGENT = "00000000-0000-0000-0000-000000000001";
@@ -38,6 +41,7 @@ describe("177 — perfis, versões e vínculos account-scoped", () => {
       CREATE TABLE wacrm.accounts(id uuid PRIMARY KEY); INSERT INTO wacrm.accounts VALUES ('${A}'),('${B}');`);
     await db.exec(migration);
     await db.exec(migration);
+    await db.exec(descriptor215);
     await db.exec(`INSERT INTO wacrm.ai_agents(id,account_id,name) VALUES ('${AGENT}','${A}','global'),('${OTHER}','${B}','global');
       INSERT INTO wacrm.ai_rules(id,account_id,name) VALUES ('${RULE}','${A}','regra'),('${RULE_B}','${B}','regra');
       INSERT INTO wacrm.ai_rule_versions(id,account_id,rule_id,version,content) VALUES ('${RV}','${A}','${RULE}',1,'r'),('${RV_B}','${B}','${RULE_B}',1,'b');`);

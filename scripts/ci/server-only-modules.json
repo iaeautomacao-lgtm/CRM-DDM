@@ -32,7 +32,8 @@
     "src/lib/webhooks-out/endpoints.ts",
     "src/lib/webhooks-out/deliver.ts",
     "src/lib/ai/knowledge/extract.ts",
-    "src/lib/ai/knowledge/files.ts"
+    "src/lib/ai/knowledge/files.ts",
+    "src/lib/ai/knowledge/vector-store.ts"
   ],
   "clientOnlyDirs": [
     "src/components",

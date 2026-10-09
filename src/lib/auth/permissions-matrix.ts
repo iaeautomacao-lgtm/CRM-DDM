@@ -210,6 +210,7 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("settings/agents/knowledge", "POST", "admin", "ai.agents.edit"),
   pg("settings/agents/knowledge/[fileId]", "DELETE", "admin", "ai.agents.edit"),
   pg("settings/agents/[id]/simulate", "POST", "supervisor", "flows.simulate"),
+  pg("settings/agents/knowledge/[fileId]/reindex", "POST", "admin", "ai.agents.edit"),
   pg("settings/tools", "GET", "supervisor", "ai.tools.view"),
   pg("settings/tools", "POST", "admin", "ai.tools.edit"),
   pg("settings/tools/[id]", "PATCH", "admin", "ai.tools.edit"),

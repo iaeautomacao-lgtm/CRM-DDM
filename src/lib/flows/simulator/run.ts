@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { VectorRetriever } from "@/lib/ai/knowledge/knowledge-context";
 import { safeFetch } from "@/lib/security/ssrf-guard";
 import { dispatchInboundToFlows } from "../engine";
 import { runWithFlowEffects } from "../effects";
@@ -41,6 +42,8 @@ export interface SimulationSeed {
    * nunca fixa versão — não há run real) e as versões de regra dessa versão. Só marcadores de
    * credencial ({{cred.X}}) — nenhum valor.
    */
+  /** Busca vetorial real do conhecimento (só leitura, chave da conta). Ausente = modo atual. */
+  knowledgeRetriever?: VectorRetriever | null;
   agents?: {
     agents: Array<Record<string, unknown>>;
     versions: Array<Record<string, unknown>>;
@@ -320,6 +323,7 @@ export async function simulateTurn(
     toolMocks: req.toolMocks ?? {},
     realReadOnlyTools: req.realReadOnlyTools ?? [],
     httpMocks: req.httpMocks ?? {},
+    knowledgeRetriever: seed.knowledgeRetriever ?? null,
     realFetch:
       deps.realFetch ??
       // Leitura real das tools liberadas também passa pelo guard anti-SSRF (#98).

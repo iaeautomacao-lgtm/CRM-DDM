@@ -6,6 +6,7 @@ import { checkRateLimit } from '@/lib/rate-limit'
 import { applyRealReadPolicy, parseSimulateRequest, SIM_MAX_BODY_CHARS } from '@/lib/flows/simulator/parse'
 import { simulateTurn } from '@/lib/flows/simulator/run'
 import { loadSimulationAccountData } from '@/lib/flows/simulator/seed'
+import { createVectorRetriever } from '@/lib/ai/knowledge/vector-store'
 import { SIM_RATE_LIMIT } from '@/lib/flows/simulator/types'
 
 /**
@@ -138,6 +139,8 @@ export async function POST(
       flowName: (flow.name as string | null) ?? 'Fluxo',
       ...accountData,
       agents,
+      // Busca por trechos do conhecimento (só leitura, chave da conta), como na produção.
+      knowledgeRetriever: createVectorRetriever({ db: admin }),
     })
     return NextResponse.json({ ...result, remaining: limit.remaining, ...(realReadDenied ? { real_read_denied: true } : {}) })
   } catch (err) {

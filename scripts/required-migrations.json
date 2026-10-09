@@ -145,6 +145,15 @@
       "kind": "registry"
     },
     {
+      "version": "215_knowledge_vector",
+      "kind": "registry"
+    },
+    {
+      "version": "215b_knowledge_chunks_embedding_idx",
+      "kind": "index",
+      "index": "idx_knowledge_chunks_embedding_hnsw"
+    },
+    {
       "version": "220_export_history_policy",
       "kind": "registry"
     },

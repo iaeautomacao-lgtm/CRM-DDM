@@ -117,6 +117,9 @@ export interface KnowledgeBaseFileItem {
   size_bytes?: number | null;
   /** Caracteres do texto extraído (conta para o teto da base do agente). */
   char_count?: number | null;
+  /** Índice da busca por trechos (RAG vetorial): indexed, no_key, failed, too_large, pending; null = sem índice. */
+  embedding_status?: string | null;
+  embedding_chunks?: number | null;
 }
 
 export interface SecretItem {
@@ -142,6 +145,12 @@ export interface AgentFormData {
       credential: string;
       top_k: number;
       timeout_ms: number;
+    };
+    /** Busca por trechos (RAG vetorial, TASK1-D). Desligada = modo atual (teto de caracteres). */
+    vector: {
+      enabled: boolean;
+      top_k: number;
+      min_similarity: number;
     };
   };
   tools: Array<{

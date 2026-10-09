@@ -130,6 +130,11 @@ export const AGENT_CONFIG_SPEC = { type: "object", properties: {
       max_bytes: positive, max_context_chars: positive, max_redirects: nonnegative, retries: nonnegative,
       failure_policy: { type: "string", values: ["continue_without_rag"], optional: true },
     } },
+    // Busca por trechos (RAG vetorial, migration 215): opcional; ausente/desligado = modo atual (teto de caracteres).
+    vector: { type: "object", optional: true, properties: {
+      enabled: { type: "boolean" }, top_k: { type: "number", integer: true, min: 1, max: 20, optional: true },
+      min_similarity: { type: "number", min: 0, max: 1, optional: true },
+    } },
   } },
   tools: { type: "array", items: { type: "object", properties: {
     tool_id: { ...uuid, optional: true }, enabled: { type: "boolean" },
