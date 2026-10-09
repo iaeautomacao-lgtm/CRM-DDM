@@ -288,6 +288,10 @@
     {
       "version": "301_quick_replies_visibility_usage",
       "kind": "registry"
+    },
+    {
+      "version": "320_billing_reports",
+      "kind": "registry"
     }
   ]
 }
