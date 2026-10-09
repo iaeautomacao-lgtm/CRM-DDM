@@ -85,6 +85,8 @@ export interface Team {
   name: string;
   session_timeout_minutes: number | null;
   overflow_team_id: string | null;
+  /** Cor da equipe na lista do Inbox (migration 280, paleta fechada em src/lib/teams/palette.ts). Null = sem cor. */
+  color?: string | null;
   created_at: string;
   updated_at: string;
 }

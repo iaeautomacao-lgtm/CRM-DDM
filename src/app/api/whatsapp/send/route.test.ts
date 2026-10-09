@@ -18,6 +18,9 @@ const messageInserts: Array<Record<string, unknown>> = []
 let existingConversation: Record<string, unknown> | null = null
 let contactRow: Record<string, unknown> | null = null
 let messageInsertError: { message: string } | null = null
+// Linhas que o operador enxerga (RLS, cliente de sessão) e a linha completa lida pelo service role.
+let sessionLines: Array<{ id: string }> = [{ id: 'cfg-1' }]
+let adminLine: Record<string, unknown> = {}
 
 const CONTACT = {
   id: 'contact-1',
@@ -45,7 +48,7 @@ function makeSupabaseMock() {
         case 'whatsapp_config':
           // Migration 200b: o cliente de sessão só enxerga os ids (RLS); os
           // segredos vêm do service role (mock abaixo).
-          return { data: [{ id: 'cfg-1' }], error: null }
+          return { data: sessionLines, error: null }
         case 'message_templates':
           return { data: null, error: null }
         default:
@@ -138,6 +141,7 @@ vi.mock('@/lib/flows/admin-client', () => ({
                     account_id: 'acct-1',
                     phone_number_id: 'PNID-1',
                     access_token: 'enc-token',
+                    ...adminLine,
                   },
                 ],
                 error: null,
@@ -163,6 +167,9 @@ vi.mock('@/lib/whatsapp/meta-api', () => ({
   sendTextMessage: vi.fn(),
   sendMediaMessage: vi.fn(),
 }))
+
+const { sendWahaTextMessage } = vi.hoisted(() => ({ sendWahaTextMessage: vi.fn(async () => ({ messageId: 'waha-1' })) }))
+vi.mock('@/lib/whatsapp/waha-api', () => ({ sendWahaTextMessage, sendWahaMediaMessage: vi.fn() }))
 
 import { POST } from './route'
 
@@ -191,6 +198,8 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
     existingConversation = null
     contactRow = CONTACT
     messageInsertError = null
+    sessionLines = [{ id: 'cfg-1' }]
+    adminLine = {}
     supabaseMock = makeSupabaseMock()
     sendTemplateMessage.mockClear()
   })
@@ -285,5 +294,84 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
       })
     )
     expect(res.status).toBe(400)
+  })
+})
+
+// PRD 23 (item 7): o operador escolhe a linha ao iniciar a conversa (channel_id).
+describe('POST /api/whatsapp/send — linha escolhida (channel_id)', () => {
+  const LINE = '11111111-2222-4333-8444-555555555555'
+  const postText = (overrides: Record<string, unknown>) =>
+    POST(
+      new Request('http://localhost/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_type: 'text', content_text: 'oi', ...overrides }),
+      })
+    )
+
+  beforeEach(() => {
+    conversationInserts.length = 0
+    messageInserts.length = 0
+    existingConversation = null
+    contactRow = CONTACT
+    messageInsertError = null
+    sessionLines = [{ id: LINE }]
+    adminLine = { id: LINE, provider: 'meta', habilitado: true, waha_session: null }
+    supabaseMock = makeSupabaseMock()
+    sendTemplateMessage.mockClear()
+  })
+
+  it('linha Meta escolhida: a conversa nasce vinculada a ela (config_id) e o envio segue o ramo Meta', async () => {
+    const res = await postContactTemplate({ channel_id: LINE })
+    expect(res.status).toBe(200)
+    expect(conversationInserts[0]).toMatchObject({ account_id: 'acct-1', contact_id: 'contact-1', config_id: LINE })
+    expect(conversationInserts[0]).not.toHaveProperty('waha_session')
+    expect(sendTemplateMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('linha WAHA escolhida: a conversa usa a SESSÃO da linha (nunca config_id) — Meta e WAHA não se misturam', async () => {
+    adminLine = { id: LINE, provider: 'waha', habilitado: true, waha_session: 'sessao-7' }
+    await postText({ contact_id: 'contact-1', channel_id: LINE })
+    expect(conversationInserts[0]).toMatchObject({ waha_session: 'sessao-7' })
+    expect(conversationInserts[0]).not.toHaveProperty('config_id')
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
+    expect(sendWahaTextMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('linha que o operador NÃO enxerga (outra equipe/conta) = 404 e nada é criado nem enviado', async () => {
+    sessionLines = []
+    const res = await postContactTemplate({ channel_id: LINE })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toMatchObject({ code: 'line_not_found' })
+    expect(conversationInserts).toHaveLength(0)
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
+  })
+
+  it('linha desabilitada = 409; channel_id que não é uuid = 400', async () => {
+    adminLine = { id: LINE, provider: 'meta', habilitado: false }
+    const disabled = await postContactTemplate({ channel_id: LINE })
+    expect(disabled.status).toBe(409)
+    expect(await disabled.json()).toMatchObject({ code: 'line_disabled' })
+    const bad = await postContactTemplate({ channel_id: "'; drop table" })
+    expect(bad.status).toBe(400)
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
+  })
+
+  it('conversa existente de OUTRA linha = 409 line_mismatch (não troca a linha de uma conversa); a mesma linha passa', async () => {
+    existingConversation = { id: 'conv-x', account_id: 'acct-1', contact_id: 'contact-1', contact: CONTACT, config_id: 'outra-linha' }
+    const mismatch = await postContactTemplate({ contact_id: undefined, conversation_id: 'conv-x', channel_id: LINE })
+    expect(mismatch.status).toBe(409)
+    expect(await mismatch.json()).toMatchObject({ code: 'line_mismatch' })
+    expect(sendTemplateMessage).not.toHaveBeenCalled()
+
+    existingConversation = { id: 'conv-x', account_id: 'acct-1', contact_id: 'contact-1', contact: CONTACT, config_id: LINE }
+    const same = await postContactTemplate({ contact_id: undefined, conversation_id: 'conv-x', channel_id: LINE })
+    expect(same.status).toBe(200)
+  })
+
+  it('sem channel_id o comportamento de antes não muda', async () => {
+    const res = await postContactTemplate()
+    expect(res.status).toBe(200)
+    expect(conversationInserts[0]).not.toHaveProperty('config_id')
   })
 })

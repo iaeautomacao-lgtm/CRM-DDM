@@ -19,6 +19,8 @@ export interface InboxFilters {
   equipe: string | null;
   cliente: string | null;
   campanha: string | null;
+  /** Tabulação (tags.id gravada em conversations.outcome_tag_id ao encerrar). Aceita ?tabulacao= ou ?outcome_tag_id=. */
+  tabulacao: string | null;
   status: InboxStatus;
   q: string;
 }
@@ -30,6 +32,7 @@ export const DEFAULT_INBOX_FILTERS: InboxFilters = {
   equipe: null,
   cliente: null,
   campanha: null,
+  tabulacao: null,
   status: "active",
   q: "",
 };
@@ -53,6 +56,7 @@ export function parseInboxFilters(params: URLSearchParams): InboxFilters {
     equipe: uuidOrNull(params.get("equipe")),
     cliente: uuidOrNull(params.get("cliente")),
     campanha: uuidOrNull(params.get("campanha")),
+    tabulacao: uuidOrNull(params.get("tabulacao") ?? params.get("outcome_tag_id")),
     status: status && STATUSES.includes(status) ? status : "active",
     q: (params.get("q") ?? "").slice(0, 80),
   };
@@ -68,6 +72,7 @@ export function writeInboxFilters(base: URLSearchParams, f: InboxFilters): URLSe
     ["equipe", f.equipe],
     ["cliente", f.cliente],
     ["campanha", f.campanha],
+    ["tabulacao", f.tabulacao],
     ["status", f.status === "active" ? null : f.status],
     ["q", f.q.trim() || null],
   ];
@@ -114,6 +119,7 @@ export function conversationMatchesFilters(
   if (f.equipe && c.team_id !== f.equipe) return false;
   if (f.cliente && c.client_id !== f.cliente) return false;
   if (f.campanha && c.origin_campaign_id !== f.campanha) return false;
+  if (f.tabulacao && c.outcome_tag_id !== f.tabulacao) return false;
   switch (f.status) {
     case "active":
       return c.status === "open" || c.status === "pending";
