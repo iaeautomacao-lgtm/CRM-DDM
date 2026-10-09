@@ -10,15 +10,9 @@ import { isPasswordResetSuccess } from "@/lib/auth/recovery-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { UsersRound } from "lucide-react";
-import { OmniDdmLogo } from "@/components/ui/omniddm-logo";
+import { Loader2, UsersRound } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { AUTH_INPUT_CLASS, AUTH_SUBMIT_CLASS, AuthNotice, AuthShell } from "@/components/auth/auth-shell";
 import {
   logAuthFx,
   summarizeSession,
@@ -55,6 +49,7 @@ function LoginPageInner() {
       : null
   );
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -94,104 +89,89 @@ function LoginPageInner() {
   };
 
   return (
-    <div className="bg-background flex min-h-screen items-center justify-center px-4">
-      <Card className="border-border bg-card w-full max-w-md">
-        <CardHeader className="items-center text-center">
-          <div className="mb-3 flex h-12 min-w-[148px] items-center justify-center">
-            {inviteToken ? (
-              <UsersRound className="text-primary h-6 w-6" aria-hidden="true" />
-            ) : (
-              <OmniDdmLogo className="w-[132px]" priority />
-            )}
-          </div>
-          <CardTitle className="text-foreground text-xl">
-            {inviteToken ? "Entrar para aceitar" : "Bem-vindo de volta"}
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            {inviteToken
-              ? "Faça login e te levaremos ao convite."
-              : "Entre na sua conta"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="flex flex-col gap-4">
-            {passwordReset && !error && (
-              <div
-                role="status"
-                className="rounded-lg border border-emerald-600/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-300"
-              >
-                Senha redefinida com sucesso. Entre com a nova senha.
-              </div>
-            )}
-            {error && (
-              <div
-                id="login-error"
-                role="alert"
-                className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-destructive"
-              >
-                {error}
-              </div>
-            )}
+    <AuthShell
+      icon={
+        inviteToken ? (
+          <span className="flex size-10 items-center justify-center rounded-full bg-primary-soft text-primary-text">
+            <UsersRound className="size-5" aria-hidden="true" />
+          </span>
+        ) : undefined
+      }
+      title={inviteToken ? "Entrar para aceitar" : "Bem-vindo de volta"}
+      description={inviteToken ? "Faça login e te levaremos ao convite." : "Entre na sua conta"}
+      notice={
+        error ? (
+          <AuthNotice tone="bad" id="login-error">
+            {error}
+          </AuthNotice>
+        ) : passwordReset ? (
+          <AuthNotice tone="ok">Senha redefinida com sucesso. Entre com a nova senha.</AuthNotice>
+        ) : undefined
+      }
+      // Sem cadastro público: CRM interno, usuários criados pelo admin.
+      footer="Sem acesso? Peça ao administrador para criar o seu usuário."
+    >
+      <form onSubmit={handleLogin} className="flex flex-col gap-3.5">
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="email" className="text-[13px] font-semibold text-foreground-2">
+            E-mail
+          </Label>
+          <Input
+            id="email"
+            type="email"
+            autoComplete="email"
+            placeholder="seu@exemplo.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "login-error" : undefined}
+            className={AUTH_INPUT_CLASS}
+          />
+        </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="email" className="font-medium text-foreground">
-                E-mail
-              </Label>
-              <Input
-                id="email"
-                type="email"
-                autoComplete="email"
-                placeholder="seu@exemplo.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? "login-error" : undefined}
-                className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
-              />
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="password" className="font-medium text-foreground">
-                Senha
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                placeholder="Digite sua senha"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                aria-invalid={error ? true : undefined}
-                aria-describedby={error ? "login-error" : undefined}
-                className="border-border bg-muted text-foreground placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-primary/20"
-              />
-              <div className="flex justify-end">
-                <Link
-                  href="/forgot-password"
-                  className="text-sm text-primary hover:text-primary/80 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                >
-                  Esqueceu sua senha?
-                </Link>
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              disabled={loading}
-              className="bg-primary text-primary-foreground hover:bg-primary/90 mt-2 h-10 w-full disabled:opacity-50"
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password" className="text-[13px] font-semibold text-foreground-2">
+              Senha
+            </Label>
+            <Link
+              href="/forgot-password"
+              className="rounded-sm text-[13px] font-medium text-primary-text hover:underline focus-visible:outline-2 focus-visible:outline-ring"
             >
-              {loading ? "Entrando..." : "Entrar"}
-            </Button>
-          </form>
+              Esqueceu sua senha?
+            </Link>
+          </div>
+          <div className="relative flex items-center">
+            <Input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
+              placeholder="Digite sua senha"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              aria-invalid={error ? true : undefined}
+              aria-describedby={error ? "login-error" : undefined}
+              className={cn(AUTH_INPUT_CLASS, "pr-20")}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-pressed={showPassword}
+              aria-controls="password"
+              className="absolute right-1.5 h-[30px] rounded-[6px] px-2 text-xs font-semibold text-foreground-2 hover:bg-surface-hover hover:text-foreground"
+            >
+              {showPassword ? "Ocultar" : "Mostrar"}
+            </button>
+          </div>
+        </div>
 
-          {/* Sem cadastro público: CRM interno, usuários criados pelo admin. */}
-          <p className="text-muted-foreground mt-6 text-center text-sm">
-            Sem acesso? Peça ao administrador para criar o seu usuário.
-          </p>
-        </CardContent>
-      </Card>
-    </div>
+        <Button type="submit" disabled={loading} className={cn(AUTH_SUBMIT_CLASS, "mt-1")}>
+          {loading && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+          {loading ? "Entrando…" : "Entrar"}
+        </Button>
+      </form>
+    </AuthShell>
   );
 }
