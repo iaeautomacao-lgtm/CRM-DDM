@@ -3,6 +3,7 @@
 import { usePermission } from "@/hooks/use-permission";
 import { CustomFieldsSettings } from "@/components/settings/custom-fields-settings";
 import { TagManager } from "@/components/settings/tag-manager";
+import { PageBody } from "@/components/ddm/page-toolbar";
 import { TabulacoesManager } from "@/components/tabulacoes/tabulacoes-manager";
 
 // /tabulacoes — standalone route, moved out of /settings?tab=fields
@@ -18,10 +19,10 @@ export default function TabulacoesPage() {
   const canEditSettings = usePermission("tags.manage");
 
   return (
-    <div className="max-w-3xl space-y-8 p-4 lg:p-6">
+    <PageBody className="gap-8">
       <TabulacoesManager />
       <TagManager />
       {canEditSettings ? <CustomFieldsSettings /> : null}
-    </div>
+    </PageBody>
   );
 }
