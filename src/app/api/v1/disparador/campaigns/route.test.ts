@@ -134,6 +134,7 @@ vi.mock('@/lib/whatsapp/waha-api', () => ({ assertWahaUrlIsSafe: async () => {} 
 vi.mock('@/lib/disparador/processQueue', () => ({ EXTERNAL_WAHA_TEXT_MARKER: '__EXTERNAL_WAHA_TEXT__' }))
 
 const { POST } = await import('./route')
+const { __resetRateLimitForTests } = await import('@/lib/rate-limit')
 
 function post(body: unknown, headers: Record<string, string> = {}, raw?: string): Request {
   return new Request('http://localhost/api/v1/disparador/campaigns', {
@@ -155,6 +156,7 @@ const base = (over: Record<string, unknown> = {}) => ({
 describe('POST /api/v1/disparador/campaigns', () => {
   beforeEach(() => {
     resetDb()
+    __resetRateLimitForTests()
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 
@@ -544,6 +546,49 @@ describe('POST /api/v1/disparador/campaigns', () => {
       expect(data).toMatchObject({ enqueued: 1, invalid: 1 })
       expect(data.invalid_sample[0].reason).toBe('missing_variable')
       expect(tables.disp_message_queue.some((q) => String(q.template_variables[0]).includes('{{'))).toBe(false)
+    })
+  })
+
+  describe('template Meta (A8)', () => {
+    it('contato sem valor para algum {{n}} do corpo vira inválido (não vai à Meta)', async () => {
+      tables.message_templates = [
+        { id: 'T1', name: 'promo', language: 'pt_BR', waba_id: 'W1', status: 'APPROVED', account_id: 'ACC', body_text: 'Oi {{1}}, vence {{2}}' },
+      ]
+      const cs = [
+        { phone: '5511910000001', variables: ['Ana', '10/10'] },
+        { phone: '5511910000002', variables: ['Bia'] },
+        { phone: '5511910000003', variables: ['Caio', ''] },
+      ]
+      const r = await POST(post(base({ contacts: cs })))
+      expect(r.status).toBe(201)
+      expect((await r.json()).data).toMatchObject({ enqueued: 1, invalid: 2 })
+    })
+
+    it('template com cabeçalho de mídia ou botão de URL dinâmica é recusado (400)', async () => {
+      tables.message_templates = [
+        { id: 'T1', name: 'promo', language: 'pt_BR', waba_id: 'W1', status: 'APPROVED', account_id: 'ACC', body_text: 'Oi', header_type: 'IMAGE' },
+      ]
+      const r = await POST(post(base()))
+      expect(r.status).toBe(400)
+      expect((await r.json()).error.message).toMatch(/cabeçalho de imagem/)
+      expect(tables.campaigns).toHaveLength(0)
+    })
+  })
+
+  describe('limite por chave (A9, D5)', () => {
+    it('7ª criação no minuto devolve 429 com Retry-After; repetição idempotente não gasta orçamento', async () => {
+      for (let i = 0; i < 6; i++) expect((await POST(post(base()))).status).toBe(201)
+      const r = await POST(post(base()))
+      expect(r.status).toBe(429)
+      expect(Number(r.headers.get('Retry-After'))).toBeGreaterThanOrEqual(1)
+      expect(tables.campaigns).toHaveLength(6)
+    })
+
+    it('20 mil contatos entram em 20 blocos de 1.000 (antes: 40 de 500)', async () => {
+      const r = await POST(post(base({ contacts: contacts(20_000) })))
+      expect(r.status).toBe(201)
+      expect(queueInsertCalls).toBe(20)
+      expect(tables.disp_message_queue).toHaveLength(20_000)
     })
   })
 

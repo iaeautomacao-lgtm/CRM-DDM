@@ -7,6 +7,7 @@ import {
   conflict,
   payloadTooLarge,
   ApiError,
+  rateLimited,
   toApiErrorResponse,
   type ApiCallLogContext,
 } from "@/lib/api/v1/respond";
@@ -17,6 +18,10 @@ import { EXTERNAL_WAHA_TEXT_MARKER } from "@/lib/disparador/processQueue";
 import { chatMediaReference } from "@/lib/storage/chat-media";
 import { randomUUID } from "crypto";
 import { loadBlacklistKeySet } from "@/lib/disparador/blacklist-keys";
+import { rollbackApiCampaign } from "@/lib/disparador/api-v1-cleanup";
+import { insertInBlocks } from "@/lib/disparador/queue-insert";
+import { countBodyVariables, templateComponentProblem, TEMPLATE_VALIDATION_COLUMNS, type LocalTemplateRow } from "@/lib/disparador/template-validation";
+import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import {
   INVALID_SAMPLE_LIMIT,
   MAX_BODY_BYTES,
@@ -127,28 +132,6 @@ type CreationResult = {
 };
 
 type Db = ReturnType<typeof supabaseAdmin>;
-
-/** Desfaz uma criação interrompida: apaga a fila, encerra a campanha e libera a chave. */
-async function rollbackCampaign(db: Db, campaignId: string, accountId: string): Promise<void> {
-  const steps: Array<[string, PromiseLike<{ error: { message: string } | null }>]> = [
-    ["fila", db.from("disp_message_queue").delete().eq("campaign_id", campaignId).eq("account_id", accountId)],
-    ["métricas", db.from("campaign_metrics").delete().eq("campaign_id", campaignId)],
-    // Deltas pendentes (migration 183): sem isto a consolidação recriaria a linha de métricas.
-    ["deltas de métricas", db.from("campaign_metric_deltas").delete().eq("campaign_id", campaignId)],
-    [
-      "campanha",
-      db
-        .from("campaigns")
-        .update({ status: "encerrada", idempotency_key: null, idempotency_response: null })
-        .eq("id", campaignId)
-        .eq("account_id", accountId),
-    ],
-  ];
-  for (const [label, step] of steps) {
-    const { error } = await step;
-    if (error) console.error(`[v1/disparador] rollback (${label}) falhou para ${campaignId}:`, error.message);
-  }
-}
 
 function creationFailure(campaignId: string): ApiError {
   return new ApiError(
@@ -335,6 +318,9 @@ export async function POST(request: Request) {
       const replay = await replayExisting(db, ctx.accountId, idem.key, idem.hash, logCtx);
       if (replay) return replay;
     }
+    // D5: 6 campanhas/min por chave (repetição idempotente já voltou acima e não gasta o orçamento).
+    const limit = await checkRateLimit(`api-v1-campaigns:${ctx.keyId}`, RATE_LIMITS.apiV1CampaignCreate);
+    if (!limit.success) throw rateLimited(limit, { accountId: ctx.accountId, keyId: ctx.keyId });
 
     // Resolver canal por UUID, waha_session estável ou número Meta.
     let channelId: string | null = null;
@@ -488,6 +474,7 @@ export async function POST(request: Request) {
     // Validar template aprovado — só se aplica a Meta; WAHA não tem
     // conceito de template, o texto vem direto de body.message.
     let templateLanguage = body.template_language ?? "pt_BR";
+    let metaBodyVariables = 0;
 
     if (provider === "meta") {
       // O canal define a WABA. A API pública segue a mesma regra do wizard:
@@ -506,7 +493,7 @@ export async function POST(request: Request) {
 
       let tplQuery = db
         .from("message_templates")
-        .select("id, name, language, waba_id, status")
+        .select(`id, ${TEMPLATE_VALIDATION_COLUMNS}`)
         .eq("name", body.template_name!)
         .eq("account_id", ctx.accountId)
         .eq("waba_id", channelWabaId)
@@ -520,6 +507,11 @@ export async function POST(request: Request) {
           `Template '${body.template_name}' não encontrado ou não aprovado na WABA do canal selecionado`
         );
       }
+      // A8: mesmas regras do wizard. O disparador só preenche o corpo; cabeçalho com mídia/variável, botão de URL dinâmica
+      // ou copiar código fariam a Meta recusar todos os envios (132000/132012).
+      const problem = templateComponentProblem(tpl as unknown as LocalTemplateRow);
+      if (problem) throw badRequest(problem);
+      metaBodyVariables = countBodyVariables((tpl as { body_text?: string | null }).body_text);
       templateLanguage = body.template_language ?? tpl.language ?? "pt_BR";
     }
 
@@ -535,6 +527,8 @@ export async function POST(request: Request) {
     const normalized = normalizeApiContacts(body.contacts, {
       blacklist: blacklistSet,
       wahaMessage: provider === "waha" ? body.message ?? "" : null,
+      // Meta: cada {{n}} do corpo precisa de valor (vazio/ausente = contato inválido, como na WAHA).
+      metaBodyVariables: provider === "meta" ? metaBodyVariables : 0,
     });
     const { contacts: validContacts, duplicates, skipped, invalid, invalidSample } = normalized;
     if (validContacts.length === 0 && invalid > 0) {
@@ -689,14 +683,8 @@ export async function POST(request: Request) {
         };
       });
 
-      // Inserir fila em chunks de 500
-      const chunkSize = 500;
-      for (let k = 0; k < queueRows.length; k += chunkSize) {
-        const { error: insertError } = await db
-          .from("disp_message_queue")
-          .insert(queueRows.slice(k, k + chunkSize));
-        if (insertError) throw insertError;
-      }
+      // Blocos de 1.000 com até 3 em voo (antes: 40 INSERTs de 500 em série para 20k contatos).
+      await insertInBlocks(queueRows, (block) => db.from("disp_message_queue").insert(block));
 
       // Métricas iniciais (antes de ativar: se falhar, nada saiu).
       const { error: metricsError } = await db
@@ -716,7 +704,7 @@ export async function POST(request: Request) {
       if (activateError) throw activateError;
     } catch (err) {
       console.error("[v1/disparador] falha ao enfileirar; desfazendo campanha", campaignId, err);
-      await rollbackCampaign(db, campaignId, ctx.accountId);
+      await rollbackApiCampaign(db, campaignId, ctx.accountId);
       await cleanupUploadedMedia();
       throw creationFailure(campaignId);
     }
