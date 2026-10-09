@@ -8,7 +8,6 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -26,7 +25,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { SettingsPanelHead } from '@/components/settings/settings-panel-head';
+import { PageToolbar } from '@/components/ddm/page-toolbar';
+import { CellMain, DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
+import { EmptyState, ErrorState, Skeleton } from '@/components/ddm/states';
 import { KNOWN_AI_EXIT_TAGS } from '@/lib/ai/exit-tags';
 import {
   getAvailableExitTags,
@@ -271,15 +272,9 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
   }
 
   return (
-    <section className="border-border space-y-4 border-t pt-4">
-      <SettingsPanelHead
-        title="Tabulação automática pela IA"
-        description={
-          SHOW_AUTO_CLOSE
-            ? 'Associe tags de saída emitidas pelo fluxo da IA às tabulações de desfecho da conta. Opcionalmente, configure o encerramento automático da conversa ao emitir cada tag.'
-            : 'Associe tags de saída emitidas pelo fluxo da IA às tabulações de desfecho da conta para classificar conversas automaticamente.'
-        }
-        action={
+    <section className="space-y-3.5 border-t border-border pt-6">
+      <PageToolbar
+        actions={
           canEditSettings ? (
             <Button
               onClick={openAddDialog}
@@ -287,258 +282,211 @@ export function AiOutcomeMapSection({ tabulacoes }: AiOutcomeMapSectionProps) {
                 loading || availableTags.length === 0 || tabulacoes.length === 0
               }
             >
-              <Plus className="size-4" />
+              <Plus className="size-4" aria-hidden="true" />
               Mapear tag da IA
             </Button>
           ) : null
         }
-      />
+      >
+        <p className="m-0 max-w-3xl text-[12.5px] text-muted-foreground">
+          {SHOW_AUTO_CLOSE
+            ? 'Associe tags de saída emitidas pelo fluxo da IA às tabulações de desfecho da conta. Opcionalmente, configure o encerramento automático da conversa ao emitir cada tag.'
+            : 'Associe tags de saída emitidas pelo fluxo da IA às tabulações de desfecho da conta para classificar conversas automaticamente.'}
+        </p>
+      </PageToolbar>
 
       {!canEditSettings && (
-        <p className="text-muted-foreground text-xs">
+        <p className="m-0 text-xs text-muted-foreground">
           Visualização somente leitura. Apenas administradores e proprietários
           da conta podem gerenciar as regras de tabulação automática.
           Supervisores e demais usuários têm acesso apenas para consulta.
         </p>
       )}
 
-      {loading ? (
-        <div className="text-muted-foreground flex items-center justify-center py-10">
-          <Loader2 className="text-primary mr-2 size-6 animate-spin" />
-          <span>Carregando mapeamentos da IA…</span>
-        </div>
-      ) : error ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 py-8 text-center">
-            <AlertTriangle className="text-destructive size-6" />
-            <p className="text-foreground text-sm">{error}</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={fetchMappings}
-              className="mt-2"
-            >
-              Tentar novamente
-            </Button>
-          </CardContent>
-        </Card>
-      ) : mappings.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-            <Bot className="text-muted-foreground size-6" />
-            <p className="text-foreground text-sm font-medium">
-              Nenhuma tag da IA mapeada ainda
-            </p>
-            <p className="text-muted-foreground max-w-md text-xs">
-              Mapeie as tags de saída dos fluxos (como #ACORDOFORMALIZADO ou
-              #RECUSA_CONFIRMADA) para que as conversas recebam automaticamente
-              a tabulação sugerida correspondente.
-            </p>
-            {canEditSettings && tabulacoes.length > 0 && (
-              <Button size="sm" onClick={openAddDialog} className="mt-2">
-                <Plus className="size-4" />
-                Mapear primeira tag
-              </Button>
-            )}
-            {tabulacoes.length === 0 && (
-              <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-                Cadastre ao menos uma tabulação de desfecho acima para começar a
-                mapear.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm" role="table">
-                <thead className="border-border bg-muted/40 text-muted-foreground border-b text-xs uppercase">
-                  <tr>
-                    <th scope="col" className="px-4 py-3 font-semibold">
-                      Tag de saída da IA
-                    </th>
-                    <th scope="col" className="px-4 py-3 font-semibold">
-                      Tabulação sugerida
-                    </th>
-                    {SHOW_AUTO_CLOSE && (
-                      <th
-                        scope="col"
-                        className="px-4 py-3 text-center font-semibold"
-                      >
-                        Encerrar automaticamente
-                      </th>
-                    )}
-                    {canEditSettings && (
-                      <th
-                        scope="col"
-                        className="px-4 py-3 text-right font-semibold"
-                      >
-                        <span className="sr-only">Ações</span>
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-border divide-y">
-                  {mappings.map((row) => {
-                    const matchedTag = tabulacaoById.get(row.outcome_tag_id);
-                    const tagDesc = getExitTagDescription(row.exit_tag);
+      <TableCard
+        title="Tabulação automática pela IA"
+        hint="Tag de saída emitida pelo fluxo da IA → tabulação de desfecho sugerida."
+      >
+        {loading ? (
+          <div className="flex flex-col gap-2 px-[18px] pb-4" aria-busy="true">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-11 w-full" />
+            ))}
+          </div>
+        ) : error ? (
+          <ErrorState
+            className="m-4 mt-0"
+            title={error}
+            onRetry={() => void fetchMappings()}
+          />
+        ) : mappings.length === 0 ? (
+          <EmptyState
+            className="m-4 mt-0"
+            icon={Bot}
+            title="Nenhuma tag da IA mapeada ainda"
+            hint={
+              tabulacoes.length === 0
+                ? 'Cadastre ao menos uma tabulação de desfecho acima para começar a mapear.'
+                : 'Mapeie as tags de saída dos fluxos (como #ACORDOFORMALIZADO ou #RECUSA_CONFIRMADA) para que as conversas recebam a tabulação sugerida correspondente.'
+            }
+          />
+        ) : (
+          <DenseTable minWidth={560}>
+            <thead>
+              <tr>
+                <Th>Tag de saída da IA</Th>
+                <Th>Tabulação sugerida</Th>
+                {SHOW_AUTO_CLOSE && <Th align="center">Encerrar automaticamente</Th>}
+                {canEditSettings && (
+                  <Th align="right">
+                    <span className="sr-only">Ações</span>
+                  </Th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {mappings.map((row) => {
+                const matchedTag = tabulacaoById.get(row.outcome_tag_id);
+                const tagDesc = getExitTagDescription(row.exit_tag);
 
-                    return (
-                      <tr
-                        key={row.id}
-                        className="hover:bg-muted/20 transition-colors"
-                      >
-                        {/* Tag IA */}
-                        <td className="px-4 py-3 align-middle">
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-foreground font-mono text-xs font-semibold">
-                              {row.exit_tag}
-                            </span>
-                            <span className="text-muted-foreground text-xs">
-                              {tagDesc}
-                            </span>
-                          </div>
-                        </td>
+                return (
+                  <Tr key={row.id}>
+                    {/* Tag IA */}
+                    <Td>
+                      <CellMain
+                        title={<span className="font-mono text-xs">{row.exit_tag}</span>}
+                        sub={tagDesc}
+                      />
+                    </Td>
 
-                        {/* Tabulação */}
-                        <td className="px-4 py-3 align-middle">
-                          {canEditSettings ? (
-                            <div className="w-56 max-w-full">
-                              <Select
-                                value={row.outcome_tag_id}
-                                onValueChange={(val) => {
-                                  if (val) void handleOutcomeChange(row, val);
-                                }}
-                              >
-                                <SelectTrigger
-                                  className="h-8 text-xs"
-                                  aria-label={`Tabulação sugerida para ${row.exit_tag}`}
-                                >
-                                  <SelectValue>
-                                    {(currentVal: string) => {
-                                      const tag = tabulacaoById.get(currentVal);
-                                      if (!tag) {
-                                        return (
-                                          <span className="text-muted-foreground italic">
-                                            Selecione uma tabulação
-                                          </span>
-                                        );
-                                      }
-                                      return (
-                                        <span className="flex items-center gap-1.5 truncate">
-                                          <span
-                                            className="size-2 shrink-0 rounded-full"
-                                            style={{
-                                              backgroundColor: tag.color,
-                                            }}
-                                            aria-hidden="true"
-                                          />
-                                          <span className="truncate">
-                                            {tag.name}
-                                          </span>
-                                        </span>
-                                      );
-                                    }}
-                                  </SelectValue>
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {tabulacoes.map((t) => (
-                                    <SelectItem
-                                      key={t.id}
-                                      value={t.id}
-                                      className="text-xs"
-                                    >
-                                      <span className="flex items-center gap-1.5">
-                                        <span
-                                          className="size-2 shrink-0 rounded-full"
-                                          style={{ backgroundColor: t.color }}
-                                          aria-hidden="true"
-                                        />
-                                        <span>{t.name}</span>
+                    {/* Tabulação */}
+                    <Td>
+                      {canEditSettings ? (
+                        <div className="w-56 max-w-full">
+                          <Select
+                            value={row.outcome_tag_id}
+                            onValueChange={(val) => {
+                              if (val) void handleOutcomeChange(row, val);
+                            }}
+                          >
+                            <SelectTrigger
+                              className="h-8 text-xs"
+                              aria-label={`Tabulação sugerida para ${row.exit_tag}`}
+                            >
+                              <SelectValue>
+                                {(currentVal: string) => {
+                                  const tag = tabulacaoById.get(currentVal);
+                                  if (!tag) {
+                                    return (
+                                      <span className="text-muted-foreground italic">
+                                        Selecione uma tabulação
                                       </span>
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ) : matchedTag ? (
-                            <Badge
-                              className="border-border gap-1.5 border px-2 py-0.5 text-xs font-normal"
-                              style={{
-                                backgroundColor: `${matchedTag.color}15`,
-                                borderColor: `${matchedTag.color}40`,
-                                color: matchedTag.color,
-                              }}
-                            >
-                              <span
-                                className="size-2 shrink-0 rounded-full"
-                                style={{ backgroundColor: matchedTag.color }}
-                                aria-hidden="true"
-                              />
-                              {matchedTag.name}
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground text-xs italic">
-                              Não configurada
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Encerrar automaticamente (Switch) */}
-                        {SHOW_AUTO_CLOSE && (
-                          <td className="px-4 py-3 text-center align-middle">
-                            <div className="flex flex-col items-center justify-center gap-1">
-                              <div className="flex items-center gap-2">
-                                <Switch
-                                  id={`switch-auto-close-${row.id}`}
-                                  checked={row.auto_close}
-                                  onCheckedChange={(checked) =>
-                                    handleAutoCloseSwitchClick(row, checked)
+                                    );
                                   }
-                                  disabled={
-                                    !canEditSettings || togglingAutoClose
-                                  }
-                                  aria-label={`Encerrar conversa automaticamente para ${row.exit_tag}`}
-                                />
-                              </div>
-                              <span
-                                className={`text-[10px] font-medium ${
-                                  row.auto_close
-                                    ? 'text-emerald-700 dark:text-emerald-400'
-                                    : 'text-muted-foreground'
-                                }`}
-                              >
-                                {row.auto_close ? 'Ativo' : 'Inativo'}
-                              </span>
-                            </div>
-                          </td>
-                        )}
+                                  return (
+                                    <span className="flex items-center gap-1.5 truncate">
+                                      <span
+                                        className="size-2 shrink-0 rounded-full"
+                                        style={{ backgroundColor: tag.color }}
+                                        aria-hidden="true"
+                                      />
+                                      <span className="truncate">{tag.name}</span>
+                                    </span>
+                                  );
+                                }}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {tabulacoes.map((t) => (
+                                <SelectItem
+                                  key={t.id}
+                                  value={t.id}
+                                  className="text-xs"
+                                >
+                                  <span className="flex items-center gap-1.5">
+                                    <span
+                                      className="size-2 shrink-0 rounded-full"
+                                      style={{ backgroundColor: t.color }}
+                                      aria-hidden="true"
+                                    />
+                                    <span>{t.name}</span>
+                                  </span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : matchedTag ? (
+                        <Badge
+                          className="border-border gap-1.5 border px-2 py-0.5 text-xs font-normal"
+                          style={{
+                            backgroundColor: `${matchedTag.color}15`,
+                            borderColor: `${matchedTag.color}40`,
+                            color: matchedTag.color,
+                          }}
+                        >
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: matchedTag.color }}
+                            aria-hidden="true"
+                          />
+                          {matchedTag.name}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-xs italic">
+                          Não configurada
+                        </span>
+                      )}
+                    </Td>
 
-                        {/* Ações */}
-                        {canEditSettings && (
-                          <td className="px-4 py-3 text-right align-middle">
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              onClick={() => setDeleteTarget(row)}
-                              title={`Remover mapeamento da tag ${row.exit_tag}`}
-                              aria-label={`Remover mapeamento da tag ${row.exit_tag}`}
-                              className="text-muted-foreground hover:text-destructive"
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                    {/* Encerrar automaticamente (Switch) — oculto por decisão de produto (SHOW_AUTO_CLOSE) */}
+                    {SHOW_AUTO_CLOSE && (
+                      <Td align="center">
+                        <div className="flex flex-col items-center justify-center gap-1">
+                          <Switch
+                            id={`switch-auto-close-${row.id}`}
+                            checked={row.auto_close}
+                            onCheckedChange={(checked) =>
+                              handleAutoCloseSwitchClick(row, checked)
+                            }
+                            disabled={!canEditSettings || togglingAutoClose}
+                            aria-label={`Encerrar conversa automaticamente para ${row.exit_tag}`}
+                          />
+                          <span
+                            className={`text-[10px] font-medium ${
+                              row.auto_close
+                                ? 'text-emerald-700 dark:text-emerald-400'
+                                : 'text-muted-foreground'
+                            }`}
+                          >
+                            {row.auto_close ? 'Ativo' : 'Inativo'}
+                          </span>
+                        </div>
+                      </Td>
+                    )}
+
+                    {/* Ações */}
+                    {canEditSettings && (
+                      <Td align="right">
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={() => setDeleteTarget(row)}
+                          title={`Remover mapeamento da tag ${row.exit_tag}`}
+                          aria-label={`Remover mapeamento da tag ${row.exit_tag}`}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </Td>
+                    )}
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </DenseTable>
+        )}
+      </TableCard>
 
       {/* Modal: Adicionar Mapeamento */}
       <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
