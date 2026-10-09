@@ -132,7 +132,7 @@ export function ContactSidebar({
     if (!contact || savingCpf) return;
     setSavingCpf(true);
     try {
-      const digits = cpfDraft.replace(/D/g, "");
+      const digits = cpfDraft.replace(/\D/g, "");
       if (await patchContact({ cpf: digits || null })) {
         onUpdateContact?.({ ...contact, cpf: digits || null });
         setIsEditingCpf(false);

@@ -214,7 +214,7 @@ function authorColor(senderId: string): string {
 
 /** Iniciais do nome (primeiro + último), como no avatar do protótipo. */
 function initialsOf(name: string): string {
-  const parts = name.trim().split(/s+/).filter(Boolean);
+  const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return "?";
   const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
   return ((parts[0][0] ?? "") + last).toUpperCase();
