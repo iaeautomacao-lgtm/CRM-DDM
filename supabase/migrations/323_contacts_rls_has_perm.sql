@@ -23,7 +23,27 @@
 --              AND cmd = 'SELECT';   -- conferir que a expressão viva é só is_account_member (se tiver mais coisa, NÃO rodar: ver prd-v2/rls-p0.sql)
 -- VERIFICAÇÃO (logado como visualizador, que hoje lê): SELECT count(*) FROM wacrm.contacts;  → igual a antes da migration.
 -- ORDEM: antes ou depois do deploy (o app não depende dela). Idempotente.
--- ROLLBACK: para cada tabela, recriar a policy sem o termo `AND (SELECT wacrm.has_perm('contacts.view'))` (expressões no corpo abaixo).
+-- ROLLBACK:   BEGIN;
+--             DROP POLICY IF EXISTS contacts_select ON wacrm.contacts;
+--             CREATE POLICY contacts_select ON wacrm.contacts FOR SELECT USING (wacrm.is_account_member(account_id));
+--             DROP POLICY IF EXISTS tags_select ON wacrm.tags;
+--             CREATE POLICY tags_select ON wacrm.tags FOR SELECT USING (wacrm.is_account_member(account_id));
+--             DROP POLICY IF EXISTS custom_fields_select ON wacrm.custom_fields;
+--             CREATE POLICY custom_fields_select ON wacrm.custom_fields FOR SELECT USING (wacrm.is_account_member(account_id));
+--             DROP POLICY IF EXISTS contact_notes_select ON wacrm.contact_notes;
+--             CREATE POLICY contact_notes_select ON wacrm.contact_notes FOR SELECT USING (wacrm.is_account_member(account_id));
+--             DROP POLICY IF EXISTS contact_identities_select ON wacrm.contact_identities;
+--             CREATE POLICY contact_identities_select ON wacrm.contact_identities FOR SELECT TO authenticated USING (wacrm.is_account_member(account_id));
+--             DROP POLICY IF EXISTS contact_tags_select ON wacrm.contact_tags;
+--             CREATE POLICY contact_tags_select ON wacrm.contact_tags FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_tags.contact_id AND wacrm.is_account_member(c.account_id)));
+--             DROP POLICY IF EXISTS contact_custom_values_select ON wacrm.contact_custom_values;
+--             CREATE POLICY contact_custom_values_select ON wacrm.contact_custom_values FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_custom_values.contact_id AND wacrm.is_account_member(c.account_id)));
+--             DROP POLICY IF EXISTS contact_phones_select ON wacrm.contact_phones;
+--             CREATE POLICY contact_phones_select ON wacrm.contact_phones FOR SELECT USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_phones.contact_id AND wacrm.is_account_member(c.account_id)));
+--             DROP POLICY IF EXISTS contact_import_variables_select ON wacrm.contact_import_variables;
+--             CREATE POLICY contact_import_variables_select ON wacrm.contact_import_variables FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM wacrm.contacts c WHERE c.id = contact_import_variables.contact_id AND wacrm.is_account_member(c.account_id)));
+--             DELETE FROM wacrm.schema_migrations WHERE version = '323_contacts_rls_has_perm';
+--             COMMIT;
 -- ============================================================
 
 BEGIN;
