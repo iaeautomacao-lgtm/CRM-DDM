@@ -15,11 +15,11 @@ import {
   Plus,
   Loader2,
   SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format, formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Input } from "@/components/ui/input";
 import { CONVERSATION_STATUS_LABELS_PLURAL } from "./status-labels";
 import {
   DropdownMenu,
@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   conversationMatchesFilters,
   parseInboxFilters,
@@ -103,6 +104,8 @@ interface LineOption {
 }
 type NamedOption = { id: string; name: string };
 type ClientOption = { id: string; name: string; color: string };
+type StatusTotals = { open?: number | null; pending?: number | null };
+type QueueTab = "me" | "unassigned" | "all";
 
 function readSectionPref(key: string): boolean {
   if (typeof window === "undefined") return true;
@@ -133,7 +136,7 @@ function useFilterOptions(accountId: string | null) {
           .from("profiles")
           .select("user_id, full_name, email")
           .eq("account_id", accountId)
-          .in("account_role", ["agent", "admin", "owner"])
+          .in("account_role", ["agent", "supervisor", "admin", "owner"])
           .order("full_name"),
         supabase.from("teams").select("id, name").eq("account_id", accountId).order("name"),
         supabase.from("clients").select("id, name, color").eq("account_id", accountId).order("name"),
@@ -195,7 +198,9 @@ export function ConversationList({
   const [loadingMore, setLoadingMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadMoreFailed, setLoadMoreFailed] = useState(false);
-  const [statusTotals, setStatusTotals] = useState<{ open?: number; pending?: number }>({});
+  const [statusTotals, setStatusTotals] = useState<StatusTotals>({});
+  // Totais das abas (null = contagem indisponível: a aba fica sem número).
+  const [tabTotals, setTabTotals] = useState<Record<QueueTab, number | null>>({ me: null, unassigned: null, all: null });
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const options = useFilterOptions(accountId);
@@ -247,25 +252,45 @@ export function ConversationList({
     conversationsRef.current = conversations;
   });
 
-  // Primeira página + contadores das abas. Refaz ao mudar filtro ou
-  // quando o pai pede (reconexão do realtime / aba volta a ficar visível).
+  // Primeira página + contadores. Refaz ao mudar filtro ou quando o pai
+  // pede (reconexão do realtime / aba volta a ficar visível).
+  // As abas Minhas / Fila / Todas usam o MESMO /api/inbox/counts com o
+  // atendente trocado: "todas" (sem atendente) dá Fila (sem atendente) e
+  // Todas (soma); "me" dá Minhas. Só busca a variação que falta.
+  const countKeys = useMemo(() => {
+    const base = writeInboxFilters(new URLSearchParams(), { ...filters, atendente: null }).toString();
+    const mine = writeInboxFilters(new URLSearchParams(), { ...filters, atendente: "me" }).toString();
+    return { base, mine };
+  }, [filters]);
   useEffect(() => {
     let cancelled = false;
+    const fetchCounts = (qs: string) =>
+      apiFetch(`/api/inbox/counts?${qs}`)
+        .then((r) => (r.ok ? r.json() : {}))
+        .catch(() => ({})) as Promise<{ unread?: Record<string, number>; status?: StatusTotals }>;
     (async () => {
       setLoading(true);
       try {
-        const [listRes, countsRes] = await Promise.all([
+        const [listRes, counts, baseCounts, mineCounts] = await Promise.all([
           apiFetch(`/api/inbox/conversations?${filtersKey}`),
-          apiFetch(`/api/inbox/counts?${filtersKey}`),
+          fetchCounts(filtersKey),
+          countKeys.base === filtersKey ? null : fetchCounts(countKeys.base),
+          countKeys.mine === filtersKey ? null : fetchCounts(countKeys.mine),
         ]);
         const list = await listRes.json();
-        const counts = await countsRes.json().catch(() => ({}));
         if (cancelled) return;
         if (!listRes.ok) throw new Error(list.error ?? `HTTP ${listRes.status}`);
         onConversationsLoadedRef.current(list.conversations ?? []);
         setNextCursor(list.next_cursor ?? null);
         setUnread(counts.unread ?? {});
         setStatusTotals(counts.status ?? {});
+        const base = (baseCounts ?? counts).status ?? {};
+        const mine = (mineCounts ?? counts).status ?? {};
+        setTabTotals({
+          me: mine.open ?? null,
+          unassigned: base.pending ?? null,
+          all: base.open != null && base.pending != null ? base.open + base.pending : null,
+        });
         setLoadMoreFailed(false);
       } catch (err) {
         console.error("Failed to fetch conversations:", err);
@@ -276,7 +301,7 @@ export function ConversationList({
     return () => {
       cancelled = true;
     };
-  }, [filtersKey, resyncToken]);
+  }, [filtersKey, resyncToken, countKeys]);
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
@@ -337,20 +362,25 @@ export function ConversationList({
       });
   }, [conversations, filters, selectedLine, user?.id]);
 
+  // Fila operacional por atribuição humana (lib/inbox/queue-section): com
+  // atendente = Em atendimento; sem atendente = Em espera. Como no
+  // protótipo, a espera vem primeiro e ordenada pela MAIOR espera (última
+  // mensagem do cliente mais antiga); o atendimento, pela mais recente.
   const grouped = filters.status === "active";
-  // A fila do operador é determinada por atribuição humana. Isso evita
-  // pending com assigned_agent_id aparecer em "Em espera" e open sem
-  // atendente aparecer como se já estivesse em atendimento.
   const openGroup = useMemo(
     () => visible.filter((c) => inboxQueueSection(c) === "attending"),
     [visible],
   );
   const pendingGroup = useMemo(
-    () => visible.filter((c) => inboxQueueSection(c) === "waiting"),
+    () =>
+      visible
+        .filter((c) => inboxQueueSection(c) === "waiting")
+        .sort((a, b) => waitingSince(a) - waitingSince(b)),
     [visible],
   );
 
   const clientsById = useMemo(() => new Map(options.clients.map((c) => [c.id, c])), [options.clients]);
+  const agentsById = useMemo(() => new Map(options.agents.map((a) => [a.id, a.name])), [options.agents]);
   const linesForTab = useMemo(
     () =>
       options.lines.filter((l) =>
@@ -363,101 +393,201 @@ export function ConversationList({
     [options.lines, filters.canal]
   );
 
-  // Filtros do popover (canal e busca ficam fora, já visíveis na barra).
-  const activeFilterCount =
-    (filters.status !== "active" ? 1 : 0) +
-    [filters.atendente, filters.linha, filters.equipe, filters.cliente, filters.campanha].filter((v) => v !== null)
-      .length;
+  // Aba ativa: Minhas = atendente "me"; Fila = sem atendente; Todas = sem
+  // filtro de atendente. Um atendente específico (filtro do supervisor)
+  // não marca nenhuma aba.
+  const activeTab: QueueTab | null =
+    filters.atendente === "me" ? "me" : filters.atendente === "unassigned" ? "unassigned" : filters.atendente === null ? "all" : null;
+  const tabs: { id: QueueTab; label: string }[] = [
+    { id: "me", label: "Minhas" },
+    { id: "unassigned", label: "Fila" },
+    { id: "all", label: "Todas" },
+  ];
+  const selectTab = (tab: QueueTab) => setFilters({ atendente: tab === "all" ? null : tab });
+
+  // Chips dos filtros ativos (o atendente da aba não conta como filtro).
+  const chips: { key: string; label: string; remove: () => void }[] = [];
+  if (filters.canal) {
+    chips.push({ key: "canal", label: CHANNEL_BADGE[filters.canal]?.label ?? filters.canal, remove: () => setFilters({ canal: null, linha: null }) });
+  }
+  if (filters.status !== "active") {
+    chips.push({ key: "status", label: STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? "Status", remove: () => setFilters({ status: "active" }) });
+  }
+  if (activeTab === null && filters.atendente) {
+    chips.push({ key: "atendente", label: agentsById.get(filters.atendente) ?? "Atendente", remove: () => setFilters({ atendente: null }) });
+  }
+  if (filters.linha) {
+    chips.push({ key: "linha", label: options.lines.find((l) => l.id === filters.linha)?.name ?? "Linha", remove: () => setFilters({ linha: null }) });
+  }
+  if (filters.equipe) {
+    chips.push({ key: "equipe", label: options.teams.find((t) => t.id === filters.equipe)?.name ?? "Equipe", remove: () => setFilters({ equipe: null }) });
+  }
+  if (filters.cliente) {
+    chips.push({ key: "cliente", label: options.clients.find((c) => c.id === filters.cliente)?.name ?? "Cliente", remove: () => setFilters({ cliente: null }) });
+  }
+  if (filters.campanha) {
+    chips.push({ key: "campanha", label: options.campaigns.find((c) => c.id === filters.campanha)?.name ?? "Campanha", remove: () => setFilters({ campanha: null }) });
+  }
+  const activeFilterCount = chips.length;
   const clearFilters = () =>
-    setFilters({ status: "active", atendente: null, linha: null, equipe: null, cliente: null, campanha: null });
+    setFilters({ canal: null, status: "active", atendente: activeTab === null ? null : filters.atendente, linha: null, equipe: null, cliente: null, campanha: null });
+  const clearAll = () => {
+    setSearchDraft("");
+    setFilters({ q: "", canal: null, status: "active", atendente: null, linha: null, equipe: null, cliente: null, campanha: null });
+  };
 
-  const agentLabel = (() => {
-    if (filters.atendente === "me") return "Minhas";
-    if (filters.atendente === "unassigned") return isAgent ? "Fila da equipe" : "Sem atendente";
-    if (filters.atendente) return options.agents.find((a) => a.id === filters.atendente)?.name ?? "Atendente";
-    return "Todos";
-  })();
+  const renderItems = (items: Conversation[]) => (
+    <div className="ddm-stagger flex flex-col">
+      {items.map((conv) => (
+        <ConversationItem
+          key={conv.id}
+          conversation={conv}
+          isActive={conv.id === activeConversationId}
+          onSelect={onSelect}
+          client={conv.client_id ? clientsById.get(conv.client_id) ?? null : null}
+          assigneeName={
+            conv.assigned_agent_id && conv.assigned_agent_id !== user?.id
+              ? agentsById.get(conv.assigned_agent_id) ?? null
+              : null
+          }
+          showStatus={!grouped}
+        />
+      ))}
+    </div>
+  );
 
-  const renderItems = (items: Conversation[]) =>
-    items.map((conv) => (
-      <ConversationItem
-        key={conv.id}
-        conversation={conv}
-        isActive={conv.id === activeConversationId}
-        onSelect={onSelect}
-        client={conv.client_id ? clientsById.get(conv.client_id) ?? null : null}
-      />
-    ));
+  const sections = grouped
+    ? [
+        {
+          key: "pending" as const,
+          label: CONVERSATION_STATUS_LABELS_PLURAL.pending,
+          dot: "bg-warning",
+          items: pendingGroup,
+          total: sectionTotal(pendingGroup.length, filters.q ? null : statusTotals.pending ?? null, Boolean(nextCursor)),
+          expanded: pendingSectionExpanded,
+          empty: "Ninguém aguardando atendimento.",
+          show: activeTab !== "me",
+        },
+        {
+          key: "open" as const,
+          label: CONVERSATION_STATUS_LABELS_PLURAL.open,
+          dot: "bg-success",
+          items: openGroup,
+          total: sectionTotal(openGroup.length, filters.q ? null : statusTotals.open ?? null, Boolean(nextCursor)),
+          expanded: openSectionExpanded,
+          empty: "Nenhuma conversa em atendimento.",
+          show: activeTab !== "unassigned",
+        },
+      ].filter((s) => s.show)
+    : [];
 
   return (
-    // A lista é a superfície de triagem do Inbox: um pouco mais larga no
-    // desktop com largura suficiente para triagem, priorizando a área central
-    // de mensagens como superfície principal do atendimento.
-    <div className="flex h-full w-full flex-col border-r border-border bg-background lg:w-[320px]">
-      <div className="border-b border-border">
-        <div className="flex items-center justify-between px-3 pb-2 pt-3">
-          <div>
-            <p className="text-sm font-semibold text-foreground">Atendimentos</p>
-            <p className="mt-0.5 text-[11px] text-muted-foreground">Priorize e encontre conversas rapidamente</p>
-          </div>
-          {onCreateConversation && canReply && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={onCreateConversation}
-              className="h-8 w-8 shrink-0"
-              aria-label="Nova conversa"
-              title="Nova conversa"
-            >
-              <Plus className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          )}
+    // Lista de triagem do redesenho DDM (protótipo "Inbox Operacional"):
+    // abas da fila, busca + filtros com chips, seções por fila e itens em
+    // três linhas (contato · prévia · cliente/canal/atendente).
+    <section aria-label="Lista de conversas" className="flex h-full w-full flex-col border-r border-border bg-card lg:w-[288px] xl:w-[320px]">
+      <div className="flex flex-col gap-2.5 border-b border-border px-3.5 pb-2.5 pt-3.5">
+        <div className="flex gap-0.5 rounded-lg bg-card-2 p-[3px]" role="tablist" aria-label="Fila">
+          {tabs.map((tab) => {
+            const on = activeTab === tab.id;
+            const count = tabTotals[tab.id];
+            const alert = on && tab.id === "unassigned" && (count ?? 0) > 0;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => selectTab(tab.id)}
+                className={cn(
+                  "flex h-[30px] flex-1 items-center justify-center gap-1.5 rounded-md text-[12.5px] font-semibold",
+                  on
+                    ? "bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,.12),0_0_0_1px_var(--border)]"
+                    : "text-foreground-2 hover:text-foreground",
+                )}
+              >
+                {tab.label}
+                {count !== null && (
+                  <span
+                    className={cn(
+                      "inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-[5px] text-[11px] tabular-nums",
+                      alert ? "bg-warning-soft text-warning" : "bg-surface-3 text-foreground-2",
+                    )}
+                  >
+                    {count > 999 ? "999+" : count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex items-center gap-2 px-3 pb-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input
+        <div className="flex gap-2">
+          <label className="relative flex flex-1 items-center">
+            <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
+            <input
               type="search"
               aria-label="Buscar conversas por nome ou telefone"
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
-              placeholder="Buscar conversas…"
-              className="h-9 border-border/80 bg-muted/45 pl-9 text-sm text-foreground placeholder:text-muted-foreground focus:border-primary/50"
+              placeholder="Buscar nome ou telefone"
+              className="h-[34px] w-full rounded-md border border-border bg-card pl-[34px] pr-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
             />
-          </div>
+          </label>
           <Popover>
             <PopoverTrigger
               render={
-                <Button
+                <button
                   type="button"
-                  variant="outline"
-                  size="sm"
                   className={cn(
-                    "h-9 shrink-0 gap-1.5 border-border/80 px-2.5 text-xs",
-                    activeFilterCount > 0 && "border-primary/40 text-primary",
+                    "flex h-[34px] shrink-0 items-center gap-1.5 rounded-md border bg-card px-2.5 text-[12.5px] font-medium hover:bg-surface-hover",
+                    activeFilterCount > 0 ? "border-primary-soft-2 text-primary-text" : "border-border text-foreground-2",
                   )}
                   aria-label={activeFilterCount > 0 ? `Filtros (${activeFilterCount} ativos)` : "Filtros"}
                 />
               }
             >
-              <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-              <span>Filtros</span>
+              <SlidersHorizontal className="size-4" aria-hidden="true" />
+              Filtros
               {activeFilterCount > 0 && (
-                <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-semibold leading-4 text-primary-foreground" aria-hidden="true">
+                <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10.5px] font-bold text-primary-foreground" aria-hidden="true">
                   {activeFilterCount}
                 </span>
               )}
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 gap-2 p-3">
-              <div className="flex h-8 items-center justify-between">
-                <span className="text-sm font-medium text-foreground">Filtros</span>
+            <PopoverContent align="end" className="w-[280px] gap-3 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-semibold text-foreground">Filtros</span>
                 {activeFilterCount > 0 && (
-                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs" onClick={clearFilters}>
-                    Limpar filtros
-                  </Button>
+                  <button type="button" onClick={clearFilters} className="rounded px-1 py-1 text-xs font-semibold text-primary-text hover:underline">
+                    Limpar
+                  </button>
                 )}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">Canal</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {CHANNEL_TABS.map((tab) => {
+                    const on = filters.canal === tab.value;
+                    const count = unread[tab.value ?? "all"] ?? 0;
+                    return (
+                      <button
+                        key={tab.label}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setFilters({ canal: tab.value, linha: null })}
+                        aria-label={count > 0 ? `${tab.label} (${count} não lidas)` : tab.label}
+                        className={cn(
+                          "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs font-medium",
+                          on ? "border-primary-soft-2 bg-primary-soft text-primary-text" : "border-border bg-card text-foreground-2 hover:bg-surface-hover",
+                        )}
+                      >
+                        {tab.label}
+                        {count > 0 && <span className="tabular-nums opacity-80" aria-hidden="true">{count > 99 ? "99+" : count}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
               <div className="flex flex-col gap-1">
                 <FilterMenu
@@ -468,18 +598,16 @@ export function ConversationList({
                   highlighted={filters.status !== "active"}
                   onChange={(v) => setFilters({ status: (v ?? "active") as InboxStatus })}
                 />
-                <FilterMenu
-                  title="Atendente"
-                  label={agentLabel}
-                  options={[
-                    { id: "me", name: "Minhas" },
-                    { id: "unassigned", name: isAgent ? "Fila da equipe" : "Sem atendente" },
-                    ...(isAgent ? [] : options.agents),
-                  ]}
-                  value={filters.atendente}
-                  onChange={(v) => setFilters({ atendente: v })}
-                  allLabel="Todos"
-                />
+                {!isAgent && options.agents.length > 0 && (
+                  <FilterMenu
+                    title="Atendente"
+                    label={activeTab === null && filters.atendente ? agentsById.get(filters.atendente) ?? "Atendente" : "Pela aba"}
+                    options={options.agents}
+                    value={activeTab === null ? filters.atendente : null}
+                    onChange={(v) => setFilters({ atendente: v })}
+                    allLabel="Pela aba (Minhas / Fila / Todas)"
+                  />
+                )}
                 {linesForTab.length > 0 && (
                   <FilterMenu
                     title="Linha"
@@ -523,46 +651,35 @@ export function ConversationList({
               </div>
             </PopoverContent>
           </Popover>
+          {onCreateConversation && canReply && (
+            <button
+              type="button"
+              onClick={onCreateConversation}
+              className="flex size-[34px] shrink-0 items-center justify-center rounded-md border border-border bg-card text-foreground-2 hover:bg-surface-hover hover:text-foreground"
+              aria-label="Nova conversa"
+              title="Nova conversa"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+            </button>
+          )}
         </div>
 
-        <div
-          className="flex gap-4 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          role="group"
-          aria-label="Filtrar por canal"
-        >
-          {CHANNEL_TABS.map((tab) => {
-            const count = unread[tab.value ?? "all"] ?? 0;
-            const active = filters.canal === tab.value;
-            return (
+        {chips.length > 0 && (
+          <div className="flex animate-ddm-fade flex-wrap gap-1.5">
+            {chips.map((chip) => (
               <button
-                key={tab.label}
+                key={chip.key}
                 type="button"
-                onClick={() => setFilters({ canal: tab.value, linha: null })}
-                aria-pressed={active}
-                aria-label={count > 0 ? `${tab.label} (${count} não lidas)` : tab.label}
-                className={cn(
-                  "flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-0 text-xs font-medium transition-colors",
-                  active
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-                )}
+                onClick={chip.remove}
+                aria-label={`Remover filtro ${chip.label}`}
+                className="inline-flex h-6 items-center gap-1 rounded-full border border-primary-soft-2 bg-primary-soft pl-[9px] pr-1.5 text-xs font-medium text-primary-text"
               >
-                <span>{tab.label}</span>
-                {count > 0 && (
-                  <span
-                    className={cn(
-                      "text-[10px] tabular-nums",
-                      active ? "font-semibold text-primary" : "text-muted-foreground",
-                    )}
-                    aria-hidden="true"
-                  >
-                    {count > 99 ? "99+" : count}
-                  </span>
-                )}
+                <span className="max-w-[160px] truncate">{chip.label}</span>
+                <X className="size-3.5" aria-hidden="true" />
               </button>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* `min-h-0` is load-bearing: a flex child defaults to
@@ -571,45 +688,56 @@ export function ConversationList({
           space (issue #229). */}
       <ScrollArea className="min-h-0 flex-1">
         {loading ? (
-          <div className="flex items-center justify-center py-12" role="status">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+          <div className="flex flex-col" role="status" aria-busy="true">
             <span className="sr-only">Carregando conversas…</span>
+            {Array.from({ length: 7 }).map((_, i) => (
+              <div key={i} className="flex gap-3 border-b border-border-soft px-3.5 py-3" aria-hidden="true">
+                <Skeleton className="size-9 shrink-0 rounded-full" />
+                <div className="flex flex-1 flex-col gap-2 pt-0.5">
+                  <Skeleton className="h-3 w-2/3" />
+                  <Skeleton className="h-2.5 w-full" />
+                  <Skeleton className="h-2.5 w-1/2" />
+                </div>
+              </div>
+            ))}
           </div>
         ) : visible.length === 0 ? (
-          <div className="px-4 py-12 text-center">
-            <p className="text-sm text-muted-foreground">Nenhuma conversa encontrada</p>
+          <div className="flex animate-ddm-fade flex-col items-center gap-1.5 px-6 py-12 text-center">
+            <Search className="size-4 text-muted-foreground" aria-hidden="true" />
+            <p className="text-[13px] font-semibold text-foreground">Nenhuma conversa encontrada</p>
+            <p className="text-[12.5px] text-muted-foreground">Ajuste a busca ou limpe os filtros.</p>
+            {(activeFilterCount > 0 || filters.q || activeTab !== "all") && (
+              <button
+                type="button"
+                onClick={clearAll}
+                className="mt-1.5 h-[30px] rounded-md border border-border bg-card px-3 text-[12.5px] font-medium text-foreground hover:bg-surface-hover"
+              >
+                Limpar filtros
+              </button>
+            )}
           </div>
         ) : grouped ? (
-          <div className="flex flex-col py-1">
-            <SectionHeader
-              label={CONVERSATION_STATUS_LABELS_PLURAL.open}
-              count={sectionTotal(openGroup.length, filters.q ? null : statusTotals.open, Boolean(nextCursor))}
-              expanded={openSectionExpanded}
-              onToggle={() => toggleSection("open")}
-            />
-            {openSectionExpanded &&
-              (openGroup.length === 0 ? (
-                <p className="px-4 pb-3 text-xs text-muted-foreground">Nenhuma conversa em atendimento</p>
-              ) : (
-                <div className="flex flex-col">{renderItems(openGroup)}</div>
-              ))}
-            <div className="mt-2">
-              <SectionHeader
-                label={CONVERSATION_STATUS_LABELS_PLURAL.pending}
-                count={sectionTotal(pendingGroup.length, filters.q ? null : statusTotals.pending, Boolean(nextCursor))}
-                expanded={pendingSectionExpanded}
-                onToggle={() => toggleSection("pending")}
-              />
-              {pendingSectionExpanded &&
-                (pendingGroup.length === 0 ? (
-                  <p className="px-4 pb-3 text-xs text-muted-foreground">Nenhuma conversa em espera</p>
-                ) : (
-                  <div className="flex flex-col">{renderItems(pendingGroup)}</div>
-                ))}
-            </div>
+          <div className="flex flex-col">
+            {sections.map((section) => (
+              <div key={section.key}>
+                <SectionHeader
+                  label={section.label}
+                  dot={section.dot}
+                  count={section.total}
+                  expanded={section.expanded}
+                  onToggle={() => toggleSection(section.key)}
+                />
+                {section.expanded &&
+                  (section.items.length === 0 ? (
+                    <p className="px-4 py-3.5 text-[12.5px] text-muted-foreground">{section.empty}</p>
+                  ) : (
+                    renderItems(section.items)
+                  ))}
+              </div>
+            ))}
           </div>
         ) : (
-          <div className="flex flex-col">{renderItems(visible)}</div>
+          renderItems(visible)
         )}
         {!loading && nextCursor && (
           <div ref={sentinelRef} className="p-3">
@@ -626,8 +754,14 @@ export function ConversationList({
           </div>
         )}
       </ScrollArea>
-    </div>
+    </section>
   );
+}
+
+/** Desde quando o cliente espera (ms): última mensagem dele; sem ela, a da conversa. */
+function waitingSince(c: Conversation): number {
+  const iso = c.last_customer_message_at ?? c.last_message_at;
+  return iso ? Date.parse(iso) : Number.POSITIVE_INFINITY;
 }
 
 /** Menu de filtro com opção "todos" (quando `allLabel` é passado). */
@@ -656,19 +790,19 @@ function FilterMenu({
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={`${title}: ${label}`}
-        className="flex h-8 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-sm hover:bg-muted"
+        className="flex h-8 w-full items-center justify-between gap-2 rounded-md px-2 text-left text-[13px] hover:bg-surface-hover"
       >
         <span className="shrink-0 text-muted-foreground">{title}</span>
-        <span className={cn("flex min-w-0 items-center gap-1", active ? "font-medium text-primary" : "text-foreground")}>
+        <span className={cn("flex min-w-0 items-center gap-1", active ? "font-medium text-primary-text" : "text-foreground")}>
           <span className="truncate">{label}</span>
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         </span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto border-border bg-popover">
+      <DropdownMenuContent align="start" className="max-h-80 overflow-y-auto">
         {allLabel && (
           <DropdownMenuItem
             onClick={() => onChange(null)}
-            className={cn("text-sm", value === null ? "text-primary" : "text-popover-foreground")}
+            className={cn("text-[13px]", value === null ? "text-primary-text" : "text-popover-foreground")}
           >
             {allLabel}
           </DropdownMenuItem>
@@ -677,7 +811,7 @@ function FilterMenu({
           <DropdownMenuItem
             key={opt.id}
             onClick={() => onChange(opt.id)}
-            className={cn("text-sm", value === opt.id ? "text-primary" : "text-popover-foreground")}
+            className={cn("text-[13px]", value === opt.id ? "text-primary-text" : "text-popover-foreground")}
           >
             {opt.name}
           </DropdownMenuItem>
@@ -687,15 +821,17 @@ function FilterMenu({
   );
 }
 
-/** Collapsible header for a status section ("Em Atendimento" / "Em
- *  Espera") in the default view. */
+/** Cabeçalho fixo de uma seção da fila ("Em espera" / "Em atendimento"),
+ *  com a bolinha de cor da fila (item 15 do PRD 23). */
 function SectionHeader({
   label,
+  dot,
   count,
   expanded,
   onToggle,
 }: {
   label: string;
+  dot: string;
   count: number;
   expanded: boolean;
   onToggle: () => void;
@@ -704,17 +840,17 @@ function SectionHeader({
     <button
       type="button"
       onClick={onToggle}
-      className="sticky top-0 z-10 flex w-full items-center justify-between border-b border-border/50 bg-background/95 px-3 py-2.5 text-left backdrop-blur transition-colors hover:bg-muted/35"
+      className="sticky top-0 z-[2] flex h-8 w-full items-center gap-2 border-b border-border bg-card px-3.5 text-left hover:bg-surface-hover"
       aria-expanded={expanded}
+      data-no-ripple
     >
-      <span className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">
-        {label}
-        <span className="text-[10px] font-medium tabular-nums text-muted-foreground/80">{count}</span>
-      </span>
       <ChevronDown
         aria-hidden="true"
-        className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", !expanded && "-rotate-90")}
+        className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform duration-200 ease-ddm", !expanded && "-rotate-90")}
       />
+      <span className={cn("size-1.5 rounded-full", dot)} aria-hidden="true" />
+      <span className="text-xs font-semibold text-foreground-2">{label}</span>
+      <span className="text-xs font-medium tabular-nums text-muted-foreground">{count}</span>
     </button>
   );
 }
@@ -723,25 +859,25 @@ interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
   onSelect: (conversation: Conversation) => void;
-  /** Cliente da linha (selo com nome e cor). */
+  /** Cliente da linha (quadradinho com a cor e o nome). */
   client: ClientOption | null;
+  /** Atendente da conversa quando não é o usuário logado (item 13 do PRD 23). */
+  assigneeName: string | null;
+  /** Mostra o selo da fila no item (lista sem seções — item 15 do PRD 23). */
+  showStatus: boolean;
 }
 
-const SENTIMENT_ICONS: Record<string, { emoji: string; color: string; label: string }> = {
-  positive: { emoji: "😊", color: "text-emerald-700 dark:text-emerald-400", label: "Sentimento: Positivo" },
-  neutral: { emoji: "😐", color: "text-slate-700 dark:text-slate-300", label: "Sentimento: Neutro" },
-  negative: { emoji: "😠", color: "text-rose-700 dark:text-rose-400", label: "Sentimento: Negativo" },
-  mixed: { emoji: "🧐", color: "text-amber-700 dark:text-amber-400", label: "Sentimento: Misto" },
-};
-
-/** "Aguardando há X" para conversa sem atendente, a partir da última mensagem do cliente. */
-function waitingLabel(c: Conversation): string | null {
+/** Minutos que o cliente espera sem atendente (null se não está esperando). */
+function waitingMinutes(c: Conversation): number | null {
   if (c.assigned_agent_id || c.status === "closed" || !c.last_customer_message_at) return null;
-  const minutes = Math.floor((Date.now() - Date.parse(c.last_customer_message_at)) / 60_000);
-  if (minutes < 5) return null;
-  if (minutes < 60) return `aguardando ${minutes} min`;
+  return Math.floor((Date.now() - Date.parse(c.last_customer_message_at)) / 60_000);
+}
+
+/** "5 min", "2 h", "3 d". */
+function shortDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
-  return hours < 24 ? `aguardando ${hours} h` : `aguardando ${Math.floor(hours / 24)} d`;
+  return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
 /** Tempo compacto desde a última mensagem: "agora", "5 min", "2 h", "3 d";
@@ -750,28 +886,43 @@ function compactTimeAgo(iso: string): string {
   const date = new Date(iso);
   const minutes = Math.floor((Date.now() - date.getTime()) / 60_000);
   if (minutes < 1) return "agora";
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} h`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days} d`;
+  if (minutes < 60 * 24 * 7) return shortDuration(minutes);
   return format(date, "dd/MM/yy", { locale: ptBR });
 }
 
-function ConversationItem({ conversation, isActive, onSelect, client }: ConversationItemProps) {
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0][0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return (first + last).toUpperCase();
+}
+
+const QUEUE_DOT: Record<string, string> = {
+  waiting: "bg-warning",
+  attending: "bg-success",
+  closed: "bg-muted-foreground",
+};
+
+function ConversationItem({ conversation, isActive, onSelect, client, assigneeName, showStatus }: ConversationItemProps) {
   const { accountId } = useAuth();
   const contact = conversation.contact;
   const displayName = contact?.name || contact?.phone || "Desconhecido";
-  const initials = displayName.charAt(0).toUpperCase();
-  const channelBadge = CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"];
-  const waiting = waitingLabel(conversation);
+  const channelLabel = CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"]?.label ?? "WhatsApp";
+  const unread = conversation.unread_count > 0;
+  const waitMin = waitingMinutes(conversation);
+  const waiting = waitMin !== null && waitMin >= 5;
   const negative = conversation.sentiment === "negative";
   const queueSection = inboxQueueSection(conversation);
   const queueLabel = INBOX_QUEUE_LABELS[queueSection];
 
-  const timeAgo = conversation.last_message_at ? compactTimeAgo(conversation.last_message_at) : "";
+  const time = waiting
+    ? `aguarda ${shortDuration(waitMin)}`
+    : conversation.last_message_at
+      ? compactTimeAgo(conversation.last_message_at)
+      : "";
   // Tooltip com a forma longa em pt-BR ("há 3 dias").
-  const timeAgoTitle = conversation.last_message_at
+  const timeTitle = conversation.last_message_at
     ? formatDistanceToNow(new Date(conversation.last_message_at), { addSuffix: true, locale: ptBR })
     : undefined;
 
@@ -781,12 +932,16 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
       onClick={() => onSelect(conversation)}
       aria-current={isActive ? "true" : undefined}
       className={cn(
-        "flex w-full items-center gap-2.5 border-b border-l-2 border-b-border/45 border-l-transparent px-3 py-2.5 text-left transition-colors hover:bg-muted/40",
-        isActive && "border-l-primary bg-muted/65 hover:bg-muted/65"
+        "flex w-full gap-3 border-b border-l-2 border-b-border-soft py-3 pl-3 pr-3.5 text-left",
+        isActive ? "border-l-primary bg-selected" : "border-l-transparent hover:bg-surface-hover",
       )}
     >
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-medium text-foreground" aria-hidden="true">
+      <span
+        className="relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-[12.5px] font-semibold text-foreground-2"
+        aria-hidden="true"
+      >
         {contact?.avatar_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             // Proxy por telefone só existe para WhatsApp.
             src={
@@ -794,63 +949,82 @@ function ConversationItem({ conversation, isActive, onSelect, client }: Conversa
                 ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}`
                 : contact.avatar_url
             }
-            // Decorativo: o nome do contato já vem logo ao lado.
             alt=""
-            className="h-9 w-9 rounded-full object-cover"
+            className="size-9 object-cover"
           />
         ) : (
-          initials
+          initialsOf(displayName)
         )}
-      </div>
+      </span>
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[13px] font-semibold text-foreground">{displayName}</span>
-          {/* O horário vira "aguardando X" (âmbar) quando o cliente espera
-              ≥ 5 min sem atendente — mesmo espaço, sem linha extra. */}
-          <span
-            className={cn("shrink-0 text-[11px]", waiting ? "font-medium text-amber-600 dark:text-amber-400" : "text-muted-foreground/80")}
-            title={timeAgoTitle}
-          >
-            {waiting ?? timeAgo}
+      <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
+        <span className="flex items-baseline gap-2">
+          <span className={cn("min-w-0 flex-1 truncate text-[13.5px] text-foreground", unread ? "font-bold" : "font-semibold")}>
+            {displayName}
           </span>
-        </div>
+          <span
+            className={cn(
+              "shrink-0 whitespace-nowrap text-[11.5px] tabular-nums",
+              waiting
+                ? cn("font-semibold", waitMin >= 30 ? "text-destructive" : "text-warning")
+                : unread
+                  ? "font-semibold text-primary-text"
+                  : "text-muted-foreground",
+            )}
+            title={timeTitle}
+          >
+            {time}
+          </span>
+        </span>
 
-        <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
-            {/* Cliente da linha: ponto com a cor dele + nome (sem pílula colorida). */}
-            {client && (
-              <span className="flex max-w-[42%] shrink-0 items-center gap-1 text-[11px] text-foreground/70" title={`Cliente: ${client.name}`}>
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: client.color }} aria-hidden="true" />
-                <span className="truncate">{client.name}</span>
-                <span aria-hidden="true" className="text-muted-foreground">·</span>
+        <span className="flex items-center gap-2">
+          <span className={cn("min-w-0 flex-1 truncate text-[12.5px]", unread ? "text-foreground" : "text-foreground-2")}>
+            {conversation.last_message_text || "Nenhuma mensagem ainda"}
+          </span>
+          {negative && (
+            <span
+              className="size-[7px] shrink-0 rounded-full bg-destructive"
+              role="img"
+              aria-label="Sentimento negativo"
+              title="Sentimento negativo"
+            />
+          )}
+          {unread && (
+            <span className="inline-flex h-[22px] min-w-5 shrink-0 animate-ddm-pop items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold tabular-nums text-primary-foreground">
+              {conversation.unread_count}
+              <span className="sr-only"> não lidas</span>
+            </span>
+          )}
+        </span>
+
+        <span className="flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted-foreground">
+          {client && (
+            <>
+              <span className="size-[7px] shrink-0 rounded-[2px]" style={{ backgroundColor: client.color }} aria-hidden="true" />
+              <span className="min-w-0 truncate" title={`Cliente: ${client.name}`}>{client.name}</span>
+              <span aria-hidden="true">·</span>
+            </>
+          )}
+          <span className="shrink-0">{channelLabel}</span>
+          {assigneeName && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="min-w-0 truncate" title={`Atendente: ${assigneeName}`}>
+                <span className="sr-only">Atendente: </span>
+                {assigneeName}
               </span>
-            )}
-            {channelBadge && <span className="sr-only">Canal: {channelBadge.label}.</span>}
-            <span className="truncate">{conversation.last_message_text || "Nenhuma mensagem ainda"}</span>
-          </p>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {negative && (
-              <span
-                className="h-2 w-2 rounded-full bg-destructive"
-                role="img"
-                aria-label={SENTIMENT_ICONS.negative.label}
-                title={SENTIMENT_ICONS.negative.label}
-              />
-            )}
-            {/* Não lidas OU o ponto de status — nunca os dois. */}
-            {conversation.unread_count > 0 ? (
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-medium text-primary-foreground">
-                {conversation.unread_count}
-                <span className="sr-only"> não lidas</span>
-              </span>
-            ) : (
-              null
-            )}
+            </>
+          )}
+          {showStatus ? (
+            <span className="ml-auto inline-flex shrink-0 items-center gap-1 font-medium text-foreground-2">
+              <span className={cn("size-1.5 rounded-full", QUEUE_DOT[queueSection])} aria-hidden="true" />
+              {queueLabel}
+            </span>
+          ) : (
             <span className="sr-only">Status: {queueLabel}</span>
-          </div>
-        </div>
-      </div>
+          )}
+        </span>
+      </span>
     </button>
   );
 }
