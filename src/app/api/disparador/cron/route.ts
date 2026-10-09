@@ -47,6 +47,7 @@ import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { drainPushOutbox } from "@/lib/push/service";
+import { trackSend } from "@/lib/disparador/shutdown-gate";
 import { sweepStuckApiCampaigns } from "@/lib/disparador/api-v1-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
@@ -424,7 +425,7 @@ async function runTick(request: Request, chain: ChainContext) {
     // derruba o tick nem impede novos envios.
     try {
       const recovered = await recoverStaleSendingReservations(db);
-      if (recovered.recoveredAccepted > 0 || recovered.finalizedUnknown > 0 || recovered.failed > 0) {
+      if (recovered.recoveredAccepted > 0 || recovered.finalizedUnknown > 0 || recovered.requeuedNeverSent > 0 || recovered.failed > 0) {
         for (const campaignId of recovered.campaignIds) {
           const { error: completeError } = await db.rpc("complete_dispatch_campaign", {
             p_campaign_id: campaignId,
@@ -436,7 +437,7 @@ async function runTick(request: Request, chain: ChainContext) {
           level: recovered.failed > 0 ? "warn" : "info",
           source: "disparador",
           event: "dispatch_stale_sending_recovered",
-          message: "Watchdog liberou reservas antigas sem reenviar",
+          message: "Watchdog liberou reservas antigas: devolveu à fila o que nunca chegou ao provedor e fechou como incerto o que pode ter saído (nunca reenvia este)",
           payload: recovered,
         });
       }
@@ -670,6 +671,7 @@ async function runTick(request: Request, chain: ChainContext) {
         })
       : null;
     const confirmBatcher = claimer ? new ConfirmBatcher({ db, single: singleConfirm(db) }) : null;
+    // D-02: o SIGTERM espera os envios em voo ANTES de drenar o micro-lote de confirmações (registerShutdownDrain).
     const unregisterDrain = confirmBatcher ? registerShutdownDrain(confirmBatcher) : null;
     try {
     schedule = await runDispatchSchedule<QueueItem>({
@@ -716,7 +718,8 @@ async function runTick(request: Request, chain: ChainContext) {
         let signal = null as BackoffReason | null;
         let pauseCampaign = false;
         try {
-          const outcome = await processQueueItem(item, entry.campaign, {
+          // D-02: registra o envio em voo (claim → confirmação); no SIGTERM o processo espera até 8 s por estes antes de sair.
+          const outcome = await trackSend(processQueueItem(item, entry.campaign, {
             defaultMaxInFlight: channelWork.defaultMaxInFlight.get(ctx.channelId),
             channelConfig: channelConfigFor(channelWork.configs, ctx.channelId, entry.campaign.account_id),
             blacklistLookup: itemBlacklist,
@@ -726,7 +729,7 @@ async function runTick(request: Request, chain: ChainContext) {
               telemetry.recordProviderCall(observation.provider, observation.latencyMs, observation.code);
               signal = observation.signal ?? signal;
             },
-          });
+          }));
           telemetry.recordOutcome(ctx.channelId, outcome.outcome);
           if (outcome.outcome === "sent") entry.result.sent++;
           if (outcome.outcome === "pending_confirmation") entry.result.pending_confirmation++;

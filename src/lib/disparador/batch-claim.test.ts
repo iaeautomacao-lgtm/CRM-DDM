@@ -186,6 +186,7 @@ describe('ConfirmBatcher', () => {
     const batcher = new ConfirmBatcher({ db: { rpc } as never, single: vi.fn(), maxItems: 100, maxWaitMs: 60_000 });
     const unregister = registerShutdownDrain(batcher);
     const pending = batcher.submit(args(0));
+    // D-02: o SIGTERM agora primeiro espera os envios em voo (nenhum aqui) e só então drena.
     process.emit('SIGTERM');
     expect((await pending).error).toBeNull();
     expect(rpc).toHaveBeenCalledTimes(1);

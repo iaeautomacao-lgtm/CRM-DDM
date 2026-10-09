@@ -45,6 +45,7 @@ vi.mock('@/lib/disparador/reconcile-unknown-provider-outcomes', () => ({
   recoverStaleSendingReservations: vi.fn(async () => ({
     recoveredAccepted: 0,
     finalizedUnknown: 0,
+    requeuedNeverSent: 0,
     failed: 0,
     campaignIds: [],
   })),
