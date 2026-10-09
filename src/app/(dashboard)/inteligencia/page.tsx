@@ -9,7 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { AnswerMarkdown } from "@/components/inteligencia/answer-markdown";
 import { SUGGESTED_QUESTIONS, toolLabel, type ChatStreamEvent } from "@/lib/intelligence/chat/labels";
 import { cn } from "@/lib/utils";
-import { Skeleton } from "@/components/ddm/states";
+import { ForbiddenState, Skeleton } from "@/components/ddm/states";
+import { usePermissions } from "@/hooks/use-permission";
 
 // /inteligencia — chat do DDM Intelligence (PRD-04, Fase 2). Owner/admin/
 // supervisor (ROUTE_ALLOWLIST em src/lib/role-utils.ts). As respostas vêm
@@ -56,7 +57,29 @@ async function readError(res: Response): Promise<string> {
   }
 }
 
+/** Porta da página: o chat exige intelligence.use (o servidor também confere em cada rota). */
 export default function InteligenciaPage() {
+  const { loading, can } = usePermissions();
+  if (loading) {
+    return (
+      <div className="flex flex-col gap-3" aria-busy="true">
+        <Skeleton className="h-9 w-56" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+  if (!can("intelligence.use")) {
+    return (
+      <ForbiddenState
+        title="Você não tem acesso ao DDM Intelligence"
+        hint="Se precisar dele, peça a um administrador da organização."
+      />
+    );
+  }
+  return <InteligenciaChat />;
+}
+
+function InteligenciaChat() {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null);
   const [activeChatId, setActiveChatId] = useState<string | null>(null);

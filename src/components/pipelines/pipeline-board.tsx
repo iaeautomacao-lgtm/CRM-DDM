@@ -27,6 +27,8 @@ interface PipelineBoardProps {
   onDealMoved: (dealId: string, newStageId: string) => void;
   onAddDeal: (stageId: string) => void;
   onEditDeal: (deal: Deal) => void;
+  /** Pode mover e criar negócios (contacts.edit, igual à RLS de deals). Sem isso o quadro é só leitura. */
+  canEdit?: boolean;
 }
 
 export function PipelineBoard({
@@ -35,6 +37,7 @@ export function PipelineBoard({
   onDealMoved,
   onAddDeal,
   onEditDeal,
+  canEdit = true,
 }: PipelineBoardProps) {
   const { defaultCurrency } = useAuth();
   const [activeDealId, setActiveDealId] = useState<string | null>(null);
@@ -72,6 +75,7 @@ export function PipelineBoard({
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveDealId(null);
+    if (!canEdit) return;
     const { active, over } = event;
     if (!over) return;
     const dealId = String(active.id);
@@ -116,8 +120,9 @@ export function PipelineBoard({
               deals={stageDeals}
               totalValue={totalValue}
               currency={defaultCurrency}
-              onAddDeal={onAddDeal}
+              onAddDeal={canEdit ? onAddDeal : undefined}
               onEditDeal={onEditDeal}
+              canDrag={canEdit}
             />
           );
         })}
@@ -192,13 +197,16 @@ function StageColumn({
   currency,
   onAddDeal,
   onEditDeal,
+  canDrag,
 }: {
   stage: PipelineStage;
   deals: Deal[];
   totalValue: number;
   currency: string;
-  onAddDeal: (stageId: string) => void;
+  /** Ausente = sem permissão para criar negócios: o botão some. */
+  onAddDeal?: (stageId: string) => void;
   onEditDeal: (deal: Deal) => void;
+  canDrag: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id });
 
@@ -239,12 +247,13 @@ function StageColumn({
         ) : (
           <div className="ddm-stagger flex flex-col gap-2">
             {deals.map((deal) => (
-              <DraggableDealCard key={deal.id} deal={deal} stage={stage} onEdit={onEditDeal} />
+              <DraggableDealCard key={deal.id} deal={deal} stage={stage} onEdit={onEditDeal} canDrag={canDrag} />
             ))}
           </div>
         )}
       </div>
 
+      {onAddDeal && (
       <button
         type="button"
         onClick={() => onAddDeal(stage.id)}
@@ -253,6 +262,7 @@ function StageColumn({
         <Plus className="size-3" aria-hidden="true" />
         Adicionar negócio
       </button>
+      )}
     </section>
   );
 }
@@ -261,13 +271,16 @@ function DraggableDealCard({
   deal,
   stage,
   onEdit,
+  canDrag,
 }: {
   deal: Deal;
   stage: PipelineStage;
   onEdit: (deal: Deal) => void;
+  canDrag: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
+    disabled: !canDrag,
   });
 
   return (
@@ -275,7 +288,7 @@ function DraggableDealCard({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      style={{ opacity: isDragging ? 0.3 : 1, touchAction: "none" }}
+      style={{ opacity: isDragging ? 0.3 : 1, touchAction: canDrag ? "none" : undefined }}
     >
       <DealCard deal={deal} stage={stage} onEdit={onEdit} />
     </div>

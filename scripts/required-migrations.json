@@ -199,6 +199,10 @@
       "kind": "registry"
     },
     {
+      "version": "262_flow_send_flow_node",
+      "kind": "registry"
+    },
+    {
       "version": "270_billing_rulers",
       "kind": "registry"
     },
@@ -286,7 +290,20 @@
       "kind": "registry"
     },
     {
-      "version": "298_web_push",
+      "version": "301_quick_replies_visibility_usage",
+      "kind": "registry"
+    },
+    {
+      "version": "302_message_origin_my_handled",
+      "kind": "registry"
+    },
+    {
+      "version": "302b_conversation_assignments_from_agent_idx",
+      "kind": "index",
+      "index": "idx_conversation_assignments_from_agent"
+    },
+    {
+      "version": "311_member_deactivation_last_access",
       "kind": "registry"
     }
   ]

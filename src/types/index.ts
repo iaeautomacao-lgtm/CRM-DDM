@@ -71,6 +71,13 @@ export interface AccountMember {
   /** Cap on concurrent open/pending conversations for handoff routing
    *  (migration 116). Null = no limit. */
   max_simultaneous_chats: number | null;
+  /** Membro ativo (migration 311). Desativado não entra, não recebe conversas e não aparece na distribuição. */
+  active: boolean;
+  deactivated_at: string | null;
+  /** Último login (auth.users). Só para quem tem members.manage; null para os demais ou sem registro. */
+  last_sign_in_at: string | null;
+  /** Última atividade (renovação mais recente de sessão). Mesma regra de visibilidade. */
+  last_active_at: string | null;
 }
 
 /**
@@ -354,7 +361,9 @@ export type TemplateButton =
   | { type: 'QUICK_REPLY'; text: string }
   | { type: 'URL'; text: string; url: string; example?: string }
   | { type: 'PHONE_NUMBER'; text: string; phone_number: string }
-  | { type: 'COPY_CODE'; text: string; example: string };
+  | { type: 'COPY_CODE'; text: string; example: string }
+  /** Botão que abre um WhatsApp Flow (PRD 21). O flow_token é gerado POR ENVIO (correlação com o contato), não vive no template. */
+  | { type: 'FLOW'; text: string; flow_id?: string; flow_name?: string; flow_action?: 'navigate' | 'data_exchange'; navigate_screen?: string };
 
 export interface TemplateSampleValues {
   body?: string[];

@@ -55,6 +55,7 @@ import type {
 } from "@/types"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { usePermission } from "@/hooks/use-permission"
 
 // ------------------------------------------------------------
 // Types (builder-local — mirror the flattened rows we POST)
@@ -472,8 +473,17 @@ function SendTemplateFields({
 // Main builder component
 // ------------------------------------------------------------
 
+/**
+ * Modo somente leitura: quem só tem automations.view abre o builder para consultar (o servidor bloqueia a escrita em
+ * PATCH/POST /api/automations*). Os cartões expandem normalmente, mas os campos ficam desabilitados e somem salvar,
+ * adicionar, mover e excluir etapas.
+ */
+const ReadOnlyContext = createContext(false)
+
 export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
   const router = useRouter()
+  const canEdit = usePermission("automations.edit")
+  const readOnly = !canEdit
   const isEditing = !!initial.id
   const [state, setState] = useState<BuilderInitial>(initial)
   const [saving, setSaving] = useState(false)
@@ -575,6 +585,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
         <input
           value={state.name}
           onChange={(e) => patchTop("name", e.target.value)}
+          readOnly={readOnly}
           placeholder="Automação sem nome"
           className="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-sm font-semibold text-foreground placeholder:text-muted-foreground focus:bg-muted focus:outline-none sm:text-base"
         />
@@ -588,31 +599,41 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
           <Switch
             checked={state.is_active}
             onCheckedChange={(v) => patchTop("is_active", !!v)}
+            disabled={readOnly}
             aria-label="Ativar ao salvar"
           />
         </div>
-        <Button
-          onClick={save}
-          disabled={saving}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {isEditing ? "Salvar" : "Salvar rascunho"}
-        </Button>
+        {readOnly ? (
+          <span className="rounded-md bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            Somente leitura
+          </span>
+        ) : (
+          <Button
+            onClick={save}
+            disabled={saving}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {isEditing ? "Salvar" : "Salvar rascunho"}
+          </Button>
+        )}
       </header>
 
       {/* Canvas */}
       <div className="relative flex-1 overflow-y-auto">
         <div className="absolute inset-0 bg-[radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none" />
         <div className="relative mx-auto flex max-w-2xl flex-col items-center gap-0 px-4 py-10">
+          <ReadOnlyContext.Provider value={readOnly}>
           <ResourcesProvider>
-            <TriggerCard
-              type={state.trigger_type}
-              config={state.trigger_config}
-              onTypeChange={(t) => patchTop("trigger_type", t)}
-              onConfigChange={(c) => patchTop("trigger_config", c)}
-            />
-            <LinesCard value={state.line_ids ?? []} onChange={(ids) => patchTop("line_ids", ids)} />
+            <fieldset disabled={readOnly} className="m-0 flex min-w-0 flex-col items-center border-0 p-0">
+              <TriggerCard
+                type={state.trigger_type}
+                config={state.trigger_config}
+                onTypeChange={(t) => patchTop("trigger_type", t)}
+                onConfigChange={(c) => patchTop("trigger_config", c)}
+              />
+              <LinesCard value={state.line_ids ?? []} onChange={(ids) => patchTop("line_ids", ids)} />
+            </fieldset>
             <StepList
               steps={state.steps}
               parentPath={[]}
@@ -624,6 +645,7 @@ export function AutomationBuilder({ initial }: { initial: BuilderInitial }) {
               moveStepAt={moveStepAt}
             />
           </ResourcesProvider>
+          </ReadOnlyContext.Provider>
         </div>
       </div>
     </div>
@@ -941,6 +963,7 @@ function StepRenderer({
       ? { kind: "root", index }
       : { kind: "branch", parentCid: parentScope.parentCid, branch: parentScope.branch, index },
   ]
+  const readOnly = useContext(ReadOnlyContext)
   const meta = STEP_META[step.step_type]
   const Icon = meta.icon
   const expanded = props.expandedId === step.cid
@@ -983,10 +1006,13 @@ function StepRenderer({
           </button>
           {expanded && (
             <div className="border-t border-border px-4 py-3">
-              <StepEditor
-                step={step}
-                onChange={(next) => props.updateStep(path, () => next)}
-              />
+              <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
+                <StepEditor
+                  step={step}
+                  onChange={(next) => props.updateStep(path, () => next)}
+                />
+              </fieldset>
+              {!readOnly && (
               <div className="mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
                 <div className="flex gap-1">
                   <Button
@@ -1017,6 +1043,7 @@ function StepRenderer({
                   Excluir
                 </Button>
               </div>
+              )}
             </div>
           )}
         </div>
@@ -1092,6 +1119,8 @@ function BranchColumn({
 }
 
 function AddButton({ onPick }: { onPick: (t: AutomationStepType) => void }) {
+  const readOnly = useContext(ReadOnlyContext)
+  if (readOnly) return <div className="h-4 w-[2px] bg-border" aria-hidden />
   return (
     <div className="relative flex flex-col items-center">
       <div className="h-4 w-[2px] bg-border" aria-hidden />

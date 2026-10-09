@@ -167,7 +167,7 @@ export async function DELETE(
 ) {
   const { id } = await context.params
 
-  const guard = await guardFlow(id, 'flows.view_runs')
+  const guard = await guardFlow(id, 'flows.edit')
   if (!guard.ok) return guard.response
   const { accountId } = guard.ctx
 

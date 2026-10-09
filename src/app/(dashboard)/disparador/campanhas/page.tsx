@@ -34,6 +34,7 @@ import { DenseTable, Td, Th, Tr } from "@/components/ddm/table-card";
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { EmptyState, Skeleton } from "@/components/ddm/states";
 import { ExportJobButton } from "@/components/disparador/export/campaign-exports";
+import { parseReusedList, type ReusedList } from "@/lib/disparador/import-client";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -398,6 +399,7 @@ export default function CampanhasPage() {
   // Assistente "Nova campanha" (src/components/disparador/nova-campanha).
   // editingCampaign = campanha em rascunho ou agendada sendo editada.
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [reusedList, setReusedList] = useState<ReusedList | null>(null);
   const [editingCampaign, setEditingCampaign] = useState<EditableCampaign | null>(null);
   // "Iniciar agora" numa campanha agendada (fila começa agora, não no horário).
   const [startNow, setStartNow] = useState(false);
@@ -488,6 +490,20 @@ export default function CampanhasPage() {
   } | null>(null);
   const [utmMetricsLoading, setUtmMetricsLoading] = useState(false);
   const metricsRefreshRef = useRef<NodeJS.Timeout | null>(null);
+
+  // "Usar em nova campanha" (Listas importadas): ?lista=<draft_id>&nome=&contatos=&variaveis= abre o
+  // assistente com a lista como público; a URL é limpa em seguida (recarregar não reabre).
+  useEffect(() => {
+    const list = parseReusedList(window.location.search);
+    if (!list) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    const t = setTimeout(() => {
+      setEditingCampaign(null);
+      setReusedList(list);
+      setWizardOpen(true);
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
 
   // Load Data on Mount
   useEffect(() => {
@@ -802,12 +818,14 @@ export default function CampanhasPage() {
 
   const openCreateModal = () => {
     setEditingCampaign(null);
+    setReusedList(null);
     setWizardOpen(true);
   };
 
   const closeWizard = () => {
     setWizardOpen(false);
     setEditingCampaign(null);
+    setReusedList(null);
   };
 
   // Desagendar: agendada → rascunho (sem agendamento), no servidor.
@@ -1304,6 +1322,7 @@ export default function CampanhasPage() {
         tags={tags}
         onClose={closeWizard}
         onSaved={loadData}
+        reusedList={reusedList}
       />
 
       {/* Excluir: confirmação (apaga a fila junto, ON DELETE CASCADE). */}

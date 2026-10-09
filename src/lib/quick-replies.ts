@@ -3,6 +3,8 @@
 
 import { normalizeForSearch } from "@/lib/utils";
 
+export type QuickReplyVisibility = "personal" | "team" | "account";
+
 export interface QuickReply {
   id: string;
   account_id: string;
@@ -11,6 +13,9 @@ export interface QuickReply {
   content: string;
   /** Quem cadastrou (coluna da 142); a tela usa para o filtro "Minhas". */
   created_by?: string | null;
+  /** Migration 301: pessoal (só o dono), equipe (membros de team_id) ou conta (todos). */
+  visibility?: QuickReplyVisibility;
+  team_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -49,9 +54,13 @@ export function matchSlashQuery(beforeCaret: string): { start: number; query: st
   return { start: m.index + m[1].length, query: m[2] };
 }
 
-/** Atalho que começa com a busca primeiro; depois atalho/título que contém. */
-export function filterQuickReplies(list: QuickReply[], query: string, limit = 8): QuickReply[] {
-  const q = normalizeForSearch(query.trim());
+/**
+ * Atalho que começa com a busca primeiro; depois atalho/título que contém.
+ * Atalho repetido entre escopos aparece uma vez só: pessoal > equipe > conta (dedupeByShortcut).
+ */
+export function filterQuickReplies(rawList: QuickReply[], query: string, limit = 8): QuickReply[] {
+  const list = dedupeByShortcut(rawList);
+  const q =normalizeForSearch(query.trim());
   if (!q) return list.slice(0, limit);
   const prefix: QuickReply[] = [];
   const contains: QuickReply[] = [];
@@ -91,4 +100,64 @@ export function renderQuickReply(content: string, vars: QuickReplyVars): string 
     // Variável vazia no começo: não começa a mensagem com vírgula.
     .replace(/^[,; \t]+/, "")
     .trim();
+}
+
+// ---------- Visibilidade (migration 301) ----------
+
+export const QUICK_REPLY_VISIBILITY_LABEL: Record<QuickReplyVisibility, string> = {
+  personal: "Pessoal",
+  team: "Equipe",
+  account: "Conta",
+};
+
+/** Menor número = mais específico: pessoal vence equipe, que vence conta. */
+const VISIBILITY_RANK: Record<QuickReplyVisibility, number> = { personal: 0, team: 1, account: 2 };
+
+/** As respostas que já existiam antes da 301 não têm a coluna lida: valem como "conta". */
+export function visibilityOf(reply: Pick<QuickReply, "visibility">): QuickReplyVisibility {
+  return reply.visibility ?? "account";
+}
+
+/**
+ * Atalho repetido entre escopos (o mesmo /oi pessoal, de equipe e da conta): fica o mais específico —
+ * pessoal > equipe > conta. Em empate (duas equipes do mesmo usuário) vale a primeira da lista.
+ * Mantém a ordem original dos que ficam.
+ */
+export function dedupeByShortcut(list: QuickReply[]): QuickReply[] {
+  const best = new Map<string, QuickReply>();
+  for (const r of list) {
+    const cur = best.get(r.shortcut);
+    if (!cur || VISIBILITY_RANK[visibilityOf(r)] < VISIBILITY_RANK[visibilityOf(cur)]) best.set(r.shortcut, r);
+  }
+  return list.filter((r) => best.get(r.shortcut) === r);
+}
+
+/** Quem pode editar/excluir (a RLS é quem decide de verdade): pessoal só o dono; equipe/conta só quem tem manage. */
+export function canEditQuickReply(
+  reply: Pick<QuickReply, "visibility" | "created_by">,
+  ctx: { userId: string | null | undefined; canManage: boolean },
+): boolean {
+  if (visibilityOf(reply) === "personal") return !!ctx.userId && reply.created_by === ctx.userId;
+  return ctx.canManage;
+}
+
+/** Visibilidades que o usuário pode escolher ao criar: sem manage, só pessoal. */
+export function visibilityOptions(canManage: boolean): QuickReplyVisibility[] {
+  return canManage ? ["personal", "team", "account"] : ["personal"];
+}
+
+/** O atalho é único por escopo: conta, equipe ou dono (pessoal). Há outra resposta no MESMO escopo com este atalho? */
+export function shortcutTaken(
+  list: QuickReply[],
+  candidate: { shortcut: string; visibility: QuickReplyVisibility; teamId: string | null; ownerId: string | null | undefined },
+  ignoreId?: string,
+): boolean {
+  return list.some((r) => {
+    if (r.id === ignoreId || r.shortcut !== candidate.shortcut) return false;
+    const v = visibilityOf(r);
+    if (v !== candidate.visibility) return false;
+    if (v === "team") return (r.team_id ?? null) === candidate.teamId;
+    if (v === "personal") return r.created_by === candidate.ownerId;
+    return true;
+  });
 }

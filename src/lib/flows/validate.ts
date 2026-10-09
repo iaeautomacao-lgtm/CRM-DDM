@@ -1068,6 +1068,36 @@ function validateNode(
       break;
     }
 
+    case "send_flow": {
+      // PRD 21.4: formulário nativo do WhatsApp (só canal Meta; nos demais vai o fallback_text). O desenho das telas é da operação (Meta).
+      const cfg = node.config as {
+        flow_id?: string;
+        cta_text?: string;
+        body_text?: string;
+        header_text?: string;
+        footer_text?: string;
+        screen_id?: string;
+        flow_action?: string;
+        next_node_key?: string;
+      };
+      const problem = (field: string, message: string) =>
+        issues.push({ severity: "error", scope: "node", node_key: node.node_key, field, message });
+      if (!/^[0-9]{5,30}$/.test((cfg.flow_id ?? "").trim())) problem("flow_id", "Formulário (Flow) precisa do id do Flow na Meta (só números).");
+      const cta = (cfg.cta_text ?? "").trim();
+      if (cta.length < 1 || cta.length > 30) problem("cta_text", "O texto do botão do formulário deve ter de 1 a 30 caracteres.");
+      const body = (cfg.body_text ?? "").trim();
+      if (body.length < 1 || body.length > 1024) problem("body_text", "A mensagem do formulário deve ter de 1 a 1024 caracteres.");
+      if ((cfg.header_text ?? "").length > 60) problem("header_text", "O título do formulário deve ter até 60 caracteres.");
+      if ((cfg.footer_text ?? "").length > 60) problem("footer_text", "O rodapé do formulário deve ter até 60 caracteres.");
+      if (cfg.flow_action !== "navigate" && cfg.flow_action !== "data_exchange") {
+        problem("flow_action", "A ação do formulário deve ser 'navigate' ou 'data_exchange'.");
+      } else if (cfg.flow_action === "navigate" && !cfg.screen_id?.trim()) {
+        problem("screen_id", "Com ação 'navigate' é preciso informar a tela inicial (screen_id).");
+      }
+      issues.push(...validateNextNodeKey(node, cfg.next_node_key, knownKeys, "Formulário (Flow)"));
+      break;
+    }
+
     case "add_note": {
       const cfg = node.config as { note_text?: string; next_node_key?: string };
       if (!cfg.note_text?.trim()) {
@@ -1348,6 +1378,7 @@ function outgoingEdges(node: NodeInput): string[] {
     case "send_template":
     case "add_note":
     case "receive_attachment":
+    case "send_flow":
     case "send_webchat": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];

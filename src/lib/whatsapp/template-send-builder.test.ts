@@ -275,3 +275,29 @@ describe('buildSendComponents — end-to-end mix', () => {
     expect((components[2] as { index: string }).index).toBe('1');
   });
 });
+
+describe('buildSendComponents — botão FLOW (PRD 21.3)', () => {
+  const flowRow = (buttons: MessageTemplate['buttons'] = [{ type: 'FLOW', text: 'Negociar', flow_id: '495819284729182' }]) =>
+    row({ body_text: 'Olá {{1}}, toque para negociar.', buttons });
+
+  it('emite o componente do botão com o flow_token do envio (sub_type flow, índice do botão)', () => {
+    const components = buildSendComponents(flowRow(), { body: ['Maria'], flowToken: 'dq:abc' });
+    expect(components).toEqual([
+      { type: 'body', parameters: [{ type: 'text', text: 'Maria' }] },
+      { type: 'button', sub_type: 'flow', index: '0', parameters: [{ type: 'action', action: { flow_token: 'dq:abc' } }] },
+    ]);
+  });
+
+  it('o índice acompanha a posição do botão (resposta rápida antes do Flow)', () => {
+    const components = buildSendComponents(
+      flowRow([{ type: 'QUICK_REPLY', text: 'Depois' }, { type: 'FLOW', text: 'Negociar', flow_id: '1' }]),
+      { body: ['Maria'], flowToken: 'dq:abc' },
+    );
+    expect(components.map((c) => (c as { index?: string }).index)).toEqual([undefined, '1']);
+  });
+
+  it('sem flowToken lança erro claro (a Meta recusaria o envio): nunca manda o botão sem token', () => {
+    expect(() => buildSendComponents(flowRow(), { body: ['Maria'] })).toThrow(/flowToken/);
+    expect(() => buildSendComponents(flowRow(), { body: ['Maria'], flowToken: '  ' })).toThrow(/flowToken/);
+  });
+});

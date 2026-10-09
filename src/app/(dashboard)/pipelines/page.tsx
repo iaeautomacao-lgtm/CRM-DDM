@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { usePermission } from "@/hooks/use-permission";
 import { useAuth } from "@/hooks/use-auth";
 import { GatedButton } from "@/components/ui/gated-button";
+import { ErrorState } from "@/components/ddm/states";
 
 // Pipeline creation is admin-class (settings-tier write under
 // the new RLS); deal creation is operational and only requires
@@ -56,6 +57,8 @@ export default function PipelinesPage() {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
+  // Falha ao ler os pipelines: mostra erro com retry em vez de "nenhum pipeline" (e não tenta criar o padrão).
+  const [loadError, setLoadError] = useState(false);
 
   // Dialog / sheet state
   const [newPipelineOpen, setNewPipelineOpen] = useState(false);
@@ -79,8 +82,10 @@ export default function PipelinesPage() {
       .order("created_at");
     if (error) {
       console.error("Failed to load pipelines:", error.message);
-      return [];
+      setLoadError(true);
+      return null;
     }
+    setLoadError(false);
     return data ?? [];
   }, [supabase]);
 
@@ -146,13 +151,17 @@ export default function PipelinesPage() {
       setLoading(true);
       let list = await loadPipelines();
 
-      if (list.length === 0 && !seedAttempted.current) {
+      if (list && list.length === 0 && !seedAttempted.current) {
         seedAttempted.current = true;
         const seeded = await seedDefaultPipeline();
         if (seeded) list = await loadPipelines();
       }
 
       if (cancelled) return;
+      if (list === null) {
+        setLoading(false);
+        return;
+      }
       setPipelines(list);
       if (list.length > 0) {
         setSelectedPipelineId((prev) =>
@@ -205,6 +214,7 @@ export default function PipelinesPage() {
 
   const refreshPipelines = useCallback(async () => {
     const list = await loadPipelines();
+    if (list === null) return;
     setPipelines(list);
     if (list.length === 0) setSelectedPipelineId("");
     else if (!list.some((p) => p.id === selectedPipelineId))
@@ -303,6 +313,18 @@ export default function PipelinesPage() {
   }
 
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
+
+  if (loadError && !loading && pipelines.length === 0) {
+    return (
+      <ErrorState
+        title="Não foi possível carregar os pipelines"
+        onRetry={() => {
+          setLoading(true);
+          void refreshPipelines().finally(() => setLoading(false));
+        }}
+      />
+    );
+  }
 
   if (loading) {
     return (
@@ -429,6 +451,7 @@ export default function PipelinesPage() {
             onDealMoved={handleDealMoved}
             onAddDeal={handleAddDeal}
             onEditDeal={handleEditDeal}
+            canEdit={canCreateDeals}
           />
         </>
       )}
@@ -498,6 +521,7 @@ export default function PipelinesPage() {
         stages={stages}
         defaultStageId={defaultStageId}
         onSaved={refreshDeals}
+        readOnly={!canCreateDeals}
       />
     </div>
   );

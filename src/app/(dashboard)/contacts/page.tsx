@@ -47,6 +47,7 @@ import { ContactDetailView } from '@/components/contacts/contact-detail-view';
 import { ImportModal } from '@/components/contacts/import-modal';
 import { CustomFieldsManager } from '@/components/contacts/custom-fields-manager';
 import { usePermission } from '@/hooks/use-permission';
+import { ErrorState } from '@/components/ddm/states';
 import { GatedButton } from '@/components/ui/gated-button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -63,6 +64,8 @@ interface ContactWithTags extends Contact {
 export default function ContactsPage() {
   const supabase = createClient();
   const canEdit = usePermission('contacts.edit');
+  // Importar cria contatos e etiquetas em lote: o catálogo exige contacts.import (admin+), mais que contacts.edit.
+  const canImport = usePermission('contacts.import');
   const canEditSettings = usePermission('tags.manage');
 
   const [contacts, setContacts] = useState<ContactWithTags[]>([]);
@@ -83,6 +86,7 @@ export default function ContactsPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [customFieldsOpen, setCustomFieldsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -117,6 +121,7 @@ export default function ContactsPage() {
   const fetchContacts = useCallback(async () => {
     const seq = ++fetchSeq.current;
     setLoading(true);
+    setLoadError(false);
     // The visible rows are about to change — drop any selection that
     // referred to the old page/search results so the bulk bar can't
     // act on rows the user can no longer see.
@@ -143,6 +148,7 @@ export default function ContactsPage() {
       if (seq !== fetchSeq.current) return; // superseded by a newer fetch
       if (error) {
         toast.error('Falha ao carregar contatos');
+        setLoadError(true);
         setLoading(false);
         return;
       }
@@ -172,6 +178,7 @@ export default function ContactsPage() {
       if (seq !== fetchSeq.current) return; // superseded by a newer fetch
       if (error) {
         toast.error('Falha ao carregar contatos');
+        setLoadError(true);
         setLoading(false);
         return;
       }
@@ -374,14 +381,14 @@ export default function ContactsPage() {
             )}
             <GatedButton
               variant="outline"
-              canAct={canEdit}
-              gateReason="adicionar ou importar contatos"
+              canAct={canImport}
+              gateReason="importar contatos"
               onClick={() => setImportOpen(true)}
             >
               <Upload className="size-3.5" />
               Importar
             </GatedButton>
-            <GatedButton canAct={canEdit} gateReason="adicionar ou importar contatos" onClick={openAddForm}>
+            <GatedButton canAct={canEdit} gateReason="adicionar contatos" onClick={openAddForm}>
               <Plus className="size-3.5" />
               Adicionar contato
             </GatedButton>
@@ -533,6 +540,13 @@ export default function ContactsPage() {
       )}
 
       {/* Tabela */}
+      {loadError && !loading ? (
+        <ErrorState
+          className="min-h-0"
+          title="Não foi possível carregar os contatos"
+          onRetry={() => void fetchContacts()}
+        />
+      ) : (
       <TableCard label="Contatos">
           <DenseTable>
             <thead>
@@ -728,6 +742,7 @@ export default function ContactsPage() {
           </div>
         )}
       </TableCard>
+      )}
 
       {/* Contact Form Dialog */}
       <ContactForm
