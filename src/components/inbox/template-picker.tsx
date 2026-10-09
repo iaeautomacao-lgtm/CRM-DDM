@@ -36,6 +36,10 @@ interface TemplatePickerProps {
   onSelect: (template: MessageTemplate, values: TemplateSendValues) => void;
   /** Contato da conversa: alimenta as sugestões das variáveis (PRD 23, item 6). */
   contact?: Pick<Contact, "id" | "name" | "instituicao"> | null;
+  /** Linhas para escolher por qual número a conversa começa (PRD 23, item 7). */
+  lineOptions?: { id: string; name: string }[];
+  lineId?: string | null;
+  onLineChange?: (lineId: string) => void;
 }
 
 interface VariableSuggestion {
@@ -112,6 +116,9 @@ export function TemplatePicker({
   onOpenChange,
   onSelect,
   contact,
+  lineOptions,
+  lineId,
+  onLineChange,
 }: TemplatePickerProps) {
   // VAR1–VAR3 da importação mais recente do contato (migration 079; RLS da conta).
   const [csvVars, setCsvVars] = useState<{ contactId: string; vars: Record<number, string> } | null>(null);
@@ -308,6 +315,22 @@ export function TemplatePicker({
           </DialogDescription>
         </DialogHeader>
 
+        {lineOptions && lineOptions.length > 1 && onLineChange && (
+          <label className="flex items-center gap-2 rounded-md border border-border bg-card-2 px-3 py-2 text-[12.5px] text-foreground-2">
+            <span className="shrink-0 font-medium">Enviar pela linha</span>
+            <select
+              value={lineId ?? ""}
+              onChange={(e) => onLineChange(e.target.value)}
+              className="h-8 min-w-0 flex-1 rounded-md border border-border bg-card px-2 text-[13px] text-foreground outline-none focus:border-primary"
+            >
+              {lineOptions.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {!selected ? (
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
             {loading ? (

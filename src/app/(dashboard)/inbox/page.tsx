@@ -690,10 +690,25 @@ export default function InboxPage() {
     [router]
   );
 
+  // PRD 23, item 7 — escolher a linha ao iniciar conversa. A nova conversa
+  // começa por template (Meta), então a lista são as linhas WhatsApp Meta que
+  // o operador enxerga (/api/lines, sem sessão WAHA). O servidor valida de
+  // novo (acesso e linha habilitada) no channel_id do /api/whatsapp/send.
+  const [newConvLines, setNewConvLines] = useState<{ id: string; name: string }[]>([]);
+  const [newConvLineId, setNewConvLineId] = useState<string | null>(null);
+
   const handleContactPicked = useCallback((contact: Contact) => {
     setNewConvContact(contact);
     setContactPickerOpen(false);
     setNewConvTemplatePickerOpen(true);
+    void apiFetch("/api/lines")
+      .then((r) => (r.ok ? r.json() : { lines: [] }))
+      .then((json: { lines?: { id: string; name: string; channel_type: string; waha_session: string | null }[] }) => {
+        const metaLines = (json.lines ?? []).filter((l) => l.channel_type === "whatsapp" && !l.waha_session);
+        setNewConvLines(metaLines.map((l) => ({ id: l.id, name: l.name })));
+        setNewConvLineId((prev) => (prev && metaLines.some((l) => l.id === prev) ? prev : metaLines[0]?.id ?? null));
+      })
+      .catch(() => setNewConvLines([]));
   }, []);
 
   const handleSendNewConversationTemplate = useCallback(
@@ -715,6 +730,9 @@ export default function InboxPage() {
               buttonParams: values.buttonParams,
             },
             template_params: values.body,
+            // Só manda a linha quando há escolha real (mais de uma): com uma
+            // só, o servidor usa a padrão como sempre.
+            ...(newConvLines.length > 1 && newConvLineId ? { channel_id: newConvLineId } : {}),
           }),
         });
         const payload = await res.json().catch(() => ({}));
@@ -732,7 +750,7 @@ export default function InboxPage() {
         setSendingNewConvTemplate(false);
       }
     },
-    [newConvContact, sendingNewConvTemplate]
+    [newConvContact, sendingNewConvTemplate, newConvLines.length, newConvLineId]
   );
 
   // On mobile (<lg) we show a SINGLE pane — either the list or the
@@ -879,6 +897,9 @@ export default function InboxPage() {
         onOpenChange={setNewConvTemplatePickerOpen}
         onSelect={handleSendNewConversationTemplate}
         contact={newConvContact}
+        lineOptions={newConvLines}
+        lineId={newConvLineId}
+        onLineChange={setNewConvLineId}
       />
     </div>
   );
