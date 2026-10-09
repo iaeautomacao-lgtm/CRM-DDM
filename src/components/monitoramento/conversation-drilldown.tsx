@@ -9,6 +9,7 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2 } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
+import { formatCappedTotal, pageCount, readCappedTotal } from "@/lib/reports/capped-label";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
@@ -63,7 +64,7 @@ export function ConversationDrilldown({
 }) {
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<Row[]>([]);
-  const [total, setTotal] = useState(0);
+  const [totals, setTotals] = useState({ total: 0, capped: false, cap: 100_000 });
   const [loading, setLoading] = useState(false);
   const seq = useRef(0);
   const queryKey = query ? JSON.stringify(query) : null;
@@ -89,7 +90,7 @@ export function ConversationDrilldown({
       .then((json) => {
         if (mySeq !== seq.current) return;
         setRows(json.rows ?? []);
-        setTotal(json.total ?? 0);
+        setTotals(readCappedTotal(json));
       })
       .catch(() => {
         if (mySeq === seq.current) setRows([]);
@@ -101,7 +102,8 @@ export function ConversationDrilldown({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryKey, page]);
 
-  const pages = Math.max(1, Math.ceil(total / 50));
+  // Com teto ("100 mil+") o total já vem igual ao teto: a paginação não passa dele.
+  const pages = pageCount(totals.total, 50);
 
   return (
     <Sheet open={!!query} onOpenChange={(open) => !open && onClose()}>
@@ -109,7 +111,7 @@ export function ConversationDrilldown({
         <SheetHeader>
           <SheetTitle>{query?.title}</SheetTitle>
           <SheetDescription>
-            {loading ? "Carregando…" : `${total.toLocaleString("pt-BR")} conversa(s) · clique para abrir o caso`}
+            {loading ? "Carregando…" : `${formatCappedTotal(totals.total, totals.capped, totals.cap)} conversa(s) · clique para abrir o caso`}
           </SheetDescription>
         </SheetHeader>
         <div className="space-y-1 px-4 pb-4">

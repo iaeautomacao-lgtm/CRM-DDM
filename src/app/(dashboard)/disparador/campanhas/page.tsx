@@ -32,7 +32,7 @@ import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { DenseTable, Td, Th, Tr } from "@/components/ddm/table-card";
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
-import { EmptyState, Skeleton } from "@/components/ddm/states";
+import { EmptyState, ErrorState, Skeleton } from "@/components/ddm/states";
 import { ExportJobButton } from "@/components/disparador/export/campaign-exports";
 import { parseReusedList, type ReusedList } from "@/lib/disparador/import-client";
 import {
@@ -385,9 +385,13 @@ export default function CampanhasPage() {
   // número vermelho = campaigns.red_quality_override (só proprietário).
   const { can } = usePermissions();
   const canRecalculate = can("campaigns.manage");
+  // Criar, editar, iniciar, pausar, retomar, encerrar, desagendar e excluir: campaigns.manage, a chave que
+  // requireDisparadorAccess exige em todas as rotas /api/disparador/campaigns/*.
+  const canManage = can("campaigns.manage");
   const canOverrideRed = can("campaigns.red_quality_override");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [recalculatingMetrics, setRecalculatingMetrics] = useState(false);
   const [tags, setTags] = useState<TagItem[]>([]);
   const [sessions, setSessions] = useState<WahaSession[]>([]);
@@ -573,12 +577,15 @@ export default function CampanhasPage() {
       setAccountId(scopedAccountId);
 
       // Load Campaigns
-      const { data: campaignList } = await supabase
+      const { data: campaignList, error: campaignsError } = await supabase
         .from("campaigns")
         .select("*")
         .eq("account_id", scopedAccountId)
         .order("created_at", { ascending: false });
+      // Erro de carga vira ErrorState (antes caía em "Nenhuma campanha cadastrada").
+      if (campaignsError) throw campaignsError;
       setCampaigns(campaignList ?? []);
+      setLoadError(null);
 
       // Métricas resumidas por campanha — buscadas junto (1 query pra
       // todas, não N+1) para que os cards já mostrem
@@ -659,6 +666,7 @@ export default function CampanhasPage() {
       setSessions(wahaSessions);
     } catch (err) {
       console.error("Failed to load campaigns metadata:", err);
+      setLoadError("Não foi possível carregar as campanhas.");
     } finally {
       setLoading(false);
     }
@@ -1115,9 +1123,9 @@ export default function CampanhasPage() {
                 Recalcular métricas
               </Button>
             )}
-            <Button onClick={openCreateModal}>
+            {canManage && <Button onClick={openCreateModal}>
               <Plus className="size-3.5" aria-hidden="true" /> Nova campanha
-            </Button>
+            </Button>}
           </>
         }
       >
@@ -1147,11 +1155,13 @@ export default function CampanhasPage() {
             <Skeleton key={i} className="h-[112px] w-full rounded-[10px]" />
           ))}
         </div>
+      ) : loadError && campaigns.length === 0 ? (
+        <ErrorState title={loadError} onRetry={() => void loadData()} />
       ) : campaigns.length === 0 ? (
         <EmptyState
           icon={Megaphone}
           title="Nenhuma campanha cadastrada"
-          hint="Crie a primeira campanha em “Nova campanha”."
+          hint={canManage ? "Crie a primeira campanha em “Nova campanha”." : undefined}
         />
       ) : visibleCampaigns.length === 0 ? (
         <EmptyState icon={Search} title="Nenhuma campanha neste filtro" hint="Troque o filtro ou a busca." />
@@ -1250,7 +1260,7 @@ export default function CampanhasPage() {
 
                 {/* Ações */}
                 <div className="ml-auto flex flex-none flex-wrap items-center gap-1.5">
-                  {c.status === "em_execucao" ? (
+                  {!canManage ? null : c.status === "em_execucao" ? (
                     <Button variant="outline" onClick={() => handlePause(c.id)}>
                       <Pause className="size-3.5" aria-hidden="true" /> Pausar
                     </Button>
@@ -1268,7 +1278,7 @@ export default function CampanhasPage() {
                       <Play className="size-3.5" aria-hidden="true" /> {c.status === "pausada" ? "Retomar" : "Iniciar"}
                     </Button>
                   ) : null}
-                  {(c.status === "em_execucao" || c.status === "pausada") && (
+                  {canManage && (c.status === "em_execucao" || c.status === "pausada") && (
                     <Button variant="outline" onClick={() => setStopConfirm({ id: c.id, nome: c.nome })}>
                       Encerrar
                     </Button>
@@ -1283,7 +1293,7 @@ export default function CampanhasPage() {
                   >
                     Detalhes <ChevronRight className="size-3.5" aria-hidden="true" />
                   </Link>
-                  {(c.status === "rascunho" || c.status === "agendado") && (
+                  {canManage && (c.status === "rascunho" || c.status === "agendado") && (
                     <Button
                       size="icon"
                       variant="ghost"
@@ -1295,7 +1305,7 @@ export default function CampanhasPage() {
                       <Pencil className="size-4" aria-hidden="true" />
                     </Button>
                   )}
-                  <Button
+                  {canManage && <Button
                     size="icon"
                     variant="ghost"
                     onClick={() => askDelete(c)}
@@ -1304,7 +1314,7 @@ export default function CampanhasPage() {
                     className="text-danger hover:bg-danger-soft hover:text-danger"
                   >
                     <Trash2 className="size-4" aria-hidden="true" />
-                  </Button>
+                  </Button>}
                 </div>
               </section>
             );
@@ -1807,7 +1817,7 @@ export default function CampanhasPage() {
               !queueDetailLoading &&
               metricsData &&
               queueDetailTotal < metricsData.total_respostas && (
-                <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-muted-foreground">
+                <p className="m-0 rounded-lg bg-surface-3 px-3 py-2 text-xs text-foreground-2">
                   O card conta {metricsData.total_respostas} respostas; {metricsData.total_respostas - queueDetailTotal}{" "}
                   foram registradas antes do rastreio por envio e não aparecem nesta lista.
                 </p>

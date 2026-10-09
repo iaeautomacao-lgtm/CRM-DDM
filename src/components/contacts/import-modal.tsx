@@ -212,9 +212,9 @@ export function ImportModal({
         data: { session },
       } = await supabase.auth.getSession();
       const user = session?.user;
-      if (!user) throw new Error('Not authenticated');
+      if (!user) throw new Error('Você não está autenticado.');
       if (!accountId)
-        throw new Error('Your profile is not linked to an account.');
+        throw new Error('Seu perfil não está vinculado a uma conta.');
 
       let imported = 0;
       let skipped = 0;
@@ -587,7 +587,7 @@ export function ImportModal({
           )}
 
           {result && (
-            <div className="rounded-xl border border-border bg-background/50 p-4">
+            <div role="status" className="rounded-xl border border-border bg-background/50 p-4">
               <p className="text-sm font-medium text-popover-foreground">Importação concluída</p>
               <div className="mt-3 flex flex-wrap gap-3">
                 {result.imported > 0 && (
@@ -597,20 +597,20 @@ export function ImportModal({
                   </div>
                 )}
                 {result.tagsAssigned > 0 && (
-                  <div className="flex items-center gap-1.5 text-sm text-cyan-400">
+                  <div className="flex items-center gap-1.5 text-sm text-success">
                     <CheckCircle className="size-4 shrink-0" />
                     {result.tagsAssigned} tag
                     {result.tagsAssigned !== 1 ? 's' : ''} atribuída{result.tagsAssigned !== 1 ? 's' : ''}
                   </div>
                 )}
                 {result.skipped > 0 && (
-                  <div className="flex items-center gap-1.5 text-sm text-amber-400">
+                  <div className="flex items-center gap-1.5 text-sm text-warning">
                     <AlertTriangle className="size-4 shrink-0" />
                     {result.skipped} ignorado{result.skipped !== 1 ? 's' : ''}
                   </div>
                 )}
                 {result.failed > 0 && (
-                  <div className="flex items-center gap-1.5 text-sm text-red-400">
+                  <div className="flex items-center gap-1.5 text-sm text-danger">
                     <XCircle className="size-4 shrink-0" />
                     {result.failed} falhou{result.failed !== 1 ? 'ram' : ''}
                   </div>

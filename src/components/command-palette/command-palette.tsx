@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Loader2, Search } from "lucide-react";
@@ -22,6 +22,9 @@ export const OPEN_PALETTE_EVENT = "ddm:open-command-palette";
 export function openCommandPalette() {
   window.dispatchEvent(new Event(OPEN_PALETTE_EVENT));
 }
+
+const subscribeNoop = () => () => {};
+const detectMac = () => /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
 
 function isTypingTarget(el: Element | null): boolean {
   if (!el) return false;
@@ -45,6 +48,7 @@ export function CommandPalette() {
   const { data: me, loading, error } = useMePermissions();
   const listRef = useRef<HTMLDivElement>(null);
   const listId = useId();
+  const isMac = useSyncExternalStore(subscribeNoop, detectMac, () => false);
 
   const visible = useMemo(
     () => (me ? PALETTE_ITEMS.filter((item) => isPaletteItemVisible(item, me)) : []),
@@ -127,7 +131,7 @@ export function CommandPalette() {
               placeholder="Buscar telas e atalhos…"
               aria-label="Buscar"
               role="combobox"
-              aria-expanded="true"
+              aria-expanded={!loading && !error && results.length > 0}
               aria-controls={listId}
               aria-autocomplete="list"
               aria-activedescendant={results[activeIndex] ? `${listId}-${activeIndex}` : undefined}
@@ -136,7 +140,16 @@ export function CommandPalette() {
             <kbd className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">Esc</kbd>
           </div>
 
-          <div ref={listRef} id={listId} role="listbox" aria-label="Resultados" className="min-h-0 flex-1 overflow-y-auto p-1.5">
+          {/* Anúncio da quantidade de resultados (WCAG 4.1.3), fora do listbox. */}
+          <div role="status" aria-live="polite" className="sr-only">
+            {loading || error
+              ? ""
+              : results.length === 0
+                ? "Nenhum resultado"
+                : `${results.length} ${results.length === 1 ? "resultado" : "resultados"}`}
+          </div>
+
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">
             {loading ? (
               <p className="flex items-center justify-center gap-2 px-3 py-6 text-[13px] text-muted-foreground" role="status">
                 <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -150,8 +163,9 @@ export function CommandPalette() {
               <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
                 Nada encontrado para “{query}”.
               </p>
-            ) : (
-              results.map((item, i) => {
+            ) : null}
+            <div id={listId} role="listbox" aria-label="Resultados">
+              {!loading && !error && results.map((item, i) => {
                 const selected = i === activeIndex;
                 const current = isCurrentPaletteItem(item, pathname, search);
                 return (
@@ -176,14 +190,14 @@ export function CommandPalette() {
                     <span className="shrink-0 text-[11.5px] text-muted-foreground">{item.group}</span>
                   </div>
                 );
-              })
-            )}
+              })}
+            </div>
           </div>
 
           <div className="hidden gap-3.5 border-t border-border px-3.5 py-2 text-[11.5px] text-muted-foreground sm:flex" aria-hidden="true">
             <span>↑ ↓ navegar</span>
             <span>Enter abrir</span>
-            <span>Ctrl K abrir/fechar</span>
+            <span>{isMac ? "⌘K" : "Ctrl K"} abrir/fechar</span>
           </div>
         </DialogPrimitive.Popup>
       </DialogPortal>

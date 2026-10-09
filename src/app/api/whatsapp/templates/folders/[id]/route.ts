@@ -15,7 +15,7 @@ export async function PATCH(
   try {
     const { id } = await context.params
     if (!UUID_RE.test(id)) {
-      return NextResponse.json({ error: 'Invalid folder id.' }, { status: 400 })
+      return NextResponse.json({ error: 'ID de pasta inválido.' }, { status: 400 })
     }
 
     const { supabase, accountId } = await requirePermission('templates.manage')
@@ -24,7 +24,7 @@ export async function PATCH(
     try {
       body = (await request.json()) as { name?: string; position?: number }
     } catch {
-      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 })
+      return NextResponse.json({ error: 'Corpo JSON inválido.' }, { status: 400 })
     }
 
     const patch: { name?: string; position?: number } = {}
@@ -32,11 +32,11 @@ export async function PATCH(
     if (body.name !== undefined) {
       const name = body.name.trim()
       if (!name) {
-        return NextResponse.json({ error: 'Folder name cannot be empty.' }, { status: 400 })
+        return NextResponse.json({ error: 'O nome da pasta não pode ficar vazio.' }, { status: 400 })
       }
       if (name.length > NAME_MAX_LENGTH) {
         return NextResponse.json(
-          { error: `Folder name exceeds ${NAME_MAX_LENGTH} characters.` },
+          { error: `O nome da pasta excede ${NAME_MAX_LENGTH} caracteres.` },
           { status: 400 },
         )
       }
@@ -45,13 +45,13 @@ export async function PATCH(
 
     if (body.position !== undefined) {
       if (!Number.isInteger(body.position)) {
-        return NextResponse.json({ error: 'position must be an integer.' }, { status: 400 })
+        return NextResponse.json({ error: 'position deve ser um inteiro.' }, { status: 400 })
       }
       patch.position = body.position
     }
 
     if (Object.keys(patch).length === 0) {
-      return NextResponse.json({ error: 'Nothing to update.' }, { status: 400 })
+      return NextResponse.json({ error: 'Nada para atualizar.' }, { status: 400 })
     }
 
     // RLS scopes writes to admin+ members of the folder's own
@@ -69,7 +69,7 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
     if (!folder) {
-      return NextResponse.json({ error: 'Folder not found.' }, { status: 404 })
+      return NextResponse.json({ error: 'Pasta não encontrada.' }, { status: 404 })
     }
 
     return NextResponse.json({ folder })
@@ -85,7 +85,7 @@ export async function DELETE(
   try {
     const { id } = await context.params
     if (!UUID_RE.test(id)) {
-      return NextResponse.json({ error: 'Invalid folder id.' }, { status: 400 })
+      return NextResponse.json({ error: 'ID de pasta inválido.' }, { status: 400 })
     }
 
     const { supabase, accountId } = await requirePermission('templates.manage')
@@ -97,7 +97,7 @@ export async function DELETE(
       .eq('account_id', accountId)
       .maybeSingle()
     if (lookupErr || !existing) {
-      return NextResponse.json({ error: 'Folder not found.' }, { status: 404 })
+      return NextResponse.json({ error: 'Pasta não encontrada.' }, { status: 404 })
     }
 
     // Templates in the folder are kept — just unfiled. FK is

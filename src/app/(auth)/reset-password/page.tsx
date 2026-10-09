@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { MIN_PASSWORD_LENGTH, PASSWORD_TOO_SHORT_MESSAGE, translateAuthError } from "@/lib/auth/auth-errors";
@@ -24,6 +24,8 @@ export default function ResetPasswordPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  const focusFirst = () => setTimeout(() => firstFieldRef.current?.focus(), 0);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   // Antes de mostrar o formulário, confere se o link abriu uma sessão de
@@ -66,11 +68,13 @@ export default function ResetPasswordPage() {
 
     if (password !== confirmPassword) {
       setError("As senhas não coincidem.");
+      focusFirst();
       return;
     }
 
     if (password.length < MIN_PASSWORD_LENGTH) {
       setError(PASSWORD_TOO_SHORT_MESSAGE);
+      focusFirst();
       return;
     }
 
@@ -82,6 +86,7 @@ export default function ResetPasswordPage() {
 
     if (error) {
       setError(translateAuthError(error));
+      focusFirst();
       setLoading(false);
       return;
     }
@@ -145,6 +150,7 @@ export default function ResetPasswordPage() {
           <div className="relative flex items-center">
             <Input
               id="password"
+              ref={firstFieldRef}
               type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               placeholder={`Pelo menos ${MIN_PASSWORD_LENGTH} caracteres`}
@@ -159,6 +165,7 @@ export default function ResetPasswordPage() {
               type="button"
               onClick={() => setShowPassword((v) => !v)}
               aria-pressed={showPassword}
+              aria-label="Mostrar senha"
               aria-controls="password confirmPassword"
               className="absolute right-1.5 h-[30px] rounded-[6px] px-2 text-xs font-semibold text-foreground-2 hover:bg-surface-hover hover:text-foreground"
             >

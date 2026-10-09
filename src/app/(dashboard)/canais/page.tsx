@@ -46,6 +46,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/dashboard/empty-state";
+import { ErrorState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { ChannelConfig } from "@/components/canais/types";
 import { NewChannelDialog } from "@/components/canais/NewChannelDialog";
@@ -118,6 +119,7 @@ export default function CanaisPage() {
   const [flows, setFlows] = useState<{ id: string; name: string; status?: string }[]>([]);
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -177,13 +179,16 @@ export default function CanaisPage() {
     setLoading(true);
     try {
       const res = await apiFetch("/api/whatsapp/config");
-      const payload = await res.json();
+      const payload = await res.json().catch(() => ({}));
+      // Erro de carga vira ErrorState com "Tentar novamente" — não "Nenhum canal configurado".
+      if (!res.ok) throw new Error(payload?.error || `Erro HTTP ${res.status}`);
       const list = (payload.configs ?? []) as ChannelConfig[];
       setConfigs(list);
+      setLoadError(null);
       return list;
     } catch (err) {
       console.error("[canais] failed to load channels:", err);
-      toast.error("Falha ao carregar canais");
+      setLoadError(err instanceof Error ? err.message : "Falha ao carregar canais");
       return [];
     } finally {
       setLoading(false);
@@ -250,6 +255,9 @@ export default function CanaisPage() {
   // Disparador › Números (GET /api/disparador/rate-limits, migrations 190/221),
   // só para quem tem campaigns.rate_limit. Sem leitura, a coluna mostra "—".
   const canSeeQuality = usePermission("campaigns.rate_limit");
+  // Escrita em canais (conectar, editar, ligar/desligar, cliente da linha, testar, excluir): channels.manage, a
+  // mesma chave que /api/whatsapp/config, /waha/* e /channel-test exigem no servidor.
+  const canManage = usePermission("channels.manage");
   const [quality, setQuality] = useState<Map<string, ChannelQuality>>(new Map());
   useEffect(() => {
     if (!canSeeQuality) return;
@@ -394,7 +402,7 @@ export default function CanaisPage() {
         </p>
       </div>
 
-      {!loading && configs.length > 0 && (
+      {!loading && !loadError && configs.length > 0 && (
         <KpiStrip
           ariaLabel="Resumo dos canais"
           items={[
@@ -419,15 +427,17 @@ export default function CanaisPage() {
 
       <PageToolbar
         actions={
-          <>
-            <Button variant="outline" onClick={() => setClientsOpen(true)}>
-              Clientes
-            </Button>
-            <Button onClick={() => setNewOpen(true)}>
-              <Plus className="size-3.5" />
-              Conectar canal
-            </Button>
-          </>
+          canManage ? (
+            <>
+              <Button variant="outline" onClick={() => setClientsOpen(true)}>
+                Clientes
+              </Button>
+              <Button onClick={() => setNewOpen(true)}>
+                <Plus className="size-3.5" />
+                Conectar canal
+              </Button>
+            </>
+          ) : undefined
         }
       >
         <label className="relative flex min-w-0 flex-[1_1_240px] items-center sm:max-w-[360px]">
@@ -454,7 +464,7 @@ export default function CanaisPage() {
         />
       </PageToolbar>
 
-      {selectedCount > 0 && (
+      {canManage && selectedCount > 0 && (
         <div className="flex animate-ddm-up flex-wrap items-center gap-2.5 rounded-[10px] bg-foreground py-2 pl-4 pr-2.5 text-background">
           <span className="text-[13px] font-semibold">
             {selectedCount} {selectedCount === 1 ? "canal selecionado" : "canais selecionados"}
@@ -464,7 +474,6 @@ export default function CanaisPage() {
             variant="destructive"
             size="sm"
             onClick={() => setDeleteTargets(configs.filter((c) => selected.has(c.id)))}
-            className="bg-[#d8362f] text-white hover:bg-[#c42b24]"
           >
             <Trash2 className="size-3.5" />
             Excluir
@@ -498,6 +507,10 @@ export default function CanaisPage() {
               </div>
             ))}
           </div>
+        ) : loadError ? (
+          <div className="p-4">
+            <ErrorState title="Não foi possível carregar os canais" hint={loadError} onRetry={() => void fetchConfigs()} />
+          </div>
         ) : visibleConfigs.length === 0 ? (
           <div className="p-4">
             <EmptyState
@@ -505,7 +518,9 @@ export default function CanaisPage() {
               title={configs.length === 0 ? "Nenhum canal configurado" : "Nada encontrado"}
               hint={
                 configs.length === 0
-                  ? "Clique em “Conectar canal” para conectar um número WhatsApp (WAHA ou Meta)."
+                  ? canManage
+                    ? "Clique em “Conectar canal” para conectar um número WhatsApp (WAHA ou Meta)."
+                    : "Peça a um administrador para conectar um número."
                   : "Ajuste a busca ou o filtro."
               }
             />
@@ -514,9 +529,11 @@ export default function CanaisPage() {
           <DenseTable>
             <thead>
               <tr>
-                <Th className="w-11 pl-4 pr-0">
-                  <Checkbox checked={allVisibleSelected} onCheckedChange={toggleSelectAll} aria-label="Selecionar todos" />
-                </Th>
+                {canManage && (
+                  <Th className="w-11 pl-4 pr-0">
+                    <Checkbox checked={allVisibleSelected} onCheckedChange={toggleSelectAll} aria-label="Selecionar todos" />
+                  </Th>
+                )}
                 <Th>Canal</Th>
                 <Th className="hidden md:table-cell">Situação</Th>
                 <Th className="hidden lg:table-cell">Número / sessão</Th>
@@ -534,13 +551,15 @@ export default function CanaisPage() {
                 const q = quality.get(c.id);
                 return (
                   <Tr key={c.id} onClick={() => setDetail(c)} className={cn("cursor-pointer", selected.has(c.id) && "bg-selected")}>
-                    <Td className="pl-4 pr-0" onClick={(e) => e.stopPropagation()}>
-                      <Checkbox
-                        checked={selected.has(c.id)}
-                        onCheckedChange={() => toggleRow(c.id)}
-                        aria-label={`Selecionar ${channelName(c)}`}
-                      />
-                    </Td>
+                    {canManage && (
+                      <Td className="pl-4 pr-0" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selected.has(c.id)}
+                          onCheckedChange={() => toggleRow(c.id)}
+                          aria-label={`Selecionar ${channelName(c)}`}
+                        />
+                      </Td>
+                    )}
                     <Td>
                       <span className="flex min-w-0 items-center gap-2.5">
                         <span className="flex size-[30px] shrink-0 items-center justify-center rounded-full bg-success-soft text-success" aria-hidden="true">
@@ -572,6 +591,7 @@ export default function CanaisPage() {
                       <select
                         value={c.client_id ?? ""}
                         onChange={(e) => handleClientChange(c, e.target.value || null)}
+                        disabled={!canManage}
                         aria-label={`Cliente — ${channelName(c)}`}
                         className="h-8 max-w-[160px] rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:border-primary"
                       >
@@ -587,7 +607,7 @@ export default function CanaisPage() {
                       <Switch
                         checked={c.receptivo}
                         onCheckedChange={() => handleToggleField(c, "receptivo")}
-                        disabled={toggleBusyKey === `${c.id}:receptivo`}
+                        disabled={!canManage || toggleBusyKey === `${c.id}:receptivo`}
                         aria-label={`Receptivo — ${channelName(c)}`}
                       />
                     </Td>
@@ -595,12 +615,12 @@ export default function CanaisPage() {
                       <Switch
                         checked={c.habilitado}
                         onCheckedChange={() => handleToggleField(c, "habilitado")}
-                        disabled={toggleBusyKey === `${c.id}:habilitado`}
+                        disabled={!canManage || toggleBusyKey === `${c.id}:habilitado`}
                         aria-label={`Ativo — ${channelName(c)}`}
                       />
                     </Td>
                     <Td className="pr-2 text-right" onClick={(e) => e.stopPropagation()}>
-                      <ChannelActions
+                      {canManage && <ChannelActions
                         c={c}
                         stopBusy={stopBusyId === c.id}
                         onConnect={() => setConnecting(c)}
@@ -608,7 +628,7 @@ export default function CanaisPage() {
                         onTest={() => setTesting(c)}
                         onEdit={() => setEditing(c)}
                         onDelete={() => setDeleteTargets([c])}
-                      />
+                      />}
                     </Td>
                   </Tr>
                 );
@@ -626,7 +646,7 @@ export default function CanaisPage() {
         description={detailRow ? `WhatsApp · ${detailRow.provider === "waha" ? "WAHA" : "Meta Cloud"}` : undefined}
         headerExtra={detailRow ? <ChannelStatus c={detailRow} /> : undefined}
         footer={
-          detailRow ? (
+          detailRow && canManage ? (
             <div className="flex flex-wrap justify-end gap-2">
               <Button variant="outline" onClick={() => setTesting(detailRow)}>
                 <Zap className="size-3.5" />
@@ -672,8 +692,10 @@ export default function CanaisPage() {
 
       <SocialChannelsSection flows={flows} teams={teams} clients={clients} />
 
+      {/* GET e PUT de /api/webchat/settings exigem channels.manage: sem ela a seção nem aparece. */}
+
       {/* Só fluxos ativos: o motor recusa iniciar Webchat em rascunho. */}
-      <WebchatSettingsSection flows={flows.filter((f) => f.status === "active")} />
+      {canManage && <WebchatSettingsSection flows={flows.filter((f) => f.status === "active")} />}
 
       <ClientsDialog
         accountId={accountId}

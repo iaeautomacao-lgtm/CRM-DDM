@@ -129,8 +129,9 @@ export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps)
                           disabled={isFirst}
                           onClick={() => handleMoveRule(index, 'up')}
                           title="Mover para cima"
+                          aria-label={`Mover regra ${index + 1} para cima`}
                         >
-                          <ArrowUp className="size-3.5" />
+                          <ArrowUp className="size-3.5" aria-hidden="true" />
                         </Button>
                         <Button
                           type="button"
@@ -140,13 +141,15 @@ export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps)
                           disabled={isLast}
                           onClick={() => handleMoveRule(index, 'down')}
                           title="Mover para baixo"
+                          aria-label={`Mover regra ${index + 1} para baixo`}
                         >
-                          <ArrowDown className="size-3.5" />
+                          <ArrowDown className="size-3.5" aria-hidden="true" />
                         </Button>
                         <div className="h-4 w-px bg-border mx-1" />
                         <div className="flex items-center gap-1.5 mr-1">
                           <Switch
                             id={`rule-toggle-${rule.id}`}
+                            aria-label={`Regra ${index + 1} ativa`}
                             checked={rule.enabled}
                             onCheckedChange={(checked) => handleToggleRule(index, checked)}
                             className="scale-90"
@@ -159,8 +162,9 @@ export function RulesTab({ data, onChange, readOnly, onConvert }: RulesTabProps)
                           className="size-7 text-muted-foreground hover:text-destructive"
                           onClick={() => handleRemoveRule(index)}
                           title="Remover regra"
+                          aria-label={`Remover regra ${index + 1}`}
                         >
-                          <Trash2 className="size-3.5" />
+                          <Trash2 className="size-3.5" aria-hidden="true" />
                         </Button>
                       </>
                     )}

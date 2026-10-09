@@ -144,6 +144,12 @@ export function FlowEditorShell({ initialFlow, initialNodes, debug, focusNodeKey
         />
         <EditorNotices />
 
+        {isMobile && !isDebugMode && (
+          <p className="mx-4 mt-2 text-xs text-muted-foreground">
+            O diagrama e o teste do fluxo ficam disponíveis em telas maiores. Aqui você edita pela lista.
+          </p>
+        )}
+
         {/* ---- legenda dos tipos de nó (só telas largas, fora do debug) ---- */}
         {!isMobile && !isDebugMode && (
           <div className="hidden items-center px-6 pt-3 lg:flex">
@@ -248,14 +254,17 @@ function NodeLegend() {
             key={t}
             type="button"
             onClick={match ? () => requestFlash(match.node_key) : undefined}
+            disabled={!match}
+            title={match ? undefined : "Nenhum nó deste tipo no fluxo"}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11.5px] text-muted-foreground transition-colors",
-              match ? "cursor-pointer hover:text-foreground" : "cursor-default"
+              match ? "cursor-pointer hover:text-foreground" : "cursor-default opacity-60"
             )}
           >
             <span
               className="h-2.5 w-2.5 rounded-full"
               style={{ background: nodeColors(t).solid }}
+              aria-hidden="true"
             />
             {NODE_META[t].label}
           </button>
@@ -276,7 +285,7 @@ function DebugBanner({ debug }: { debug: FlowDebugState }) {
   const contactLabel = contact?.name?.trim() || contact?.phone || "contato desconhecido";
   const startedAt = debug.runMeta?.started_at;
   return (
-    <div className="flex animate-ddm-fade items-center gap-2.5 border-b border-primary bg-primary-soft px-6 py-2.5 text-[13px]">
+    <div role="status" className="flex animate-ddm-fade items-center gap-2.5 border-b border-primary bg-primary-soft px-6 py-2.5 text-[13px]">
       <Eye className="size-4 shrink-0 text-primary-text" />
       <span className="min-w-0 truncate text-foreground">
         {debug.loading

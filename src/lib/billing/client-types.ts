@@ -163,3 +163,60 @@ export function variableKey(src: VariableSource | undefined): string {
   if (src.type === "static") return "static";
   return `${src.type === "contact_field" ? "contact" : "debt"}:${src.field}`;
 }
+
+// ── Relatório e alertas (PRD 17.6) ─────────────────────────────────────────
+
+export interface RulerReport {
+  ruler_id: string;
+  from: string;
+  to: string;
+  steps: Array<{
+    step_id: string;
+    position: number;
+    offset_days: number | null;
+    active: boolean;
+    sent: number;
+    delivered: number;
+    read: number;
+    replied: number;
+    errors: number;
+    paid_after: number;
+  }>;
+  totals: { sent: number; delivered: number; read: number; replied: number; errors: number };
+  payments: {
+    paid_after_charge: number;
+    paid_without_charge: number;
+    avg_charges_before_payment: number | null;
+    by_charges: Array<{ charges: number; total: number }>;
+  };
+  daily: Array<{ day: string; sent: number; paid_after: number }>;
+}
+
+export type BillingAlertCode =
+  | "sync_never_succeeded"
+  | "sync_stale"
+  | "reserved_stuck"
+  | "deferred_rate_high"
+  | "ruler_without_channel"
+  | "ruler_channel_disabled"
+  | "ruler_channel_red";
+
+export interface BillingAlert {
+  code: BillingAlertCode;
+  severity: "warning" | "critical";
+  /** Já vem em português do servidor. */
+  message: string;
+  detail?: unknown;
+}
+
+/** Texto da tela para "paga após cobrança": é pagamento DETECTADO depois do envio, não a data do pagamento. */
+export const PAID_AFTER_NOTE =
+  "“Paga após cobrança” é o pagamento detectado pelo sistema depois de pelo menos uma etapa enviada, atribuído à última etapa enviada. É uma correlação, não prova que a cobrança causou o pagamento, e não é a data do pagamento na DDM.";
+
+export const REPLIED_NOTE = "“Respondida” é quando o cliente escreveu em até 3 dias depois do envio.";
+
+/** Média de cobranças até o pagamento: "2,4" (null = sem dado). */
+export function formatAvgCharges(v: number | null | undefined): string {
+  if (v == null) return "—";
+  return v.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+}

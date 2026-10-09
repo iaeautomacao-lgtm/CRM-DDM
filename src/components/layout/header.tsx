@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
@@ -22,6 +23,9 @@ import { openCommandPalette } from "@/components/command-palette/command-palette
 import { getPageTitle } from "@/lib/nav";
 import { usePermissions } from "@/hooks/use-permission";
 
+const subscribeNoop = () => () => {};
+const detectMac = () => /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
+
 interface HeaderProps {
   /** Wired to the shell's drawer state. Used only on mobile — the
    *  hamburger button is hidden on lg+. */
@@ -33,6 +37,9 @@ export function Header({ onOpenSidebar }: HeaderProps) {
   const { profile, signOut } = useAuth();
   const { canOpen } = usePermissions();
   const title = getPageTitle(pathname);
+  // Atalho exibido conforme a plataforma (⌘K no Mac). Começa em Ctrl para
+  // casar com o HTML do servidor e troca após montar.
+  const isMac = useSyncExternalStore(subscribeNoop, detectMac, () => false);
 
   const initial =
     profile?.full_name?.charAt(0)?.toUpperCase() ??
@@ -47,7 +54,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
           type="button"
           onClick={onOpenSidebar}
           aria-label="Abrir menu"
-          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:hidden"
         >
           <Menu className="h-5 w-5" />
         </button>
@@ -60,19 +67,19 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         <button
           type="button"
           onClick={openCommandPalette}
-          aria-label="Buscar telas (Ctrl+K)"
+          aria-label={`Buscar telas (${isMac ? "⌘K" : "Ctrl+K"})`}
           aria-keyshortcuts="Control+K Meta+K"
-          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground md:h-8 md:w-56 md:justify-start md:gap-2 md:border md:border-border md:bg-card md:px-2.5"
+          className="flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-8 md:w-56 md:justify-start md:gap-2 md:border md:border-border md:bg-card md:px-2.5"
         >
           <Search className="size-4 shrink-0" aria-hidden="true" />
           <span className="hidden flex-1 text-left text-[13px] md:inline">Buscar…</span>
-          <kbd className="hidden rounded border border-border px-1.5 font-mono text-[10.5px] md:inline">Ctrl K</kbd>
+          <kbd className="hidden rounded border border-border px-1.5 font-mono text-[10.5px] md:inline" aria-hidden="true">{isMac ? "⌘K" : "Ctrl K"}</kbd>
         </button>
         <ModeToggle />
 
         <DropdownMenu>
         <DropdownMenuTrigger
-          className="flex items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-muted/70 focus:bg-muted/70 focus:outline-none data-popup-open:bg-muted/70 sm:gap-3 sm:pl-1 sm:pr-3"
+          className="flex items-center gap-2 rounded-md px-1 py-1 transition-colors hover:bg-muted/70 focus-visible:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-muted/70 sm:gap-3 sm:pl-1 sm:pr-3"
           aria-label="Abrir menu da conta"
         >
           <Avatar className="size-8">

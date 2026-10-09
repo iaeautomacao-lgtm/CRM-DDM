@@ -38,6 +38,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { StatusChip } from '@/components/ddm/status-chip';
 import { SettingsPanelHead } from './settings-panel-head';
 import {
   Accordion,
@@ -164,13 +165,13 @@ export function WhatsAppConfig() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to request pairing code');
+        throw new Error(data.error || 'Falha ao solicitar o código de pareamento');
       }
 
       setPairingCode(data.code);
       toast.success('Código de pareamento gerado!');
     } catch (err: any) {
-      setPairingError(err.message || 'Failed to generate code');
+      setPairingError(err.message || 'Falha ao gerar o código');
       toast.error(err.message || 'Erro ao gerar código');
     } finally {
       setPairingLoading(false);
@@ -706,13 +707,13 @@ export function WhatsAppConfig() {
                       >
                         <div className="flex items-center gap-3">
                           {/* Status Dot */}
-                          <span className="relative flex h-2.5 w-2.5">
+                          <span className="relative flex h-2.5 w-2.5" aria-hidden="true">
                             {c.connected && (
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75"></span>
                             )}
                             <span
                               className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                                c.connected ? 'bg-emerald-500' : 'bg-red-500'
+                                c.connected ? 'bg-success' : 'bg-danger'
                               }`}
                             ></span>
                           </span>
@@ -725,6 +726,9 @@ export function WhatsAppConfig() {
                               <span className="font-medium capitalize text-primary/80 bg-primary/10 px-1.5 py-0.5 rounded text-[10px]">
                                 {c.provider === 'waha' ? 'WAHA' : 'Meta API'}
                               </span>
+                              <StatusChip tone={c.connected ? 'ok' : 'bad'} dot={false}>
+                                {c.connected ? 'Conectado' : 'Desconectado'}
+                              </StatusChip>
                               {c.phone_info?.verified_name && (
                                 <span className="truncate max-w-[220px]">{c.phone_info.verified_name}</span>
                               )}
@@ -745,7 +749,7 @@ export function WhatsAppConfig() {
                             size="sm"
                             variant="outline"
                             onClick={() => setPendingConfirm({ kind: 'remove-line', config: c })}
-                            className="text-xs h-7 font-medium border-red-900/50 text-red-400 hover:bg-red-950/20 hover:text-red-300"
+                            className="text-xs h-7 font-medium border-danger/40 text-danger hover:bg-danger-soft hover:text-danger"
                           >
                             Remover
                           </Button>
@@ -1143,8 +1147,9 @@ export function WhatsAppConfig() {
               {provider === 'waha' ? (
                 <>
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">URL do Servidor WAHA</Label>
+                    <Label htmlFor="wa-waha-url" className="text-muted-foreground">URL do Servidor WAHA</Label>
                     <Input
+                      id="wa-waha-url"
                       placeholder="ex.: http://localhost:3000 ou https://waha.minhaempresa.com"
                       value={wahaUrl}
                       onChange={(e) => setWahaUrl(e.target.value)}
@@ -1156,8 +1161,9 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">Nome da Sessão</Label>
+                    <Label htmlFor="wa-waha-session" className="text-muted-foreground">Nome da Sessão</Label>
                     <Input
+                      id="wa-waha-session"
                       placeholder="ex.: default"
                       value={wahaSession}
                       onChange={(e) => setWahaSession(normalizeSessionName(e.target.value))}
@@ -1169,9 +1175,10 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">Chave de API do WAHA (Secret Key)</Label>
+                    <Label htmlFor="wa-waha-key" className="text-muted-foreground">Chave de API do WAHA (Secret Key)</Label>
                     <div className="relative">
                       <Input
+                        id="wa-waha-key"
                         type={showToken ? 'text' : 'password'}
                         placeholder="Insira o Token Secreto da API (opcional)"
                         value={wahaApiKey}
@@ -1190,6 +1197,8 @@ export function WhatsAppConfig() {
                       <button
                         type="button"
                         onClick={() => setShowToken(!showToken)}
+                        aria-label={showToken ? 'Ocultar chave de API' : 'Mostrar chave de API'}
+                        aria-pressed={showToken}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       >
                         {showToken ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -1205,8 +1214,9 @@ export function WhatsAppConfig() {
               ) : (
                 <>
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">ID do Número de Telefone</Label>
+                    <Label htmlFor="wa-phone-number-id" className="text-muted-foreground">ID do Número de Telefone</Label>
                     <Input
+                      id="wa-phone-number-id"
                       placeholder="ex.: 100234567890123"
                       value={phoneNumberId}
                       onChange={(e) => setPhoneNumberId(e.target.value)}
@@ -1215,8 +1225,9 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">ID da Conta WhatsApp Business (WABA)</Label>
+                    <Label htmlFor="wa-waba-id" className="text-muted-foreground">ID da Conta WhatsApp Business (WABA)</Label>
                     <Input
+                      id="wa-waba-id"
                       placeholder="ex.: 100234567890456"
                       value={wabaId}
                       onChange={(e) => setWabaId(e.target.value)}
@@ -1225,9 +1236,10 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">Token de Acesso Permanente</Label>
+                    <Label htmlFor="wa-access-token" className="text-muted-foreground">Token de Acesso Permanente</Label>
                     <div className="relative">
                       <Input
+                        id="wa-access-token"
                         type={showToken ? 'text' : 'password'}
                         placeholder="Insira seu token de acesso"
                         value={accessToken}
@@ -1246,6 +1258,8 @@ export function WhatsAppConfig() {
                       <button
                         type="button"
                         onClick={() => setShowToken(!showToken)}
+                        aria-label={showToken ? 'Ocultar token de acesso' : 'Mostrar token de acesso'}
+                        aria-pressed={showToken}
                         className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       >
                         {showToken ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -1259,8 +1273,9 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">Token de Verificação do Webhook</Label>
+                    <Label htmlFor="wa-verify-token" className="text-muted-foreground">Token de Verificação do Webhook</Label>
                     <Input
+                      id="wa-verify-token"
                       placeholder="Crie um token de verificação personalizado"
                       value={verifyToken}
                       onChange={(e) => setVerifyToken(e.target.value)}
@@ -1272,11 +1287,12 @@ export function WhatsAppConfig() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-muted-foreground">
+                    <Label htmlFor="wa-pin" className="text-muted-foreground">
                       PIN de confirmação em duas etapas
                       <span className="ml-1 text-muted-foreground">(opcional)</span>
                     </Label>
                     <Input
+                      id="wa-pin"
                       type="text"
                       inputMode="numeric"
                       maxLength={6}
@@ -1303,15 +1319,16 @@ export function WhatsAppConfig() {
               <CardTitle className="text-foreground">Configuração de Webhook</CardTitle>
               <CardDescription className="text-muted-foreground font-light">
                 {provider === 'waha'
-                  ? 'Configure this URL in your WAHA settings to receive incoming chats.'
-                  : 'Use this URL as your webhook callback in the Meta App Dashboard.'}
+                  ? 'Configure esta URL nas configurações do seu WAHA para receber as conversas.'
+                  : 'Use esta URL como callback de webhook no painel do app da Meta (Meta App Dashboard).'}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                <Label className="text-muted-foreground">URL de Callback do Webhook</Label>
+                <Label htmlFor="wa-webhook-url" className="text-muted-foreground">URL de Callback do Webhook</Label>
                 <div className="flex gap-2">
                   <Input
+                    id="wa-webhook-url"
                     readOnly
                     value={provider === 'waha' ? wahaWebhookUrl : metaWebhookUrl}
                     className="bg-muted border-border text-muted-foreground font-mono text-sm"
@@ -1321,6 +1338,7 @@ export function WhatsAppConfig() {
                     variant="outline"
                     size="icon"
                     onClick={handleCopyWebhookUrl}
+                    aria-label="Copiar URL de callback do webhook"
                     className="shrink-0 border-border text-muted-foreground hover:text-foreground hover:bg-muted"
                   >
                     <Copy className="size-4" />

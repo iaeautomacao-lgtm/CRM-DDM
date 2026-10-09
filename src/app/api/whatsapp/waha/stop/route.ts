@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     )
 
     if (configError || !configs || configs.length === 0 || configs[0].provider !== 'waha') {
-      return NextResponse.json({ error: 'WAHA is not configured.' }, { status: 400 })
+      return NextResponse.json({ error: 'WAHA não configurado.' }, { status: 400 })
     }
 
     const config = configs[0]
@@ -43,9 +43,9 @@ export async function POST(request: Request) {
     }
 
     await stopWahaSession(wahaConfig)
-    return NextResponse.json({ success: true, message: 'WAHA session stop requested.' })
+    return NextResponse.json({ success: true, message: 'Parada da sessão WAHA solicitada.' })
   } catch (err: any) {
     console.error('[waha/stop] error:', err)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 })
   }
 }

@@ -174,7 +174,7 @@ export async function POST() {
       return NextResponse.json(
         {
           error:
-            'WhatsApp not configured. Connect your WhatsApp Business account in Settings first.',
+            'WhatsApp não configurado. Conecte primeiro sua conta do WhatsApp Business nas Configurações.',
         },
         { status: 400 },
       )
@@ -191,7 +191,7 @@ export async function POST() {
       return NextResponse.json(
         {
           error:
-            'WABA (WhatsApp Business Account) ID missing. Re-connect your account in Settings.',
+            'ID da WABA (conta do WhatsApp Business) ausente. Reconecte sua conta nas Configurações.',
         },
         { status: 400 },
       )
@@ -257,7 +257,7 @@ export async function POST() {
     return NextResponse.json(
       {
         error:
-          error instanceof Error ? error.message : 'Failed to sync templates',
+          error instanceof Error ? error.message : 'Falha ao sincronizar os templates',
       },
       { status: 500 },
     )

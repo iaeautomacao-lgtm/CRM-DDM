@@ -664,7 +664,7 @@ export function InternalChatDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex h-[32rem] flex-col border-border bg-background p-0 sm:max-w-sm">
+      <DialogContent className="flex h-[min(32rem,85dvh)] flex-col border-border bg-background p-0 sm:max-w-sm">
         {step === "list" ? (
           <>
             <DialogHeader className="gap-2.5 border-b border-border px-4 pb-3 pt-4">
@@ -681,8 +681,9 @@ export function InternalChatDialog({
             <ScrollArea className="min-h-0 flex-1">
               <div className="space-y-0.5 p-2">
                 {contactsLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  <div role="status" className="flex items-center justify-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" />
+                    <span className="sr-only">Carregando pessoas…</span>
                   </div>
                 ) : contactsError ? (
                   <ErrorState
@@ -756,10 +757,17 @@ export function InternalChatDialog({
               </DialogHeader>
 
               <ScrollArea className="min-h-0 flex-1">
-                <div className="space-y-2 p-3">
+                <div
+                  role="log"
+                  aria-live="polite"
+                  aria-relevant="additions"
+                  aria-label="Mensagens da conversa"
+                  className="space-y-2 p-3"
+                >
                   {messagesLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                    <div role="status" className="flex items-center justify-center py-8">
+                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" aria-hidden="true" />
+                      <span className="sr-only">Carregando conversa…</span>
                     </div>
                   ) : messagesError ? (
                     <ErrorState
@@ -791,12 +799,8 @@ export function InternalChatDialog({
                                 <MessageMedia url={m.media_url} type={m.media_type} />
                               </div>
                             )}
-                            {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
-                            <p
-                              className={`mt-1 text-[10px] ${
-                                "text-muted-foreground"
-                              }`}
-                            >
+                            {m.content && <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{m.content}</p>}
+                            <p className="mt-1 text-[11px] text-muted-foreground">
                               {new Date(m.created_at).toLocaleTimeString("pt-BR", {
                                 hour: "2-digit",
                                 minute: "2-digit",
@@ -859,7 +863,7 @@ export function InternalChatDialog({
 
                 {recording ? (
                   <div className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3 py-2">
-                    <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger" />
+                    <span aria-hidden="true" className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger" />
                     <span className="flex-1 text-sm text-foreground">
                       Gravando… {formatDuration(recordSeconds)} / {formatDuration(MAX_RECORDING_SECONDS)}
                     </span>
@@ -917,6 +921,9 @@ export function InternalChatDialog({
                           handleSend();
                         }
                       }}
+                      aria-label="Mensagem"
+                      enterKeyHint="send"
+                      autoComplete="off"
                       placeholder="Escreva uma mensagem..."
                       disabled={composerDisabled}
                       className="flex-1"

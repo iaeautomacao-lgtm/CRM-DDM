@@ -568,7 +568,7 @@ export function AiAgentSettings() {
             {/* Files List */}
             {kbFiles.length > 0 ? (
               <div className="space-y-2 rounded-lg border border-border/60 bg-muted/20 p-3 max-h-52 overflow-y-auto">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
                   Documentos na Base ({kbFiles.length})
                 </p>
                 {kbFiles.map((file) => (
@@ -583,17 +583,18 @@ export function AiAgentSettings() {
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {new Date(file.created_at).toLocaleDateString("pt-BR")}
                       </span>
                       {canEditSettings && (
                         <button
                           type="button"
                           onClick={() => handleKbDelete(file.id)}
-                          className="text-muted-foreground hover:text-red-400 p-1 rounded hover:bg-muted cursor-pointer"
+                          className="text-muted-foreground hover:text-danger p-1.5 rounded hover:bg-muted cursor-pointer"
                           title="Remover Documento"
+                          aria-label={`Remover documento ${file.name}`}
                         >
-                          <Trash2 className="size-3.5" />
+                          <Trash2 className="size-3.5" aria-hidden="true" />
                         </button>
                       )}
                     </div>
@@ -602,9 +603,9 @@ export function AiAgentSettings() {
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center p-6 border border-dashed border-border/60 rounded-lg bg-muted/10 text-center">
-                <FileText className="size-6 text-muted-foreground/45 mb-1.5" />
+                <FileText className="size-6 text-muted-foreground mb-1.5" aria-hidden="true" />
                 <p className="text-xs text-muted-foreground">Sua base de conhecimento está vazia.</p>
-                <p className="text-[10px] text-muted-foreground/70 mt-0.5">Faça upload de arquivos acima para o robô poder consultá-los.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Faça upload de arquivos acima para o robô poder consultá-los.</p>
               </div>
             )}
           </CardContent>
