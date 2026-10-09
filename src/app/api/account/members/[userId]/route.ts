@@ -41,7 +41,7 @@ function rpcErrorToResponse(err: PostgrestError): NextResponse {
   }
   console.error("[members route] unexpected RPC error:", err);
   return NextResponse.json(
-    { error: "Failed to update member" },
+    { error: "Falha ao atualizar o membro" },
     { status: 500 },
   );
 }
@@ -69,7 +69,7 @@ export async function PATCH(
 
     if (!hasRole && !hasMaxChats) {
       return NextResponse.json(
-        { error: "Provide 'role' and/or 'max_simultaneous_chats' to update" },
+        { error: "Informe 'role' e/ou 'max_simultaneous_chats' para atualizar" },
         { status: 400 },
       );
     }
@@ -79,7 +79,7 @@ export async function PATCH(
 
       if (!isAccountRole(role)) {
         return NextResponse.json(
-          { error: "'role' must be one of owner, admin, supervisor, agent, viewer" },
+          { error: "'role' deve ser um destes: owner, admin, supervisor, agent, viewer" },
           { status: 400 },
         );
       }
@@ -90,7 +90,7 @@ export async function PATCH(
         return NextResponse.json(
           {
             error:
-              "Use POST /api/account/transfer-ownership to promote a member to owner",
+              "Use POST /api/account/transfer-ownership para promover um membro a proprietário",
           },
           { status: 400 },
         );
@@ -112,7 +112,7 @@ export async function PATCH(
         (typeof maxChats !== "number" || !Number.isInteger(maxChats) || maxChats < 1)
       ) {
         return NextResponse.json(
-          { error: "'max_simultaneous_chats' must be an integer >= 1, or null" },
+          { error: "'max_simultaneous_chats' deve ser um inteiro maior ou igual a 1, ou null" },
           { status: 400 },
         );
       }

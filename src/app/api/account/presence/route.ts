@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
     if (error) {
       console.error("[account/presence] touch_presence error:", error);
       return NextResponse.json(
-        { error: "Failed to update presence" },
+        { error: "Falha ao atualizar a presença" },
         { status: 500 },
       );
     }

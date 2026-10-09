@@ -53,7 +53,7 @@ export async function GET(
     const { teamId } = await params;
 
     if (!(await teamBelongsToAccount(ctx.supabase, teamId, ctx.accountId))) {
-      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+      return NextResponse.json({ error: "Equipe não encontrada" }, { status: 404 });
     }
 
     const { data, error } = await ctx.supabase
@@ -64,7 +64,7 @@ export async function GET(
     if (error) {
       console.error("[team members] list error:", error);
       return NextResponse.json(
-        { error: "Failed to load team members" },
+        { error: "Falha ao carregar os membros da equipe" },
         { status: 500 },
       );
     }
@@ -92,7 +92,7 @@ export async function POST(
     if (!limit.success) return rateLimitResponse(limit);
 
     if (!(await teamBelongsToAccount(ctx.supabase, teamId, ctx.accountId))) {
-      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+      return NextResponse.json({ error: "Equipe não encontrada" }, { status: 404 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -102,7 +102,7 @@ export async function POST(
 
     if (typeof userId !== "string" || !userId) {
       return NextResponse.json(
-        { error: "'userId' must be a non-empty string" },
+        { error: "'userId' deve ser um texto não vazio" },
         { status: 400 },
       );
     }
@@ -119,13 +119,13 @@ export async function POST(
     if (profileErr) {
       console.error("[team members] target lookup error:", profileErr);
       return NextResponse.json(
-        { error: "Failed to verify member" },
+        { error: "Falha ao verificar o membro" },
         { status: 500 },
       );
     }
     if (!targetProfile || targetProfile.account_id !== ctx.accountId) {
       return NextResponse.json(
-        { error: "Member not found in this account" },
+        { error: "Membro não encontrado nesta conta" },
         { status: 404 },
       );
     }
@@ -140,7 +140,7 @@ export async function POST(
     if (error) {
       console.error("[team members] insert error:", error);
       return NextResponse.json(
-        { error: "Failed to add member to team" },
+        { error: "Falha ao adicionar o membro à equipe" },
         { status: 500 },
       );
     }
@@ -166,7 +166,7 @@ export async function DELETE(
     if (!limit.success) return rateLimitResponse(limit);
 
     if (!(await teamBelongsToAccount(ctx.supabase, teamId, ctx.accountId))) {
-      return NextResponse.json({ error: "Team not found" }, { status: 404 });
+      return NextResponse.json({ error: "Equipe não encontrada" }, { status: 404 });
     }
 
     const body = (await request.json().catch(() => null)) as
@@ -176,7 +176,7 @@ export async function DELETE(
 
     if (typeof userId !== "string" || !userId) {
       return NextResponse.json(
-        { error: "'userId' must be a non-empty string" },
+        { error: "'userId' deve ser um texto não vazio" },
         { status: 400 },
       );
     }
@@ -190,7 +190,7 @@ export async function DELETE(
     if (error) {
       console.error("[team members] delete error:", error);
       return NextResponse.json(
-        { error: "Failed to remove member from team" },
+        { error: "Falha ao remover o membro da equipe" },
         { status: 500 },
       );
     }

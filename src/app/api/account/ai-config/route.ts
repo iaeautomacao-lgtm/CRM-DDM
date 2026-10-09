@@ -88,7 +88,7 @@ export async function GET() {
 
     if (error) {
       console.error('[ai-config] GET falhou:', error.message)
-      return NextResponse.json({ error: 'Failed to load AI config' }, { status: 500 })
+      return NextResponse.json({ error: 'Falha ao carregar a configuração de IA' }, { status: 500 })
     }
 
     if (!aiConfig) {
@@ -117,7 +117,7 @@ export async function GET() {
     })
   } catch (err: any) {
     console.error('[ai-config] GET erro:', err)
-    return NextResponse.json({ error: 'Failed to load AI config' }, { status: 500 })
+    return NextResponse.json({ error: 'Falha ao carregar a configuração de IA' }, { status: 500 })
   }
 }
 
@@ -140,7 +140,7 @@ export async function POST(request: Request) {
       .eq('status', 'active')
     if (activeFlowsError) {
       console.error('[ai-config] POST flows:', activeFlowsError.message)
-      return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
+      return NextResponse.json({ error: 'Falha ao salvar a configuração de IA' }, { status: 500 })
     }
 
     const activeFlowIds = (activeFlows ?? []).map((flow) => flow.id)
@@ -152,7 +152,7 @@ export async function POST(request: Request) {
         .eq('node_type', 'ai_agent')
       if (aiNodesError) {
         console.error('[ai-config] POST nós de IA:', aiNodesError.message)
-        return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
+        return NextResponse.json({ error: 'Falha ao salvar a configuração de IA' }, { status: 500 })
       }
       const incompatible = (aiNodes ?? []).filter((node) => {
         const model =
@@ -248,7 +248,7 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error('[ai-config] POST upsert:', error.message)
-      return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
+      return NextResponse.json({ error: 'Falha ao salvar a configuração de IA' }, { status: 500 })
     }
 
     const newPrompt = payload.system_prompt as string
@@ -266,6 +266,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true })
   } catch (err: any) {
     console.error('[ai-config] POST erro:', err)
-    return NextResponse.json({ error: 'Failed to save AI config' }, { status: 500 })
+    return NextResponse.json({ error: 'Falha ao salvar a configuração de IA' }, { status: 500 })
   }
 }

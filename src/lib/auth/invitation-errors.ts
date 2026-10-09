@@ -28,7 +28,7 @@ export function rpcErrorToResponse(err: PostgrestError): NextResponse {
   }
   console.error("[redeem_invitation] unexpected RPC error:", err);
   return NextResponse.json(
-    { error: "Failed to redeem invitation" },
+    { error: "Falha ao resgatar o convite" },
     { status: 500 },
   );
 }
