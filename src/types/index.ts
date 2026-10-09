@@ -1,4 +1,5 @@
 import type { AccountRole } from "@/lib/auth/roles";
+import type { MessageOrigin } from "@/lib/inbox/message-origin";
 
 export interface Profile {
   id: string;
@@ -279,6 +280,9 @@ export interface Message {
   queue_item_id?: string | null;
   /** Só na resposta do cliente. */
   attribution_method?: CampaignAttributionMethod | null;
+  /** Origem do envio (migration 302): customer | operator | ai | flow |
+   *  campaign | automation | api. NULL = histórico antigo/eco sem origem. */
+  origin?: MessageOrigin | null;
 }
 
 /** wacrm.internal_messages (migration 109) — 1:1 staff chat between an
