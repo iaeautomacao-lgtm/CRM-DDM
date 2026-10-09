@@ -9,7 +9,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  --font-heading: var(--font-poppins), var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,6 +48,32 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-soft: var(--primary-soft);
   --color-primary-soft-2: var(--primary-soft-2);
+  /* Redesenho DDM: tokens extras do protótipo como utilitários
+   * (bg-surface-3, bg-surface-hover, bg-selected, border-border-strong,
+   * text-foreground-2, text-primary-text, bg-success-soft, bg-bubble-out…). */
+  --color-foreground-2: var(--foreground-2);
+  --color-primary-text: var(--primary-text);
+  --color-surface-3: var(--surface-3);
+  --color-surface-hover: var(--surface-hover);
+  --color-selected: var(--selected);
+  --color-border-soft: var(--border-soft);
+  --color-border-strong: var(--border-strong);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-border: var(--warning-border);
+  --color-danger: var(--destructive);
+  --color-danger-soft: var(--danger-soft);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-bubble-in: var(--bubble-in);
+  --color-bubble-in-border: var(--bubble-in-border);
+  --color-bubble-out: var(--bubble-out);
+  --color-bubble-out-border: var(--bubble-out-border);
+  --color-bubble-bot: var(--bubble-bot);
+  --color-bubble-bot-border: var(--bubble-bot-border);
+  --color-scrim: var(--scrim);
+  --shadow-overlay: var(--shadow-overlay);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -85,80 +111,125 @@
  * ============================================================ */
 
 /* ---- MODE: neutral surfaces ---- */
+/* Neutros do redesenho DDM (protótipo 09/10, tokens --bg/--surface/--fg…
+ * do "Inbox Operacional"), mapeados nas variáveis shadcn para o app
+ * inteiro herdar sem tocar em componente. Os tokens extras (surface-3,
+ * surface-hover, selected, border-strong, foreground-2, success/warning/
+ * danger + soft, bolhas, scrim, shadow-overlay) são os do protótipo. */
 
 :root,
 html[data-mode="dark"] {
-  --background: oklch(0.13 0.01 260);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.18 0.01 260);
-  --card-2: oklch(0.205 0.01 260);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.18 0.01 260);
-  --popover-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.22 0.01 260);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.22 0.01 260);
-  --muted-foreground: oklch(0.65 0.01 260);
-  --accent: oklch(0.22 0.01 260);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.28 0.01 260);
-  --input: oklch(0.28 0.01 260);
+  --background: #0e1013;
+  --foreground: #ecedee;
+  --foreground-2: #b4b9c0;
+  --card: #15181c;
+  --card-2: #1a1e23;
+  --card-foreground: #ecedee;
+  --popover: #15181c;
+  --popover-foreground: #ecedee;
+  --secondary: #1a1e23;
+  --secondary-foreground: #ecedee;
+  --muted: #1a1e23;
+  --muted-foreground: #8e949d;
+  --accent: #1e2227;
+  --accent-foreground: #ecedee;
+  --destructive: #f97066;
+  --border: #262b31;
+  --border-soft: #1e2227;
+  --border-strong: #363c45;
+  --input: #363c45;
+  --surface-3: #252a31;
+  --surface-hover: #1e2227;
+  --selected: #1f2329;
+  --success: #3fcf8e;
+  --success-soft: rgba(63, 207, 142, 0.12);
+  --warning: #f5b454;
+  --warning-soft: rgba(245, 180, 84, 0.1);
+  --warning-border: rgba(245, 180, 84, 0.28);
+  --danger-soft: rgba(249, 112, 102, 0.12);
+  --neutral-soft: rgba(180, 185, 192, 0.12);
+  --bubble-in: #1c2025;
+  --bubble-in-border: #262b31;
+  --bubble-bot: #181b1f;
+  --bubble-bot-border: #2c3138;
+  --scrim: rgba(0, 0, 0, 0.45);
+  --shadow-overlay: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.02);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.16 0.01 260);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.22 0.01 260);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.28 0.01 260);
+  --radius: 0.375rem;
+  --sidebar: #111418;
+  --sidebar-foreground: #ecedee;
+  --sidebar-accent: #1f2329;
+  --sidebar-accent-foreground: #ecedee;
+  --sidebar-border: #262b31;
+  color-scheme: dark;
 }
 
 html[data-mode="light"] {
-  --background: oklch(0.99 0.002 260);
-  --foreground: oklch(0.21 0.01 260);
-  --card: oklch(1 0 0);
-  --card-2: oklch(0.985 0.002 260);
-  --card-foreground: oklch(0.21 0.01 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.01 260);
-  --secondary: oklch(0.967 0.003 260);
-  --secondary-foreground: oklch(0.25 0.01 260);
-  --muted: oklch(0.967 0.003 260);
-  --muted-foreground: oklch(0.52 0.015 260);
-  --accent: oklch(0.96 0.004 260);
-  --accent-foreground: oklch(0.25 0.01 260);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0.004 260);
-  --input: oklch(0.922 0.004 260);
+  --background: #f5f5f3;
+  --foreground: #18191b;
+  --foreground-2: #4a4e55;
+  --card: #ffffff;
+  --card-2: #f4f4f2;
+  --card-foreground: #18191b;
+  --popover: #ffffff;
+  --popover-foreground: #18191b;
+  --secondary: #f4f4f2;
+  --secondary-foreground: #18191b;
+  --muted: #f4f4f2;
+  --muted-foreground: #686d75;
+  --accent: #f2f2ef;
+  --accent-foreground: #18191b;
+  --destructive: #c42b24;
+  --border: #e5e5e2;
+  --border-soft: #efefec;
+  --border-strong: #d2d2cd;
+  --input: #d2d2cd;
+  --surface-3: #e9e9e6;
+  --surface-hover: #f2f2ef;
+  --selected: #f6f1ee;
+  --success: #17804a;
+  --success-soft: #e7f5ec;
+  --warning: #9a5b00;
+  --warning-soft: #fdf4e3;
+  --warning-border: #f3d9a6;
+  --danger-soft: #fcebea;
+  --neutral-soft: #efefec;
+  --bubble-in: #ffffff;
+  --bubble-in-border: #e5e5e2;
+  --bubble-bot: #f4f4f2;
+  --bubble-bot-border: #e1e1dd;
+  --scrim: rgba(24, 25, 27, 0.25);
+  --shadow-overlay: 0 16px 40px rgba(20, 16, 12, 0.12), 0 1px 2px rgba(20, 16, 12, 0.06);
   --chart-2: oklch(0.6 0.1 260);
   --chart-3: oklch(0.7 0.06 260);
   --chart-4: oklch(0.8 0.04 260);
   --chart-5: oklch(0.87 0.03 260);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0.002 260);
-  --sidebar-foreground: oklch(0.21 0.01 260);
-  --sidebar-accent: oklch(0.96 0.004 260);
-  --sidebar-accent-foreground: oklch(0.25 0.01 260);
-  --sidebar-border: oklch(0.922 0.004 260);
+  --radius: 0.375rem;
+  --sidebar: #fafaf9;
+  --sidebar-foreground: #18191b;
+  --sidebar-accent: #f6f1ee;
+  --sidebar-accent-foreground: #18191b;
+  --sidebar-border: #e5e5e2;
+  color-scheme: light;
 }
 
 /* ---- ACCENT: primary color ---- */
 
 :root,
 html[data-theme="ddm"] {
-  --primary: oklch(0.64 0.23 42);
-  --primary-foreground: oklch(0.985 0 0);
-  --primary-hover: oklch(0.70 0.21 42);
-  --primary-soft: oklch(0.64 0.23 42 / 0.12);
-  --primary-soft-2: oklch(0.64 0.23 42 / 0.22);
-  --ring: oklch(0.64 0.23 42);
-  --chart-1: oklch(0.64 0.23 42);
-  --sidebar-primary: oklch(0.64 0.23 42);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-ring: oklch(0.64 0.23 42);
+  --primary: #ff5706;
+  --primary-foreground: #ffffff;
+  --primary-hover: #e84b00;
+  --primary-soft: rgba(255, 87, 6, 0.13);
+  --primary-soft-2: rgba(255, 87, 6, 0.28);
+  --ring: #ff5706;
+  --chart-1: #ff5706;
+  --sidebar-primary: #ff5706;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #ff5706;
 }
 
 html[data-theme="violet"] {
@@ -243,6 +314,41 @@ html[data-theme="red"] {
   --sidebar-ring: oklch(0.577 0.245 27);
 }
 
+/* ---- MODE × ACCENT: tokens derivados do primary ----
+ * Dependem das duas dimensões, então ficam depois dos blocos de acento e
+ * com os dois atributos no seletor (vencem por especificidade). Valem
+ * para qualquer acento; o DDM tem os valores exatos do protótipo.
+ *   --primary-text  texto na cor da marca com contraste AA no fundo
+ *   --bubble-out*   bolha de mensagem enviada (tom da marca) */
+:root,
+html[data-mode="dark"][data-theme] {
+  --primary-text: color-mix(in srgb, var(--primary) 68%, white);
+  --bubble-out: color-mix(in srgb, var(--primary) 12%, var(--card));
+  --bubble-out-border: color-mix(in srgb, var(--primary) 20%, var(--card));
+}
+
+html[data-mode="light"][data-theme] {
+  --primary-text: color-mix(in srgb, var(--primary) 76%, black);
+  --primary-soft: color-mix(in srgb, var(--primary) 8%, white);
+  --primary-soft-2: color-mix(in srgb, var(--primary) 24%, white);
+  --bubble-out: color-mix(in srgb, var(--primary) 7%, white);
+  --bubble-out-border: color-mix(in srgb, var(--primary) 18%, white);
+}
+
+html[data-mode="dark"][data-theme="ddm"] {
+  --primary-text: #ff8754;
+  --bubble-out: #2a1c14;
+  --bubble-out-border: #3a271b;
+}
+
+html[data-mode="light"][data-theme="ddm"] {
+  --primary-text: #c23e00;
+  --primary-soft: #fff3ec;
+  --primary-soft-2: #ffd9c5;
+  --bubble-out: #fff3ec;
+  --bubble-out-border: #ffe0d1;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -261,5 +367,189 @@ html[data-theme="red"] {
   :where(a[href], button, input, select, textarea, summary, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+}
+
+/* ============================================================
+ * MOVIMENTO — porte do motion.js do protótipo DDM (09/10).
+ *
+ * Mesmas curvas e durações, como utilitários declarativos em vez do
+ * MutationObserver do protótipo (que decorava o DOM por heurística):
+ *   animate-ddm-up      entrada de bloco/página (sobe 8px)       .42s
+ *   animate-ddm-fade    conteúdo novo (troca de aba, filtro)     .24s
+ *   animate-ddm-pop     modal (sobe 10px + escala .97, mola)      .30s
+ *   animate-ddm-drawer  gaveta da direita (32px)                 .34s
+ *   animate-ddm-drawer-l gaveta da esquerda                      .30s
+ *   animate-ddm-menu    menu/popover (desce 4px + escala .96)     .16s
+ *   animate-ddm-row     linha de lista/tabela (6px da esquerda)  .32s
+ *   animate-ddm-pulse   skeleton                                1.3s ∞
+ *   animate-ddm-bar     barra de progresso cresce da esquerda    .70s
+ *   animate-ddm-col     coluna de gráfico cresce da base         .60s
+ *   animate-ddm-glow    halo ao ligar switch/checkbox            .60s
+ *   ddm-stagger         filhos entram em cascata (ddm-row, 28ms)
+ *   ddm-stagger-blocks  blocos da página em cascata (ddm-up, 45ms)
+ * Com prefers-reduced-motion tudo vira instantâneo (bloco no fim).
+ * ============================================================ */
+
+@theme {
+  --ease-ddm: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-ddm-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+
+  --animate-ddm-up: ddm-up 0.42s var(--ease-ddm) both;
+  --animate-ddm-fade: ddm-fade 0.24s ease-out both;
+  --animate-ddm-pop: ddm-pop 0.3s var(--ease-ddm-spring) both;
+  --animate-ddm-drawer: ddm-drawer 0.34s var(--ease-ddm) both;
+  --animate-ddm-drawer-l: ddm-drawer-l 0.3s var(--ease-ddm) both;
+  --animate-ddm-menu: ddm-menu 0.16s var(--ease-ddm) both;
+  --animate-ddm-row: ddm-row 0.32s var(--ease-ddm) both;
+  --animate-ddm-pulse: ddm-pulse 1.3s ease-in-out infinite;
+  /* O animate-pulse do Tailwind passa a ser o pulso do protótipo (1.3s,
+   * opacidade até .45) — todos os skeletons existentes herdam. */
+  --animate-pulse: ddm-pulse 1.3s ease-in-out infinite;
+  --animate-ddm-bar: ddm-bar 0.7s var(--ease-ddm) both;
+  --animate-ddm-col: ddm-col 0.6s var(--ease-ddm) both;
+  --animate-ddm-glow: ddm-glow 0.6s ease-out;
+
+  @keyframes ddm-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes ddm-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes ddm-pop {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes ddm-drawer {
+    from { opacity: 0.4; transform: translateX(32px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes ddm-drawer-l {
+    from { opacity: 0.4; transform: translateX(-32px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes ddm-menu {
+    from { opacity: 0; transform: translateY(-4px) scale(0.96); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes ddm-row {
+    from { opacity: 0; transform: translateX(-6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes ddm-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+  }
+  @keyframes ddm-bar {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+  }
+  @keyframes ddm-col {
+    from { transform: scaleY(0); }
+    to { transform: scaleY(1); }
+  }
+  @keyframes ddm-glow {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 45%, transparent); }
+    100% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--primary) 0%, transparent); }
+  }
+  @keyframes ddm-ripple {
+    from { transform: scale(0); opacity: 0.35; }
+    to { transform: scale(1); opacity: 0; }
+  }
+}
+
+@layer utilities {
+  /* Barras e colunas crescem a partir da origem certa. */
+  .animate-ddm-bar { transform-origin: left; }
+  .animate-ddm-col { transform-origin: bottom; }
+
+  /* Cascata de linhas: até 16 itens animam (60ms + 28ms × n); do 17º em
+   * diante entram sem atraso, como no protótipo (listas longas não
+   * "escorrem" por segundos). */
+  .ddm-stagger > * { animation: var(--animate-ddm-row); }
+  .ddm-stagger > :nth-child(n + 17) { animation: none; }
+  .ddm-stagger-blocks > * { animation: var(--animate-ddm-up); }
+  .ddm-stagger-blocks > :nth-child(n + 11) { animation: none; }
+}
+
+/* Atrasos da cascata — fora de utilities para não gerar 26 classes. */
+.ddm-stagger > :nth-child(1) { animation-delay: 60ms; }
+.ddm-stagger > :nth-child(2) { animation-delay: 88ms; }
+.ddm-stagger > :nth-child(3) { animation-delay: 116ms; }
+.ddm-stagger > :nth-child(4) { animation-delay: 144ms; }
+.ddm-stagger > :nth-child(5) { animation-delay: 172ms; }
+.ddm-stagger > :nth-child(6) { animation-delay: 200ms; }
+.ddm-stagger > :nth-child(7) { animation-delay: 228ms; }
+.ddm-stagger > :nth-child(8) { animation-delay: 256ms; }
+.ddm-stagger > :nth-child(9) { animation-delay: 284ms; }
+.ddm-stagger > :nth-child(10) { animation-delay: 312ms; }
+.ddm-stagger > :nth-child(11) { animation-delay: 340ms; }
+.ddm-stagger > :nth-child(12) { animation-delay: 368ms; }
+.ddm-stagger > :nth-child(13) { animation-delay: 396ms; }
+.ddm-stagger > :nth-child(14) { animation-delay: 424ms; }
+.ddm-stagger > :nth-child(15) { animation-delay: 452ms; }
+.ddm-stagger > :nth-child(16) { animation-delay: 480ms; }
+.ddm-stagger-blocks > :nth-child(2) { animation-delay: 45ms; }
+.ddm-stagger-blocks > :nth-child(3) { animation-delay: 90ms; }
+.ddm-stagger-blocks > :nth-child(4) { animation-delay: 135ms; }
+.ddm-stagger-blocks > :nth-child(5) { animation-delay: 180ms; }
+.ddm-stagger-blocks > :nth-child(6) { animation-delay: 225ms; }
+.ddm-stagger-blocks > :nth-child(7) { animation-delay: 270ms; }
+.ddm-stagger-blocks > :nth-child(8) { animation-delay: 315ms; }
+.ddm-stagger-blocks > :nth-child(9) { animation-delay: 360ms; }
+.ddm-stagger-blocks > :nth-child(10) { animation-delay: 405ms; }
+
+/* Onda do clique (MotionEffects cria o <span class="ddm-ripple">). */
+.ddm-ripple {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: currentColor;
+  animation: ddm-ripple 0.5s ease-out forwards;
+}
+
+/* Microinterações globais do protótipo: transição suave de cor/sombra em
+ * controles e linhas; alvo de toque mínimo de 44px no celular. */
+@layer base {
+  /* Títulos em Poppins (design system DDM); utilitários font-* vencem. */
+  :where(h1, h2) {
+    font-family: var(--font-heading);
+  }
+  :where(button, a[href], [role="tab"], [role="menuitem"], [role="option"]) {
+    transition-property: background-color, border-color, color, box-shadow, opacity, transform;
+    transition-duration: 0.16s;
+    transition-timing-function: var(--ease-ddm);
+  }
+  :where(input, textarea, select) {
+    transition: border-color 0.16s, box-shadow 0.16s;
+  }
+  :where(tr, [role="row"]) {
+    transition: background-color 0.14s;
+  }
+  @media (pointer: coarse) {
+    :where([role="checkbox"], button[aria-label]) {
+      position: relative;
+    }
+    :where([role="checkbox"], button[aria-label])::after {
+      content: "";
+      position: absolute;
+      inset: -10px;
+    }
+  }
+}
+
+/* Movimento reduzido: o sistema inteiro vira instantâneo (inclusive as
+ * animações tw-animate dos primitivos e a onda do clique). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

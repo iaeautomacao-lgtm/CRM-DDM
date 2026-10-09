@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertCircle, RefreshCw } from 'lucide-react'
+import { AlertCircle, Lock, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -25,7 +25,7 @@ export function ErrorState({
     <div
       role="alert"
       className={cn(
-        'flex h-full min-h-40 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-destructive/40 bg-card/40 px-4 py-6 text-center',
+        'flex h-full min-h-40 animate-ddm-fade flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-destructive/40 bg-card/40 px-4 py-6 text-center',
         className,
       )}
     >
@@ -40,6 +40,37 @@ export function ErrorState({
           Tentar novamente
         </Button>
       )}
+    </div>
+  )
+}
+
+/**
+ * Estado "sem permissão" (403): o servidor recusou a leitura para o papel
+ * atual. Mesmo formato do ErrorState, sem "Tentar novamente" (repetir não
+ * muda a resposta).
+ */
+export function ForbiddenState({
+  title = 'Você não tem permissão para ver isto',
+  hint = 'Se precisar deste acesso, peça a um administrador da organização.',
+  className,
+}: {
+  title?: string
+  hint?: string
+  className?: string
+}) {
+  return (
+    <div
+      role="status"
+      className={cn(
+        'flex h-full min-h-40 animate-ddm-fade flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-card/40 px-4 py-6 text-center',
+        className,
+      )}
+    >
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-soft text-muted-foreground">
+        <Lock className="h-5 w-5" />
+      </div>
+      <p className="text-sm font-medium text-foreground">{title}</p>
+      {hint && <p className="max-w-xs text-xs text-muted-foreground">{hint}</p>}
     </div>
   )
 }

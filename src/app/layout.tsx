@@ -1,9 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Poppins } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
+import { MotionEffects } from "@/components/motion/motion-effects";
 import { AuthForensics } from "@/components/debug/auth-forensics";
 import {
   DEFAULT_MODE,
@@ -13,6 +14,13 @@ import {
   STORAGE_KEY,
   THEME_IDS,
 } from "@/lib/themes";
+
+// Poppins: títulos (h1/h2 e font-heading) do design system DDM; Inter no corpo.
+const poppins = Poppins({
+  variable: "--font-poppins",
+  subsets: ["latin"],
+  weight: ["500", "600"],
+});
 
 const inter = Inter({
   variable: "--font-sans",
@@ -87,7 +95,7 @@ export default function RootLayout({
       translate="no"
       data-theme={DEFAULT_THEME}
       data-mode={DEFAULT_MODE}
-      className={`${inter.variable} h-full antialiased`}
+      className={`${inter.variable} ${poppins.variable} h-full antialiased`}
       // The `theme-boot` script below rewrites `data-theme` and
       // `data-mode` on <html> from localStorage before React hydrates,
       // so for any non-default choice the client DOM intentionally
@@ -110,6 +118,7 @@ export default function RootLayout({
           <AuthForensics />
           {children}
           <ThemedToaster />
+          <MotionEffects />
         </ThemeProvider>
       </body>
     </html>
