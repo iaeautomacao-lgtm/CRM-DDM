@@ -20,6 +20,7 @@ import {
   X,
   Loader2,
   Zap,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GatedButton } from "@/components/ui/gated-button";
@@ -570,8 +571,8 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-t border-border bg-background px-3 py-3 sm:px-5">
-      <div className="mx-auto w-full max-w-[1120px]">
+    <div className="shrink-0 border-t border-border bg-card px-3 pb-4 pt-3 sm:px-6">
+      <div className="mx-auto w-full max-w-[760px]">
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -582,21 +583,24 @@ export function MessageComposer({
         </div>
       )}
       {sessionExpired && (
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/25 bg-amber-500/8 px-3 py-2" role="status">
-          {/* amber-400 sobre fundo claro dava ~1,7:1 — no tema claro usa
-              amber-700 (≥ 4,5:1); no escuro mantém o tom original. */}
-          <p className="text-xs text-amber-700 dark:text-amber-400">
-            Sessão de 24 horas expirada. Use um template para reengajar.
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 text-xs text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
-            onClick={onOpenTemplates}
-          >
-            <LayoutTemplate className="mr-1 h-4 w-4" aria-hidden="true" />
-            Templates
-          </Button>
+        <div className="mb-2.5 flex animate-ddm-fade flex-wrap items-center gap-3 rounded-[10px] border border-warning-border bg-warning-soft px-3.5 py-3" role="status">
+          <AlertTriangle className="size-4 shrink-0 text-warning" aria-hidden="true" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-semibold text-foreground">Janela de 24 horas expirada</p>
+            <p className="mt-0.5 text-[12.5px] text-foreground-2">
+              Mensagens livres estão bloqueadas. Envie um template aprovado para retomar o contato.
+            </p>
+          </div>
+          {onOpenTemplates && (
+            <button
+              type="button"
+              onClick={onOpenTemplates}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border-strong bg-card px-3.5 text-[12.5px] font-semibold text-foreground hover:bg-surface-hover"
+            >
+              <LayoutTemplate className="size-3.5" aria-hidden="true" />
+              Enviar template
+            </button>
+          )}
         </div>
       )}
 
@@ -632,7 +636,7 @@ export function MessageComposer({
         }}
       />
 
-      <div className="rounded-xl border border-border/80 bg-card/35 p-2">
+      <div className="rounded-[10px] border border-border bg-card focus-within:border-primary focus-within:shadow-[0_0_0_3px_var(--primary-soft-2)]">
       {draft ? (
         <MediaDraftPreview
           draft={draft}
@@ -681,7 +685,7 @@ export function MessageComposer({
             />
           )}
 
-          <div className="rounded-lg bg-muted/45 px-3 py-2.5 focus-within:ring-1 focus-within:ring-ring/60">
+          <div>
             <textarea
               ref={textareaRef}
               aria-label="Mensagem"
@@ -698,22 +702,22 @@ export function MessageComposer({
                   ? "Somente leitura — visualizadores podem navegar mas não responder"
                   : sessionExpired
                     ? "Sessão expirada - use um template"
-                    : "Digite uma mensagem…"
+                    : "Escreva uma mensagem…  Digite / para respostas rápidas"
               }
               disabled={sessionExpired || readOnly}
-              rows={1}
+              rows={2}
               title={
                 readOnly
                   ? "Somente leitura — seu perfil não pode enviar mensagens"
                   : "/ para respostas rápidas · Shift+Enter para nova linha"
               }
               className={cn(
-                "block w-full min-w-0 resize-none border-0 bg-transparent px-0 py-0 text-sm leading-6 text-foreground placeholder:text-muted-foreground outline-none focus:ring-0",
+                "block w-full min-w-0 resize-none border-0 bg-transparent px-3.5 pb-1 pt-3 text-[13.5px] leading-normal text-foreground placeholder:text-muted-foreground outline-none focus:ring-0",
                 (sessionExpired || readOnly) && "cursor-not-allowed opacity-50"
               )}
             />
 
-            <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/60 pt-2">
+            <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1.5">
               <div className="flex min-w-0 items-center gap-0.5">
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -797,7 +801,7 @@ export function MessageComposer({
 
               <div className="flex items-center gap-2">
                 {!readOnly && !sessionExpired && (
-                  <span className="hidden text-[10px] text-muted-foreground/75 xl:inline">
+                  <span className="mr-2.5 hidden text-[11.5px] text-muted-foreground sm:inline">
                     Enter envia · Shift+Enter quebra linha
                   </span>
                 )}
@@ -808,7 +812,7 @@ export function MessageComposer({
                   disabled={!text.trim() || sessionExpired || sending}
                   aria-label="Enviar mensagem"
                   onClick={handleSend}
-                  className="h-8 shrink-0 gap-1.5 rounded-md bg-primary px-3 text-xs font-medium hover:bg-primary/90 disabled:opacity-40"
+                  className="h-8 shrink-0 gap-1.5 rounded-md bg-primary px-3.5 text-[12.5px] font-semibold hover:bg-primary-hover disabled:bg-surface-3 disabled:text-muted-foreground disabled:opacity-100"
                 >
                   <Send className="h-3.5 w-3.5" aria-hidden="true" />
                   <span className="hidden sm:inline">Enviar</span>
