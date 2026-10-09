@@ -54,6 +54,9 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   // ── Conta, membros, convites, chaves ────────────────────
   pg("account", "GET", "viewer", "account.view"),
   pg("account", "PATCH", "admin", "settings.account"),
+  pg("settings/account-config", "GET", "viewer", "account.view"), // PRD 24, item 6
+  pg("settings/account-config/[key]", "PUT", "admin", "settings.account"),
+  pg("settings/account-config/[key]", "DELETE", "admin", "settings.account"),
   pg("account/ai-config", "GET", "admin", "ai.config"),
   pg("account/ai-config", "POST", "admin", "ai.config"),
   pg("account/api-keys", "GET", "viewer", "api_keys.view"),
