@@ -33,6 +33,16 @@
  */
 
 import { buildToolResultPayload, loadRunToolResults } from "@/lib/flows/tool-results";
+import {
+  PICKER_CHOSEN_VAR,
+  PICKER_IDS_VAR,
+  buildPickerMenu,
+  chosenAgentFromReply,
+  isPickerReplyId,
+  listOnlineAgents,
+  pickerNoAgentTarget,
+  pickerTemplateRow,
+} from "./agent-picker";
 import { maskPiiArgs } from "@/lib/privacy/mask";
 import {
   AI_EMPTY_REPLY_FALLBACK_TEXT,
@@ -150,6 +160,9 @@ export function matchReplyId(
       const hit = section.rows?.find((r) => r.reply_id === reply_id);
       if (hit) return hit.next_node_key;
     }
+    // Menu de operadores online (agent_picker): as linhas são geradas no envio; o destino é o da linha-modelo.
+    // (Quem valida se o id estava no menu enviado é o handler da resposta — chosenAgentFromReply.)
+    if (cfg.agent_picker && isPickerReplyId(reply_id)) return pickerTemplateRow(cfg)?.next_node_key ?? null;
     return null;
   }
   return null;
@@ -1220,12 +1233,35 @@ async function sendButtonsAndSuspend(
   return { outcome: "advanced", node_key: node.node_key };
 }
 
+/** Nó de handoff sintético da "fila normal" do menu de operadores (ninguém online e sem linha __no_agent configurada). */
+function pickerFallbackHandoffNode(node: FlowNodeRow): FlowNodeRow {
+  const picker = (node.config as unknown as SendListNodeConfig).agent_picker;
+  return {
+    ...node,
+    node_type: "handoff_team",
+    config: {
+      team_id: picker?.team_id,
+      reason_code: "MENU_SEM_OPERADOR_ONLINE",
+      note: "Menu de operadores: nenhum operador online; conversa segue para a fila normal.",
+    },
+  } as unknown as FlowNodeRow;
+}
+
 async function sendListAndSuspend(
   db: AdminClient,
   run: FlowRunRow,
   node: FlowNodeRow,
-): Promise<{ outcome: "advanced"; node_key: string }> {
-  const cfg = withInterpolatedTexts(node.config as unknown as SendListNodeConfig, run.vars);
+): Promise<{ outcome: "advanced" | "no_agents"; node_key: string }> {
+  let cfg = withInterpolatedTexts(node.config as unknown as SendListNodeConfig, run.vars);
+  if (cfg.agent_picker) {
+    // Menu "escolha seu atendente": linhas geradas com os operadores ONLINE agora. Ninguém ⇒ não envia nada (fila normal).
+    const agents = await listOnlineAgents(db, run.account_id, cfg.agent_picker.team_id);
+    const menu = buildPickerMenu(cfg, agents);
+    if (!menu) return { outcome: "no_agents", node_key: node.node_key };
+    cfg = menu.cfg;
+    // Guarda quem foi oferecido: só esses ids valem na resposta (um reply_id inventado não atribui ninguém).
+    await updateRunVars(db, run, { [PICKER_IDS_VAR]: menu.agentIds });
+  }
   const { whatsapp_message_id } = await sendListViaProvider(db, run, cfg);
   await logEvent(db, run.id, "message_sent", node.node_key, {
     node_type: "send_list",
@@ -1370,16 +1406,32 @@ async function executeHandoffAgent(
   const input = { ...run.vars };
   const cfg = node.config as {
     assign_to?: string;
+    assign_from_var?: string;
     note?: string;
     reason_code?: string;
     reason_subcode?: string;
   };
+  // assign_to fixo manda; senão o operador escolhido pelo cliente no menu (vars), só se for Operador desta conta.
+  let assignTo: string | undefined = cfg.assign_to;
+  if (!assignTo && cfg.assign_from_var) {
+    const candidate = run.vars?.[cfg.assign_from_var];
+    if (typeof candidate === "string" && candidate) {
+      const { data: agentRows } = await db
+        .from("profiles")
+        .select("user_id")
+        .eq("user_id", candidate)
+        .eq("account_id", run.account_id)
+        .eq("account_role", "agent")
+        .limit(1);
+      if ((agentRows as unknown[] | null)?.length) assignTo = candidate;
+    }
+  }
   try {
     const convUpdate: Record<string, unknown> = {
       status: "pending",
       updated_at: new Date().toISOString(),
     };
-    if (cfg.assign_to) convUpdate.assigned_agent_id = cfg.assign_to;
+    if (assignTo) convUpdate.assigned_agent_id = assignTo;
     if (run.conversation_id) {
       await db
         .from("conversations")
@@ -1395,7 +1447,7 @@ async function executeHandoffAgent(
       err,
       input,
       output: {
-        assigned_to: cfg.assign_to ?? null,
+        assigned_to: assignTo ?? null,
         handoff_reason: cfg.reason_code ?? "INDEFINIDO",
         handoff_subreason: cfg.reason_subcode ?? null,
       },
@@ -1408,7 +1460,7 @@ async function executeHandoffAgent(
     node,
     cfg.reason_code ?? "INDEFINIDO",
     cfg.reason_subcode ?? null,
-    cfg.assign_to ?? null,
+    assignTo ?? null,
     null,
   );
   await logEvent(db, run.id, "handoff", node.node_key, {
@@ -1417,7 +1469,7 @@ async function executeHandoffAgent(
     ai_exit_code: run.vars?.ai_exit_code ?? null,
     conversation_id: run.conversation_id ?? null,
     note: cfg.note ?? null,
-    assigned_to: cfg.assign_to ?? null,
+    assigned_to: assignTo ?? null,
     team_id: null,
   });
   await logRunEvent(db, {
@@ -1432,7 +1484,7 @@ async function executeHandoffAgent(
     payload: {
       input,
       output: {
-        assigned_to: cfg.assign_to ?? null,
+        assigned_to: assignTo ?? null,
         handoff_reason: cfg.reason_code ?? "INDEFINIDO",
         handoff_subreason: cfg.reason_subcode ?? null,
       },
@@ -3131,7 +3183,18 @@ export async function advanceFromNodeKey(
       const cfg = node.config as unknown as SendListNodeConfig;
       const message_text = interpolateVars(cfg.text, run.vars);
       try {
-        await sendListAndSuspend(db, run, node);
+        const sent = await sendListAndSuspend(db, run, node);
+        if (sent.outcome === "no_agents") {
+          // Menu de operadores: ninguém online. Segue pela linha "__no_agent" ou, sem ela, pela fila normal da equipe.
+          const target = pickerNoAgentTarget(cfg);
+          await nodeCompleted({ picker: "no_agents_online", next_node_key: target });
+          if (target) {
+            currentKey = target;
+            continue;
+          }
+          await executeHandoffTeam(db, run, pickerFallbackHandoffNode(node));
+          return { outcome: "handed_off" };
+        }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         await logEvent(db, run.id, "error", node.node_key, {
@@ -4655,6 +4718,23 @@ async function handleReplyForActiveRun(
     }
   }
 
+  // Menu de operadores online: a escolha só vale se o id estava no menu que ESTE run enviou; vale ⇒ guarda em vars para o handoff_agent.
+  if (
+    matched &&
+    effectiveMessage.kind === "interactive_reply" &&
+    currentNode.node_type === "send_list" &&
+    (currentNode.config as unknown as SendListNodeConfig).agent_picker &&
+    isPickerReplyId(effectiveMessage.reply_id)
+  ) {
+    const chosen = chosenAgentFromReply(effectiveMessage.reply_id, run.vars);
+    if (chosen) {
+      await updateRunVars(db, run, { [PICKER_CHOSEN_VAR]: chosen });
+      await logEvent(db, run.id, "node_entered", currentNode.node_key, { picker_chosen_agent_id: chosen });
+    } else {
+      matched = null; // fora do menu enviado: cai na política de fallback (reprompt)
+    }
+  }
+
   if (matched) {
     // Reset reprompt count on a successful match. Skip the write when
     // already 0 — the collect_input capture branch above already
@@ -4702,7 +4782,17 @@ async function handleReplyForActiveRun(
     if (currentNode.node_type === "send_buttons") {
       await sendButtonsAndSuspend(db, run, currentNode);
     } else if (currentNode.node_type === "send_list") {
-      await sendListAndSuspend(db, run, currentNode);
+      const resent = await sendListAndSuspend(db, run, currentNode);
+      if (resent.outcome === "no_agents") {
+        // Os operadores saíram do ar entre o menu e o reenvio: segue como "ninguém online".
+        const target = pickerNoAgentTarget(currentNode.config as unknown as SendListNodeConfig);
+        if (target) {
+          const advancedTo = await advanceFromNodeKey(db, run, target, nodes);
+          return { consumed: true, flow_run_id: run.id, outcome: advancedTo.outcome };
+        }
+        await executeHandoffTeam(db, run, pickerFallbackHandoffNode(currentNode));
+        return { consumed: true, flow_run_id: run.id, outcome: "handed_off" };
+      }
     } else if (currentNode.node_type === "collect_input") {
       // Customer typed something we couldn't accept (empty after trim,
       // or var_key missing — rare). Re-send the prompt so they try again.

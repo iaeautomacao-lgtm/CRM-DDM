@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { VectorRetriever } from "@/lib/ai/knowledge/knowledge-context";
 import { safeFetch } from "@/lib/security/ssrf-guard";
 import { dispatchInboundToFlows } from "../engine";
 import { runWithFlowEffects } from "../effects";
@@ -32,6 +33,11 @@ export interface SimulationSeed {
   aiConfig: Record<string, unknown> | null;
   knowledgeBase: Array<{ id?: string; name: string; content: string }>;
   teams: Array<{ id: string; name: string }>;
+  /**
+   * Operadores fictícios da simulação (menu "escolha seu atendente" e handoff de equipe): `online` = visto agora; `max` = teto de
+   * conversas simultâneas. Só vivem no banco em memória — nada é gravado de verdade.
+   */
+  operators?: Array<{ user_id: string; name: string; team_id?: string | null; online?: boolean; away?: boolean; max?: number | null }>;
   /** Catálogo de ferramentas da conta (somente SELECT; sem credenciais — a tabela guarda só marcadores). */
   aiTools?: Array<Record<string, unknown>>;
   /** Variáveis (valor) e credenciais (SÓ nome e hosts — nunca value_encrypted) da conta. */
@@ -41,6 +47,8 @@ export interface SimulationSeed {
    * nunca fixa versão — não há run real) e as versões de regra dessa versão. Só marcadores de
    * credencial ({{cred.X}}) — nenhum valor.
    */
+  /** Busca vetorial real do conhecimento (só leitura, chave da conta). Ausente = modo atual. */
+  knowledgeRetriever?: VectorRetriever | null;
   agents?: {
     agents: Array<Record<string, unknown>>;
     versions: Array<Record<string, unknown>>;
@@ -100,6 +108,12 @@ function buildTables(req: SimulateRequest, seed: SimulationSeed, state: SimState
   tables.ai_config = seed.aiConfig ? [JSON.parse(JSON.stringify(seed.aiConfig)) as SimRow] : [];
   tables.knowledge_base_files = seed.knowledgeBase.map((f) => ({ ...f, account_id: seed.accountId }));
   tables.teams = seed.teams.map((t) => ({ ...t, account_id: seed.accountId }));
+  const operators = seed.operators ?? [];
+  tables.profiles = operators.map((o) => ({ user_id: o.user_id, account_id: seed.accountId, account_role: "agent", full_name: o.name, max_simultaneous_chats: o.max ?? null }));
+  tables.team_members = operators.filter((o) => o.team_id).map((o) => ({ user_id: o.user_id, team_id: o.team_id, created_at: new Date(0).toISOString() }));
+  tables.member_presence = operators
+    .filter((o) => o.online || o.away)
+    .map((o) => ({ user_id: o.user_id, account_id: seed.accountId, status: o.online ? "online" : "away", last_seen_at: new Date().toISOString() }));
   tables.ai_tools = (seed.aiTools ?? []).map((t) => ({ ...(JSON.parse(JSON.stringify(t)) as SimRow), account_id: seed.accountId }));
   const withAccount = (r: Record<string, unknown>) => ({
     ...(JSON.parse(JSON.stringify(r)) as SimRow),
@@ -320,6 +334,7 @@ export async function simulateTurn(
     toolMocks: req.toolMocks ?? {},
     realReadOnlyTools: req.realReadOnlyTools ?? [],
     httpMocks: req.httpMocks ?? {},
+    knowledgeRetriever: seed.knowledgeRetriever ?? null,
     realFetch:
       deps.realFetch ??
       // Leitura real das tools liberadas também passa pelo guard anti-SSRF (#98).

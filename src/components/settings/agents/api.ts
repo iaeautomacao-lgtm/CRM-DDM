@@ -270,6 +270,19 @@ export async function uploadKnowledgeFile(file: File): Promise<KnowledgeBaseFile
   return (data as { file: KnowledgeBaseFileItem }).file;
 }
 
+/** (Re)gera o índice da busca por trechos de um arquivo, com a chave de IA da conta. */
+export async function reindexKnowledgeFile(id: string): Promise<{ embedding_status: string; embedding_chunks: number | null }> {
+  let res: Response;
+  try {
+    res = await apiFetch(`/api/settings/agents/knowledge/${encodeURIComponent(id)}/reindex`, { method: 'POST' });
+  } catch {
+    throw new AgentApiError('Não foi possível conectar ao servidor para reindexar o arquivo.', 0);
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new AgentApiError(data?.error || 'Não foi possível reindexar o arquivo.', res.status);
+  return data as { embedding_status: string; embedding_chunks: number | null };
+}
+
 /** Remove um arquivo de conhecimento (409 se algum agente o usa). */
 export async function removeKnowledgeFile(id: string): Promise<void> {
   let res: Response;

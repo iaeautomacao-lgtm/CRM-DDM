@@ -621,3 +621,59 @@ describe("Testar agente (TASK1-C) — fluxo sintético de um nó com o rascunho 
     expectNoRealEffects();
   });
 });
+
+describe("simulador — conhecimento por trechos (TASK1-D), mesmo caminho da produção", () => {
+  const UUID = "11111111-1111-4111-8111-111111111111";
+  const FILE = "33333333-3333-4333-8333-333333333333";
+  const seed = (retriever: SimulationSeed["knowledgeRetriever"]): SimulationSeed => {
+    const config = convertAiAgentNode(
+      { mode: "loop", max_turns: 20, system_prompt_override: "PROMPT DO AGENTE" } as never,
+      { account_id: UUID, enabled: true, api_provider: "openai", api_model: "gpt-4o-mini" },
+      { node_key: "ia" },
+    ).config as Record<string, unknown> & { knowledge: Record<string, unknown> };
+    config.knowledge = { ...config.knowledge, vector: { enabled: true, top_k: 2, min_similarity: 0.4 } };
+    return {
+      ...SEED,
+      knowledgeBase: [{ id: FILE, name: "Manual", content: "CONTEUDO INTEIRO DO MANUAL com horários e descontos" }],
+      knowledgeRetriever: retriever,
+      agents: {
+        agents: [{ id: "ag1", name: "Agente", enabled: true, published_version_id: "v1" }],
+        versions: [{ id: "v1", agent_id: "ag1", version: 1, config, prompt_content: "PROMPT DO AGENTE", composition: "legacy_v1", config_hash: "h" }],
+        ruleVersions: [],
+      },
+    };
+  };
+  const nodes = [
+    { node_key: "start", node_type: "start", config: { next_node_key: "ia" } },
+    { node_key: "ia", node_type: "ai_agent", config: { agent_id: "ag1" } },
+  ];
+  const req = (text: string) =>
+    request(text, null, { draft: { entry_node_id: "start", trigger_type: "first_inbound_message", trigger_config: {}, fallback_policy: null, nodes: nodes as never } });
+
+  beforeEach(() => {
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("com índice: entram só os trechos encontrados, com os parâmetros do agente", async () => {
+    const ai = stubOpenAi([{ content: "Desconto de 40%." }]);
+    const retriever = vi.fn(async () => [{ file_id: FILE, chunk_index: 0, content: "TRECHO SOBRE DESCONTOS", similarity: 0.9 }]);
+    const turn = await simulateTurn(req("tem desconto?"), seed(retriever));
+    expect(retriever).toHaveBeenCalledWith(expect.objectContaining({ fileIds: [FILE], topK: 2, minSimilarity: 0.4 }));
+    expect(ai.systemPrompts[0]).toContain("TRECHO SOBRE DESCONTOS");
+    expect(ai.systemPrompts[0]).not.toContain("CONTEUDO INTEIRO DO MANUAL");
+    expect(turn.timeline.some((e) => e.label.startsWith("Conhecimento: busca por trechos (1 trecho"))).toBe(true);
+    expectNoRealEffects();
+  });
+
+  it("busca falhou (sem chave/sem índice): cai no modo atual e a resposta sai normalmente", async () => {
+    const ai = stubOpenAi([{ content: "Olá!" }]);
+    const turn = await simulateTurn(req("tem desconto?"), seed(async () => Promise.reject(new Error("sem índice"))));
+    expect(ai.systemPrompts[0]).toContain("CONTEUDO INTEIRO DO MANUAL");
+    expect(turn.outbound.map((o) => o.text)).toEqual(["Olá!"]);
+    expect(turn.timeline.some((e) => e.label === "Conhecimento: modo atual (busca por trechos indisponível: error)")).toBe(true);
+  });
+});

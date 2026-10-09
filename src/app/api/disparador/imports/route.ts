@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import type { ColumnMap } from "@/lib/disparador/import-block";
-import { createImportJob, draftBelongsToOtherAccount, toPublicImportJob, type ImportJob } from "@/lib/disparador/import-jobs";
+import { createImportJob, draftBelongsToOtherAccount, parseListName, toPublicImportJob, type ImportJob } from "@/lib/disparador/import-jobs";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
 
 export const dynamic = "force-dynamic";
 
-// POST /api/disparador/imports  { campaign_id?, draft_id?, column_map, mapping_confirmed }  → 201 { job }
+// POST /api/disparador/imports  { campaign_id?, draft_id?, column_map, mapping_confirmed, name? }  → 201 { job }   (name = nome da lista, migration 292)
 // GET  /api/disparador/imports?campaign_id=&draft_id=                                       → { jobs } (20 mais recentes da conta)
 // Fluxo completo e contrato para o front em docs/disparador-importacao-assincrona.md.
 
@@ -27,6 +27,8 @@ export async function POST(request: Request) {
       if (value) columnMap[key] = value;
     }
     const campaignId = text(body.campaign_id);
+    const listName = parseListName(body.name);
+    if (listName === null) return NextResponse.json({ error: "Nome da lista inválido (1 a 120 caracteres).", code: "invalid_name" }, { status: 400 });
     const draftId = text(body.draft_id);
     const db = supabaseAdmin();
 
@@ -43,6 +45,7 @@ export async function POST(request: Request) {
       draftId,
       columnMap,
       mappingConfirmed: body.mapping_confirmed === true || body.mapping_confirmed === "true",
+      name: listName,
     });
     if (!result.ok) return NextResponse.json({ error: result.message, code: result.code }, { status: result.status });
     return NextResponse.json({ job: toPublicImportJob(result.job) }, { status: 201 });

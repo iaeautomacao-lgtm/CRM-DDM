@@ -25,6 +25,7 @@ import {
   ZoomOut,
   RotateCcw,
   Eye,
+  Bot,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -42,6 +43,9 @@ interface MessageBubbleProps {
   /** Campanha do Disparador ligada à mensagem (message.campaign_id). `href`
    *  só para quem pode abrir a campanha (owner/admin). */
   campaign?: { name: string; href: string | null } | null;
+  /** Autor acima da bolha (item 21 do PRD 23): "Você", o atendente com a cor
+   *  dele, ou "Automação". null = mesma pessoa da mensagem anterior. */
+  author?: { label: string; className: string; bot: boolean } | null;
 }
 
 /** Nome da campanha, como link quando o usuário pode abri-la. */
@@ -55,19 +59,19 @@ function CampaignName({ campaign }: { campaign: { name: string; href: string | n
   );
 }
 
-// Só aparece em bolhas de saída (fundo primary): os ícones usam a cor do
-// texto sobre primary; azul fica reservado para "lida". Como "entregue" e
+// Só aparece em bolhas de saída (tom suave da marca, redesenho DDM): os
+// ícones usam o cinza do horário; azul fica reservado para "lida". Como "entregue" e
 // "lida" diferem só pela cor, cada ícone leva rótulo para leitor de tela.
 function StatusIcon({ status }: { status: Message["status"] }) {
   switch (status) {
     case "sending":
-      return <Clock role="img" aria-label="Enviando" className="h-3 w-3 text-primary-foreground/70" />;
+      return <Clock role="img" aria-label="Enviando" className="h-3 w-3 text-muted-foreground" />;
     case "sent":
-      return <Check role="img" aria-label="Enviada" className="h-3 w-3 text-primary-foreground/70" />;
+      return <Check role="img" aria-label="Enviada" className="h-3 w-3 text-muted-foreground" />;
     case "delivered":
-      return <CheckCheck role="img" aria-label="Entregue" className="h-3 w-3 text-primary-foreground/70" />;
+      return <CheckCheck role="img" aria-label="Entregue" className="h-3 w-3 text-muted-foreground" />;
     case "read":
-      return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-blue-400" />;
+      return <CheckCheck role="img" aria-label="Lida" className="h-3 w-3 text-sky-600 dark:text-sky-400" />;
     case "failed":
       return (
         <span className="inline-flex items-center gap-0.5 rounded bg-red-500 px-1 text-xs font-medium text-white">
@@ -447,7 +451,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
   switch (message.content_type) {
     case "text":
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words text-[13.5px] leading-normal">
           {message.content_text}
         </p>
       );
@@ -545,7 +549,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
             <CornerDownLeft className="h-3 w-3" />
             Resposta de botão
           </span>
-          <p className="whitespace-pre-wrap break-words text-sm">
+          <p className="whitespace-pre-wrap break-words text-[13.5px] leading-normal">
             {message.content_text || "[Resposta interativa]"}
           </p>
         </div>
@@ -608,7 +612,7 @@ function MessageContent({ message: originalMessage }: { message: Message }) {
 
     default:
       return (
-        <p className="whitespace-pre-wrap break-words text-sm">
+        <p className="whitespace-pre-wrap break-words text-[13.5px] leading-normal">
           {message.content_text || "[Tipo de mensagem não suportado]"}
         </p>
       );
@@ -622,8 +626,10 @@ export function MessageBubble({
   currentUserId,
   onToggleReaction,
   campaign,
+  author,
 }: MessageBubbleProps) {
   const isAgent = message.sender_type === "agent" || message.sender_type === "bot";
+  const isBot = message.sender_type === "bot";
   // Mensagem do disparo (saída) ganha faixa no topo; a resposta do cliente
   // ganha uma linha abaixo dizendo a qual campanha ela responde.
   const campaignSend = isAgent && campaign ? campaign : null;
@@ -642,20 +648,29 @@ export function MessageBubble({
       className={cn(
         "flex flex-col",
         isAgent ? "items-end" : "items-start",
+        author && "mt-2",
       )}
     >
+      {author && (
+        <span className={cn("mx-1 mb-1 inline-flex items-center gap-[5px] text-[11.5px] font-semibold", author.className)}>
+          {author.bot && <Bot className="size-3" aria-hidden="true" />}
+          {author.label}
+        </span>
+      )}
       <div
         className={cn(
-          "relative rounded-2xl px-3 py-2",
+          "relative border px-3 pb-[7px] pt-[9px] text-foreground",
           message.content_type === "sticker"
-            ? "bg-transparent p-0"
-            : isAgent
-            ? "rounded-br-md bg-primary text-primary-foreground"
-            : "rounded-bl-md bg-muted text-foreground",
+            ? "border-transparent bg-transparent p-0"
+            : isBot
+              ? "rounded-[12px_12px_4px_12px] border-bubble-bot-border bg-bubble-bot"
+              : isAgent
+                ? "rounded-[12px_12px_4px_12px] border-bubble-out-border bg-bubble-out"
+                : "rounded-[12px_12px_12px_4px] border-bubble-in-border bg-bubble-in",
         )}
       >
         {campaignSend && (
-          <div className="mb-1.5 flex items-center gap-1 border-b border-primary-foreground/20 pb-1 text-xs text-primary-foreground/80">
+          <div className="mb-1.5 flex items-center gap-1 border-b border-border pb-1 text-xs text-muted-foreground">
             <Megaphone className="h-3 w-3 shrink-0" />
             <span>
               Campanha: <CampaignName campaign={campaignSend} />
@@ -666,37 +681,22 @@ export function MessageBubble({
           <ReplyQuote
             authorLabel={reply.authorLabel}
             preview={reply.preview}
-            onPrimary={isAgent}
+            onPrimary={false}
           />
         )}
         <MessageContent message={message} />
         <div
-          className={cn(
-            "mt-1 flex items-center gap-1",
-            isAgent ? "justify-end" : "justify-start",
-          )}
+          className="mt-[3px] flex items-center justify-end gap-1 text-[11px] tabular-nums text-muted-foreground"
         >
-          {/* Bot = IA, fluxo, automação ou disparo — distingue do atendente humano. */}
-          {message.sender_type === "bot" && (
-            <span
-              className="rounded bg-primary-foreground/15 px-1 text-xs font-semibold uppercase tracking-wide text-primary-foreground/80"
-              title="Enviada por automação (IA, fluxo ou disparo)"
-            >
-              Automação
+          {/* Bot = IA, fluxo, automação ou disparo — sem rótulo acima (ex.: bolha
+              agrupada), o selo continua aqui para distinguir do atendente. */}
+          {isBot && !author && (
+            <span className="inline-flex items-center" title="Enviada por automação (IA, fluxo ou disparo)">
+              <Bot className="size-3" aria-hidden="true" />
+              <span className="sr-only">Automação</span>
             </span>
           )}
-          <span
-            className={cn(
-              "text-xs",
-              // Outbound bubbles sit on the primary fill, so the
-              // timestamp must read against that (not the neutral
-              // foreground) — otherwise it goes low-contrast in light
-              // mode. Inbound bubbles use the muted surface.
-              isAgent ? "text-primary-foreground/70" : "text-muted-foreground",
-            )}
-          >
-            {time}
-          </span>
+          <span>{time}</span>
           {isAgent && <StatusIcon status={message.status} />}
         </div>
       </div>

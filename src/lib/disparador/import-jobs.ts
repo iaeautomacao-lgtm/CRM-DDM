@@ -50,6 +50,8 @@ export interface ImportJob {
   requested_by: string | null;
   campaign_id: string | null;
   draft_id: string | null;
+  /** Nome da lista (migration 292); ausente/NULL = sem nome ou migration não aplicada. */
+  name?: string | null;
   column_map: ColumnMap;
   state: ImportState;
   blocks: Record<string, number>;
@@ -65,6 +67,15 @@ export interface ImportJob {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+/** Nome da lista importada: texto de 1 a 120 caracteres (aparado). undefined = não informado; null = inválido. */
+export const IMPORT_LIST_NAME_MAX = 120;
+export function parseListName(raw: unknown): string | null | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string") return null;
+  const name = raw.trim().replace(/\s+/g, " ");
+  return name.length >= 1 && name.length <= IMPORT_LIST_NAME_MAX ? name : null;
 }
 
 export const emptyTotals = (): ImportTotals => ({ importados: 0, duplicados: 0, invalidos: 0, blacklisted: 0, variaveis_falhas: 0 });
@@ -84,7 +95,7 @@ const fail = (code: string, message: string, status: number): { ok: false; code:
 
 export async function createImportJob(
   db: Db,
-  args: { accountId: string; userId: string | null; campaignId: string | null; draftId: string | null; columnMap: ColumnMap; mappingConfirmed: boolean },
+  args: { accountId: string; userId: string | null; campaignId: string | null; draftId: string | null; columnMap: ColumnMap; mappingConfirmed: boolean; name?: string },
 ): Promise<JobResult> {
   if ((args.campaignId && !UUID_RE.test(args.campaignId)) || (args.draftId && !UUID_RE.test(args.draftId))) {
     return fail("invalid_id", "Identificador inválido.", 400);
@@ -97,17 +108,22 @@ export async function createImportJob(
     const { data } = await db.from("campaigns").select("id").eq("id", args.campaignId).eq("account_id", args.accountId).limit(1);
     if (!data?.length) return fail("campaign_not_found", "Campanha não encontrada", 404);
   }
-  const { data, error } = await db
+  const base = {
+    account_id: args.accountId,
+    requested_by: args.userId,
+    campaign_id: args.campaignId,
+    draft_id: args.draftId,
+    column_map: args.columnMap,
+  };
+  let { data, error } = await db
     .from("dispatch_import_jobs")
-    .insert({
-      account_id: args.accountId,
-      requested_by: args.userId,
-      campaign_id: args.campaignId,
-      draft_id: args.draftId,
-      column_map: args.columnMap,
-    })
+    .insert(args.name ? { ...base, name: args.name } : base)
     .select("*")
     .limit(1);
+  // Migration 292 ausente (sem a coluna name): cria a importação sem o nome — o nome nunca bloqueia importar.
+  if (error && args.name && (error.code === "42703" || error.code === "PGRST204")) {
+    ({ data, error } = await db.from("dispatch_import_jobs").insert(base).select("*").limit(1));
+  }
   if (error) {
     if (isMissingTable(error)) return fail("unavailable", UNAVAILABLE, 503);
     throw new Error(`Falha ao criar a importação: ${error.message}`);
@@ -360,6 +376,7 @@ export function toPublicImportJob(job: ImportJob) {
     id: job.id,
     campaign_id: job.campaign_id,
     draft_id: job.draft_id,
+    name: job.name ?? null,
     state: job.state,
     blocks_received: Object.keys(job.blocks).length,
     blocks_total: job.blocks_total,

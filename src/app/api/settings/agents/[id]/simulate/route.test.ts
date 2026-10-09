@@ -73,6 +73,8 @@ describe('POST /api/settings/agents/[id]/simulate', () => {
     ]);
     expect(req.ignoreTrigger).toBe(true);
     expect(seed).toMatchObject({ accountId: ACCOUNT, flowId: AGENT, aiConfig: { api_provider: 'openai' } });
+    // RAG vetorial (TASK1-D): o teste do agente usa a mesma busca por trechos da produção.
+    expect(typeof seed.knowledgeRetriever).toBe('function');
     const body = await res.json();
     expect(JSON.stringify(body)).not.toContain('52998224725');
     expect(JSON.stringify(body)).not.toContain('529.982.247-25');

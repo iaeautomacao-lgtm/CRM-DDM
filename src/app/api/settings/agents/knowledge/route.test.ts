@@ -15,7 +15,9 @@ const files = vi.hoisted(() => ({
   listKnowledgeFiles: vi.fn(),
   createKnowledgeFile: vi.fn(),
   deleteKnowledgeFile: vi.fn(),
+  readKnowledgeFileContent: vi.fn(),
 }));
+const vector = vi.hoisted(() => ({ indexKnowledgeFile: vi.fn() }));
 
 vi.mock('@/lib/auth/route-guard', () => ({
   guardPermission: async (permission: Permission) =>
@@ -25,9 +27,12 @@ vi.mock('@/lib/auth/route-guard', () => ({
 }));
 vi.mock('@/lib/rate-limit', () => ({ checkRateLimit: async () => ({ success: true }) }));
 vi.mock('@/lib/ai/knowledge/files', () => files);
+vi.mock('@/lib/ai/knowledge/vector-store', () => vector);
+vi.mock('@/lib/flows/admin-client', () => ({ supabaseAdmin: () => ({ fake: true }) }));
 
 const { GET, POST } = await import('./route');
 const { DELETE } = await import('./[fileId]/route');
+const { POST: REINDEX } = await import('./[fileId]/reindex/route');
 
 function upload(name: string, content: string | Uint8Array, headers: Record<string, string> = {}) {
   const form = new FormData();
@@ -47,6 +52,7 @@ beforeEach(() => {
     created_at: '2026-10-09T12:00:00Z',
   }));
   files.deleteKnowledgeFile.mockResolvedValue({ ok: true });
+  vector.indexKnowledgeFile.mockResolvedValue({ status: 'indexed', chunks: 1, ms: 5 });
 });
 
 describe('GET /api/settings/agents/knowledge', () => {
@@ -72,6 +78,16 @@ describe('POST /api/settings/agents/knowledge', () => {
     expect(files.createKnowledgeFile).toHaveBeenCalledWith(
       expect.objectContaining({ accountId: ACCOUNT, userId: USER, name: 'tabela.csv', text: 'nome;valor\nA;1', sizeBytes: 17 }),
     );
+    // RAG vetorial (TASK1-D): indexa logo após guardar, com o texto extraído.
+    expect(vector.indexKnowledgeFile).toHaveBeenCalledWith({ db: { fake: true } }, ACCOUNT, FILE_ID, 'nome;valor\nA;1');
+    expect(body.file).toMatchObject({ embedding_status: 'indexed', embedding_chunks: 1 });
+  });
+
+  it('sem chave da conta o envio funciona e o arquivo fica sem índice (vale o modo atual)', async () => {
+    vector.indexKnowledgeFile.mockResolvedValueOnce({ status: 'no_key', chunks: 0, ms: 1 });
+    const res = await POST(upload('a.txt', 'conteúdo'));
+    expect(res.status).toBe(201);
+    expect((await res.json()).file).toMatchObject({ embedding_status: 'no_key', embedding_chunks: null });
   });
 
   it('supervisor não envia (ai.agents.edit)', async () => {
@@ -129,5 +145,27 @@ describe('DELETE /api/settings/agents/knowledge/[fileId]', () => {
     state.role = 'supervisor';
     expect((await del(FILE_ID)).status).toBe(403);
     expect(files.deleteKnowledgeFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/settings/agents/knowledge/[fileId]/reindex (TASK1-D)', () => {
+  const reindex = (id: string) => REINDEX(new Request('http://localhost', { method: 'POST' }), { params: Promise.resolve({ fileId: id }) });
+
+  it('admin reindexa o texto guardado do arquivo da própria conta', async () => {
+    files.readKnowledgeFileContent.mockResolvedValueOnce({ id: FILE_ID, content: 'texto guardado' });
+    const res = await reindex(FILE_ID);
+    expect(res.status).toBe(200);
+    expect(files.readKnowledgeFileContent).toHaveBeenCalledWith(ACCOUNT, FILE_ID);
+    expect(vector.indexKnowledgeFile).toHaveBeenCalledWith({ db: { fake: true } }, ACCOUNT, FILE_ID, 'texto guardado');
+    expect(await res.json()).toEqual({ embedding_status: 'indexed', embedding_chunks: 1 });
+  });
+
+  it('arquivo de outra conta/inexistente → 404; id inválido → 404; supervisor → 403', async () => {
+    files.readKnowledgeFileContent.mockResolvedValueOnce(null);
+    expect((await reindex(FILE_ID)).status).toBe(404);
+    expect((await reindex('nao-e-uuid')).status).toBe(404);
+    state.role = 'supervisor';
+    expect((await reindex(FILE_ID)).status).toBe(403);
+    expect(vector.indexKnowledgeFile).not.toHaveBeenCalled();
   });
 });

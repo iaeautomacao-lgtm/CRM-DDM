@@ -3,6 +3,8 @@ import { guardPermission } from '@/lib/auth/route-guard';
 import { checkRateLimit } from '@/lib/rate-limit';
 import { extractKnowledgeText } from '@/lib/ai/knowledge/extract';
 import { createKnowledgeFile, listKnowledgeFiles } from '@/lib/ai/knowledge/files';
+import { indexKnowledgeFile } from '@/lib/ai/knowledge/vector-store';
+import { supabaseAdmin } from '@/lib/flows/admin-client';
 import {
   KB_MAX_FILE_BYTES,
   KB_MAX_NAME_CHARS,
@@ -16,6 +18,11 @@ import {
 //   POST ai.agents.edit : multipart com `file` (PDF, DOCX, TXT/MD, CSV; até 10 MB). O texto é
 //                         extraído NO SERVIDOR (extract.ts, worker com tempo e memória limitados)
 //                         e guardado; devolve { file } com o id. O arquivo original não é guardado.
+//                         Em seguida indexa para a busca por trechos (RAG vetorial, 215) com a chave da
+//                         conta; sem chave/erro o arquivo fica "sem índice" e vale o modo atual — o envio
+//                         nunca falha por causa do índice.
+
+export const maxDuration = 120;
 
 export async function GET() {
   const auth = await guardPermission('ai.agents.view');
@@ -73,7 +80,11 @@ export async function POST(request: Request) {
       sizeBytes: file.size,
       text: extracted.text,
     });
-    return NextResponse.json({ file: saved, pages: extracted.pages ?? null }, { status: 201 });
+    const index = await indexKnowledgeFile({ db: supabaseAdmin() }, accountId, saved.id, extracted.text);
+    return NextResponse.json(
+      { file: { ...saved, embedding_status: index.status, embedding_chunks: index.status === 'indexed' ? index.chunks : null }, pages: extracted.pages ?? null },
+      { status: 201 },
+    );
   } catch (err) {
     console.error('[settings/agents/knowledge] falha ao salvar:', err instanceof Error ? err.message : err);
     return NextResponse.json({ error: 'Não foi possível salvar o arquivo.' }, { status: 500 });

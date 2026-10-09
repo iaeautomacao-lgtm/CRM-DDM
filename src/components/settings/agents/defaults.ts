@@ -1,4 +1,5 @@
 import { LEGACY_AGENT_DEFAULTS, type AgentConfig } from '@/lib/ai/agents/schema';
+import { VECTOR_DEFAULT_MIN_SIMILARITY, VECTOR_DEFAULT_TOP_K } from '@/lib/ai/knowledge/knowledge-context';
 import { DEFAULT_MODEL_BY_PROVIDER, type AiProvider } from '@/lib/ai/models';
 import { KNOWN_AI_EXIT_TAGS } from '@/lib/ai/exit-tags';
 import type {
@@ -27,6 +28,7 @@ export function createInitialAgentFormData(): AgentFormData {
         top_k: defaults.knowledge.rag_external.top_k,
         timeout_ms: defaults.knowledge.rag_external.timeout_ms,
       },
+      vector: { enabled: false, top_k: VECTOR_DEFAULT_TOP_K, min_similarity: VECTOR_DEFAULT_MIN_SIMILARITY },
     },
     tools: [],
     legacyTools: [],
@@ -131,6 +133,11 @@ export function formDataFromPublished(
         top_k: cfgRag.top_k ?? initial.knowledge.rag_external.top_k,
         timeout_ms: cfgRag.timeout_ms ?? initial.knowledge.rag_external.timeout_ms,
       },
+      vector: {
+        enabled: cfgKnowledge.vector?.enabled ?? false,
+        top_k: cfgKnowledge.vector?.top_k ?? initial.knowledge.vector.top_k,
+        min_similarity: cfgKnowledge.vector?.min_similarity ?? initial.knowledge.vector.min_similarity,
+      },
     },
     tools: mappedTools,
     legacyTools: (config.tools ?? [])
@@ -190,6 +197,14 @@ export function formDataFromPublished(
  * o formulário edita — o resto (tags de saída, mídia, conexões, flags legadas…) é preservado, para
  * que salvar pela tela não apague configuração vinda da conversão ou de outras versões.
  */
+function vectorConfig(formData: AgentFormData): NonNullable<AgentConfig['knowledge']['vector']> {
+  return {
+    enabled: formData.knowledge.vector.enabled,
+    top_k: formData.knowledge.vector.top_k,
+    min_similarity: formData.knowledge.vector.min_similarity,
+  };
+}
+
 export function formDataToAgentConfig(
   formData: AgentFormData,
   existingConfig?: AgentConfig | null,
@@ -232,6 +247,10 @@ export function formDataToAgentConfig(
   knowledge.rag_external = { ...merged.knowledge.rag_external, ...fresh.knowledge.rag_external };
   if (!fresh.knowledge.rag_external.url) delete knowledge.rag_external.url;
   if (!fresh.knowledge.rag_external.credential) delete knowledge.rag_external.credential;
+  // Busca por trechos: ligada vem do formulário; desligada só fica registrada se a versão anterior já tinha.
+  if (fresh.knowledge.vector) knowledge.vector = fresh.knowledge.vector;
+  else if (merged.knowledge.vector) knowledge.vector = { ...vectorConfig(formData), enabled: false };
+  else delete knowledge.vector;
   merged.knowledge = knowledge;
   // Inline (legado): reenvia as da versão atual com o liga/desliga do formulário; o servidor mantém a
   // definição da versão anterior e a ordem. Entradas de catálogo vêm do formulário.
@@ -390,6 +409,8 @@ function buildFreshConfig(
       min_partial_chars: defaults.knowledge.min_partial_chars,
       truncation_note: defaults.knowledge.truncation_note,
       rag_external: ragExternal,
+      // Só entra na config quando ligada: agente que não usa não muda (nem o hash da versão).
+      ...(formData.knowledge.vector.enabled ? { vector: vectorConfig(formData) } : {}),
     },
     tools: formData.tools.map((t) => ({
       tool_id: t.tool_id,
