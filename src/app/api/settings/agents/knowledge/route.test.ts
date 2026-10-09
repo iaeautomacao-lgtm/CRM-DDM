@@ -31,7 +31,7 @@ const { DELETE } = await import('./[fileId]/route');
 
 function upload(name: string, content: string | Uint8Array, headers: Record<string, string> = {}) {
   const form = new FormData();
-  form.append('file', new File([content], name));
+  form.append('file', new File([content as BlobPart], name));
   return new Request('http://localhost/api/settings/agents/knowledge', { method: 'POST', body: form, headers });
 }
 
