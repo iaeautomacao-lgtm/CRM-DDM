@@ -56,12 +56,12 @@ import { codigoInUseBy, codigoTabulacaoBloqueado, parseCodigoTabulacao } from '@
 import { AiOutcomeMapSection } from './ai-outcome-map-table';
 
 const TABULACAO_COLORS = [
-  { name: 'Red', value: '#ef4444' },
-  { name: 'Orange', value: '#f97316' },
-  { name: 'Amber', value: '#f59e0b' },
-  { name: 'Emerald', value: '#10b981' },
-  { name: 'Blue', value: '#3b82f6' },
-  { name: 'Violet', value: '#8b5cf6' },
+  { name: 'Vermelho', value: '#ef4444' },
+  { name: 'Laranja', value: '#f97316' },
+  { name: 'Âmbar', value: '#f59e0b' },
+  { name: 'Verde', value: '#10b981' },
+  { name: 'Azul', value: '#3b82f6' },
+  { name: 'Violeta', value: '#8b5cf6' },
 ];
 
 // Sentinel for Base UI Select, which needs a real string value — same
@@ -613,7 +613,7 @@ export function TabulacoesManager() {
                     }
                     aria-label={`Usar ${color.name}`}
                     aria-pressed={form.color === color.value}
-                    className={`size-6 rounded-full border-2 transition-transform ${
+                    className={`size-6 rounded-full border-2 transition-transform focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                       form.color === color.value
                         ? 'border-foreground scale-110'
                         : 'border-transparent'
@@ -687,7 +687,7 @@ export function TabulacoesManager() {
                 {deleteTarget &&
                   (aiExitTagsByOutcomeTag.get(deleteTarget.id) ?? []).length >
                     0 && (
-                    <span className="block rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs font-medium text-amber-800 dark:text-amber-300">
+                    <span className="block rounded-md border border-warning/30 bg-warning-soft p-2.5 text-xs font-medium text-warning">
                       Aviso: Esta tabulação está mapeada para{' '}
                       {(aiExitTagsByOutcomeTag.get(deleteTarget.id) ?? [])
                         .length === 1

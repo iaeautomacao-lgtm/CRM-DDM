@@ -25,7 +25,17 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -48,6 +58,23 @@ const STAGE_COLORS = [
   "#14b8a6",
   "#06b6d4",
 ];
+
+const STAGE_COLOR_NAMES: Record<string, string> = {
+  "#3b82f6": "Azul",
+  "#6366f1": "Índigo",
+  "#8b5cf6": "Violeta",
+  "#ec4899": "Rosa",
+  "#f43f5e": "Vermelho rosado",
+  "#f97316": "Laranja",
+  "#eab308": "Amarelo",
+  "#22c55e": "Verde",
+  "#14b8a6": "Verde-água",
+  "#06b6d4": "Ciano",
+};
+
+function colorName(hex: string): string {
+  return STAGE_COLOR_NAMES[hex.toLowerCase()] ?? "Cor personalizada";
+}
 
 interface PipelineSettingsProps {
   open: boolean;
@@ -77,6 +104,7 @@ export function PipelineSettings({
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [stageToDelete, setStageToDelete] = useState<PipelineStage | null>(null);
 
   // Reset form state when the dialog opens or its prop inputs change
   // — legitimate prop-driven sync.
@@ -198,6 +226,34 @@ export function PipelineSettings({
   }
 
   return (
+    <>
+    <AlertDialog
+      open={stageToDelete !== null}
+      onOpenChange={(o) => {
+        if (!o) setStageToDelete(null);
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Excluir etapa</AlertDialogTitle>
+          <AlertDialogDescription>
+            Deseja excluir a etapa &quot;{stageToDelete?.name}&quot;? Esta ação
+            não pode ser desfeita.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            className={buttonVariants({ variant: "destructive" })}
+            onClick={() => {
+              if (stageToDelete) void handleRemoveStage(stageToDelete.id);
+            }}
+          >
+            Excluir etapa
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md bg-popover border-border max-h-[85vh] overflow-y-auto">
         <DialogHeader>
@@ -239,8 +295,9 @@ export function PipelineSettings({
           <>
             <div className="grid gap-4 py-2">
               <div className="grid gap-2">
-                <Label className="text-muted-foreground">Nome do Pipeline</Label>
+                <Label htmlFor="pipeline-settings-name" className="text-muted-foreground">Nome do Pipeline</Label>
                 <Input
+                  id="pipeline-settings-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="border-border bg-muted text-foreground"
@@ -273,7 +330,7 @@ export function PipelineSettings({
                             updated[index] = { ...updated[index], color: v };
                             setLocalStages(updated);
                           }}
-                          onRemove={() => handleRemoveStage(stage.id)}
+                          onRemove={() => setStageToDelete(stage)}
                           colors={STAGE_COLORS}
                         />
                       ))}
@@ -288,7 +345,7 @@ export function PipelineSettings({
                       key={color}
                       type="button"
                       onClick={() => setNewStageColor(color)}
-                      className="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110"
+                      className="h-6 w-6 rounded-full border-2 outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50"
                       style={{
                         backgroundColor: color,
                         borderColor:
@@ -296,12 +353,14 @@ export function PipelineSettings({
                             ? "var(--foreground)"
                             : "transparent",
                       }}
-                      aria-label={`Selecionar cor ${color}`}
+                      aria-label={`Selecionar cor ${colorName(color)}`}
+                      aria-pressed={newStageColor === color}
                     />
                   ))}
                 </div>
                 <div className="flex items-center gap-2">
                   <Input
+                    aria-label="Nome da nova etapa"
                     value={newStageName}
                     onChange={(e) => setNewStageName(e.target.value)}
                     placeholder="Nome da nova etapa"
@@ -337,7 +396,7 @@ export function PipelineSettings({
               <Button
                 variant="destructive"
                 onClick={() => setShowDeleteConfirm(true)}
-                className="mr-auto bg-red-600 hover:bg-red-700"
+                className="mr-auto"
               >
                 Excluir Pipeline
               </Button>
@@ -360,6 +419,7 @@ export function PipelineSettings({
         )}
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 
@@ -405,12 +465,14 @@ function SortableStageRow({
         value={stage.name}
         onChange={(e) => onNameChange(e.target.value)}
         className="h-7 flex-1 border-transparent bg-transparent text-sm text-foreground focus:border-border"
+        aria-label={`Nome da etapa ${stage.name}`}
       />
       <Button
         variant="ghost"
         size="icon-xs"
         onClick={onRemove}
-        className="text-muted-foreground hover:text-red-400"
+        className="text-muted-foreground hover:text-danger"
+        aria-label={`Excluir etapa ${stage.name}`}
       >
         <Trash2 className="h-3 w-3" />
       </Button>
@@ -429,18 +491,27 @@ function ColorSwatch({
 }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
+    <div
+      className="relative"
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && open) {
+          e.stopPropagation();
+          setOpen(false);
+        }
+      }}
+    >
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="h-4 w-4 rounded-full border border-border"
+        className="h-6 w-6 rounded-full border border-border outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         style={{ backgroundColor: value }}
-        aria-label="Alterar cor"
+        aria-label={`Alterar cor (atual: ${colorName(value)})`}
+        aria-expanded={open}
       />
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-6 z-20 flex flex-wrap gap-1 rounded-lg border border-border bg-popover p-2 shadow-lg w-36">
+          <div className="absolute left-0 top-8 z-20 flex w-40 flex-wrap gap-1 rounded-lg border border-border bg-popover p-2 shadow-lg">
             {colors.map((c) => (
               <button
                 key={c}
@@ -449,12 +520,14 @@ function ColorSwatch({
                   onChange(c);
                   setOpen(false);
                 }}
-                className="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110"
+                className="h-6 w-6 rounded-full border-2 outline-none transition-transform hover:scale-110 focus-visible:ring-3 focus-visible:ring-ring/50"
                 style={{
                   backgroundColor: c,
                   borderColor:
                     c === value ? "var(--foreground)" : "transparent",
                 }}
+                aria-label={colorName(c)}
+                aria-pressed={c === value}
               />
             ))}
           </div>

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, KeyRound } from 'lucide-react';
+import { Eye, EyeOff, Loader2, KeyRound } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -30,6 +30,24 @@ export function PasswordForm() {
   const [confirm, setConfirm] = useState('');
   const [saving, setSaving] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [currentError, setCurrentError] = useState<string | null>(null);
+  const [showPasswords, setShowPasswords] = useState(false);
+
+  const tooShortError = confirmError !== null && next.length < MIN_PASSWORD;
+  const mismatchError = confirmError !== null && !tooShortError;
+
+  // Um único botão por campo, todos controlam a mesma visibilidade.
+  const toggleVisibility = (
+    <button
+      type="button"
+      onClick={() => setShowPasswords((v) => !v)}
+      className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+      aria-label={showPasswords ? 'Ocultar senhas' : 'Mostrar senhas'}
+      aria-pressed={showPasswords}
+    >
+      {showPasswords ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
+    </button>
+  );
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,7 +76,7 @@ export function PasswordForm() {
         password: current,
       });
       if (signInError) {
-        toast.error('Senha atual incorreta');
+        setCurrentError('Senha atual incorreta');
         return;
       }
 
@@ -101,15 +119,29 @@ export function PasswordForm() {
             <Label htmlFor="current-password" className="text-foreground">
               Senha atual
             </Label>
-            <Input
-              id="current-password"
-              type="password"
-              value={current}
-              onChange={(e) => setCurrent(e.target.value)}
-              autoComplete="current-password"
-              disabled={saving}
-              required
-            />
+            <div className="relative">
+              <Input
+                id="current-password"
+                type={showPasswords ? 'text' : 'password'}
+                value={current}
+                onChange={(e) => {
+                  setCurrent(e.target.value);
+                  setCurrentError(null);
+                }}
+                autoComplete="current-password"
+                aria-invalid={currentError ? true : undefined}
+                aria-describedby={currentError ? 'current-password-error' : undefined}
+                className={`pr-9${currentError ? ' border-danger' : ''}`}
+                disabled={saving}
+                required
+              />
+              {toggleVisibility}
+            </div>
+            {currentError && (
+              <p id="current-password-error" role="alert" className="text-xs text-danger">
+                {currentError}
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -117,36 +149,58 @@ export function PasswordForm() {
               <Label htmlFor="new-password" className="text-foreground">
                 Nova senha
               </Label>
-              <Input
-                id="new-password"
-                type="password"
-                value={next}
-                onChange={(e) => setNext(e.target.value)}
-                autoComplete="new-password"
-                minLength={MIN_PASSWORD}
-                disabled={saving}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showPasswords ? 'text' : 'password'}
+                  value={next}
+                  onChange={(e) => {
+                    setNext(e.target.value);
+                    setConfirmError(null);
+                  }}
+                  autoComplete="new-password"
+                  minLength={MIN_PASSWORD}
+                  aria-invalid={tooShortError ? true : undefined}
+                  aria-describedby={tooShortError ? 'password-form-error' : undefined}
+                  className={`pr-9${tooShortError ? ' border-danger' : ''}`}
+                  disabled={saving}
+                  required
+                />
+                {toggleVisibility}
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirm-password" className="text-foreground">
                 Confirmar nova senha
               </Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                autoComplete="new-password"
-                minLength={MIN_PASSWORD}
-                disabled={saving}
-                required
-              />
+              <div className="relative">
+                <Input
+                  id="confirm-password"
+                  type={showPasswords ? 'text' : 'password'}
+                  value={confirm}
+                  onChange={(e) => {
+                    setConfirm(e.target.value);
+                    setConfirmError(null);
+                  }}
+                  autoComplete="new-password"
+                  minLength={MIN_PASSWORD}
+                  aria-invalid={mismatchError ? true : undefined}
+                  aria-describedby={mismatchError ? 'password-form-error' : undefined}
+                  className={`pr-9${mismatchError ? ' border-danger' : ''}`}
+                  disabled={saving}
+                  required
+                />
+                {toggleVisibility}
+              </div>
             </div>
           </div>
 
           {confirmError && (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <p
+              id="password-form-error"
+              role="alert"
+              className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+            >
               {confirmError}
             </p>
           )}

@@ -26,12 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { InfoHint } from "@/components/ddm/info-hint";
 import { normalizeSessionName } from "./types";
 import { cn } from "@/lib/utils";
 
@@ -94,14 +89,8 @@ function FieldLabel({
   return (
     <div className="flex items-center gap-1.5">
       <Label htmlFor={htmlFor}>{children}</Label>
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger
-            render={<Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />}
-          />
-          <TooltipContent className="max-w-[260px] text-xs">{tooltip}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+      {/* Ajuda em botão (popover): abre com clique, teclado e toque — o ícone com tooltip não recebia foco. */}
+      <InfoHint label="Ajuda sobre este campo">{tooltip}</InfoHint>
     </div>
   );
 }
@@ -303,6 +292,7 @@ export function NewChannelDialog({
               <button
                 type="button"
                 onClick={() => setWahaMode("new")}
+                aria-pressed={wahaMode === "new"}
                 className={cn(
                   "flex-1 py-1.5 px-3 transition-colors",
                   wahaMode === "new"
@@ -315,6 +305,7 @@ export function NewChannelDialog({
               <button
                 type="button"
                 onClick={() => setWahaMode("existing")}
+                aria-pressed={wahaMode === "existing"}
                 className={cn(
                   "flex-1 py-1.5 px-3 transition-colors",
                   wahaMode === "existing"
@@ -402,7 +393,6 @@ export function NewChannelDialog({
               <Button
                 onClick={handleCreateWaha}
                 disabled={saving}
-                className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
               >
                 {saving ? "Criando…" : "Criar e conectar"}
               </Button>
@@ -540,7 +530,6 @@ export function NewChannelDialog({
               <Button
                 onClick={handleCreateMeta}
                 disabled={saving}
-                className="bg-[#FF5706] text-white hover:bg-[#FF5706]/90"
               >
                 {saving ? "Salvando…" : "Salvar"}
               </Button>
@@ -550,4 +539,4 @@ export function NewChannelDialog({
       </DialogContent>
     </Dialog>
   );
-}
+}

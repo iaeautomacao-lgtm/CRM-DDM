@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     .maybeSingle()
 
   if (configError || !config) {
-    return NextResponse.json({ error: 'Config not found' }, { status: 404 })
+    return NextResponse.json({ error: 'Configuração não encontrada' }, { status: 404 })
   }
 
   const { data: contacts, error: contactsError } = await db
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     .limit(MAX_CONTACTS_PER_RUN)
 
   if (contactsError || !contacts) {
-    return NextResponse.json({ error: 'Failed to fetch contacts' }, { status: 500 })
+    return NextResponse.json({ error: 'Falha ao buscar os contatos' }, { status: 500 })
   }
 
   const wahaConfig = {

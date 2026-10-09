@@ -55,7 +55,7 @@ export async function PATCH(request: Request) {
 
     if (typeof rawName !== "string") {
       return NextResponse.json(
-        { error: "'name' must be a string" },
+        { error: "'name' deve ser um texto" },
         { status: 400 },
       );
     }
@@ -63,13 +63,13 @@ export async function PATCH(request: Request) {
     const name = rawName.trim();
     if (name.length === 0) {
       return NextResponse.json(
-        { error: "Account name cannot be empty" },
+        { error: "O nome da conta não pode ficar vazio" },
         { status: 400 },
       );
     }
     if (name.length > MAX_NAME_LEN) {
       return NextResponse.json(
-        { error: `Account name must be ${MAX_NAME_LEN} characters or fewer` },
+        { error: `O nome da conta deve ter no máximo ${MAX_NAME_LEN} caracteres` },
         { status: 400 },
       );
     }
@@ -87,7 +87,7 @@ export async function PATCH(request: Request) {
     if (error) {
       console.error("[PATCH /api/account] update error:", error);
       return NextResponse.json(
-        { error: "Failed to update account" },
+        { error: "Falha ao atualizar a conta" },
         { status: 500 },
       );
     }

@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
   }
 
   // Keyed by user id — see the budget's doc comment for why this beats
@@ -58,14 +58,14 @@ export async function POST(request: Request) {
     | null;
 
   if (typeof body?.code !== "string" || !body.code.trim()) {
-    return NextResponse.json({ error: "Missing invitation code" }, { status: 400 });
+    return NextResponse.json({ error: "Código do convite ausente" }, { status: 400 });
   }
 
   const normalized = normalizeInviteCode(body.code);
   // Cheap early exit for obviously-malformed input — still counted
   // against the rate limit above (a malformed guess is still a guess).
   if (!normalized) {
-    return NextResponse.json({ error: "Invalid invitation code" }, { status: 400 });
+    return NextResponse.json({ error: "Código do convite inválido" }, { status: 400 });
   }
 
   const { data: accountId, error } = await supabase.rpc("redeem_invitation", {

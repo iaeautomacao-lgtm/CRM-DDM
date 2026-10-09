@@ -10,6 +10,7 @@ import {
   LayoutDashboard,
   Megaphone,
   MessageSquare,
+  Network,
   Settings,
   Shield,
   Tags,
@@ -65,7 +66,7 @@ export const navItems: NavItem[] = [
   { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "intelligence", beta: true },
   { href: "/relatorios/atendimentos", label: "Relatórios", icon: FileText, group: "intelligence" },
 
-  { href: "/equipes", label: "Equipes", icon: Users, group: "administration" },
+  { href: "/equipes", label: "Equipes", icon: Network, group: "administration" },
   { href: "/usuarios", label: "Usuários", icon: UsersRound, group: "administration" },
 ];
 
@@ -105,6 +106,7 @@ const extraTitles: Record<string, string> = {
   "/lead-extractor": "Extrator de leads",
   "/membros": "Usuários",
   "/unauthorized": "Acesso negado",
+  "/ddm-logs": "Logs do sistema",
 };
 
 export function navPath(href: string): string {
@@ -142,5 +144,22 @@ const titleMap: Record<string, string> = (() => {
 
 export function getPageTitle(pathname: string): string {
   const match = longestMatchingHref(pathname, Object.keys(titleMap));
-  return match ? titleMap[match] : "";
+  if (match) return titleMap[match];
+  // Fallback: nunca devolve vazio (WCAG 2.4.2/2.4.6). Usa o último segmento
+  // da rota de forma legível ou o nome do produto.
+  const segment = pathname
+    .split("?")[0]
+    .split("/")
+    .filter(Boolean)
+    .pop();
+  if (!segment) return "OmniDDM";
+  let decoded = segment;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    // segmento malformado: usa o texto original
+  }
+  const friendly = decoded.replace(/[-_]+/g, " ").trim();
+  if (!friendly) return "OmniDDM";
+  return friendly.charAt(0).toUpperCase() + friendly.slice(1);
 }

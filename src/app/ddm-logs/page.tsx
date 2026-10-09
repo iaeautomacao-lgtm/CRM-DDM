@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { CircleCheck, CircleX, TriangleAlert, type LucideIcon } from "lucide-react";
 import type { LogLevel, LogSource } from "@/lib/logger";
 import { SystemHealthCard } from "@/components/ops/system-health-card";
 import {
@@ -149,15 +150,36 @@ const TEST_STATUS_BADGE: Record<TestStatus, string> = {
   fail: "bg-danger-soft text-danger border-danger/40",
 };
 const TEST_STATUS_LABEL: Record<TestStatus, string> = {
-  pass: "✅ PASS",
-  warn: "⚠️ WARN",
-  fail: "❌ FAIL",
+  pass: "PASS",
+  warn: "WARN",
+  fail: "FAIL",
 };
+const TEST_STATUS_ICON: Record<TestStatus, LucideIcon> = {
+  pass: CircleCheck,
+  warn: TriangleAlert,
+  fail: CircleX,
+};
+
+// Ícone lucide + texto (status nunca só por emoji/cor).
+function TestStatusLabel({ status }: { status: TestStatus }) {
+  const Icon = TEST_STATUS_ICON[status];
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Icon className="size-3.5 shrink-0" aria-hidden="true" />
+      {TEST_STATUS_LABEL[status]}
+    </span>
+  );
+}
 const TEST_CARD_BG: Record<TestStatus, string> = {
   pass: "border-success/40 bg-success-soft",
   warn: "border-warning/40 bg-warning-soft",
   fail: "border-danger/40 bg-danger-soft",
 };
+
+// Botão na primeira célula das linhas clicáveis: dá foco por teclado, Enter/Espaço
+// e aria-expanded sem duplicar o onClick da <tr> (o clique nativo sobe até ela).
+const ROW_TOGGLE_CLASS =
+  "rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 type Tab = "events" | "users" | "sessions" | "actions" | "tests" | "feedback";
 
@@ -844,7 +866,15 @@ export default function DdmLogsPage() {
           }`}
         >
           <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
-            {formatTimestamp(log.created_at)}
+            {/* O clique nativo do botão (Enter/Espaço) sobe até o onClick da linha. */}
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              aria-label={`${isExpanded ? "Recolher" : "Expandir"} payload do log de ${formatTimestamp(log.created_at)}`}
+              className={ROW_TOGGLE_CLASS}
+            >
+              {formatTimestamp(log.created_at)}
+            </button>
           </td>
           <td className="px-3 py-2">
             <span
@@ -900,7 +930,14 @@ export default function DdmLogsPage() {
           className="cursor-pointer border-b border-border transition-colors hover:bg-surface-3/40"
         >
           <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
-            {formatTimestamp(log.created_at)}
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              aria-label={`${isExpanded ? "Recolher" : "Expandir"} payload da ação de ${formatTimestamp(log.created_at)}`}
+              className={ROW_TOGGLE_CLASS}
+            >
+              {formatTimestamp(log.created_at)}
+            </button>
           </td>
           <td className="whitespace-nowrap px-3 py-2 text-xs text-foreground-2">
             {displayUserName(log)}
@@ -1027,6 +1064,7 @@ export default function DdmLogsPage() {
           <button
             type="button"
             onClick={() => setAutoRefresh((v) => !v)}
+            aria-pressed={autoRefresh}
             className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
               autoRefresh
                 ? "border-primary/60 bg-primary/20 text-primary-text"
@@ -1057,13 +1095,19 @@ export default function DdmLogsPage() {
       <SystemHealthCard className="px-4 pt-4" />
 
       {/* Abas */}
-      <div className="flex items-center gap-1 border-b border-border bg-surface-3/40 px-4 pt-2">
+      <div
+        role="tablist"
+        aria-label="Seções dos logs"
+        className="flex items-center gap-1 overflow-x-auto border-b border-border bg-surface-3/40 px-4 pt-2"
+      >
         {TAB_OPTIONS.map((t) => (
           <button
             key={t.value}
             type="button"
+            role="tab"
+            aria-selected={tab === t.value}
             onClick={() => setTab(t.value)}
-            className={`rounded-t-md border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
+            className={`shrink-0 whitespace-nowrap rounded-t-md border-b-2 px-3 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
               tab === t.value
                 ? "border-primary text-primary-text"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -1151,9 +1195,10 @@ export default function DdmLogsPage() {
             <button
               type="button"
               onClick={() => setUserIdFilter(null)}
-              className="ml-1 text-primary-text hover:text-foreground"
+              aria-label="Remover filtro de usuário"
+              className="ml-1 rounded text-primary-text hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              ×
+              <span aria-hidden="true">×</span>
             </button>
           </span>
         )}
@@ -1165,13 +1210,13 @@ export default function DdmLogsPage() {
         {tab === "events" && (
           <>
             {error && (
-              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              <div role="alert" className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {error}
               </div>
             )}
 
             {loading && logs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando logs...
               </div>
             ) : logs.length === 0 ? (
@@ -1179,7 +1224,7 @@ export default function DdmLogsPage() {
                 Nenhum log encontrado para os filtros atuais.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -1210,8 +1255,15 @@ export default function DdmLogsPage() {
                             }`}
                           >
                             <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
-                              {formatTimestamp(groupLogs[groupLogs.length - 1].created_at)} →{" "}
-                              {formatTimestamp(first.created_at)}
+                              <button
+                                type="button"
+                                aria-expanded={isGroupExpanded}
+                                aria-label={`${isGroupExpanded ? "Recolher" : "Expandir"} grupo de ${groupLogs.length} logs repetidos`}
+                                className={ROW_TOGGLE_CLASS}
+                              >
+                                {formatTimestamp(groupLogs[groupLogs.length - 1].created_at)} →{" "}
+                                {formatTimestamp(first.created_at)}
+                              </button>
                             </td>
                             <td className="px-3 py-2">
                               <span
@@ -1267,13 +1319,13 @@ export default function DdmLogsPage() {
         {tab === "users" && (
           <>
             {usersError && (
-              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              <div role="alert" className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {usersError}
               </div>
             )}
 
             {usersLoading && users.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando ranking...
               </div>
             ) : users.length === 0 ? (
@@ -1281,7 +1333,7 @@ export default function DdmLogsPage() {
                 Nenhum evento com usuário identificado no período.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -1304,7 +1356,13 @@ export default function DdmLogsPage() {
                             <span className="flex size-7 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary-text">
                               {getInitials(u.full_name)}
                             </span>
-                            <span className="text-foreground">{u.full_name || "Sem nome"}</span>
+                            <button
+                              type="button"
+                              aria-label={`Filtrar logs do usuário ${u.full_name || "Sem nome"}`}
+                              className={`${ROW_TOGGLE_CLASS} text-foreground`}
+                            >
+                              {u.full_name || "Sem nome"}
+                            </button>
                           </div>
                         </td>
                         <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
@@ -1338,13 +1396,13 @@ export default function DdmLogsPage() {
         {tab === "sessions" && (
           <>
             {sessionsError && (
-              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              <div role="alert" className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {sessionsError}
               </div>
             )}
 
             {sessionsLoading && sessions.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando sessões...
               </div>
             ) : sessions.length === 0 ? (
@@ -1352,7 +1410,7 @@ export default function DdmLogsPage() {
                 Nenhuma sessão encontrada para os filtros atuais.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -1419,13 +1477,13 @@ export default function DdmLogsPage() {
         {tab === "actions" && (
           <>
             {actionsError && (
-              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              <div role="alert" className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {actionsError}
               </div>
             )}
 
             {actionsLoading && actionLogs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando ações...
               </div>
             ) : actionLogs.length === 0 ? (
@@ -1433,7 +1491,7 @@ export default function DdmLogsPage() {
                 Nenhuma ação encontrada para os filtros atuais.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-border">
+              <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
                     <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
@@ -1459,8 +1517,15 @@ export default function DdmLogsPage() {
                             className="cursor-pointer border-b border-border transition-colors hover:bg-surface-3/40"
                           >
                             <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
-                              {formatTimestamp(groupLogs[groupLogs.length - 1].created_at)} →{" "}
-                              {formatTimestamp(first.created_at)}
+                              <button
+                                type="button"
+                                aria-expanded={isGroupExpanded}
+                                aria-label={`${isGroupExpanded ? "Recolher" : "Expandir"} grupo de ${groupLogs.length} ações repetidas`}
+                                className={ROW_TOGGLE_CLASS}
+                              >
+                                {formatTimestamp(groupLogs[groupLogs.length - 1].created_at)} →{" "}
+                                {formatTimestamp(first.created_at)}
+                              </button>
                             </td>
                             <td className="whitespace-nowrap px-3 py-2 text-xs text-foreground-2">
                               {displayUserName(first)}
@@ -1511,18 +1576,18 @@ export default function DdmLogsPage() {
         {tab === "tests" && (
           <>
             {runNowError && (
-              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              <div role="alert" className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {runNowError}
               </div>
             )}
             {testsError && (
-              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              <div role="alert" className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {testsError}
               </div>
             )}
 
             {testsLoading && testRuns.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando execuções...
               </div>
             ) : testRuns.length === 0 ? (
@@ -1547,6 +1612,7 @@ export default function DdmLogsPage() {
                       <button
                         type="button"
                         onClick={() => toggleTestRun(run.id)}
+                        aria-expanded={isExpanded}
                         className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-3/40"
                       >
                         <span className="font-mono text-xs text-muted-foreground">
@@ -1555,7 +1621,7 @@ export default function DdmLogsPage() {
                         <span
                           className={`inline-block rounded-full border px-2.5 py-0.5 text-xs font-semibold ${TEST_STATUS_BADGE[overall]}`}
                         >
-                          {TEST_STATUS_LABEL[overall]}
+                          <TestStatusLabel status={overall} />
                         </span>
                         <span className="text-xs text-muted-foreground">
                           {run.payload?.duration_total_ms ?? 0}ms total
@@ -1569,7 +1635,7 @@ export default function DdmLogsPage() {
                       </button>
 
                       {isExpanded && (
-                        <div className="border-t border-border bg-surface-3/50 px-4 py-3">
+                        <div className="overflow-x-auto border-t border-border bg-surface-3/50 px-4 py-3">
                           <table className="w-full border-collapse text-left text-sm">
                             <thead>
                               <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
@@ -1614,13 +1680,13 @@ export default function DdmLogsPage() {
         {tab === "feedback" && (
           <>
             {feedbackError && (
-              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
+              <div role="alert" className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {feedbackError}
               </div>
             )}
 
             {feedbackLoading && feedbackLogs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
+              <div role="status" className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando feedbacks...
               </div>
             ) : feedbackLogs.length === 0 ? (

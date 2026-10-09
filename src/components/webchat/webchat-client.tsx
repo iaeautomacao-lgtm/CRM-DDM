@@ -20,6 +20,17 @@ const POLL_OVERLAP_MS = 5000;
 // Suporte a gravação não muda durante a vida da página: não há o que assinar.
 const noopSubscribe = () => () => {};
 
+// Falhas seguidas do polling antes de avisar "Sem conexão".
+const POLL_FAILS_BEFORE_WARNING = 3;
+
+/** Respeita prefers-reduced-motion ao rolar para a última mensagem. */
+function scrollBehavior(): ScrollBehavior {
+  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    return "auto";
+  }
+  return "smooth";
+}
+
 /**
  * Variáveis do tema a partir da cor do Webchat (/canais): primária, hover,
  * foco e texto preto ou branco conforme a luminosidade (cor clara não fica
@@ -52,6 +63,8 @@ export function WebchatClient({ token }: { token: string }) {
   const [sendError, setSendError] = useState<string | null>(null);
   const lastAtRef = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const pollFailsRef = useRef(0);
+  const [offline, setOffline] = useState(false);
 
   // Junta mensagens novas sem duplicar (a mensagem do próprio cliente
   // chega pelo POST e de novo na busca seguinte).
@@ -97,9 +110,18 @@ export function WebchatClient({ token }: { token: string }) {
       const body = await res.json().catch(() => ({}));
       const gone = goneFrom(res.status, body);
       if (gone) return setPage(gone);
-      if (res.ok && Array.isArray(body.messages)) merge(body.messages, true);
+      if (res.ok && Array.isArray(body.messages)) {
+        pollFailsRef.current = 0;
+        setOffline(false);
+        merge(body.messages, true);
+      } else {
+        pollFailsRef.current += 1;
+        if (pollFailsRef.current >= POLL_FAILS_BEFORE_WARNING) setOffline(true);
+      }
     } catch {
       // Rede instável no celular: a próxima consulta tenta de novo.
+      pollFailsRef.current += 1;
+      if (pollFailsRef.current >= POLL_FAILS_BEFORE_WARNING) setOffline(true);
     }
   }, [api, merge]);
 
@@ -157,9 +179,13 @@ export function WebchatClient({ token }: { token: string }) {
     };
   }, [page.kind, poll]);
 
+  const scrollToBottom = useCallback(() => {
+    bottomRef.current?.scrollIntoView({ behavior: scrollBehavior(), block: "end" });
+  }, []);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length]);
+    scrollToBottom();
+  }, [messages.length, scrollToBottom]);
 
   const post = useCallback(
     async (payload: Record<string, unknown>) => {
@@ -230,8 +256,9 @@ export function WebchatClient({ token }: { token: string }) {
 
   if (page.kind === "loading") {
     return (
-      <div className="flex h-dvh items-center justify-center bg-background">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div role="status" className="flex h-dvh items-center justify-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
+        <span className="sr-only">Abrindo atendimento…</span>
       </div>
     );
   }
@@ -266,7 +293,13 @@ export function WebchatClient({ token }: { token: string }) {
       </p>
 
       <main className="min-h-0 flex-1 overflow-y-auto bg-background px-4 py-4">
-        <div className="flex flex-col gap-2">
+        <div
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Mensagens da conversa"
+          className="flex flex-col gap-2"
+        >
           {messages.length === 0 && (
             <p className="py-8 text-center text-sm text-muted-foreground">
               {page.welcome}
@@ -278,6 +311,7 @@ export function WebchatClient({ token }: { token: string }) {
               <MessageBubble
                 key={m.id}
                 message={m}
+                onMediaLoad={scrollToBottom}
                 // Botões só respondem enquanto são a última mensagem.
                 onChoose={
                   isLast && m.interactive && !sending
@@ -291,11 +325,25 @@ export function WebchatClient({ token }: { token: string }) {
         </div>
       </main>
 
+      {offline && !sendError && (
+        <p role="status" className="shrink-0 bg-warning-soft px-4 py-2 text-center text-xs text-warning">
+          Sem conexão, tentando de novo…
+        </p>
+      )}
+
       {sendError && (
-        <p className="flex items-center justify-between gap-2 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+        <p
+          role="alert"
+          className="flex items-center justify-between gap-2 bg-destructive/10 px-4 py-2 text-xs text-destructive"
+        >
           {sendError}
-          <button type="button" onClick={() => setSendError(null)} aria-label="Fechar aviso">
-            <X className="h-3.5 w-3.5" />
+          <button
+            type="button"
+            onClick={() => setSendError(null)}
+            aria-label="Fechar aviso"
+            className="flex size-8 shrink-0 items-center justify-center rounded-full hover:bg-destructive/10"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </p>
       )}
@@ -306,6 +354,7 @@ export function WebchatClient({ token }: { token: string }) {
         sending={sending}
         onSend={sendText}
         onFile={sendFile}
+        onError={setSendError}
       />
       </section>
     </div>
@@ -335,6 +384,15 @@ function GoneScreen({ reason }: { reason: "expired" | "revoked" | "not_found" | 
     <div className="flex h-dvh flex-col items-center justify-center gap-2 bg-background px-6 text-center">
       <h1 className="text-base font-semibold text-foreground">{copy.title}</h1>
       <p className="max-w-sm text-sm text-muted-foreground">{copy.body}</p>
+      {reason === "error" && (
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-2 inline-flex h-10 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground"
+        >
+          Tentar de novo
+        </button>
+      )}
     </div>
   );
 }
@@ -342,9 +400,11 @@ function GoneScreen({ reason }: { reason: "expired" | "revoked" | "not_found" | 
 function MessageBubble({
   message,
   onChoose,
+  onMediaLoad,
 }: {
   message: WebchatClientMessage;
   onChoose?: (id: string, title: string) => void;
+  onMediaLoad?: () => void;
 }) {
   const mine = message.from === "customer";
   const time = new Date(message.created_at).toLocaleTimeString("pt-BR", {
@@ -361,7 +421,7 @@ function MessageBubble({
             : "rounded-[14px_14px_14px_4px] bg-card text-foreground shadow-[inset_0_0_0_1px_var(--border)]"
         )}
       >
-        <MessageMedia message={message} />
+        <MessageMedia message={message} onLoad={onMediaLoad} />
         {message.text && <p className="whitespace-pre-wrap break-words">{message.text}</p>}
         <p className="mt-1 text-right text-[11px] text-muted-foreground">
           {time}
@@ -374,16 +434,29 @@ function MessageBubble({
   );
 }
 
-function MessageMedia({ message }: { message: WebchatClientMessage }) {
+function MessageMedia({ message, onLoad }: { message: WebchatClientMessage; onLoad?: () => void }) {
   if (!message.media_url) return null;
   switch (message.content_type) {
     case "image":
       return (
         // eslint-disable-next-line @next/next/no-img-element -- URL assinada temporária, sem otimização do Next
-        <img src={message.media_url} alt="Imagem" className="mb-1 max-h-72 rounded-lg object-cover" />
+        <img
+          src={message.media_url}
+          alt={message.from === "customer" ? "Imagem enviada por você" : "Imagem recebida no atendimento"}
+          onLoad={onLoad}
+          className="mb-1 max-h-72 rounded-lg object-cover"
+        />
       );
     case "video":
-      return <video src={message.media_url} controls className="mb-1 max-h-72 rounded-lg" />;
+      return (
+        <video
+          src={message.media_url}
+          controls
+          onLoadedMetadata={onLoad}
+          aria-label="Vídeo da conversa"
+          className="mb-1 max-h-72 rounded-lg"
+        />
+      );
     case "audio":
       return <audio src={message.media_url} controls className="mb-1 w-60 max-w-full" />;
     default:
@@ -394,7 +467,7 @@ function MessageMedia({ message }: { message: WebchatClientMessage }) {
           rel="noopener noreferrer"
           className="mb-1 flex items-center gap-2 underline-offset-2 hover:underline"
         >
-          <FileText className="h-4 w-4 shrink-0" />
+          <FileText className="h-4 w-4 shrink-0" aria-hidden="true" />
           Abrir arquivo
         </a>
       );
@@ -420,7 +493,7 @@ function InteractiveOptions({
           type="button"
           disabled={!onChoose}
           onClick={() => onChoose?.(o.id, o.title)}
-          className="rounded-full border border-primary/40 bg-card px-3 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-default disabled:opacity-50"
+          className="rounded-full border border-primary/40 bg-card min-h-10 px-4 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-default disabled:opacity-50"
         >
           {o.title}
         </button>
@@ -435,15 +508,25 @@ function Composer({
   sending,
   onSend,
   onFile,
+  onError,
 }: {
   draft: string;
   setDraft: (v: string) => void;
   sending: boolean;
   onSend: () => void;
   onFile: (file: File) => void;
+  onError: (message: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [recorder, setRecorder] = useState<MediaRecorder | null>(null);
+  const [seconds, setSeconds] = useState(0);
+
+  // Contador de tempo da gravação.
+  useEffect(() => {
+    if (!recorder) return;
+    const id = window.setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [recorder]);
 
   // Áudio: grava com MediaRecorder e envia como arquivo (mesmo caminho dos
   // anexos). Navegadores sem suporte (alguns in-app) simplesmente não
@@ -473,9 +556,10 @@ function Composer({
         onFile(new File(chunks, `audio-${Date.now()}.${ext}`, { type }));
       };
       rec.start();
+      setSeconds(0);
       setRecorder(rec);
     } catch {
-      // Permissão negada: não há o que fazer além de não gravar.
+      onError("Não foi possível usar o microfone. Libere a permissão no navegador e tente de novo.");
     }
   };
 
@@ -500,7 +584,7 @@ function Composer({
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-50"
           aria-label="Anexar arquivo"
         >
-          <Paperclip className="h-5 w-5" />
+          <Paperclip className="h-5 w-5" aria-hidden="true" />
         </button>
         <textarea
           value={draft}
@@ -513,7 +597,14 @@ function Composer({
           }}
           rows={1}
           maxLength={4000}
-          placeholder={recorder ? "Gravando áudio…" : "Digite uma mensagem"}
+          aria-label="Mensagem"
+          enterKeyHint="send"
+          autoComplete="off"
+          placeholder={
+            recorder
+              ? `Gravando… ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+              : "Digite uma mensagem"
+          }
           disabled={!!recorder}
           className="max-h-32 min-h-10 flex-1 resize-none rounded-[20px] border border-border bg-card px-4 py-2.5 text-base text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-[3px] focus:ring-primary/20 md:text-sm"
         />
@@ -525,7 +616,11 @@ function Composer({
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:bg-surface-3 disabled:text-muted-foreground"
             aria-label="Enviar"
           >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {sending ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Send className="h-4 w-4" aria-hidden="true" />
+            )}
           </button>
         ) : (
           <button
@@ -537,8 +632,13 @@ function Composer({
               recorder ? "bg-destructive text-white" : "bg-primary text-primary-foreground"
             )}
             aria-label={recorder ? "Parar e enviar áudio" : "Gravar áudio"}
+            aria-pressed={!!recorder}
           >
-            {recorder ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            {recorder ? (
+              <Square className="h-4 w-4" aria-hidden="true" />
+            ) : (
+              <Mic className="h-4 w-4" aria-hidden="true" />
+            )}
           </button>
         )}
       </div>

@@ -1067,6 +1067,16 @@ export function TemplateManager() {
                       draggingFolder === folder.id && 'opacity-50',
                     )}
                     onClick={() => setActiveFolder(folder.id)}
+                    // Selecionar a pasta também pelo teclado (antes só com clique).
+                    tabIndex={0}
+                    aria-current={activeFolder === folder.id ? "true" : undefined}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setActiveFolder(folder.id);
+                      }
+                    }}
                   >
                     <GripVertical className="size-3.5 shrink-0 opacity-0 group-hover:opacity-60 cursor-grab" />
                     <Folder className="size-3.5 shrink-0" />
@@ -1111,7 +1121,7 @@ export function TemplateManager() {
                             type="button"
                             aria-label="Mais ações da pasta"
                             onClick={(e) => e.stopPropagation()}
-                            className="shrink-0 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+                            className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
                           >
                             <MoreVertical className="size-3.5" />
                           </button>
@@ -1480,8 +1490,9 @@ export function TemplateManager() {
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Nome do Template</Label>
+              <Label htmlFor="template-name" className="text-muted-foreground">Nome do Template</Label>
               <Input
+                id="template-name"
                 placeholder="ex.: order_confirmation"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -1496,12 +1507,13 @@ export function TemplateManager() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Canal</Label>
+              <Label htmlFor="template-channel" className="text-muted-foreground">Canal</Label>
               <Select
                 value={form.channel_id}
                 onValueChange={(val) => val && setForm({ ...form, channel_id: val })}
               >
                 <SelectTrigger
+                  id="template-channel"
                   className="w-full bg-muted border-border text-foreground disabled:opacity-60 disabled:cursor-not-allowed"
                   disabled={editingId !== null}
                 >
@@ -1544,7 +1556,7 @@ export function TemplateManager() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-muted-foreground">Categoria</Label>
+                <Label htmlFor="template-category" className="text-muted-foreground">Categoria</Label>
                 <Select
                   value={form.category}
                   onValueChange={(val) =>
@@ -1554,8 +1566,8 @@ export function TemplateManager() {
                     })
                   }
                 >
-                  <SelectTrigger className="w-full bg-muted border-border text-foreground">
-                    <SelectValue />
+                  <SelectTrigger id="template-category" className="w-full bg-muted border-border text-foreground">
+                    <SelectValue>{(val: string) => CATEGORY_LABEL[val] ?? val}</SelectValue>
                   </SelectTrigger>
                   <SelectContent className="bg-popover border-border">
                     {CATEGORIES.map((cat) => (
@@ -1564,7 +1576,7 @@ export function TemplateManager() {
                         value={cat}
                         className="text-popover-foreground focus:bg-muted focus:text-popover-foreground"
                       >
-                        {cat}
+                        {CATEGORY_LABEL[cat] ?? cat}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1572,8 +1584,9 @@ export function TemplateManager() {
               </div>
 
               <div className="space-y-2">
-                <Label className="text-muted-foreground">Idioma</Label>
+                <Label htmlFor="template-language" className="text-muted-foreground">Idioma</Label>
                 <Input
+                  id="template-language"
                   list="template-language-codes"
                   placeholder="en_US"
                   value={form.language}
@@ -1602,7 +1615,7 @@ export function TemplateManager() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Cabeçalho</Label>
+              <Label htmlFor="template-header-format" className="text-muted-foreground">Cabeçalho</Label>
               <Select
                 value={form.header_format}
                 onValueChange={(val) =>
@@ -1618,7 +1631,7 @@ export function TemplateManager() {
                   })
                 }
               >
-                <SelectTrigger className="w-full bg-muted border-border text-foreground">
+                <SelectTrigger id="template-header-format" className="w-full bg-muted border-border text-foreground">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-popover border-border">
@@ -1697,6 +1710,7 @@ export function TemplateManager() {
                     </div>
                   )}
                   <Input
+                    aria-label="Link público da mídia do cabeçalho"
                     placeholder={`https://… (ou cole um link público de ${form.header_format})`}
                     value={form.header_media_url}
                     onChange={(e) =>
@@ -1726,8 +1740,14 @@ export function TemplateManager() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Texto do Corpo</Label>
+              <span className="flex items-baseline justify-between gap-2">
+                <Label htmlFor="template-body" className="text-muted-foreground">Texto do Corpo</Label>
+                <span className="text-[11px] tabular-nums text-muted-foreground" aria-live="polite">
+                  {form.body_text.length}/{TEMPLATE_LIMITS.bodyMaxLength}
+                </span>
+              </span>
               <Textarea
+                id="template-body"
                 placeholder="Olá {{1}}, seu pedido {{2}} está confirmado."
                 value={form.body_text}
                 onChange={(e) =>
@@ -1770,8 +1790,14 @@ export function TemplateManager() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Rodapé (opcional)</Label>
+              <span className="flex items-baseline justify-between gap-2">
+                <Label htmlFor="template-footer" className="text-muted-foreground">Rodapé (opcional)</Label>
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {form.footer_text.length}/{TEMPLATE_LIMITS.footerMaxLength}
+                </span>
+              </span>
               <Input
+                id="template-footer"
                 placeholder="Texto de rodapé opcional (máx. 60 caracteres)"
                 value={form.footer_text}
                 onChange={(e) =>
@@ -1783,7 +1809,7 @@ export function TemplateManager() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-muted-foreground">Tags de canal (opcional)</Label>
+              <Label htmlFor="template-channel-tag" className="text-muted-foreground">Tags de canal (opcional)</Label>
               {form.channel_tags.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
                   {form.channel_tags.map((tag) => (
@@ -1796,7 +1822,7 @@ export function TemplateManager() {
                         type="button"
                         onClick={() => removeChannelTag(tag)}
                         aria-label={`Remover tag ${tag}`}
-                        className="hover:text-red-400"
+                        className="-my-1 -mr-1 inline-flex size-6 items-center justify-center rounded hover:text-danger"
                       >
                         <X className="size-3" />
                       </button>
@@ -1805,6 +1831,7 @@ export function TemplateManager() {
                 </div>
               )}
               <Input
+                id="template-channel-tag"
                 placeholder="Digite uma tag e pressione Enter"
                 value={channelTagInput}
                 onChange={(e) => setChannelTagInput(e.target.value)}
@@ -1857,7 +1884,7 @@ export function TemplateManager() {
                             changeButtonType(i, val as TemplateButton['type']);
                           }}
                         >
-                          <SelectTrigger className="w-40 bg-muted border-border text-foreground h-8 text-xs">
+                          <SelectTrigger aria-label={`Tipo do botão ${i + 1}`} className="w-32 shrink-0 sm:w-40 bg-muted border-border text-foreground h-8 text-xs">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="bg-popover border-border">
@@ -1888,20 +1915,22 @@ export function TemplateManager() {
                           </SelectContent>
                         </Select>
                         <Input
+                          aria-label={`Texto do botão ${i + 1}`}
                           placeholder="Texto do botão"
                           value={btn.text}
                           maxLength={TEMPLATE_LIMITS.buttonTextMaxLength}
                           onChange={(e) =>
                             updateButton(i, { text: e.target.value })
                           }
-                          className="flex-1 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                          className="min-w-0 flex-1 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
                         />
                         <Button
                           type="button"
                           variant="ghost"
                           size="icon"
                           onClick={() => removeButton(i)}
-                          className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 size-7"
+                          aria-label={`Remover botão ${i + 1}`}
+                          className="text-muted-foreground hover:text-danger hover:bg-danger-soft size-8 shrink-0"
                         >
                           <X className="size-3.5" />
                         </Button>
@@ -1909,6 +1938,7 @@ export function TemplateManager() {
                       {btn.type === 'URL' && (
                         <div className="space-y-1 pl-1">
                           <Input
+                            aria-label={`Link do botão ${i + 1}`}
                             placeholder="https://exemplo.com/caminho ou com sufixo {{1}}"
                             value={btn.url}
                             onChange={(e) =>
@@ -1918,6 +1948,7 @@ export function TemplateManager() {
                           />
                           {extractVariableIndices(btn.url).length > 0 && (
                             <Input
+                              aria-label={`Valor de exemplo da variável do link do botão ${i + 1}`}
                               placeholder="Valor de exemplo para {{1}} (obrigatório quando a URL tem uma variável)"
                               value={btn.example ?? ''}
                               onChange={(e) =>
@@ -1930,6 +1961,7 @@ export function TemplateManager() {
                       )}
                       {btn.type === 'PHONE_NUMBER' && (
                         <Input
+                          aria-label={`Telefone do botão ${i + 1}`}
                           placeholder="+15551234567"
                           value={btn.phone_number}
                           onChange={(e) =>
@@ -1940,6 +1972,7 @@ export function TemplateManager() {
                       )}
                       {btn.type === 'COPY_CODE' && (
                         <Input
+                          aria-label={`Código de exemplo do botão ${i + 1}`}
                           placeholder="Código de exemplo (ex.: SUMMER20)"
                           value={btn.example}
                           onChange={(e) =>

@@ -130,6 +130,7 @@ export const openApiSpec = {
       '',
       '## Limite de requisições',
       '**120 requisições por minuto por chave.** Ao exceder: `429` com `Retry-After` (segundos) e `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`.',
+      '**`POST /disparador/campaigns` tem um limite próprio de 6 criações por minuto por chave** (cada chamada pode enfileirar até 20.000 itens), além dos 120/min gerais. Ao exceder: `429` com `Retry-After` (segundos até poder criar de novo); respeite o valor em vez de repetir em laço. A repetição idempotente que devolve a campanha já criada não consome esse limite.',
       '',
       '## Idempotência',
       '- `POST /whatsapp/send`: o header `Idempotency-Key` é **obrigatório**. Erros 400 de validação (antes de chamar o provedor) **não consomem** a chave: corrija e reenvie com a mesma chave.',
@@ -376,12 +377,12 @@ export const openApiSpec = {
           '',
           '**Canal.** `channel` aceita UUID, nome da sessão **WAHA** (`waha_session`) ou número de telefone de um canal **Meta**. Omita apenas se a conta tiver exatamente um canal habilitado. UUIDs WAHA antigos de uma linha excluída/recriada podem ser remapeados com segurança pelo histórico da própria conta.',
           '',
-          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato. Opcionalmente, envie uma imagem em `media` por URL HTTPS ou Base64; `message` vira a legenda.',
+          '**Meta × WAHA.** Canal **Meta**: `template_name` obrigatório (template **aprovado** na WABA do canal); `variables` de cada contato vão como parâmetros do template (um valor para cada `{{n}}` do **corpo**). O Disparador só preenche o corpo: template com **cabeçalho de imagem/vídeo/documento**, **variável no cabeçalho**, **botão de link dinâmico** (`{{1}}` na URL) ou **botão de copiar código** é recusado com `400` (a Meta recusaria todos os envios); escolha um template com cabeçalho fixo e sem esses botões. Canal **WAHA**: `message` obrigatório, texto livre com `{{1}}`, `{{2}}`… preenchidos com as `variables` do contato. Opcionalmente, envie uma imagem em `media` por URL HTTPS ou Base64; `message` vira a legenda.',
           '',
           '**Validação e deduplicação (antes de enfileirar).**',
           '- `duplicates`: mesmo número repetido (com/sem `+55`, com/sem o 9º dígito) — o primeiro vale.',
           '- `skipped`: números na blacklist.',
-          '- `invalid`: contato que não é objeto, sem telefone, telefone inválido (7–15 dígitos; números `55` precisam de 12–13) ou, no WAHA, `{{n}}` sem valor (`missing_variable`). `invalid_sample` lista até 20, com `index`, `phone` e `reason`.',
+          '- `invalid`: contato que não é objeto, sem telefone, telefone inválido (7–15 dígitos; números `55` precisam de 12–13) ou `{{n}}` sem valor (`missing_variable`): no WAHA, `{{n}}` da `message`; na Meta, `{{n}}` do corpo do template — vazio ou ausente invalida o contato, que não é enfileirado. `invalid_sample` lista até 20, com `index`, `phone` e `reason`.',
           '- Se nenhum contato válido restar: `400` com os mesmos contadores.',
           '',
           '**Limites.** Até **20.000 contatos por requisição** e corpo de até 15 MB (acima: `413 payload_too_large` — divida em várias campanhas).',
@@ -391,6 +392,10 @@ export const openApiSpec = {
           '**Idempotência (opcional).** Envie `Idempotency-Key` (header) **ou** `external_id` (corpo; vence se ambos vierem). Repetir com o mesmo conteúdo devolve a campanha existente (`200`, mesmo corpo da criação); mesma chave com outro conteúdo → `409 conflict`; repetição enquanto a primeira criação ainda roda → `409`. Sem nenhum dos dois, cada chamada cria uma campanha.',
           '',
           '**Falha no meio.** Se o enfileiramento falhar, os itens já inseridos são removidos, a campanha é encerrada (`encerrada`), a chave é liberada e a resposta é `500` com `error.campaign_id` — repetir é seguro.',
+          '',
+          '**Criação interrompida.** Se o processo cair antes de a campanha ser ativada, ela fica como rascunho sem fila: o painel **recusa iniciá-la** (`409`: crie-a de novo pela API) e o sistema a desfaz sozinho depois de 15 minutos. Campanhas criadas pela API sempre entram direto em `em_execucao`; não há "iniciar" para elas.',
+          '',
+          '**Limite de criação.** No máximo **6 campanhas por minuto por chave** (`429` com `Retry-After`; a repetição idempotente não conta).',
         ].join('\n'),
         parameters: [
           {
@@ -475,12 +480,19 @@ export const openApiSpec = {
           },
           '400': {
             description:
-              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), `media` inválida/não HTTPS/não suportada pelo provedor, janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura ou nenhum contato válido.',
+              'Entrada inválida: nome ausente/longo, `contacts` vazio, canal não encontrado/desabilitado, canal Meta sem WABA configurada, template ausente/não aprovado na WABA do canal (Meta; linhas antigas sem WABA não valem), `message` ausente (WAHA), `media` inválida/não HTTPS/não suportada pelo provedor, janela ou `dias_envio` inválidos, `external_id`/`Idempotency-Key` malformados, JSON inválido, `callback_url` insegura, **template Meta incompatível com o Disparador** (cabeçalho de mídia ou com variável, botão de link dinâmico ou de copiar código) ou nenhum contato válido.',
             content: {
               'application/json': {
                 schema: ref('ErrorEnvelope'),
                 examples: {
                   janela: { value: errorExample('bad_request', "'janela_fim' deve ser depois de 'janela_inicio' (o envio acontece dentro do mesmo dia)") },
+                  template_incompativel: {
+                    summary: 'Template Meta com cabeçalho de mídia',
+                    value: errorExample(
+                      'bad_request',
+                      'cobranca_vencida (pt_BR) tem cabeçalho de imagem. O disparador envia só o texto do template e a Meta recusaria todos os envios — escolha um template sem mídia no cabeçalho.'
+                    ),
+                  },
                   sem_validos: {
                     value: {
                       error: {
@@ -521,7 +533,7 @@ export const openApiSpec = {
               },
             },
           },
-          '429': resp('RateLimited'),
+          '429': resp('CampaignCreateRateLimited'),
           '500': {
             description:
               'Erro interno. Se vier `error.campaign_id`, o enfileiramento falhou no meio, a fila foi desfeita e a campanha foi encerrada; repetir a requisição é seguro.',
@@ -775,6 +787,22 @@ export const openApiSpec = {
           },
         },
       },
+      CampaignCreateRateLimited: {
+        description:
+          'Mais de 6 criações de campanha por minuto com a mesma chave (ou mais de 120 requisições/min). Espere `Retry-After` segundos e tente de novo; a repetição idempotente (mesmo `Idempotency-Key`/`external_id` e mesmo conteúdo) devolve a campanha existente e não conta.',
+        headers: {
+          'Retry-After': { $ref: '#/components/headers/Retry-After' },
+          'X-RateLimit-Limit': { $ref: '#/components/headers/X-RateLimit-Limit' },
+          'X-RateLimit-Remaining': { $ref: '#/components/headers/X-RateLimit-Remaining' },
+          'X-RateLimit-Reset': { $ref: '#/components/headers/X-RateLimit-Reset' },
+        },
+        content: {
+          'application/json': {
+            schema: ref('ErrorEnvelope'),
+            example: errorExample('rate_limited', 'Rate limit exceeded for this API key'),
+          },
+        },
+      },
       RateLimited: {
         description: 'Limite de 120 requisições por minuto por chave excedido.',
         headers: {
@@ -980,7 +1008,11 @@ export const openApiSpec = {
         properties: {
           index: { type: 'integer', description: 'Posição do contato em `contacts` (0-based).' },
           phone: { type: ['string', 'null'] },
-          reason: { type: 'string', enum: ['invalid_contact', 'missing_phone', 'invalid_phone', 'missing_variable'] },
+          reason: {
+            type: 'string',
+            enum: ['invalid_contact', 'missing_phone', 'invalid_phone', 'missing_variable'],
+            description: '`missing_variable`: algum `{{n}}` sem valor — da `message` (WAHA) ou do corpo do template (Meta).',
+          },
         },
       },
       CreateCampaignResult: {

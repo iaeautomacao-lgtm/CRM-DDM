@@ -71,7 +71,7 @@ export const ERROR_ROWS: ErrorRow[] = [
   { http: '409', code: 'conflict', significa: 'A Idempotency-Key / external_id já foi usada com outro conteúdo, ou o envio anterior está em andamento / com resultado desconhecido.', fazer: 'Não mude a chave para "forçar". Reenvie exatamente o mesmo corpo; se vier `provider_outcome_unknown`, aguarde e NÃO reenvie.' },
   { http: '413', code: 'payload_too_large', significa: 'Mais de 20.000 contatos ou corpo acima de 15 MB.', fazer: 'Divida em várias campanhas.' },
   { http: '422', code: 'recipient_blocked', significa: 'O destinatário está na blacklist / pediu opt-out.', fazer: 'Não tente de novo: o número não pode receber mensagens.' },
-  { http: '429', code: 'rate_limited', significa: 'Mais de 120 requisições por minuto com a mesma chave.', fazer: 'Espere `Retry-After` segundos e tente de novo; reduza o ritmo.' },
+  { http: '429', code: 'rate_limited', significa: 'Mais de 120 requisições por minuto com a mesma chave — ou, em `POST /disparador/campaigns`, mais de 6 criações de campanha por minuto.', fazer: 'Espere `Retry-After` segundos e tente de novo; reduza o ritmo.' },
   { http: '500 / 502', code: 'internal', significa: 'Falha nossa ou do provedor (Meta/WAHA).', fazer: 'Se vier `campaign_id` num 500 de campanha, a criação foi desfeita e repetir é seguro. No envio avulso, repita com a MESMA Idempotency-Key.' },
   { http: '503', code: 'unavailable', significa: 'Serviço temporariamente indisponível.', fazer: 'Tente de novo em instantes, com a mesma Idempotency-Key.' },
 ];

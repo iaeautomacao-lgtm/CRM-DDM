@@ -61,6 +61,10 @@ interface ContactWithTags extends Contact {
   tags?: Tag[];
 }
 
+interface ContactWithTagIds extends Contact {
+  tagIds: string[];
+}
+
 export default function ContactsPage() {
   const supabase = createClient();
   const canEdit = usePermission('contacts.edit');
@@ -68,9 +72,10 @@ export default function ContactsPage() {
   const canImport = usePermission('contacts.import');
   const canEditSettings = usePermission('tags.manage');
 
-  const [contacts, setContacts] = useState<ContactWithTags[]>([]);
+  const [contactRowsState, setContacts] = useState<ContactWithTagIds[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   // Tag filter — contacts shown must have ANY of these tags (OR).
@@ -103,6 +108,15 @@ export default function ContactsPage() {
   // earlier request resolve last and render stale rows.
   const fetchSeq = useRef(0);
 
+  const contacts = useMemo<ContactWithTags[]>(
+    () =>
+      contactRowsState.map((c) => ({
+        ...c,
+        tags: c.tagIds.map((tid) => tagsMap[tid]).filter(Boolean),
+      })),
+    [contactRowsState, tagsMap],
+  );
+
   const fetchTags = useCallback(async () => {
     const { data } = await supabase.from('tags').select('*');
     if (data) {
@@ -129,7 +143,7 @@ export default function ContactsPage() {
 
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
-    const term = search.trim();
+    const term = debouncedSearch.trim();
 
     let contactRows: Contact[];
     let count: number;
@@ -208,16 +222,14 @@ export default function ContactsPage() {
       tagsByContact[ct.contact_id].push(ct.tag_id);
     });
 
-    const enriched: ContactWithTags[] = contactRows.map((c) => ({
-      ...c,
-      tags: (tagsByContact[c.id] ?? [])
-        .map((tid) => tagsMap[tid])
-        .filter(Boolean),
-    }));
-
-    setContacts(enriched);
+    // Guarda só os ids das etiquetas; o mapa id -> etiqueta é aplicado na
+    // renderização (useMemo), então o catálogo de etiquetas carregar depois
+    // não dispara nova busca de contatos.
+    setContacts(
+      contactRows.map((c) => ({ ...c, tagIds: tagsByContact[c.id] ?? [] })),
+    );
     setLoading(false);
-  }, [supabase, page, search, selectedTagIds, tagsMap]);
+  }, [supabase, page, debouncedSearch, selectedTagIds]);
 
   // Load-once-on-mount-ish data fetches. Each setter inside runs
   // inside an async promise completion (Supabase await), not
@@ -227,6 +239,16 @@ export default function ContactsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchTags();
   }, [fetchTags]);
+
+  // Debounce de 300 ms na busca (como no Histórico). Ao mudar o termo
+  // a paginação volta à página 0 — a página N pode deixar de existir.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -400,12 +422,7 @@ export default function ContactsPage() {
           <input
             type="search"
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              // Reset pagination when the query changes — the result
-              // set shrinks/grows, page N may no longer be valid.
-              setPage(0);
-            }}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por nome, telefone ou e-mail"
             aria-label="Buscar contatos"
             className="h-[34px] w-full rounded-md border border-border bg-card pl-[34px] pr-2.5 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:shadow-[0_0_0_3px_var(--primary-soft-2)]"
@@ -514,7 +531,7 @@ export default function ContactsPage() {
       {/* Barra de seleção em massa (contraste invertido, como no protótipo) */}
       {selected.size > 0 && (
         <div className="flex animate-ddm-up flex-wrap items-center gap-2.5 rounded-[10px] bg-foreground py-2 pl-4 pr-2.5 text-background">
-          <span className="text-[13px] font-semibold">
+          <span role="status" className="text-[13px] font-semibold">
             {selected.size} {selected.size === 1 ? 'contato selecionado' : 'contatos selecionados'}
           </span>
           <span className="flex-1" />
@@ -524,7 +541,7 @@ export default function ContactsPage() {
             canAct={canEdit}
             gateReason="excluir contatos"
             onClick={() => setBulkDeleteOpen(true)}
-            className="bg-[#d8362f] text-white hover:bg-[#c42b24]"
+            className="bg-destructive text-white hover:bg-destructive/90"
           >
             <Trash2 className="size-3.5" />
             Excluir
@@ -532,7 +549,7 @@ export default function ContactsPage() {
           <button
             type="button"
             onClick={() => setSelected(new Set())}
-            className="h-[30px] rounded-md px-2.5 text-[12.5px] opacity-80 hover:opacity-100"
+            className="h-[30px] rounded-md px-2.5 text-[12.5px] opacity-80 outline-none hover:opacity-100 focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             Limpar
           </button>
@@ -637,9 +654,19 @@ export default function ContactsPage() {
                             {contactInitials(name)}
                           </span>
                           <span className="flex min-w-0 flex-col">
-                            <span className={cn('truncate font-semibold', contact.name ? 'text-foreground' : 'italic text-muted-foreground')}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openDetail(contact.id);
+                              }}
+                              className={cn(
+                                'truncate rounded-sm text-left font-semibold outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50',
+                                contact.name ? 'text-foreground' : 'italic text-muted-foreground',
+                              )}
+                            >
                               {contact.name || 'Sem nome'}
-                            </span>
+                            </button>
                             <span className="truncate text-xs tabular-nums text-muted-foreground sm:hidden">{contact.phone}</span>
                           </span>
                         </span>

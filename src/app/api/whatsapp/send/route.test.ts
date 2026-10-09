@@ -281,7 +281,7 @@ describe('POST /api/whatsapp/send — contact_id template path', () => {
     const json = await res.json()
 
     expect(res.status).toBe(404)
-    expect(json.error).toMatch(/contact not found/i)
+    expect(json.error).toMatch(/contato não encontrado/i)
     expect(sendTemplateMessage).not.toHaveBeenCalled()
   })
 

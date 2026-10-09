@@ -23,6 +23,7 @@ import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { ErrorState } from "@/components/ddm/states";
 import { StepsEditor, type TemplateOption } from "@/components/regua/steps-editor";
+import { ReportPanel } from "@/components/regua/report-panel";
 import { billingFetch, errorMessage } from "@/lib/billing/client-api";
 import {
   ENROLLMENT_STATUS_LABEL,
@@ -47,13 +48,14 @@ export interface LineChoice {
 
 export const STATE_TONE: Record<RulerState, StatusTone> = { off: "mute", simulation: "warn", live: "ok" };
 
-type DrawerTab = "config" | "steps" | "simulate" | "metrics";
+type DrawerTab = "config" | "steps" | "simulate" | "metrics" | "report";
 
 const TAB_OPTIONS = [
   { value: "config", label: "Configuração" },
   { value: "steps", label: "Etapas" },
   { value: "simulate", label: "Simulação" },
   { value: "metrics", label: "Métricas" },
+  { value: "report", label: "Relatório" },
 ] as const;
 
 const SELECT_CLASS =
@@ -190,6 +192,7 @@ export function RulerDrawer({
             )}
             {tab === "simulate" && <SimulatePanel ruler={ruler} canManage={canManage} />}
             {tab === "metrics" && <MetricsPanel ruler={ruler} />}
+            {tab === "report" && <ReportPanel ruler={ruler} />}
           </div>
         )}
       </div>
@@ -575,7 +578,7 @@ function MetricsPanel({ ruler }: { ruler: Ruler }) {
         )}
       </section>
 
-      <p className="text-xs text-muted-foreground">Respondidas e “pagas após cobrança” ainda não estão disponíveis.</p>
+      <p className="text-xs text-muted-foreground">Respondidas e “pagas após cobrança” estão na aba Relatório.</p>
     </div>
   );
 }

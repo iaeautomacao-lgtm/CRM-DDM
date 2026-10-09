@@ -94,6 +94,7 @@ const FAIL_COPY: Record<PeekFail['reason'], { title: string; body: string }> = {
   },
 };
 
+/** Erro ao aceitar o convite, por status da rota /redeem (o corpo traz o texto do RPC em inglês). */function redeemErrorMessage(status: number): string {  if (status === 400) return 'Este convite não é mais válido: expirou ou já foi usado. Peça um novo ao administrador.';  if (status === 401) return 'Sua sessão expirou. Entre de novo para aceitar o convite.';  if (status === 429) return 'Muitas tentativas seguidas. Aguarde um minuto e tente de novo.';  return 'Não foi possível aceitar o convite. Tente de novo em instantes.';}
 export default function JoinPage() {
   const params = useParams<{ token: string }>();
   const token = params?.token;
@@ -183,13 +184,12 @@ export default function JoinPage() {
         // enough to show directly; we open a modal so the user has
         // a clear next-action (sign out → use different email)
         // rather than a 3-second toast.
+        // O texto do RPC vem em inglês (e cita um cadastro que não existe): mostra a mensagem pelo status.
+        void payload;
         if (res.status === 409) {
-          setConflictMessage(
-            payload.error ||
-              'Você já está em outra organização. Entre com outro e-mail para participar desta.',
-          );
+          setConflictMessage('Você já está em outra organização. Entre com outro e-mail para participar desta.');
         } else {
-          toast.error(payload.error || 'Não foi possível aceitar o convite.');
+          toast.error(redeemErrorMessage(res.status));
         }
         setAccepting(false);
         return;

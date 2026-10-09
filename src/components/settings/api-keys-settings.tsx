@@ -65,7 +65,7 @@ interface ApiKey {
 }
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
+  return new Date(iso).toLocaleDateString('pt-BR', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -409,9 +409,11 @@ function CreateKeyDialog({
             </DialogHeader>
 
             <div className="space-y-1.5">
-              <Label className="text-muted-foreground">Chave de API</Label>
+              <Label htmlFor="api-key-created-value" className="text-muted-foreground">Chave de API</Label>
               <div className="flex gap-2">
                 <Input
+                  id="api-key-created-value"
+                  aria-label="Chave de API"
                   readOnly
                   value={createdKey}
                   className="font-mono text-xs"

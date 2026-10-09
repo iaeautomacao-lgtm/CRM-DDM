@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     const configId = searchParams.get('configId')
 
     if (!configId) {
-      return NextResponse.json({ error: 'configId is required' }, { status: 400 })
+      return NextResponse.json({ error: 'configId é obrigatório' }, { status: 400 })
     }
 
     const { data: config, error: configError } = await supabase
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
       .maybeSingle()
 
     if (configError || !config) {
-      return NextResponse.json({ error: 'Channel not found' }, { status: 404 })
+      return NextResponse.json({ error: 'Canal não encontrado' }, { status: 404 })
     }
 
     let templatesQuery = supabase
@@ -54,12 +54,12 @@ export async function GET(request: Request) {
 
     if (templatesError) {
       console.error('[channel-test/templates] failed to load templates:', templatesError)
-      return NextResponse.json({ error: 'Failed to load templates' }, { status: 500 })
+      return NextResponse.json({ error: 'Falha ao carregar os templates' }, { status: 500 })
     }
 
     return NextResponse.json({ templates: templates ?? [] })
   } catch (error) {
     console.error('Error in WhatsApp channel-test/templates GET:', error)
-    return NextResponse.json({ error: 'Failed to load templates' }, { status: 500 })
+    return NextResponse.json({ error: 'Falha ao carregar os templates' }, { status: 500 })
   }
 }

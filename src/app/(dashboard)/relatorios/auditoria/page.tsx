@@ -1,6 +1,7 @@
 "use client";
 
 import { apiFetch } from "@/lib/api-fetch";
+import { formatCappedTotal, pageCount, readCappedTotal } from "@/lib/reports/capped-label";
 
 // ============================================================
 // /relatorios/auditoria — trilha de auditoria da conta.
@@ -137,7 +138,8 @@ export default function AuditoriaPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(PAGE_SIZES[0]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [total, setTotal] = useState(0);
+  const [totals, setTotals] = useState({ total: 0, capped: false, cap: 100_000 });
+  const total = totals.total;
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -171,7 +173,7 @@ export default function AuditoriaPage() {
       if (seq !== requestSeq.current) return;
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
       setLogs(json.logs ?? []);
-      setTotal(json.total ?? 0);
+      setTotals(readCappedTotal(json));
     } catch (err) {
       if (seq !== requestSeq.current) return;
       console.error("[auditoria] failed to load audit logs:", err);
@@ -219,7 +221,8 @@ export default function AuditoriaPage() {
     { value: ALL, label: "Todos" },
     ...members.map((m) => ({ value: m.user_id, label: m.full_name || m.email || m.user_id })),
   ];
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // Com teto ("100 mil+") o total já vem igual ao teto: a paginação não passa dele.
+  const totalPages = pageCount(total, pageSize);
   const set = (patch: Partial<AuditFilters>) => setDraft((d) => ({ ...d, ...patch }));
 
   // GET /api/audit-logs exige audit.view; o servidor revalida.
@@ -350,7 +353,7 @@ export default function AuditoriaPage() {
             <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span>
-                  {total.toLocaleString()} evento(s) · página {page} de {totalPages}
+                  {formatCappedTotal(total, totals.capped, totals.cap)} evento(s) · página {page} de {totalPages}
                 </span>
                 <label className="flex items-center gap-1.5">
                   Itens por página
