@@ -33,7 +33,7 @@
 //
 //   <GatedButton
 //     canAct={canCreate}
-//     gateReason="create broadcasts"
+//     gateReason="criar campanhas"
 //     onClick={() => router.push("/broadcasts/new")}
 //   >
 //     <Plus className="h-4 w-4" /> New Broadcast
@@ -56,9 +56,9 @@ interface GatedButtonProps extends Omit<ComponentProps<typeof Button>, "title"> 
    *  without the prop is just a Button. */
   canAct?: boolean;
   /** Verb phrase that completes the sentence
-   *  `"Read-only — your role can't <gateReason>"`. Provided
-   *  per-call so each CTA can name what it does ("create flows",
-   *  "send messages", "add contacts"). */
+   *  `"Somente leitura: seu perfil não pode <gateReason>."`. Provided
+   *  per-call so each CTA can name what it does ("criar fluxos",
+   *  "enviar mensagens", "adicionar contatos"). */
   gateReason?: string;
   /** Optional fallback title for the non-gated case. */
   title?: string;
@@ -75,8 +75,12 @@ export function GatedButton({
   ...rest
 }: GatedButtonProps) {
   const effectivelyDisabled = disabled || !canAct;
-  const tooltip = !canAct && gateReason
-    ? "Seu perfil possui acesso somente de leitura."
+  // gateReason completa a frase em pt-BR ("enviar mensagens", "criar
+  // fluxos"…); sem ele, a frase genérica.
+  const tooltip = !canAct
+    ? gateReason
+      ? `Somente leitura: seu perfil não pode ${gateReason}.`
+      : "Seu perfil possui acesso somente de leitura."
     : title;
 
   return (

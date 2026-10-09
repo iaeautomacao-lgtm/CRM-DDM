@@ -45,7 +45,7 @@ import { ErrorState } from "@/components/dashboard/error-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 import type { AccountMember } from "@/types";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
-import { loadSharedPeriod, saveSharedPeriod } from "@/lib/relatorios/period";
+import { loadSharedPeriod, rangeError, saveSharedPeriod } from "@/lib/relatorios/period";
 import { PeriodFilter } from "@/components/relatorios/period-filter";
 import { formatDuration } from "@/lib/relatorios/format-duration";
 
@@ -176,6 +176,7 @@ export default function AgentesPage() {
   }, [rows]);
 
   function handlePesquisar() {
+    if (rangeError({ dateFrom: draft.dateFrom, dateTo: draft.dateTo })) return;
     setApplied(draft);
     saveSharedPeriod({ dateFrom: draft.dateFrom, dateTo: draft.dateTo });
   }
@@ -218,7 +219,11 @@ export default function AgentesPage() {
             </Select>
           </div>
 
-          <Button onClick={handlePesquisar} className="bg-primary text-primary-foreground hover:bg-primary/90">
+          <Button
+            onClick={handlePesquisar}
+            disabled={!!rangeError({ dateFrom: draft.dateFrom, dateTo: draft.dateTo })}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
             <Search className="size-4" />
             Pesquisar
           </Button>
