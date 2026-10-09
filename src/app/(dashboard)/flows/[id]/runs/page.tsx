@@ -303,6 +303,10 @@ export default function FlowRunsPage() {
   // without duplicating its fetch/error-handling logic in a callback.
   const [reloadKey, setReloadKey] = useState(0);
   const [loadError, setLoadError] = useState(false);
+  // Paginação por deslocamento: `has_more` vem da API; sem ela (versão antiga) a lista é só a 1ª página.
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [moreError, setMoreError] = useState(false);
 
   useEffect(() => {
     if (!params.id) return;
@@ -335,10 +339,13 @@ export default function FlowRunsPage() {
           flow: { id: string; name: string };
           runs: RunRow[];
           events?: EventRow[];
+          has_more?: boolean;
         };
         if (!cancelled) {
           setFlow(json.flow);
           setRuns(json.runs ?? []);
+          setHasMore(json.has_more === true);
+          setMoreError(false);
           setSelected(new Set());
           if (focusRunId && !focusHandled.current && (json.runs ?? []).some((r) => r.id === focusRunId)) {
             focusHandled.current = true;
@@ -363,6 +370,33 @@ export default function FlowRunsPage() {
       cancelled = true;
     };
   }, [params.id, statusFilter, contactFilter, dateFrom, dateTo, reloadKey, focusRunId]);
+
+  async function loadMoreRuns() {
+    if (!params.id) return;
+    setLoadingMore(true);
+    setMoreError(false);
+    try {
+      const qs = new URLSearchParams();
+      if (statusFilter !== STATUS_FILTER_ALL) qs.set("status", statusFilter);
+      if (contactFilter) qs.set("contact", contactFilter);
+      if (dateFrom) qs.set("date_from", new Date(`${dateFrom}T00:00:00`).toISOString());
+      if (dateTo) qs.set("date_to", new Date(`${dateTo}T23:59:59.999`).toISOString());
+      qs.set("offset", String(runs.length));
+      const res = await apiFetch(`/api/flows/${params.id}/runs?${qs.toString()}`);
+      if (!res.ok) throw new Error(`Failed: ${res.status}`);
+      const json = (await res.json()) as { runs: RunRow[]; has_more?: boolean };
+      setRuns((prev) => {
+        const known = new Set(prev.map((r) => r.id));
+        return [...prev, ...(json.runs ?? []).filter((r) => !known.has(r.id))];
+      });
+      setHasMore(json.has_more === true);
+    } catch (err) {
+      console.error(err);
+      setMoreError(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   // Independent of the runs fetch above — a failure here just means
   // "Nós não executados" stays empty everywhere, not a page-breaking
@@ -544,7 +578,7 @@ export default function FlowRunsPage() {
         <KpiStrip
           ariaLabel="Resumo das execuções listadas"
           items={[
-            { label: "Listadas", value: <CountUp value={runs.length} />, info: "Execuções exibidas abaixo — até 50, após os filtros." },
+            { label: "Listadas", value: <CountUp value={runs.length} />, info: "Execuções carregadas abaixo, após os filtros. Use Carregar mais para ver as anteriores." },
             { label: "Concluídas", value: <CountUp value={runCounts.completed} className="text-success" /> },
             { label: "Em andamento", value: <CountUp value={runCounts.active} /> },
             {
@@ -716,6 +750,19 @@ export default function FlowRunsPage() {
               onViewInDiagram={() => router.push(`/flows/${flow.id}?run_id=${run.id}`)}
             />
           ))}
+        </div>
+      )}
+
+      {hasMore && !loading && !loadError && runs.length > 0 && (
+        <div className="flex flex-col items-center gap-2">
+          {moreError && (
+            <p role="alert" className="text-xs text-danger">
+              Não foi possível carregar mais execuções. Tente de novo.
+            </p>
+          )}
+          <Button type="button" variant="outline" disabled={loadingMore} onClick={() => void loadMoreRuns()}>
+            {loadingMore ? "Carregando…" : "Carregar mais"}
+          </Button>
         </div>
       )}
 
