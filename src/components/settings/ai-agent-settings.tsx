@@ -26,6 +26,8 @@ import {
   uploadKnowledgeFile,
 } from "./agents/api";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermission } from "@/hooks/use-permission";
+import { ErrorState } from "@/components/ddm/states";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -102,7 +104,10 @@ Você é exclusivamente um assistente financeiro de acordos e suporte do Grupo D
 4. Apenas nestes casos do item 3, encerre sua resposta educadamente com a tag \`#EQUIPEHUMANA\` para que o operador humano assuma. Caso contrário, continue conduzindo a negociação normalmente.`;
 
 export function AiAgentSettings() {
-  const { accountId, canEditSettings } = useAuth();
+  const { accountId } = useAuth();
+  // Mesma chave que o servidor exige em /api/account/ai-config (guardPermission('ai.config')).
+  const canEditSettings = usePermission("ai.config");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [enabled, setEnabled] = useState(false);
   const [apiProvider, setApiProvider] = useState<"gemini" | "openai" | "claude" | "hermes">("gemini");
@@ -133,6 +138,7 @@ export function AiAgentSettings() {
   }, [accountId]);
 
   async function loadConfig() {
+    setLoadError(null);
     try {
       // Server-side route — api_key/elevenlabs_api_key never round-trip
       // in plaintext through the browser client anymore (see PROBLEMA 2
@@ -156,7 +162,7 @@ export function AiAgentSettings() {
       }
     } catch (err) {
       console.error("Failed to load AI config:", err);
-      toast.error("Falha ao carregar configuração do Agente de IA");
+      setLoadError(err instanceof Error ? err.message : "Falha ao carregar configuração do Agente de IA");
     } finally {
       setLoading(false);
     }
@@ -254,6 +260,20 @@ export function AiAgentSettings() {
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
+    );
+  }
+
+  // Falha de carga não pode virar formulário com valores padrão (salvar sobrescreveria a configuração real).
+  if (loadError) {
+    return (
+      <ErrorState
+        title="Não foi possível carregar a configuração do Agente de IA"
+        hint={loadError}
+        onRetry={() => {
+          setLoading(true);
+          void loadConfig();
+        }}
+      />
     );
   }
 

@@ -2,6 +2,17 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { LogLevel, LogSource } from "@/lib/logger";
+import { SystemHealthCard } from "@/components/ops/system-health-card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Logs use the signed-in CRM session; remove reusable legacy credentials.
 const AUTH_STORAGE_KEY = "ddm-logs-auth";
@@ -351,6 +362,10 @@ export default function DdmLogsPage() {
   const [expandedTestRuns, setExpandedTestRuns] = useState<Set<string>>(new Set());
   const [runningNow, setRunningNow] = useState(false);
   const [runNowError, setRunNowError] = useState<string | null>(null);
+  const [runSecretDialogOpen, setRunSecretDialogOpen] = useState(false);
+  // Segredo digitado só vive neste estado enquanto o diálogo está aberto;
+  // é limpo ao fechar e nunca é salvo nem exibido.
+  const [runSecretInput, setRunSecretInput] = useState("");
 
   // ---- Aba Feedbacks ----
   const [feedbackLogs, setFeedbackLogs] = useState<LogRow[]>([]);
@@ -679,8 +694,7 @@ export default function DdmLogsPage() {
   // essa rota não é protegida pelo Basic Auth do /api/ddm-logs, usa seu
   // próprio header x-stress-secret. Ao terminar, recarrega a lista pra
   // mostrar a execução que acabou de rodar.
-  const runHealthCheckNow = useCallback(async () => {
-    const secret = window.prompt("Digite o STRESS_RUN_SECRET:");
+  const runHealthCheckNow = useCallback(async (secret: string) => {
     if (!secret) return;
     setRunningNow(true);
     setRunNowError(null);
@@ -966,13 +980,50 @@ export default function DdmLogsPage() {
           {tab === "tests" && (
             <button
               type="button"
-              onClick={() => runHealthCheckNow()}
+              onClick={() => setRunSecretDialogOpen(true)}
               disabled={runningNow}
               className="rounded-md border border-success/40 bg-success-soft px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:bg-success-soft disabled:cursor-not-allowed disabled:opacity-50"
             >
               {runningNow ? "Rodando..." : "Rodar agora"}
             </button>
           )}
+          <AlertDialog
+            open={runSecretDialogOpen}
+            onOpenChange={(open) => {
+              setRunSecretDialogOpen(open);
+              if (!open) setRunSecretInput("");
+            }}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Rodar health check agora</AlertDialogTitle>
+                <AlertDialogDescription>Digite o STRESS_RUN_SECRET:</AlertDialogDescription>
+              </AlertDialogHeader>
+              <input
+                type="password"
+                autoComplete="off"
+                autoFocus
+                value={runSecretInput}
+                onChange={(e) => setRunSecretInput(e.target.value)}
+                aria-label="STRESS_RUN_SECRET"
+                className="w-full rounded-md border border-border bg-surface-3/60 px-3 py-2 text-sm text-foreground outline-none focus:border-primary/60"
+              />
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                <AlertDialogAction
+                  disabled={!runSecretInput}
+                  onClick={() => {
+                    const secret = runSecretInput;
+                    setRunSecretInput("");
+                    void runHealthCheckNow(secret);
+                  }}
+                >
+                  Rodar
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
           <button
             type="button"
             onClick={() => setAutoRefresh((v) => !v)}
@@ -1001,6 +1052,9 @@ export default function DdmLogsPage() {
           </button>
         </div>
       </header>
+
+      {/* Saúde do sistema (PRD 24, item 5): migrations, cron e fila de mensagens recebidas */}
+      <SystemHealthCard className="px-4 pt-4" />
 
       {/* Abas */}
       <div className="flex items-center gap-1 border-b border-border bg-surface-3/40 px-4 pt-2">

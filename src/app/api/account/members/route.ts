@@ -17,6 +17,8 @@ import { NextResponse } from "next/server";
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
 import { can } from "@/lib/auth/permissions";
 import { isAccountRole } from "@/lib/auth/roles";
+import { supabaseAdmin } from "@/lib/account/admin-client";
+import { loadMembersAccess } from "@/lib/members/member-status";
 import type { AccountMember } from "@/types";
 
 interface ProfileRow {
@@ -28,6 +30,8 @@ interface ProfileRow {
   created_at: string;
   team_id: string | null;
   max_simultaneous_chats: number | null;
+  /** Migration 311; ausente antes dela. */
+  deactivated_at?: string | null;
 }
 
 export async function GET() {
@@ -38,9 +42,8 @@ export async function GET() {
     // the caller's, so this query is naturally account-scoped.
     const { data, error } = await ctx.supabase
       .from("profiles")
-      .select(
-        "user_id, full_name, email, avatar_url, account_role, created_at, team_id, max_simultaneous_chats",
-      )
+      // "*": inclui deactivated_at (migration 311) sem quebrar enquanto ela não foi aplicada.
+      .select("*")
       .eq("account_id", ctx.accountId)
       .order("created_at", { ascending: true });
 
@@ -53,6 +56,9 @@ export async function GET() {
     }
 
     const canSeeEmails = can(ctx, "members.view_emails");
+    // Último acesso é dado de gestão: só para quem gere membros (members.manage).
+    const canSeeAccess = can(ctx, "members.manage");
+    const access = canSeeAccess ? await loadMembersAccess(supabaseAdmin(), ctx.accountId) : new Map();
 
     const members: AccountMember[] = (data as ProfileRow[]).flatMap((row) => {
       // Defensive: the DB enum should never let an unknown role
@@ -69,6 +75,10 @@ export async function GET() {
           joined_at: row.created_at,
           team_id: row.team_id,
           max_simultaneous_chats: row.max_simultaneous_chats,
+          active: !row.deactivated_at,
+          deactivated_at: row.deactivated_at ?? null,
+          last_sign_in_at: canSeeAccess ? (access.get(row.user_id)?.last_sign_in_at ?? null) : null,
+          last_active_at: canSeeAccess ? (access.get(row.user_id)?.last_active_at ?? null) : null,
         },
       ];
     });

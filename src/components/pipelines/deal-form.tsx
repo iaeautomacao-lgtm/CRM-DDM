@@ -41,6 +41,8 @@ interface DealFormProps {
   stages: PipelineStage[];
   defaultStageId?: string;
   onSaved: () => void;
+  /** Sem permissão de editar negócios: campos desabilitados e sem salvar, mudar status ou excluir. */
+  readOnly?: boolean;
 }
 
 export function DealForm({
@@ -51,6 +53,7 @@ export function DealForm({
   stages,
   defaultStageId,
   onSaved,
+  readOnly = false,
 }: DealFormProps) {
   const supabase = createClient();
   const { accountId, defaultCurrency } = useAuth();
@@ -252,11 +255,11 @@ export function DealForm({
         <div className="flex h-full flex-col">
           <SheetHeader className="border-b border-border/50 p-4">
             <SheetTitle className="text-popover-foreground">
-              {deal ? "Editar Negócio" : "Novo Negócio"}
+              {readOnly ? "Negócio" : deal ? "Editar Negócio" : "Novo Negócio"}
             </SheetTitle>
           </SheetHeader>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <fieldset disabled={readOnly} className="m-0 min-w-0 flex-1 space-y-4 overflow-y-auto border-0 p-4">
             <div className="grid gap-2">
               <Label className="text-muted-foreground">Título</Label>
               <Input
@@ -424,7 +427,7 @@ export function DealForm({
                 )}
               </div>
             )}
-          </div>
+          </fieldset>
 
           <div className="border-t border-border/50 bg-popover/80 p-4">
             <div className="flex gap-2">
@@ -433,8 +436,9 @@ export function DealForm({
                 onClick={() => onOpenChange(false)}
                 className="flex-1 border-border bg-transparent text-muted-foreground hover:bg-muted"
               >
-                Cancelar
+                {readOnly ? "Fechar" : "Cancelar"}
               </Button>
+              {!readOnly && (
               <Button
                 onClick={handleSave}
                 disabled={saving || !title.trim() || !contactId || !stageId}
@@ -442,9 +446,10 @@ export function DealForm({
               >
                 {saving ? "Salvando..." : deal ? "Salvar Alterações" : "Criar Negócio"}
               </Button>
+              )}
             </div>
 
-            {deal &&
+            {deal && !readOnly &&
               (confirmDelete ? (
                 <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs">
                   <span className="text-red-300">Excluir este negócio?</span>

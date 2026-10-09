@@ -174,6 +174,7 @@ function countButtonsByType(
     URL: 0,
     PHONE_NUMBER: 0,
     COPY_CODE: 0,
+    FLOW: 0,
   };
   for (const b of buttons) counts[b.type]++;
   return counts;

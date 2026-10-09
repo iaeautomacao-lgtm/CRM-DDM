@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { AlertTriangle, Crown, KeyRound, Loader2, MailX, Plus, Search, Trash2, Upload, UsersRound } from 'lucide-react';
+import { AlertTriangle, Crown, Power, KeyRound, Loader2, MailX, Plus, Search, Trash2, Upload, UsersRound } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
 import { createClient } from '@/lib/supabase/client';
@@ -55,6 +55,11 @@ interface Member {
   role: AccountRole;
   joined_at: string;
   team_id: string | null;
+  /** Status da conta (migration 311). Os campos de acesso só vêm para quem tem members.manage. */
+  active: boolean;
+  deactivated_at: string | null;
+  last_sign_in_at: string | null;
+  last_active_at: string | null;
 }
 
 interface Invitation {
@@ -66,6 +71,7 @@ interface Invitation {
 }
 
 type Filter = 'all' | AccountRole | 'invites';
+type StatusFilter = 'all' | 'active' | 'inactive';
 
 // Papéis editáveis no seletor. Proprietário nunca é opção: a promoção passa pela transferência de propriedade.
 const EDITABLE_ROLES: AccountRole[] = ['admin', 'supervisor', 'agent', 'viewer'];
@@ -112,6 +118,12 @@ function initial(m: { full_name: string; email: string | null }): string {
   return (m.full_name || m.email || 'U').charAt(0).toUpperCase();
 }
 
+/** Último acesso: atividade no app (last_active_at); sem ela, o último login. Online vira "agora". */
+function lastAccessLabel(m: Pick<Member, 'last_active_at' | 'last_sign_in_at'>, presence: PresenceStatus, now: number): string {
+  if (presence === 'online') return 'agora';
+  return fmtLastSeen(m.last_active_at ?? m.last_sign_in_at, now);
+}
+
 function RoleChip({ role }: { role: AccountRole }) {
   return (
     <StatusChip tone={ROLE_TONE[role]} dot={false}>
@@ -129,7 +141,7 @@ export function UsuariosView() {
   const canResetPassword = can('members.reset_password');
   // Só o proprietário (ownership.transfer); o servidor revalida.
   const canTransferOwnership = can('ownership.transfer');
-  const { getPresence, getRow, now } = usePresence();
+  const { getPresence, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
@@ -139,6 +151,7 @@ export function UsuariosView() {
 
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -151,6 +164,9 @@ export function UsuariosView() {
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(null);
   const [transferTarget, setTransferTarget] = useState<Member | null>(null);
   const [transferring, setTransferring] = useState(false);
+  // Desativar/reativar (POST /api/account/members/{id}/status): nunca o proprietário nem a si mesmo.
+  const [statusTarget, setStatusTarget] = useState<{ member: Member; active: boolean } | null>(null);
+  const [changingStatus, setChangingStatus] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -214,10 +230,12 @@ export function UsuariosView() {
     const q = search.trim().toLowerCase();
     return members.filter((m) => {
       if (filter !== 'all' && m.role !== filter) return false;
+      if (statusFilter === 'active' && !m.active) return false;
+      if (statusFilter === 'inactive' && m.active) return false;
       if (!q) return true;
       return (m.full_name || '').toLowerCase().includes(q) || (m.email || '').toLowerCase().includes(q);
     });
-  }, [members, filter, search]);
+  }, [members, filter, statusFilter, search]);
 
   const filteredInvites = useMemo(() => {
     if (filter !== 'invites') return [];
@@ -343,6 +361,41 @@ export function UsuariosView() {
     }
   }
 
+  async function handleChangeStatus() {
+    if (!statusTarget) return;
+    const { member, active } = statusTarget;
+    setChangingStatus(true);
+    try {
+      const res = await apiFetch(`/api/account/members/${member.user_id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(payload.error || (active ? 'Falha ao reativar o usuário' : 'Falha ao desativar o usuário'));
+        return;
+      }
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.user_id === member.user_id ? { ...m, active, deactivated_at: active ? null : new Date().toISOString() } : m,
+        ),
+      );
+      const name = member.full_name || 'Usuário';
+      if (payload.ban_failed) {
+        toast.warning(`${name} foi desativado e as sessões caíram, mas o bloqueio de login não foi concluído. Tente de novo.`);
+      } else {
+        toast.success(active ? `${name} reativado` : `${name} desativado`);
+      }
+      setStatusTarget(null);
+    } catch (err) {
+      console.error('[UsuariosView] status change error:', err);
+      toast.error('Não foi possível conectar ao servidor');
+    } finally {
+      setChangingStatus(false);
+    }
+  }
+
   async function handleRevoke(invite: Invitation) {
     try {
       const res = await apiFetch(`/api/account/invitations/${invite.id}`, { method: 'DELETE' });
@@ -443,6 +496,19 @@ export function UsuariosView() {
               />
             </label>
             <Segmented ariaLabel="Filtrar por papel" size="lg" value={filter} onChange={setFilter} options={segOptions} />
+            {canManageMembers && filter !== 'invites' && (
+              <Segmented
+                ariaLabel="Filtrar por status"
+                size="lg"
+                value={statusFilter}
+                onChange={setStatusFilter}
+                options={[
+                  { value: 'all', label: 'Todos' },
+                  { value: 'active', label: 'Ativos', count: members.filter((m) => m.active).length },
+                  { value: 'inactive', label: 'Desativados', count: members.filter((m) => !m.active).length },
+                ]}
+              />
+            )}
           </PageToolbar>
 
           <TableCard label={filter === 'invites' ? 'Convites pendentes' : 'Usuários'}>
@@ -525,19 +591,20 @@ export function UsuariosView() {
                     <Th>Papel</Th>
                     <Th className="hidden md:table-cell">Equipe</Th>
                     <Th>Situação</Th>
-                    <Th align="right" className="hidden sm:table-cell">
-                      Última atividade
-                    </Th>
+                    {canManageMembers && (
+                      <Th align="right" className="hidden sm:table-cell">
+                        Último acesso
+                      </Th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredMembers.map((m) => {
                     const presence = getPresence(m.user_id);
-                    const row = getRow(m.user_id);
                     return (
                       <Tr
                         key={m.user_id}
-                        className="cursor-pointer"
+                        className={m.active ? 'cursor-pointer' : 'cursor-pointer opacity-60'}
                         tabIndex={0}
                         aria-label={`Abrir ${m.full_name || 'usuário'}`}
                         onClick={() => setSelectedId(m.user_id)}
@@ -570,11 +637,17 @@ export function UsuariosView() {
                         </Td>
                         <Td className="hidden text-foreground-2 md:table-cell">{(m.team_id && teamNames[m.team_id]) || '—'}</Td>
                         <Td>
-                          <StatusChip tone={PRESENCE_TONE[presence]}>{PRESENCE_TEXT[presence]}</StatusChip>
+                          {m.active ? (
+                            <StatusChip tone={PRESENCE_TONE[presence]}>{PRESENCE_TEXT[presence]}</StatusChip>
+                          ) : (
+                            <StatusChip tone="mute">Desativado</StatusChip>
+                          )}
                         </Td>
-                        <Td align="right" className="hidden text-muted-foreground sm:table-cell">
-                          {presence === 'online' ? 'agora' : fmtLastSeen(row?.last_seen_at, now)}
-                        </Td>
+                        {canManageMembers && (
+                          <Td align="right" className="hidden text-muted-foreground sm:table-cell">
+                            {lastAccessLabel(m, presence, now)}
+                          </Td>
+                        )}
                       </Tr>
                     );
                   })}
@@ -608,6 +681,12 @@ export function UsuariosView() {
                 </Button>
               )}
               {selectedCanEdit && (
+                <Button variant="outline" onClick={() => setStatusTarget({ member: selected, active: !selected.active })}>
+                  <Power className="size-3.5" />
+                  {selected.active ? 'Desativar' : 'Reativar'}
+                </Button>
+              )}
+              {selectedCanEdit && (
                 <Button variant="destructive" onClick={() => setRemovingMember(selected)} disabled={pendingMemberAction === selected.user_id}>
                   <Trash2 className="size-3.5" />
                   Remover da conta
@@ -624,7 +703,11 @@ export function UsuariosView() {
                 {selected.avatar_url ? <AvatarImage src={selected.avatar_url} alt="" /> : null}
                 <AvatarFallback className="bg-primary/10 text-base font-medium text-primary">{initial(selected)}</AvatarFallback>
               </Avatar>
-              <StatusChip tone={PRESENCE_TONE[getPresence(selected.user_id)]}>{PRESENCE_TEXT[getPresence(selected.user_id)]}</StatusChip>
+              {selected.active ? (
+                <StatusChip tone={PRESENCE_TONE[getPresence(selected.user_id)]}>{PRESENCE_TEXT[getPresence(selected.user_id)]}</StatusChip>
+              ) : (
+                <StatusChip tone="mute">Desativado</StatusChip>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">
@@ -659,15 +742,43 @@ export function UsuariosView() {
               <dt className="text-xs font-semibold text-muted-foreground">Entrou em</dt>
               <dd className="text-foreground">{fmtDate(selected.joined_at)}</dd>
             </div>
-            <div className="flex flex-col gap-1.5">
-              <dt className="text-xs font-semibold text-muted-foreground">Última atividade</dt>
-              <dd className="text-foreground">
-                {getPresence(selected.user_id) === 'online' ? 'agora' : fmtLastSeen(getRow(selected.user_id)?.last_seen_at, now)}
-              </dd>
-            </div>
+            {canManageMembers && (
+              <div className="flex flex-col gap-1.5">
+                <dt className="text-xs font-semibold text-muted-foreground">Último acesso</dt>
+                <dd className="text-foreground">{lastAccessLabel(selected, getPresence(selected.user_id), now)}</dd>
+              </div>
+            )}
           </dl>
         )}
       </DetailDrawer>
+
+      <AlertDialog open={statusTarget !== null} onOpenChange={(open) => !open && !changingStatus && setStatusTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{statusTarget?.active ? 'Reativar usuário?' : 'Desativar usuário?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {statusTarget?.active
+                ? `${statusTarget.member.full_name || 'Este usuário'} volta a poder entrar na conta com o papel que já tinha.`
+                : `${statusTarget?.member.full_name || 'Este usuário'} perde o acesso agora: as sessões abertas caem, o login é bloqueado e a pessoa sai da distribuição de conversas. O histórico dela é mantido e você pode reativar depois.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={changingStatus}>Voltar</AlertDialogCancel>
+            <Button variant={statusTarget?.active ? 'default' : 'destructive'} onClick={() => void handleChangeStatus()} disabled={changingStatus}>
+              {changingStatus ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Aguarde...
+                </>
+              ) : statusTarget?.active ? (
+                'Reativar'
+              ) : (
+                'Desativar'
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={transferTarget !== null} onOpenChange={(open) => !open && !transferring && setTransferTarget(null)}>
         <AlertDialogContent>

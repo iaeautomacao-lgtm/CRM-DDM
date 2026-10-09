@@ -178,3 +178,40 @@ export function firstMissingBlock(message: string | undefined): number {
   const nums = (m?.[1] ?? "").split(",").map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n >= 0);
   return nums.length ? Math.min(...nums) : 0;
 }
+
+// ── Lista reaproveitada numa campanha nova (POST /imports/[id]/reuse) ─────────────
+// A tela de listas chama o reuse (o servidor copia vínculos e VAR1–3 para um rascunho novo) e abre o assistente em
+// /disparador/campanhas com estes parâmetros; o assistente usa o draft_id como público "csv" já importado.
+
+export interface ReusedList {
+  draftId: string;
+  name: string;
+  contacts: number;
+  variables: number;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Monta a URL da tela de campanhas que abre o assistente com a lista. */
+export function reuseCampaignHref(list: ReusedList): string {
+  const qs = new URLSearchParams({
+    lista: list.draftId,
+    nome: list.name.slice(0, 120),
+    contatos: String(Math.max(0, Math.trunc(list.contacts))),
+    variaveis: String(Math.max(0, Math.trunc(list.variables))),
+  });
+  return `/disparador/campanhas?${qs.toString()}`;
+}
+
+/** Lê os parâmetros da URL; null quando ausentes ou inválidos (draft_id precisa ser UUID). */
+export function parseReusedList(search: string | URLSearchParams): ReusedList | null {
+  const p = typeof search === "string" ? new URLSearchParams(search) : search;
+  const draftId = p.get("lista") ?? "";
+  if (!UUID_RE.test(draftId)) return null;
+  const int = (v: string | null) => {
+    const n = Number(v);
+    return Number.isInteger(n) && n >= 0 ? n : 0;
+  };
+  const name = (p.get("nome") ?? "").trim().slice(0, 120) || "Lista importada";
+  return { draftId, name, contacts: int(p.get("contatos")), variables: int(p.get("variaveis")) };
+}

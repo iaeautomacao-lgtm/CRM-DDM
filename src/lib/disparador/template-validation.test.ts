@@ -43,6 +43,8 @@ describe("templateComponentProblem", () => {
       templateComponentProblem({ ...base, buttons: [{ type: "URL", url: "https://x.com/{{1}}" }] })
     ).toMatch(/link dinâmico/);
     expect(templateComponentProblem({ ...base, buttons: [{ type: "COPY_CODE" }] })).toMatch(/copiar código/);
+    // botão FLOW (PRD 21.3): o disparador manda o flow_token de cada envio, então o template é compatível
+    expect(templateComponentProblem({ ...base, buttons: [{ type: "FLOW" }] })).toBeNull();
     expect(
       templateComponentProblem({
         ...base,

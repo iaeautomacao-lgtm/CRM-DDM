@@ -340,6 +340,16 @@ function NodeConfigFields({
         />
       );
 
+    case "send_flow":
+      return (
+        <SendFlowForm
+          cfg={cfg as SendFlowCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+        />
+      );
+
     case "add_note":
       return (
         <>
@@ -2734,6 +2744,121 @@ function SendTemplateForm({
       </div>
       <TextRow
         label="Texto de fallback para WAHA (opcional)"
+        value={cfg.fallback_text ?? ""}
+        onChange={(v) => onUpdateConfig({ fallback_text: v })}
+        rows={2}
+      />
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label="Depois de enviar, avança para"
+      />
+    </>
+  );
+}
+
+// ============================================================
+// send_flow — formulário nativo do WhatsApp (PRD 21.4)
+// ============================================================
+
+interface SendFlowCfg {
+  flow_id?: string;
+  cta_text?: string;
+  body_text?: string;
+  header_text?: string;
+  footer_text?: string;
+  screen_id?: string;
+  flow_action?: "navigate" | "data_exchange";
+  fallback_text?: string;
+  next_node_key?: string;
+}
+
+const FLOW_ACTION_OPTIONS: Array<{ value: "navigate" | "data_exchange"; label: string }> = [
+  { value: "navigate", label: "Abrir direto na tela" },
+  { value: "data_exchange", label: "Buscar os dados no CRM (Data Exchange)" },
+];
+
+function SendFlowForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+}: {
+  cfg: SendFlowCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+}) {
+  const action = cfg.flow_action ?? "navigate";
+  const vars = "Aceita {{vars.nome_da_variavel}}.";
+  return (
+    <>
+      <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-[10px] text-amber-400">
+        O formulário (WhatsApp Flow) só funciona em canais Meta. Nos demais canais (WAHA, Webchat…) é enviado o texto
+        alternativo abaixo; sem texto alternativo, o fluxo apenas avança. A resposta do cliente volta ao fluxo como
+        variáveis (flow_*).
+      </p>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <TextRow
+          label="Id do Flow na Meta (só números)"
+          value={cfg.flow_id ?? ""}
+          onChange={(v) => onUpdateConfig({ flow_id: v.replace(/\D/g, "") })}
+        />
+        <TextRow
+          label={`Texto do botão que abre o formulário (${(cfg.cta_text ?? "").length}/30)`}
+          value={cfg.cta_text ?? ""}
+          onChange={(v) => onUpdateConfig({ cta_text: v.slice(0, 30) })}
+        />
+      </div>
+      <TextRow
+        label={`Mensagem (obrigatória, até 1024). ${vars}`}
+        value={cfg.body_text ?? ""}
+        onChange={(v) => onUpdateConfig({ body_text: v })}
+        rows={3}
+      />
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <TextRow
+          label={`Título (opcional, até 60). ${vars}`}
+          value={cfg.header_text ?? ""}
+          onChange={(v) => onUpdateConfig({ header_text: v.slice(0, 60) })}
+        />
+        <TextRow
+          label="Rodapé (opcional, até 60)"
+          value={cfg.footer_text ?? ""}
+          onChange={(v) => onUpdateConfig({ footer_text: v.slice(0, 60) })}
+        />
+      </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">Ao abrir o formulário</label>
+          <Select
+            value={action}
+            onValueChange={(v) => v && onUpdateConfig({ flow_action: v as "navigate" | "data_exchange" })}
+          >
+            <SelectTrigger className="w-full bg-muted">
+              <SelectValue>
+                {(v: string) => FLOW_ACTION_OPTIONS.find((o) => o.value === v)?.label ?? v}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {FLOW_ACTION_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <TextRow
+          label={action === "navigate" ? "Tela inicial (screen_id, obrigatória)" : "Tela inicial (screen_id, opcional)"}
+          value={cfg.screen_id ?? ""}
+          onChange={(v) => onUpdateConfig({ screen_id: v })}
+        />
+      </div>
+      <TextRow
+        label={`Texto alternativo para canais sem formulário (opcional). ${vars}`}
         value={cfg.fallback_text ?? ""}
         onChange={(v) => onUpdateConfig({ fallback_text: v })}
         rows={2}

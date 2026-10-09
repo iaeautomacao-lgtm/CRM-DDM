@@ -85,6 +85,7 @@ export function StepOrigem({
   tags,
   importCtl,
   keepsExistingAudience,
+  reusedListName = null,
   audiencePreview,
   utm,
 }: {
@@ -97,6 +98,8 @@ export function StepOrigem({
   tags: Array<{ id: string; name: string }>;
   importCtl: ImportController;
   keepsExistingAudience: boolean;
+  /** Nome da lista importada reaproveitada como público (campanha nova). */
+  reusedListName?: string | null;
   audiencePreview: AudiencePreviewState | null;
   utm: UtmController;
 }) {
@@ -238,7 +241,9 @@ export function StepOrigem({
         {keepsExistingAudience && !hasFile && (
           <p className="flex gap-2 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            Esta campanha mantém a base já importada. Envie um arquivo só se quiser substituí-la.
+            {reusedListName
+              ? `Público: lista “${reusedListName}”, já importada. Envie um arquivo só se quiser substituí-la.`
+              : "Esta campanha mantém a base já importada. Envie um arquivo só se quiser substituí-la."}
           </p>
         )}
 

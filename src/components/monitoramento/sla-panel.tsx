@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
+import { ErrorState } from "@/components/ddm/states";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { SlaStats } from "@/lib/monitoramento/sla";
@@ -104,7 +105,14 @@ export function SlaPanel({ teamNames }: { teamNames: Record<string, string> }) {
         </Button>
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && (
+        <ErrorState
+          className="min-h-0"
+          title="Não foi possível carregar o SLA"
+          hint={data ? "Os números abaixo podem estar desatualizados. Tente de novo." : error}
+          onRetry={() => void load()}
+        />
+      )}
 
       {data && (
         <>

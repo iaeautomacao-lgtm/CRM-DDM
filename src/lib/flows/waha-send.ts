@@ -84,6 +84,7 @@ async function persistOutgoing(
   const { error: msgErr } = await db.from('messages').insert({
     conversation_id: args.conversationId,
     sender_type: 'bot',
+    origin: 'flow',
     content_type: args.contentType,
     content_text: args.contentText,
     message_id: args.messageId,

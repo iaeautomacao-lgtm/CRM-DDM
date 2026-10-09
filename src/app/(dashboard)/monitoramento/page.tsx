@@ -102,8 +102,10 @@ export default function MonitoramentoPage() {
 }
 
 function MonitoramentoBoard() {
-  const { accountId, canManageMembers, profile } = useAuth();
+  const { accountId, profile } = useAuth();
   const { can } = usePermissions();
+  // Arrastar agente entre equipes grava em /api/account/teams/[teamId]/members, que exige teams.manage (não o papel).
+  const canManageTeams = can("teams.manage");
   const canBulkTransfer = can("inbox.transfer");
   const canBulkFinalize = can("inbox.close");
   const [view, setView] = useState<MonitorView>("fases");
@@ -361,22 +363,33 @@ function MonitoramentoBoard() {
   // ----------------------------------------------------------
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(true);
+  const [membersError, setMembersError] = useState(false);
+  const [membersTick, setMembersTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     apiFetch("/api/account/members", { cache: "no-store" })
-      .then((res) => res.json())
-      .then((data: { members?: AccountMember[] }) => {
-        if (!cancelled) setMembers(data.members ?? []);
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json();
       })
-      .catch((err) => console.error("[monitoramento] failed to load members:", err))
+      .then((data: { members?: AccountMember[] }) => {
+        if (!cancelled) {
+          setMembers(data.members ?? []);
+          setMembersError(false);
+        }
+      })
+      .catch((err) => {
+        console.error("[monitoramento] failed to load members:", err);
+        if (!cancelled) setMembersError(true);
+      })
       .finally(() => {
         if (!cancelled) setMembersLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [membersTick]);
 
   const { getPresence, getRow, now } = usePresence();
 
@@ -400,6 +413,7 @@ function MonitoramentoBoard() {
   // ----------------------------------------------------------
   const [teams, setTeams] = useState<Team[]>([]);
   const [teamsLoading, setTeamsLoading] = useState(true);
+  const [teamsError, setTeamsError] = useState(false);
   // Single dialog instance for both "create" (team=null) and "edit"
   // (team=<the column's team>) — same TeamFormDialog used in
   // teams-panel.tsx (Settings), not a second copy.
@@ -426,8 +440,10 @@ function MonitoramentoBoard() {
       .order("name");
     if (error) {
       console.error("[monitoramento] failed to load teams:", error);
+      setTeamsError(true);
       return;
     }
+    setTeamsError(false);
     setTeams((data ?? []) as Team[]);
   }, [accountId]);
 
@@ -929,6 +945,17 @@ function MonitoramentoBoard() {
                 <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
+          ) : membersError ? (
+            <ErrorState
+              className="min-h-0"
+              title="Não foi possível carregar os agentes"
+              hint="Verifique sua conexão e tente novamente."
+              onRetry={() => {
+                setMembersLoading(true);
+                setMembersError(false);
+                setMembersTick((n) => n + 1);
+              }}
+            />
           ) : (
             <>
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -991,6 +1018,19 @@ function MonitoramentoBoard() {
                 <Skeleton key={i} className="h-64 rounded-[10px]" />
               ))}
             </div>
+          ) : teamsError || membersError ? (
+            <ErrorState
+              className="min-h-0"
+              title="Não foi possível carregar as equipes"
+              hint="Verifique sua conexão e tente novamente."
+              onRetry={() => {
+                setTeamsLoading(true);
+                setMembersLoading(true);
+                setMembersError(false);
+                setMembersTick((n) => n + 1);
+                void fetchTeams().finally(() => setTeamsLoading(false));
+              }}
+            />
           ) : teams.length === 0 ? (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-card/40 p-10 text-center text-sm text-muted-foreground">
               <p>Nenhuma equipe criada ainda.</p>
@@ -1034,7 +1074,7 @@ function MonitoramentoBoard() {
                       getPresence={getPresence}
                       getLastSeenAt={(userId) => getRow(userId)?.last_seen_at}
                       now={now}
-                      canDrag={canManageMembers}
+                      canDrag={canManageTeams}
                       onEdit={openEditTeam}
                       actions={equipesActions}
                     />

@@ -45,6 +45,16 @@ import { CellMain, DenseTable, TableCard, Td, Th, Tr } from "@/components/ddm/ta
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/dashboard/error-state";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 /**
  * Flows list page.
@@ -103,6 +113,7 @@ export default function FlowsPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | FlowRow["status"]>("all");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<FlowRow | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -189,11 +200,8 @@ export default function FlowsPage() {
     }
   }
 
+  /** A confirmação vem do AlertDialog (deleteTarget); o servidor exige flows.edit em DELETE /api/flows/[id]. */
   async function handleDelete(flow: FlowRow) {
-    const yes = window.confirm(
-      `Excluir "${flow.name}"? Todas as execuções ativas serão finalizadas imediatamente.`,
-    );
-    if (!yes) return;
     try {
       const res = await apiFetch(`/api/flows/${flow.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Falha ao excluir: ${res.status}`);
@@ -486,17 +494,19 @@ export default function FlowsPage() {
         footer={
           detailFlow ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button
-                variant="ghost"
-                className="mr-auto text-danger hover:bg-danger-soft hover:text-danger"
-                onClick={() => {
-                  setDetailId(null);
-                  void handleDelete(detailFlow);
-                }}
-              >
-                <Trash2 className="size-3.5" />
-                Excluir
-              </Button>
+              {canCreate && (
+                <Button
+                  variant="ghost"
+                  className="mr-auto text-danger hover:bg-danger-soft hover:text-danger"
+                  onClick={() => {
+                    setDeleteTarget(detailFlow);
+                    setDetailId(null);
+                  }}
+                >
+                  <Trash2 className="size-3.5" />
+                  Excluir
+                </Button>
+              )}
               <Button variant="outline" onClick={() => router.push(`/flows/${detailFlow.id}/runs`)}>
                 <History className="size-3.5" />
                 Execuções
@@ -538,6 +548,29 @@ export default function FlowsPage() {
           </div>
         )}
       </DetailDrawer>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir o fluxo “{deleteTarget?.name}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Todas as execuções ativas serão finalizadas imediatamente. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = deleteTarget;
+                setDeleteTarget(null);
+                if (target) void handleDelete(target);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         {/* `sm:max-w-4xl` not `max-w-4xl` — shadcn's DialogContent has
