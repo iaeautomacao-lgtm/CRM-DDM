@@ -40,6 +40,7 @@ import {
 } from "@/lib/audit/labels";
 import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
 import { loadSharedPeriod, saveSharedPeriod } from "@/lib/relatorios/period";
+import { usePermissions } from "@/hooks/use-permission";
 import { PeriodFilter } from "@/components/relatorios/period-filter";
 
 const ALL = "all";
@@ -115,6 +116,8 @@ function FilterSelect({
 }
 
 export default function AuditoriaPage() {
+  // Exportar exige reports.export; o servidor revalida.
+  const canExport = usePermissions().can("reports.export");
   const [members, setMembers] = useState<AccountMember[]>([]);
   const [draft, setDraft] = useState<AuditFilters>(defaultFilters);
   const [applied, setApplied] = useState<AuditFilters>(defaultFilters);
@@ -215,21 +218,23 @@ export default function AuditoriaPage() {
   const set = (patch: Partial<AuditFilters>) => setDraft((d) => ({ ...d, ...patch }));
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Auditoria</h1>
+          <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Auditoria</h1>
           <p className="text-sm text-muted-foreground">
             Quem fez o quê, quando e de onde — conversas, contatos, campanhas, fluxos, automações, canais e equipe.
           </p>
         </div>
+        {canExport && (
         <Button variant="outline" onClick={handleExport} disabled={exporting || total === 0}>
           {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
           Exportar Excel
         </Button>
+        )}
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4">
+      <div className="rounded-[10px] border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
           <PeriodFilter
             value={{ dateFrom: draft.from, dateTo: draft.to }}
@@ -257,7 +262,7 @@ export default function AuditoriaPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (

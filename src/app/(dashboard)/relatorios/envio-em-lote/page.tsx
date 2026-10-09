@@ -37,6 +37,7 @@ import {
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -231,6 +232,8 @@ function defaultItemFilters(): ItemFilters {
 }
 
 export default function EnvioEmLotePage() {
+  // Exportar exige reports.export (supervisor+); o servidor revalida.
+  const canExport = usePermissions().can("reports.export");
   const { accountId } = useAuth();
 
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -458,15 +461,15 @@ export default function EnvioEmLotePage() {
   }
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Envio em Lote</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Envio em Lote</h1>
         <p className="text-sm text-muted-foreground">
           Campanhas do Disparador com métricas agregadas e detalhe por contato.
         </p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         <button
           type="button"
           onClick={() => setFiltersOpen((o) => !o)}
@@ -561,10 +564,12 @@ export default function EnvioEmLotePage() {
                   <Search className="size-4" />
                   Pesquisar
                 </Button>
+                {canExport && (
                 <Button variant="outline" size="sm" disabled={!campaignId || exporting} onClick={handleExportCsv}>
                   <Download className="size-4" />
                   {exporting ? "Exportando…" : "CSV"}
                 </Button>
+                )}
               </div>
             </div>
           </div>
@@ -572,7 +577,7 @@ export default function EnvioEmLotePage() {
       </div>
 
       {!campaignId ? (
-        <div className="rounded-xl border border-border bg-card p-4">
+        <div className="rounded-[10px] border border-border bg-card p-4">
           <EmptyState
             icon={Search}
             title="Selecione uma campanha"
@@ -581,7 +586,7 @@ export default function EnvioEmLotePage() {
         </div>
       ) : (
         <>
-          <div className="rounded-xl border border-border bg-card p-4">
+          <div className="rounded-[10px] border border-border bg-card p-4">
             <h2 className="mb-3 text-sm font-semibold text-foreground">Detalhes</h2>
             {detailLoading ? (
               <Skeleton className="h-32 w-full" />
@@ -624,7 +629,7 @@ export default function EnvioEmLotePage() {
             )}
           </div>
 
-          <div className="rounded-xl border border-border bg-card">
+          <div className="rounded-[10px] border border-border bg-card">
             {itemsLoading ? (
               <div className="space-y-3 p-4">
                 {[0, 1, 2].map((i) => (
@@ -731,7 +736,7 @@ export default function EnvioEmLotePage() {
           </div>
 
           {items.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
               <span className="text-xs text-muted-foreground">
                 {rangeStart} - {rangeEnd} de {totalCount} itens
               </span>

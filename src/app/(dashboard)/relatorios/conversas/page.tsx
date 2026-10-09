@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -195,7 +196,7 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
   const contactInitial = contactLabel(row.contactName, row.contactPhone).charAt(0).toUpperCase();
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
+    <div className="overflow-hidden rounded-[10px] border border-border">
       <div
         role="button"
         tabIndex={0}
@@ -250,6 +251,8 @@ function ConversationAccordionItem({ row }: { row: ConversationRow }) {
 }
 
 export default function ConversasPage() {
+  // Exportar exige reports.export (supervisor+); o servidor revalida.
+  const canExport = usePermissions().can("reports.export");
   const { accountId } = useAuth();
 
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -471,15 +474,15 @@ export default function ConversasPage() {
   }
 
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Conversas</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Conversas</h1>
         <p className="text-sm text-muted-foreground">
           Lista de conversas com filtros avançados e visualização inline das mensagens.
         </p>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         <button
           type="button"
           onClick={() => setFiltersOpen((o) => !o)}
@@ -612,6 +615,7 @@ export default function ConversasPage() {
                   <Search className="size-4" />
                   Pesquisar
                 </Button>
+                {canExport && (<>
                 <Button
                   variant="outline"
                   size="sm"
@@ -630,6 +634,7 @@ export default function ConversasPage() {
                   <Download className="size-4" />
                   {exporting === "csv" ? "Exportando…" : "CSV"}
                 </Button>
+                </>)}
               </div>
             </div>
           </div>
@@ -644,11 +649,11 @@ export default function ConversasPage() {
             ))}
           </div>
         ) : loadError ? (
-          <div className="rounded-xl border border-border bg-card p-4">
+          <div className="rounded-[10px] border border-border bg-card p-4">
             <ErrorState title="Não foi possível carregar as conversas" onRetry={() => runSearch()} />
           </div>
         ) : rows.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card p-4">
+          <div className="rounded-[10px] border border-border bg-card p-4">
             <EmptyState
               icon={MessageCircle}
               title="Nenhuma conversa encontrada"
@@ -670,7 +675,7 @@ export default function ConversasPage() {
               </div>
             ))}
 
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-border bg-card px-4 py-3">
               <span className="text-xs text-muted-foreground">
                 {rangeStart} - {rangeEnd} de {totalCount} itens
               </span>

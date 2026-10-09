@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permission";
+import { ForbiddenState } from "@/components/dashboard/error-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -119,6 +121,7 @@ function formatPeriod(from: string | null, to: string | null): string {
 
 export default function ExportacoesPage() {
   const { accountId } = useAuth();
+  const perms = usePermissions();
 
   const [draftSearch, setDraftSearch] = useState("");
   const [search, setSearch] = useState("");
@@ -203,10 +206,20 @@ export default function ExportacoesPage() {
 
   const selectedCount = selected.size;
 
+  // Histórico e download de exportações: só exports.manage (admin e proprietário). O servidor revalida.
+  if (!perms.loading && !perms.error && !perms.can("exports.manage")) {
+    return (
+      <ForbiddenState
+        title="Você não tem permissão para ver as exportações"
+        hint="O histórico de exportações é restrito a administradores e ao proprietário."
+      />
+    );
+  }
+
   return (
-    <div className="space-y-4 p-4 lg:p-6">
+    <div className="space-y-4">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">Exportações</h1>
+        <h1 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Exportações</h1>
         <p className="text-sm text-muted-foreground">
           Histórico de arquivos exportados nos relatórios — baixe novamente sem gerar de novo.
         </p>
@@ -242,7 +255,7 @@ export default function ExportacoesPage() {
         </Button>
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
+      <div className="rounded-[10px] border border-border bg-card">
         {loading ? (
           <div className="space-y-3 p-4">
             {[0, 1, 2].map((i) => (
