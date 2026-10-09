@@ -69,30 +69,30 @@ export function formatLastSeen(
   lastSeenAt: string | null | undefined,
   now: number,
 ): string {
-  if (!lastSeenAt) return "a while ago";
+  if (!lastSeenAt) return "há algum tempo";
   const last = new Date(lastSeenAt).getTime();
-  if (Number.isNaN(last)) return "a while ago";
+  if (Number.isNaN(last)) return "há algum tempo";
 
   const diff = Math.max(0, now - last);
   const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins === 1) return "1 minute ago";
-  if (mins < 60) return `${mins} minutes ago`;
+  if (mins < 1) return "agora mesmo";
+  if (mins === 1) return "há 1 minuto";
+  if (mins < 60) return `há ${mins} minutos`;
 
   const hours = Math.floor(mins / 60);
-  if (hours === 1) return "1 hour ago";
-  if (hours < 24) return `${hours} hours ago`;
+  if (hours === 1) return "há 1 hora";
+  if (hours < 24) return `há ${hours} horas`;
 
   const days = Math.floor(hours / 24);
-  if (days === 1) return "1 day ago";
-  return `${days} days ago`;
+  if (days === 1) return "há 1 dia";
+  return `há ${days} dias`;
 }
 
 /**
  * Tooltip / aria label for a presence dot, e.g.
- *   "Online — active now"
- *   "Away — idle"
- *   "Offline — last seen 2 hours ago"
+ *   "Online — ativo agora"
+ *   "Ausente — inativo"
+ *   "Offline — visto pela última vez há 2 horas"
  */
 export function presenceLabel(
   status: PresenceStatus,
@@ -101,11 +101,11 @@ export function presenceLabel(
 ): string {
   switch (status) {
     case "online":
-      return "Online — active now";
+      return "Online — ativo agora";
     case "away":
-      return "Away — idle";
+      return "Ausente — inativo";
     case "offline":
-      return `Offline — last seen ${formatLastSeen(lastSeenAt, now)}`;
+      return `Offline — visto pela última vez ${formatLastSeen(lastSeenAt, now)}`;
   }
 }
 
