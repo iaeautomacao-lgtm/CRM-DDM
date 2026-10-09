@@ -32,6 +32,7 @@ import {
   PanelRight,
   CircleCheck,
   UserPlus,
+  Clock,
   Phone,
   Trash2,
   Loader2,
@@ -64,6 +65,7 @@ import { deleteAccountMedia } from "@/lib/storage/upload-media";
 import {
   closeConversationWithOutcomeTag,
   transferConversation,
+  assignSelf,
 } from "@/lib/conversations/actions";
 import { TemplatePicker } from "./template-picker";
 import { OutcomeTagPicker } from "./outcome-tag-picker";
@@ -1338,6 +1340,27 @@ export function MessageThread({
     [conversation, onAssignChange, profiles],
   );
 
+  // "Assumir" (PRD 24, item 1): a conversa da fila passa para quem clicou,
+  // de forma atômica no servidor. Se outra pessoa assumiu antes (409
+  // already_assigned), avisa e o realtime atualiza a lista.
+  const [assuming, setAssuming] = useState(false);
+  const handleAssumeSelf = useCallback(async () => {
+    if (!conversation || !user?.id || assuming) return;
+    setAssuming(true);
+    try {
+      const me = profiles.find((p) => p.user_id === user.id);
+      const { error, code } = await assignSelf(conversation.id, me?.full_name);
+      if (error) {
+        toast.error(code === "already_assigned" ? "Outra pessoa já assumiu esta conversa" : error);
+        return;
+      }
+      toast.success("Conversa assumida");
+      onAssignChange(conversation.id, user.id);
+    } finally {
+      setAssuming(false);
+    }
+  }, [assuming, conversation, onAssignChange, profiles, user?.id]);
+
   if (!conversation || !contact) {
     return (
       <div className="flex flex-1 items-center justify-center bg-background px-6">
@@ -1471,6 +1494,19 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {!assignedAgentId && conversation.status !== "closed" && can("inbox.reply") && (
+            <button
+              type="button"
+              onClick={() => void handleAssumeSelf()}
+              disabled={assuming}
+              title="Assumir a conversa (ela passa a ser sua)"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+            >
+              {assuming ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <UserPlus className="size-3.5" aria-hidden="true" />}
+              Assumir
+            </button>
+          )}
+
           <DropdownMenu>
             <DropdownMenuTrigger
               aria-label={assignedAgentId ? `Atribuída a ${assignLabel}. Alterar atendente` : "Atribuir conversa"}
@@ -1479,7 +1515,7 @@ export function MessageThread({
                 "inline-flex h-8 max-w-48 shrink-0 items-center gap-2 rounded-md text-[12.5px] font-medium",
                 assignedAgentId
                   ? "border border-border bg-card pl-1 pr-2 text-foreground hover:bg-surface-hover"
-                  : "bg-primary px-3 font-semibold text-primary-foreground hover:bg-primary-hover",
+                  : "border border-border bg-card px-2.5 text-foreground-2 hover:bg-surface-hover hover:text-foreground",
               )}
             >
               {assignedAgentId ? (
@@ -1492,8 +1528,8 @@ export function MessageThread({
                 </>
               ) : (
                 <>
-                  <UserPlus className="size-3.5 shrink-0" aria-hidden="true" />
                   <span className="hidden sm:inline">Atribuir</span>
+                  <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                 </>
               )}
             </DropdownMenuTrigger>
@@ -1785,6 +1821,29 @@ export function MessageThread({
           </button>
         )}
       </div>
+
+      {/* Conversa na fila (PRD 24, item 1): convite para assumir antes de
+          responder, como no protótipo. O composer continua disponível. */}
+      {!assignedAgentId && conversation.status !== "closed" && can("inbox.reply") && (
+        <div className="shrink-0 border-t border-border bg-card px-3 pt-3 sm:px-6">
+          <div className="mx-auto flex w-full max-w-[760px] animate-ddm-fade items-center gap-3 rounded-[10px] border border-border bg-card-2 px-3.5 py-3">
+            <Clock className="size-4 shrink-0 text-warning" aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-semibold text-foreground">Conversa aguardando atendimento</p>
+              <p className="mt-0.5 text-[12.5px] text-foreground-2">Assuma a conversa para responder. O cliente será atribuído a você.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void handleAssumeSelf()}
+              disabled={assuming}
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3.5 text-[12.5px] font-semibold text-primary-foreground hover:bg-primary-hover disabled:opacity-60"
+            >
+              {assuming ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : <UserPlus className="size-3.5" aria-hidden="true" />}
+              Assumir conversa
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Composer */}
       <MessageComposer
