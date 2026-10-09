@@ -20,6 +20,7 @@
  * runtimes that don't keep timers alive across requests.
  */
 
+import "server-only";
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 

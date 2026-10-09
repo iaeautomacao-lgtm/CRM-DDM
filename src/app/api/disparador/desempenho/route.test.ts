@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { assertRowColumns } from "@/test/db-columns";
 
 const mocks = vi.hoisted(() => ({
   account: vi.fn(),
@@ -36,13 +37,13 @@ vi.mock("@/lib/disparador/admin-client", () => ({
       mocks.adminFrom(table);
       if (table === "whatsapp_config") {
         return chain({
-          data: [{ id: "session-1", display_phone_number: "551199999999", phone_number_id: "pn1", waha_session: null, provider: "meta", habilitado: true }],
+          data: assertRowColumns("whatsapp_config", [{ id: "session-1", display_phone_number: "551199999999", phone_number_id: "pn1", waha_session: null, provider: "meta", habilitado: true }]),
           error: null,
         });
       }
       if (table === "channel_health") {
         return chain({
-          data: [{ session_id: "session-1", verified_name: "Principal", display_phone_number: "551199999999", checked_at: "2026-10-08T10:00:00Z", last_error: null }],
+          data: assertRowColumns("channel_health", [{ session_id: "session-1", verified_name: "Principal", display_phone_number: "551199999999", checked_at: "2026-10-08T10:00:00Z", last_error: null }]),
           error: null,
         });
       }

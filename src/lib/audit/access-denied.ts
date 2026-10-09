@@ -1,3 +1,4 @@
+import "server-only";
 import type { Permission } from '@/lib/auth/permissions'
 
 // `access.denied` (PRD 20, 20.8): o 403 de requirePermission/requireDisparadorAccess vira um evento de auditoria com a

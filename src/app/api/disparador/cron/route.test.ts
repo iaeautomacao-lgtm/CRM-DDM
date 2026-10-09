@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { assertRowColumns } from '@/test/db-columns'
 // after() só existe dentro de uma requisição do Next: aqui registramos os callbacks para executá-los à mão.
 const afterMock = vi.hoisted(() => ({ queued: [] as Array<() => Promise<void> | void> }));
 vi.mock('next/server', async (importOriginal) => ({
@@ -94,7 +95,7 @@ describe('cron: agendador por número', () => {
       };
       builder.select = () => {
         if (table === 'whatsapp_config')
-          result = { data: [{ id: 'ch-meta', provider: 'meta', account_id: 'acc' }, { id: 'ch-waha', provider: 'waha', account_id: 'acc' }], error: null };
+          result = { data: assertRowColumns('whatsapp_config', [{ id: 'ch-meta', provider: 'meta', account_id: 'acc' }, { id: 'ch-waha', provider: 'waha', account_id: 'acc' }]), error: null };
         if (table === 'dispatch_channel_limits') result = { data: limits, error: null };
         return builder;
       };

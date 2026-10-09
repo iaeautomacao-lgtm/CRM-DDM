@@ -2,6 +2,7 @@
 // Varre componentes "use client" e lista os que alcançam código só de servidor.
 import fs from "node:fs";
 import path from "node:path";
+import { hasServerOnlyMarker, loadServerOnlyConfig } from "./server-only-modules.mjs";
 const root = path.resolve(process.argv[2] ?? process.cwd());
 const exts = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"];
 const norm = (p) => p.split(path.sep).join("/");
@@ -32,7 +33,9 @@ const all = [];
   }
 })(path.join(root, "src"));
 const clients = all.filter((f) => /^\s*["']use client["']/.test(fs.readFileSync(f, "utf8")));
-const bad = /whatsapp[\\/]meta-dispatcher|loadtest[\\/]gate|whatsapp[\\/]meta-api\.ts$|disparador[\\/]admin-client|supabase[\\/]admin/;
+// Fonte ÚNICA (scripts/ci/server-only-modules.json): os módulos listados E qualquer arquivo com `import "server-only"` são "só de servidor".
+const serverOnly = new Set(loadServerOnlyConfig(root).modules.map((m) => path.resolve(m)));
+const bad = { test: (file) => serverOnly.has(path.resolve(file)) || hasServerOnlyMarker(fs.readFileSync(file, "utf8")) };
 const found = new Map();
 for (const c of clients) {
   const seen = new Set([c]);

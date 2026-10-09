@@ -8,6 +8,7 @@
 // linha corrompida) é IGNORADA — o marcador vira "ausente" e a ferramenta
 // falha de forma explícita, em vez de enviar lixo.
 
+import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/flows/admin-client";

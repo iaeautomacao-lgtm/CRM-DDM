@@ -1,8 +1,14 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
     tsconfigPaths: true,
+    // `import "server-only"` lança fora de um bundle de servidor do Next (é o que faz o build falhar para client components); nos
+    // testes (Node) o módulo vira vazio. PRD 14, 14.12.
+    alias: {
+      "server-only": fileURLToPath(new URL("./src/test/server-only-empty.ts", import.meta.url)),
+    },
   },
   test: {
     // PGlite sobe um Postgres inteiro no beforeAll: com a máquina carregada (CI, vários agentes)
