@@ -705,7 +705,7 @@ export default function InboxPage() {
         </div>
       )}
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="relative flex flex-1 overflow-hidden">
         {/* Left panel: Conversation list.
             Hidden on mobile when a conversation is selected so the
             thread can occupy the full width. Always visible on lg+. */}
@@ -760,12 +760,22 @@ export default function InboxPage() {
           />
         </div>
 
-        {/* Right panel: Contact sidebar — desktop only, and only when the
-            agent hasn't collapsed it via the thread-header toggle (#258).
-            On mobile it's always hidden (the `lg:block` below), so the
-            toggle — which is itself desktop-only — never affects it. */}
-        {contactPanelOpen && (
-          <div className="hidden lg:block">
+        {/* Painel do contato (redesenho DDM, modo "foco" do protótipo):
+            gaveta de 360px sobre a conversa, entrando da direita
+            (animate-ddm-drawer); a partir de 2xl vira coluna fixa. Abre e
+            fecha pelo botão do header da conversa (preferência salva,
+            #258) — agora também no celular, onde antes ficava oculto. */}
+        {contactPanelOpen && hasActiveConv && (
+          <button
+            type="button"
+            aria-label="Fechar detalhes do contato"
+            onClick={handleToggleContactPanel}
+            className="absolute inset-0 z-20 animate-ddm-fade bg-scrim lg:hidden"
+            data-no-ripple
+          />
+        )}
+        {contactPanelOpen && hasActiveConv && (
+          <div className="absolute inset-y-0 right-0 z-30 w-[360px] max-w-full animate-ddm-drawer border-l border-border bg-card shadow-overlay 2xl:static 2xl:z-auto 2xl:animate-none 2xl:shadow-none">
             <ContactSidebar
               contact={activeContact}
               conversation={activeConversation}

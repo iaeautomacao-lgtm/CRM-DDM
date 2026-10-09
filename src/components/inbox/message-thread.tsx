@@ -12,6 +12,7 @@ import { usePresence } from "@/hooks/use-presence";
 import { PresenceDot } from "@/components/presence/presence-dot";
 import { presenceLabel } from "@/lib/presence";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import type {
   Conversation,
   Message,
@@ -28,8 +29,9 @@ import {
   Check,
   ArrowLeft,
   RefreshCw,
-  PanelRightOpen,
-  PanelRightClose,
+  PanelRight,
+  CircleCheck,
+  UserPlus,
   Phone,
   Trash2,
   Loader2,
@@ -184,6 +186,39 @@ const STATUS_OPTIONS: { label: string; value: ConversationStatus; color: string 
   { label: CONVERSATION_STATUS_LABELS.pending, value: "pending", color: "text-amber-700 dark:text-amber-400" },
   { label: CONVERSATION_STATUS_LABELS.closed, value: "closed", color: "text-muted-foreground" },
 ];
+
+// Cor da bolinha de cada status (redesenho DDM): atendimento verde,
+// espera laranja, encerrada neutra.
+const STATUS_DOT: Record<string, string> = {
+  open: "bg-success",
+  pending: "bg-warning",
+  closed: "bg-muted-foreground",
+};
+
+// Cores do rótulo de autor por atendente (item 21 do PRD 23): fixas por
+// sender_id (hash), legíveis no claro e no escuro. "Você" usa a cor da marca.
+const AUTHOR_COLORS = [
+  "text-sky-700 dark:text-sky-400",
+  "text-violet-700 dark:text-violet-400",
+  "text-emerald-700 dark:text-emerald-400",
+  "text-rose-700 dark:text-rose-400",
+  "text-teal-700 dark:text-teal-400",
+  "text-amber-800 dark:text-amber-400",
+];
+
+function authorColor(senderId: string): string {
+  let h = 0;
+  for (let i = 0; i < senderId.length; i++) h = (h * 31 + senderId.charCodeAt(i)) >>> 0;
+  return AUTHOR_COLORS[h % AUTHOR_COLORS.length];
+}
+
+/** Iniciais do nome (primeiro + último), como no avatar do protótipo. */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] ?? "" : "";
+  return ((parts[0][0] ?? "") + last).toUpperCase();
+}
 
 // Distância do fim (px) abaixo da qual a thread ainda conta como "no fim".
 const SCROLL_NEAR_BOTTOM_PX = 120;
@@ -1306,18 +1341,32 @@ export function MessageThread({
   if (!conversation || !contact) {
     return (
       <div className="flex flex-1 items-center justify-center bg-background px-6">
-        <div className="text-center">
-          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-muted/35">
-            <MessageSquare className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-          </div>
-          <h3 className="mt-3 text-sm font-medium text-foreground">Nenhuma conversa selecionada</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Escolha uma conversa para visualizar o atendimento.
+        <div className="flex animate-ddm-fade flex-col items-center gap-2 text-center">
+          <MessageSquare className="size-5 text-muted-foreground" aria-hidden="true" />
+          <h3 className="text-sm font-semibold text-foreground">Selecione uma conversa</h3>
+          <p className="max-w-[300px] text-[13px] text-muted-foreground">
+            Comece pela fila “Em espera”, ordenada pelo maior tempo de espera.
           </p>
         </div>
       </div>
     );
   }
+
+  // Rótulo de autor acima das mensagens enviadas (item 21 do PRD 23):
+  // "Você", o nome do colega na cor dele ou "Automação" (IA, fluxo,
+  // disparo). Só quando o autor muda em relação à mensagem anterior.
+  const authorFor = (msg: Message, prev: Message | undefined) => {
+    if (msg.sender_type !== "agent" && msg.sender_type !== "bot") return null;
+    if (prev && prev.sender_type === msg.sender_type && (prev.sender_id ?? null) === (msg.sender_id ?? null)) return null;
+    if (msg.sender_type === "bot") return { label: "Automação", className: "text-muted-foreground", bot: true };
+    if (msg.sender_id && msg.sender_id === user?.id) return { label: "Você", className: "text-primary-text", bot: false };
+    const name = msg.sender_id ? profiles.find((p) => p.user_id === msg.sender_id)?.full_name : null;
+    return {
+      label: name ?? "Atendente",
+      className: msg.sender_id ? authorColor(msg.sender_id) : "text-muted-foreground",
+      bot: false,
+    };
+  };
 
   const displayName = contact.name || contact.phone || "Contato";
   const messageGroups = groupMessagesByDate(messages);
@@ -1340,82 +1389,69 @@ export function MessageThread({
     // root shrink lets the bubbles' break-words / max-w caps apply.
     // Issue #257.
     <div className={cn("flex min-w-0 flex-1 flex-col", DOODLE_BG_CLASSES)}>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-3 py-2.5 sm:px-4">
-        <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-          {/* Back-to-list button — mobile only. Hidden on lg+ where the
-              conversation list is always visible next to the thread. */}
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              aria-label="Voltar às conversas"
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
-            >
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            </button>
+      {/* Header da conversa (redesenho DDM): avatar + nome em Poppins,
+          telefone, e a barra de ações — Status, atendente, Encerrar
+          (abre a tabulação), painel do contato e "Mais ações". */}
+      <div className="flex min-h-[60px] shrink-0 items-center gap-3 border-b border-border bg-card py-2.5 pl-3 pr-3 sm:gap-3.5 sm:pl-5 sm:pr-4">
+        {/* Voltar à lista — só no celular/tablet (a lista some ao abrir uma conversa). */}
+        {onBack && (
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="Voltar às conversas"
+            className="-ml-1 flex size-9 shrink-0 items-center justify-center rounded-md text-foreground-2 hover:bg-surface-hover hover:text-foreground lg:hidden"
+          >
+            <ArrowLeft className="size-4" aria-hidden="true" />
+          </button>
+        )}
+        <span
+          className="flex size-[38px] shrink-0 items-center justify-center overflow-hidden rounded-full bg-surface-3 text-[13px] font-semibold text-foreground-2"
+          aria-hidden="true"
+        >
+          {contact.avatar_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              // Proxy por telefone só existe para WhatsApp; contato de
+              // Instagram/Messenger (sem telefone) usa a foto do perfil.
+              src={contact.phone && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
+              alt=""
+              className="size-[38px] object-cover"
+            />
+          ) : (
+            initialsOf(displayName)
           )}
-          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted/60 text-sm font-medium text-foreground" aria-hidden="true">
-            {contact.avatar_url ? (
-              <img
-                // Proxy por telefone só existe para WhatsApp; contato de
-                // Instagram/Messenger (sem telefone) usa a foto do perfil.
-                src={contact.phone && accountId ? `/api/whatsapp/contacts/avatar?phone=${encodeURIComponent(contact.phone.replace(/^\+/, "").replace(/\s/g, ""))}&account_id=${accountId}` : contact.avatar_url ?? ""}
-                alt=""
-                className="h-9 w-9 rounded-full object-cover"
-              />
-            ) : (
-              displayName.charAt(0).toUpperCase()
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
+          <h2 className="truncate font-heading text-[15px] font-semibold text-foreground">{displayName}</h2>
+          <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            {(contact.phone ?? contact.email) && (
+              <span className="truncate tabular-nums">{contact.phone ?? contact.email}</span>
             )}
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-[14px] font-semibold text-foreground">{displayName}</h2>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
-              <span className="shrink-0">
-                {CHANNEL_BADGE[conversation.channel_type ?? "whatsapp"]?.label ?? "WhatsApp"}
-              </span>
-              {(contact.phone ?? contact.email) && (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <span className="truncate">{contact.phone ?? contact.email}</span>
-                </>
-              )}
-            </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-1" role="toolbar" aria-label="Ações da conversa">
+        <div className="flex shrink-0 items-center gap-1.5" role="toolbar" aria-label="Ações da conversa">
           <DropdownMenu>
             <DropdownMenuTrigger
               aria-label={`Status da conversa: ${currentStatus?.label ?? "não definido"}`}
-              className={cn(
-                "inline-flex h-8 shrink-0 items-center gap-1 rounded-md bg-muted/55 px-2.5 text-xs font-medium transition-colors hover:bg-muted",
-                currentStatus?.color ?? "text-muted-foreground",
-              )}
+              title="Alterar status"
+              className="hidden h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-card pl-2 pr-1.5 text-[12.5px] font-medium text-foreground-2 hover:bg-surface-hover hover:text-foreground sm:inline-flex"
             >
+              <span className={cn("size-[7px] rounded-full", STATUS_DOT[conversation.status] ?? "bg-muted-foreground")} aria-hidden="true" />
               {currentStatus?.label ?? "Status"}
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              <ChevronDown className="size-3.5 text-muted-foreground" aria-hidden="true" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-44 border-border bg-popover">
+            <DropdownMenuContent align="end" className="min-w-[200px]">
               {STATUS_OPTIONS.map((opt) => (
                 <DropdownMenuItem
                   key={opt.value}
                   onClick={() => handleStatusOptionClick(opt.value)}
-                  className="text-sm"
+                  className="text-[12.5px]"
                 >
-                  <span
-                    className={cn(
-                      "h-1.5 w-1.5 rounded-full",
-                      opt.value === "open"
-                        ? "bg-primary"
-                        : opt.value === "pending"
-                          ? "bg-amber-500"
-                          : "bg-muted-foreground/60",
-                    )}
-                    aria-hidden="true"
-                  />
+                  <span className={cn("size-[7px] rounded-full", STATUS_DOT[opt.value])} aria-hidden="true" />
                   <span className="flex-1">{opt.label}</span>
                   {opt.value === conversation.status && (
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    <Check className="size-3.5 text-primary-text" aria-hidden="true" />
                   )}
                 </DropdownMenuItem>
               ))}
@@ -1424,7 +1460,7 @@ export function MessageThread({
                   <DropdownMenuSeparator />
                   <div className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted-foreground">
                     <span
-                      className="h-1.5 w-1.5 rounded-full"
+                      className="size-2 rounded-[2px]"
                       style={{ backgroundColor: conversation.outcome_tag.color }}
                       aria-hidden="true"
                     />
@@ -1437,18 +1473,36 @@ export function MessageThread({
 
           <DropdownMenu>
             <DropdownMenuTrigger
-              aria-label={assignedAgentId ? `Atribuída a ${assignLabel}` : "Atribuir conversa"}
+              aria-label={assignedAgentId ? `Atribuída a ${assignLabel}. Alterar atendente` : "Atribuir conversa"}
+              title={assignedAgentId ? "Alterar atendente" : "Atribuir conversa"}
               className={cn(
-                "inline-flex h-8 max-w-40 items-center justify-center gap-1 rounded-md px-2 text-xs transition-colors hover:bg-muted",
-                assignedAgentId ? "text-foreground" : "text-muted-foreground",
+                "inline-flex h-8 max-w-48 shrink-0 items-center gap-2 rounded-md text-[12.5px] font-medium",
+                assignedAgentId
+                  ? "border border-border bg-card pl-1 pr-2 text-foreground hover:bg-surface-hover"
+                  : "bg-primary px-3 font-semibold text-primary-foreground hover:bg-primary-hover",
               )}
             >
-              <span className="hidden max-w-24 truncate sm:inline">{assignLabel}</span>
-              <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+              {assignedAgentId ? (
+                <>
+                  <span className="flex size-[22px] shrink-0 items-center justify-center rounded-full bg-primary-soft text-[10.5px] font-bold text-primary-text" aria-hidden="true">
+                    {initialsOf(assignLabel)}
+                  </span>
+                  <span className="hidden truncate sm:inline">{assignLabel}</span>
+                  <ArrowRightLeft className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                </>
+              ) : (
+                <>
+                  <UserPlus className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="hidden sm:inline">Atribuir</span>
+                </>
+              )}
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-52 border-border bg-popover">
+            <DropdownMenuContent align="end" className="min-w-[220px]">
+              <p className="px-2.5 pb-1.5 pt-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                {assignedAgentId ? "Atendente" : "Atribuir a"}
+              </p>
               {profiles.length === 0 ? (
-                <DropdownMenuItem disabled className="text-sm text-muted-foreground">
+                <DropdownMenuItem disabled className="text-[12.5px] text-muted-foreground">
                   Nenhum membro disponível
                 </DropdownMenuItem>
               ) : (
@@ -1459,7 +1513,7 @@ export function MessageThread({
                     <DropdownMenuItem
                       key={p.id}
                       onClick={() => handleAssignChange(p.user_id)}
-                      className="text-sm"
+                      className="text-[12.5px]"
                     >
                       <PresenceDot
                         status={presence}
@@ -1474,7 +1528,7 @@ export function MessageThread({
                         {p.full_name}
                         {p.user_id === user?.id ? " (eu)" : ""}
                       </span>
-                      {isSelected && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                      {isSelected && <Check className="size-3.5 text-primary-text" aria-hidden="true" />}
                     </DropdownMenuItem>
                   );
                 })
@@ -1484,7 +1538,7 @@ export function MessageThread({
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => handleAssignChange(null)}
-                    className="text-sm text-muted-foreground"
+                    className="text-[12.5px] text-muted-foreground"
                   >
                     Remover atribuição
                   </DropdownMenuItem>
@@ -1493,53 +1547,87 @@ export function MessageThread({
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {conversation.status !== "closed" && can("inbox.close") && (
+            <button
+              type="button"
+              onClick={() => handleStatusOptionClick("closed")}
+              className={cn(
+                "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-[12.5px] font-semibold",
+                assignedAgentId
+                  ? "bg-primary text-primary-foreground hover:bg-primary-hover"
+                  : "border border-border bg-card text-foreground hover:bg-surface-hover",
+              )}
+              title="Tabular e encerrar"
+            >
+              <CircleCheck className="size-3.5" aria-hidden="true" />
+              <span className="hidden sm:inline">Encerrar</span>
+              <span className="sr-only sm:hidden">Encerrar conversa</span>
+            </button>
+          )}
+
+          {onToggleContactPanel && (
+            <>
+              <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={onToggleContactPanel}
+                aria-pressed={contactPanelOpen}
+                aria-label="Detalhes do contato"
+                title="Detalhes do contato"
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-surface-hover",
+                  contactPanelOpen ? "bg-selected text-primary-text" : "text-foreground-2",
+                )}
+              >
+                <PanelRight className="size-4" aria-hidden="true" />
+              </button>
+            </>
+          )}
+
           {(() => {
             const canCall =
               whatsappProvider === "waha" && !!contact?.phone && conversation.channel_type !== "webchat";
             const canDelete = !!onDeleteConversation && can("inbox.delete_conversation");
             const canTransfer = can("inbox.transfer");
-            const canTogglePanel = !!onToggleContactPanel;
-            if (!onRefresh && !canCall && !canDelete && !canTransfer && !canTogglePanel) return null;
+            if (!onRefresh && !canCall && !canDelete && !canTransfer) return null;
 
             return (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   aria-label="Mais ações"
                   title="Mais ações"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  className="inline-flex size-8 items-center justify-center rounded-md text-foreground-2 hover:bg-surface-hover hover:text-foreground"
                 >
                   {isRefreshing || isDeleting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
                   ) : (
-                    <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                    <MoreHorizontal className="size-4" aria-hidden="true" />
                   )}
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="min-w-52 border-border bg-popover">
+                <DropdownMenuContent align="end" className="min-w-52">
+                  {/* Status também aqui: no celular o seletor do header some. */}
+                  <div className="sm:hidden">
+                    {STATUS_OPTIONS.filter((opt) => opt.value !== conversation.status).map((opt) => (
+                      <DropdownMenuItem key={opt.value} onClick={() => handleStatusOptionClick(opt.value)} className="text-[12.5px]">
+                        <span className={cn("size-[7px] rounded-full", STATUS_DOT[opt.value])} aria-hidden="true" />
+                        Marcar como {opt.label.toLowerCase()}
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator />
+                  </div>
+
                   {canTransfer && (
-                    <DropdownMenuItem onClick={() => setTransferOpen(true)} className="text-sm">
-                      <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />
+                    <DropdownMenuItem onClick={() => setTransferOpen(true)} className="text-[12.5px]">
+                      <ArrowRightLeft className="size-4" aria-hidden="true" />
                       Transferir atendimento
                     </DropdownMenuItem>
                   )}
 
-                  {canTogglePanel && (
-                    <DropdownMenuItem onClick={onToggleContactPanel} className="text-sm">
-                      {contactPanelOpen ? (
-                        <PanelRightClose className="h-4 w-4" aria-hidden="true" />
-                      ) : (
-                        <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
-                      )}
-                      {contactPanelOpen ? "Ocultar contexto" : "Exibir contexto"}
-                    </DropdownMenuItem>
-                  )}
-
-                  {(canTransfer || canTogglePanel) && (onRefresh || canCall || canDelete) && (
-                    <DropdownMenuSeparator />
-                  )}
+                  {canTransfer && (onRefresh || canCall || canDelete) && <DropdownMenuSeparator />}
 
                   {onRefresh && (
-                    <DropdownMenuItem onClick={handleRefreshClick} disabled={isRefreshing} className="text-sm">
-                      <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} aria-hidden="true" />
+                    <DropdownMenuItem onClick={handleRefreshClick} disabled={isRefreshing} className="text-[12.5px]">
+                      <RefreshCw className={cn("size-4", isRefreshing && "animate-spin")} aria-hidden="true" />
                       Atualizar conversa
                     </DropdownMenuItem>
                   )}
@@ -1547,9 +1635,9 @@ export function MessageThread({
                   {canCall && (
                     <DropdownMenuItem
                       onClick={() => contact.phone && startOutboundCall(contact.phone)}
-                      className="text-sm"
+                      className="text-[12.5px]"
                     >
-                      <Phone className="h-4 w-4" aria-hidden="true" />
+                      <Phone className="size-4" aria-hidden="true" />
                       Ligar pelo WhatsApp
                     </DropdownMenuItem>
                   )}
@@ -1561,9 +1649,9 @@ export function MessageThread({
                         variant="destructive"
                         onClick={handleDeleteClick}
                         disabled={isDeleting}
-                        className="text-sm"
+                        className="text-[12.5px]"
                       >
-                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                        <Trash2 className="size-4" aria-hidden="true" />
                         Excluir conversa
                       </DropdownMenuItem>
                     </>
@@ -1586,12 +1674,21 @@ export function MessageThread({
       <ConversationOriginBanner key={conversation.id} conversationId={conversation.id} />
 
       <div className="relative flex min-h-0 flex-1 flex-col">
-        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-5 sm:px-5">
-          <div className="mx-auto w-full max-w-[1120px]">
+        <div ref={scrollRef} onScroll={handleThreadScroll} className="flex-1 overflow-y-auto px-3 py-5 sm:px-6">
+          {/* key: a thread entra de novo (fade + sobe) ao trocar de conversa, como no protótipo. */}
+          <div key={conversation.id} className="mx-auto w-full max-w-[760px] animate-ddm-up">
           {loading ? (
-            <div className="flex items-center justify-center py-12" role="status">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" aria-hidden="true" />
+            <div className="flex flex-col gap-3 py-4" role="status" aria-busy="true">
               <span className="sr-only">Carregando mensagens…</span>
+              {[
+                ["self-start", "w-2/3", "h-14"],
+                ["self-start", "w-1/2", "h-10"],
+                ["self-end", "w-3/5", "h-12"],
+                ["self-start", "w-2/5", "h-10"],
+                ["self-end", "w-1/2", "h-16"],
+              ].map(([side, width, height], i) => (
+                <Skeleton key={i} className={cn("rounded-xl", side, width, height)} />
+              ))}
             </div>
           ) : messages.length === 0 && pendingSends.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -1605,16 +1702,17 @@ export function MessageThread({
               {messageGroups.map((group) => (
                 <div key={group.date}>
                   {/* Date separator */}
-                  <div className="mb-4 flex items-center gap-3">
-                    <span className="h-px flex-1 bg-border/60" />
-                    <span className="text-[10px] font-medium text-muted-foreground">
+                  <div className="my-2 flex items-center gap-3">
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-[11.5px] font-semibold text-muted-foreground">
                       {formatDateSeparator(group.date)}
                     </span>
-                    <span className="h-px flex-1 bg-border/60" />
+                    <span className="h-px flex-1 bg-border" />
                   </div>
                   {/* Messages */}
-                  <div className="space-y-2">
-                    {group.messages.map((msg) => {
+                  <div className="space-y-1.5">
+                    {group.messages.map((msg, idx) => {
+                      const author = authorFor(msg, group.messages[idx - 1]);
                       const parent = msg.reply_to_message_id
                         ? messagesById.get(msg.reply_to_message_id)
                         : null;
@@ -1652,6 +1750,7 @@ export function MessageThread({
                             currentUserId={user?.id}
                             onToggleReaction={handlePillToggle}
                             campaign={campaignFor(msg)}
+                            author={author}
                           />
                         </MessageActions>
                       );

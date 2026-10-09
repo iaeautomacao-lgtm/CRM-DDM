@@ -38,16 +38,16 @@ export function PendingSendBubble({
 
   return (
     <div className="flex flex-col items-end">
-      <div className="relative max-w-[75%] rounded-2xl rounded-br-md bg-primary/50 px-3 py-2 text-primary-foreground">
-        <p className="whitespace-pre-wrap break-words text-sm italic opacity-90">
+      <div className="relative max-w-[72%] animate-ddm-pop rounded-[12px_12px_4px_12px] border border-dashed border-bubble-out-border bg-bubble-out px-3 pb-[7px] pt-[9px] text-foreground">
+        <p className="whitespace-pre-wrap break-words text-[13.5px] italic opacity-90">
           {preview}
         </p>
         {caption && (
-          <p className="mt-1 whitespace-pre-wrap break-words text-sm italic opacity-80">
+          <p className="mt-1 whitespace-pre-wrap break-words text-[13.5px] italic opacity-80">
             {caption}
           </p>
         )}
-        <div className="mt-1 flex items-center justify-end gap-1 text-xs text-primary-foreground/70">
+        <div className="mt-[3px] flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
           <Clock className="h-3 w-3" />
           <span>Enviando em {secondsLeft}s</span>
         </div>
