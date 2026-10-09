@@ -50,3 +50,12 @@ export function mondayIndex(d: Date): number {
 }
 
 export const DOW_SHORT_MON_FIRST = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'] as const
+
+/** Fuso IANA do navegador ("America/Sao_Paulo"): o banco usa o MESMO "dia local" que o dashboard sempre usou. Fora do navegador/sem Intl: UTC. */
+export function browserTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  } catch {
+    return 'UTC'
+  }
+}
