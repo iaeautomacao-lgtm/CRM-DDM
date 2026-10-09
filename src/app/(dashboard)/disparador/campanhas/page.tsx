@@ -1599,7 +1599,7 @@ export default function CampanhasPage() {
                 { label: "Disparos previstos", value: plannedDispatchCount(metricsCampaign, metricsData.total_contatos), dot: "bg-foreground-2", status: null },
                 { label: "Total de contatos", value: metricsData.total_contatos, dot: "bg-foreground-2", status: "total" as const },
                 { label: "A enviar", value: agendadosCount ?? 0, dot: "bg-muted-foreground", status: "agendado" as const },
-                { label: "Enviados", value: metricsData.total_enviados, dot: "bg-[#5B8DEF]", status: "enviado" as const },
+                { label: "Enviados", value: metricsData.total_enviados, dot: "bg-info", status: "enviado" as const },
                 { label: "Aguardando confirmação", value: aguardandoConfirmacaoCount ?? 0, dot: "bg-warning", status: "aguardando_confirmacao" as const },
                 { label: "Entregues", value: metricsData.total_entregues, dot: "bg-success", status: "entregue" as const },
                 { label: "Lidos", value: metricsData.total_lidos, dot: "bg-primary", status: "lido" as const },

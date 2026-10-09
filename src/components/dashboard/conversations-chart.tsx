@@ -19,7 +19,7 @@ const RANGES: ReadonlyArray<{ value: RangeDays; label: string }> = [
 
 // Série de entrada (cliente) em azul, saída na cor da marca — como no
 // protótipo. O azul muda com o modo claro/escuro.
-const SERIES_IN = 'bg-[#5B8DEF] [html[data-mode=light]_&]:bg-[#3B6FD8]'
+const SERIES_IN = 'bg-info'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
 

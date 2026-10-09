@@ -86,7 +86,7 @@ const STATUS_OPTIONS = [
 const STATUS_BADGE: Record<string, { label: string; className: string }> = {
   agendado: { label: "Agendado", className: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300" },
   enviando: { label: "Enviando", className: "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300" },
-  enviado: { label: "Enviado", className: "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300" },
+  enviado: { label: "Enviado", className: "bg-info-soft text-info" },
   erro: { label: "Erro", className: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300" },
   cancelado: { label: "Cancelado", className: "bg-muted text-muted-foreground" },
 };
