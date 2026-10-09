@@ -149,6 +149,12 @@ export interface ImportBlockInput {
   draftId: string | null;
   /** 0 = primeiro bloco (limpa o vínculo anterior do rascunho/campanha); os demais acrescentam. */
   chunkIndex: number;
+  /**
+   * A15 (opcional, migration 295): identifica UMA importação. O bloco 0 só apaga vínculos de OUTRA importação
+   * (token diferente ou legado sem token), então reenviar o bloco 0 depois dos seguintes não desfaz o que já foi vinculado.
+   * Sem token (ou sem a migration) vale o comportamento antigo.
+   */
+  importToken?: string | null;
 }
 
 export interface ImportBlockResults {
@@ -166,6 +172,7 @@ export type ImportBlockOutcome =
 
 export async function importContactBlock(input: ImportBlockInput): Promise<ImportBlockOutcome> {
   const { accountId, userId, rows, columnMap, chunkIndex } = input;
+  const importTokenWanted = input.importToken ?? null;
   const campaignIdRaw = input.campaignId;
   const draftIdRaw = input.draftId;
 
@@ -575,12 +582,22 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
     const { data, error } = await supabaseAdmin()
       .from("contacts")
       .insert(chunk.map(toInsertRow))
-      .select("id");
+      .select("id, phone_normalized");
     if (!error) {
-      const inserted = data ?? [];
+      // A14: casa cada contato criado com a linha do CSV pelo telefone normalizado, não pela ordem do RETURNING
+      // (a ordem não é contrato do PostgREST). Sem chave devolvida (ou repetida), cai na posição como antes.
+      const inserted = (data ?? []) as Array<{ id: string; phone_normalized?: string | null }>;
+      const byKey = new Map<string, PendingContact>();
+      for (const source of chunk) byKey.set(String(source.phone ?? "").replace(/\D/g, ""), source);
+      const used = new Set<PendingContact>();
       for (let j = 0; j < inserted.length; j++) {
-        const source = chunk[j];
-        if (source) onInserted(source, inserted[j].id);
+        const key = inserted[j].phone_normalized ?? "";
+        const byPhone = key ? byKey.get(key) : undefined;
+        const source = byPhone && !used.has(byPhone) ? byPhone : chunk[j];
+        if (source) {
+          used.add(source);
+          onInserted(source, inserted[j].id);
+        }
       }
       return;
     }
@@ -749,12 +766,19 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
     const idColumn = campaignIdRaw ? "campaign_id" : "draft_id";
     const idValue = (campaignIdRaw ?? draftIdRaw) as string;
     let clearErr: { message: string } | null = null;
+    // A15: só usa o token se a coluna existir (migration 295); sonda barata, só quando o cliente mandou token.
+    let importToken: string | null = null;
+    if (importTokenWanted) {
+      const { error: probeErr } = await supabaseAdmin().from("disp_import_contacts").select("import_token").limit(1);
+      if (!probeErr) importToken = importTokenWanted;
+    }
+    // Vínculos de OUTRA importação (token diferente ou legado sem token). Sem token: todos, como sempre.
+    const staleLinks = <T extends { or: (f: string) => T }>(query: T): T =>
+      importToken ? query.or(`import_token.is.null,import_token.neq.${importToken}`) : query;
     if (chunkIndex === 0) {
-      ({ error: clearErr } = await supabaseAdmin()
-        .from("disp_import_contacts")
-        .delete()
-        .eq("account_id", accountId)
-        .eq(idColumn, idValue));
+      ({ error: clearErr } = await staleLinks(
+        supabaseAdmin().from("disp_import_contacts").delete().eq("account_id", accountId).eq(idColumn, idValue),
+      ));
     }
     // Reimport ao editar: o vínculo antigo da criação (por rascunho) sai
     // também — a lista nova substitui a antiga, nunca soma.
@@ -767,11 +791,9 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
         .limit(1);
       const draftOfCampaign = camp?.[0]?.import_draft_id;
       if (draftOfCampaign) {
-        ({ error: clearErr } = await supabaseAdmin()
-          .from("disp_import_contacts")
-          .delete()
-          .eq("account_id", accountId)
-          .eq("draft_id", draftOfCampaign));
+        ({ error: clearErr } = await staleLinks(
+          supabaseAdmin().from("disp_import_contacts").delete().eq("account_id", accountId).eq("draft_id", draftOfCampaign),
+        ));
       }
     }
     if (clearErr) {
@@ -784,7 +806,8 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
     const alreadyLinked = new Set<string>();
     // Contatos criados agora neste bloco ainda não podem estar vinculados: só os pré-existentes entram na checagem.
     const preExistingIds = [...importedContactIds].filter((id) => !insertedNowIds.has(id));
-    if (chunkIndex > 0 && preExistingIds.length > 0) {
+    // Com token, o bloco 0 repetido também pode encontrar vínculos da própria importação.
+    if ((chunkIndex > 0 || importToken) && preExistingIds.length > 0) {
       await processWithConcurrency(sliceInto(preExistingIds, LOOKUP_IN_CHUNK), LOOKUP_CONCURRENCY, async (ids) => {
         const { data: linked, error: linkedErr } = await supabaseAdmin()
           .from("disp_import_contacts")
@@ -801,6 +824,7 @@ export async function importContactBlock(input: ImportBlockInput): Promise<Impor
       contact_id,
       campaign_id: campaignIdRaw,
       draft_id: campaignIdRaw ? null : draftIdRaw,
+      ...(importToken ? { import_token: importToken } : {}),
     }));
     let linkFailed = false;
     await processWithConcurrency(sliceInto(linkRows, BULK_WRITE_CHUNK), WRITE_CONCURRENCY, async (slice) => {
