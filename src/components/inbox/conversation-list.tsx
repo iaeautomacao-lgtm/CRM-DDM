@@ -45,6 +45,7 @@ import {
 } from "@/lib/inbox/filters";
 import { sectionTotal, shouldAutoLoadMore } from "@/lib/inbox/pagination";
 import { INBOX_QUEUE_LABELS, inboxQueueSection } from "@/lib/inbox/queue-section";
+import { PushNudge } from "./push-nudge";
 
 // Lista do inbox (F2). Os dados vêm de /api/inbox/conversations, paginados
 // e filtrados no servidor (RLS do usuário). Os filtros ficam na URL
@@ -517,6 +518,7 @@ export function ConversationList({
     // abas da fila, busca + filtros com chips, seções por fila e itens em
     // três linhas (contato · prévia · cliente/canal/atendente).
     <section aria-label="Lista de conversas" className="flex h-full w-full flex-col border-r border-border bg-card lg:w-[288px] xl:w-[320px]">
+      <PushNudge />
       <div className="flex flex-col gap-2.5 border-b border-border px-3.5 pb-2.5 pt-3.5">
         <div className="flex items-center gap-1.5">
         <div className="flex flex-1 gap-0.5 rounded-lg bg-card-2 p-[3px]" role="tablist" aria-label="Fila">
