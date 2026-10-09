@@ -59,6 +59,36 @@ type SendInput =
   | (SendTextArgs & { kind: 'text' })
   | (SendTemplateArgs & { kind: 'template' })
 
+type Db = ReturnType<typeof supabaseAdmin>
+
+/**
+ * Linha (whatsapp_config) pela qual a automação envia: a da conversa (config_id).
+ * Conversa antiga sem config_id: a única linha Meta da conta. Com várias linhas e
+ * sem config_id não adivinha (enviaria pelo número errado): falha com motivo claro.
+ * Antes era `.eq('account_id').single()`, que falhava em TODA conta com 2+ linhas.
+ * Exportada para teste.
+ */
+export async function loadSendLine(db: Db, accountId: string, conversationId: string) {
+  const { data: convRows, error: convErr } = await db
+    .from('conversations')
+    .select('config_id')
+    .eq('id', conversationId)
+    .eq('account_id', accountId)
+    .limit(1)
+  if (convErr) throw new Error(`conversation lookup failed: ${convErr.message}`)
+  const configId = (convRows?.[0] as { config_id?: string | null } | undefined)?.config_id ?? null
+
+  let query = db.from('whatsapp_config').select('*').eq('account_id', accountId)
+  query = configId ? query.eq('id', configId) : query.eq('provider', 'meta')
+  const { data: lines, error } = await query.limit(2)
+  if (error) throw new Error(`whatsapp_config lookup failed: ${error.message}`)
+  if (!lines || lines.length === 0) throw new Error('WhatsApp not configured for this account')
+  if (lines.length > 1) {
+    throw new Error('conversation has no line (config_id) and the account has several Meta lines')
+  }
+  return lines[0]
+}
+
 async function sendViaMeta(
   input: SendInput
 ): Promise<{ whatsapp_message_id: string; reconciliation_required?: boolean }> {
@@ -87,14 +117,7 @@ async function sendViaMeta(
     throw new Error(`contact phone invalid: ${contact.phone}`)
   }
 
-  const { data: config, error: configErr } = await db
-    .from('whatsapp_config')
-    .select('*')
-    .eq('account_id', input.accountId)
-    .single()
-  if (configErr || !config) {
-    throw new Error('WhatsApp not configured for this account')
-  }
+  const config = await loadSendLine(db, input.accountId, input.conversationId)
 
   const accessToken = decrypt(config.access_token)
 
