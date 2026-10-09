@@ -63,6 +63,8 @@
   --color-warning: var(--warning);
   --color-warning-soft: var(--warning-soft);
   --color-warning-border: var(--warning-border);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
   --color-danger: var(--destructive);
   --color-danger-soft: var(--danger-soft);
   --color-neutral-soft: var(--neutral-soft);
@@ -146,6 +148,8 @@ html[data-mode="dark"] {
   --warning: #f5b454;
   --warning-soft: rgba(245, 180, 84, 0.1);
   --warning-border: rgba(245, 180, 84, 0.28);
+  --info: #5b8def;
+  --info-soft: rgba(91, 141, 239, 0.14);
   --danger-soft: rgba(249, 112, 102, 0.12);
   --neutral-soft: rgba(180, 185, 192, 0.12);
   --bubble-in: #1c2025;
@@ -195,6 +199,8 @@ html[data-mode="light"] {
   --warning: #9a5b00;
   --warning-soft: #fdf4e3;
   --warning-border: #f3d9a6;
+  --info: #3b6fd8;
+  --info-soft: #eaf0fc;
   --danger-soft: #fcebea;
   --neutral-soft: #efefec;
   --bubble-in: #ffffff;

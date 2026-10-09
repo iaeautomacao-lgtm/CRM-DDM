@@ -8,7 +8,7 @@ const TONE: Record<StatusTone, string> = {
   warn: 'bg-warning-soft text-warning',
   bad: 'bg-danger-soft text-danger',
   mute: 'bg-surface-3 text-foreground-2',
-  info: 'bg-[rgba(91,141,239,.14)] text-[#5B8DEF] [html[data-mode=light]_&]:bg-[#EAF0FC] [html[data-mode=light]_&]:text-[#3B6FD8]',
+  info: 'bg-info-soft text-info',
   brand: 'bg-primary-soft text-primary-text',
 }
 
