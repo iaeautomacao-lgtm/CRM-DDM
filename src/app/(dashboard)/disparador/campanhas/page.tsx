@@ -33,6 +33,7 @@ import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { DenseTable, Td, Th, Tr } from "@/components/ddm/table-card";
 import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { EmptyState, Skeleton } from "@/components/ddm/states";
+import { ExportJobButton } from "@/components/disparador/export/campaign-exports";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -1764,6 +1765,10 @@ export default function CampanhasPage() {
                   className="h-8 pl-8 text-[12.5px]"
                 />
               </div>
+              <div className="flex flex-wrap gap-2">
+              {metricsModal && queueDetailModal && (
+                <ExportJobButton campaignId={metricsModal.campaignId} statusKey={queueDetailModal.status} />
+              )}
               <Button
                 variant="outline"
                 onClick={handleExportQueueDetailXlsx}
@@ -1776,6 +1781,7 @@ export default function CampanhasPage() {
                 )}
                 Baixar XLSX
               </Button>
+              </div>
             </div>
 
             {queueDetailModal?.status === "respondido" &&
