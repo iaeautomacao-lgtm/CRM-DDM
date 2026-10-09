@@ -300,7 +300,7 @@ function AgentEditor({
   useEffect(() => {
     void fetchToolsCatalog().then((v) => mounted.current && setCatalog(v)).catch(() => undefined);
     void fetchAccountSecrets().then((v) => mounted.current && setSecrets(v)).catch(() => undefined);
-    void fetchKnowledgeBaseFiles(accountId).then((v) => mounted.current && setKbFiles(v));
+    void fetchKnowledgeBaseFiles().then((v) => mounted.current && setKbFiles(v)).catch(() => undefined);
   }, [accountId]);
 
   const dirty = useMemo(() => JSON.stringify(form) !== saved, [form, saved]);
@@ -478,7 +478,15 @@ function AgentEditor({
           <RulesTab data={form} onChange={patch} readOnly={readOnly || converting} onConvert={() => void startConvert()} />
         </TabsContent>
         <TabsContent value="knowledge" className="pt-4">
-          <KnowledgeTab data={form} onChange={patch} kbFiles={kbFiles} secrets={secrets} readOnly={readOnly} />
+          <KnowledgeTab
+            data={form}
+            onChange={patch}
+            kbFiles={kbFiles}
+            onFilesChange={setKbFiles}
+            maxChars={existingConfig?.knowledge.max_chars ?? LEGACY_AGENT_DEFAULTS.knowledge.max_chars}
+            secrets={secrets}
+            readOnly={readOnly}
+          />
         </TabsContent>
         <TabsContent value="tools" className="pt-4">
           <ToolsTab data={form} onChange={patch} catalog={catalog} readOnly={readOnly} />

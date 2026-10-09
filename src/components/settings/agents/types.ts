@@ -110,6 +110,10 @@ export interface KnowledgeBaseFileItem {
   id: string;
   name: string;
   created_at: string;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  /** Caracteres do texto extraído (conta para o teto da base do agente). */
+  char_count?: number | null;
 }
 
 export interface SecretItem {
