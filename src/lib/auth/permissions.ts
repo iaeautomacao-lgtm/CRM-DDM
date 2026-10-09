@@ -62,7 +62,8 @@ export const PERMISSION_CATALOG = {
   "contacts.edit": { label: "Editar contatos", description: "Criar, editar e vincular contatos.", group: "Contatos", scope: "none", roles: atLeast("agent"), dependsOn: ["contacts.view"] },
   "contacts.import": { label: "Importar contatos", description: "Importar contatos (cria tags).", group: "Contatos", scope: "none", roles: atLeast("admin"), dependsOn: ["contacts.edit"] },
   "tags.manage": { label: "Gerenciar tags e tabulações", description: "Tags, tabulações e campos personalizados.", group: "Contatos", scope: "none", roles: atLeast("admin") },
-  "pipelines.manage": { label: "Gerenciar funis", description: "Funis, etapas e regras de negócio do CRM.", group: "Contatos", scope: "none", roles: atLeast("admin") },
+  "pipelines.view": { label: "Ver funis e negócios", description: "Ler funis, etapas e negócios (leitura direta do CRM).", group: "Contatos", scope: "account", roles: ALL },
+  "pipelines.manage": { label: "Gerenciar funis", description: "Funis, etapas e regras de negócio do CRM.", group: "Contatos", scope: "none", roles: atLeast("admin"), dependsOn: ["pipelines.view"] },
 
   // ── Acompanhamento ──────────────────────────────────────
   "dashboard.view": { label: "Dashboard", description: "Ver o dashboard.", group: "Acompanhamento", scope: "account", roles: ["owner", "admin", "supervisor", "viewer"] },
@@ -81,7 +82,8 @@ export const PERMISSION_CATALOG = {
   "intelligence.personal_key": { label: "Chave pessoal do MCP", description: "Criar a própria chave de acesso ao Intelligence.", group: "Intelligence", scope: "own", roles: atLeast("supervisor"), dependsOn: ["intelligence.use"] },
 
   // ── Disparador ──────────────────────────────────────────
-  "campaigns.manage": { label: "Disparador", description: "Criar, editar, iniciar e pausar campanhas; listas, métricas, erros e UTM.", group: "Disparador", scope: "none", roles: atLeast("admin"), dependsOn: ["channels.view"] },
+  "campaigns.view": { label: "Ver campanhas", description: "Ler campanhas, métricas e fila de envio (leitura direta; o Inbox mostra a origem da conversa).", group: "Disparador", scope: "account", roles: ALL },
+  "campaigns.manage": { label: "Disparador", description: "Criar, editar, iniciar e pausar campanhas; listas, métricas, erros e UTM.", group: "Disparador", scope: "none", roles: atLeast("admin"), dependsOn: ["channels.view", "campaigns.view"] },
   "campaigns.rate_limit": { label: "Limites de envio", description: "Vagas e limite por segundo por número; reconhecer avisos de qualidade.", group: "Disparador", scope: "none", roles: atLeast("admin"), dependsOn: ["campaigns.manage"] },
   "campaigns.red_quality_override": { label: "Número em qualidade vermelha", description: "Iniciar campanha em número vermelho e alterar a política de qualidade.", group: "Disparador", scope: "none", roles: ["owner"], ownerOnly: true, dependsOn: ["campaigns.manage"] },
 
