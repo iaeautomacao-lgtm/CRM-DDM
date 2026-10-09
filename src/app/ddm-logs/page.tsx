@@ -119,23 +119,23 @@ const PERIOD_OPTIONS: { value: string; label: string; ms: number }[] = [
 ];
 
 const LEVEL_BADGE_STYLES: Record<string, string> = {
-  debug: "bg-zinc-600/30 text-zinc-300 border-zinc-500/40",
-  info: "bg-sky-600/20 text-sky-300 border-sky-500/40",
-  warn: "bg-amber-500/20 text-amber-300 border-amber-500/40",
-  error: "bg-red-600/25 text-red-300 border-red-500/50",
-  critical: "bg-red-600/40 text-red-100 border-red-400/70 animate-pulse",
+  debug: "bg-surface-3 text-foreground-2 border-border",
+  info: "bg-[rgba(91,141,239,.14)] text-[#5B8DEF] [html[data-mode=light]_&]:text-[#3B6FD8] border-[#5B8DEF]/40",
+  warn: "bg-warning-soft text-warning border-warning/40",
+  error: "bg-danger-soft text-danger border-danger/40",
+  critical: "bg-danger-soft text-danger border-danger/40 animate-pulse",
 };
 
 const SOURCE_BADGE_STYLE =
-  "bg-[#FF5706]/15 text-[#FF5706] border-[#FF5706]/40";
+  "bg-primary/15 text-primary-text border-primary/40";
 
 // Aba Testes — badge do status geral/individual e cor de fundo do card
 // por execução (ver overall em route.ts: 'pass' se todos pass, 'warn'
 // se algum warn e nenhum fail, 'fail' se algum fail).
 const TEST_STATUS_BADGE: Record<TestStatus, string> = {
-  pass: "bg-emerald-500/20 text-emerald-300 border-emerald-500/40",
-  warn: "bg-amber-500/20 text-amber-300 border-amber-500/40",
-  fail: "bg-red-600/25 text-red-300 border-red-500/50",
+  pass: "bg-success-soft text-success border-success/40",
+  warn: "bg-warning-soft text-warning border-warning/40",
+  fail: "bg-danger-soft text-danger border-danger/40",
 };
 const TEST_STATUS_LABEL: Record<TestStatus, string> = {
   pass: "✅ PASS",
@@ -143,9 +143,9 @@ const TEST_STATUS_LABEL: Record<TestStatus, string> = {
   fail: "❌ FAIL",
 };
 const TEST_CARD_BG: Record<TestStatus, string> = {
-  pass: "border-emerald-800/40 bg-emerald-950/40",
-  warn: "border-amber-800/40 bg-amber-950/40",
-  fail: "border-red-800/40 bg-red-950/40",
+  pass: "border-success/40 bg-success-soft",
+  warn: "border-warning/40 bg-warning-soft",
+  fail: "border-danger/40 bg-danger-soft",
 };
 
 type Tab = "events" | "users" | "sessions" | "actions" | "tests" | "feedback";
@@ -207,12 +207,12 @@ function getInitials(name?: string | null): string {
 }
 
 const ACTION_BADGE_PALETTE = [
-  "bg-sky-500/15 text-sky-300 border-sky-500/40",
-  "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
-  "bg-purple-500/15 text-purple-300 border-purple-500/40",
-  "bg-amber-500/15 text-amber-300 border-amber-500/40",
-  "bg-pink-500/15 text-pink-300 border-pink-500/40",
-  "bg-cyan-500/15 text-cyan-300 border-cyan-500/40",
+  "bg-[rgba(91,141,239,.14)] text-[#5B8DEF] [html[data-mode=light]_&]:text-[#3B6FD8] border-[#5B8DEF]/40",
+  "bg-success-soft text-success border-success/40",
+  "bg-purple-500/15 text-purple-300 [html[data-mode=light]_&]:text-purple-700 border-purple-500/40",
+  "bg-warning-soft text-warning border-warning/40",
+  "bg-pink-500/15 text-pink-300 [html[data-mode=light]_&]:text-pink-700 border-pink-500/40",
+  "bg-cyan-500/15 text-cyan-300 [html[data-mode=light]_&]:text-cyan-700 border-cyan-500/40",
 ];
 
 // user_name vem da RPC get_action_logs (LEFT JOIN em profiles,
@@ -246,13 +246,13 @@ function highlightJson(value: unknown): string {
   return escaped.replace(
     /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(?:true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
     (match) => {
-      let cls = "text-orange-300"; // número
+      let cls = "text-orange-300 [html[data-mode=light]_&]:text-orange-700"; // número
       if (/^"/.test(match)) {
-        cls = /:\s*$/.test(match) ? "text-sky-300" : "text-emerald-300"; // chave vs. valor string
+        cls = /:\s*$/.test(match) ? "text-[#5B8DEF] [html[data-mode=light]_&]:text-[#3B6FD8]" : "text-success"; // chave vs. valor string
       } else if (/^(true|false)$/.test(match)) {
-        cls = "text-purple-300";
+        cls = "text-purple-300 [html[data-mode=light]_&]:text-purple-700";
       } else if (match === "null") {
-        cls = "text-zinc-500";
+        cls = "text-muted-foreground";
       }
       return `<span class="${cls}">${match}</span>`;
     }
@@ -825,11 +825,11 @@ export default function DdmLogsPage() {
       <Fragment key={log.id}>
         <tr
           onClick={() => toggleExpand(log.id)}
-          className={`cursor-pointer border-b border-white/5 transition-colors hover:bg-white/[0.04] ${
-            isErrorish ? "bg-red-500/[0.06]" : ""
+          className={`cursor-pointer border-b border-border transition-colors hover:bg-surface-3/40 ${
+            isErrorish ? "bg-danger/[0.06]" : ""
           }`}
         >
-          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
             {formatTimestamp(log.created_at)}
           </td>
           <td className="px-3 py-2">
@@ -848,21 +848,21 @@ export default function DdmLogsPage() {
               {log.source}
             </span>
           </td>
-          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
+          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-foreground-2">
             {log.event}
           </td>
-          <td className="max-w-md truncate px-3 py-2 text-zinc-200">{log.message}</td>
+          <td className="max-w-md truncate px-3 py-2 text-foreground">{log.message}</td>
         </tr>
         {isExpanded && (
-          <tr className="border-b border-white/5 bg-black/40">
+          <tr className="border-b border-border bg-surface-3/50">
             <td colSpan={5} className="px-3 py-3">
               {log.account_id && (
-                <p className="mb-2 font-mono text-[11px] text-zinc-500">
+                <p className="mb-2 font-mono text-[11px] text-muted-foreground">
                   account_id: {log.account_id}
                 </p>
               )}
               <pre
-                className="overflow-x-auto rounded-md bg-black/60 p-3 font-mono text-[11px] leading-relaxed text-zinc-300"
+                className="overflow-x-auto rounded-md bg-surface-3 p-3 font-mono text-[11px] leading-relaxed text-foreground-2"
                 // Seguro: highlightJson escapa &/</> antes de envolver em
                 // <span> com classes fixas — não há atributo/HTML
                 // controlado pelo payload.
@@ -883,12 +883,12 @@ export default function DdmLogsPage() {
       <Fragment key={log.id}>
         <tr
           onClick={() => toggleActionExpand(log.id)}
-          className="cursor-pointer border-b border-white/5 transition-colors hover:bg-white/[0.04]"
+          className="cursor-pointer border-b border-border transition-colors hover:bg-surface-3/40"
         >
-          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
             {formatTimestamp(log.created_at)}
           </td>
-          <td className="whitespace-nowrap px-3 py-2 text-xs text-zinc-300">
+          <td className="whitespace-nowrap px-3 py-2 text-xs text-foreground-2">
             {displayUserName(log)}
           </td>
           <td className="px-3 py-2">
@@ -900,15 +900,15 @@ export default function DdmLogsPage() {
               {log.action || log.event}
             </span>
           </td>
-          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
+          <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-foreground-2">
             {log.page || "—"}
           </td>
         </tr>
         {isExpanded && (
-          <tr className="border-b border-white/5 bg-black/40">
+          <tr className="border-b border-border bg-surface-3/50">
             <td colSpan={4} className="px-3 py-3">
               <pre
-                className="overflow-x-auto rounded-md bg-black/60 p-3 font-mono text-[11px] leading-relaxed text-zinc-300"
+                className="overflow-x-auto rounded-md bg-surface-3 p-3 font-mono text-[11px] leading-relaxed text-foreground-2"
                 dangerouslySetInnerHTML={{
                   __html: highlightJson(log.payload ?? {}),
                 }}
@@ -951,15 +951,15 @@ export default function DdmLogsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       {/* Header fixo */}
-      <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-white/10 bg-[#1F1F1F]/95 px-4 py-3 backdrop-blur">
-        <h1 className="text-lg font-semibold text-white">DDM Logs</h1>
-        <span className="rounded-full border border-[#FF5706]/40 bg-[#FF5706]/15 px-2.5 py-0.5 text-xs font-medium text-[#FF5706]">
+      <header className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur">
+        <h1 className="font-heading text-lg font-semibold tracking-[-0.01em] text-foreground">Logs do sistema</h1>
+        <span className="rounded-full border border-primary/40 bg-primary/15 px-2.5 py-0.5 text-xs font-medium text-primary-text">
           {activeCount} {activeCount === 1 ? "linha" : "linhas"}
         </span>
 
         <div className="ml-auto flex items-center gap-2">
           {lastUpdated && (
-            <span className="hidden text-xs text-zinc-500 sm:inline">
+            <span className="hidden text-xs text-muted-foreground sm:inline">
               Atualizado às {formatTimestamp(lastUpdated.toISOString())}
             </span>
           )}
@@ -968,7 +968,7 @@ export default function DdmLogsPage() {
               type="button"
               onClick={() => runHealthCheckNow()}
               disabled={runningNow}
-              className="rounded-md border border-emerald-500/50 bg-emerald-500/15 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md border border-success/40 bg-success-soft px-3 py-1.5 text-xs font-semibold text-success transition-colors hover:bg-success-soft disabled:cursor-not-allowed disabled:opacity-50"
             >
               {runningNow ? "Rodando..." : "Rodar agora"}
             </button>
@@ -978,8 +978,8 @@ export default function DdmLogsPage() {
             onClick={() => setAutoRefresh((v) => !v)}
             className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
               autoRefresh
-                ? "border-[#FF5706]/60 bg-[#FF5706]/20 text-[#FF5706]"
-                : "border-white/10 bg-white/5 text-zinc-300 hover:bg-white/10"
+                ? "border-primary/60 bg-primary/20 text-primary-text"
+                : "border-border bg-surface-3/60 text-foreground-2 hover:bg-surface-hover"
             }`}
           >
             Auto-refresh (30s) {autoRefresh ? "ON" : "OFF"}
@@ -995,7 +995,7 @@ export default function DdmLogsPage() {
               else loadFeedbackFirstPage();
             }}
             disabled={activeLoading}
-            className="rounded-md bg-[#FF5706] px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {activeLoading ? "Atualizando..." : "Atualizar"}
           </button>
@@ -1003,7 +1003,7 @@ export default function DdmLogsPage() {
       </header>
 
       {/* Abas */}
-      <div className="flex items-center gap-1 border-b border-white/10 bg-white/[0.02] px-4 pt-2">
+      <div className="flex items-center gap-1 border-b border-border bg-surface-3/40 px-4 pt-2">
         {TAB_OPTIONS.map((t) => (
           <button
             key={t.value}
@@ -1011,8 +1011,8 @@ export default function DdmLogsPage() {
             onClick={() => setTab(t.value)}
             className={`rounded-t-md border-b-2 px-3 py-2 text-xs font-medium transition-colors ${
               tab === t.value
-                ? "border-[#FF5706] text-[#FF5706]"
-                : "border-transparent text-zinc-400 hover:text-zinc-200"
+                ? "border-primary text-primary-text"
+                : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
             {t.value === "feedback" ? `${t.label} (${feedbackLogs.length})` : t.label}
@@ -1021,15 +1021,15 @@ export default function DdmLogsPage() {
       </div>
 
       {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 bg-white/[0.02] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface-3/40 px-4 py-3">
         {tab === "events" && (
           <>
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
               Source
               <select
                 value={sourceFilter}
                 onChange={(e) => setSourceFilter(e.target.value)}
-                className="rounded-md border border-white/10 bg-[#262626] px-2 py-1.5 text-xs text-zinc-100 focus:border-[#FF5706]/60 focus:outline-none"
+                className="rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:border-primary/60 focus:outline-none"
               >
                 <option value="">Todos</option>
                 {SOURCE_OPTIONS.map((s) => (
@@ -1040,12 +1040,12 @@ export default function DdmLogsPage() {
               </select>
             </label>
 
-            <label className="flex items-center gap-2 text-xs text-zinc-400">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
               Level
               <select
                 value={levelFilter}
                 onChange={(e) => setLevelFilter(e.target.value)}
-                className="rounded-md border border-white/10 bg-[#262626] px-2 py-1.5 text-xs text-zinc-100 focus:border-[#FF5706]/60 focus:outline-none"
+                className="rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:border-primary/60 focus:outline-none"
               >
                 <option value="">Todos</option>
                 {LEVEL_OPTIONS.map((l) => (
@@ -1059,12 +1059,12 @@ export default function DdmLogsPage() {
         )}
 
         {tab === "actions" && (
-          <label className="flex items-center gap-2 text-xs text-zinc-400">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
             Tipo de ação
             <select
               value={actionTypeFilter}
               onChange={(e) => setActionTypeFilter(e.target.value)}
-              className="rounded-md border border-white/10 bg-[#262626] px-2 py-1.5 text-xs text-zinc-100 focus:border-[#FF5706]/60 focus:outline-none"
+              className="rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:border-primary/60 focus:outline-none"
             >
               <option value="">Todos</option>
               {actionTypes.map((a) => (
@@ -1076,12 +1076,12 @@ export default function DdmLogsPage() {
           </label>
         )}
 
-        <label className="flex items-center gap-2 text-xs text-zinc-400">
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
           Período
           <select
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
-            className="rounded-md border border-white/10 bg-[#262626] px-2 py-1.5 text-xs text-zinc-100 focus:border-[#FF5706]/60 focus:outline-none"
+            className="rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground focus:border-primary/60 focus:outline-none"
           >
             {PERIOD_OPTIONS.map((p) => (
               <option key={p.value} value={p.value}>
@@ -1092,12 +1092,12 @@ export default function DdmLogsPage() {
         </label>
 
         {userIdFilter && (tab === "events" || tab === "sessions" || tab === "actions") && (
-          <span className="flex items-center gap-1.5 rounded-full border border-[#FF5706]/40 bg-[#FF5706]/15 px-2.5 py-1 text-xs text-[#FF5706]">
+          <span className="flex items-center gap-1.5 rounded-full border border-primary/40 bg-primary/15 px-2.5 py-1 text-xs text-primary-text">
             Filtrado por usuário: {userIdFilter.slice(0, 8)}
             <button
               type="button"
               onClick={() => setUserIdFilter(null)}
-              className="ml-1 text-[#FF5706] hover:text-white"
+              className="ml-1 text-primary-text hover:text-foreground"
             >
               ×
             </button>
@@ -1111,24 +1111,24 @@ export default function DdmLogsPage() {
         {tab === "events" && (
           <>
             {error && (
-              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {error}
               </div>
             )}
 
             {loading && logs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando logs...
               </div>
             ) : logs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Nenhum log encontrado para os filtros atuais.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-white/10">
+              <div className="overflow-hidden rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-zinc-500">
+                    <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="px-3 py-2 font-medium">Timestamp</th>
                       <th className="px-3 py-2 font-medium">Level</th>
                       <th className="px-3 py-2 font-medium">Source</th>
@@ -1151,11 +1151,11 @@ export default function DdmLogsPage() {
                         <Fragment key={key}>
                           <tr
                             onClick={() => toggleGroup(key)}
-                            className={`cursor-pointer border-b border-white/5 transition-colors hover:bg-white/[0.04] ${
-                              isErrorish ? "bg-red-500/[0.06]" : ""
+                            className={`cursor-pointer border-b border-border transition-colors hover:bg-surface-3/40 ${
+                              isErrorish ? "bg-danger/[0.06]" : ""
                             }`}
                           >
-                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
                               {formatTimestamp(groupLogs[groupLogs.length - 1].created_at)} →{" "}
                               {formatTimestamp(first.created_at)}
                             </td>
@@ -1175,11 +1175,11 @@ export default function DdmLogsPage() {
                                 {first.source}
                               </span>
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
+                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-foreground-2">
                               {first.event}
                             </td>
-                            <td className="max-w-md truncate px-3 py-2 text-zinc-200">
-                              <span className="mr-2 inline-block rounded-full border border-[#FF5706]/60 bg-[#FF5706] px-2 py-0.5 text-[10px] font-bold text-white">
+                            <td className="max-w-md truncate px-3 py-2 text-foreground">
+                              <span className="mr-2 inline-block rounded-full border border-primary/60 bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
                                 ×{groupLogs.length}
                               </span>
                               {first.message}
@@ -1200,7 +1200,7 @@ export default function DdmLogsPage() {
                   type="button"
                   onClick={() => loadMore()}
                   disabled={loadingMore}
-                  className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-border bg-surface-3/60 px-4 py-2 text-xs font-medium text-foreground-2 transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {loadingMore ? "Carregando..." : "Carregar mais"}
                 </button>
@@ -1213,24 +1213,24 @@ export default function DdmLogsPage() {
         {tab === "users" && (
           <>
             {usersError && (
-              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {usersError}
               </div>
             )}
 
             {usersLoading && users.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando ranking...
               </div>
             ) : users.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Nenhum evento com usuário identificado no período.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-white/10">
+              <div className="overflow-hidden rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-zinc-500">
+                    <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="px-3 py-2 font-medium">Usuário</th>
                       <th className="px-3 py-2 font-medium">Email</th>
                       <th className="px-3 py-2 font-medium">Erros</th>
@@ -1243,32 +1243,32 @@ export default function DdmLogsPage() {
                       <tr
                         key={u.user_id}
                         onClick={() => handleUserRowClick(u)}
-                        className="cursor-pointer border-b border-white/5 transition-colors hover:bg-white/[0.04]"
+                        className="cursor-pointer border-b border-border transition-colors hover:bg-surface-3/40"
                       >
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-2">
-                            <span className="flex size-7 items-center justify-center rounded-full bg-[#FF5706]/15 text-[10px] font-semibold text-[#FF5706]">
+                            <span className="flex size-7 items-center justify-center rounded-full bg-primary/15 text-[10px] font-semibold text-primary-text">
                               {getInitials(u.full_name)}
                             </span>
-                            <span className="text-zinc-200">{u.full_name || "Sem nome"}</span>
+                            <span className="text-foreground">{u.full_name || "Sem nome"}</span>
                           </div>
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs text-zinc-400">
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
                           {u.email || "—"}
                         </td>
                         <td className="px-3 py-2">
                           <span
                             className={`inline-block rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
                               u.error_count > 10
-                                ? "border-red-400/70 bg-red-600/40 text-red-100 animate-pulse"
-                                : "border-red-500/40 bg-red-600/15 text-red-300"
+                                ? "border-danger/40 bg-danger-soft text-danger animate-pulse"
+                                : "border-danger/40 bg-danger-soft text-danger"
                             }`}
                           >
                             {u.error_count}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-zinc-300">{u.total_events}</td>
-                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+                        <td className="px-3 py-2 text-foreground-2">{u.total_events}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
                           {formatTimestamp(u.last_seen)}
                         </td>
                       </tr>
@@ -1284,24 +1284,24 @@ export default function DdmLogsPage() {
         {tab === "sessions" && (
           <>
             {sessionsError && (
-              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {sessionsError}
               </div>
             )}
 
             {sessionsLoading && sessions.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando sessões...
               </div>
             ) : sessions.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Nenhuma sessão encontrada para os filtros atuais.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-white/10">
+              <div className="overflow-hidden rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-zinc-500">
+                    <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="px-3 py-2 font-medium">Usuário</th>
                       <th className="px-3 py-2 font-medium">Início</th>
                       <th className="px-3 py-2 font-medium">Fim</th>
@@ -1313,30 +1313,30 @@ export default function DdmLogsPage() {
                   </thead>
                   <tbody>
                     {sessions.map((s) => (
-                      <tr key={s.id} className="border-b border-white/5">
-                        <td className="px-3 py-2 text-zinc-200">{s.user_name || "Sem nome"}</td>
-                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+                      <tr key={s.id} className="border-b border-border">
+                        <td className="px-3 py-2 text-foreground">{s.user_name || "Sem nome"}</td>
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
                           {formatTimestamp(s.started_at)}
                         </td>
                         <td className="px-3 py-2">
                           {s.ended_at ? (
-                            <span className="whitespace-nowrap font-mono text-xs text-zinc-400">
+                            <span className="whitespace-nowrap font-mono text-xs text-muted-foreground">
                               {formatTimestamp(s.ended_at)}
                             </span>
                           ) : (
-                            <span className="inline-block rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                            <span className="inline-block rounded-full border border-success/40 bg-success-soft px-2 py-0.5 text-[10px] font-semibold text-success">
                               Ativa
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 font-mono text-xs text-zinc-300">
+                        <td className="px-3 py-2 font-mono text-xs text-foreground-2">
                           {formatDuration(s.started_at, s.ended_at)}
                         </td>
-                        <td className="px-3 py-2 text-zinc-300">{s.page_count}</td>
-                        <td className="px-3 py-2 font-mono text-xs text-zinc-400">
+                        <td className="px-3 py-2 text-foreground-2">{s.page_count}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">
                           {s.ip_address || "—"}
                         </td>
-                        <td className="px-3 py-2 text-xs text-zinc-400">
+                        <td className="px-3 py-2 text-xs text-muted-foreground">
                           {summarizeUserAgent(s.user_agent)}
                         </td>
                       </tr>
@@ -1352,7 +1352,7 @@ export default function DdmLogsPage() {
                   type="button"
                   onClick={() => loadSessionsMore()}
                   disabled={sessionsLoadingMore}
-                  className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-border bg-surface-3/60 px-4 py-2 text-xs font-medium text-foreground-2 transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {sessionsLoadingMore ? "Carregando..." : "Carregar mais"}
                 </button>
@@ -1365,24 +1365,24 @@ export default function DdmLogsPage() {
         {tab === "actions" && (
           <>
             {actionsError && (
-              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {actionsError}
               </div>
             )}
 
             {actionsLoading && actionLogs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando ações...
               </div>
             ) : actionLogs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Nenhuma ação encontrada para os filtros atuais.
               </div>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-white/10">
+              <div className="overflow-hidden rounded-lg border border-border">
                 <table className="w-full border-collapse text-left text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 bg-white/[0.03] text-xs uppercase tracking-wide text-zinc-500">
+                    <tr className="border-b border-border bg-surface-3/40 text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="px-3 py-2 font-medium">Timestamp</th>
                       <th className="px-3 py-2 font-medium">Usuário</th>
                       <th className="px-3 py-2 font-medium">Ação</th>
@@ -1402,18 +1402,18 @@ export default function DdmLogsPage() {
                         <Fragment key={key}>
                           <tr
                             onClick={() => toggleActionGroup(key)}
-                            className="cursor-pointer border-b border-white/5 transition-colors hover:bg-white/[0.04]"
+                            className="cursor-pointer border-b border-border transition-colors hover:bg-surface-3/40"
                           >
-                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
                               {formatTimestamp(groupLogs[groupLogs.length - 1].created_at)} →{" "}
                               {formatTimestamp(first.created_at)}
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 text-xs text-zinc-300">
+                            <td className="whitespace-nowrap px-3 py-2 text-xs text-foreground-2">
                               {displayUserName(first)}
                             </td>
                             <td className="px-3 py-2">
                               <span
-                                className={`mr-2 inline-block rounded-full border border-[#FF5706]/60 bg-[#FF5706] px-2 py-0.5 text-[10px] font-bold text-white`}
+                                className={`mr-2 inline-block rounded-full border border-primary/60 bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground`}
                               >
                                 ×{groupLogs.length}
                               </span>
@@ -1425,7 +1425,7 @@ export default function DdmLogsPage() {
                                 {first.action || first.event}
                               </span>
                             </td>
-                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
+                            <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-foreground-2">
                               {first.page || "—"}
                             </td>
                           </tr>
@@ -1444,7 +1444,7 @@ export default function DdmLogsPage() {
                   type="button"
                   onClick={() => loadActionsMore()}
                   disabled={actionsLoadingMore}
-                  className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-border bg-surface-3/60 px-4 py-2 text-xs font-medium text-foreground-2 transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {actionsLoadingMore ? "Carregando..." : "Carregar mais"}
                 </button>
@@ -1457,22 +1457,22 @@ export default function DdmLogsPage() {
         {tab === "tests" && (
           <>
             {runNowError && (
-              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {runNowError}
               </div>
             )}
             {testsError && (
-              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {testsError}
               </div>
             )}
 
             {testsLoading && testRuns.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando execuções...
               </div>
             ) : testRuns.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Nenhuma execução de health check ainda. Clique em &quot;Rodar agora&quot; ou
                 aguarde o crontab diário (ver README de tests/stress).
               </div>
@@ -1493,9 +1493,9 @@ export default function DdmLogsPage() {
                       <button
                         type="button"
                         onClick={() => toggleTestRun(run.id)}
-                        className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/[0.03]"
+                        className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-3/40"
                       >
-                        <span className="font-mono text-xs text-zinc-400">
+                        <span className="font-mono text-xs text-muted-foreground">
                           {formatTimestamp(run.created_at)}
                         </span>
                         <span
@@ -1503,22 +1503,22 @@ export default function DdmLogsPage() {
                         >
                           {TEST_STATUS_LABEL[overall]}
                         </span>
-                        <span className="text-xs text-zinc-400">
+                        <span className="text-xs text-muted-foreground">
                           {run.payload?.duration_total_ms ?? 0}ms total
                         </span>
-                        <span className="text-xs text-zinc-400">
+                        <span className="text-xs text-muted-foreground">
                           {passCount}/{results.length || 7} testes
                         </span>
-                        <span className="ml-auto text-xs text-zinc-500">
+                        <span className="ml-auto text-xs text-muted-foreground">
                           {isExpanded ? "▲ recolher" : "▼ expandir"}
                         </span>
                       </button>
 
                       {isExpanded && (
-                        <div className="border-t border-white/10 bg-black/20 px-4 py-3">
+                        <div className="border-t border-border bg-surface-3/50 px-4 py-3">
                           <table className="w-full border-collapse text-left text-sm">
                             <thead>
-                              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-zinc-500">
+                              <tr className="border-b border-border text-xs uppercase tracking-wide text-muted-foreground">
                                 <th className="px-3 py-2 font-medium">Teste</th>
                                 <th className="px-3 py-2 font-medium">Status</th>
                                 <th className="px-3 py-2 font-medium">Duração</th>
@@ -1527,8 +1527,8 @@ export default function DdmLogsPage() {
                             </thead>
                             <tbody>
                               {results.map((r) => (
-                                <tr key={r.name} className="border-b border-white/5">
-                                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-300">
+                                <tr key={r.name} className="border-b border-border">
+                                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-foreground-2">
                                     {r.name}
                                   </td>
                                   <td className="px-3 py-2">
@@ -1538,10 +1538,10 @@ export default function DdmLogsPage() {
                                       {r.status}
                                     </span>
                                   </td>
-                                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-zinc-400">
+                                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground">
                                     {r.duration_ms}ms
                                   </td>
-                                  <td className="px-3 py-2 text-zinc-200">{r.message}</td>
+                                  <td className="px-3 py-2 text-foreground">{r.message}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1560,17 +1560,17 @@ export default function DdmLogsPage() {
         {tab === "feedback" && (
           <>
             {feedbackError && (
-              <div className="mb-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <div className="mb-3 rounded-md border border-danger/40 bg-danger-soft px-3 py-2 text-sm text-danger">
                 {feedbackError}
               </div>
             )}
 
             {feedbackLoading && feedbackLogs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Carregando feedbacks...
               </div>
             ) : feedbackLogs.length === 0 ? (
-              <div className="flex items-center justify-center py-16 text-sm text-zinc-500">
+              <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
                 Nenhum problema reportado. 🎉
               </div>
             ) : (
@@ -1588,10 +1588,10 @@ export default function DdmLogsPage() {
                   return (
                     <div
                       key={f.id}
-                      className="overflow-hidden rounded-lg border border-amber-800/40 bg-amber-950/10"
+                      className="overflow-hidden rounded-lg border border-warning/40 bg-warning-soft"
                     >
                       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-                        <span className="font-mono text-xs text-zinc-400">
+                        <span className="font-mono text-xs text-muted-foreground">
                           {formatTimestamp(f.created_at)}
                         </span>
                         <span
@@ -1599,16 +1599,16 @@ export default function DdmLogsPage() {
                         >
                           {f.level}
                         </span>
-                        <span className="text-xs text-zinc-300">{userLabel}</span>
+                        <span className="text-xs text-foreground-2">{userLabel}</span>
                         {page && (
-                          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 font-mono text-[11px] text-zinc-400">
+                          <span className="rounded-full border border-border bg-surface-3/60 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
                             {page}
                           </span>
                         )}
                       </div>
 
-                      <div className="border-t border-white/10 bg-black/20 px-4 py-3">
-                        <p className="whitespace-pre-wrap break-words text-sm text-zinc-100">
+                      <div className="border-t border-border bg-surface-3/50 px-4 py-3">
+                        <p className="whitespace-pre-wrap break-words text-sm text-foreground">
                           {f.message}
                         </p>
 
@@ -1617,12 +1617,12 @@ export default function DdmLogsPage() {
                             <button
                               type="button"
                               onClick={() => toggleFeedbackUserAgent(f.id)}
-                              className="text-[11px] text-zinc-500 hover:text-zinc-300"
+                              className="text-[11px] text-muted-foreground hover:text-foreground-2"
                             >
                               {isUaExpanded ? "▲ recolher user agent" : "▼ ver user agent"}
                             </button>
                             {isUaExpanded && (
-                              <p className="mt-1 break-all font-mono text-[11px] text-zinc-500">
+                              <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
                                 {userAgent}
                               </p>
                             )}
@@ -1641,7 +1641,7 @@ export default function DdmLogsPage() {
                   type="button"
                   onClick={() => loadFeedbackMore()}
                   disabled={feedbackLoadingMore}
-                  className="rounded-md border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md border border-border bg-surface-3/60 px-4 py-2 text-xs font-medium text-foreground-2 transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {feedbackLoadingMore ? "Carregando..." : "Carregar mais"}
                 </button>

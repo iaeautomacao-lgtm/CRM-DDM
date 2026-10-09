@@ -2,18 +2,13 @@
 
 import { useState } from "react";
 import { 
-  BookOpen, 
   Smartphone, 
   Bot, 
   Megaphone, 
   GitBranch, 
-  HelpCircle, 
-  ChevronRight,
-  ArrowRight,
-  ExternalLink,
-  PlayCircle
+  HelpCircle
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { PageBody } from "@/components/ddm/page-toolbar";
 
 export default function HelpPage() {
   const [activeTab, setActiveTab] = useState<"whatsapp" | "ai" | "campaigns" | "pipeline" | "faq">("whatsapp");
@@ -27,41 +22,36 @@ export default function HelpPage() {
   ] as const;
 
   return (
-    <div className="flex-1 space-y-6 p-6 max-w-5xl mx-auto">
-      {/* Header Banner */}
-      <div className="relative rounded-2xl bg-gradient-to-r from-orange-600 to-amber-500 p-6 md:p-8 overflow-hidden shadow-lg border border-orange-500/20">
-        <div className="absolute right-0 bottom-0 opacity-10 select-none">
-          <BookOpen className="h-64 w-64 translate-x-12 translate-y-12 rotate-12" />
-        </div>
-        <div className="relative z-10 max-w-2xl space-y-2">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-white/20 text-white backdrop-blur-sm">
-            Central de Ajuda DDM
-          </span>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-            Guia do Usuário & Onboarding
-          </h1>
-          <p className="text-sm md:text-base text-orange-50/90 leading-relaxed">
-            Tudo o que você precisa saber para configurar o seu CRM, conectar o WhatsApp, ativar a Inteligência Artificial e disparar campanhas de ligações em minutos.
-          </p>
-        </div>
+    <PageBody className="gap-4">
+      <div className="flex animate-ddm-up flex-col gap-1.5 pt-1">
+        <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Ajuda</h1>
+        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+          Guia do usuário e primeiros passos.
+        </p>
       </div>
 
-      {/* Tabs Selector */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+      {/* Seletor de tópicos (trilho segmentado do design system DDM) */}
+      <div
+        role="group"
+        aria-label="Tópicos da ajuda"
+        className="flex max-w-full gap-0.5 self-start overflow-x-auto rounded-lg bg-surface-3 p-[3px] [scrollbar-width:none]"
+      >
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
+              type="button"
+              aria-pressed={isActive}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex flex-col md:flex-row items-center justify-center md:justify-start gap-2.5 px-4 py-3 rounded-xl border text-xs font-semibold transition-all duration-200 ${
+              className={`flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2.5 text-[12.5px] font-semibold transition-colors ${
                 isActive
-                  ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20 scale-[1.02]"
-                  : "bg-card text-muted-foreground border-border hover:bg-muted hover:text-foreground"
+                  ? "bg-card text-foreground shadow-[0_1px_2px_rgba(0,0,0,.12),0_0_0_1px_var(--border)]"
+                  : "text-foreground-2 hover:text-foreground"
               }`}
             >
-              <Icon className="h-4 w-4 shrink-0" />
+              <Icon className="size-3.5 shrink-0" aria-hidden />
               <span>{tab.label}</span>
             </button>
           );
@@ -69,11 +59,11 @@ export default function HelpPage() {
       </div>
 
       {/* Main Tab Content */}
-      <div className="bg-card/50 backdrop-blur border border-border rounded-2xl p-6 shadow-sm min-h-[400px]">
+      <div className="min-h-[400px] rounded-[10px] border border-border bg-card p-6">
         
         {/* TAB 1: WHATSAPP */}
         {activeTab === "whatsapp" && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Smartphone className="h-5 w-5 text-primary" /> Conectando o seu WhatsApp no CRM
@@ -123,7 +113,7 @@ export default function HelpPage() {
 
         {/* TAB 2: AI AGENT */}
         {activeTab === "ai" && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Bot className="h-5 w-5 text-primary" /> Configurando o Agente de IA (Auto-responder)
@@ -169,7 +159,7 @@ export default function HelpPage() {
 
         {/* TAB 3: CAMPAIGNS */}
         {activeTab === "campaigns" && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <Megaphone className="h-5 w-5 text-primary" /> Disparador de Campanhas e Ligações Automatizadas
@@ -214,7 +204,7 @@ export default function HelpPage() {
 
         {/* TAB 4: PIPELINES */}
         {activeTab === "pipeline" && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <GitBranch className="h-5 w-5 text-primary" /> Kanban e Funis de Venda (CRM)
@@ -253,7 +243,7 @@ export default function HelpPage() {
 
         {/* TAB 5: FAQ */}
         {activeTab === "faq" && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="space-y-6 animate-ddm-fade">
             <div className="space-y-1">
               <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
                 <HelpCircle className="h-5 w-5 text-primary" /> Perguntas Frequentes & Solução de Problemas
@@ -289,6 +279,6 @@ export default function HelpPage() {
         )}
 
       </div>
-    </div>
+    </PageBody>
   );
 }
