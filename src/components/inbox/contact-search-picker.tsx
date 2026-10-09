@@ -18,7 +18,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, UserPlus } from "lucide-react";
+import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-fetch";
+import { usePermission } from "@/hooks/use-permission";
+import { Button } from "@/components/ui/button";
 import type { Contact } from "@/types";
 
 interface ContactSearchPickerProps {
@@ -39,6 +43,42 @@ export function ContactSearchPicker({
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(false);
+  // PRD 23, item 5 — criar o contato pelo Inbox (POST /api/contacts,
+  // contacts.edit). Mesmo número de um contato existente não duplica: a API
+  // devolve o existente e a conversa segue com ele.
+  const canCreate = usePermission("contacts.edit");
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  function startCreate() {
+    const digits = query.replace(/\D/g, "");
+    setNewPhone(digits.length >= 8 ? digits : "");
+    setNewName(digits.length >= 8 ? "" : query.trim());
+    setCreating(true);
+  }
+
+  async function submitCreate() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const res = await apiFetch("/api/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName.trim() || undefined, phone: newPhone }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { contact?: Contact; created?: boolean; error?: string };
+      if (!res.ok || !json.contact) {
+        toast.error(json.error ?? "Não foi possível criar o contato");
+        return;
+      }
+      toast.success(json.created ? "Contato criado" : "Esse número já era de um contato — usando o existente");
+      handleSelect(json.contact);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   // Reset happens in event handlers (dialog close, input change), not in
   // an effect reacting to `open`/`query` — calling setState synchronously
@@ -49,6 +89,9 @@ export function ContactSearchPicker({
     setQuery("");
     setResults([]);
     setLoading(false);
+    setCreating(false);
+    setNewName("");
+    setNewPhone("");
   }
 
   function handleOpenChange(next: boolean) {
@@ -79,7 +122,7 @@ export function ContactSearchPicker({
       const escaped = trimmed.replace(/[%,]/g, "");
       const { data, error } = await supabase
         .from("contacts")
-        .select("id, name, phone, avatar_url")
+        .select("id, name, phone, avatar_url, instituicao")
         .eq("account_id", accountId)
         .or(`name.ilike.%${escaped}%,phone.ilike.%${escaped}%`)
         .limit(RESULT_LIMIT);
@@ -108,6 +151,48 @@ export function ContactSearchPicker({
           <DialogTitle className="text-popover-foreground">Nova conversa</DialogTitle>
         </DialogHeader>
 
+        {creating ? (
+          <form
+            className="flex animate-ddm-fade flex-col gap-3 px-4 pb-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void submitCreate();
+            }}
+          >
+            <label className="flex flex-col gap-1.5 text-[12.5px] font-medium text-foreground">
+              Nome
+              <Input
+                autoFocus
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Nome do contato"
+                maxLength={200}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5 text-[12.5px] font-medium text-foreground">
+              Telefone (com DDI e DDD)
+              <Input
+                value={newPhone}
+                onChange={(e) => setNewPhone(e.target.value)}
+                placeholder="5511999999999"
+                inputMode="tel"
+                required
+              />
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Se o número já for de um contato, a conversa segue com ele (sem duplicar).
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setCreating(false)} disabled={saving}>
+                Voltar
+              </Button>
+              <Button type="submit" disabled={saving || newPhone.replace(/\D/g, "").length < 8}>
+                {saving ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <UserPlus className="size-4" aria-hidden="true" />}
+                Criar e continuar
+              </Button>
+            </div>
+          </form>
+        ) : (
         <div className="px-4 pb-4">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
@@ -164,7 +249,18 @@ export function ContactSearchPicker({
               })
             )}
           </div>
+          {canCreate && (
+            <button
+              type="button"
+              onClick={startCreate}
+              className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-md border border-dashed border-border-strong text-[13px] font-medium text-foreground-2 hover:border-primary-soft-2 hover:bg-primary-soft hover:text-primary-text"
+            >
+              <UserPlus className="size-4" aria-hidden="true" />
+              Criar contato novo
+            </button>
+          )}
         </div>
+        )}
       </DialogContent>
     </Dialog>
   );
