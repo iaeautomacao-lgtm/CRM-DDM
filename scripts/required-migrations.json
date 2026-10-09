@@ -170,6 +170,14 @@
       "kind": "registry"
     },
     {
+      "version": "250_calling_cdr",
+      "kind": "registry"
+    },
+    {
+      "version": "251_call_permissions",
+      "kind": "registry"
+    },
+    {
       "version": "260_whatsapp_flows",
       "kind": "registry"
     },

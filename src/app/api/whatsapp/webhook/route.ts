@@ -29,6 +29,7 @@ import {
   ingestStatusEvents,
 } from '@/lib/whatsapp/status-inbox'
 import { extractPricingEvents, recordMessagePricing } from '@/lib/whatsapp/message-pricing'
+import { processCallEvents, type CallsValue } from '@/lib/whatsapp/calls'
 import { isWellFormedHubSignature, readCappedBody } from '@/lib/security/webhook-body'
 import {
   allowExpensiveRejection,
@@ -44,7 +45,7 @@ import {
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
 import { handleChannelHealthChange, isChannelHealthField } from '@/lib/disparador/channel-health'
-import { processMessage, type WhatsAppMessage } from '@/lib/whatsapp/inbound-message'
+import { processMessage, resolveCallContext, type WhatsAppMessage } from '@/lib/whatsapp/inbound-message'
 import { extractMessageEvents, ingestMessageEvents, messageInboxMode } from '@/lib/whatsapp/message-inbox'
 import { drainMessageInboxLive } from '@/lib/whatsapp/message-inbox-runner'
 import { maskTextForLog } from '@/lib/privacy/mask'
@@ -595,6 +596,28 @@ async function processWebhook(
       }
 
       const value = change.value
+
+      // WhatsApp Calling (PRD 18, PR-18.1): o campo `calls` vira CDR + permissão de ligação. Só DADOS (sem áudio); falha aqui não derruba o POST.
+      if (change.field === 'calls') {
+        try {
+          const pn = value?.metadata?.phone_number_id
+          const { rows } = pn ? await lookupConfigRows(pn) : { rows: null }
+          const cfg = rows && rows.length === 1 && rows[0].id === channel.id ? rows[0] : null
+          if (cfg) {
+            await processCallEvents(value as unknown as CallsValue, {
+              db: supabaseAdmin(),
+              accountId: channel.account_id,
+              channelId: channel.id,
+              resolveContext: (phone, name) => resolveCallContext(channel.account_id, cfg.user_id, channel.id, phone, name),
+            })
+          } else {
+            console.error('[webhook] calls: canal não resolvido para o phone_number_id:', pn)
+          }
+        } catch (error) {
+          console.error('[webhook] falha ao tratar evento de chamada:', error)
+        }
+        continue
+      }
 
       // WH-06: erros reportados pela Meta no value (tipo não suportado, restrição do número…) ficam no log.
       if (Array.isArray(value.errors) && value.errors.length > 0) {

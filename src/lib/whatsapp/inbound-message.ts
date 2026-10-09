@@ -16,6 +16,7 @@ import { recordCampaignReply } from '@/lib/disparador/reply-tracker'
 import { maybeStartCampaignWebchat } from '@/lib/webchat/campaign'
 import { writeLog, maskPhone } from '@/lib/logger'
 import { formatTranscript, transcribeInboundAudio, type TranscriptionResult } from '@/lib/ai/stt'
+import { callPermissionReplyText, parseCallPermissionReply, recordCallPermissionReply, type CallContext } from '@/lib/whatsapp/calls'
 import { safeDbError } from '@/lib/privacy/mask'
 import { flowResponseVars, parseNfmReply, type ParsedFlowResponse } from '@/lib/whatsapp/flow-response'
 import { deliverFlowResponseToActiveRun } from '@/lib/flows/flow-response-vars'
@@ -82,11 +83,13 @@ export interface WhatsAppMessage {
    * to advance the per-contact run.
    */
   interactive?: {
-    type: 'button_reply' | 'list_reply' | 'nfm_reply'
+    type: 'button_reply' | 'list_reply' | 'nfm_reply' | 'call_permission_reply'
     button_reply?: { id: string; title: string }
     list_reply?: { id: string; title: string; description?: string }
     /** Formulário (WhatsApp Flow) concluído pelo cliente — `response_json` é uma STRING JSON (PRD 21). */
     nfm_reply?: { name?: string; body?: string; response_json?: string }
+    /** Resposta do cliente ao pedido de permissão de ligação (WhatsApp Calling, PRD 18). */
+    call_permission_reply?: { response?: string; is_permanent?: boolean; expiration_timestamp?: number | string; response_source?: string }
   }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
@@ -247,6 +250,18 @@ export async function processMessage(
   if (message.type === 'reaction') {
     await handleReaction(message, conversation.id, contactRecord.id)
     return "reaction"
+  }
+
+  // WhatsApp Calling (PRD 18, migration 251): o cliente respondeu ao pedido de permissão de ligação — grava o consentimento (ou a recusa).
+  const callPermissionReply = message.type === 'interactive' ? parseCallPermissionReply(message.interactive) : null
+  if (callPermissionReply) {
+    await recordCallPermissionReply(supabaseAdmin(), {
+      accountId,
+      contactId: contactRecord.id,
+      phone: senderPhone,
+      reply: callPermissionReply,
+      messageTs: Number(message.timestamp) || null,
+    })
   }
 
   // Parse message content based on type
@@ -906,6 +921,8 @@ async function parseMessageContent(
         const flowResponse = parseNfmReply(message.interactive?.nfm_reply)
         return { ...empty, contentText: flowResponse.text, flowResponse }
       }
+      const permissionReply = parseCallPermissionReply(message.interactive)
+      if (permissionReply) return { ...empty, contentText: callPermissionReplyText(permissionReply) }
       const reply =
         message.interactive?.button_reply ?? message.interactive?.list_reply
       if (reply?.id) {
@@ -1107,4 +1124,22 @@ async function findOrCreateConversation(
   }
 
   return newConv
+}
+
+/**
+ * WhatsApp Calling (PRD 18, PR-18.1): contato e conversa do telefone que ligou/foi ligado, pelos MESMOS helpers das mensagens recebidas
+ * (mesma regra de "mesmo número"). Null quando não consegue — o evento de chamada daquele telefone é ignorado, sem derrubar o webhook.
+ */
+export async function resolveCallContext(
+  accountId: string,
+  configOwnerUserId: string,
+  configId: string,
+  phone: string,
+  name: string
+): Promise<CallContext | null> {
+  const contactOutcome = await findOrCreateContact(accountId, configOwnerUserId, normalizePhone(phone), name)
+  if (!contactOutcome) return null
+  const conversation = await findOrCreateConversation(accountId, configOwnerUserId, contactOutcome.contact.id, configId)
+  if (!conversation) return null
+  return { contactId: contactOutcome.contact.id, conversationId: conversation.id }
 }
