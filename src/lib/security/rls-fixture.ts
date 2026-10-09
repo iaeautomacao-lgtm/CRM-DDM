@@ -96,3 +96,26 @@ export async function asUser<T = Record<string, unknown>>(db: PGlite, who: strin
     await db.exec("RESET ROLE");
   }
 }
+
+/**
+ * SQL EXECUTÁVEL do bloco `-- ROLLBACK:` do cabeçalho de uma migration (linhas `--` até a régua `-- ====`): o mesmo critério do teste da rodada de deploy
+ * (cada comando numa linha que começa por uma palavra SQL; DO $$ … $$ pode ter várias linhas). Prosa é descartada.
+ */
+export function headerRollback(file: string): string {
+  const lines = migration(file).split("\n");
+  const start = lines.findIndex((l) => /^--\s*ROLLBACK/i.test(l));
+  if (start < 0) throw new Error(`${file}: sem linha ROLLBACK no cabeçalho`);
+  const raw = [lines[start].replace(/^--\s*ROLLBACK[^:]*:/i, "")];
+  for (let i = start + 1; i < lines.length && lines[i].startsWith("--") && !/^--\s*={5,}/.test(lines[i]); i++) raw.push(lines[i]);
+  const SQL_START = /^(BEGIN|COMMIT|DROP|DELETE|ALTER|DO|UPDATE|CREATE|REVOKE|GRANT|END|FOR|EXECUTE|SELECT)\b/i;
+  const kept: string[] = [];
+  let inDollar = false;
+  for (const line of raw) {
+    const t = line.replace(/^--/, "").trim();
+    if (!t) continue;
+    if (!inDollar && !SQL_START.test(t)) continue;
+    kept.push(t);
+    if (((t.match(/\$\$/g) ?? []).length % 2) === 1) inDollar = !inDollar;
+  }
+  return kept.join("\n");
+}
