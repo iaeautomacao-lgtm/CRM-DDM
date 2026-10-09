@@ -18,7 +18,7 @@ export async function GET(
 
     if (!mediaId) {
       return NextResponse.json(
-        { error: 'Media ID is required' },
+        { error: 'ID da mídia é obrigatório' },
         { status: 400 }
       )
     }
@@ -32,7 +32,7 @@ export async function GET(
 
     if (authError || !user) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        { error: 'Não autorizado' },
         { status: 401 }
       )
     }
@@ -49,7 +49,7 @@ export async function GET(
     const accountId = profile?.account_id as string | undefined
     if (!accountId) {
       return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
+        { error: 'Seu perfil não está vinculado a uma conta.' },
         { status: 403 },
       )
     }
@@ -60,7 +60,7 @@ export async function GET(
       const rawFile = searchParams.get('file')
       if (!rawFile) {
         return NextResponse.json(
-          { error: 'File parameter is required' },
+          { error: 'O parâmetro \'file\' é obrigatório' },
           { status: 400 }
         )
       }
@@ -68,7 +68,7 @@ export async function GET(
       const file = sanitizeWahaFilePath(rawFile)
       if (!file) {
         return NextResponse.json(
-          { error: 'Invalid file parameter' },
+          { error: 'Parâmetro \'file\' inválido' },
           { status: 400 }
         )
       }
@@ -84,7 +84,7 @@ export async function GET(
 
       if (configError || !wahaConfig) {
         return NextResponse.json(
-          { error: 'WAHA not configured' },
+          { error: 'WAHA não configurado' },
           { status: 400 }
         )
       }
@@ -93,7 +93,7 @@ export async function GET(
         await assertWahaUrlIsSafe(wahaConfig.waha_url)
       } catch (err) {
         if (err instanceof WahaUrlBlockedError) {
-          return NextResponse.json({ error: 'WAHA server URL is not allowed.' }, { status: 400 })
+          return NextResponse.json({ error: 'A URL do servidor WAHA não é permitida.' }, { status: 400 })
         }
         throw err
       }
@@ -112,13 +112,13 @@ export async function GET(
         fileRes = await safeFetch(fileUrl, { headers }, { maxBytes: WAHA_MEDIA_MAX_BYTES, timeoutMs: 30_000 })
       } catch (err) {
         if (err instanceof SsrfBlockedError) {
-          return NextResponse.json({ error: 'WAHA server URL is not allowed.' }, { status: 400 })
+          return NextResponse.json({ error: 'A URL do servidor WAHA não é permitida.' }, { status: 400 })
         }
         throw err
       }
       if (!fileRes.ok) {
         return NextResponse.json(
-          { error: 'Failed to fetch media from WAHA' },
+          { error: 'Falha ao buscar a mídia no WAHA' },
           { status: fileRes.status }
         )
       }
@@ -142,7 +142,7 @@ export async function GET(
 
     if (configError || !config) {
       return NextResponse.json(
-        { error: 'WhatsApp not configured' },
+        { error: 'WhatsApp não configurado' },
         { status: 400 }
       )
     }
@@ -165,7 +165,7 @@ export async function GET(
   } catch (error) {
     console.error('Error in WhatsApp media GET:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch media' },
+      { error: 'Falha ao buscar a mídia' },
       { status: 500 }
     )
   }

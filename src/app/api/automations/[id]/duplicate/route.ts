@@ -19,7 +19,7 @@ export async function POST(
     .eq('account_id', accountId)
     .maybeSingle()
   if (origErr) return NextResponse.json({ error: origErr.message }, { status: 500 })
-  if (!original) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!original) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
 
   const { data: copy, error: copyErr } = await admin
     .from('automations')

@@ -62,7 +62,7 @@ export async function POST(
     if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
       return NextResponse.json(
         {
-          error: `'password' must be a string with at least ${MIN_PASSWORD_LENGTH} characters`,
+          error: `'password' deve ser um texto com pelo menos ${MIN_PASSWORD_LENGTH} caracteres`,
         },
         { status: 400 },
       );
@@ -81,13 +81,13 @@ export async function POST(
     if (profileErr) {
       console.error("[reset-password] profile lookup error:", profileErr);
       return NextResponse.json(
-        { error: "Failed to verify member" },
+        { error: "Falha ao verificar o membro" },
         { status: 500 },
       );
     }
     if (!targetProfile || targetProfile.account_id !== ctx.accountId) {
       return NextResponse.json(
-        { error: "Member not found in this account" },
+        { error: "Membro não encontrado nesta conta" },
         { status: 404 },
       );
     }
@@ -99,7 +99,7 @@ export async function POST(
     if (updateErr) {
       console.error("[reset-password] updateUserById error:", updateErr);
       return NextResponse.json(
-        { error: updateErr.message || "Failed to reset password" },
+        { error: updateErr.message || "Falha ao redefinir a senha" },
         { status: 500 },
       );
     }
