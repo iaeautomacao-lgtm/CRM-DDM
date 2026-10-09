@@ -268,7 +268,7 @@ export function validUuid(id: string): boolean {
 // ---- acesso aos dados ---------------------------------------------------------------------------------------------------------------
 
 /** Falha de infraestrutura (migration ausente: tabela/função inexistente) ⇒ 503 com o motivo curto, nunca o erro cru do banco. */
-function unavailable(error: { code?: string; message?: string } | null, what: string): ApiError {
+export function unavailable(error: { code?: string; message?: string } | null, what: string): ApiError {
   const missing = ["42P01", "42883", "PGRST202", "PGRST205"].includes(error?.code ?? "");
   return new ApiError("unavailable", missing ? `${what} indisponível: aplique as migrations 270–279 do PRD 17` : `${what} indisponível no momento`, 503);
 }
