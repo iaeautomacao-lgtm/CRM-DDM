@@ -1,9 +1,13 @@
-import { AlertTriangle, Trash2, Wrench } from 'lucide-react';
+'use client';
+
+import { useState } from 'react';
+import { AlertTriangle, Play, Plus, Trash2, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { TestDialog, ToolDialog, type SavedTool } from '../../tool-dialogs';
 import type { AgentFormData, ToolCatalogItem } from '../types';
 
 interface ToolsTabProps {
@@ -11,9 +15,16 @@ interface ToolsTabProps {
   onChange: (patch: Partial<AgentFormData>) => void;
   catalog: ToolCatalogItem[];
   readOnly?: boolean;
+  /** Tem `ai.tools.edit`: pode criar e testar ferramentas do catálogo daqui. */
+  canManageTools?: boolean;
+  /** Ferramenta recém-criada: entra no catálogo do editor (o vínculo é feito aqui). */
+  onToolCreated?: (tool: ToolCatalogItem) => void;
 }
 
-export function ToolsTab({ data, onChange, catalog, readOnly }: ToolsTabProps) {
+export function ToolsTab({ data, onChange, catalog, readOnly, canManageTools, onToolCreated }: ToolsTabProps) {
+  const [creating, setCreating] = useState(false);
+  const [testing, setTesting] = useState<ToolCatalogItem | null>(null);
+  const canCreate = !readOnly && !!canManageTools;
   const selected = new Map(data.tools.map((t) => [t.tool_id, t]));
   const catalogIds = new Set(catalog.map((t) => t.id));
   const orphans = data.tools.filter((t) => !catalogIds.has(t.tool_id));
@@ -23,6 +34,23 @@ export function ToolsTab({ data, onChange, catalog, readOnly }: ToolsTabProps) {
       onChange({ tools: [...data.tools, { tool_id: toolId, enabled: true }] });
     } else {
       onChange({ tools: data.tools.filter((t) => t.tool_id !== toolId) });
+    }
+  }
+
+  function created(tool: SavedTool) {
+    setCreating(false);
+    onToolCreated?.({
+      id: tool.id,
+      name: tool.name,
+      display_name: tool.display_name,
+      description: tool.description,
+      enabled: tool.enabled,
+      http: tool.http,
+      parameters: tool.parameters,
+    });
+    // Já vincula ao agente em edição (vale ao publicar a nova versão).
+    if (!data.tools.some((t) => t.tool_id === tool.id)) {
+      onChange({ tools: [...data.tools, { tool_id: tool.id, enabled: true }] });
     }
   }
 
@@ -74,9 +102,17 @@ export function ToolsTab({ data, onChange, catalog, readOnly }: ToolsTabProps) {
             mas o agente deixa de usá-la.
           </p>
         </div>
-        <a href="/settings?tab=tools" className="text-xs text-primary hover:underline shrink-0">
-          Gerenciar catálogo de ferramentas
-        </a>
+        <div className="flex shrink-0 items-center gap-3">
+          <a href="/settings?tab=tools" className="text-xs text-primary hover:underline">
+            Gerenciar catálogo de ferramentas
+          </a>
+          {canCreate && (
+            <Button type="button" size="sm" onClick={() => setCreating(true)}>
+              <Plus className="size-4" />
+              Criar ferramenta
+            </Button>
+          )}
+        </div>
       </div>
 
       {catalog.length === 0 ? (
@@ -115,6 +151,12 @@ export function ToolsTab({ data, onChange, catalog, readOnly }: ToolsTabProps) {
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{tool.description}</p>
                     )}
                   </div>
+                  {canManageTools && tool.parameters && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => setTesting(tool)}>
+                      <Play className="size-3.5" />
+                      Testar
+                    </Button>
+                  )}
                   {used && (
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">{link.enabled ? 'Ligada' : 'Desligada'}</span>
@@ -157,6 +199,21 @@ export function ToolsTab({ data, onChange, catalog, readOnly }: ToolsTabProps) {
             </div>
           ))}
         </div>
+      )}
+
+      {creating && (
+        <ToolDialog
+          item={null}
+          description="Ao salvar, ela já fica vinculada a este agente (vale ao publicar a nova versão)."
+          onClose={() => setCreating(false)}
+          onSaved={created}
+        />
+      )}
+      {testing?.parameters && (
+        <TestDialog
+          item={{ id: testing.id, name: testing.name, parameters: testing.parameters }}
+          onClose={() => setTesting(null)}
+        />
       )}
     </div>
   );

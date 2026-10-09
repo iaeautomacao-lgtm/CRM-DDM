@@ -10,6 +10,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { ArrowLeft, Loader2, Plus, Save, Sparkles, Trash2 } from 'lucide-react';
 
+import { can } from '@/lib/auth/permissions';
 import { hasMinRole } from '@/lib/auth/roles';
 import { useAuth } from '@/hooks/use-auth';
 import { Badge } from '@/components/ui/badge';
@@ -98,6 +99,7 @@ function errorMessage(err: unknown, fallback: string): string {
 export function AgentsSettings() {
   const { accountRole, accountId } = useAuth();
   const canEdit = !!accountRole && hasMinRole(accountRole, 'admin');
+  const canManageTools = !!accountRole && can({ role: accountRole }, 'ai.tools.edit');
   const router = useRouter();
   const searchParams = useSearchParams();
   const selectedId = searchParams.get('id');
@@ -119,6 +121,7 @@ export function AgentsSettings() {
         key={selectedId}
         agentId={selectedId === 'new' ? null : selectedId}
         canEdit={canEdit}
+        canManageTools={canManageTools}
         accountId={accountId}
         onBack={() => select(null)}
         onCreated={(id) => select(id)}
@@ -240,12 +243,14 @@ function AgentList({ canEdit, onOpen }: { canEdit: boolean; onOpen: (id: string)
 function AgentEditor({
   agentId,
   canEdit,
+  canManageTools,
   accountId,
   onBack,
   onCreated,
 }: {
   agentId: string | null;
   canEdit: boolean;
+  canManageTools: boolean;
   accountId: string | null;
   onBack: () => void;
   onCreated: (id: string) => void;
@@ -481,7 +486,14 @@ function AgentEditor({
           <KnowledgeTab data={form} onChange={patch} kbFiles={kbFiles} secrets={secrets} readOnly={readOnly} />
         </TabsContent>
         <TabsContent value="tools" className="pt-4">
-          <ToolsTab data={form} onChange={patch} catalog={catalog} readOnly={readOnly} />
+          <ToolsTab
+            data={form}
+            onChange={patch}
+            catalog={catalog}
+            readOnly={readOnly}
+            canManageTools={canManageTools}
+            onToolCreated={(tool) => setCatalog((prev) => [...prev.filter((t) => t.id !== tool.id), tool])}
+          />
         </TabsContent>
         <TabsContent value="model" className="pt-4">
           <ModelTab data={form} onChange={patch} readOnly={readOnly} />
