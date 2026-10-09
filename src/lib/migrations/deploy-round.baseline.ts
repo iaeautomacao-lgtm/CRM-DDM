@@ -76,7 +76,7 @@ CREATE TABLE wacrm.quick_replies (
   UNIQUE (account_id, shortcut));
 CREATE TABLE wacrm.flow_nodes (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), node_type text NOT NULL,
   CONSTRAINT flow_nodes_node_type_check CHECK (node_type IN ('start'::text, 'send_message'::text, 'condition'::text, 'end'::text)));
-CREATE TABLE wacrm.disp_message_queue (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), sent_at timestamptz);
+CREATE TABLE wacrm.disp_message_queue (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), sent_at timestamptz, status text, account_id uuid, campaign_id uuid);
 CREATE TABLE wacrm.billing_rulers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, name text, channel_id uuid,
   priority integer DEFAULT 0, active boolean DEFAULT true, dry_run boolean DEFAULT false);
 CREATE TABLE wacrm.billing_ruler_steps (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL, ruler_id uuid, position integer, offset_days integer, active boolean);
