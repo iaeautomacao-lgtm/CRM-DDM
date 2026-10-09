@@ -65,7 +65,7 @@ export function DeletableEdge({
             }}
             title="Excluir conexão"
             aria-label="Excluir conexão"
-            className="border-border bg-card text-muted-foreground flex h-4 w-4 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors hover:border-red-400 hover:text-red-400"
+            className="border-border bg-card text-muted-foreground flex h-4 w-4 shrink-0 items-center justify-center rounded-full border shadow-sm transition-colors hover:border-danger hover:text-danger"
           >
             <Trash2 className="h-2.5 w-2.5" />
           </button>

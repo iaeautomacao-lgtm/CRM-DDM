@@ -49,10 +49,10 @@ const TIMELINE_COLORS: Record<SimTimelineEvent["type"], string> = {
   node: "text-muted-foreground",
   branch: "text-sky-600 dark:text-sky-400",
   tag: "text-violet-600 dark:text-violet-400",
-  tool_call: "text-amber-700 dark:text-amber-400",
-  tool_result: "text-amber-700 dark:text-amber-400",
+  tool_call: "text-warning",
+  tool_result: "text-warning",
   handoff: "text-orange-600 dark:text-orange-400",
-  run_end: "text-emerald-700 dark:text-emerald-400",
+  run_end: "text-success",
   error: "text-destructive",
   note: "text-muted-foreground italic",
 };
@@ -267,7 +267,7 @@ export function FlowSimulatorPanel({ onClose }: { onClose: () => void }) {
                           <span>
                             Consultar a API real (somente leitura)
                             {isReal && (
-                              <span className="mt-0.5 flex items-center gap-1 text-amber-700 dark:text-amber-400">
+                              <span className="mt-0.5 flex items-center gap-1 text-warning">
                                 <TriangleAlert className="h-3 w-3" /> Usa dados reais de devedor — só com CPF de teste.
                               </span>
                             )}

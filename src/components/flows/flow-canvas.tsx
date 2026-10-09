@@ -138,18 +138,18 @@ function getDebugVisual(
 ): { style: React.CSSProperties; badge: 'check' | 'cross' | null } | null {
   switch (status) {
     case 'success':
-      return { style: { borderColor: '#22c55e', borderWidth: 2 }, badge: 'check' };
+      return { style: { borderColor: 'var(--success)', borderWidth: 2 }, badge: 'check' };
     case 'error':
       return {
         style: {
-          borderColor: '#ef4444',
+          borderColor: 'var(--danger)',
           borderWidth: 2,
-          backgroundColor: 'rgba(239,68,68,0.08)',
+          backgroundColor: 'var(--danger-soft)',
         },
         badge: 'cross',
       };
     case 'stalled':
-      return { style: { borderColor: '#eab308', borderWidth: 2 }, badge: null };
+      return { style: { borderColor: 'var(--warning)', borderWidth: 2 }, badge: null };
     case 'unreached':
       return {
         style: {
@@ -226,22 +226,22 @@ function FlowNodeCard({ data, selected }: NodeProps) {
         } as React.CSSProperties
       }
       className={cn(
-        'bg-card relative max-w-[260px] min-w-[220px] rounded-xl border px-3.5 py-3 text-left shadow-[0_2px_6px_rgba(0,0,0,0.18)] transition-[box-shadow,border-color]',
+        'bg-card relative max-w-[260px] min-w-[220px] rounded-[10px] border px-3.5 py-3 text-left shadow-[0_2px_6px_rgba(0,0,0,0.18)] transition-[box-shadow,border-color]',
         selected
           ? 'border-[var(--nc)]'
           : 'border-border hover:border-[var(--nc-ring)]',
         // Flash overrides hover/selected colors briefly. Tailwind's
         // built-in `animate-pulse` is too gentle; a ring with the
         // amber accent matches the list view's flash semantics.
-        isFlashed && '!border-amber-400 ring-2 ring-amber-400/60',
-        !isFlashed && !selected && errorCount > 0 && '!border-red-500/60'
+        isFlashed && '!border-warning ring-2 ring-warning/60',
+        !isFlashed && !selected && errorCount > 0 && '!border-danger/60'
       )}
     >
       {!debugVisual && (errorCount > 0 || warningCount > 0) && (
         <span
           className={cn(
             'absolute -top-2 -right-2 z-10 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]',
-            errorCount > 0 ? 'bg-red-500' : 'bg-amber-500'
+            errorCount > 0 ? 'bg-danger' : 'bg-warning'
           )}
           title={
             errorCount > 0
@@ -256,7 +256,7 @@ function FlowNodeCard({ data, selected }: NodeProps) {
         <span
           className="absolute -top-2 -right-2 z-10 flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
           style={{
-            backgroundColor: debugVisual.badge === 'check' ? '#22c55e' : '#ef4444',
+            backgroundColor: debugVisual.badge === 'check' ? 'var(--success)' : 'var(--danger)',
           }}
         >
           {debugVisual.badge === 'check' ? '✓' : '✗'}
@@ -756,7 +756,7 @@ function FlowCanvasInner({ debug }: { debug?: FlowDebugState }) {
                 className={cn(
                   'bg-card h-9',
                   issues.some((i) => i.scope === 'trigger' && i.severity === 'error') &&
-                    'border-red-500/60 text-red-500'
+                    'border-danger/60 text-danger'
                 )}
                 title="Quando este fluxo começa"
               >
@@ -861,7 +861,7 @@ function NodeEditSheet({
             <SheetTitle className="flex items-center gap-2 text-[11px] font-semibold tracking-wider uppercase">
               <span style={{ color: c.text }}>{meta.label}</span>
               {isEntry && (
-                <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-emerald-300 uppercase">
+                <span className="rounded bg-success-soft px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-success uppercase">
                   Entrada
                 </span>
               )}
@@ -870,7 +870,7 @@ function NodeEditSheet({
               {meta.blurb}
             </SheetDescription>
           </div>
-          <code className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]">
+          <code className="bg-surface-3 text-muted-foreground shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px]">
             {node.node_key}
           </code>
         </SheetHeader>
@@ -904,7 +904,7 @@ function NodeEditSheet({
               variant="ghost"
               size="sm"
               onClick={onDelete}
-              className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              className="text-danger hover:bg-danger-soft hover:text-danger"
             >
               <Trash2 className="h-3.5 w-3.5" />
               Excluir nó
