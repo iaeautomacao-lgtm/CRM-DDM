@@ -660,7 +660,7 @@ export function InternalChatDialog({
         {step === "list" ? (
           <>
             <DialogHeader className="gap-2.5 border-b border-border px-4 pb-3 pt-4">
-              <DialogTitle className="text-foreground">{listTitle}</DialogTitle>
+              <DialogTitle className="font-heading text-foreground">{listTitle}</DialogTitle>
               <input
                 type="search"
                 value={contactQuery}
@@ -688,7 +688,7 @@ export function InternalChatDialog({
                         key={c.user_id}
                         type="button"
                         onClick={() => openThread(c)}
-                        className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-muted"
+                        className="animate-ddm-row flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
                       >
                         <Avatar className="size-8 shrink-0">
                           {c.avatar_url ? <AvatarImage src={c.avatar_url} alt={name} /> : null}
@@ -760,10 +760,10 @@ export function InternalChatDialog({
                           className={`flex ${mine ? "justify-end" : "justify-start"}`}
                         >
                           <div
-                            className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                            className={`animate-ddm-up max-w-[80%] rounded-[10px] px-3 py-2 text-sm ${
                               mine
-                                ? "bg-primary text-primary-foreground"
-                                : "border border-border bg-muted text-foreground"
+                                ? "bg-primary-soft text-foreground"
+                                : "border border-border bg-card text-foreground"
                             }`}
                           >
                             {m.media_url && (
@@ -774,7 +774,7 @@ export function InternalChatDialog({
                             {m.content && <p className="whitespace-pre-wrap">{m.content}</p>}
                             <p
                               className={`mt-1 text-[10px] ${
-                                mine ? "text-primary-foreground/70" : "text-muted-foreground"
+                                "text-muted-foreground"
                               }`}
                             >
                               {new Date(m.created_at).toLocaleTimeString("pt-BR", {
@@ -804,7 +804,7 @@ export function InternalChatDialog({
                 />
 
                 {stagedMedia && (
-                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-border bg-muted/40 p-2">
+                  <div className="mb-2 flex items-center gap-2 rounded-[10px] border border-border bg-surface-2 p-2">
                     <div className="min-w-0 flex-1">
                       {stagedMedia.kind === "image" ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -838,15 +838,15 @@ export function InternalChatDialog({
                 )}
 
                 {recording ? (
-                  <div className="flex items-center gap-3 rounded-lg border border-border bg-muted px-3 py-2">
-                    <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+                  <div className="flex items-center gap-3 rounded-[10px] border border-border bg-surface-2 px-3 py-2">
+                    <span className="flex h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-danger" />
                     <span className="flex-1 text-sm text-foreground">
                       Gravando… {formatDuration(recordSeconds)} / {formatDuration(MAX_RECORDING_SECONDS)}
                     </span>
                     <button
                       type="button"
                       onClick={cancelRecording}
-                      className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-background hover:text-foreground"
+                      className="rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-surface-hover hover:text-foreground"
                     >
                       Cancelar
                     </button>
