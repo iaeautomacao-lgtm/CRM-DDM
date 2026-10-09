@@ -346,6 +346,10 @@
       "index": "idx_conversations_account_created"
     },
     {
+      "version": "317_automation_pending_lease",
+      "kind": "registry"
+    },
+    {
       "version": "320_billing_reports",
       "kind": "registry"
     },
