@@ -8,6 +8,7 @@ import {
   type CampaignMessageFields,
   type TemplateMode,
 } from "@/lib/disparador/campaign-validation";
+import { flowPublishProblems } from "@/lib/disparador/flow-button";
 import {
   TEMPLATE_VALIDATION_COLUMNS,
   type LocalTemplateRow,
@@ -83,5 +84,13 @@ export async function checkCampaignConfig(
     audienceMode: options.audienceMode,
   });
   if (!result.ok) return { ok: false, status: 400, error: result.error };
+  // FLOW-03 (PRD 21.3): template com botão FLOW só entra se o Flow estiver PUBLISHED na Meta (confirmado na Graph API; sem confirmar, não começa)
+  if (isMeta && templateRows.length > 0) {
+    const metaChannels = channels.filter((c) => c.provider === "meta");
+    const wabas = new Set(metaChannels.map((c) => c.waba_id).filter(Boolean));
+    const ownRows = templateRows.filter((r) => !r.waba_id || wabas.has(r.waba_id)); // linha de outra WABA não vale
+    const problems = await flowPublishProblems(db, accountId, metaChannels.map((c) => c.id), ownRows);
+    if (problems.length > 0) return { ok: false, status: 400, error: problems[0] };
+  }
   return { ...result, channels };
 }

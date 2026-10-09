@@ -39,6 +39,7 @@ import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTA
 import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
 import { metaCodesWhere, reportUnknownMetaCode } from "@/lib/disparador/meta-error-catalog";
 import { loadCampaignStatusCounts, summarizeStatusCounts } from "@/lib/disparador/campaign-status-counts";
+import { flowTokenForQueueItem, loadFlowTemplate } from "@/lib/disparador/flow-button";
 export { EXTERNAL_WAHA_TEXT_MARKER };
 
 export interface QueueItem {
@@ -1153,13 +1154,18 @@ async function sendViaMeta(
       return v.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
     });
 
+    // PRD 21.3: template com botão FLOW exige o componente do botão com o flow_token DESTE envio (`dq:<item>`); sem ele a Meta recusa.
+    // Só esse caso sai do caminho de corpo (os demais templates seguem como sempre, sem consulta extra: linha em cache de 5 min).
+    const language = item.template_language ?? "pt_BR";
+    const flowTemplate = await loadFlowTemplate(supabaseAdmin(), config.account_id, config.waba_id, item.template_name, language);
     const result = await sendTemplateMessage({
       phoneNumberId,
       accessToken,
       to: phone,
       templateName: item.template_name,
-      language: item.template_language ?? "pt_BR",
+      language,
       params: sanitizedVariables,
+      ...(flowTemplate ? { template: flowTemplate, messageParams: { body: sanitizedVariables, flowToken: flowTokenForQueueItem(item.id) } } : {}),
     });
     return result.messageId;
   }
