@@ -9,6 +9,7 @@
 // Sem a RPC do lote (migration 188 não aplicada) cai na confirmação unitária injetada em `single`.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { onShutdownAfterSends } from "@/lib/disparador/shutdown-gate";
 
 type Db = Pick<SupabaseClient, "rpc">;
 
@@ -151,16 +152,17 @@ export function singleConfirm(db: Db): (args: Record<string, unknown>) => Promis
   };
 }
 
-// SIGTERM (deploy/restart do Passenger): drena os lotes pendentes antes de sair. O handler só existe enquanto há batchers ativos.
+// SIGTERM (deploy/restart do Passenger): primeiro espera os envios em voo (shutdown-gate, até 8 s: assim a confirmação deles entra no
+// micro-lote), depois drena os lotes pendentes antes de sair. Registra-se uma vez; o callback só age sobre os batchers ativos.
 const active = new Set<ConfirmBatcher>();
-let installed = false;
+let drainRegistered = false;
 
 export function registerShutdownDrain(batcher: ConfirmBatcher): () => void {
   active.add(batcher);
-  if (!installed && typeof process !== "undefined" && typeof process.once === "function") {
-    installed = true;
-    process.on("SIGTERM", () => {
-      void Promise.allSettled([...active].map((b) => b.drain()));
+  if (!drainRegistered) {
+    drainRegistered = true;
+    onShutdownAfterSends(async () => {
+      await Promise.allSettled([...active].map((b) => b.drain()));
     });
   }
   return () => {

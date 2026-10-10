@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { registerAuditActor } from "@/lib/audit/context";
@@ -17,7 +18,7 @@ import { supabaseAdmin } from "@/lib/disparador/admin-client";
 export const maxDuration = 120;
 const LOCK_TTL_SECONDS = 120;
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   await registerAuditActor({ actorType: "system", source: "cron_billing" });
   if (!process.env.CRON_SECRET) return NextResponse.json({ error: "cron not configured" }, { status: 503 });
   if (!matchesOperationalSecret(process.env.CRON_SECRET, request.headers.get("x-cron-secret"))) {
@@ -55,4 +56,9 @@ export async function POST(request: Request) {
       }
     }
   }
+}
+
+// Batimento do cron (D-12, migration 334): registra quando rodou e como terminou; não altera a resposta.
+export async function POST(request: Request) {
+  return trackCron("billing", () => handlePost(request))
 }

@@ -1,3 +1,4 @@
+import { trackCron } from "@/lib/ops/cron-heartbeat";
 import { after, NextResponse } from "next/server";
 import { registerAuditActor } from '@/lib/audit/context'
 import { randomUUID } from 'node:crypto';
@@ -46,7 +47,11 @@ import {
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
+import { dispatchSchemaReady } from "@/lib/disparador/cron-preflight";
+import { fetchDueCandidates } from "@/lib/disparador/due-candidates";
+import { mapWithConcurrency, resolvePlanConcurrency } from "@/lib/disparador/plan-concurrency";
 import { drainPushOutbox } from "@/lib/push/service";
+import { trackSend } from "@/lib/disparador/shutdown-gate";
 import { sweepStuckApiCampaigns } from "@/lib/disparador/api-v1-cleanup";
 import { recoverStaleSendingReservations } from "@/lib/disparador/reconcile-unknown-provider-outcomes";
 import { drainStatusInbox } from "@/lib/whatsapp/status-inbox";
@@ -204,7 +209,6 @@ async function buildChannelWork(
   return { channels, defaultMaxInFlight, configs };
 }
 
-const CANDIDATE_PAGE_SIZE = 1000;
 
 // O retry de erros transitórios roda no máximo a cada ~5 ticks: o lock
 // expira sozinho (não é liberado) e só o tick que o adquire chama a RPC.
@@ -224,34 +228,6 @@ const METRICS_CONSOLIDATE_MAX_ROUNDS = 5;
 function meta131026ConfirmMinutes(): number {
   const parsed = Number(process.env.DISPARADOR_131026_CONFIRM_MINUTES);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 1440;
-}
-
-// Candidatos vencidos de uma campanha, na ordem (scheduled_at, id), em
-// páginas de 1.000 (o PostgREST corta cada resposta no max-rows, 1.000 por
-// padrão no Supabase). Nada é reservado aqui: o claim decide.
-async function fetchDueCandidates(db: AdminDb, campaignId: string, limit: number): Promise<QueueItem[]> {
-  const items: QueueItem[] = [];
-  const now = new Date().toISOString();
-  while (items.length < limit) {
-    const from = items.length;
-    const to = Math.min(limit, from + CANDIDATE_PAGE_SIZE) - 1;
-    const { data, error } = await db
-      .from("disp_message_queue")
-      .select("*, contacts(name, phone, company)")
-      .eq("campaign_id", campaignId)
-      .eq("status", "agendado")
-      .lte("scheduled_at", now)
-      // Desempate por id: a rodada inteira vence em < 2 s
-      // (roundSpreadOffsetMs), então muitos itens dividem o scheduled_at.
-      .order("scheduled_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to);
-    if (error) throw error;
-    const page = (data ?? []) as QueueItem[];
-    items.push(...page);
-    if (page.length < to - from + 1) break;
-  }
-  return items;
 }
 
 // Amostra dos itens vencidos mais antigos (sem OFFSET, sem contatos): só para o detector de reflow no caminho em lote (188).
@@ -424,7 +400,7 @@ async function runTick(request: Request, chain: ChainContext) {
     // derruba o tick nem impede novos envios.
     try {
       const recovered = await recoverStaleSendingReservations(db);
-      if (recovered.recoveredAccepted > 0 || recovered.finalizedUnknown > 0 || recovered.failed > 0) {
+      if (recovered.recoveredAccepted > 0 || recovered.finalizedUnknown > 0 || recovered.requeuedNeverSent > 0 || recovered.failed > 0) {
         for (const campaignId of recovered.campaignIds) {
           const { error: completeError } = await db.rpc("complete_dispatch_campaign", {
             p_campaign_id: campaignId,
@@ -436,7 +412,7 @@ async function runTick(request: Request, chain: ChainContext) {
           level: recovered.failed > 0 ? "warn" : "info",
           source: "disparador",
           event: "dispatch_stale_sending_recovered",
-          message: "Watchdog liberou reservas antigas sem reenviar",
+          message: "Watchdog liberou reservas antigas: devolveu à fila o que nunca chegou ao provedor e fechou como incerto o que pode ter saído (nunca reenvia este)",
           payload: recovered,
         });
       }
@@ -447,8 +423,9 @@ async function runTick(request: Request, chain: ChainContext) {
     // Preflight de deploy: se a coluna next_batch_at (migration 118) não
     // existir, o código novo subiu sem as migrations. Para aqui, antes de
     // qualquer preparação de campanha ou envio externo.
-    const { error: readinessError } = await db.from("campaigns").select("next_batch_at").limit(1);
-    if (readinessError) {
+    // D-16: resultado positivo em cache por 10 min no processo (cron-preflight.ts); falha nunca é guardada.
+    const readiness = await dispatchSchemaReady(db);
+    if (!readiness.ok) {
       tickStatus = "migration_required";
       return NextResponse.json({ error: "Dispatch safety migration required" }, { status: 503 });
     }
@@ -547,16 +524,18 @@ async function runTick(request: Request, chain: ChainContext) {
     // Claim em lote (migration 188, DISPARADOR_BATCH_CLAIM=0 desliga): fichas por campanha×número no planejamento e itens reivindicados
     // em lotes por número. Se as RPCs não existirem, volta sozinho ao caminho por item (fetchDueCandidates + claim unitário).
     let batchMode = isBatchClaimEnabled();
-    for (const campaign of (active ?? []) as Campaign[]) {
-      if (outOfTime()) break;
+    // D-08: planejamento por campanha com concorrência limitada (plan-concurrency.ts); a ordem do resultado é a da lista (fairness).
+    let tokenPlanned = 0;
+    const planCampaign = async (campaign: Campaign): Promise<PlannedCampaign | null> => {
+      if (outOfTime()) return null;
       // Avalia antes de planejar para não enviar outra rodada de uma
       // campanha que já passou do limite no tick anterior.
-      if (await checkCampaignAutoPause(db, campaign, autoPauseConfig)) continue;
-      if (outOfTime()) break;
+      if (await checkCampaignAutoPause(db, campaign, autoPauseConfig)) return null;
+      if (outOfTime()) return null;
       if (
         !canSendNow({ inicio: campaign.janela_inicio, fim: campaign.janela_fim, dias: campaign.dias_envio })
       )
-        continue;
+        return null;
       // Sequential campaigns (batch_size=1) still use the database cadence
       // reservation. Batched/segmented campaigns already encode their logical
       // pause in disp_message_queue.scheduled_at when startCampaign builds the
@@ -568,7 +547,7 @@ async function runTick(request: Request, chain: ChainContext) {
           p_campaign_id: campaign.id,
         });
         if (reservationError) throw reservationError;
-        if (!reserved) continue;
+        if (!reserved) return null;
       }
 
       // This is a candidate-fetch limit, not provider concurrency (that is
@@ -585,11 +564,16 @@ async function runTick(request: Request, chain: ChainContext) {
       if (batchMode) {
         const plan = await planClaimTokens(db, campaign.id, batchSize);
         if (plan === null) {
+          // D-08: com planejamento concorrente, a RPC "sumir" depois de outra campanha já ter sido planejada por fichas misturaria os dois
+          // caminhos (claim em lote × por item) no mesmo tick. Não acontece em operação normal (a 1ª campanha decide sozinha); se
+          // acontecer, o tick falha inteiro e o próximo recomeça consistente.
+          if (tokenPlanned > 0) throw new Error("count_due_dispatch_items ficou indisponível no meio do planejamento do tick");
           batchMode = false;
           console.warn("[Cron] count_due_dispatch_items indisponível (migration 188 não aplicada); usando o claim por item.");
           items = await fetchDueCandidates(db, campaign.id, batchSize);
         } else {
           claimTokens = plan.tokens;
+          tokenPlanned++;
           items = plan.tokens.length ? await fetchDueSample(db, campaign.id) : [];
         }
       } else {
@@ -612,7 +596,7 @@ async function runTick(request: Request, chain: ChainContext) {
           if (recalcError)
             console.error("[Cron] Falha ao recalcular métricas:", recalcError.message);
         }
-        continue;
+        return null;
       }
       // Lote/"Segmentado": fila com rodadas agendadas em período fechado
       // (montada antes do relógio de janela, retomada…) é redistribuída uma
@@ -631,14 +615,25 @@ async function runTick(request: Request, chain: ChainContext) {
         if (reflow.ok)
           console.log("[Cron] Fila redistribuída na janela:", campaign.id, reflow.items, "itens via", reflow.via);
         else console.error("[Cron] Falha ao redistribuir a fila na janela:", campaign.id, reflow.error);
-        continue;
+        return null;
       }
-      planned.push({
+      return {
         campaign,
         items: claimTokens ?? items,
         result: { campaign_id: campaign.id, sent: 0, pending_confirmation: 0 },
-      });
+      };
+    };
+    const toPlan = (active ?? []) as Campaign[];
+    const planConcurrency = resolvePlanConcurrency();
+    let planResults: Array<PlannedCampaign | null>;
+    if (batchMode && planConcurrency > 1 && toPlan.length > 1) {
+      // A 1ª campanha decide SOZINHA se as RPCs do claim em lote existem (batchMode pode virar false); as demais seguem em paralelo.
+      const first = await planCampaign(toPlan[0]);
+      planResults = [first, ...(await mapWithConcurrency(toPlan.slice(1), planConcurrency, planCampaign))];
+    } else {
+      planResults = await mapWithConcurrency(toPlan, planConcurrency, planCampaign);
     }
+    for (const entry of planResults) if (entry) planned.push(entry);
     plannedCount = planned.length;
 
     // 3b) Envio, agendado por NÚMERO (dispatch-scheduler.ts): números em
@@ -670,6 +665,7 @@ async function runTick(request: Request, chain: ChainContext) {
         })
       : null;
     const confirmBatcher = claimer ? new ConfirmBatcher({ db, single: singleConfirm(db) }) : null;
+    // D-02: o SIGTERM espera os envios em voo ANTES de drenar o micro-lote de confirmações (registerShutdownDrain).
     const unregisterDrain = confirmBatcher ? registerShutdownDrain(confirmBatcher) : null;
     try {
     schedule = await runDispatchSchedule<QueueItem>({
@@ -716,7 +712,8 @@ async function runTick(request: Request, chain: ChainContext) {
         let signal = null as BackoffReason | null;
         let pauseCampaign = false;
         try {
-          const outcome = await processQueueItem(item, entry.campaign, {
+          // D-02: registra o envio em voo (claim → confirmação); no SIGTERM o processo espera até 8 s por estes antes de sair.
+          const outcome = await trackSend(processQueueItem(item, entry.campaign, {
             defaultMaxInFlight: channelWork.defaultMaxInFlight.get(ctx.channelId),
             channelConfig: channelConfigFor(channelWork.configs, ctx.channelId, entry.campaign.account_id),
             blacklistLookup: itemBlacklist,
@@ -726,7 +723,7 @@ async function runTick(request: Request, chain: ChainContext) {
               telemetry.recordProviderCall(observation.provider, observation.latencyMs, observation.code);
               signal = observation.signal ?? signal;
             },
-          });
+          }));
           telemetry.recordOutcome(ctx.channelId, outcome.outcome);
           if (outcome.outcome === "sent") entry.result.sent++;
           if (outcome.outcome === "pending_confirmation") entry.result.pending_confirmation++;
@@ -827,7 +824,7 @@ async function runTick(request: Request, chain: ChainContext) {
 // Tick encadeado (tick-chain.ts): ao terminar um tick que PROCESSOU trabalho (lock já liberado no finally de runTick), dispara o
 // próximo hop via after() — sem esperar. O hop encadeado (header x-cron-hop) responde 202 na hora e roda o tick em after(), então
 // nenhuma requisição fica presa ao proxy; o cron externo (hop 0) continua síncrono e é o ressuscitador da cadeia.
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const chainConfig = resolveTickChainConfig();
   const ctx = readChainContext(request.headers);
   const secret = process.env.CRON_SECRET ?? "";
@@ -858,4 +855,9 @@ export async function POST(request: Request) {
   if (!chainConfig.enabled) return response;
   const status = await response.clone().json().then((body) => String(body?.status ?? ""), () => "");
   return chainAfter(response, status);
+}
+
+// Batimento do cron (D-12, migration 334): registra quando rodou e como terminou; não altera a resposta.
+export async function POST(request: Request) {
+  return trackCron("disparador_tick", () => handlePost(request))
 }

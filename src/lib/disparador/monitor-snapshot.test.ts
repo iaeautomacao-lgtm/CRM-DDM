@@ -250,7 +250,7 @@ describe("buildMonitorSnapshot", () => {
 
 // ── IO: leituras sempre escopadas pela conta ──
 type Call = { table: string; filters: Array<[string, unknown]> };
-function fakeDb(overrides: { rpcError?: boolean } = {}) {
+function fakeDb(overrides: { rpcError?: boolean; pendingRpc?: "missing" | Array<{ campaign_id: string; pending: number | string }>; pendingRows?: number } = {}) {
   const calls: Call[] = [];
   const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const rows: Record<string, unknown[]> = {
@@ -261,7 +261,7 @@ function fakeDb(overrides: { rpcError?: boolean } = {}) {
     channel_health: [{ session_id: A, verified_name: "Cobrança 1", display_phone_number: "+5511", checked_at: "2026-10-08T10:00:00Z", last_error: null }],
     campaigns: [{ id: C1, nome: "Black Friday", status: "em_execucao", session_ids: [A], updated_at: iso(1) }],
     system_logs: [],
-    dispatch_meta_131026_failures: [{ campaign_id: C1 }, { campaign_id: C1 }],
+    dispatch_meta_131026_failures: Array.from({ length: overrides.pendingRows ?? 2 }, () => ({ campaign_id: C1 })),
     dispatch_channel_limits: [{ session_id: A, max_in_flight: 24, hourly_limit: null }],
     dispatch_channel_cooldowns: [],
     campaign_metrics_live: [{ campaign_id: C1, total_contatos: 10, total_enviados: 4, total_entregues: 0, total_lidos: 0, total_erros: 1, total_blacklist: 0 }],
@@ -277,6 +277,11 @@ function fakeDb(overrides: { rpcError?: boolean } = {}) {
   };
   const rpc = async (fn: string, args: Record<string, unknown>) => {
     rpcCalls.push({ fn, args });
+    // Migration 333 (D-10): por padrão a função de contagem agrupada está ausente (caminho antigo); os testes da 333 a ligam.
+    if (fn === "dispatch_131026_pending_counts") {
+      const pending = overrides.pendingRpc ?? "missing";
+      return pending === "missing" ? { data: null, error: { code: "PGRST202", message: "not found" } } : { data: pending, error: null };
+    }
     if (overrides.rpcError) return { data: null, error: { code: "PGRST202", message: "not found" } };
     return { data: { sessions: [], campaigns: [], errors: [], has_queue_index: true, has_error_code: true }, error: null };
   };
@@ -295,7 +300,10 @@ describe("loadMonitorInput / getMonitorSnapshot", () => {
     }
     const accountLogs = calls.filter((c) => c.table === "system_logs" && c.filters.some(([k]) => k === "in:event"));
     expect(accountLogs[0].filters).toContainEqual(["eq:account_id", "ACC-1"]);
-    expect(rpcCalls).toEqual([{ fn: "dispatch_monitor_counts", args: { p_account_id: "ACC-1", p_sessions: [A], p_campaigns: [C1], p_errors_minutes: 15 } }]);
+    expect(rpcCalls).toEqual([
+      { fn: "dispatch_131026_pending_counts", args: { p_account_id: "ACC-1" } },
+      { fn: "dispatch_monitor_counts", args: { p_account_id: "ACC-1", p_sessions: [A], p_campaigns: [C1], p_errors_minutes: 15 } },
+    ]);
     expect(input.channels.map((c) => c.id)).toEqual([A]);
     expect(JSON.stringify(input)).not.toContain(DISABLED);
     // Limites e cooldowns só dos números da conta.
@@ -303,6 +311,23 @@ describe("loadMonitorInput / getMonitorSnapshot", () => {
     expect(input.pending131026.get(C1)).toBe(2);
     expect(input.metrics.get(C1)).toMatchObject({ total: 10, enviados: 4, erros: 1 });
     expect(input.limits.get(A)).toEqual({ maxInFlight: 24, hourlyLimit: null });
+  });
+
+  it("D-10: com a migration 333, a contagem 131026 vem agrupada do banco (sem teto de 5.000 linhas)", async () => {
+    const { db, calls } = fakeDb({ pendingRpc: [{ campaign_id: C1, pending: "12345" }] });
+    const input = await loadMonitorInput(db, "ACC-1", NOW);
+    expect(input.pending131026.get(C1)).toBe(12345);
+    expect(calls.some((c) => c.table === "dispatch_meta_131026_failures")).toBe(false);
+    expect(input.degraded.join(" ")).not.toMatch(/131026/);
+  });
+
+  it("D-10: sem a 333 lê as linhas como antes e SINALIZA contagem parcial ao bater nas 5.000", async () => {
+    const small = await loadMonitorInput(fakeDb({ pendingRows: 7 }).db, "ACC-1", NOW);
+    expect(small.pending131026.get(C1)).toBe(7);
+    expect(small.degraded.join(" ")).not.toMatch(/131026/);
+    const capped = await loadMonitorInput(fakeDb({ pendingRows: 5000 }).db, "ACC-1", NOW);
+    expect(capped.pending131026.get(C1)).toBe(5000);
+    expect(capped.degraded.join(" ")).toContain("131026 pendentes (contagem parcial: 5.000+");
   });
 
   it("RPC ausente: degraded e o painel ainda monta", async () => {
@@ -314,7 +339,11 @@ describe("loadMonitorInput / getMonitorSnapshot", () => {
   });
 
   it("cache de ~2,5 s por conta: várias abas = uma leitura; outra conta tem cache próprio; expira", async () => {
-    const { db, rpcCalls } = fakeDb();
+    const { db, rpcCalls: allRpcCalls } = fakeDb();
+    // A contagem 131026 também é uma RPC por leitura; o cache é medido pela RPC principal do Monitor.
+    const rpcCalls = new Proxy([] as typeof allRpcCalls, {
+      get: (_t, prop) => (allRpcCalls.filter((c) => c.fn === "dispatch_monitor_counts") as never)[prop as never],
+    });
     let t = NOW.getTime();
     const clock = () => new Date(t);
     await Promise.all([getMonitorSnapshot(db, "ACC-1", clock), getMonitorSnapshot(db, "ACC-1", clock), getMonitorSnapshot(db, "ACC-1", clock)]);

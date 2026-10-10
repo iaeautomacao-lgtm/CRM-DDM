@@ -45,6 +45,7 @@ vi.mock('@/lib/disparador/reconcile-unknown-provider-outcomes', () => ({
   recoverStaleSendingReservations: vi.fn(async () => ({
     recoveredAccepted: 0,
     finalizedUnknown: 0,
+    requeuedNeverSent: 0,
     failed: 0,
     campaignIds: [],
   })),
@@ -572,7 +573,7 @@ describe('cron: agendador por número', () => {
 });
 
 describe('cron: candidatos por campanha', () => {
-  it('teto derivado da vazão do tick, em páginas de 1.000 (max-rows do PostgREST)', async () => {
+  it('teto derivado da vazão do tick, em páginas de 1.000 por KEYSET (max-rows do PostgREST; D-09)', async () => {
     vi.stubEnv('CRON_SECRET', 'test-secret');
     vi.stubEnv('DISPATCH_PROCESS_CONCURRENCY', '48');
     vi.stubEnv('DISPARADOR_TICK_BUDGET_MS', '45000');
@@ -580,7 +581,7 @@ describe('cron: candidatos por campanha', () => {
       id: 'imediato', account_id: 'acc', status: 'em_execucao', janela_inicio: '00:00', janela_fim: '23:59',
       dias_envio: [], batch_size: 999_999, batch_pause_seconds: 0,
     };
-    const ranges: Array<[number, number]> = [];
+    const pages: Array<{ limit: number; after: string | null; columns: string }> = [];
     const total = 10_000;
     mocks.rpc.mockImplementation(async (name: string) =>
       name === 'blacklisted_phone_keys' ? { data: [], error: null } : { data: true, error: null }
@@ -588,17 +589,25 @@ describe('cron: candidatos por campanha', () => {
     mocks.from.mockImplementation((table: string) => {
       let result: { data: unknown; error: null } = { data: [], error: null };
       const builder: Record<string, unknown> = {};
-      for (const m of ['lte', 'lt', 'order', 'limit', 'update', 'in', 'select', 'not', 'is', 'or']) builder[m] = () => builder;
+      let after: string | null = null;
+      let columns = '';
+      for (const m of ['lte', 'lt', 'order', 'update', 'in', 'not', 'is']) builder[m] = () => builder;
+      builder.select = (cols?: string) => ((columns = cols ?? ''), builder);
+      // Keyset: o cursor vem na expressão "scheduled_at.gt.\"X\",and(scheduled_at.eq.\"X\",id.gt.\"i<N>\")".
+      builder.or = (expr: string) => ((after = /id\.gt\."(i\d+)"/.exec(expr)?.[1] ?? null), builder);
       builder.eq = (_column: string, value: unknown) => {
         if (table === 'campaigns' && value === 'em_execucao') result = { data: [campaign], error: null };
         return builder;
       };
-      builder.range = (from: number, to: number) => {
-        ranges.push([from, to]);
-        const rows = [];
-        for (let i = from; i <= Math.min(to, from + 999, total - 1); i++)
-          rows.push({ id: `i${i}`, campaign_id: 'imediato', session_id: 'ch', tentativas: 0 });
-        result = { data: rows, error: null };
+      builder.limit = (n: number) => {
+        if (table === 'disp_message_queue') {
+          pages.push({ limit: n, after, columns });
+          const first = after === null ? 0 : Number(after.slice(1)) + 1;
+          const rows = [];
+          for (let i = first; i < Math.min(first + n, total); i++)
+            rows.push({ id: `i${i}`, campaign_id: 'imediato', session_id: 'ch', tentativas: 0, scheduled_at: '2026-10-09T12:00:00+00:00' });
+          result = { data: rows, error: null };
+        }
         return builder;
       };
       builder.then = (resolve: (value: unknown) => unknown) => Promise.resolve(result).then(resolve);
@@ -611,7 +620,11 @@ describe('cron: candidatos por campanha', () => {
       vi.unstubAllEnvs();
     }
     // 48 × 45 s ÷ 0,5 s = 4.320 (antes: 700 fixos).
-    expect(ranges).toEqual([[0, 999], [1000, 1999], [2000, 2999], [3000, 3999], [4000, 4319]]);
+    expect(pages.map((x) => [x.limit, x.after])).toEqual([[1000, null], [1000, 'i999'], [1000, 'i1999'], [1000, 'i2999'], [320, 'i3999']]);
+    // Só as colunas que o envio usa (e o contato), nunca select("*").
+    expect(pages[0].columns).toContain('mensagem_final');
+    expect(pages[0].columns).not.toBe('*');
+    expect(pages[0].columns.startsWith('*')).toBe(false);
     expect(mocks.process).toHaveBeenCalledTimes(4320);
     vi.clearAllMocks();
   });

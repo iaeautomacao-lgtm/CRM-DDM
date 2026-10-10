@@ -59,3 +59,12 @@ arquivo fora do repositório (não colar segredo em crontab versionado).
 - `GET` com o segredo em cada rota de diagnóstico devolve `healthy`/`unavailable`.
 - O tick do disparador grava uma linha `cron_tick` em `system_logs` por execução: ausência de linhas
   recentes = cron parado.
+
+## Batimento dos crons (migration 334)
+
+Cada rota de cron registra, ao terminar, uma linha em `wacrm.cron_heartbeat` (job, cadência esperada, último OK, último
+status/erro, duração, contadores) — `src/lib/ops/cron-heartbeat.ts`, cadências em `src/lib/ops/cron-jobs.ts`. O cartão
+"Saúde do sistema" (`/api/ops/system-health`) lista todos: **atrasado** depois de 2,5 ciclos sem OK e **parado** depois de 6
+(pisos de 3 e 10 min). Resposta `401` (segredo errado) não conta como execução; `503`/exceção conta como erro e o job
+envelhece pelo último OK. Job que nunca registrou aparece como `indisponivel` (pode não estar agendado nesta instalação).
+Sem a migration o registro é ignorado e o cartão volta a mostrar só o `cron_tick` do disparador.

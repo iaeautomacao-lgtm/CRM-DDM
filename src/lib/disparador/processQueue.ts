@@ -35,6 +35,8 @@ import { DB_DEFAULT_MAX_IN_FLIGHT } from "@/lib/disparador/throughput-config";
 import { queueItemPrimaryPhone, type BlacklistLookup } from "@/lib/disparador/tick-preload";
 import { hasDialablePhone, NO_VALID_PHONE_ERROR } from "@/lib/disparador/valid-phone";
 import { startInflightLease } from "@/lib/disparador/inflight-lease";
+import { markProviderCallStarted, releaseUncalledItem } from "@/lib/disparador/provider-call-marker";
+import { isShuttingDown } from "@/lib/disparador/shutdown-gate";
 import { AI_UNAVAILABLE_ERROR, isNotConnectedError, NOT_CONNECTED_ERROR, UNCERTAIN_OUTCOME_ERROR } from "@/lib/disparador/provider-outcome";
 import { generateDispatchAiText } from "@/lib/disparador/dispatch-ai";
 import { metaCodesWhere, reportUnknownMetaCode } from "@/lib/disparador/meta-error-catalog";
@@ -127,6 +129,25 @@ let cappedClaimUnavailable = false;
 
 function isMissingFunction(error: { code?: string } | null): boolean {
   return error?.code === "PGRST202" || error?.code === "42883";
+}
+
+/**
+ * Última etapa antes de falar com o provedor (D-02). Devolve um resultado para ENCERRAR o processamento sem enviar, ou null para enviar.
+ * - desligamento em curso (SIGTERM): não inicia chamada nova; o item volta à fila (ainda não chamou);
+ * - "lost": outro remetente já chamou, ou o item não está mais 'enviando' (o watchdog o devolveu): não envia, não mexe no item;
+ * - "error": não dá para provar o estado: não envia; o item volta à fila se ainda não chamou (senão o watchdog trata);
+ * - "unavailable" (migration 332 ausente): envia como antes, sem marcador.
+ */
+async function beginProviderCall(itemId: string): Promise<ProcessResult | null> {
+  if (isShuttingDown()) {
+    await releaseUncalledItem(supabaseAdmin(), itemId);
+    return { outcome: "deferred", reason: "shutting_down" };
+  }
+  const mark = await markProviderCallStarted(supabaseAdmin(), itemId);
+  if (mark === "marked" || mark === "unavailable") return null;
+  if (mark === "lost") return { outcome: "deferred", reason: "provider_call_not_owned" };
+  await releaseUncalledItem(supabaseAdmin(), itemId);
+  return { outcome: "deferred", reason: "provider_call_marker_failed" };
 }
 
 async function claimItemAtomically(itemId: string, defaultMaxInFlight?: number): Promise<boolean> {
@@ -656,10 +677,22 @@ export async function processQueueItem(
   }
 
   if (blacklisted) {
-    await supabaseAdmin()
+    // D-17: confere o resultado e exige que o item ainda esteja 'enviando'. Antes, uma falha aqui passava em silêncio: o item ficava
+    // 'enviando' até o watchdog o fechar como "incerto" e a métrica contava um bloqueio que não foi gravado.
+    const { data: blocked, error: blockError } = await supabaseAdmin()
       .from("disp_message_queue")
       .update({ status: "bloqueado", erro: "Número na Blacklist" })
-      .eq("id", item.id);
+      .eq("id", item.id)
+      .eq("status", "enviando")
+      .select("id");
+    if (blockError) {
+      // Nada foi enviado e o bloqueio não ficou gravado: erro técnico retentável (o próximo tick confere a blacklist de novo).
+      const message = `Falha ao registrar o bloqueio por blacklist: ${blockError.message}`;
+      await markQueueError(item.id, message, false, item.campaign_id, tentativasAtuais + 1);
+      return { outcome: "error", error: message };
+    }
+    // Outro caminho já mudou o item (devolvido pelo watchdog, encerrado...): não conta o bloqueio duas vezes.
+    if (!blocked || blocked.length === 0) return { outcome: "blocked", reason: "blacklisted" };
     // Antes desta correção, nada incrementava total_blacklist —
     // campaign_metrics nunca refletia quantos itens foram bloqueados.
     const { error: metricError } = await supabaseAdmin().rpc("increment_campaign_metric", {
@@ -763,10 +796,24 @@ export async function processQueueItem(
   // F14: enquanto espera o provedor, renova o lease do item em voo (o watchdog só age em lease vencido).
   const lease = startInflightLease(supabaseAdmin(), item.id);
   try {
-    externalMessageId =
-      provider === "meta"
-        ? await sendViaMeta(config, item, normalizedPhone, cleanText, tipo)
-        : await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
+    // D-02 (migration 332): o marcador "chamada ao provedor iniciada" é gravado IMEDIATAMENTE antes do POST, em cada ramo (Meta e WAHA
+    // continuam caminhos separados). Se outro remetente já chamou, ou o item saiu de 'enviando', ou o processo está desligando, NÃO
+    // se envia: o item é devolvido à fila (só se ainda não chamou) ou segue com quem tem a chamada.
+    if (provider === "meta") {
+      const stop = await beginProviderCall(item.id);
+      if (stop) {
+        lease.stop();
+        return stop;
+      }
+      externalMessageId = await sendViaMeta(config, item, normalizedPhone, cleanText, tipo);
+    } else {
+      const stop = await beginProviderCall(item.id);
+      if (stop) {
+        lease.stop();
+        return stop;
+      }
+      externalMessageId = await sendViaWaha(config, item, normalizedPhone, cleanText, tipo);
+    }
     lease.stop();
     observe(options, { provider, latencyMs: Date.now() - providerStartedAt, ok: true, signal: null, code: null });
   } catch (sendErr: any) {
