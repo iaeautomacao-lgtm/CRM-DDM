@@ -129,3 +129,48 @@ describe("buildMePermissions com cargo de sistema ajustado (TASK5, migration 318
     expect(me.permissions).toContain("campaigns.manage");
   });
 });
+
+describe("pages do cargo personalizado saem da permissão (PAGE_MATRIX, decisão 13/10)", () => {
+  const custom = (role: AccountRole, permissions: string[]) =>
+    buildMePermissions({
+      account: { id: "acc-1", name: "Acme" },
+      role,
+      permissions: new Set(permissions),
+      customRole: { id: "c1", name: "Personalizado" },
+    }).pages;
+
+  it("channels.manage abre /canais mesmo com papel de compatibilidade operador", () => {
+    const pages = custom("agent", ["inbox.view", "channels.manage"]);
+    expect(pages).toContain("/canais");
+    expect(pages).not.toContain("/contacts");
+    expect(pages).not.toContain("/pipelines");
+  });
+
+  it("sem a permissão a tela não abre, mesmo com compat admin", () => {
+    const pages = custom("admin", ["inbox.view"]);
+    expect(pages).not.toContain("/canais");
+    expect(pages).not.toContain("/settings");
+    expect(pages).toContain("/historico");
+  });
+
+  it("ai.agents.view abre /settings; /perfil e /seguranca seguem o papel (todos)", () => {
+    const pages = custom("agent", ["ai.agents.view"]);
+    expect(pages).toContain("/settings");
+    expect(pages).toContain("/perfil");
+    expect(pages).toContain("/seguranca");
+  });
+
+  it("papéis de sistema: admin abre as telas de gestão; supervisor abre /settings e /historico; operador não", () => {
+    const pages = (r: AccountRole) => buildMePermissions(ctxFor(r)).pages;
+    for (const p of ["/canais", "/contacts", "/pipelines", "/ajuda", "/lead-extractor"]) {
+      expect(pages("admin"), p).toContain(p);
+      expect(pages("supervisor"), p).not.toContain(p);
+      expect(pages("agent"), p).not.toContain(p);
+    }
+    expect(pages("supervisor")).toContain("/settings");
+    expect(pages("agent")).not.toContain("/settings");
+    for (const r of ["owner", "admin", "supervisor", "agent"] as const) expect(pages(r)).toContain("/historico");
+    expect(pages("viewer")).not.toContain("/historico");
+    for (const r of ACCOUNT_ROLES) expect(pages(r)).toContain("/perfil");
+  });
+});

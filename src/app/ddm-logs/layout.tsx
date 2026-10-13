@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 
-// noindex — não é autenticação (a rota não tem nenhuma, de propósito),
-// só evita que a URL "oculta" acabe indexada por um crawler.
+// noindex: evita que a URL acabe indexada por um crawler. A página não tem gate próprio;
+// quem protege os dados é /api/ddm-logs (admin com audit.view). Fica fora do menu lateral
+// (só no Ctrl+K, com audit.view).
 export const metadata: Metadata = {
   title: "DDM Logs",
   robots: {

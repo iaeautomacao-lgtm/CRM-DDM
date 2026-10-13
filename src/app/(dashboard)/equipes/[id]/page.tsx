@@ -320,14 +320,14 @@ export default function EquipeDetailPage({
   const { id } = use(params);
   const router = useRouter();
   const supabase = createClient();
-  const { user, accountId, accountRole } = useAuth();
+  const { user, accountId } = useAuth();
   // Supervisor (admin) view: read-only. Owner keeps full edit access.
   // UI-only — RLS still allows admin writes where migrations already
   // granted them; this just hides the controls per this task's scope.
   // Também sem `teams.manage` (papel personalizado) a tela fica só leitura.
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState("overview");
-  const isReadOnly = accountRole === "admin" || !can("teams.manage");
+  const isReadOnly = !can("teams.manage");
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
