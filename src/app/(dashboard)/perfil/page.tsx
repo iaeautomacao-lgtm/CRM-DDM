@@ -15,6 +15,7 @@ import { PanelHeadingLevel } from "@/components/settings/settings-panel-head";
 import { SecurityPanel } from "@/components/settings/security-panel";
 import { AppearancePanel } from "@/components/settings/appearance-panel";
 import { PushSettingsCard } from "@/components/push/push-settings-card";
+import { PageHeader } from "@/components/ddm/page-header";
 
 const TABS = ["perfil", "seguranca", "aparencia"] as const;
 type ProfileTab = (typeof TABS)[number];
@@ -33,12 +34,7 @@ function PerfilContent() {
 
   return (
     <PageBody className="gap-6">
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Meu perfil</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Suas informações pessoais, segurança, notificações e aparência.
-        </p>
-      </div>
+      <PageHeader>Suas informações pessoais, segurança, notificações e aparência.</PageHeader>
 
       <Tabs
         value={tab}

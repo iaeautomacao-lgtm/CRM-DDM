@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 /**
@@ -26,9 +26,9 @@ export function PageToolbar({
 }
 
 /** Contêiner de página do redesenho: largura máxima 1320px (o respiro lateral já vem do <main> do shell). */
-export function PageBody({ children, className }: { children: ReactNode; className?: string }) {
+export function PageBody({ children, className, ...rest }: { children: ReactNode; className?: string } & Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'className'>) {
   return (
-    <div className={cn('mx-auto flex w-full max-w-[1320px] flex-col gap-3.5 pb-10 md:pb-12', className)}>
+    <div {...rest} className={cn('mx-auto flex w-full max-w-[1320px] flex-col gap-3.5 pb-10 md:pb-12', className)}>
       {children}
     </div>
   )

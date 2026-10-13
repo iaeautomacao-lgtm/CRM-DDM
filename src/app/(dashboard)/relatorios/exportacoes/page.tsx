@@ -53,6 +53,7 @@ import {
 import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
+import { PageHeader } from "@/components/ddm/page-header";
 
 const BUCKET = "relatorio-exports";
 
@@ -216,12 +217,7 @@ export default function ExportacoesPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Exportações</h2>
-        <p className="text-sm text-muted-foreground">
-          Histórico de arquivos exportados nos relatórios — baixe novamente sem gerar de novo.
-        </p>
-      </div>
+      <PageHeader>Histórico de arquivos exportados nos relatórios — baixe novamente sem gerar de novo.</PageHeader>
 
       <div className="relative max-w-md">
         <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

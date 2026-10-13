@@ -84,6 +84,7 @@ import { KpiStrip } from "@/components/ddm/kpi-strip";
 import { PageBody, PageToolbar } from "@/components/ddm/page-toolbar";
 import { StatusChip, type StatusTone } from "@/components/ddm/status-chip";
 import { ErrorState } from "@/components/dashboard/error-state";
+import { PageHeader } from "@/components/ddm/page-header";
 
 /**
  * Run history viewer.
@@ -570,11 +571,10 @@ export default function FlowRunsPage() {
           <ArrowLeft className="size-3" aria-hidden="true" />
           {flow.name}
         </Link>
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Execuções</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
+        <PageHeader heading="Execuções">
           As 50 execuções mais recentes deste fluxo (após os filtros abaixo).
           Clique em uma linha para ver o log passo a passo do motor.
-        </p>
+        </PageHeader>
       </div>
 
       {runs.length > 0 && (

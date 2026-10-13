@@ -61,6 +61,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { CountUp } from '@/components/motion/count-up';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import { PageBody, PageToolbar } from '@/components/ddm/page-toolbar';
+import { PageHeader } from '@/components/ddm/page-header';
 
 const PAGE_SIZE = 25;
 
@@ -906,12 +907,7 @@ function ContactsContent() {
 
   return (
     <PageBody>
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Contatos</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Sua lista de contatos, as listas importadas, as tags e os campos personalizados.
-        </p>
-      </div>
+      <PageHeader>Sua lista de contatos, as listas importadas, as tags e os campos personalizados.</PageHeader>
 
       <Tabs
         value={tab}

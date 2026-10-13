@@ -1,6 +1,7 @@
 'use client';
 
 import { apiFetch } from "@/lib/api-fetch";
+import { PageHeader } from "@/components/ddm/page-header";
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -972,29 +973,29 @@ export function TemplateManager() {
 
   return (
     <PageBody>
-      <div className="flex flex-wrap items-end justify-between gap-3 pt-1">
-        <div className="flex flex-col gap-1.5">
-          <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Templates</h2>
-          <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-            Crie templates e envie para aprovação da Meta. Use &ldquo;Sincronizar do Meta&rdquo; para importar os aprovados externamente.
-          </p>
-        </div>
-          {canManage && <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={handleSyncFromMeta}
-              disabled={syncing}
-              title="Importar templates aprovados da sua conta comercial do WhatsApp (Meta)"
-            >
-              <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
-              {syncing ? 'Sincronizando…' : 'Sincronizar do Meta'}
-            </Button>
-            <Button onClick={openCreate}>
-              <Plus className="size-4" />
-              Novo template
-            </Button>
-          </div>}
-      </div>
+      <PageHeader
+        actions={
+          canManage && (
+            <>
+              <Button
+                variant="outline"
+                onClick={handleSyncFromMeta}
+                disabled={syncing}
+                title="Importar templates aprovados da sua conta comercial do WhatsApp (Meta)"
+              >
+                <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
+                {syncing ? 'Sincronizando…' : 'Sincronizar do Meta'}
+              </Button>
+              <Button onClick={openCreate}>
+                <Plus className="size-4" />
+                Novo template
+              </Button>
+            </>
+          )
+        }
+      >
+        Crie templates e envie para aprovação da Meta. Use &ldquo;Sincronizar do Meta&rdquo; para importar os aprovados externamente.
+      </PageHeader>
 
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <aside className="w-full shrink-0 space-y-0.5 rounded-card border border-border bg-card p-1.5 lg:sticky lg:top-0 lg:w-52" aria-label="Pastas">

@@ -22,6 +22,8 @@ import { usePresence } from "@/hooks/use-presence";
 import { useSelection } from "@/hooks/use-selection";
 import { Segmented } from "@/components/ddm/segmented";
 import { PageBody } from "@/components/ddm/page-toolbar";
+import { PageHeader } from "@/components/ddm/page-header";
+import { StatusChip } from "@/components/ddm/status-chip";
 import { ForbiddenState } from "@/components/ddm/states";
 import { usePermissions } from "@/hooks/use-permission";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -865,30 +867,9 @@ function MonitoramentoBoard() {
 
   return (
     <PageBody className="gap-4">
-      <div className="flex animate-ddm-up flex-wrap items-start justify-between gap-3 pt-1">
-        <div className="flex flex-col gap-1.5">
-          <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">
-            Monitoramento
-          </h1>
-          <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-            Operadores, filas e conversas em tempo real.
-          </p>
-        </div>
-        <span
-          role="status"
-          className={
-            isConnected
-              ? "inline-flex h-[22px] items-center gap-1.5 rounded-full bg-success-soft px-2 text-[11.5px] font-semibold text-success"
-              : "inline-flex h-[22px] items-center gap-1.5 rounded-full bg-surface-3 px-2 text-[11.5px] font-semibold text-foreground-2"
-          }
-        >
-          <span
-            aria-hidden
-            className={isConnected ? "size-1.5 rounded-full bg-success" : "size-1.5 rounded-full bg-muted-foreground"}
-          />
-          {isConnected ? "Tempo real" : "Reconectando…"}
-        </span>
-      </div>
+      <PageHeader actions={<StatusChip tone={isConnected ? "ok" : "mute"}>{isConnected ? "Tempo real" : "Reconectando…"}</StatusChip>}>
+        Operadores, filas e conversas em tempo real.
+      </PageHeader>
 
       <Segmented<MonitorView>
         ariaLabel="Visão do monitoramento"
