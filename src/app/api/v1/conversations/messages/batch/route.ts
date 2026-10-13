@@ -1,5 +1,6 @@
 import { requireApiKey } from '@/lib/auth/api-context';
-import { ok, toApiErrorResponse, type ApiCallLogContext } from '@/lib/api/v1/respond';
+import { toApiErrorResponse, type ApiCallLogContext } from '@/lib/api/v1/respond';
+import { privateOk } from '@/lib/api/v1/conversation-response';
 import { batchMessages } from '@/lib/api/v1/conversation-history';
 import { readBoundedJson } from '@/lib/api/v1/limited-json';
 export async function POST(request:Request) {
@@ -8,6 +9,6 @@ export async function POST(request:Request) {
   const ctx=await requireApiKey(request,'conversations:read');
   logCtx.accountId=ctx.accountId;logCtx.keyId=ctx.keyId;
   const body=await readBoundedJson(request,16384);
-  return ok(await batchMessages(ctx.supabase,ctx.accountId,body),200,logCtx);
+  return privateOk(await batchMessages(ctx.supabase,ctx.accountId,body),200,logCtx);
  } catch(e) {return toApiErrorResponse(e,logCtx);}
 }
