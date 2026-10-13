@@ -139,6 +139,38 @@ describe("import: escopo do rascunho e preservação dos blocos", () => {
     });
   });
 
+  describe("codificação do arquivo CSV (Excel brasileiro salva em Windows-1252)", () => {
+    const csv = "nome;telefone\nJoão;11999990001\nConceição;11999990002\nAção Ltda;11999990003\n";
+    const postFile = (bytes: Uint8Array) => {
+      const form = new FormData();
+      form.set('file', new File([Uint8Array.from(bytes)], 'contatos.csv', { type: 'text/csv' }));
+      form.set('draft_id', DRAFT);
+      form.set('column_map', JSON.stringify({ name: 'nome', phone: 'telefone' }));
+      form.set('mapping_confirmed', 'true');
+      form.set('chunk_index', '0');
+      return POST(new Request('https://crm.test/api', { method: 'POST', body: form }));
+    };
+    const insertedNames = () => {
+      const ins = state.calls.find((c) => c.table === 'contacts' && c.method === 'insert');
+      return ((ins?.args[0] ?? []) as Array<{ name?: string }>).map((r) => r.name);
+    };
+
+    it.each([
+      ['UTF-8', () => new TextEncoder().encode(csv)],
+      ['UTF-8 com BOM', () => Uint8Array.from([0xef, 0xbb, 0xbf, ...new TextEncoder().encode(csv)])],
+      ['Windows-1252', () => Uint8Array.from(Buffer.from(csv, 'latin1'))],
+    ])('importa os nomes acentuados corretamente (%s)', async (_n, bytes) => {
+      state.contactsReturn = [
+        { id: 'c1', phone_normalized: '5511999990001' },
+        { id: 'c2', phone_normalized: '5511999990002' },
+        { id: 'c3', phone_normalized: '5511999990003' },
+      ];
+      const res = await postFile(bytes());
+      expect(res.status).toBe(200);
+      expect(insertedNames()).toEqual(['João', 'Conceição', 'Ação Ltda']);
+    });
+  });
+
   it("falha parcial de insert não vaza a mensagem do banco em results.erros", async () => {
     state.failContact = true;
     const res = await post(body());

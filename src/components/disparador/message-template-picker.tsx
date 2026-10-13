@@ -1,5 +1,6 @@
 "use client";
 
+import { readTextFile } from "@/lib/text/decode-text";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
@@ -199,7 +200,7 @@ export function MessageTemplatePicker({
         const result = await mammoth.extractRawText({ arrayBuffer });
         text = result.value;
       } else if (name.endsWith(".txt")) {
-        text = await file.text();
+        text = await readTextFile(file);
       } else {
         toast.error("Formato não suportado. Use .docx ou .txt.");
         return;

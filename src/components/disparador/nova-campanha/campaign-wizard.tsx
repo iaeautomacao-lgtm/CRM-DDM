@@ -1,5 +1,6 @@
 "use client";
 
+import { readTextFile } from "@/lib/text/decode-text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -305,7 +306,7 @@ export function CampaignWizard({ open, editing, accountId, channels, teams, tags
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         parsed = tableFromMatrix(XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false }));
       } else {
-        parsed = parseImportCsv(await file.text());
+        parsed = parseImportCsv(await readTextFile(file));
       }
       if (parsed.rows.length === 0) {
         toast.error("Arquivo vazio ou sem dados.");

@@ -15,6 +15,7 @@
 // user creation rather than spreadsheet parsing.
 // ============================================================
 
+import { readTextFile } from '@/lib/text/decode-text';
 import { useRef, useState } from 'react';
 import * as Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -212,7 +213,7 @@ export function BulkImportMembersDialog({
 
     try {
       if (filename.endsWith('.csv')) {
-        const text = (await selected.text()).replace(/^﻿/, '');
+        const text = await readTextFile(selected);
         const parsed = Papa.parse<Record<string, unknown>>(text, {
           header: true,
           skipEmptyLines: true,
