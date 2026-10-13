@@ -50,7 +50,7 @@ describe('/docs/api — renderiza sem sessão', () => {
 });
 
 describe('referência (Scalar) e CSP', () => {
-  const config = readFileSync('next.config.ts', 'utf8');
+  const config = readFileSync('src/lib/security/csp.ts', 'utf8'); // a política de CSP mora em csp.ts (o next.config.ts só a usa)
   it('versão fixada, só o caminho do Scalar liberado e Swagger removido', () => {
     expect(SCALAR_SRC).toContain(`@scalar/api-reference@${SCALAR_VERSION}/`);
     expect(config).toContain(`https://cdn.jsdelivr.net/npm/@scalar/api-reference@${SCALAR_VERSION}/`);
