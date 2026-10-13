@@ -441,6 +441,10 @@
       "kind": "registry"
     },
     {
+      "version": "340_pipeline_archive",
+      "kind": "registry"
+    },
+    {
       "version": "345_contacts_write_rls_has_perm",
       "kind": "registry"
     },
