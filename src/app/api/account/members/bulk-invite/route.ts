@@ -52,6 +52,9 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+import { isUuid } from "@/lib/auth/sessions";
+import { CustomRoleError } from "@/lib/roles/custom-roles";
+import { resolveInviteRole } from "@/lib/roles/invite-role";
 
 // Best-effort rollback for the "auth user created, but a later step in
 // the same row failed" window (profile lookup or the account_id/role
@@ -118,6 +121,8 @@ interface ImportRow {
   name: string;
   email: string;
   role: AccountRole;
+  /** Cargo escolhido (TASK5, migrations 318/319): sistema ou personalizado desta organização. */
+  roleId: string | null;
 }
 
 interface ImportError {
@@ -174,8 +179,27 @@ export async function POST(request: Request) {
     const errors: ImportError[] = [];
     const seenEmails = new Set<string>();
 
+    // TASK5: cargo escolhido para todos (role_id no topo) ou por linha (members[i].role_id, que vence). Cada cargo é
+    // conferido UMA vez (só abaixo de quem importa, sem escalada); o `role` gravado é o compat efetivo do cargo.
+    const topRoleId = (body as { role_id?: unknown } | null)?.role_id;
+    if (topRoleId !== undefined && topRoleId !== null && !isUuid(topRoleId)) {
+      return NextResponse.json({ error: "'role_id' inválido.", code: "invalid" }, { status: 400 });
+    }
+    const roleCache = new Map<string, AccountRole | null>();
+    const compatFor = async (roleId: string): Promise<AccountRole | null> => {
+      if (!roleCache.has(roleId)) {
+        try {
+          roleCache.set(roleId, (await resolveInviteRole(supabaseAdmin(), { accountId: ctx.accountId, actorId: ctx.userId, roleId, role: null })).role);
+        } catch (err) {
+          if (!(err instanceof CustomRoleError)) throw err;
+          roleCache.set(roleId, null);
+        }
+      }
+      return roleCache.get(roleId) ?? null;
+    };
+
     for (const raw of rawMembers) {
-      const row = raw as { name?: unknown; email?: unknown; role?: unknown };
+      const row = raw as { name?: unknown; email?: unknown; role?: unknown; role_id?: unknown };
       const email = typeof row.email === "string" ? row.email.trim() : "";
       const name = typeof row.name === "string" ? row.name.trim() : "";
 
@@ -192,6 +216,17 @@ export async function POST(request: Request) {
         errors.push({ email, reason: "Nome é obrigatório" });
         continue;
       }
+      const rowRoleId = row.role_id ?? topRoleId ?? null;
+      if (rowRoleId !== null) {
+        const compat = isUuid(rowRoleId) ? await compatFor(rowRoleId) : null;
+        if (!compat) {
+          errors.push({ email, reason: "Cargo inválido, de outra organização ou acima do seu" });
+          continue;
+        }
+        seenEmails.add(normalizedEmail);
+        valid.push({ name, email, role: compat, roleId: rowRoleId as string });
+        continue;
+      }
       const role = resolveRole(row.role);
       if (!role || !isAccountRole(role)) {
         errors.push({
@@ -202,7 +237,7 @@ export async function POST(request: Request) {
       }
 
       seenEmails.add(normalizedEmail);
-      valid.push({ name, email, role });
+      valid.push({ name, email, role, roleId: null });
     }
 
     const admin = supabaseAdmin();
@@ -255,7 +290,8 @@ export async function POST(request: Request) {
 
         const { error: updateErr } = await admin
           .from("profiles")
-          .update({ account_id: ctx.accountId, account_role: row.role })
+          // role_id (cargo escolhido) vence: a sincronia (318) acerta o account_role para o compat efetivo.
+          .update(row.roleId ? { account_id: ctx.accountId, account_role: row.role, role_id: row.roleId } : { account_id: ctx.accountId, account_role: row.role })
           .eq("user_id", newUserId);
 
         if (updateErr) {
