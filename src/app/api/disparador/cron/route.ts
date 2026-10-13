@@ -46,6 +46,7 @@ import {
 } from "@/lib/disparador/tick-chain";
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 import { derivedSlots, effectiveRate, policyFromRow, type RateState } from "@/lib/disparador/channel-rate";
+import { DEFAULT_WAHA_RATE_PER_SECOND, loadWahaRates } from "@/lib/disparador/waha-rate";
 import { cleanupOrphanReceipts } from "@/lib/disparador/receipts-cleanup";
 import { dispatchSchemaReady } from "@/lib/disparador/cron-preflight";
 import { fetchDueCandidates } from "@/lib/disparador/due-candidates";
@@ -158,6 +159,11 @@ async function buildChannelWork(
       if (entry) entry.cooldownUntil = row.cooldown_until;
     }
   }
+  // Ritmo do WAHA (migration 338, item 20 de 13/10): limite/s por sessão; sem linha (ou sem a tabela) vale o padrão conservador de 1/s.
+  const wahaRates = await loadWahaRates(
+    db,
+    ids.filter((id) => info.get(id)?.provider === "waha"),
+  );
   // Política (% por cor, rampa, teto) por conta dos canais deste tick; ausente = padrão do dono.
   const policyByAccount = new Map<string, Record<string, unknown>>();
   if (rateRows.size && configs) {
@@ -184,19 +190,24 @@ async function buildChannelWork(
     // Limite por segundo (P1-4): só Meta e só com linha em dispatch_channel_rate; efetivo = manual ?? auto (rampa, trava, cooldown).
     // As vagas passam a ser DERIVADAS do limite/s (ceil(rate × p95 × 1,2)), limitadas ao teto do número.
     let ratePerSecond: number | undefined;
+    // Só a Meta deriva as vagas do limite/s; o WAHA mantém as vagas de sempre e só ganha o balde de fichas (abaixo).
+    let slotsFromRate = false;
     const rateRow = provider === "waha" ? undefined : rateRows.get(channelId);
-    if (rateRow) {
+    if (provider === "waha") {
+      ratePerSecond = wahaRates.get(channelId) ?? DEFAULT_WAHA_RATE_PER_SECOND;
+    } else if (rateRow) {
       const accountId = configs?.get(channelId)?.account_id as string | undefined;
       const policy = policyFromRow(accountId ? policyByAccount.get(accountId) : null);
       const effective = effectiveRate(rateRow as RateState, policy, now, { inCooldown });
       ratePerSecond = effective.rate;
+      slotsFromRate = true;
       maxConcurrency = derivedSlots(effective.rate, assumedP95Seconds(), channelInfo?.maxInFlight ?? MAX_PER_NUMBER_CONCURRENCY);
     }
     // Sem linha no banco, o claim usa o padrão do provedor como teto
     // atômico (claim_dispatch_item_capped); com linha, vale a linha.
     defaultMaxInFlight.set(
       channelId,
-      channelInfo?.maxInFlight ? undefined : ratePerSecond !== undefined ? maxConcurrency : config.perNumber[provider ?? "unknown"]
+      channelInfo?.maxInFlight ? undefined : slotsFromRate ? maxConcurrency : config.perNumber[provider ?? "unknown"]
     );
     telemetry.channel(channelId, provider, inCooldown);
     channels.push({
