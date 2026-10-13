@@ -76,11 +76,11 @@ export function MonitorFiltersPanel({
         <div className="border-t border-border p-4">
           <div className="flex flex-wrap items-end gap-3">
             <MultiSelectFilter
-              label="Agentes"
+              label="Atendentes"
               options={agentOptions}
               selectedIds={draft.agentIds}
               onChange={(ids) => setDraft((d) => ({ ...d, agentIds: ids }))}
-              emptyText="Nenhum agente na conta."
+              emptyText="Nenhum atendente na conta."
             />
             <MultiSelectFilter
               label="Equipes"

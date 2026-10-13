@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 // quem protege os dados é /api/ddm-logs (admin com audit.view). Fica fora do menu lateral
 // (só no Ctrl+K, com audit.view).
 export const metadata: Metadata = {
-  title: "DDM Logs",
+  title: "Logs do sistema",
   robots: {
     index: false,
     follow: false,

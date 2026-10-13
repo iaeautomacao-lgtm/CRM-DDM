@@ -72,7 +72,7 @@ export function VoipCallOverlay({
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-success-soft text-success animate-pulse" aria-hidden="true">
             <Phone className="h-8 w-8" />
           </div>
-          <h3 id="voip-incoming-title" className="mt-4 text-lg font-bold text-foreground">Ligação Recebida</h3>
+          <h3 id="voip-incoming-title" className="mt-4 text-lg font-bold text-foreground">Ligação recebida</h3>
           <p className="mt-1 text-sm font-medium text-primary">{contactName}</p>
           <p className="text-xs text-muted-foreground">{incomingCall.peer}</p>
 
@@ -81,7 +81,7 @@ export function VoipCallOverlay({
               onClick={onReject}
               variant="destructive"
               className="flex h-12 w-12 items-center justify-center rounded-full p-0"
-              title="Recusar Chamada"
+              title="Recusar chamada"
               aria-label="Recusar chamada"
             >
               <PhoneOff className="h-5 w-5" aria-hidden="true" />
@@ -89,7 +89,7 @@ export function VoipCallOverlay({
             <Button
               onClick={onAccept}
               className="flex h-12 w-12 items-center justify-center rounded-full bg-success-fill p-0 text-white hover:bg-success-fill/90"
-              title="Atender Chamada"
+              title="Atender chamada"
               aria-label="Atender chamada"
             >
               <Phone className="h-5 w-5" aria-hidden="true" />
@@ -117,7 +117,7 @@ export function VoipCallOverlay({
             )}
           </div>
           <h3 id="voip-active-title" className="mt-4 text-lg font-bold text-foreground">
-            {activeCall.status === "active" ? "Chamada em Andamento" : "Chamando..."}
+            {activeCall.status === "active" ? "Chamada em andamento" : "Chamando..."}
           </h3>
           <p className="mt-1 text-sm font-medium text-primary">{contactName}</p>
           <p className="text-xs text-muted-foreground">{activeCall.peer}</p>

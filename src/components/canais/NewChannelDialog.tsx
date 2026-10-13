@@ -274,7 +274,7 @@ export function NewChannelDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Novo Canal</DialogTitle>
+          <DialogTitle>Novo canal</DialogTitle>
         </DialogHeader>
 
         {step === "choose" ? (

@@ -528,7 +528,7 @@ export function AiAgentSettings() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-foreground">
               <FileText className="size-4 text-primary" />
-              Base de Conhecimento (File Search RAG)
+              Base de conhecimento (File Search RAG)
             </CardTitle>
             <CardDescription className="text-muted-foreground">
               Carregue manuais, tabelas e PDFs para fornecer informações exclusivas de suporte e vendas ao robô.
@@ -591,7 +591,7 @@ export function AiAgentSettings() {
                           type="button"
                           onClick={() => handleKbDelete(file.id)}
                           className="text-muted-foreground hover:text-danger p-1.5 rounded hover:bg-muted cursor-pointer"
-                          title="Remover Documento"
+                          title="Remover documento"
                           aria-label={`Remover documento ${file.name}`}
                         >
                           <Trash2 className="size-3.5" aria-hidden="true" />
@@ -624,7 +624,7 @@ export function AiAgentSettings() {
                 Salvando...
               </>
             ) : (
-              "Salvar Configurações"
+              "Salvar configurações"
             )}
           </Button>
         )}

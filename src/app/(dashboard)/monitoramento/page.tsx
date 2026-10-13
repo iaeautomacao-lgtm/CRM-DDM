@@ -73,7 +73,7 @@ type MonitorView = "fases" | "agentes" | "equipes" | "hoje" | "sla";
 
 const VIEW_OPTIONS = [
   { value: "fases", label: "Fases" },
-  { value: "agentes", label: "Agentes" },
+  { value: "agentes", label: "Atendentes" },
   { value: "equipes", label: "Equipes" },
   { value: "hoje", label: "Hoje" },
   { value: "sla", label: "SLA" },
@@ -758,7 +758,7 @@ function MonitoramentoBoard() {
           });
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
-            throw new Error(payload.error || "Falha ao remover o agente da equipe anterior");
+            throw new Error(payload.error || "Falha ao remover o atendente da equipe anterior");
           }
         }
         if (nextTeamId) {
@@ -769,14 +769,14 @@ function MonitoramentoBoard() {
           });
           if (!res.ok) {
             const payload = await res.json().catch(() => ({}));
-            throw new Error(payload.error || "Falha ao adicionar o agente à equipe");
+            throw new Error(payload.error || "Falha ao adicionar o atendente à equipe");
           }
         }
         const teamName = nextTeamId ? teams.find((t) => t.id === nextTeamId)?.name : null;
         toast.success(
           nextTeamId
-            ? `${agent.full_name || "Agente"} movido para ${teamName ?? "a equipe"}`
-            : `${agent.full_name || "Agente"} removido da equipe`,
+            ? `${agent.full_name || "Atendente"} movido para ${teamName ?? "a equipe"}`
+            : `${agent.full_name || "Atendente"} removido da equipe`,
         );
       } catch (err) {
         revert();
@@ -949,7 +949,7 @@ function MonitoramentoBoard() {
           ) : membersError ? (
             <ErrorState
               className="min-h-0"
-              title="Não foi possível carregar os agentes"
+              title="Não foi possível carregar os atendentes"
               hint="Verifique sua conexão e tente novamente."
               onRetry={() => {
                 setMembersLoading(true);

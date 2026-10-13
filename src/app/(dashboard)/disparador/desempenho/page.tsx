@@ -593,7 +593,7 @@ export default function DisparadorDesempenhoPage() {
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <Activity className="size-3.5 text-primary-text" aria-hidden="true" />
-                    Últimos 20 Ticks do Disparador
+                    Últimos 20 ticks das campanhas
                   </CardTitle>
                   <CardDescription className="mt-0.5">
                     Detalhamento dos ticks por minuto gravados em <code>wacrm.system_logs</code>.
@@ -627,7 +627,7 @@ export default function DisparadorDesempenhoPage() {
                       <Th className="font-semibold text-right">Memória RSS</Th>
                       <Th className="font-semibold text-right">Vagas</Th>
                       <Th className="font-semibold text-center">Freio</Th>
-                      <Th className="font-semibold">Erros Provedor</Th>
+                      <Th className="font-semibold">Erros do provedor</Th>
                       <Th className="font-semibold text-center">Saúde</Th>
                     </tr>
                   </thead>

@@ -15,7 +15,6 @@ import {
   MessageSquare,
   MessageSquareText,
   Network,
-  ScrollText,
   Settings,
   Shield,
   Tags,
@@ -32,11 +31,11 @@ import type { Permission } from "@/lib/auth/permissions";
 
 export type NavGroup =
   | "overview"
-  | "operation"
-  | "relationship"
+  | "attendance"
+  | "clients"
   | "campaigns"
   | "automation"
-  | "intelligence"
+  | "reports"
   | "administration";
 
 export interface NavItem {
@@ -44,81 +43,80 @@ export interface NavItem {
   label: string;
   icon: typeof LayoutDashboard;
   group?: NavGroup;
-  beta?: boolean;
   /** Exige esta permissão além do gate da rota (mesma regra da paleta Ctrl+K). */
   permission?: Permission;
 }
 
 export const NAV_GROUPS: Array<{ id: NavGroup; label: string }> = [
   { id: "overview", label: "Visão geral" },
-  { id: "operation", label: "Operação" },
-  { id: "relationship", label: "Relacionamento" },
+  { id: "attendance", label: "Atendimento" },
+  { id: "clients", label: "Clientes" },
   { id: "campaigns", label: "Campanhas" },
-  { id: "automation", label: "Automação" },
-  { id: "intelligence", label: "Inteligência" },
+  { id: "automation", label: "Automação e IA" },
+  { id: "reports", label: "Relatórios" },
   { id: "administration", label: "Administração" },
 ];
 
 export const navItems: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, group: "overview" },
+  { href: "/dashboard", label: "Painel", icon: LayoutDashboard, group: "overview" },
 
-  { href: "/inbox", label: "Conversas", icon: MessageSquare, group: "operation" },
-  { href: "/monitoramento", label: "Monitoramento", icon: Activity, group: "operation" },
-  { href: "/historico", label: "Histórico", icon: History, group: "operation" },
-  { href: "/respostas-rapidas", label: "Respostas rápidas", icon: MessageSquareText, group: "operation" },
-  { href: "/tabulacoes", label: "Tabulações", icon: Tags, group: "operation" },
+  { href: "/inbox", label: "Conversas", icon: MessageSquare, group: "attendance" },
+  { href: "/monitoramento", label: "Monitoramento", icon: Activity, group: "attendance" },
+  { href: "/historico", label: "Histórico", icon: History, group: "attendance" },
+  { href: "/respostas-rapidas", label: "Respostas rápidas", icon: MessageSquareText, group: "attendance" },
+  { href: "/tabulacoes", label: "Tabulações", icon: Tags, group: "attendance" },
 
-  { href: "/contacts", label: "Contatos", icon: Users, group: "relationship" },
-  { href: "/pipelines", label: "Funis", icon: Kanban, group: "relationship" },
-  { href: "/lead-extractor", label: "Extrator de leads", icon: UserSearch, group: "relationship" },
-  { href: "/canais", label: "Canais", icon: Wifi, group: "relationship" },
+  { href: "/contacts", label: "Contatos", icon: Users, group: "clients" },
+  { href: "/pipelines", label: "Funis", icon: Kanban, group: "clients" },
+  { href: "/lead-extractor", label: "Extrator de leads", icon: UserSearch, group: "clients" },
 
-  { href: "/disparador", label: "Disparador", icon: Megaphone, group: "campaigns" },
+  { href: "/disparador", label: "Campanhas", icon: Megaphone, group: "campaigns" },
   { href: "/templates", label: "Templates", icon: LayoutTemplate, group: "campaigns" },
   { href: "/regua", label: "Régua de cobrança", icon: CalendarClock, group: "campaigns" },
 
-  { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation", beta: true },
+  { href: "/flows", label: "Fluxos", icon: Workflow, group: "automation" },
   { href: "/automations", label: "Automações", icon: Zap, group: "automation", permission: "automations.view" },
   { href: "/settings?tab=agents", label: "Agentes de IA", icon: Bot, group: "automation" },
+  { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "automation" },
 
-  { href: "/inteligencia", label: "Inteligência", icon: Gauge, group: "intelligence", beta: true },
-  { href: "/relatorios/atendimentos", label: "Relatórios", icon: FileText, group: "intelligence" },
+  { href: "/relatorios/atendimentos", label: "Relatórios", icon: FileText, group: "reports" },
 
-  { href: "/equipes", label: "Equipes", icon: Network, group: "administration" },
   { href: "/usuarios", label: "Usuários", icon: UsersRound, group: "administration" },
-  { href: "/ddm-logs", label: "Logs do sistema", icon: ScrollText, group: "administration", permission: "audit.view" },
+  { href: "/equipes", label: "Equipes", icon: Network, group: "administration" },
+  { href: "/canais", label: "Canais", icon: Wifi, group: "administration" },
+  { href: "/relatorios/auditoria", label: "Auditoria", icon: Shield, group: "administration" },
+  { href: "/settings", label: "Configurações", icon: Settings, group: "administration" },
 ];
 
+/** Abas da tela Relatórios. A Auditoria mora em Administração (menu), não aqui. */
 export const reportNavItems: NavItem[] = [
-  { href: "/relatorios/auditoria", label: "Auditoria", icon: Shield },
-  { href: "/relatorios/atendimentos", label: "Atendimentos", icon: Headphones },
-  { href: "/relatorios/agentes", label: "Agentes", icon: UserCheck },
-  { href: "/relatorios/conversas", label: "Conversas", icon: MessageSquare },
+  { href: "/relatorios/atendimentos", label: "Desempenho do atendimento", icon: Headphones },
+  { href: "/relatorios/agentes", label: "Sessões de atendentes", icon: UserCheck },
   { href: "/relatorios/tabulacoes", label: "Tabulações", icon: Tags },
-  { href: "/relatorios/envio-em-lote", label: "Envio em lote", icon: Megaphone },
+  { href: "/relatorios/envio-em-lote", label: "Campanhas", icon: Megaphone },
   { href: "/relatorios/exportacoes", label: "Exportações", icon: Download },
 ];
 
 export const bottomNavItems: NavItem[] = [
   { href: "/ajuda", label: "Central de ajuda", icon: HelpCircle },
-  { href: "/settings", label: "Configurações", icon: Settings },
 ];
 
+// "Logs do sistema" não entra no menu (ferramenta técnica): só pelo Ctrl+K, com audit.view.
 const extraTitles: Record<string, string> = {
   "/relatorios": "Relatórios",
-  "/disparador/campanhas": "Disparador · Campanhas",
-  "/disparador/contatos": "Disparador · Contatos",
-  "/disparador/monitor": "Disparador · Monitor",
-  "/disparador/numeros": "Disparador · Números",
-  "/disparador/controles": "Disparador · Controles",
-  "/disparador/desempenho": "Disparador · Desempenho",
-  "/disparador/erros": "Disparador · Erros",
-  "/disparador/blacklist": "Disparador · Blacklist",
+  "/disparador/campanhas": "Campanhas",
+  "/disparador/contatos": "Contatos · Importações",
+  "/disparador/monitor": "Campanhas · Monitor de envios",
+  "/disparador/numeros": "Campanhas · Números",
+  "/disparador/controles": "Campanhas · Controles",
+  "/disparador/desempenho": "Campanhas · Desempenho",
+  "/disparador/erros": "Campanhas · Erros",
+  "/disparador/blacklist": "Campanhas · Blacklist",
   "/templates": "Templates",
   "/tabulacoes": "Tabulações",
   "/respostas-rapidas": "Respostas rápidas",
   "/perfil": "Meu perfil",
-  "/seguranca": "Senha e sessões",
+  "/seguranca": "Segurança",
   "/historico": "Histórico",
   "/pipelines": "Funis",
   "/automations": "Automações",
@@ -212,7 +210,7 @@ export function getBreadcrumbs(pathname: string): Crumb[] {
   if (root === "equipes" && a && !b) return [{ label: "Equipes", href: "/equipes" }, { label: "Equipe" }];
   if (root === "contacts" && a && !b) return [{ label: "Contatos", href: "/contacts" }, { label: "Contato" }];
   if (root === "disparador" && a === "campanhas" && b) {
-    return [{ label: "Disparador · Campanhas", href: "/disparador/campanhas" }, { label: "Campanha" }];
+    return [{ label: "Campanhas", href: "/disparador/campanhas" }, { label: "Campanha" }];
   }
   if (root === "inteligencia" && a === "chaves") return [{ label: "Inteligência", href: "/inteligencia" }, { label: "Chave pessoal do MCP" }];
 

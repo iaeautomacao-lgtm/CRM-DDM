@@ -2151,7 +2151,7 @@ export function TemplateManager() {
               ) : editingId ? (
                 'Salvar e Reenviar'
               ) : (
-                'Enviar para Aprovação'
+                'Enviar para aprovação'
               )}
             </Button>
           </DialogFooter>

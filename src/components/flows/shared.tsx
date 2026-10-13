@@ -185,13 +185,13 @@ export const NODE_META: Record<
     category: 'flow',
   },
   handoff_agent: {
-    label: 'Transferir para Operador',
+    label: 'Transferir para operador',
     icon: UserCheck,
     blurb: 'Transfere a conversa para um operador específico (ou qualquer um disponível)',
     category: 'routing',
   },
   handoff_team: {
-    label: 'Transferir para Equipe',
+    label: 'Transferir para equipe',
     icon: Users,
     blurb: 'Transfere a conversa para uma equipe específica (ou qualquer equipe)',
     category: 'routing',
