@@ -452,6 +452,7 @@ function AgentEditor({
             onFilesChange={setKbFiles}
             maxChars={existingConfig?.knowledge.max_chars ?? LEGACY_AGENT_DEFAULTS.knowledge.max_chars}
             secrets={secrets}
+            onSecretCreated={(s) => setSecrets((prev) => [...prev.filter((x) => x.id !== s.id), s])}
             readOnly={readOnly}
           />
         </TabsContent>
