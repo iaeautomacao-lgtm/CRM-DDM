@@ -73,6 +73,7 @@ import { VersionsTab } from './tabs/versions-tab';
 import { PreviewTab } from './tabs/preview-tab';
 import { TestTab, type TestTabTool } from './tabs/test-tab';
 import { AgentList } from './agent-list';
+import { GlobalAgentSection } from '../global-agent-section';
 
 const TABS = [
   ['general', 'Geral'],
@@ -137,7 +138,12 @@ export function AgentsSettings() {
       />
     );
   }
-  return <AgentList canEdit={canEdit} onOpen={select} />;
+  return (
+    <>
+      <AgentList canEdit={canEdit} onOpen={select} />
+      <GlobalAgentSection />
+    </>
+  );
 }
 
 /* ───────────────────────────── Editor ───────────────────────────── */
