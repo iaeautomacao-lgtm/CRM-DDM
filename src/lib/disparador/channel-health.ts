@@ -13,6 +13,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeLog } from "@/lib/logger";
+import { emitActiveAlert, shouldAlertQualityChange } from "./active-alerts";
 import { getPhoneNumberHealth, type MetaPhoneHealth } from "@/lib/whatsapp/meta-api";
 import { decryptStoredSecret } from "@/lib/whatsapp/encryption";
 import {
@@ -234,6 +235,23 @@ export async function recordChannelHealth(
         ...(input.detail ?? {}),
       },
     });
+    // Alerta ativo (item 5, 13/10): mudança real de cor da qualidade → webhook de saída + push para admin/proprietário, 1 por número/hora.
+    if (shouldAlertQualityChange(qualityOld, snapshot.quality)) {
+      void emitActiveAlert(db, {
+        accountId: channel.account_id,
+        event: "channel.quality_changed",
+        subjectId: channel.id,
+        data: {
+          session_id: channel.id,
+          phone_number: channel.display_phone_number ?? null,
+          quality_old: qualityOld,
+          quality_new: snapshot.quality,
+          downgrade,
+          rate_old: rateOld,
+          rate_new: target,
+        },
+      });
+    }
   }
 
   return { changed, qualityOld, qualityNew: snapshot.quality, tierOld, tierNew: snapshot.tier, rateOld, rateNew: target, downgrade };

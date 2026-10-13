@@ -106,7 +106,7 @@ type HeartbeatRow = {
 };
 
 /** Batimento de todos os crons (migration 334). null = tabela ausente/ilegível (cai no registro antigo, só do cron_tick). */
-async function heartbeatCrons(db: Db, now: Date): Promise<SystemHealth["crons"] | null> {
+export async function heartbeatCrons(db: Db, now: Date): Promise<SystemHealth["crons"] | null> {
   const { data, error } = await db
     .from("cron_heartbeat")
     .select("job, expected_every_seconds, last_ok_at, last_status, last_error, runs, failures")

@@ -7,6 +7,9 @@ export const WEBHOOK_EVENTS = [
   "conversation.closed", // conversa encerrada (com a tabulação, se houver)
   "agreement.created", // tabulação "Acordo Realizado" (código 142) aplicada à conversa
   "contact.opt_out", // número entrou na blacklist com motivo opt_out
+  "campaign.auto_paused", // campanha pausada automaticamente (taxa de erro, resultado incerto, IA fora) — alerta ativo, 1 por campanha/hora
+  "channel.quality_changed", // qualidade do número Meta mudou (GREEN/YELLOW/RED) — alerta ativo, 1 por número/hora
+  "dispatch.cron_stalled", // um cron do Disparador parou de bater — alerta ativo, 1 por cron/hora
 ] as const;
 
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
@@ -20,6 +23,9 @@ export const WEBHOOK_EVENT_DESCRIPTIONS: Record<WebhookEvent, string> = {
   "conversation.closed": "Conversa encerrada, com a tabulação de encerramento quando houver.",
   "agreement.created": "Acordo registrado: tabulação 'Acordo Realizado' aplicada à conversa.",
   "contact.opt_out": "Contato pediu para não receber mensagens (opt-out).",
+  "campaign.auto_paused": "Campanha pausada automaticamente, com o motivo (no máximo 1 aviso por campanha por hora).",
+  "channel.quality_changed": "Qualidade do número Meta mudou, com a cor anterior e a nova (no máximo 1 aviso por número por hora).",
+  "dispatch.cron_stalled": "Um cron do Disparador parou de bater (no máximo 1 aviso por cron por hora).",
 };
 
 export const MAX_ENDPOINTS_PER_ACCOUNT = 10;

@@ -175,3 +175,57 @@ export async function drainPushOutbox(db: Db, options: { limit?: number; sender?
   }
   return summary;
 }
+
+export const OPS_ALERT_PUSH_TYPE = "ops_alert" as const;
+/** Alertas ativos do Disparador (item 5, 13/10). O texto da notificação é fixo no service worker, por tipo: o payload só leva o tipo. */
+export type OpsAlertKind = "campaign_auto_paused" | "channel_quality_changed" | "cron_stalled";
+export const OPS_ALERT_KINDS: readonly OpsAlertKind[] = ["campaign_auto_paused", "channel_quality_changed", "cron_stalled"];
+
+/**
+ * Avisa só admin e proprietário da conta (papéis de sistema `owner`/`admin`) que tenham inscrição de push. Nunca lança.
+ * `tag` agrupa no aparelho (a notificação nova da mesma campanha/número substitui a anterior).
+ */
+export async function sendOpsAlertPush(
+  db: Db,
+  args: { accountId: string; kind: OpsAlertKind; tag: string },
+  sender: typeof sendWebPush = sendWebPush,
+): Promise<{ sent: number; failed: number; removed: number }> {
+  const summary = { sent: 0, failed: 0, removed: 0 };
+  try {
+    const admins = () => db.from("profiles").select("user_id").eq("account_id", args.accountId).in("account_role", ["owner", "admin"]);
+    // deactivated_at é da migration 311: sem a coluna (42703) repete sem o filtro; conta desativada não recebe push.
+    let { data: members, error } = await admins().is("deactivated_at", null).limit(500);
+    if (error?.code === "42703") ({ data: members, error } = await admins().limit(500));
+    if (error) return summary;
+    const userIds = ((members ?? []) as Array<{ user_id: string }>).map((m) => m.user_id);
+    if (userIds.length === 0) return summary;
+    const { data: subs, error: subsError } = await db.from("push_subscriptions").select("endpoint, p256dh, auth").eq("account_id", args.accountId).in("user_id", userIds).limit(500);
+    if (subsError || !subs?.length) return summary;
+    const vapid = await loadVapid(db, args.accountId);
+    if (!vapid) return summary;
+    const payload = { type: OPS_ALERT_PUSH_TYPE, kind: args.kind, tag: args.tag.slice(0, 80) };
+    const gone: string[] = [];
+    const queue = [...(subs as Array<{ endpoint: string; p256dh: string; auth: string }>)];
+    await Promise.all(
+      Array.from({ length: Math.min(5, queue.length) }, async () => {
+        for (let sub = queue.shift(); sub; sub = queue.shift()) {
+          try {
+            const result = await sender(sub, payload, vapid);
+            if (result.gone) gone.push(sub.endpoint);
+            else if (result.status >= 200 && result.status < 300) summary.sent++;
+            else summary.failed++;
+          } catch {
+            summary.failed++;
+          }
+        }
+      }),
+    );
+    if (gone.length > 0) {
+      const { error: delError } = await db.from("push_subscriptions").delete().in("endpoint", gone);
+      if (!delError) summary.removed += gone.length;
+    }
+  } catch (err) {
+    console.error("[Push] alerta operacional falhou:", err instanceof Error ? err.message : String(err));
+  }
+  return summary;
+}

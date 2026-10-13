@@ -21,6 +21,7 @@ import { extrairCodigoMetaErro } from "./normalize-meta-error";
 import { writeLog } from "@/lib/logger";
 import { AI_UNAVAILABLE_ERROR, UNCERTAIN_OUTCOME_ERROR } from "./provider-outcome";
 import { metaCodesWhere } from "./meta-error-catalog";
+import { emitActiveAlert } from "./active-alerts";
 
 export interface AutoPauseConfig {
   enabled: boolean;
@@ -342,6 +343,13 @@ export async function checkCampaignAutoPause(
       event: "campaign_auto_paused",
       message: reason,
       payload: { campaign_id: campaign.id, ...logPayload },
+    });
+    // Alerta ativo (item 5, 13/10): webhook de saída + push para admin/proprietário, 1 por campanha por hora. Não segura o tick.
+    void emitActiveAlert(db, {
+      accountId: campaign.account_id,
+      event: "campaign.auto_paused",
+      subjectId: campaign.id,
+      data: { campaign_id: campaign.id, campaign_name: campRows?.[0]?.nome ?? null, reason, ...logPayload },
     });
     return true;
   } catch (err) {
