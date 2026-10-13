@@ -37,6 +37,18 @@ export const BASELINE_SQL = `
 CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role BYPASSRLS;
 CREATE SCHEMA auth; CREATE SCHEMA wacrm;
 GRANT USAGE ON SCHEMA auth, wacrm TO anon, authenticated, service_role;
+-- Storage (016/020/023/121): a 351 remove as policies de ESCRITA de chat-media e flow-media e mantém as de leitura; aqui só reproduz as reais.
+CREATE SCHEMA storage;
+CREATE TABLE storage.objects (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), bucket_id text, name text, owner uuid);
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Members can upload chat media" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'chat-media');
+CREATE POLICY "Members can update chat media" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'chat-media');
+CREATE POLICY "Members can delete chat media" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'chat-media');
+CREATE POLICY "Members can upload flow media" ON storage.objects FOR INSERT TO authenticated WITH CHECK (bucket_id = 'flow-media');
+CREATE POLICY "Members can update flow media" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'flow-media');
+CREATE POLICY "Members can delete flow media" ON storage.objects FOR DELETE TO authenticated USING (bucket_id = 'flow-media');
+CREATE POLICY "Anyone can read flow media" ON storage.objects FOR SELECT USING (bucket_id = 'flow-media');
+CREATE POLICY "Members can read chat media" ON storage.objects FOR SELECT TO authenticated USING (bucket_id = 'chat-media');
 
 CREATE TABLE auth.users (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), email text, last_sign_in_at timestamptz);
 CREATE TABLE auth.sessions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, created_at timestamptz DEFAULT now(),

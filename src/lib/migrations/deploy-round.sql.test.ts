@@ -20,7 +20,7 @@ const PRE_DEPLOY = [
   "310",
 ] as const;
 /** Migrations que só rodam DEPOIS do deploy do código (o cabeçalho diz "FAZER O DEPLOY ... depois aplicar"): aplicar antes quebra o código antigo. */
-const POST_DEPLOY = ["306", "332"] as const;
+const POST_DEPLOY = ["306", "332", "351"] as const;
 export const FULL_ROUND = [...PRE_DEPLOY, ...POST_DEPLOY] as const;
 
 const DIR = "supabase/migrations";
