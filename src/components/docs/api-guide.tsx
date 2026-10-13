@@ -343,6 +343,26 @@ export function ApiGuide({ examples }: { examples: GuideExamples }) {
           </li>
         </ul>
         <CodeTabs snippets={snippets.relatorio} title="Relatório de operação" />
+        <H3>Extrair conversas e mensagens</H3>
+        <Table
+          head={['Rota', 'O que devolve', 'Escopo']}
+          rows={[
+            [<C key="e1">GET /conversations</C>, 'Conversas da conta com equipe, atendente, tabulação, contato, message_count e transferências. Filtros: updated_from/to, closed_from/to, status, channel, team_id, contact_id, phone.', <>conversations:read</>],
+            [<C key="e2">{'GET /conversations/{id}/messages'}</C>, 'Mensagens da conversa em ordem, com seq, horário, direction e author.', <>messages:read</>],
+            [<C key="e3">GET /messages</C>, 'Extração em massa por período (from e to obrigatórios, até 31 dias por chamada).', <>messages:read</>],
+          ]}
+        />
+        <ul className="max-w-[68ch] list-disc space-y-1 pl-5 text-sm text-foreground/90">
+          <li>
+            Ordem ascendente e paginação por <C>cursor</C> (repasse o <C>next_cursor</C>; <C>null</C> = fim): sem buracos nem repetição. <C>seq</C> é a posição da mensagem na conversa e não muda.
+          </li>
+          <li>
+            <C>author.type</C>: customer, operator, ai, flow, campaign, automation ou api. A mídia vem <strong>sem URL</strong>; com <C>include_media_urls=true</C>, URL assinada de 15 minutos.
+          </li>
+          <li>
+            Não saem chat interno, notas internas, dados da IA nem CPF. Limite de <strong>60 requisições por minuto</strong> por chave nestas rotas; cada extração é auditada (só a contagem, nunca o conteúdo).
+          </li>
+        </ul>
       </Section>
 
       {/* 6 ─ Webhooks de saída */}
