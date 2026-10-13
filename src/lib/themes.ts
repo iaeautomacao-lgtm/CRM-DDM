@@ -34,9 +34,11 @@ export const STORAGE_KEY = "wacrm.theme";
  *
  * The CSS variables live in `src/app/globals.css` under
  * `html[data-mode="..."]` blocks (neutral surfaces only). Applied
- * at runtime via `document.documentElement.dataset.mode`. Dark is
- * the historical default and stays the app's identity; light is the
- * opt-in eye-strain-friendly alternative.
+ * at runtime via `document.documentElement.dataset.mode`.
+ *
+ * Design System DDM (13/10): sem escolha salva, o modo segue o tema do
+ * sistema (`prefers-color-scheme`); a troca manual fica salva e passa a
+ * valer. DEFAULT_MODE é só o que o servidor renderiza antes do boot.
  *
  * Persisted under its own localStorage key so it composes freely
  * with the accent choice (you can run Violet-light or Violet-dark).
@@ -53,6 +55,14 @@ export function isMode(value: unknown): value is Mode {
   return (
     typeof value === "string" && (MODES as ReadonlyArray<string>).includes(value)
   );
+}
+
+export const SYSTEM_DARK_QUERY = "(prefers-color-scheme: dark)";
+
+/** Modo efetivo: a escolha salva vence; sem ela, o tema do sistema. */
+export function resolveMode(saved: unknown, systemPrefersDark: boolean): Mode {
+  if (isMode(saved)) return saved;
+  return systemPrefersDark ? "dark" : "light";
 }
 
 export interface ThemeMeta {
