@@ -418,6 +418,15 @@
     {
       "version": "334_cron_heartbeat",
       "kind": "registry"
+    },
+    {
+      "version": "335_contacts_phone_invalid",
+      "kind": "registry"
+    },
+    {
+      "version": "335b_contacts_phone_invalid_idx",
+      "kind": "index",
+      "index": "idx_contacts_phone_invalid"
     }
   ]
 }
