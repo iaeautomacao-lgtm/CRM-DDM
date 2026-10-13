@@ -17,6 +17,8 @@ function fakeDb(tables: Record<string, Row[]>) {
       b.eq = (c: string, v: unknown) => ((rows = rows.filter((r) => r[c] === v)), b)
       b.in = (c: string, v: unknown[]) => ((rows = rows.filter((r) => v.includes(r[c]))), b)
       b.lt = (c: string, v: string) => ((rows = rows.filter((r) => Date.parse(String(r[c])) < Date.parse(v))), b)
+      // só o que o código usa: .not(col, 'is', null)
+      b.not = (c: string) => ((rows = rows.filter((r) => r[c] !== null && r[c] !== undefined)), b)
       b.or = (expr: string) => {
         const m = /scheduled_at\.lt\."([^"]+)",and\(scheduled_at\.eq\."[^"]+",id\.lt\."([^"]+)"\)/.exec(expr)!
         rows = rows.filter((r) => String(r.scheduled_at) < m[1] || (r.scheduled_at === m[1] && String(r.id) < m[2]))
@@ -109,6 +111,18 @@ describe('loadActivity', () => {
     expect(r.items.map((i) => i.key)).toEqual(['message:m2', 'event:a1', 'message:m1', 'note:n1'])
     expect(r.next_cursor).toBeNull()
     expect(r.items.find((i) => i.key === 'note:n1')?.actor).toEqual({ name: 'Bia' })
+  })
+
+  it('negócio de funil ARQUIVADO (migration 340) não aparece; de funil ativo aparece; só da conta', async () => {
+    const tb = tables()
+    tb.pipelines = [{ id: 'p-ativo', archived_at: null }, { id: 'p-arq', archived_at: t(8) }]
+    tb.deals = [
+      { id: 'd1', account_id: ACC, contact_id: C, pipeline_id: 'p-ativo', stage_id: 's1', title: 'Ativo', created_at: t(9), updated_at: t(9) },
+      { id: 'd2', account_id: ACC, contact_id: C, pipeline_id: 'p-arq', stage_id: 's1', title: 'Arquivado', created_at: t(9), updated_at: t(9) },
+      { id: 'd3', account_id: 'other', contact_id: C, pipeline_id: 'p-ativo', stage_id: 's1', title: 'Outra conta', created_at: t(9), updated_at: t(9) },
+    ]
+    const r = await loadActivity(fakeDb(tb), ACC, C, { limit: 30, cursor: null, types: ['deal'] })
+    expect(new Set(r.items.map((i) => i.key.split(':')[1]))).toEqual(new Set(['d1']))
   })
 
   it('pagina por cursor sem repetir nem pular itens', async () => {

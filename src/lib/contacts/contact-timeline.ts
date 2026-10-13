@@ -219,9 +219,19 @@ export async function loadActivity(
   }
   if (want('deal')) {
     tasks.push((async () => {
-      const { data, error } = await db.from('deals').select('id, title, stage_id, created_at, updated_at').eq('contact_id', contactId).order('updated_at', { ascending: false }).limit(take)
+      const { data, error } = await db.from('deals').select('id, title, stage_id, pipeline_id, created_at, updated_at').eq('account_id', accountId).eq('contact_id', contactId).order('updated_at', { ascending: false }).limit(take)
       if (error) throw error
-      const rows = (data ?? []) as Row[]
+      let rows = (data ?? []) as Row[]
+      // Funil arquivado (migration 340; decisão do dono 13/10): os negócios dele somem das listas. Este caminho usa o service
+      // role (sem RLS), então filtra aqui. Banco sem a 340 (coluna ausente): nada a filtrar.
+      const pipelineIds = [...new Set(rows.map((r) => String(r.pipeline_id)))]
+      if (pipelineIds.length > 0) {
+        const { data: archived, error: archErr } = await db.from('pipelines').select('id').in('id', pipelineIds).not('archived_at', 'is', null)
+        if (!archErr && archived && archived.length > 0) {
+          const hidden = new Set((archived as Row[]).map((p) => String(p.id)))
+          rows = rows.filter((r) => !hidden.has(String(r.pipeline_id)))
+        }
+      }
       const stageIds = [...new Set(rows.map((r) => String(r.stage_id)))]
       const stages = new Map<string, string>()
       if (stageIds.length > 0) {

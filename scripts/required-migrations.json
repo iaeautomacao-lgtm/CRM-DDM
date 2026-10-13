@@ -426,6 +426,10 @@
     {
       "version": "336_campaign_template_pause",
       "kind": "registry"
+    },
+    {
+      "version": "340_pipeline_archive",
+      "kind": "registry"
     }
   ]
 }
