@@ -1,4 +1,4 @@
-// Migrations 312/313 (PRD 20 — papel personalizado). PGlite com as migrations REAIS 169, 240, 241, 241b, 276, 312 e 313.
+// Migrations 312/313 (PRD 20 — papel personalizado). PGlite com as migrations REAIS 169, 240, 241, 241b, 276, 304, 312 e 313.
 // Prova: validação do banco = validação do TS (validateCustomRolePermissions/isGrantableToCustomRole/expandPermissions);
 // só o proprietário cria/edita/apaga/atribui; limite de 20; nome único; apagar em uso é recusado; editar permissões
 // recalcula o compat e o account_role dos membros SEM tirá-los do papel; has_perm segue o papel; papel de outra organização
@@ -100,7 +100,7 @@ describe('migrations 312/313 — papel personalizado', { timeout: 120_000 }, () 
     db = new PGlite()
     await db.exec(BOOTSTRAP)
     await db.exec(migration('169_profiles_lock_privileged_columns.sql'))
-    for (const f of ['240_roles_foundation.sql', '241_roles_functions.sql', '241b_profiles_role_id_idx.sql', '276_billing_permissions.sql']) {
+    for (const f of ['240_roles_foundation.sql', '241_roles_functions.sql', '241b_profiles_role_id_idx.sql', '276_billing_permissions.sql', '304_view_permission_keys.sql']) {
       await db.exec(migration(f))
     }
     await db.exec(migration('312_custom_role_validation.sql'))
@@ -308,7 +308,7 @@ describe('313 — ROLLBACK do cabeçalho', { timeout: 120_000 }, () => {
     try {
       await pg.exec(BOOTSTRAP)
       await pg.exec(migration('169_profiles_lock_privileged_columns.sql'))
-      for (const f of ['240_roles_foundation.sql', '241_roles_functions.sql', '241b_profiles_role_id_idx.sql', '276_billing_permissions.sql']) {
+      for (const f of ['240_roles_foundation.sql', '241_roles_functions.sql', '241b_profiles_role_id_idx.sql', '276_billing_permissions.sql', '304_view_permission_keys.sql']) {
         await pg.exec(migration(f))
       }
       const def = async () =>
