@@ -1,23 +1,20 @@
 'use client';
 
 import { PanelHeadingLevel } from "@/components/settings/settings-panel-head";
-import { Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useAuth } from '@/hooks/use-auth';
-import { useTheme } from '@/hooks/use-theme';
 import { Skeleton } from '@/components/ui/skeleton';
 import { SettingsRail } from '@/components/settings/settings-rail';
 import { SettingsOverview } from '@/components/settings/settings-overview';
-import { ProfileForm } from '@/components/settings/profile-form';
-import { SecurityPanel } from '@/components/settings/security-panel';
-import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { OrganizationPanel } from '@/components/settings/organization-panel';
 import { AgentsSettings } from '@/components/settings/agents/agents-settings';
 import { IntegrationsSettings } from '@/components/settings/integrations/integrations-settings';
 import {
   canSeeSection,
   isIntegrationTab,
+  LEGACY_ACCOUNT_TABS,
   resolveSection,
   SECTION_META,
   visibleIntegrationTabs,
@@ -27,14 +24,19 @@ import {
 function SettingsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency, accountRole, profileLoading } = useAuth();
-  const { mode } = useTheme();
+  const { accountRole, profileLoading } = useAuth();
 
   // The URL (`?tab=`) is the single source of truth for the active
   // section — deep-linkable, and it keeps the existing links in the
   // app sidebar/header working. Legacy tab values (tags, custom-fields)
   // resolve onto their new home; unknown/empty → the Overview landing.
-  const requested = resolveSection(searchParams.get('tab'));
+  const rawTab = searchParams.get('tab');
+  // Links antigos (?tab=profile|security|appearance) seguem para a aba certa de /perfil.
+  const accountRedirect = rawTab ? LEGACY_ACCOUNT_TABS[rawTab] : undefined;
+  useEffect(() => {
+    if (accountRedirect) router.replace(accountRedirect);
+  }, [accountRedirect, router]);
+  const requested = resolveSection(rawTab);
   // "Integrações" no menu abre a primeira aba visível; as abas têm URL própria (?tab=api|secrets|…).
   const integrationTabs = visibleIntegrationTabs(accountRole);
   const rawSection: SettingsSection =
@@ -69,22 +71,8 @@ function SettingsContent() {
     router.replace(`/settings?${params.toString()}`, { scroll: false });
   };
 
-  // Cheap, fetch-free rail hints. The Overview landing carries the
-  // full live status/counts; the rail just surfaces the two that are
-  // already in context.
-  const hints: Partial<Record<SettingsSection, ReactNode>> = useMemo(
-    () => ({
-      appearance: mode === 'dark' ? 'Escuro' : mode === 'light' ? 'Claro' : mode,
-      deals: defaultCurrency,
-    }),
-    [mode, defaultCurrency],
-  );
-
   const panel: Partial<Record<SettingsSection, ReactNode>> = {
     overview: <SettingsOverview onSelect={go} />,
-    profile: <ProfileForm />,
-    security: <SecurityPanel />,
-    appearance: <AppearancePanel />,
     organization: <OrganizationPanel />,
     agents: <AgentsSettings />,
   };
@@ -103,7 +91,7 @@ function SettingsContent() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
-        <SettingsRail active={integrationActive ? 'integrations' : section} onSelect={go} hints={hints} role={accountRole} />
+        <SettingsRail active={integrationActive ? 'integrations' : section} onSelect={go} role={accountRole} />
         <div
           ref={panelRef}
           tabIndex={-1}

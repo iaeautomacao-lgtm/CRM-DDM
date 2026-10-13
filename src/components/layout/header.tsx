@@ -138,7 +138,7 @@ export function Header({ onOpenSidebar }: HeaderProps) {
               }
             >
               <User className="size-4" />
-              Meu Perfil
+              Meu perfil
             </DropdownMenuItem>
           )}
           {canOpen("/settings") && <DropdownMenuItem
@@ -152,9 +152,6 @@ export function Header({ onOpenSidebar }: HeaderProps) {
             <SettingsIcon className="size-4" />
             Configurações
           </DropdownMenuItem>}
-          <DropdownMenuItem render={<Link href="/seguranca" />}>
-            <User className="size-4" /> Senha e sessões
-          </DropdownMenuItem>
           <DropdownMenuSeparator className="bg-border" />
           <DropdownMenuItem
             onClick={signOut}

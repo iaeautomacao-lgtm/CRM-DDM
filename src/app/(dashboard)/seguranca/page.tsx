@@ -1,10 +1,6 @@
-import { PageBody } from "@/components/ddm/page-toolbar";
-import { SecurityPanel } from "@/components/settings/security-panel";
+import { redirect } from "next/navigation";
 
-export default function PersonalSecurityPage() {
-  return (
-    <PageBody>
-      <SecurityPanel />
-    </PageBody>
-  );
+// A segurança da conta vive em /perfil (aba Segurança). Mantém o endereço antigo funcionando.
+export default function PersonalSecurityRedirect() {
+  redirect("/perfil?tab=seguranca");
 }
