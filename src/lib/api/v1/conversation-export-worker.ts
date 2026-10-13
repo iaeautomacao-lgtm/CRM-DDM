@@ -68,7 +68,11 @@ async function processClaimedExport(db:SupabaseClient,job:ExportJob) {
       job_id:job.id,account_id:job.account_id,part_no:partNo,storage_path:storagePath,
       byte_size:bytes.length, messages_count:chunk.messagesCount, conversations_count:chunk.conversationsCount,
     },{onConflict:'job_id,part_no'});
-    if(partError)throw new Error('export_part_record_failed');
+    if(partError){
+      // Best-effort orphan prevention. Crash recovery cleanup also lists the Storage prefix.
+      await db.storage.from(EXPORT_BUCKET).remove([storagePath]).catch(()=>undefined);
+      throw new Error('export_part_record_failed');
+    }
   }
   const now=new Date().toISOString();
   const {data:saved,error:saveError}=await db.from('conversation_export_jobs').update({
@@ -102,21 +106,38 @@ export async function purgeExpiredExports(db:SupabaseClient) {
   if(error)throw error;
   let removedParts=0;
   for(const job of jobs??[]) {
+    const folder=job.account_id+'/'+job.id;
+    // List Storage objects, not just rows in the metadata table: an interrupted
+    // upload may have created an orphan before its DB reference was inserted.
+    const {data:objects,error:listError}=await db.storage.from(EXPORT_BUCKET).list(folder,{
+      limit:100,sortBy:{column:'name',order:'asc'},
+    });
+    if(listError)continue;
+    const paths=(objects??[])
+      .filter(obj=>/^part-\d{6}\.ndjson\.gz$/.test(obj.name))
+      .map(obj=>folder+'/'+obj.name);
+    if(paths.length){
+      const {error:rmError}=await db.storage.from(EXPORT_BUCKET).remove(paths);
+      if(rmError)continue;
+      const {error:delError}=await db.from('conversation_export_parts').delete()
+        .eq('job_id',job.id).eq('account_id',job.account_id).in('storage_path',paths);
+      if(delError)throw delError;
+      removedParts+=paths.length;
+      continue; // Check the folder again on the next tick (more than 100 files).
+    }
     const {data:parts,error:partError}=await db.from('conversation_export_parts')
-      .select('id,storage_path').eq('job_id',job.id).eq('account_id',job.account_id).order('part_no',{ascending:true}).limit(100);
+      .select('id').eq('job_id',job.id).eq('account_id',job.account_id).limit(100);
     if(partError)throw partError;
-    if(parts?.length) {
-      const {error:rmError}=await db.storage.from(EXPORT_BUCKET).remove(parts.map(p=>p.storage_path));
-      if(rmError)continue; // Fail closed: never drop references if deletion failed.
+    if(parts?.length){
+      // Remove stale references only after proving Storage is empty.
       const {error:delError}=await db.from('conversation_export_parts').delete()
         .eq('job_id',job.id).eq('account_id',job.account_id).in('id',parts.map(p=>p.id));
       if(delError)throw delError;
-      removedParts+=parts.length;
-    }else{
-      await db.from('conversation_export_jobs').update({
-        status:'expired',lease_token:null,lease_expires_at:null,error_code:null,updated_at:new Date().toISOString(),
-      }).eq('id',job.id).eq('account_id',job.account_id);
+      continue;
     }
+    await db.from('conversation_export_jobs').update({
+      status:'expired',lease_token:null,lease_expires_at:null,error_code:null,updated_at:new Date().toISOString(),
+    }).eq('id',job.id).eq('account_id',job.account_id);
   }
   return removedParts;
 }
