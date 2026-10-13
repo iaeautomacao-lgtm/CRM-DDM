@@ -937,7 +937,7 @@ export function WhatsAppConfig() {
                             className="bg-background border-border text-sm h-9"
                           />
                           <p className="text-xs text-warning font-medium">
-                            💡 Dica: Digite apenas o DDD + Número. O sistema adiciona o 55 automático se você esquecer!
+                            Dica: digite apenas o DDD + Número. O sistema adiciona o 55 automático se você esquecer!
                           </p>
                         </div>
                         <Button 

@@ -493,8 +493,8 @@ function SimulatePanel({ ruler, canManage }: { ruler: Ruler; canManage: boolean 
         </Button>
       </div>
       {result && (
-        <div className="overflow-hidden rounded-card border border-border">
-          <table className="w-full border-collapse text-[13px]">
+        <div className="overflow-x-auto rounded-card border border-border">
+          <table className="w-full min-w-[480px] border-collapse text-[13px]">
             <thead>
               <tr className="bg-surface-3 text-left text-xs text-muted-foreground">
                 <th className="px-4 py-2 font-semibold">Etapa</th>
