@@ -3,21 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Loader2, Pencil, Plus, Search, Trash2, Users as UsersIcon } from 'lucide-react';
+import { Pencil, Plus, Search, Trash2, Users as UsersIcon } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { RequireRole } from '@/components/auth/require-role';
 import { Button } from '@/components/ui/button';
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { EmptyState } from '@/components/dashboard/empty-state';
 import { ErrorState } from '@/components/dashboard/error-state';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -169,6 +161,7 @@ export function EquipesView() {
     } catch (err) {
       console.error('[EquipesView] delete error:', err);
       toast.error('Erro ao excluir equipe');
+      throw err; // mantém o diálogo aberto para tentar de novo
     } finally {
       setDeleting(false);
     }
@@ -347,40 +340,29 @@ export function EquipesView() {
         onSaved={fetchTeams}
       />
 
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && !deleting && setDeleteTarget(null)}>
-        <AlertDialogContent className="sm:max-w-sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Excluir equipe</AlertDialogTitle>
-            <AlertDialogDescription>
-              Excluir &quot;{deleteTarget?.name}&quot;?{' '}
-              {deleteCounts
-                ? deleteCounts.agents > 0 || deleteCounts.conversations > 0
-                  ? `Essa equipe tem ${plural(deleteCounts.agents, 'agente', 'agentes')} e ${plural(deleteCounts.conversations, 'conversa', 'conversas')} vinculados: eles ficam sem equipe, não são excluídos.`
-                  : 'Nenhum agente ou conversa está vinculado a ela.'
-                : deleteCheckFailed
-                  ? 'Não foi possível verificar os vínculos (agentes e conversas). Você ainda pode excluir; o que estiver vinculado fica sem equipe.'
-                  : 'Verificando agentes e conversas vinculados…'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
-            <Button
-              variant="destructive"
-              onClick={() => void handleDelete()}
-              disabled={deleting || (deleteCounts === null && !deleteCheckFailed)}
-            >
-              {deleting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Excluindo...
-                </>
-              ) : (
-                'Excluir equipe'
-              )}
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteTarget(null);
+        }}
+        title="Excluir equipe"
+        description={
+          <>
+            Excluir &quot;{deleteTarget?.name}&quot;?{' '}
+            {deleteCounts
+              ? deleteCounts.agents > 0 || deleteCounts.conversations > 0
+                ? `Essa equipe tem ${plural(deleteCounts.agents, 'agente', 'agentes')} e ${plural(deleteCounts.conversations, 'conversa', 'conversas')} vinculados: eles ficam sem equipe, não são excluídos.`
+                : 'Nenhum agente ou conversa está vinculado a ela.'
+              : deleteCheckFailed
+                ? 'Não foi possível verificar os vínculos (agentes e conversas). Você ainda pode excluir; o que estiver vinculado fica sem equipe.'
+                : 'Verificando agentes e conversas vinculados…'}
+          </>
+        }
+        confirmLabel="Excluir equipe"
+        busy={deleting}
+        confirmDisabled={deleteCounts === null && !deleteCheckFailed}
+        onConfirm={handleDelete}
+      />
     </PageBody>
   );
 }
