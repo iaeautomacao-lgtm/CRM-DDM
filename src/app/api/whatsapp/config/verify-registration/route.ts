@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
-import { createClient } from '@/lib/supabase/server'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import {
   getSubscribedApps,
@@ -30,30 +30,16 @@ import {
  * what the UI badges on.
  */
 export async function GET() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-  }
-
-  // whatsapp_config is one-row-per-account post-017. Resolve the
-  // caller's account_id so a teammate who joined an existing account
-  // sees the same registration state as the admin who set it up.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('account_id')
-    .eq('user_id', user.id)
-    .maybeSingle()
-  const accountId = profile?.account_id as string | undefined
-  if (!accountId) {
-    return NextResponse.json({
-      live: false,
-      checks: { config_exists: false },
-      message: 'Seu perfil não está vinculado a uma conta.',
-    })
+  // Diagnóstico que chama a Graph API com o token da conta: só quem gere canais (channels.manage). Contexto completo
+  // (revisão de segurança 13/10, item 6): papel personalizado, ajuste do cargo, membro desativado e 2FA. Antes: só sessão.
+  let supabase: Awaited<ReturnType<typeof requirePermission>>['supabase']
+  let accountId: string
+  try {
+    const ctx = await requirePermission('channels.manage')
+    supabase = ctx.supabase
+    accountId = ctx.accountId
+  } catch (err) {
+    return toErrorResponse(err)
   }
 
   // Segredos só pelo servidor (migration 200b); visibilidade = RLS do usuário.

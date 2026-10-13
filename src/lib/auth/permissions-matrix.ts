@@ -120,6 +120,9 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("whatsapp/flows/keys/[channelId]", "POST", "admin", "channels.manage"),
   pg("whatsapp/config", "DELETE", "admin", "channels.manage"),
   pg("whatsapp/config", "PATCH", "admin", "channels.manage"),
+  pg("whatsapp/config/verify-registration", "GET", "admin", "channels.manage"), // revisão de segurança 13/10: era só sessão
+  session("whatsapp/media/[mediaId]", "GET", "channels.view"), // qualquer membro que vê conversas: a rota exige inbox.view OU conversations.scope_* (o visualizador lê conversas sem inbox.view)
+  session("whatsapp/external-urls", "GET", "account.view"), // exige sessão (era sem autenticação)
   pg("whatsapp/channel-test", "POST", "admin", "channels.manage"),
   pg("whatsapp/channel-test/templates", "GET", "admin", "channels.manage"),
   pg("whatsapp/contacts/sync-avatars", "POST", "admin", "channels.manage"),

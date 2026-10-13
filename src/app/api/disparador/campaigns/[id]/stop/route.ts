@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
-import { canManageCampaigns } from "@/lib/disparador/route-auth";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { toErrorResponse } from "@/lib/auth/account";
 import { drainDispatchMoves } from "@/lib/disparador/queue-moves";
 
 export async function POST(
@@ -9,59 +9,26 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const supabase = await createServerClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-    }
+    // Pausar/encerrar: campaigns.manage pelo contexto completo (revisão de segurança 13/10, item 6): papel
+    // personalizado, ajuste do cargo na organização, membro desativado e 2FA — antes decidia só pelo papel.
+    const ctx = await requireDisparadorAccess();
+    const profile = { account_id: ctx.accountId };
 
     const { id: campaignId } = await params;
 
-    // Isolamento por conta: a campanha só é encontrada se pertencer à conta
-    // do usuário (antes só o created_by era conferido, sem escopo de conta).
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("account_id, account_role")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (profileError || !profile?.account_id)
-      return NextResponse.json(
-        { error: "Conta indisponível" },
-        { status: 403 }
-      );
-    // Pausar/encerrar: só quem gerencia campanhas (owner/admin, mesmo papel
-    // da página /disparador — route-auth.ts).
-    if (!canManageCampaigns(profile.account_role))
-      return NextResponse.json(
-        { error: "Seu papel não permite gerenciar campanhas do disparador." },
-        { status: 403 }
-      );
-    const { data: campaign, error: campaignError } = await supabaseAdmin()
+    // Isolamento por conta: a campanha só é encontrada se pertencer à conta do usuário. Quem tem campaigns.manage
+    // pausa/encerra qualquer campanha da conta (emergência), não só as próprias.
+    const { data: campaignRows, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
-      .select("id, created_by")
+      .select("id")
       .eq("id", campaignId)
-      .eq("account_id", profile.account_id)
-      .single();
+      .eq("account_id", ctx.accountId)
+      .limit(1);
 
-    if (campaignError || !campaign) {
+    if (campaignError || !campaignRows?.[0]) {
       return NextResponse.json(
         { error: "Campanha não encontrada" },
         { status: 404 }
-      );
-    }
-
-    // Mesma regra do iniciar: o criador ou owner/admin da conta (a campanha
-    // já foi escopada à conta acima). Antes só o criador — um admin não
-    // conseguia frear em emergência a campanha de um colega.
-    const isPrivilegedRole =
-      canManageCampaigns(profile.account_role);
-    if (campaign.created_by !== user.id && !isPrivilegedRole) {
-      return NextResponse.json(
-        { error: "Você não tem permissão para executar esta campanha." },
-        { status: 403 }
       );
     }
 
@@ -96,8 +63,9 @@ export async function POST(
       status: action === "pause" ? "pausada" : "encerrada",
       items_pending_move: moves.partial || !moves.ok,
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("[Campaign Stop/Pause] Failed:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    // 401/403 da autenticação com o code certo; o resto vira 500 genérico (sem detalhe interno).
+    return toErrorResponse(err);
   }
 }

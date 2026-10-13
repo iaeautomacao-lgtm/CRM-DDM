@@ -197,3 +197,24 @@ describe("execuções de fluxo: ver é leitura, apagar é escrita", () => {
     expect(deleteBody).not.toMatch(/flows\.view_runs/);
   });
 });
+
+describe("revisão de segurança 13/10, item 6: rotas que decidiam por can({ role }) usam o contexto completo", () => {
+  // Contexto completo = getCurrentAccount/requirePermission/requireDisparadorAccess: papel personalizado, ajuste do cargo
+  // na organização (318), membro desativado (311) e 2FA. can({ role }) só via o papel e ignorava tudo isso.
+  const ROUTES = [
+    "disparador/campaigns/[id]/start",
+    "disparador/campaigns/[id]/stop",
+    "flows/end-run",
+    "whatsapp/config",
+    "whatsapp/config/verify-registration",
+    "whatsapp/media/[mediaId]",
+    "whatsapp/external-urls",
+  ];
+  it.each(ROUTES)("%s", (route) => {
+    const src = read(route);
+    expect(src, "decidir só pelo papel").not.toMatch(/can\(\s*\{\s*role/);
+    expect(src, "canManageCampaigns olha só o papel").not.toMatch(/canManageCampaigns\(/);
+    expect(src, "sessão crua sem contexto da conta").not.toMatch(/\.auth\.getUser\(/);
+    expect(src).toMatch(/requirePermission\(|requireDisparadorAccess\(|getCurrentAccount\(/);
+  });
+});

@@ -56,9 +56,11 @@ vi.mock("@/lib/supabase/server", () => ({
 // Service role: devolve uma campanha do usuário para qualquer consulta.
 function chain(result: unknown): unknown {
   const proxy: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "in", "is", "not", "limit", "update", "delete", "order"]) {
+  for (const m of ["select", "eq", "in", "is", "not", "update", "delete", "order"]) {
     proxy[m] = () => chain(result);
   }
+  // .limit(n) devolve LISTA (as rotas leem `rows?.[0]`), como o PostgREST.
+  proxy.limit = () => chain({ ...(result as object), data: [(result as { data: unknown }).data] });
   proxy.single = async () => result;
   proxy.maybeSingle = async () => result;
   proxy.then = (resolve: (v: unknown) => unknown) => resolve(result);
@@ -76,9 +78,12 @@ vi.mock("@/lib/disparador/admin-client", () => ({
     rpc: async () => ({ data: 1, error: null }),
   }),
 }));
+// O 403 do guarda grava auditoria (fire-and-forget); aqui só importa o status.
+vi.mock("@/lib/audit/access-denied", () => ({ recordAccessDenied: () => undefined }));
 vi.mock("@/lib/disparador/worker", () => ({ ensureQueueWorkerRunning: () => undefined }));
 vi.mock("@/lib/disparador/startCampaign", () => ({ startCampaign: mocks.start }));
 
+import { permissionsForRole } from "@/lib/auth/permissions";
 import { canManageCampaigns } from "@/lib/disparador/route-auth";
 import { PATCH, DELETE } from "./[id]/route";
 import { POST as UNSCHEDULE } from "./[id]/unschedule/route";
@@ -108,7 +113,8 @@ describe("rotas de campanha exigem o papel do disparador", () => {
   afterEach(() => vi.clearAllMocks());
 
   it("viewer → 403 em PATCH, DELETE, desagendar, iniciar agora e encerrar", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "viewer" });
+    // start/stop usam requireDisparadorAccess → getCurrentAccount com as permissões efetivas do papel.
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "viewer", permissions: permissionsForRole("viewer") });
     mocks.profileRole.value = "viewer";
     expect((await PATCH(json({ nome: "x" }), params)).status).toBe(403);
     expect((await DELETE(new Request("https://crm.test/x", { method: "DELETE" }), params)).status).toBe(403);
@@ -122,7 +128,7 @@ describe("rotas de campanha exigem o papel do disparador", () => {
   });
 
   it("admin passa pelo portão (iniciar agora chega ao startCampaign com startNow)", async () => {
-    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin" });
+    mocks.account.mockResolvedValue({ userId: "user-1", accountId: "acc-1", role: "admin", permissions: permissionsForRole("admin") });
     mocks.profileRole.value = "admin";
     mocks.start.mockResolvedValue({ ok: true, enqueued: 3 });
     const res = await START(json({ agora: true }), params);

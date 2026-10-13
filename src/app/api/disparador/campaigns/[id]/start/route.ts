@@ -1,9 +1,9 @@
 import { NextResponse, after } from "next/server";
-import { createClient as createServerClient } from "@/lib/supabase/server";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { ensureQueueWorkerRunning } from "@/lib/disparador/worker";
 import { startCampaign } from "@/lib/disparador/startCampaign";
-import { canManageCampaigns } from "@/lib/disparador/route-auth";
+import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { toErrorResponse } from "@/lib/auth/account";
 import { kickDispatchCron } from "@/lib/disparador/dispatch-kick";
 import { resolveCronBaseUrl } from "@/lib/disparador/tick-chain";
 import { writeLog } from "@/lib/logger";
@@ -32,11 +32,12 @@ export async function POST(
     // validação completa da campanha e o enfileiramento em si ficam em
     // startCampaign(), reutilizada pelo cron pra auto-start sem round-trip
     // HTTP — ver src/lib/disparador/startCampaign.ts.
-    const { data: campaign, error: campaignError } = await supabaseAdmin()
+    const { data: campaignRows, error: campaignError } = await supabaseAdmin()
       .from("campaigns")
       .select("id, created_by")
       .eq("id", campaignId)
-      .single();
+      .limit(1);
+    const campaign = campaignRows?.[0] as { id: string; created_by: string | null } | undefined;
 
     if (campaignError || !campaign) {
       return NextResponse.json({ error: "Campanha não encontrada" }, { status: 404 });
@@ -69,61 +70,25 @@ export async function POST(
       }
       accountId = creatorProfile.account_id;
     } else {
-      const supabase = await createServerClient();
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
-      if (authError || !user) {
-        return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-      }
+      // Iniciar / "Iniciar agora" / retomar: campaigns.manage pelo contexto completo (revisão de segurança 13/10, item 6):
+      // papel personalizado, ajuste do cargo na organização, membro desativado e 2FA — antes decidia só pelo papel.
+      const ctx = await requireDisparadorAccess();
+      accountId = ctx.accountId;
+      callerRole = ctx.role;
+      callerId = ctx.userId;
 
-      // wacrm.campaigns has no account_id column yet (see migration 040,
-      // not yet applied), so resolve the caller's account_id from their
-      // profile to scope the contacts query below.
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("account_id, account_role")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (!profile?.account_id) {
-        return NextResponse.json(
-          { error: "Seu perfil não está vinculado a uma conta." },
-          { status: 400 }
-        );
-      }
-      // Iniciar / "Iniciar agora" / retomar: só quem gerencia campanhas
-      // (owner/admin, mesmo papel da página /disparador — route-auth.ts).
-      if (!canManageCampaigns(profile.account_role)) {
-        return NextResponse.json(
-          { error: "Seu papel não permite gerenciar campanhas do disparador." },
-          { status: 403 }
-        );
-      }
-      accountId = profile.account_id;
-      callerRole = profile.account_role ?? null;
-      callerId = user.id;
-
-      // wacrm.campaigns has no account_id column (only created_by), so
-      // "mesma conta" é resolvido via o profile do criador. Donos/admins
-      // podem iniciar qualquer campanha da própria conta; agents/viewers
-      // só a que eles mesmos criaram.
-      if (campaign.created_by !== user.id) {
-        const isPrivilegedRole =
-          canManageCampaigns(profile.account_role);
-
+      // wacrm.campaigns não tem account_id (só created_by): "mesma conta" é resolvido pelo perfil do criador.
+      if (campaign.created_by !== ctx.userId) {
         let sameAccountAsCreator = false;
-        if (isPrivilegedRole && campaign.created_by) {
-          const { data: creatorProfile } = await supabase
+        if (campaign.created_by) {
+          const { data: creatorRows } = await ctx.supabase
             .from("profiles")
             .select("account_id")
             .eq("user_id", campaign.created_by)
-            .maybeSingle();
-          sameAccountAsCreator = creatorProfile?.account_id === profile.account_id;
+            .limit(1);
+          sameAccountAsCreator = (creatorRows?.[0] as { account_id?: string } | undefined)?.account_id === ctx.accountId;
         }
-
-        if (!isPrivilegedRole || !sameAccountAsCreator) {
+        if (!sameAccountAsCreator) {
           return NextResponse.json(
             { error: "Você não tem permissão para executar esta campanha." },
             { status: 403 }
@@ -197,8 +162,9 @@ export async function POST(
       enqueued: result.enqueued,
       ...(result.skippedKnownInvalid ? { skipped_known_invalid: result.skippedKnownInvalid } : {}),
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error("[Campaign Start] Failed to schedule queue:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    // 401/403 da autenticação com o code certo; o resto vira 500 genérico (sem detalhe interno).
+    return toErrorResponse(err);
   }
 }

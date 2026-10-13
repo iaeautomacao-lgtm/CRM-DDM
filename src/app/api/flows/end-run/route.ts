@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
-import { isAccountRole } from '@/lib/auth/roles'
-import { can } from '@/lib/auth/permissions'
+import { requirePermission, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { endActiveRunForConversation } from '@/lib/flows/engine'
 
@@ -15,37 +13,13 @@ import { endActiveRunForConversation } from '@/lib/flows/engine'
  */
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
+    // Quem responde no inbox (inbox.reply) encerra o fluxo da conversa; o visualizador não (PRD 20, G3). Contexto completo
+    // (revisão de segurança 13/10, item 6): papel personalizado, ajuste do cargo, membro desativado e 2FA.
+    const ctx = await requirePermission('inbox.reply')
+    const supabase = ctx.supabase
+    const accountId = ctx.accountId
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id, account_role')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Seu perfil não está vinculado a uma conta.' },
-        { status: 403 },
-      )
-    }
-
-    // Visualizador (somente leitura) não encerra fluxo (PRD 20, G3): era só
-    // sessão + service role. Os demais papéis seguem como antes.
-    const role = (profile as { account_role?: string } | null)?.account_role
-    if (!role || !isAccountRole(role) || !can({ role }, 'inbox.reply')) {
-      return NextResponse.json({ error: 'Acesso negado' }, { status: 403 })
-    }
-
-    const body = await request.json()
+    const body = await request.json().catch(() => null)
     const conversationId = body?.conversation_id as string | undefined
     const requestedReason = body?.reason as string | undefined
     if (!conversationId) {
@@ -91,6 +65,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true })
   } catch (err) {
     console.error('[flows/end-run] failed:', err)
-    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
+    return toErrorResponse(err)
   }
 }
