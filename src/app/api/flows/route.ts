@@ -13,12 +13,12 @@ import { pageRange, parsePageParams, splitPage } from '@/lib/pagination'
  * conta do chamador.
  */
 
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   const guard = await guardFlowAccess()
   if (!guard.ok) return guard.response
   const { supabase, accountId } = guard.ctx
 
-  const { limit, offset } = parsePageParams(new URL(request?.url ?? 'http://localhost/').searchParams, { defaultLimit: null, maxLimit: 200 })
+  const { limit, offset } = parsePageParams(new URL(request.url).searchParams, { defaultLimit: null, maxLimit: 200 })
 
   let query = supabase
     .from('flows')

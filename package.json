@@ -105,6 +105,7 @@
     "fast-uri": "^3.1.2",
     "hono": "^4.12.25",
     "js-yaml": "^4.2.0",
-    "@babel/core": "^7.29.6"
+    "@babel/core": "^7.29.6",
+    "eslint-plugin-react-hooks": "7.0.1"
   }
 }
