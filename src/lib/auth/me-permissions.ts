@@ -7,7 +7,7 @@
 // ============================================================
 
 import { ROUTE_ALLOWLIST, canAccessRoute } from "../role-utils";
-import { PERMISSION_CATALOG, PERMISSIONS, can, type Permission } from "./permissions";
+import { PERMISSION_CATALOG, PERMISSIONS, can, isGrantableToCustomRole, type Permission } from "./permissions";
 import { ACCOUNT_ROLES, type AccountRole } from "./roles";
 
 export const SYSTEM_ROLE_NAMES: Readonly<Record<AccountRole, string>> = {
@@ -23,12 +23,14 @@ export type ScopeLevel = "all" | "team" | "own" | "none";
 export interface MePermissions {
   organization: { id: string; name: string };
   role: {
-    /** null enquanto só existem papéis de sistema (a linha em account_roles ainda não é lida aqui). */
+    /** Papel personalizado: o id em account_roles; papel de sistema: null. */
     id: string | null;
+    /** Papel de sistema (no personalizado, o compat_role — o que o RLS e as páginas usam). */
     key: AccountRole;
+    /** Nome exibido (no personalizado, o nome dado pelo proprietário). */
     name: string;
     kind: "system" | "custom";
-    /** Sistema: owner 5 … viewer 1. */
+    /** Sistema: owner 5 … viewer 1 (no personalizado, o do compat_role). */
     rank: number;
   };
   permissions: Permission[];
@@ -46,6 +48,7 @@ export interface MePermissionsInput {
   account: { id: string; name: string };
   role: AccountRole;
   permissions: ReadonlySet<string>;
+  customRole?: { id: string; name: string } | null;
 }
 
 /** Escopo de visibilidade por domínio: a variante ampla vence a estreita; sem nenhuma, `fallback`. */
@@ -61,10 +64,10 @@ export function buildMePermissions(ctx: MePermissionsInput): MePermissions {
   return {
     organization: { id: ctx.account.id, name: ctx.account.name },
     role: {
-      id: null,
+      id: ctx.customRole?.id ?? null,
       key: ctx.role,
-      name: SYSTEM_ROLE_NAMES[ctx.role],
-      kind: "system",
+      name: ctx.customRole?.name ?? SYSTEM_ROLE_NAMES[ctx.role],
+      kind: ctx.customRole ? "custom" : "system",
       rank: ACCOUNT_ROLES.indexOf(ctx.role) + 1,
     },
     permissions: PERMISSIONS.filter(has),
@@ -129,7 +132,7 @@ export function buildPermissionCatalogGroups(): CatalogGroupView[] {
       description: def.description,
       scope: def.scope === "none" ? "n/a" : def.scope,
       ownerOnly: Boolean(def.ownerOnly),
-      grantable: !def.ownerOnly,
+      grantable: isGrantableToCustomRole(key),
       dependsOn: [...(def.dependsOn ?? [])],
     });
   }

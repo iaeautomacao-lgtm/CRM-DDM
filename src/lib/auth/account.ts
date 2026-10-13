@@ -30,7 +30,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createClient } from "@/lib/supabase/server";
 import { recordAccessDenied } from "@/lib/audit/access-denied";
-import { can, permissionsForRole, type Permission } from "./permissions";
+import { can, type Permission } from "./permissions";
+import { resolveEffectivePermissions, type CustomRoleInfo } from "./effective-permissions";
 import { hasMinRole, isAccountRole, type AccountRole } from "./roles";
 import { MFA_REQUIRED_CODE } from "./mfa";
 
@@ -127,12 +128,13 @@ export interface AccountContext {
   /** Caller's role within their account. */
   role: AccountRole;
   /**
-   * Permissões efetivas do chamador (PRD 20, fase 20.2). COMPAT: derivadas do papel de sistema
-   * (permissionsForRole) — o papel personalizado ainda não existe, então é exatamente o conjunto que
-   * as checagens por papel já decidem. Nenhuma rota usa isto para decidir ainda (fase 20.3).
-   * Quando o personalizado existir, vem de profiles.role_id ⨝ role_permissions (migration 240).
+   * Permissões efetivas do chamador (PRD 20). Papel de sistema: permissionsForRole(role). Papel personalizado
+   * (migrations 312/313): profiles.role_id ⨝ role_permissions — é o que requirePermission/can() decidem.
+   * `role` continua sendo o account_role (= compat_role do personalizado), usado pelo RLS e pelas páginas.
    */
   permissions: ReadonlySet<Permission>;
+  /** Papel personalizado do chamador; ausente/null = papel de sistema. */
+  customRole?: CustomRoleInfo | null;
   /** Lightweight account meta — id + name. */
   account: { id: string; name: string };
 }
@@ -215,12 +217,26 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     throw new ForbiddenError("O perfil não está vinculado a uma conta");
   }
 
+  // Papel personalizado: permissões do banco (fail-closed se não carregar).
+  let effective;
+  try {
+    effective = await resolveEffectivePermissions(supabase, {
+      account_id: data.account_id,
+      account_role: data.account_role,
+      role_id: (data as { role_id?: string | null }).role_id ?? null,
+    });
+  } catch (err) {
+    console.error("[getCurrentAccount] role permissions error:", err);
+    throw new ForbiddenError("Could not load account context");
+  }
+
   return {
     supabase,
     userId: user.id,
     accountId: data.account_id,
     role: data.account_role,
-    permissions: permissionsForRole(data.account_role),
+    permissions: effective.permissions,
+    customRole: effective.customRole,
     account: { id: account.id, name: account.name },
   };
 }

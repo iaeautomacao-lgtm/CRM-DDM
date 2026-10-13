@@ -182,10 +182,17 @@ describe("papel personalizado: teto, dependências e papel de compatibilidade", 
     expect(isGrantableToCustomRole("x")).toBe(false);
   });
 
-  it("os conjuntos dos papéis de sistema (exceto owner) são válidos como personalizados — o teto cobre tudo que o admin faz", () => {
+  it("os conjuntos dos papéis de sistema (exceto owner) são válidos como personalizados — o teto cobre tudo que o admin faz (menos o que é future)", () => {
     for (const role of ["admin", "supervisor", "agent", "viewer"] as const) {
-      expect(validateCustomRolePermissions([...SYSTEM_ROLE_PERMISSIONS[role]]), role).toEqual([]);
+      const set = [...SYSTEM_ROLE_PERMISSIONS[role]];
+      expect(validateCustomRolePermissions(set.filter((p) => !permissionDef(p).future)), role).toEqual([]);
+      expect(validateCustomRolePermissions(set).every((e) => e.code === "not_grantable"), role).toBe(true);
     }
+  });
+
+  it("permissão future (sem checagem no código) não entra: not_grantable", () => {
+    expect(validateCustomRolePermissions(["integrations.manage"])).toEqual([{ code: "not_grantable", permission: "integrations.manage" }]);
+    expect(isGrantableToCustomRole("integrations.manage")).toBe(false);
   });
 
   it("compatRoleFor: o menor papel de sistema que contém o conjunto; sem nenhum, admin", () => {
