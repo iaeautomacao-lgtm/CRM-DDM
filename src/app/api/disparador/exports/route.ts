@@ -7,6 +7,8 @@ import { createExportJob, type ExportJob } from "@/lib/disparador/export-jobs";
 import { toPublicExportJob } from "@/lib/disparador/export-job-public";
 import { QUEUE_DETAIL_STATUS_FILTERS } from "@/lib/disparador/queue-status-filters";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { enforceRateLimit } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +32,8 @@ async function estimateTotal(db: ReturnType<typeof supabaseAdmin>, campaignId: s
 export async function POST(request: Request) {
   try {
     const ctx = await requireDisparadorAccess();
+    const limited = await enforceRateLimit(`disp:exportCreate:${ctx.userId ?? ctx.accountId}`, RATE_LIMITS.exportCreate);
+    if (limited) return limited;
     const body = (await request.json().catch(() => null)) as { campaign_id?: unknown; status?: unknown } | null;
     const campaignId = typeof body?.campaign_id === "string" ? body.campaign_id : "";
     const statusKey = typeof body?.status === "string" ? body.status : "";

@@ -9,6 +9,8 @@ import { resolveCronBaseUrl } from "@/lib/disparador/tick-chain";
 import { writeLog } from "@/lib/logger";
 import { parseRedConfirmation } from "@/lib/disparador/red-quality-gate";
 import { matchesOperationalSecret } from "@/lib/auth/operational-secret";
+import { enforceRateLimit } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 
 export const maxDuration = 60;
 
@@ -76,6 +78,10 @@ export async function POST(
       accountId = ctx.accountId;
       callerRole = ctx.role;
       callerId = ctx.userId;
+
+      // Iniciar enfileira até milhares de itens e aciona o cron: limite por usuário (o ramo interno do cron não passa por aqui).
+      const limited = await enforceRateLimit(`disp:campaignStart:${ctx.userId}`, RATE_LIMITS.campaignStart);
+      if (limited) return limited;
 
       // wacrm.campaigns não tem account_id (só created_by): "mesma conta" é resolvido pelo perfil do criador.
       if (campaign.created_by !== ctx.userId) {

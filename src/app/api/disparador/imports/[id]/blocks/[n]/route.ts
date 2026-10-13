@@ -3,6 +3,8 @@ import { toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { putImportBlock, toPublicImportJob, type ImportJob } from "@/lib/disparador/import-jobs";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { enforceRateLimit, rejectOversizedBody } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +14,11 @@ export const dynamic = "force-dynamic";
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string; n: string }> }) {
   try {
     const ctx = await requireDisparadorAccess();
+    const limited = await enforceRateLimit(`disp:importBlock:${ctx.userId ?? ctx.accountId}`, RATE_LIMITS.importBlock);
+    if (limited) return limited;
+    // Bloco de até 10.000 linhas: recusa corpo absurdo ANTES de carregar o JSON na memória.
+    const tooBig = rejectOversizedBody(request, 16 * 1024 * 1024);
+    if (tooBig) return tooBig;
     const { id, n } = await params;
     if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Importação não encontrada" }, { status: 404 });
     const db = supabaseAdmin();

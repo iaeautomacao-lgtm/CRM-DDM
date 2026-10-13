@@ -16,6 +16,8 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
+import { enforceRateLimit } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { supabaseAdmin } from "@/lib/relatorios/admin-client";
 
 const BUCKET = "relatorio-exports";
@@ -51,6 +53,8 @@ export async function POST(request: Request) {
     // Quem exporta relatórios (supervisor+, como as páginas de relatório) registra
     // o histórico; papéis abaixo não geram arquivo nenhum na conta.
     const ctx = await requirePermission("reports.export");
+    const limited = await enforceRateLimit(`rel:exportCreate:${ctx.userId}`, RATE_LIMITS.exportCreate);
+    if (limited) return limited;
     const declaredLength = Number(request.headers.get("content-length") ?? 0);
     if (declaredLength > MAX_BASE64_LENGTH + 64 * 1024) {
       return NextResponse.json({ error: "Arquivo muito grande" }, { status: 413 });
