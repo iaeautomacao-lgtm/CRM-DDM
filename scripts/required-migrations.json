@@ -441,7 +441,7 @@
       "kind": "registry"
     },
     {
-      "version": "345_contacts_write_rls_has_perm",
+      "version": "349_flows_disparador_write_rls",
       "kind": "registry"
     }
   ]
