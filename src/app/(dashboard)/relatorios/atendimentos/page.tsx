@@ -636,7 +636,7 @@ export default function AtendimentosPage() {
           <Button
             onClick={handlePesquisar}
             disabled={!!rangeError({ dateFrom: draft.dateFrom, dateTo: draft.dateTo })}
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
+            className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
           >
             <Search className="size-4" />
             Pesquisar

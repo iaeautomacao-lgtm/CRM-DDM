@@ -19,7 +19,7 @@ export function ApiDocsPanel() {
             href="/docs/api"
             target="_blank"
             rel="noreferrer"
-            className="bg-primary text-primary-foreground inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium hover:opacity-90"
+            className="bg-primary-solid text-primary-foreground inline-flex h-9 items-center gap-2 rounded-md px-4 text-sm font-medium hover:bg-primary-solid-hover"
           >
             <ExternalLink className="size-4" />
             Abrir documentação

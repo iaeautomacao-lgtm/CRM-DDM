@@ -246,7 +246,7 @@ export function DealsSettings() {
             <Button
               onClick={handleSaveCurrency}
               disabled={savingCurrency || !currencyDirty}
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
+              className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
             >
               {savingCurrency ? (
                 <>
@@ -347,7 +347,7 @@ export function DealsSettings() {
                 type="submit"
                 disabled={addingRule}
                 size="sm"
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
+                className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
               >
                 {addingRule && <Loader2 className="size-3.5 animate-spin mr-1.5" />}
                 Adicionar Regra

@@ -941,7 +941,7 @@ export function ContactSidebar({
                 />
                 <Button
                   size="sm"
-                  className="h-auto bg-primary px-2 hover:bg-primary/90"
+                  className="h-auto bg-primary-solid px-2 hover:bg-primary-solid-hover"
                   onClick={handleAddNote}
                   disabled={!newNote.trim() || addingNote}
                   aria-label="Adicionar nota"

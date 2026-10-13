@@ -562,7 +562,7 @@ export default function EnvioEmLotePage() {
                 <Button
                   onClick={handlePesquisar}
                   disabled={!campaignId}
-                  className="bg-primary text-primary-foreground hover:bg-primary/90"
+                  className="bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover"
                 >
                   <Search className="size-4" />
                   Pesquisar
@@ -763,7 +763,7 @@ export default function EnvioEmLotePage() {
                       onClick={() => setPage(p)}
                       aria-label={`Página ${p}`}
                       aria-current={p === page ? "page" : undefined}
-                      className={p === page ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}
+                      className={p === page ? "bg-primary-solid text-primary-foreground hover:bg-primary-solid-hover" : ""}
                     >
                       {p}
                     </Button>
