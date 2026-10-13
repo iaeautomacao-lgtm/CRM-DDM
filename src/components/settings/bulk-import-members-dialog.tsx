@@ -4,13 +4,13 @@
 // BulkImportMembersDialog
 //
 // Upload a CSV/XLSX with columns nome/email/role (role optional,
-// defaults to "operador"/agent) + a shared default password, and
+// defaults to "operador"/agent) and
 // create one account member per row via
 // POST /api/account/members/bulk-invite.
 //
 // Parsing happens entirely client-side (papaparse for .csv, xlsx
 // for .xlsx/.xls) — the API contract is a plain JSON
-// { members: [{name, email, role}], password } payload, not a
+// { members: [{name, email, role}], role_id? } payload, not a
 // file upload, so the server route stays focused on validation +
 // user creation rather than spreadsheet parsing.
 // ============================================================
@@ -23,8 +23,6 @@ import { toast } from 'sonner';
 import {
   AlertTriangle,
   Download,
-  Eye,
-  EyeOff,
   FileText,
   Loader2,
   Upload,
@@ -39,7 +37,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { RoleSelect } from '@/components/usuarios/role-select';
@@ -47,11 +44,10 @@ import { useRoles } from '@/hooks/use-roles';
 import { usePermissions } from '@/hooks/use-permission';
 import { assignableRoles, myLevel, roleErrorMessage } from '@/lib/roles/editor';
 import { StatusChip } from '@/components/ddm/status-chip';
+import { INVITE_LINKS_WARNING, buildInviteLinksCsv, inviteLinksFileName, parseInviteLinks, type InviteLink } from '@/lib/members/invite-links';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import type { AccountRole } from '@/lib/auth/roles';
 import { ROLE_META } from './role-meta';
-// Senha mínima única (decisão do dono 13/10: 8 em tudo, para senhas novas).
-import { MIN_PASSWORD_LENGTH } from '@/lib/auth/auth-errors';
 
 const TEMPLATE_CSV =
   'nome,email,role\nMaria Silva,maria.silva@empresa.com,operador\nJoão Souza,joao.souza@empresa.com,supervisor\n';
@@ -171,11 +167,10 @@ export function BulkImportMembersDialog({
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [internalDuplicateCount, setInternalDuplicateCount] = useState(0);
   const [existingDuplicateCount, setExistingDuplicateCount] = useState(0);
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<BulkImportResult | null>(null);
-  const [tried, setTried] = useState(false);
+  // Links de definição de senha (um por pessoa criada): aparecem UMA vez, só nesta tela; fechar o diálogo os descarta.
+  const [links, setLinks] = useState<InviteLink[]>([]);
   // Cargo padrão do arquivo (só cargos abaixo de quem importa).
   const { roles, loading: rolesLoading } = useRoles(open);
   const { me } = usePermissions();
@@ -184,14 +179,12 @@ export function BulkImportMembersDialog({
   const defaultRole = options.find((r) => r.id === defaultRoleId) ?? null;
 
   function reset() {
-    setTried(false);
+    setLinks([]);
     setDefaultRoleId(null);
     setFile(null);
     setRows([]);
     setInternalDuplicateCount(0);
     setExistingDuplicateCount(0);
-    setPassword('');
-    setShowPassword(false);
     setResult(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
@@ -199,6 +192,17 @@ export function BulkImportMembersDialog({
   function handleOpenChange(next: boolean) {
     if (!next) reset();
     onOpenChange(next);
+  }
+
+  /** CSV (BOM, ';') com o link de cada pessoa: o único momento em que os links aparecem. */
+  function downloadLinks() {
+    const blob = new Blob([buildInviteLinksCsv(links)], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = inviteLinksFileName();
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   function downloadTemplate() {
@@ -217,6 +221,7 @@ export function BulkImportMembersDialog({
 
     setFile(selected);
     setResult(null);
+    setLinks([]);
     setInternalDuplicateCount(0);
     setExistingDuplicateCount(0);
 
@@ -286,10 +291,6 @@ export function BulkImportMembersDialog({
 
   async function handleImport() {
     if (rows.length === 0) return;
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      toast.error(`A senha deve ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres`);
-      return;
-    }
 
     setImporting(true);
     try {
@@ -299,7 +300,6 @@ export function BulkImportMembersDialog({
         body: JSON.stringify({
           members: rows.map((r) => ({ name: r.name, email: r.email, ...(r.role ? { role: r.role } : defaultRoleId ? {} : { role: 'agent' }) })),
           ...(defaultRoleId ? { role_id: defaultRoleId } : {}),
-          password,
         }),
       });
 
@@ -313,6 +313,7 @@ export function BulkImportMembersDialog({
       const imported = payload.imported ?? 0;
       const errors = payload.errors ?? [];
       setResult({ imported, errors });
+      setLinks(parseInviteLinks(payload.links));
 
       if (imported > 0) {
         toast.success(
@@ -333,8 +334,6 @@ export function BulkImportMembersDialog({
     }
   }
 
-  const passwordTooShort = tried && password.length < MIN_PASSWORD_LENGTH;
-
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="flex max-h-[min(90vh,720px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
@@ -345,7 +344,7 @@ export function BulkImportMembersDialog({
               Envie um CSV ou XLSX com as colunas <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">nome</code>,{' '}
               <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">email</code> e, opcionalmente,{' '}
               <code className="rounded bg-surface-3 px-1 py-0.5 text-[11px]">role</code> (administrador, supervisor, operador ou visualizador — padrão:
-              operador). Cada linha recebe um login com a senha padrão abaixo.
+              operador). Não existe senha padrão: cada pessoa recebe um link para definir a própria senha.
             </DialogDescription>
           </DialogHeader>
 
@@ -420,34 +419,6 @@ export function BulkImportMembersDialog({
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="bulk-import-password">Senha padrão</Label>
-            <div className="relative">
-              <Input
-                id="bulk-import-password"
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={`Mínimo ${MIN_PASSWORD_LENGTH} caracteres`}
-                aria-invalid={passwordTooShort || undefined}
-                className={cn('pr-9', passwordTooShort && 'border-danger')}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="absolute top-1/2 right-2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
-              >
-                {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-              </button>
-            </div>
-            <p className={cn('text-xs', passwordTooShort ? 'text-danger' : 'text-muted-foreground')}>
-              {passwordTooShort
-                ? `A senha precisa ter pelo menos ${MIN_PASSWORD_LENGTH} caracteres.`
-                : 'Todos os usuários importados recebem esta senha inicial.'}
-            </p>
-          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
@@ -520,6 +491,38 @@ export function BulkImportMembersDialog({
                 </div>
               </div>
 
+              {links.length > 0 && (
+                <div className="space-y-3 rounded-[10px] border border-warning-border bg-warning-soft p-4" role="status">
+                  <p className="text-[13px] text-foreground">
+                    <span className="font-semibold">Links de definição de senha</span>
+                    <span className="text-foreground-2"> — {INVITE_LINKS_WARNING}</span>
+                  </p>
+                  <Button type="button" variant="outline" onClick={downloadLinks}>
+                    <Download className="size-4" />
+                    Baixar CSV (nome, e-mail, link)
+                  </Button>
+                  <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+                    {links.map((l) => (
+                      <li key={l.email} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+                        <span className="min-w-0 flex-1 truncate text-foreground">
+                          <span className="font-semibold">{l.name || l.email}</span>
+                          {l.name ? <span className="text-foreground-2"> · {l.email}</span> : null}
+                        </span>
+                        {l.link ? (
+                          <StatusChip tone="ok" dot={false}>
+                            Link gerado
+                          </StatusChip>
+                        ) : (
+                          <StatusChip tone="warn" dot={false}>
+                            Use Esqueci minha senha
+                          </StatusChip>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {result.errors.length > 0 && (
                 <ul className="divide-y divide-border overflow-hidden rounded-[10px] border border-warning-border bg-warning-soft">
                   {result.errors.map((err, i) => (
@@ -546,10 +549,7 @@ export function BulkImportMembersDialog({
             <Button
               type="button"
               disabled={rows.length === 0 || importing}
-              onClick={() => {
-                setTried(true);
-                void handleImport();
-              }}
+              onClick={() => void handleImport()}
             >
               {importing && <Loader2 className="size-4 animate-spin" />}
               {importing ? 'Importando…' : `Importar ${rows.length > 0 ? rows.length : ''} usuário${rows.length !== 1 ? 's' : ''}`}
