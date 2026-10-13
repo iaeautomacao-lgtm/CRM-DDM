@@ -209,6 +209,28 @@ CREATE POLICY message_templates_select ON wacrm.message_templates FOR SELECT USI
 CREATE TABLE wacrm.disparador_message_templates (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 ALTER TABLE wacrm.disparador_message_templates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY disparador_message_templates_select ON wacrm.disparador_message_templates FOR SELECT USING (wacrm.is_account_member(account_id));
+-- Tabelas de escrita da 349 (flows, automações, broadcasts, blacklist, UTM): colunas mínimas (account_id e a chave da tabela-mãe) + RLS + a leitura de hoje
+CREATE TABLE wacrm.flows (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.flows ENABLE ROW LEVEL SECURITY;
+CREATE POLICY flows_select ON wacrm.flows FOR SELECT USING (wacrm.is_account_member(account_id));
+ALTER TABLE wacrm.flow_nodes ADD COLUMN flow_id uuid REFERENCES wacrm.flows(id);
+ALTER TABLE wacrm.flow_nodes ENABLE ROW LEVEL SECURITY;
+CREATE TABLE wacrm.automations (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.automations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY automations_select ON wacrm.automations FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.automation_steps (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), automation_id uuid NOT NULL REFERENCES wacrm.automations(id));
+ALTER TABLE wacrm.automation_steps ENABLE ROW LEVEL SECURITY;
+CREATE TABLE wacrm.broadcasts (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.broadcasts ENABLE ROW LEVEL SECURITY;
+CREATE POLICY broadcasts_select ON wacrm.broadcasts FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.broadcast_recipients (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), broadcast_id uuid NOT NULL REFERENCES wacrm.broadcasts(id));
+ALTER TABLE wacrm.broadcast_recipients ENABLE ROW LEVEL SECURITY;
+CREATE TABLE wacrm.blacklist (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.blacklist ENABLE ROW LEVEL SECURITY;
+CREATE POLICY blacklist_select ON wacrm.blacklist FOR SELECT USING (wacrm.is_account_member(account_id));
+CREATE TABLE wacrm.disparador_utm_links (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
+ALTER TABLE wacrm.disparador_utm_links ENABLE ROW LEVEL SECURITY;
+CREATE POLICY disparador_utm_links_all ON wacrm.disparador_utm_links FOR ALL USING (wacrm.is_account_member(account_id));
 CREATE TABLE wacrm.clients (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid NOT NULL REFERENCES wacrm.accounts(id));
 ALTER TABLE wacrm.clients ENABLE ROW LEVEL SECURITY;
 CREATE POLICY clients_select ON wacrm.clients FOR SELECT USING (wacrm.is_account_member(account_id));
