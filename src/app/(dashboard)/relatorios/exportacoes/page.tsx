@@ -14,9 +14,7 @@ import { apiFetch } from "@/lib/api-fetch";
 // goes through /api/relatorios/exports (service-role — no client
 // DELETE policy exists on either the table or the bucket).
 //
-// No AlertDialog primitive exists in this project's ui/ — the delete
-// confirmation reuses the plain Dialog component (same as
-// AuditDetailModal / TeamFormDialog / MessageModal).
+// A confirmação de exclusão usa o ConfirmDialog (AlertDialog) do DDM.
 // ============================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -52,14 +50,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ddm/confirm-dialog";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { Skeleton } from "@/components/dashboard/skeleton";
 
@@ -366,27 +357,21 @@ export default function ExportacoesPage() {
         )}
       </div>
 
-      <Dialog open={pendingDeleteIds !== null} onOpenChange={(open) => !open && setPendingDeleteIds(null)}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Excluir exportação{(pendingDeleteIds?.length ?? 0) > 1 ? "ões" : ""}?</DialogTitle>
-            <DialogDescription>
-              {(pendingDeleteIds?.length ?? 0) > 1
-                ? `${pendingDeleteIds?.length} arquivos exportados serão removidos permanentemente.`
-                : "O arquivo exportado será removido permanentemente."}{" "}
-              Essa ação não pode ser desfeita.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingDeleteIds(null)} disabled={deleting}>
-              Cancelar
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
-              {deleting ? "Excluindo…" : "Excluir"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={pendingDeleteIds !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteIds(null);
+        }}
+        title={(pendingDeleteIds?.length ?? 0) > 1 ? "Excluir exportações?" : "Excluir exportação?"}
+        description={`${
+          (pendingDeleteIds?.length ?? 0) > 1
+            ? `${pendingDeleteIds?.length} arquivos exportados serão removidos permanentemente.`
+            : "O arquivo exportado será removido permanentemente."
+        } Essa ação não pode ser desfeita.`}
+        confirmLabel="Excluir"
+        busy={deleting}
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

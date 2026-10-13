@@ -42,6 +42,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmDialog } from '@/components/ddm/confirm-dialog';
 import { PageBody } from '@/components/ddm/page-toolbar';
 import { Segmented } from '@/components/ddm/segmented';
 import { StatusChip, type StatusTone } from '@/components/ddm/status-chip';
@@ -859,6 +860,7 @@ export function TemplateManager() {
     } catch (err) {
       console.error('Delete error:', err);
       toast.error(err instanceof Error ? err.message : 'Falha ao excluir template');
+      throw err; // mantém o diálogo aberto
     } finally {
       setDeletingId(null);
     }
@@ -2158,90 +2160,36 @@ export function TemplateManager() {
       {/* Confirm-delete dialog. Surfacing the meta_template_id case
           separately so users understand a real Meta delete is happening,
           not just a local cleanup. */}
-      <Dialog
+      <ConfirmDialog
         open={templateToDelete !== null}
         onOpenChange={(open) => {
           if (!open) setTemplateToDelete(null);
         }}
-      >
-        <DialogContent className="bg-popover border-border sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-popover-foreground">Excluir template?</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              {templateToDelete?.meta_template_id
-                ? `"${templateToDelete?.name}" será excluído do Meta e do wacrm. Disparos ativos usando este template começarão a falhar no próximo envio. Isso não pode ser desfeito.`
-                : `"${templateToDelete?.name}" será excluído do wacrm. Ele nunca foi enviado ao Meta, então nenhuma limpeza remota é necessária.`}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="bg-popover border-border">
-            <Button
-              variant="outline"
-              onClick={() => setTemplateToDelete(null)}
-              disabled={deletingId !== null}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={confirmDelete}
-              disabled={deletingId !== null}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {deletingId !== null ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Excluindo…
-                </>
-              ) : (
-                'Excluir'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="Excluir template?"
+        description={
+          templateToDelete?.meta_template_id
+            ? `"${templateToDelete?.name}" será excluído do Meta e do wacrm. Disparos ativos usando este template começarão a falhar no próximo envio. Isso não pode ser desfeito.`
+            : `"${templateToDelete?.name}" será excluído do wacrm. Ele nunca foi enviado ao Meta, então nenhuma limpeza remota é necessária.`
+        }
+        confirmLabel="Excluir"
+        busy={deletingId !== null}
+        onConfirm={confirmDelete}
+      />
 
       {/* Confirm-delete-folder dialog — templates keep living, just
           unfiled, so the copy is explicit that this isn't destructive
           to the templates themselves. */}
-      <Dialog
+      <ConfirmDialog
         open={folderToDelete !== null}
         onOpenChange={(open) => {
           if (!open && !deletingFolder) setFolderToDelete(null);
         }}
-      >
-        <DialogContent className="bg-popover border-border sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-popover-foreground">Excluir pasta?</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              {`"${folderToDelete?.name}" será excluída. Os templates desta pasta serão mantidos sem pasta.`}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="bg-popover border-border">
-            <Button
-              variant="outline"
-              onClick={() => setFolderToDelete(null)}
-              disabled={deletingFolder}
-              className="border-border text-muted-foreground hover:bg-muted"
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={confirmDeleteFolder}
-              disabled={deletingFolder}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {deletingFolder ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Excluindo…
-                </>
-              ) : (
-                'Excluir'
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        title="Excluir pasta?"
+        description={`"${folderToDelete?.name}" será excluída. Os templates desta pasta serão mantidos sem pasta.`}
+        confirmLabel="Excluir"
+        busy={deletingFolder}
+        onConfirm={confirmDeleteFolder}
+      />
 
       {/* Preview — simple WhatsApp-bubble mock, not a pixel-accurate
           client render. Variables with no sample value stay literal
