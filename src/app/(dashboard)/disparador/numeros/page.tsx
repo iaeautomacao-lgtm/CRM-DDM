@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Can } from "@/components/auth/can";
 import { AlertTriangle, PauseCircle, RefreshCw } from "lucide-react";
 
 import { apiFetch } from "@/lib/api-fetch";
@@ -166,7 +167,18 @@ export default function NumerosPage() {
             ))}
           </div>
         ) : numbers.length === 0 ? (
-          <EmptyState className="m-4 mt-0" title="Nenhum número cadastrado nesta conta" />
+          <>
+            <EmptyState className="m-4 mt-0 min-h-0" title="Nenhum número cadastrado nesta conta" />
+            <p className="-mt-2 mb-4 text-center text-xs text-muted-foreground">
+              <Can permission="channels.manage" fallback="Peça a um administrador para conectar um número.">
+                Conecte um número em{" "}
+                <Link href="/canais" className="font-medium text-primary-text underline underline-offset-2">
+                  Canais
+                </Link>
+                .
+              </Can>
+            </p>
+          </>
         ) : (
           <DenseTable minWidth={980}>
             <thead>

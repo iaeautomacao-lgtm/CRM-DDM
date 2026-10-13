@@ -139,7 +139,7 @@ export function validateCampaignTemplate(input: TemplateValidationInput): Templa
   );
   const notFound = {
     ok: false as const,
-    error: `${name}: ${TEMPLATE_NOT_IN_CATALOG} (Configurações → Templates → Sincronizar).`,
+    error: `${name}: ${TEMPLATE_NOT_IN_CATALOG} (Templates → Sincronizar do Meta).`,
   };
   if (sameLanguage.length === 0) return notFound;
 

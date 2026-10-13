@@ -1161,7 +1161,11 @@ export default function CampanhasPage() {
         <EmptyState
           icon={Megaphone}
           title="Nenhuma campanha cadastrada"
-          hint={canManage ? "Crie a primeira campanha em “Nova campanha”." : undefined}
+          hint={
+            canManage
+              ? "Crie a primeira campanha em “Nova campanha”."
+              : "Peça a um administrador para criar a primeira campanha."
+          }
         />
       ) : visibleCampaigns.length === 0 ? (
         <EmptyState icon={Search} title="Nenhuma campanha neste filtro" hint="Troque o filtro ou a busca." />
