@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { guardFlow } from '@/lib/flows/route-auth'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
+import { pageRange, parsePageParams, splitPage } from '@/lib/pagination'
 
 /**
  * GET /api/flows/[id]/runs
@@ -31,9 +32,8 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
  * caller's account via the flows/flow_runs policies), so no separate
  * account_id check is needed here.
  *
- * Limited to the 50 most recent (post-filter) runs. Pagination can
- * come later; the dashboard surface here is for debugging, not heavy
- * querying.
+ * Paginado: 50 execuções por página por padrão (`?limit=` até 100, `?offset=`); a resposta traz `has_more`.
+ * Sem parâmetros o comportamento é o de sempre (as 50 mais recentes).
  */
 export async function GET(
   request: Request,
@@ -46,6 +46,8 @@ export async function GET(
   const contactFilter = params.get('contact')
   const dateFrom = params.get('date_from')
   const dateTo = params.get('date_to')
+  const { limit: pageLimit, offset } = parsePageParams(params, { defaultLimit: 50, maxLimit: 100 })
+  const limit = pageLimit ?? 50
 
   // Owner/admin + fluxo da conta (outra conta → 404) antes da consulta de runs.
   const guard = await guardFlow(id, 'flows.view_runs')
@@ -73,7 +75,7 @@ export async function GET(
       .or(`name.ilike."%${like}%",phone.ilike."%${like}%"`)
     const resolvedIds = (matches ?? []).map((c: { id: string }) => c.id)
     if (resolvedIds.length === 0) {
-      return NextResponse.json({ flow, runs: [], events: [] })
+      return NextResponse.json({ flow, runs: [], events: [], has_more: false })
     }
     contactIds = resolvedIds
   }
@@ -89,17 +91,20 @@ export async function GET(
   if (dateFrom) runsQuery = runsQuery.gte('started_at', dateFrom)
   if (dateTo) runsQuery = runsQuery.lte('started_at', dateTo)
 
+  const [rangeFrom, rangeTo] = pageRange({ limit, offset })
   const { data: listed, error: runsErr } = await runsQuery
     .order('started_at', { ascending: false })
-    .limit(50)
+    .order('id', { ascending: false })
+    .range(rangeFrom, rangeTo)
   if (runsErr) {
     return NextResponse.json({ error: runsErr.message }, { status: 500 })
   }
-  let runs = listed ?? []
+  const listedPage = splitPage(listed ?? [], limit)
+  let runs = listedPage.rows
 
   // Link direto para uma execução (inbox → "Fluxo"): traz essa execução
   // mesmo fora das 50 mais recentes ou dos filtros, sempre deste fluxo.
-  if (runId && !runs.some((r: { id: string }) => r.id === runId)) {
+  if (offset === 0 && runId && !runs.some((r: { id: string }) => r.id === runId)) {
     const { data: focused } = await supabase
       .from('flow_runs')
       .select(
@@ -146,6 +151,7 @@ export async function GET(
     flow,
     runs,
     events,
+    has_more: listedPage.hasMore,
   })
 }
 
