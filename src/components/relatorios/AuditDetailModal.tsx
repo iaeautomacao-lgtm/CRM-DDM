@@ -30,7 +30,7 @@ export type { AuditLog } from "@/lib/audit/labels";
 
 export const EVENT_BADGE: Record<AuditLog["event_type"], string> = {
   created: "bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300",
-  updated: "bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300",
+  updated: "bg-info-soft text-info",
   deleted: "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300",
   action: "bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300",
 };

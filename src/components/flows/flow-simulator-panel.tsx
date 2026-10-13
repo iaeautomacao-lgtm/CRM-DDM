@@ -47,7 +47,7 @@ interface TurnLog {
 
 const TIMELINE_COLORS: Record<SimTimelineEvent["type"], string> = {
   node: "text-muted-foreground",
-  branch: "text-sky-600 dark:text-sky-400",
+  branch: "text-info",
   tag: "text-violet-600 dark:text-violet-400",
   tool_call: "text-warning",
   tool_result: "text-warning",
