@@ -3763,13 +3763,7 @@ export async function advanceFromNodeKey(
         return { outcome: "handed_off" };
       }
 
-      // Limpa assigned_agent_id para que replies do cliente cheguem ao agente
-      if (run.conversation_id) {
-        await db
-          .from("conversations")
-          .update({ assigned_agent_id: null })
-          .eq("id", run.conversation_id);
-      }
+      // Never clear a human assignment when entering an AI node.
 
       // Limpa ai_exit_code ao entrar neste nó — garante que o exit code
       // de um nó ai_agent anterior não vaze pra decisão do nó atual.
@@ -3847,6 +3841,7 @@ export async function advanceFromNodeKey(
       }
 
       const { lastReply, exitCodeFound, baseOutput } = core;
+      if (core.responseReason === "human_takeover") return { outcome: "advanced" };
       if (core.messageSent) {
         await logEvent(db, run.id, "message_sent", node.node_key, {
           node_type: "ai_agent",
@@ -4603,6 +4598,7 @@ async function handleReplyForActiveRun(
     }
 
     const { lastReply, exitCodeFound, baseOutput } = core;
+    if (core.responseReason === "human_takeover") return { consumed: true, flow_run_id: run.id, outcome: "advanced" };
 
     // Trava do responder (anti-abuso / anti-loop) já passou a conversa
     // para humano: encerra a execução como handoff (mesma regra do
