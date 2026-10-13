@@ -16,6 +16,7 @@
 // ============================================================
 
 import { readTextFile } from '@/lib/text/decode-text';
+import { MEMBER_IMPORT_TEMPLATE_CSV } from '@/lib/members/import-template';
 import { useRef, useState } from 'react';
 import * as Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -48,9 +49,6 @@ import type { AccountRole } from '@/lib/auth/roles';
 import { ROLE_META } from './role-meta';
 // Senha mínima única (decisão do dono 13/10: 8 em tudo, para senhas novas).
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth/auth-errors';
-
-const TEMPLATE_CSV =
-  'nome,email,role\nMaria Silva,maria.silva@empresa.com,operador\nJoão Souza,joao.souza@empresa.com,supervisor\n';
 
 const MAX_ROWS = 200;
 
@@ -191,7 +189,7 @@ export function BulkImportMembersDialog({
   }
 
   function downloadTemplate() {
-    const blob = new Blob([TEMPLATE_CSV], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob([MEMBER_IMPORT_TEMPLATE_CSV], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;

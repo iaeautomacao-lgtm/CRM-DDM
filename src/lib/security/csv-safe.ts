@@ -58,6 +58,9 @@ export function csvCell(value: unknown): string {
   return /[";\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
+/** BOM UTF-8: todo CSV que o usuário baixa começa com ele (o Excel pt-BR só abre acentos corretamente assim) e usa `;` como separador. */
+export const CSV_BOM = "\uFEFF";
+
 /** Linha de CSV terminada em CRLF: `csvCell` em cada valor, juntos por `sep` (padrão `;`, o separador do Excel pt-BR). */
 export function csvLine(cells: readonly unknown[], sep = ";"): string {
   return `${cells.map((c) => csvCell(c)).join(sep)}\r\n`;

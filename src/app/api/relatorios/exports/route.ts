@@ -22,7 +22,7 @@ const BUCKET = "relatorio-exports";
 
 const CONTENT_TYPES: Record<string, string> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  csv: "text/csv",
+  csv: "text/csv; charset=utf-8",
 };
 
 // base64 ≈ 4/3 do binário: 25 MB de arquivo cabem em ~34 MB de texto.
