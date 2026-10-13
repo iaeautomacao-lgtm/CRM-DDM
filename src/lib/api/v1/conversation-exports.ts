@@ -68,12 +68,12 @@ export function isExportDownloadable(job:Pick<ExportJob,'status'|'expires_at'>, 
 }
 export async function getExportStatus(db:SupabaseClient,accountId:string,id:string,afterPartNo:number) {
   const job=await getExportJob(db,accountId,id);
-  if(!Number.isInteger(afterPartNo)||afterPartNo<0)throw badRequest('after_part_no must be a nonnegative integer');
+  if(!Number.isSafeInteger(afterPartNo)||afterPartNo<0)throw badRequest('after_part_no must be a nonnegative integer');
   const q=db.from('conversation_export_parts').select('id,part_no,byte_size,messages_count,conversations_count')
     .eq('account_id',accountId).eq('job_id',job.id).gt('part_no',afterPartNo)
     .order('part_no',{ascending:true}).limit(101);
   // Do not expose partially written parts; exports only become downloadable when complete.
-  const {data,error}=job.status==='completed'?await q:{data:[],error:null};
+  const {data,error}=isExportDownloadable(job)?await q:{data:[],error:null};
   if(error)throw error;
   const all=data??[],page=all.slice(0,100);
   return {
