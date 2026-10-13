@@ -16,8 +16,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // Evita o zoom automático do iOS ao focar o campo de texto.
-  maximumScale: 1,
+  // Zoom liberado (WCAG 1.4.4, decisão do dono 13/10). O campo de texto tem 16px
+  // (text-base), então o iOS não dá zoom automático ao focar.
   // Teclado virtual encolhe a página em vez de cobrir o campo de texto.
   interactiveWidget: "resizes-content",
 };
