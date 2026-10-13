@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ChevronRight, FileText, Loader2, MessageSquareText, PlugZap, Tags, UsersRound, type LucideIcon } from 'lucide-react';
+import { ChevronRight, FileText, Loader2, MessageSquareText, Palette, PlugZap, Tags, UsersRound, type LucideIcon } from 'lucide-react';
 
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
@@ -242,9 +242,11 @@ export function SettingsOverview({
       subtitle: 'Atalhos usados no atendimento do Inbox',
     },
     {
-      kind: 'section',
+      kind: 'link',
       key: 'appearance',
-      section: 'appearance',
+      href: '/perfil?tab=aparencia',
+      icon: Palette,
+      label: 'Aparência',
       loading: false,
       subtitle: `Modo ${mode === 'dark' ? 'escuro' : mode === 'light' ? 'claro' : mode} · destaque ${themeName}`,
     },

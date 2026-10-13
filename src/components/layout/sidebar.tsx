@@ -6,7 +6,6 @@ import { Fragment, useEffect, useRef, useState, type ReactElement } from "react"
 import {
   ChevronDown,
   Headphones,
-  KeyRound,
   PanelLeftClose,
   PanelLeftOpen,
   X,
@@ -27,7 +26,6 @@ import {
   type NavGroup,
 } from "@/lib/nav";
 import { OmniDdmLogo } from "@/components/ui/omniddm-logo";
-import { ChangePasswordDialog } from "@/components/layout/change-password-dialog";
 import { InternalChatDialog } from "@/components/internal-chat/internal-chat-dialog";
 import {
   Tooltip,
@@ -109,7 +107,6 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const totalUnread = useTotalUnread();
   const unreadInternalMessages = useUnreadInternalMessages(true);
 
-  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [internalChatOpen, setInternalChatOpen] = useState(false);
 
   const { collapsed, setCollapsed, toggle: toggleCollapsed } = useSidebarCollapsed();
@@ -377,23 +374,15 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                             </RailTooltip>
                           </li>
 
-                          {item.href === "/inbox" && accountRole === "agent" && (
-                            <>
-                              {renderExtraButton(
-                                "supervisor",
-                                "Mensagens internas",
-                                Headphones,
-                                () => setInternalChatOpen(true),
-                                unreadInternalMessages,
-                              )}
-                              {renderExtraButton(
-                                "password-agent",
-                                "Trocar senha",
-                                KeyRound,
-                                () => setPasswordDialogOpen(true),
-                              )}
-                            </>
-                          )}
+                          {item.href === "/inbox" &&
+                            accountRole === "agent" &&
+                            renderExtraButton(
+                              "supervisor",
+                              "Mensagens internas",
+                              Headphones,
+                              () => setInternalChatOpen(true),
+                              unreadInternalMessages,
+                            )}
 
                           {item.href === "/inbox" &&
                             (accountRole === "admin" || accountRole === "owner" || accountRole === "supervisor") &&
@@ -403,15 +392,6 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                               Headphones,
                               () => setInternalChatOpen(true),
                               unreadInternalMessages,
-                            )}
-
-                          {item.href === "/inbox" &&
-                            accountRole === "admin" &&
-                            renderExtraButton(
-                              "password-admin",
-                              "Trocar senha",
-                              KeyRound,
-                              () => setPasswordDialogOpen(true),
                             )}
                         </Fragment>
                       );
@@ -466,7 +446,6 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         </TooltipProvider>
       </aside>
 
-      <ChangePasswordDialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen} />
       <InternalChatDialog
         open={internalChatOpen}
         onOpenChange={setInternalChatOpen}
