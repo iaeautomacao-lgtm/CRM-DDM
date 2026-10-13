@@ -44,6 +44,7 @@ import {
   type RawTabulacaoRow,
   type TabulacaoRow,
 } from '@/lib/relatorios/tabulacoes';
+import { PageHeader } from '@/components/ddm/page-header';
 
 const ALL = 'all';
 interface Filters extends PeriodRange {
@@ -187,12 +188,7 @@ export default function TabulacoesPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Tabulações</h2>
-        <p className="text-muted-foreground text-sm">
-          Conversas encerradas no período, por tabulação e origem.
-        </p>
-      </div>
+      <PageHeader>Conversas encerradas no período, por tabulação e origem.</PageHeader>
       <div className="border-border bg-card space-y-3 rounded-xl border p-4">
         <PeriodFilter
           value={draft}

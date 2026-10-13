@@ -27,6 +27,7 @@ import { PageBody, PageToolbar } from '@/components/ddm/page-toolbar';
 import { CellMain, DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import { TeamFormDialog } from '@/components/settings/team-form-dialog';
 import type { Team } from '@/types';
+import { PageHeader } from '@/components/ddm/page-header';
 
 interface DeleteCounts {
   agents: number;
@@ -184,12 +185,7 @@ export function EquipesView() {
 
   return (
     <PageBody>
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Equipes</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Filas nomeadas para rotear conversas, com os usuários, canais, tabulações e templates de cada uma.
-        </p>
-      </div>
+      <PageHeader>Filas nomeadas para rotear conversas, com os usuários, canais, tabulações e templates de cada uma.</PageHeader>
 
       {loadError ? (
         <ErrorState title="Não foi possível carregar as equipes" onRetry={() => void fetchTeams()} />

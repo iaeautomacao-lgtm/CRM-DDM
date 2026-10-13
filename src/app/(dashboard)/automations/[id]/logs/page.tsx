@@ -21,6 +21,7 @@ import { ErrorState } from "@/components/dashboard/error-state"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { pageRange, splitPage } from "@/lib/pagination"
+import { PageHeader } from "@/components/ddm/page-header";
 
 /** Execuções por página; "Carregar mais" busca a próxima. */
 const LOGS_PAGE = 50
@@ -158,11 +159,8 @@ export default function AutomationLogsPage({
 
   return (
     <PageBody>
-      <div className="flex flex-col gap-1.5 pt-1">
-        {back}
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">{automation.name}</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">Logs de execução</p>
-      </div>
+      {back}
+      <PageHeader heading={automation.name}>Logs de execução</PageHeader>
 
       {logs.length > 0 && (
         <KpiStrip

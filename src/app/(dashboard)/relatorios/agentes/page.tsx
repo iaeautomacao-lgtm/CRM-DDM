@@ -48,6 +48,7 @@ import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
 import { loadSharedPeriod, rangeError, saveSharedPeriod } from "@/lib/relatorios/period";
 import { PeriodFilter } from "@/components/relatorios/period-filter";
 import { formatDuration } from "@/lib/relatorios/format-duration";
+import { PageHeader } from "@/components/ddm/page-header";
 
 const ALL = "all";
 
@@ -189,12 +190,7 @@ export default function AgentesPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Agentes</h2>
-        <p className="text-sm text-muted-foreground">
-          Histórico de sessões (login/logout) por agente.
-        </p>
-      </div>
+      <PageHeader>Histórico de sessões (login/logout) por agente.</PageHeader>
 
       <div className="rounded-card border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">

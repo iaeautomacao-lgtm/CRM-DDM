@@ -57,6 +57,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { CountUp } from '@/components/motion/count-up';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import { PageBody, PageToolbar } from '@/components/ddm/page-toolbar';
+import { PageHeader } from '@/components/ddm/page-header';
 
 const PAGE_SIZE = 25;
 
@@ -382,17 +383,12 @@ export default function ContactsPage() {
   return (
     <PageBody>
       {/* Cabeçalho da página (redesenho DDM): título em Poppins + resumo. */}
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Contatos</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Gerencie sua lista de contatos.{' '}
+      <PageHeader>Gerencie sua lista de contatos.{' '}
           {totalCount > 0 && (
             <>
               <CountUp value={totalCount} className="font-medium text-foreground-2" /> contatos no total.
             </>
-          )}
-        </p>
-      </div>
+          )}</PageHeader>
 
       {/* Barra: busca, etiquetas e ações */}
       <PageToolbar

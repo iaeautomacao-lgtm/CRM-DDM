@@ -63,6 +63,7 @@ import {
   type TimelineMessage,
 } from "@/lib/contact-timeline/queries";
 import { MessageThread } from "@/components/contact-timeline/MessageThread";
+import { PageHeader } from "@/components/ddm/page-header";
 
 const ALL = "all";
 const PAGE_SIZE = 60;
@@ -474,12 +475,7 @@ export default function ConversasPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Conversas</h2>
-        <p className="text-sm text-muted-foreground">
-          Lista de conversas com filtros avançados e visualização inline das mensagens.
-        </p>
-      </div>
+      <PageHeader>Lista de conversas com filtros avançados e visualização inline das mensagens.</PageHeader>
 
       <div className="rounded-card border border-border bg-card">
         <button

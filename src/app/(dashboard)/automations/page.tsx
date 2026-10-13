@@ -55,6 +55,7 @@ import { ErrorState } from "@/components/dashboard/error-state"
 import { AUTOMATION_TEMPLATES, type TemplateSlug } from "@/lib/automations/templates"
 import { triggerMeta } from "@/lib/automations/trigger-meta"
 import { PipelineAutomations } from "@/components/automations/pipeline-automations"
+import { PageHeader } from "@/components/ddm/page-header";
 
 const TEMPLATE_ORDER: TemplateSlug[] = [
   "welcome_message",
@@ -169,12 +170,7 @@ export default function AutomationsPage() {
 
   return (
     <PageBody>
-      <div className="flex flex-col gap-1.5 pt-1">
-        <h2 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">Automações</h2>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">
-          Crie fluxos automáticos e configure o envelhecimento de cartões do CRM.
-        </p>
-      </div>
+      <PageHeader>Crie fluxos automáticos e configure o envelhecimento de cartões do CRM.</PageHeader>
 
       <PageToolbar
         actions={

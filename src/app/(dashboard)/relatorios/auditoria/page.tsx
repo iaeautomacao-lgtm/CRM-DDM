@@ -44,6 +44,7 @@ import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
 import { loadSharedPeriod, rangeError, saveSharedPeriod } from "@/lib/relatorios/period";
 import { usePermissions } from "@/hooks/use-permission";
 import { PeriodFilter } from "@/components/relatorios/period-filter";
+import { PageHeader } from "@/components/ddm/page-header";
 
 const ALL = "all";
 const PAGE_SIZES = [50, 100, 200] as const;
@@ -240,12 +241,7 @@ export default function AuditoriaPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="font-heading text-xl font-semibold tracking-[-0.015em] text-foreground">Auditoria</h2>
-          <p className="text-sm text-muted-foreground">
-            Quem fez o quê, quando e de onde — conversas, contatos, campanhas, fluxos, automações, canais e equipe.
-          </p>
-        </div>
+        <PageHeader>Quem fez o quê, quando e de onde — conversas, contatos, campanhas, fluxos, automações, canais e equipe.</PageHeader>
         {canExport && (
         <Button variant="outline" onClick={handleExport} disabled={exporting || total === 0}>
           {exporting ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}

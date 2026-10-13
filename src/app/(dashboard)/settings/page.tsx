@@ -23,6 +23,8 @@ import {
   visibleIntegrationTabs,
   type SettingsSection,
 } from '@/components/settings/settings-sections';
+import { PageBody } from '@/components/ddm/page-toolbar';
+import { PageHeader } from '@/components/ddm/page-header';
 
 function SettingsContent() {
   const router = useRouter();
@@ -91,18 +93,13 @@ function SettingsContent() {
   const integrationActive = isIntegrationTab(section);
 
   return (
-    <div>
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight text-foreground">
-          Configurações
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Tudo em um só lugar — sua conta e seu espaço de trabalho. Escolha uma
-          seção para gerenciá-la.
-        </p>
-      </div>
+    <PageBody>
+      <PageHeader>
+        Tudo em um só lugar — sua conta e seu espaço de trabalho. Escolha uma
+        seção para gerenciá-la.
+      </PageHeader>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
+      <div className="grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
         <SettingsRail active={integrationActive ? 'integrations' : section} onSelect={go} hints={hints} role={accountRole} />
         <div
           ref={panelRef}
@@ -120,20 +117,19 @@ function SettingsContent() {
           </PanelHeadingLevel>
         </div>
       </div>
-    </div>
+    </PageBody>
   );
 }
 
 function SettingsSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Carregando configurações">
-      <Skeleton className="h-8 w-48" />
-      <Skeleton className="mt-2 h-4 w-80 max-w-full" />
-      <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
-        <Skeleton className="h-64 w-full rounded-lg" />
-        <Skeleton className="h-96 w-full rounded-lg" />
+    <PageBody aria-busy="true" aria-label="Carregando configurações">
+      <Skeleton className="h-4 w-80 max-w-full" />
+      <div className="grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
+        <Skeleton className="h-64 w-full rounded-card" />
+        <Skeleton className="h-96 w-full rounded-card" />
       </div>
-    </div>
+    </PageBody>
   );
 }
 

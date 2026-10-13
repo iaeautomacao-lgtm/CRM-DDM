@@ -30,6 +30,7 @@ import { ContactTimeline } from "@/components/contact-timeline/ContactTimeline";
 import { formatDuration, type HistoryPeriod } from "@/lib/historico/format";
 import { loadClosedConversations, type ClosedConversation } from "@/lib/historico/queries";
 import type { AccountMember, Team } from "@/types";
+import { PageHeader } from "@/components/ddm/page-header";
 
 const ALL_TABS = "__all__";
 
@@ -195,12 +196,7 @@ export default function HistoricoPage() {
 
   return (
     <PageBody>
-      <div className="flex animate-ddm-up flex-col gap-1.5 pt-1">
-        <h1 className="font-heading text-[28px] font-semibold leading-tight tracking-[-0.025em] text-foreground">
-          Histórico
-        </h1>
-        <p className="max-w-[620px] text-sm leading-relaxed text-muted-foreground">Conversas encerradas.</p>
-      </div>
+      <PageHeader>Conversas encerradas.</PageHeader>
 
       <PageToolbar
         actions={
