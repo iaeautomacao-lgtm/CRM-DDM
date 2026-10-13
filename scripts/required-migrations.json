@@ -439,6 +439,10 @@
     {
       "version": "336_campaign_template_pause",
       "kind": "registry"
+    },
+    {
+      "version": "345_contacts_write_rls_has_perm",
+      "kind": "registry"
     }
   ]
 }
