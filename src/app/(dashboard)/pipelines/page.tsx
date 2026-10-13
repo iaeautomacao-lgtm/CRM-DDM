@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Pipeline, PipelineStage, Deal } from "@/types";
 import { PipelineBoard } from "@/components/pipelines/pipeline-board";
@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { GitBranch, Plus, ChevronDown, Settings } from "lucide-react";
+import { GitBranch, Plus, ChevronDown, Settings, Archive, ArchiveRestore } from "lucide-react";
 import { toast } from "sonner";
 import { usePermission } from "@/hooks/use-permission";
 import { useAuth } from "@/hooks/use-auth";
@@ -50,6 +50,7 @@ export default function PipelinesPage() {
   const supabase = createClient();
   const canEditSettings = usePermission("pipelines.manage");
   const canCreateDeals = usePermission("contacts.edit");
+  const canDeleteForever = usePermission("pipelines.delete");
   const { accountId } = useAuth();
 
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
@@ -67,6 +68,9 @@ export default function PipelinesPage() {
   const [newPipelineName, setNewPipelineName] = useState("");
   const [creating, setCreating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Filtro "Mostrar arquivados" (migration 340): arquivados saem do seletor e do quadro até o filtro ligar.
+  const [showArchived, setShowArchived] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   // Deal form state is lifted here so both the top-bar "Add Deal" and
   // the per-column "+" trigger the same Sheet.
@@ -184,9 +188,10 @@ export default function PipelinesPage() {
         return;
       }
       setPipelines(list);
+      const active = list.filter((p) => !p.archived_at);
       if (list.length > 0) {
         setSelectedPipelineId((prev) =>
-          prev && list.some((p) => p.id === prev) ? prev : list[0].id,
+          prev && list.some((p) => p.id === prev) ? prev : (active[0] ?? list[0]).id,
         );
       } else {
         setSelectedPipelineId("");
@@ -198,15 +203,20 @@ export default function PipelinesPage() {
     };
   }, [loadPipelines, seedDefaultPipeline]);
 
+  const activePipelines = pipelines.filter((p) => !p.archived_at);
+  const archivedPipelines = pipelines.filter((p) => p.archived_at);
+  // Estável entre renders: o efeito de carga só recarrega quando a lista de arquivados muda de verdade.
+  const archivedKey = archivedPipelines.map((p) => p.id).join(",");
+  const archivedIds = useMemo(() => new Set(archivedKey ? archivedKey.split(",") : []), [archivedKey]);
+
   // Load stages + deals whenever selected pipeline changes.
   // Clearing on no-selection is a legitimate sync with URL/prop
   // state; the load completion uses async setters inside promise
   // callbacks (not synchronous in the effect body).
   useEffect(() => {
-    if (!selectedPipelineId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+    // Arquivado: o RLS esconde etapas e negócios; não há o que carregar (mostra o painel de restaurar).
+    if (!selectedPipelineId || archivedIds.has(selectedPipelineId)) {
       setStages([]);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDeals([]);
       return;
     }
@@ -236,16 +246,17 @@ export default function PipelinesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedPipelineId, loadStages, loadDeals]);
+  }, [selectedPipelineId, loadStages, loadDeals, archivedIds]);
 
   const refreshPipelines = useCallback(async () => {
     const list = await loadPipelines();
     if (list === null) return;
     setPipelines(list);
-    if (list.length === 0) setSelectedPipelineId("");
-    else if (!list.some((p) => p.id === selectedPipelineId))
-      setSelectedPipelineId(list[0].id);
-  }, [loadPipelines, selectedPipelineId]);
+    const visible = list.filter((p) => showArchived || !p.archived_at);
+    const current = list.find((p) => p.id === selectedPipelineId);
+    // Sai do seletor se foi excluído ou arquivado com o filtro desligado.
+    if (!current || (current.archived_at && !showArchived)) setSelectedPipelineId(visible[0]?.id ?? "");
+  }, [loadPipelines, selectedPipelineId, showArchived]);
 
   const refreshStages = useCallback(async () => {
     if (!selectedPipelineId) return;
@@ -351,6 +362,20 @@ export default function PipelinesPage() {
   }
 
   const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
+  const selectedIsArchived = !!selectedPipeline?.archived_at;
+
+  async function handleRestorePipeline() {
+    if (!selectedPipeline) return;
+    setRestoring(true);
+    const { error } = await supabase.rpc("restore_pipeline", { p_pipeline: selectedPipeline.id });
+    setRestoring(false);
+    if (error) {
+      toast.error(error.code === "42501" ? "Você não pode restaurar funis" : "Falha ao restaurar funil");
+      return;
+    }
+    toast.success("Funil restaurado");
+    await refreshPipelines();
+  }
 
   if (loadError && !loading && pipelines.length === 0) {
     return (
@@ -404,12 +429,12 @@ export default function PipelinesPage() {
               align="start"
               className="w-64 border-border bg-popover text-popover-foreground"
             >
-              {pipelines.length === 0 && (
+              {activePipelines.length === 0 && (
                 <DropdownMenuItem disabled className="text-muted-foreground">
-                  Nenhum funil ainda
+                  Nenhum funil ativo
                 </DropdownMenuItem>
               )}
-              {pipelines.map((p) => (
+              {activePipelines.map((p) => (
                 <DropdownMenuItem
                   key={p.id}
                   onClick={() => setSelectedPipelineId(p.id)}
@@ -423,8 +448,36 @@ export default function PipelinesPage() {
                   {p.name}
                 </DropdownMenuItem>
               ))}
+              {showArchived && archivedPipelines.length > 0 && (
+                <>
+                  <DropdownMenuSeparator className="bg-border" />
+                  {archivedPipelines.map((p) => (
+                    <DropdownMenuItem
+                      key={p.id}
+                      onClick={() => setSelectedPipelineId(p.id)}
+                      className={p.id === selectedPipelineId ? "text-primary" : "text-muted-foreground"}
+                    >
+                      <Archive className="mr-2 h-3.5 w-3.5" />
+                      {p.name} (arquivado)
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
               <DropdownMenuSeparator className="bg-border" />
-              {selectedPipeline && (
+              {archivedPipelines.length > 0 && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    const next = !showArchived;
+                    setShowArchived(next);
+                    if (!next && selectedIsArchived) setSelectedPipelineId(activePipelines[0]?.id ?? "");
+                  }}
+                  className="text-popover-foreground"
+                >
+                  <Archive className="mr-2 h-3.5 w-3.5" />
+                  {showArchived ? "Ocultar arquivados" : `Mostrar arquivados (${archivedPipelines.length})`}
+                </DropdownMenuItem>
+              )}
+              {selectedPipeline && !selectedIsArchived && (
                 <DropdownMenuItem
                   onClick={() => setSettingsOpen(true)}
                   className="text-popover-foreground"
@@ -461,7 +514,26 @@ export default function PipelinesPage() {
       </div>
 
       {/* Board */}
-      {pipelines.length === 0 ? (
+      {selectedIsArchived && selectedPipeline ? (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border py-16 text-center">
+          <Archive className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
+          <h3 className="text-lg font-medium text-foreground">Funil arquivado: {selectedPipeline.name}</h3>
+          <p className="max-w-md text-sm text-muted-foreground">
+            As etapas e os negócios ficam ocultos nas listas e nos relatórios até o funil ser restaurado. Nada foi apagado.
+          </p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <GatedButton canAct={canEditSettings} gateReason="restaurar funis" disabled={restoring} onClick={handleRestorePipeline}>
+              <ArchiveRestore className="size-3.5" />
+              {restoring ? "Restaurando..." : "Restaurar funil"}
+            </GatedButton>
+            {canDeleteForever && (
+              <Button variant="destructive" onClick={() => setSettingsOpen(true)}>
+                Excluir definitivamente
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : activePipelines.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-20">
           <GitBranch className="h-12 w-12 text-muted-foreground" />
           <h3 className="mt-4 text-lg font-medium text-foreground">

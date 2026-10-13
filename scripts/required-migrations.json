@@ -370,14 +370,6 @@
       "kind": "registry"
     },
     {
-      "version": "318_roles_by_level",
-      "kind": "registry"
-    },
-    {
-      "version": "319_invitation_role_id",
-      "kind": "registry"
-    },
-    {
       "version": "320_billing_reports",
       "kind": "registry"
     },
@@ -399,6 +391,14 @@
     },
     {
       "version": "326_teams_templates_channels_rls_has_perm",
+      "kind": "registry"
+    },
+    {
+      "version": "327_revoke_broadcast_counters",
+      "kind": "registry"
+    },
+    {
+      "version": "328_trigger_functions_search_path",
       "kind": "registry"
     },
     {
@@ -428,7 +428,16 @@
       "kind": "registry"
     },
     {
-      "version": "337_ops_alert_dedupe",
+      "version": "335_contacts_phone_invalid",
+      "kind": "registry"
+    },
+    {
+      "version": "335b_contacts_phone_invalid_idx",
+      "kind": "index",
+      "index": "idx_contacts_phone_invalid"
+    },
+    {
+      "version": "336_campaign_template_pause",
       "kind": "registry"
     },
     {
@@ -436,7 +445,11 @@
       "kind": "registry"
     },
     {
-      "version": "352_pipelines_delete_owner_only",
+      "version": "345_contacts_write_rls_has_perm",
+      "kind": "registry"
+    },
+    {
+      "version": "348_deals_pipelines_write_rls_has_perm",
       "kind": "registry"
     }
   ]
