@@ -424,13 +424,8 @@
       "kind": "registry"
     },
     {
-      "version": "335_contacts_phone_invalid",
+      "version": "336_campaign_template_pause",
       "kind": "registry"
-    },
-    {
-      "version": "335b_contacts_phone_invalid_idx",
-      "kind": "index",
-      "index": "idx_contacts_phone_invalid"
     }
   ]
 }

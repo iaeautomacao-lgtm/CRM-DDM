@@ -114,3 +114,90 @@ CPU do Supabase < 70 %; claim p95 < 10 ms; zero duplicado; zero tick perdido; ze
 - Falha do gate = **o app não sobe** (boot) e `meta-api.ts` lança ao carregar. Em produção **não** defina nenhuma dessas variáveis.
 - O mock só escuta em `127.0.0.1` por padrão (`MOCK_HOST=0.0.0.0` só em rede privada de staging). Tokens e `app_secret` dos canais de teste são fictícios.
 - Os scripts nunca leem o `.env` do app; só `.env.load`/variáveis `LOAD_*` explícitas.
+
+## 6. Roteiro passo a passo para o dono (S1–S3, S9–S10) e a decisão de ligar o lote
+
+Decisão do dono de 13/10 (item 1): **medir na bancada antes de ligar** o envio em lote e o tick encadeado. Nada disso está ligado agora
+(`DISPARADOR_BATCH_CLAIM` e `DISPARADOR_TICK_CHAIN` ausentes = desligados). Este roteiro é o que **você** roda; não há staging nem Meta real envolvidos
+(a Meta é o mock) e nenhuma mensagem é gasta. Reserve ~3 horas e uma máquina que **não** seja a de produção.
+
+> ⚠️ Em todos os passos: se o terminal pedir `LOAD_CONFIRM_TEST_DB=yes`, só responda sim se a URL for a do projeto de **staging**. Se aparecer
+> `cyftbffhgjmsfogxawrl` em qualquer variável, **pare**: é produção.
+
+### 6.1 Antes de começar (uma vez)
+
+1. Siga as seções 1 a 3: projeto Supabase de staging com as migrations aplicadas (inclusive 164–168, 183, 332–338), app de staging com `DISPATCH_LOAD_TEST=1`
+   e `META_API_BASE_URL` apontando para o mock, mock no ar (`node scripts/loadtest/mock-meta.mjs`), `.env.load` preenchido.
+2. Confira que o app de staging subiu com o aviso `⚠️⚠️⚠️ BANCADA DE CARGA ATIVA` no log. Sem o aviso, não rode nada.
+3. Rode o seed: `npx tsx scripts/loadtest/seed.mjs` (demora; só uma vez).
+4. Em cada cenário, antes de começar: `curl http://<host-do-mock>:4010/__reset` (zera contadores) e anote o horário. Ao terminar, guarde a saída do `load.mjs`
+   e o resultado de `curl http://<host-do-mock>:4010/__stats`.
+5. Capacidade do app de staging para S2/S3 (valores do `docs/disparador-tick-encadeado.md`): `DISPATCH_PROCESS_CONCURRENCY=150` e
+   `DISPARADOR_PER_NUMBER_CONCURRENCY_META=100`.
+
+### 6.2 S1: linha de base (confere se o mock reproduz a produção)
+
+1. Com **lote e encadeamento desligados**: `LOAD_CHANNELS=1 LOAD_ITEMS=20000 npx tsx scripts/loadtest/load.mjs`.
+2. Leia a tabela final: **envios/min** e **p95 do claim**.
+3. ✅ Aceite: cerca de **480 envios/min**. Se der muito diferente, o mock ou o staging está fora do padrão: **não siga**; avise a Âncora com a saída.
+
+### 6.3 S2: degraus de vagas (acha o teto sem lote)
+
+1. Repita o S1 quatro vezes, mudando `DISPARADOR_PER_NUMBER_CONCURRENCY_META` no app de staging (reinicie o app a cada mudança): **12, 24, 48, 100**.
+2. Anote, por degrau: envios/min, lag do event loop p99, RSS e CPU (Node e Postgres: `docker stats` e o painel do Supabase).
+3. ✅ Aceite: chega a **2.000 envios/min ou mais sem lote** e cresce de forma proporcional até o teto. Se parar de crescer antes de 2.000, anote em que degrau.
+
+### 6.4 S3: 80/s em 1 número (o teste que decide o lote)
+
+Rode **duas vezes**, com o mesmo comando (`LOAD_CHANNELS=1 LOAD_ITEMS=20000 npx tsx scripts/loadtest/load.mjs`):
+
+| Rodada | App de staging com | Para quê |
+|---|---|---|
+| A | `DISPARADOR_TICK_CHAIN=1` (sem lote) | ver quanto o encadeamento sozinho rende |
+| B | `DISPARADOR_TICK_CHAIN=1` **e** `DISPARADOR_BATCH_CLAIM=1` | ver quanto o lote soma |
+
+Reinicie o app entre as rodadas. Em cada uma anote: **envios/min sustentado**, **atraso do envio até o status aplicado**, **lag p99**, **CPU do Supabase** e
+**RSS**.
+
+✅ Aceite da rodada: **4.500 envios/min ou mais sustentado**, lag p99 **abaixo de 100 ms**, RSS **abaixo de 60 %** do limite do container, CPU do Supabase
+**abaixo de 70 %**, claim p95 **abaixo de 10 ms**.
+
+### 6.5 S9: reiniciar no meio da carga
+
+1. Comece uma rodada do S3 (a que passou no aceite; se nenhuma passou, a A).
+2. Com a carga em andamento (uns 5 minutos depois do início), **reinicie o container do app de staging** (EasyPanel → Reiniciar).
+3. Espere a campanha terminar. Depois consulte no banco de staging:
+   ```sql
+   select status, count(*) from wacrm.disp_message_queue where campaign_id in (<ids da execução>) group by 1;
+   ```
+4. ✅ Aceite: **nenhum item preso em `enviando`** depois de ~2 minutos (o lock vence em 90 s) e **nenhum evento de status perdido** (o total de
+   `sent` no `/__stats` do mock bate com o de itens enviados + falhas na fila).
+
+### 6.6 S10: duplicidade (a prova de que nada saiu duas vezes)
+
+Depois do S9 (e de cada rodada do S3), no banco de staging:
+
+```sql
+-- por mensagem do provedor
+select waha_message_id, count(*) from wacrm.disp_message_queue
+ where waha_message_id is not null group by 1 having count(*) > 1;
+-- por campanha, contato e template
+select campaign_id, contact_id, count(*) from wacrm.disp_message_queue
+ where status in ('enviado','entregue','lido') group by 1, 2 having count(*) > 1;
+```
+
+✅ Aceite: as duas consultas devolvem **0 linhas**. Qualquer linha: **não ligue nada** e mande a consulta e a saída para a Âncora.
+
+### 6.7 Decisão: ligar o lote em produção?
+
+| Resultado | Decisão |
+|---|---|
+| S1 a S3 e S9/S10 dentro do aceite com a **rodada B** | Pode ligar o lote **e** o encadeamento |
+| Rodada **A** passa (4.500/min) e a B não melhora ou piora | Ligue **só o encadeamento**; deixe o lote desligado |
+| Nenhuma rodada chega a 4.500/min | Não ligue; mande a tabela para a Âncora (o gargalo é o próximo passo) |
+| S9 ou S10 falharam em qualquer rodada | **Não ligue nada**, mande a saída |
+
+Como ligar (em produção, só depois da decisão acima): hoje os dois são **variáveis de ambiente** do serviço (`DISPARADOR_TICK_CHAIN=1` e
+`DISPARADOR_BATCH_CLAIM=1`, com `DISPARADOR_CHAIN_URL=http://127.0.0.1:3000` se o proxy cortar). A **chave na tela de admin** que você pediu **ainda não
+existe**: falta uma entrega de backend (flag por conta no banco) e a tela. Até lá, a ligação é por variável e um reinício controlado, fora de campanha em curso.
+Para desligar de novo é só remover a variável e reiniciar.

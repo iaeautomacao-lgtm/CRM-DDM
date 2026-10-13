@@ -29,8 +29,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeStatus } from './template-status-normalize'
+import { pauseCampaignsForTemplate, resumeCampaignsForTemplate } from '@/lib/disparador/template-pause'
 
 const TEMPLATE_WEBHOOK_FIELDS = new Set([
+  'template_category_update',
   'message_template_status_update',
   'message_template_quality_update',
   'message_template_components_update',
@@ -60,6 +62,14 @@ interface TemplateComponentsUpdateValue {
   message_template_id?: string | number
   message_template_name?: string
   message_template_language?: string
+}
+
+interface TemplateCategoryUpdateValue {
+  message_template_id?: string | number
+  message_template_name?: string
+  message_template_language?: string
+  previous_category?: string
+  new_category?: string
 }
 
 export interface TemplateWebhookChange {
@@ -94,6 +104,13 @@ export async function handleTemplateWebhookChange(
     case 'message_template_quality_update':
       await handleQualityUpdate(
         change.value as TemplateQualityUpdateValue,
+        supabase,
+        scope,
+      )
+      return
+    case 'template_category_update':
+      await handleCategoryUpdate(
+        change.value as TemplateCategoryUpdateValue,
         supabase,
         scope,
       )
@@ -141,7 +158,7 @@ async function handleStatusUpdate(
     .update(update)
     .eq('meta_template_id', metaTemplateId)
   if (scope) query = query.eq('account_id', scope.accountId)
-  const { data, error } = await query.select('id')
+  const { data, error } = await query.select('id, account_id, name, language')
 
   if (error) {
     console.error(
@@ -163,6 +180,21 @@ async function handleStatusUpdate(
     console.warn(
       `[template-webhook] status update matched ${data.length} rows for meta_template_id ${metaTemplateId} — investigate.`,
     )
+  }
+
+  // Item 6 (13/10): template PAUSED/DISABLED pausa NA HORA a campanha em execução que o usa; APPROVED retoma as pausadas por ele.
+  // Falha aqui nunca derruba o webhook (as funções não lançam).
+  if (status !== 'PAUSED' && status !== 'DISABLED' && status !== 'APPROVED') return
+  for (const row of data as Array<{ account_id?: string | null; name?: string | null; language?: string | null }>) {
+    const accountId = row.account_id ?? scope?.accountId
+    const name = row.name ?? value.message_template_name
+    if (!accountId || !name) continue
+    const language = row.language ?? value.message_template_language
+    if (status === 'APPROVED') {
+      await resumeCampaignsForTemplate(supabase, { accountId, name, language })
+    } else {
+      await pauseCampaignsForTemplate(supabase, { accountId, name, language, status, reason: value.reason })
+    }
   }
 }
 
@@ -203,6 +235,50 @@ async function handleQualityUpdate(
       error.message,
     )
   }
+}
+
+/**
+ * Meta reclassificou a categoria do template (ex.: UTILITY → MARKETING), o que muda o custo por mensagem.
+ * Grava a categoria nova na linha local (a tela e o custo por categoria passam a refletir) e registra a mudança.
+ */
+async function handleCategoryUpdate(
+  value: TemplateCategoryUpdateValue,
+  supabase: SupabaseClient,
+  scope?: { accountId: string },
+): Promise<void> {
+  const metaTemplateId =
+    value.message_template_id !== undefined
+      ? String(value.message_template_id)
+      : null
+  const category = value.new_category?.toUpperCase()
+  if (!metaTemplateId || !category) {
+    console.warn(
+      '[template-webhook] category update missing message_template_id or new_category:',
+      value,
+    )
+    return
+  }
+  let query = supabase
+    .from('message_templates')
+    .update({ category })
+    .eq('meta_template_id', metaTemplateId)
+  if (scope) query = query.eq('account_id', scope.accountId)
+  const { error } = await query
+  if (error) {
+    console.error(
+      '[template-webhook] category update failed for meta_template_id',
+      metaTemplateId,
+      error.message,
+    )
+    return
+  }
+  console.info(
+    '[template-webhook] category changed by Meta for template',
+    value.message_template_name,
+    value.previous_category,
+    '->',
+    category,
+  )
 }
 
 /**
