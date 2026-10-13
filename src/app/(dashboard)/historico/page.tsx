@@ -9,7 +9,8 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Download, History, Search } from "lucide-react";
+import { Download, FileSpreadsheet, History, Search } from "lucide-react";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { createClient } from "@/lib/supabase/client";
@@ -29,6 +30,14 @@ import { DetailDrawer } from "@/components/ddm/list-with-drawer";
 import { EmptyState, ErrorState } from "@/components/ddm/states";
 import { ContactTimeline } from "@/components/contact-timeline/ContactTimeline";
 import { formatDuration, type HistoryPeriod } from "@/lib/historico/format";
+import { exportWithHistory } from "@/lib/relatorios/export-with-history";
+import {
+  buildReportRpcParams,
+  REPORT_EXPORT_COLUMNS,
+  toReportExportRows,
+  type ReportRawRow,
+} from "@/lib/historico/report-export";
+import { startOfDayIso, endOfDayIso } from "@/lib/relatorios/date-range";
 import { loadClosedConversations, type ClosedConversation, type HistoryStatus } from "@/lib/historico/queries";
 import type { AccountMember, Team } from "@/types";
 
@@ -94,7 +103,11 @@ function HistoricoContent() {
   const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
   const [tabulacao, setTabulacao] = useState<string>(ALL_TABS);
   const [exportOpen, setExportOpen] = useState(false);
-  const canExport = usePermissions().can("exports.manage");
+  const perms = usePermissions();
+  const canExport = perms.can("exports.manage");
+  // Planilha xlsx/csv das conversas filtradas (veio do relatório Conversas; reports.export, o servidor revalida).
+  const canReportExport = perms.can("reports.export");
+  const [reportExporting, setReportExporting] = useState<"xlsx" | "csv" | null>(null);
 
   // Apoios (atendentes, equipes, tabulações) que falharam ao carregar: aviso discreto em vez de só console.
   const [supportFailed, setSupportFailed] = useState<string[]>([]);
@@ -207,6 +220,37 @@ function HistoricoContent() {
     void fetchPage(0, false);
   }, [fetchPage]);
 
+  async function exportReport(kind: "xlsx" | "csv") {
+    if (!accountId) return;
+    setReportExporting(kind);
+    try {
+      const { dateFrom, dateTo, rpc } = buildReportRpcParams({
+        accountId,
+        status,
+        period,
+        range: period === "custom" ? { from: rangeFrom, to: rangeTo } : null,
+        search,
+      });
+      // Todas as linhas do recorte, sem paginação (como no relatório).
+      const { data, error: rpcError } = await createClient().rpc("get_conversations_report", rpc);
+      if (rpcError) throw rpcError;
+      await exportWithHistory({
+        data: toReportExportRows((data ?? []) as ReportRawRow[]),
+        columns: [...REPORT_EXPORT_COLUMNS],
+        exportType: "conversas",
+        description: `Conversas - ${format(new Date(startOfDayIso(dateFrom)), "dd/MM/yyyy")} a ${format(new Date(startOfDayIso(dateTo)), "dd/MM/yyyy")}`,
+        periodFrom: new Date(startOfDayIso(dateFrom)),
+        periodTo: new Date(endOfDayIso(dateTo)),
+        format: kind,
+      });
+    } catch (err) {
+      console.error("[historico] export failed:", err);
+      toast.error("Falha ao exportar as conversas. Tente novamente.");
+    } finally {
+      setReportExporting(null);
+    }
+  }
+
   const agentName = useMemo(() => {
     const map = new Map(members.map((m) => [m.user_id, m.full_name || m.email || "Sem nome"]));
     return (id: string | null) => (id ? map.get(id) ?? "—" : "—");
@@ -229,11 +273,37 @@ function HistoricoContent() {
 
       <PageToolbar
         actions={
-          canExport ? (
-            <Button variant="outline" onClick={() => setExportOpen(true)}>
-              <Download className="size-3.5" />
-              Exportar
-            </Button>
+          canExport || canReportExport ? (
+            <>
+              {canReportExport && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={reportExporting !== null || tabulacao !== ALL_TABS}
+                    title={tabulacao !== ALL_TABS ? "A planilha não filtra por tabulação: use Exportar." : undefined}
+                    onClick={() => void exportReport("xlsx")}
+                  >
+                    <FileSpreadsheet className="size-3.5" />
+                    {reportExporting === "xlsx" ? "Gerando…" : "Planilha (xlsx)"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={reportExporting !== null || tabulacao !== ALL_TABS}
+                    title={tabulacao !== ALL_TABS ? "A planilha não filtra por tabulação: use Exportar." : undefined}
+                    onClick={() => void exportReport("csv")}
+                  >
+                    <Download className="size-3.5" />
+                    {reportExporting === "csv" ? "Gerando…" : "CSV"}
+                  </Button>
+                </>
+              )}
+              {canExport && (
+                <Button variant="outline" onClick={() => setExportOpen(true)}>
+                  <Download className="size-3.5" />
+                  Exportar
+                </Button>
+              )}
+            </>
           ) : undefined
         }
       >
