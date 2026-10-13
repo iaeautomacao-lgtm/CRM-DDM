@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import Link from 'next/link';
 import { toast } from 'sonner';
 import { cn, normalizeForSearch } from '@/lib/utils';
 import type { Contact, Tag, ContactTag } from '@/types';
@@ -621,6 +622,11 @@ export default function ContactsPage() {
                           <Plus className="size-3.5" />
                           Adicionar o primeiro contato
                         </Button>
+                      )}
+                      {!hasActiveFilters && canImport && (
+                        <Link href="/disparador/contatos" className="text-[12.5px] font-medium text-primary-text hover:underline">
+                          Importar lista
+                        </Link>
                       )}
                     </div>
                   </td>
