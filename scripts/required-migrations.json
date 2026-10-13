@@ -451,6 +451,10 @@
     {
       "version": "348_deals_pipelines_write_rls_has_perm",
       "kind": "registry"
+    },
+    {
+      "version": "352_pipelines_delete_owner_only",
+      "kind": "registry"
     }
   ]
 }
