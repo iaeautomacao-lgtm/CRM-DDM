@@ -426,6 +426,10 @@
     {
       "version": "336_campaign_template_pause",
       "kind": "registry"
+    },
+    {
+      "version": "339_ai_daily_quota",
+      "kind": "registry"
     }
   ]
 }
