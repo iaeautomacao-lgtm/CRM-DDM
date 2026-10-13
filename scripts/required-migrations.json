@@ -451,6 +451,10 @@
     {
       "version": "348_deals_pipelines_write_rls_has_perm",
       "kind": "registry"
+    },
+    {
+      "version": "349_flows_disparador_write_rls",
+      "kind": "registry"
     }
   ]
 }
