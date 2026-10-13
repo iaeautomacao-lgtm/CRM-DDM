@@ -28,19 +28,19 @@ BEGIN
   IF to_regclass('wacrm.messages') IS NULL OR to_regclass('wacrm.conversations') IS NULL THEN
     RAISE EXCEPTION '330: faltam wacrm.messages/conversations';
   END IF;
-END $;
+END $$;
 
 -- A V1 não exige a migration 302 da V2: incluir apenas a origem e seu trigger mínimo.
 ALTER TABLE wacrm.messages ADD COLUMN IF NOT EXISTS origin text;
-DO $ BEGIN
+DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='messages_origin_chk'
                  AND conrelid='wacrm.messages'::regclass) THEN
     ALTER TABLE wacrm.messages ADD CONSTRAINT messages_origin_chk
       CHECK (origin IS NULL OR origin IN ('customer','operator','ai','flow','campaign','automation','api')) NOT VALID;
   END IF;
-END $;
+END $$;
 CREATE OR REPLACE FUNCTION wacrm.set_message_origin()
-RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
   IF NEW.origin IS NULL THEN
     IF NEW.sender_type='customer' THEN NEW.origin:='customer';
@@ -48,7 +48,7 @@ BEGIN
     END IF;
   END IF;
   RETURN NEW;
-END $;
+END $$;
 DROP TRIGGER IF EXISTS trg_set_message_origin ON wacrm.messages;
 CREATE TRIGGER trg_set_message_origin BEFORE INSERT ON wacrm.messages
   FOR EACH ROW EXECUTE FUNCTION wacrm.set_message_origin();
