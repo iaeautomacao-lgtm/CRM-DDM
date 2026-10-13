@@ -1220,7 +1220,7 @@ export default function CampanhasPage() {
                         <span className="font-semibold text-foreground">{Math.round(sentPct)}%</span>
                       </div>
                       <span
-                        className="relative h-1.5 overflow-hidden rounded-full bg-surface-3"
+                        className="relative h-2 overflow-hidden rounded-full bg-muted"
                         title={`Enviados ${Math.round(sentPct)}% · lidos ${Math.round(readPct)}%`}
                       >
                         <span className="absolute inset-y-0 left-0 origin-left animate-ddm-bar bg-muted-foreground/45 transition-[width] duration-500" style={{ width: `${sentPct}%` }} />
@@ -1899,7 +1899,7 @@ function RateRow({ label, part, total }: { label: string; part: number; total: n
   return (
     <div className="grid grid-cols-[130px_minmax(0,1fr)_56px] items-center gap-2.5 text-[12.5px]">
       <span className="text-foreground-2">{label}</span>
-      <span className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+      <span className="h-2 overflow-hidden rounded-full bg-muted">
         <span
           className="block h-full origin-left animate-ddm-bar rounded-full bg-primary"
           style={{ width: `${Math.min(100, pct)}%` }}

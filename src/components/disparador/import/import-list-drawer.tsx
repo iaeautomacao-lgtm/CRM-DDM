@@ -408,7 +408,7 @@ export function ProgressBar({ pct, tone = "brand" }: { pct: number; tone?: "bran
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(w)}
-      className="block h-2 w-full overflow-hidden rounded-full bg-surface-3"
+      className="block h-2 w-full overflow-hidden rounded-full bg-muted"
     >
       <span
         className={cn(
