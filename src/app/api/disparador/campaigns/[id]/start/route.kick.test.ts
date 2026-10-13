@@ -35,9 +35,20 @@ function chain(result: unknown): unknown {
 }
 vi.mock("@/lib/disparador/admin-client", () => ({
   supabaseAdmin: () => ({
-    from: () => chain({ data: { id: "camp-1", created_by: "user-1", account_id: "acc-1" }, error: null }),
+    // campanha em lista (a rota usa limit(1)); perfil do criador (ramo interno do cron) em objeto
+    from: (table: string) =>
+      chain(
+        table === "campaigns"
+          ? { data: [{ id: "camp-1", created_by: "user-1", account_id: "acc-1" }], error: null }
+          : { data: { account_id: "acc-1" }, error: null },
+      ),
     rpc: async () => ({ data: 1, error: null }),
   }),
+}));
+// Contexto completo (revisão de segurança 13/10): a rota usa requireDisparadorAccess → getCurrentAccount.
+vi.mock("@/lib/auth/account", async (orig) => ({
+  ...(await orig<typeof import("@/lib/auth/account")>()),
+  getCurrentAccount: async () => ({ supabase: {}, userId: "user-1", accountId: "acc-1", role: "admin", account: { id: "acc-1", name: "Conta" } }),
 }));
 vi.mock("@/lib/disparador/worker", () => ({ ensureQueueWorkerRunning: () => undefined }));
 vi.mock("@/lib/disparador/startCampaign", () => ({ startCampaign: mocks.start }));

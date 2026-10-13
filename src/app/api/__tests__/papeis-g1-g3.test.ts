@@ -42,15 +42,23 @@ vi.mock("@/lib/auth/account", async () => {
   class ForbiddenError extends Error {
     readonly status = 403 as const;
   }
+  const { createClient } = await import("@/lib/supabase/server");
+  const { can } = await import("@/lib/auth/permissions");
+  const ctx = async () => ({
+    supabase: await createClient(),
+    userId: "user-1",
+    accountId: "acc-1",
+    role: state.role,
+    account: { id: "acc-1", name: "Conta" },
+  });
   return {
     ForbiddenError,
-    getCurrentAccount: async () => ({
-      supabase: {},
-      userId: "user-1",
-      accountId: "acc-1",
-      role: state.role,
-      account: { id: "acc-1", name: "Conta" },
-    }),
+    getCurrentAccount: ctx,
+    // revisão de segurança 13/10: as rotas pedem a permissão pelo contexto completo
+    requirePermission: async (p: string) => {
+      if (!can({ role: state.role } as never, p as never)) throw new ForbiddenError("Acesso negado");
+      return ctx();
+    },
     toErrorResponse: (err: unknown) =>
       new Response(JSON.stringify({ error: String(err) }), { status: (err as { status?: number })?.status ?? 500 }),
   };
