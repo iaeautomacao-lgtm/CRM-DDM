@@ -394,10 +394,6 @@
       "kind": "registry"
     },
     {
-      "version": "327_revoke_broadcast_counters",
-      "kind": "registry"
-    },
-    {
       "version": "330_api_v1_conversation_extract",
       "kind": "registry"
     },
@@ -424,7 +420,7 @@
       "kind": "registry"
     },
     {
-      "version": "336_campaign_template_pause",
+      "version": "345_contacts_write_rls_has_perm",
       "kind": "registry"
     }
   ]
