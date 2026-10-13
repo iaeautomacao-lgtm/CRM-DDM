@@ -132,7 +132,7 @@ type Case = [string, () => Promise<Response>];
 // Cada handler chamado como um papel abaixo do mínimo.
 const ADMIN_ONLY: Case[] = [
   ["POST /api/flows", () => flowsPost(req())],
-  ["GET /api/flows", () => flowsGet()],
+  ["GET /api/flows", () => flowsGet(req("GET"))],
   ["GET /api/flows/[id]", () => flowGet(req("GET"), idParams)],
   ["PUT /api/flows/[id]", () => flowPut(req("PUT"), idParams)],
   ["DELETE /api/flows/[id]", () => flowDelete(req("DELETE"), idParams)],

@@ -9,6 +9,19 @@ import { toast } from 'sonner';
 import { Copy, Loader2, ShieldCheck } from 'lucide-react';
 
 import { apiFetch } from '@/lib/api-fetch';
+
+/** Auditoria (revisão de segurança 13/10): o servidor confere o estado real antes de registrar. Falha aqui não afeta o 2FA. */
+async function reportMfaChange(event: 'enabled' | 'disabled', factorId: string): Promise<void> {
+  try {
+    await apiFetch('/api/me/mfa', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event, factor_id: factorId }),
+    });
+  } catch {
+    // auditoria é melhor esforço do lado do navegador
+  }
+}
 import { normalizeTotpCode } from '@/lib/auth/mfa';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -120,6 +133,7 @@ export function TwoFactorCard() {
         return;
       }
       toast.success('Verificação em duas etapas ativada.');
+      void reportMfaChange('enabled', enrolling.factorId);
       setEnrolling(null);
       await load();
     } finally {
@@ -142,6 +156,7 @@ export function TwoFactorCard() {
         return;
       }
       toast.success('Verificação em duas etapas desativada.');
+      void reportMfaChange('disabled', f.id);
       await load();
     } finally {
       setBusy(null);
