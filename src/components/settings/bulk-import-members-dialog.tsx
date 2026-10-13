@@ -46,11 +46,12 @@ import { StatusChip } from '@/components/ddm/status-chip';
 import { DenseTable, TableCard, Td, Th, Tr } from '@/components/ddm/table-card';
 import type { AccountRole } from '@/lib/auth/roles';
 import { ROLE_META } from './role-meta';
+// Senha mínima única (decisão do dono 13/10: 8 em tudo, para senhas novas).
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth/auth-errors';
 
 const TEMPLATE_CSV =
   'nome,email,role\nMaria Silva,maria.silva@empresa.com,operador\nJoão Souza,joao.souza@empresa.com,supervisor\n';
 
-const MIN_PASSWORD_LENGTH = 6;
 const MAX_ROWS = 200;
 
 // Client-side mirror of the server's alias map (bulk-invite/route.ts) —
