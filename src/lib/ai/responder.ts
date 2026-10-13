@@ -2,6 +2,7 @@ import "server-only";
 import { maskCpfForLog, maskTextForLog, safeDbError } from '@/lib/privacy/mask';
 import { openAiUrl } from '@/lib/loadtest/gate';
 import { parseTranscript } from "@/lib/ai/stt";
+import { resolveConversationLine } from "@/lib/whatsapp/conversation-line";
 import { resolveProviderMedia } from '@/lib/storage/provider-media';
 import { safeFetch, SsrfBlockedError } from "@/lib/security/ssrf-guard";
 import { classifyPriorityIntent } from "@/lib/ai/priority-intents";
@@ -66,6 +67,9 @@ import {
   isValidE164,
   isRecipientNotAllowedError,
 } from "@/lib/whatsapp/phone-utils";
+
+/** Builder do Supabase visto pelo helper de linha da conversa (src/lib/whatsapp/conversation-line.ts). */
+type ConversationLineDb = Parameters<typeof resolveConversationLine>[0];
 
 
 // fetch com teto de 15s para todas as chamadas externas da IA (OpenAI,
@@ -1491,15 +1495,13 @@ async function handleAiAutoResponseAttempt(
 
     let targetAgentId = convData?.user_id;
 
-    // Fallback: se a conversa não tiver user_id, pega o dono do whatsapp_config correspondente
+    // Fallback: se a conversa não tiver user_id, pega o dono da LINHA DA CONVERSA (decisão do dono 13/10, item 17).
+    // Antes: whatsapp_config só por conta + maybeSingle, que falhava calado em conta com 2+ linhas.
     if (!targetAgentId) {
-      const { data: wahaCfg } = await db
-        .from("whatsapp_config")
-        .select("user_id")
-        .eq("account_id", accountId)
-        .maybeSingle();
-      if (wahaCfg?.user_id) {
-        targetAgentId = wahaCfg.user_id;
+      const resolved = await resolveConversationLine(db as unknown as ConversationLineDb, { accountId, conversationId, configId });
+      const owner = resolved.line?.user_id;
+      if (typeof owner === "string" && owner) {
+        targetAgentId = owner;
       }
     }
 
@@ -1634,21 +1636,22 @@ async function handleAiAutoResponseAttempt(
     }
   }
 
-  // 7. Load WhatsApp configuration
-  let configQuery = db
-    .from("whatsapp_config")
-    .select("*")
-    .eq("account_id", accountId);
-  if (configId) configQuery = configQuery.eq("id", configId);
-  const { data: config, error: configError } = await configQuery.maybeSingle();
+  // 7. Load WhatsApp configuration — a LINHA DA CONVERSA (decisão do dono 13/10, item 17): a do chamador, senão a da
+  // conversa, senão a única da conta. Com várias linhas e nenhuma pista, não adivinha o número: falha com motivo.
+  const resolvedLine = await resolveConversationLine(db as unknown as ConversationLineDb, { accountId, conversationId, configId });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const config = resolvedLine.line as any;
 
-  if (configError || !config) {
-    console.error("[AI Agent] WhatsApp config not found");
+  if (!config) {
+    console.error(`[AI Agent] WhatsApp config not resolved (${resolvedLine.reason})`);
     return {
       outcome: "failed",
-      reason: configError
-        ? `whatsapp_config_load_failed:${configError.message}`
-        : "whatsapp_config_missing",
+      reason:
+        resolvedLine.reason === "error"
+          ? `whatsapp_config_load_failed:${resolvedLine.error ?? ""}`
+          : resolvedLine.reason === "ambiguous"
+            ? "whatsapp_config_ambiguous"
+            : "whatsapp_config_missing",
       detectedTag,
       modelUsed: responseModel,
     };

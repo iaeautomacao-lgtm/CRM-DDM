@@ -56,7 +56,7 @@ describe("catálogo", () => {
     for (const key of PERMISSIONS) visit(key);
   });
 
-  it("só o proprietário tem as permissões ownerOnly (e são exatamente estas 6)", () => {
+  it("só o proprietário tem as permissões ownerOnly (e são exatamente estas 6; roles.manage passou a ser do admin na TASK5 e pipelines.delete veio na 340)", () => {
     const ownerOnly = PERMISSIONS.filter((p) => permissionDef(p).ownerOnly).sort();
     expect(ownerOnly).toEqual([
       "account.delete",
@@ -64,7 +64,7 @@ describe("catálogo", () => {
       "members.bulk_invite",
       "members.reset_password",
       "ownership.transfer",
-      "roles.manage",
+      "pipelines.delete",
     ]);
     for (const p of ownerOnly) {
       for (const role of ACCOUNT_ROLES) expect(can({ role }, p), `${role} ${p}`).toBe(role === "owner");
@@ -155,7 +155,7 @@ describe("escopos e implicações", () => {
 describe("papel personalizado: teto, dependências e papel de compatibilidade", () => {
   it("rejeita chave desconhecida e as ownerOnly", () => {
     const errors = validateCustomRolePermissions(["inbox.view", "roles.manage", "ownership.transfer", "nada.disso"]);
-    expect(errors).toContainEqual({ code: "owner_only", permission: "roles.manage" });
+    expect(errors).toContainEqual({ code: "not_grantable", permission: "roles.manage" }); // admin e acima, mas nunca vai para cargo (TASK5)
     expect(errors).toContainEqual({ code: "owner_only", permission: "ownership.transfer" });
     expect(errors).toContainEqual({ code: "unknown_permission", permission: "nada.disso" });
   });
@@ -185,7 +185,7 @@ describe("papel personalizado: teto, dependências e papel de compatibilidade", 
   it("os conjuntos dos papéis de sistema (exceto owner) são válidos como personalizados — o teto cobre tudo que o admin faz (menos o que é future)", () => {
     for (const role of ["admin", "supervisor", "agent", "viewer"] as const) {
       const set = [...SYSTEM_ROLE_PERMISSIONS[role]];
-      expect(validateCustomRolePermissions(set.filter((p) => !permissionDef(p).future)), role).toEqual([]);
+      expect(validateCustomRolePermissions(set.filter((p) => !permissionDef(p).future && !permissionDef(p).notGrantable)), role).toEqual([]);
       expect(validateCustomRolePermissions(set).every((e) => e.code === "not_grantable"), role).toBe(true);
     }
   });
@@ -203,5 +203,13 @@ describe("papel personalizado: teto, dependências e papel de compatibilidade", 
     expect(compatRoleFor(["campaigns.manage"])).toBe("admin");
     // receber atribuição (só agent) + editar automações (só admin+): nenhum contém → admin (teto)
     expect(compatRoleFor(["inbox.receive_assignments", "automations.edit"])).toBe("admin");
+  });
+});
+
+describe("roles.manage (TASK5, migration 318)", () => {
+  it("vale para admin e proprietário, não para supervisor/operador/visualizador; não é ownerOnly e nunca vai para cargo", () => {
+    for (const role of ACCOUNT_ROLES) expect(can({ role }, "roles.manage"), role).toBe(role === "admin" || role === "owner");
+    expect(permissionDef("roles.manage").ownerOnly).toBeUndefined();
+    expect(isGrantableToCustomRole("roles.manage")).toBe(false);
   });
 });

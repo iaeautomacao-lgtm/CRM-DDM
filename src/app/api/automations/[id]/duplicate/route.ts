@@ -38,7 +38,7 @@ export async function POST(
     .select()
     .single()
   if (copyErr || !copy) {
-    return NextResponse.json({ error: copyErr?.message ?? 'copy failed' }, { status: 500 })
+    return internalErrorResponse("automations-duplicate", copyErr)
   }
 
   const { data: steps } = await admin

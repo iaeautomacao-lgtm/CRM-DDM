@@ -45,6 +45,7 @@ import {
 } from "@/lib/internal-chat/threads";
 import { useAuth } from "@/hooks/use-auth";
 import { uploadAccountMedia, deleteAccountMedia, MEDIA_MAX_BYTES_BY_KIND } from "@/lib/storage/upload-media";
+import { isChatMediaRef } from "@/lib/storage/chat-media";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +59,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { ErrorState } from "@/components/dashboard/error-state";
 import type { InternalMessage } from "@/types";
 
-const CHAT_MEDIA_BUCKET = "chat-media";
 const MAX_RECORDING_SECONDS = 5 * 60;
 
 type InternalChatMode = "operator" | "supervisor";
@@ -163,6 +163,10 @@ function extensionForAudioMime(mime: string): string {
 /** Renders a message's attached media inline, per media_type — mirrors
  *  the four buckets message-composer.tsx's MediaDraftPreview covers. */
 function MessageMedia({ url, type }: { url: string; type: string | null | undefined }) {
+  // Só renderiza a referência autenticada do chat: uma media_url de fora (mensagem antiga ou gravada por fora) não é carregada.
+  if (!isChatMediaRef(url)) {
+    return <p className="text-xs opacity-70">Anexo indisponível</p>;
+  }
   if (type?.startsWith("image/")) {
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={url} alt="" className="max-w-full rounded-md" />;
@@ -243,7 +247,7 @@ export function InternalChatDialog({
       // GC a staged-but-unsent upload so it doesn't linger as an
       // orphan in chat-media.
       if (stagedMedia) {
-        deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch((err) => {
+        deleteAccountMedia("internal_chat", stagedMedia.path).catch((err) => {
           console.error("[InternalChatDialog] failed to GC staged media on close:", err);
         });
       }
@@ -550,7 +554,7 @@ export function InternalChatDialog({
 
   function discardStagedMedia() {
     if (stagedMedia) {
-      deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch((err) => {
+      deleteAccountMedia("internal_chat", stagedMedia.path).catch((err) => {
         console.error("[InternalChatDialog] failed to GC staged media:", err);
       });
     }
@@ -569,9 +573,9 @@ export function InternalChatDialog({
     }
     setUploading(true);
     try {
-      const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+      const { publicUrl, path } = await uploadAccountMedia("internal_chat", file);
       if (stagedMedia) {
-        deleteAccountMedia(CHAT_MEDIA_BUCKET, stagedMedia.path).catch(() => {});
+        deleteAccountMedia("internal_chat", stagedMedia.path).catch(() => {});
       }
       setStagedMedia({ kind, mediaUrl: publicUrl, mediaType: file.type, path, filename: file.name });
     } catch (err) {
@@ -596,7 +600,7 @@ export function InternalChatDialog({
     }
     setUploading(true);
     try {
-      const { publicUrl, path } = await uploadAccountMedia(CHAT_MEDIA_BUCKET, file);
+      const { publicUrl, path } = await uploadAccountMedia("internal_chat", file);
       setStagedMedia({ kind: "audio", mediaUrl: publicUrl, mediaType: mimeType, path, filename: file.name });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha no upload do áudio");
@@ -673,6 +677,12 @@ export function InternalChatDialog({
     }
     setSending(true);
     try {
+      // Só a referência autenticada da própria conta (o banco também recusa qualquer outra: migration 350).
+      const mediaUrl = stagedMedia?.mediaUrl ?? null;
+      if (mediaUrl !== null && !isChatMediaRef(mediaUrl, accountId)) {
+        toast.error("Anexo inválido. Envie o arquivo de novo.");
+        return;
+      }
       const supabase = createClient();
       const { data, error } = await supabase
         .from("internal_messages")
@@ -681,7 +691,7 @@ export function InternalChatDialog({
           sender_id: myUserId,
           recipient_id: selectedContact.user_id,
           content,
-          media_url: stagedMedia?.mediaUrl ?? null,
+          media_url: mediaUrl,
           media_type: stagedMedia?.mediaType ?? null,
         })
         .select()

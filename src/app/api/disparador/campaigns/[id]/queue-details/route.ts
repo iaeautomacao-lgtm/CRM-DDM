@@ -5,6 +5,8 @@ import * as XLSX from "xlsx";
 
 import { toErrorResponse } from "@/lib/auth/account";
 import { requireDisparadorAccess } from "@/lib/disparador/route-auth";
+import { enforceRateLimit } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
 import { totalFromStatusCounts } from "@/lib/disparador/queue-total";
 import { EXPORT_SYNC_MAX_ROWS } from "@/lib/disparador/export-jobs";
@@ -81,6 +83,9 @@ export async function GET(
   try {
     // Nome + telefone de todos os destinatários: mesmo papel da página de campanhas.
     const ctx = await requireDisparadorAccess();
+    // XLSX/CSV da fila inteira: limite por usuário.
+    const limited = await enforceRateLimit(`disp:queueDetails:${ctx.userId ?? ctx.accountId}`, RATE_LIMITS.queueDetails);
+    if (limited) return limited;
     const { id: campaignId } = await params;
 
     const { searchParams } = new URL(request.url);

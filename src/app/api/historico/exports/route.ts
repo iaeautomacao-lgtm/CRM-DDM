@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
+import { enforceRateLimit } from "@/lib/api/guards";
+import { RATE_LIMITS } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit/log-event";
 import { supabaseAdmin } from "@/lib/flows/admin-client";
 import { createHistoryExportJob, parseHistoryExportRequest, toPublicHistoryExportJob, type HistoryExportJob } from "@/lib/historico/export-jobs";
@@ -14,6 +16,8 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     const ctx = await requirePermission("exports.manage");
+    const limited = await enforceRateLimit(`hist:exportCreate:${ctx.userId}`, RATE_LIMITS.exportCreate);
+    if (limited) return limited;
     const parsed = parseHistoryExportRequest(await request.json().catch(() => null));
     if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 

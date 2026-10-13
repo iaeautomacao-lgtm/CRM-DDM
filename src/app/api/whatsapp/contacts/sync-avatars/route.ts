@@ -1,4 +1,6 @@
 ﻿import { NextResponse } from 'next/server'
+import { enforceRateLimit } from '@/lib/api/guards'
+import { RATE_LIMITS } from '@/lib/rate-limit'
 import { guardPermission } from '@/lib/auth/route-guard'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { decrypt } from '@/lib/whatsapp/encryption'
@@ -11,6 +13,8 @@ export async function POST(request: Request) {
   // Laço de 200 ms por contato com a chave WAHA da conta: só admin.
   const auth = await guardPermission('channels.manage')
   if (!auth.ok) return auth.response
+  const limited = await enforceRateLimit(`wa:avatarSync:${auth.ctx.userId ?? auth.ctx.accountId}`, RATE_LIMITS.avatarSync)
+  if (limited) return limited
   const account_id = auth.ctx.accountId
 
   const db = supabaseAdmin()

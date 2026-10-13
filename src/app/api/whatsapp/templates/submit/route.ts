@@ -1,3 +1,5 @@
+import { enforceRateLimit } from '@/lib/api/guards'
+import { RATE_LIMITS } from '@/lib/rate-limit'
 import { templatesDryRunEnabled } from '@/lib/whatsapp/templates-dry-run'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
@@ -124,6 +126,8 @@ export async function POST(request: Request) {
     // (mesmo papel das páginas /templates e /canais).
     const auth = await guardPermission('templates.manage')
     if (!auth.ok) return auth.response
+    const limited = await enforceRateLimit(`wa:templateSubmit:${auth.ctx.userId ?? auth.ctx.accountId}`, RATE_LIMITS.templateSubmit)
+    if (limited) return limited
     const { supabase, accountId } = auth.ctx
 
     let payload: TemplatePayload

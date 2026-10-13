@@ -33,12 +33,18 @@
 //     4. delete the now-empty personal account (nothing else
 //        references it, since step 3 already moved the profile).
 //
-// Per-row failures (bad email, duplicate email, invalid role,
-// weak password) are collected into `errors` rather than aborting
+// SENHA (revisão de segurança 13/10, plano aprovado): não existe mais senha padrão compartilhada. Cada usuário é criado
+// com uma senha aleatória que ninguém vê, e a resposta traz um LINK DE DEFINIÇÃO DE SENHA por pessoa (`links`), mostrado
+// uma única vez para o proprietário baixar em CSV e repassar. No primeiro acesso a pessoa define a própria senha (tela de
+// recuperação, via /auth/callback?token_hash=…&type=recovery). Link vencido: "Esqueci minha senha" no login. Um
+// `password` no corpo (front antigo) é IGNORADO.
+//
+// Per-row failures (bad email, duplicate email, invalid role) are collected into `errors` rather than aborting
 // the whole batch — one bad row in a 200-row spreadsheet shouldn't
 // sink the other 199.
 // ============================================================
 
+import { randomBytes } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { requirePermission, toErrorResponse } from "@/lib/auth/account";
@@ -46,12 +52,15 @@ import { isAccountRole, type AccountRole } from "@/lib/auth/roles";
 import { supabaseAdmin } from "@/lib/account/admin-client";
 import { maskEmailForLog } from "@/lib/privacy/mask";
 // Senha mínima única (decisão do dono 13/10: 8 em tudo, para senhas novas).
-import { MIN_PASSWORD_LENGTH } from "@/lib/auth/auth-errors";
 import {
   checkRateLimit,
   rateLimitResponse,
   RATE_LIMITS,
 } from "@/lib/rate-limit";
+import { isUuid } from "@/lib/auth/sessions";
+import { CustomRoleError } from "@/lib/roles/custom-roles";
+import { resolveInviteRole } from "@/lib/roles/invite-role";
+import { InviteBaseUrlError, resolveInviteBaseUrl } from "@/lib/invitations/base-url";
 
 // Best-effort rollback for the "auth user created, but a later step in
 // the same row failed" window (profile lookup or the account_id/role
@@ -118,6 +127,8 @@ interface ImportRow {
   name: string;
   email: string;
   role: AccountRole;
+  /** Cargo escolhido (TASK5, migrations 318/319): sistema ou personalizado desta organização. */
+  roleId: string | null;
 }
 
 interface ImportError {
@@ -142,14 +153,17 @@ export async function POST(request: Request) {
         }
       | null;
 
-    const password = body?.password;
-    if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
-      return NextResponse.json(
-        {
-          error: `'password' deve ser um texto com pelo menos ${MIN_PASSWORD_LENGTH} caracteres`,
-        },
-        { status: 400 },
-      );
+    // Base dos links de definição de senha: só de configuração do servidor (nunca do Host desta requisição). Sem host
+    // confiável, falha ANTES de criar qualquer usuário.
+    let baseUrl: string;
+    try {
+      baseUrl = resolveInviteBaseUrl(request);
+    } catch (err) {
+      if (err instanceof InviteBaseUrlError) {
+        console.error("[bulk-invite]", err.message);
+        return NextResponse.json({ error: err.message }, { status: 500 });
+      }
+      throw err;
     }
 
     const rawMembers = body?.members;
@@ -174,8 +188,27 @@ export async function POST(request: Request) {
     const errors: ImportError[] = [];
     const seenEmails = new Set<string>();
 
+    // TASK5: cargo escolhido para todos (role_id no topo) ou por linha (members[i].role_id, que vence). Cada cargo é
+    // conferido UMA vez (só abaixo de quem importa, sem escalada); o `role` gravado é o compat efetivo do cargo.
+    const topRoleId = (body as { role_id?: unknown } | null)?.role_id;
+    if (topRoleId !== undefined && topRoleId !== null && !isUuid(topRoleId)) {
+      return NextResponse.json({ error: "'role_id' inválido.", code: "invalid" }, { status: 400 });
+    }
+    const roleCache = new Map<string, AccountRole | null>();
+    const compatFor = async (roleId: string): Promise<AccountRole | null> => {
+      if (!roleCache.has(roleId)) {
+        try {
+          roleCache.set(roleId, (await resolveInviteRole(supabaseAdmin(), { accountId: ctx.accountId, actorId: ctx.userId, roleId, role: null })).role);
+        } catch (err) {
+          if (!(err instanceof CustomRoleError)) throw err;
+          roleCache.set(roleId, null);
+        }
+      }
+      return roleCache.get(roleId) ?? null;
+    };
+
     for (const raw of rawMembers) {
-      const row = raw as { name?: unknown; email?: unknown; role?: unknown };
+      const row = raw as { name?: unknown; email?: unknown; role?: unknown; role_id?: unknown };
       const email = typeof row.email === "string" ? row.email.trim() : "";
       const name = typeof row.name === "string" ? row.name.trim() : "";
 
@@ -192,6 +225,17 @@ export async function POST(request: Request) {
         errors.push({ email, reason: "Nome é obrigatório" });
         continue;
       }
+      const rowRoleId = row.role_id ?? topRoleId ?? null;
+      if (rowRoleId !== null) {
+        const compat = isUuid(rowRoleId) ? await compatFor(rowRoleId) : null;
+        if (!compat) {
+          errors.push({ email, reason: "Cargo inválido, de outra organização ou acima do seu" });
+          continue;
+        }
+        seenEmails.add(normalizedEmail);
+        valid.push({ name, email, role: compat, roleId: rowRoleId as string });
+        continue;
+      }
       const role = resolveRole(row.role);
       if (!role || !isAccountRole(role)) {
         errors.push({
@@ -202,26 +246,31 @@ export async function POST(request: Request) {
       }
 
       seenEmails.add(normalizedEmail);
-      valid.push({ name, email, role });
+      valid.push({ name, email, role, roleId: null });
     }
 
     const admin = supabaseAdmin();
     let imported = 0;
+    // Um link por usuário criado; null quando a geração falhou (a pessoa usa "Esqueci minha senha").
+    const links: { email: string; name: string; link: string | null }[] = [];
 
     for (const row of valid) {
       try {
         const { data: createdUser, error: createErr } =
           await admin.auth.admin.createUser({
             email: row.email,
-            password,
+            // Aleatória e descartada: ninguém (nem o proprietário) conhece. A pessoa define a dela pelo link.
+            password: randomBytes(32).toString("base64url"),
             email_confirm: true,
             user_metadata: { full_name: row.name },
           });
 
         if (createErr || !createdUser?.user) {
+          if (createErr) console.error("[bulk-invite] createUser falhou:", createErr.status ?? "", createErr.code ?? "");
           errors.push({
             email: row.email,
-            reason: createErr?.message || "Falha ao criar usuário",
+            // Mensagem do GoTrue não vai ao navegador: só o caso útil (e-mail já cadastrado) tem texto próprio; o resto fica no log.
+            reason: /already|registered|exists/i.test(createErr?.message ?? "") ? "E-mail já cadastrado." : "Falha ao criar usuário.",
           });
           continue;
         }
@@ -255,7 +304,8 @@ export async function POST(request: Request) {
 
         const { error: updateErr } = await admin
           .from("profiles")
-          .update({ account_id: ctx.accountId, account_role: row.role })
+          // role_id (cargo escolhido) vence: a sincronia (318) acerta o account_role para o compat efetivo.
+          .update(row.roleId ? { account_id: ctx.accountId, account_role: row.role, role_id: row.roleId } : { account_id: ctx.accountId, account_role: row.role })
           .eq("user_id", newUserId);
 
         if (updateErr) {
@@ -280,13 +330,29 @@ export async function POST(request: Request) {
         }
 
         imported += 1;
+
+        // Link de definição de senha (não envia e-mail: o proprietário repassa). Nunca vai para log.
+        let link: string | null = null;
+        try {
+          const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({ type: "recovery", email: row.email });
+          const hashed = (linkData as { properties?: { hashed_token?: string } } | null)?.properties?.hashed_token;
+          if (!linkErr && hashed) {
+            link = `${baseUrl}/auth/callback?token_hash=${encodeURIComponent(hashed)}&type=recovery&next=/reset-password`;
+          } else if (linkErr) {
+            console.error(`[bulk-invite] falha ao gerar o link de ${maskEmailForLog(row.email)}:`, linkErr.message);
+          }
+        } catch (err) {
+          console.error(`[bulk-invite] falha ao gerar o link de ${maskEmailForLog(row.email)}:`, err);
+        }
+        links.push({ email: row.email, name: row.name, link });
       } catch (err) {
         console.error("[bulk-invite] row failed:", err);
         errors.push({ email: row.email, reason: "Erro inesperado ao importar" });
       }
     }
 
-    return NextResponse.json({ success: true, imported, errors });
+    // Os links valem pelo prazo do e-mail de recuperação do Supabase (Authentication → Email OTP expiration).
+    return NextResponse.json({ success: true, imported, errors, links }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return toErrorResponse(err);
   }

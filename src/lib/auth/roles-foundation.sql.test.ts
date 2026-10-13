@@ -14,6 +14,7 @@ import {
   SYSTEM_ROLE_PERMISSIONS,
   can,
   compatRoleFor,
+  isGrantableToCustomRole,
   permissionDef,
   type Permission,
 } from './permissions'
@@ -28,6 +29,9 @@ const uid = (n: number) => `00000000-0000-0000-0000-0000000001${String(n).padSta
 const BOOTSTRAP = `
   CREATE ROLE anon NOLOGIN; CREATE ROLE authenticated NOLOGIN; CREATE ROLE service_role NOLOGIN;
   CREATE SCHEMA wacrm; CREATE SCHEMA auth;
+  -- auditoria (131), pré-requisito da 318: só aceita a chamada
+  CREATE FUNCTION wacrm.audit_write(p_account uuid, p_event text, p_resource_type text, p_resource_id uuid, p_label text,
+    p_action text, p_summary text, p_changes jsonb DEFAULT NULL, p_metadata jsonb DEFAULT NULL) RETURNS void LANGUAGE sql AS $$ SELECT $$;
   GRANT USAGE ON SCHEMA wacrm, auth TO anon, authenticated, service_role;
   CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('test.uid', true), '')::uuid $$;
   CREATE TYPE wacrm.account_role_enum AS ENUM ('owner', 'admin', 'supervisor', 'agent', 'viewer');
@@ -64,6 +68,21 @@ describe('migrations 240/241/241b — papéis como linhas, sincronia e has_perm'
     await db.exec(migration('241b_profiles_role_id_idx.sql'))
     await db.exec(migration('276_billing_permissions.sql')) // billing.view/manage (PRD 17.5): o catálogo do código já os tem
     await db.exec(migration('304_view_permission_keys.sql')) // campaigns.view/pipelines.view (§8 item 4): o catálogo do código já os tem
+    // TASK5: o catálogo do código já tem roles.manage para admin e acima (318); 312/313 são pré-requisito dela
+    await db.exec(migration('312_custom_role_validation.sql'))
+    await db.exec(migration('313_custom_roles.sql'))
+    await db.exec(migration('318_roles_by_level.sql'))
+    // pipelines.delete (340, decisão do dono 13/10): o catálogo do código já a tem. Tabelas mínimas de funil + stubs.
+    await db.exec(`
+      CREATE OR REPLACE FUNCTION wacrm.is_account_member(p_account uuid, p_role text DEFAULT 'viewer') RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT true $$;
+      CREATE OR REPLACE FUNCTION wacrm.audit_write(p_account uuid, p_event text, p_resource_type text, p_resource_id uuid, p_label text,
+        p_action text, p_summary text, p_changes jsonb DEFAULT NULL, p_metadata jsonb DEFAULT NULL) RETURNS void LANGUAGE sql AS $$ SELECT $$;
+      CREATE TABLE wacrm.pipelines (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid, name text);
+      CREATE TABLE wacrm.pipeline_stages (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), pipeline_id uuid REFERENCES wacrm.pipelines(id) ON DELETE CASCADE);
+      CREATE TABLE wacrm.deals (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), account_id uuid, pipeline_id uuid REFERENCES wacrm.pipelines(id) ON DELETE CASCADE);
+      ALTER TABLE wacrm.pipelines ENABLE ROW LEVEL SECURITY; ALTER TABLE wacrm.deals ENABLE ROW LEVEL SECURITY; ALTER TABLE wacrm.pipeline_stages ENABLE ROW LEVEL SECURITY;
+    `)
+    await db.exec(migration('340_pipeline_archive.sql'))
   }, 60_000)
   afterAll(async () => {
     await db.close()
@@ -101,7 +120,7 @@ describe('migrations 240/241/241b — papéis como linhas, sincronia e has_perm'
         expect(row.group_name, row.key).toBe(def.group)
         expect(row.scope, row.key).toBe(def.scope === 'none' ? 'n/a' : def.scope)
         expect(row.owner_only, row.key).toBe(Boolean(def.ownerOnly))
-        expect(row.grantable, row.key).toBe(!def.ownerOnly)
+        expect(row.grantable, row.key).toBe(isGrantableToCustomRole(row.key))
         expect(row.depends_on, row.key).toEqual([...(def.dependsOn ?? [])])
         expect(row.sort).toBe((i + 1) * 10)
       }

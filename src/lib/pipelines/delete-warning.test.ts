@@ -17,6 +17,12 @@ describe("pipelineDeleteWarning", () => {
     expect(t).toContain("1 negócio.");
   });
 
+  it("funil arquivado: etapas e negócios ocultos, sem número inventado", () => {
+    const t = pipelineDeleteWarning({ name: "X", stages: null, deals: null });
+    expect(t).toContain("todas as etapas");
+    expect(t).not.toMatch(/\d+ etapa/);
+  });
+
   it("não inventa número quando a contagem falhou", () => {
     const t = pipelineDeleteWarning({ name: "X", stages: 3, deals: null });
     expect(t).toContain("todos os negócios dele");

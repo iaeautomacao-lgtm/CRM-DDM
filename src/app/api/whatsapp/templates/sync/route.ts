@@ -1,6 +1,9 @@
+import { enforceRateLimit } from '@/lib/api/guards'
+import { RATE_LIMITS } from '@/lib/rate-limit'
 import { NextResponse } from 'next/server'
 import { fetchChannelConfigs } from '@/lib/whatsapp/channel-config'
 import { guardPermission } from '@/lib/auth/route-guard'
+import { safeDbError } from '@/lib/privacy/mask'
 import type { createClient } from '@/lib/supabase/server'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
@@ -152,6 +155,8 @@ export async function POST() {
     // (mesmo papel das páginas /templates e /canais).
     const auth = await guardPermission('templates.manage')
     if (!auth.ok) return auth.response
+    const limited = await enforceRateLimit(`wa:templateSync:${auth.ctx.userId ?? auth.ctx.accountId}`, RATE_LIMITS.templateSync)
+    if (limited) return limited
     const { supabase, accountId } = auth.ctx
 
     // Todos os canais Meta habilitados da conta, agrupados por WABA: cada
@@ -384,7 +389,10 @@ async function upsertSyncedTemplate(
     .eq('name', t.name)
     .eq('language', t.language)
     .or(`waba_id.eq.${wabaId},waba_id.is.null`)
-  if (lookupErr) return { error: lookupErr.message }
+  if (lookupErr) {
+    console.error('[templates/sync] falha ao procurar o template no catálogo:', safeDbError(lookupErr))
+    return { error: 'Falha ao gravar o template no catálogo.' }
+  }
 
   const existingId = pickCatalogRowId(
     (candidates ?? []) as Array<{ id: string; waba_id: string | null }>,
@@ -396,8 +404,16 @@ async function upsertSyncedTemplate(
       .from('message_templates')
       .update(row)
       .eq('id', existingId)
-    return updErr ? { error: updErr.message } : 'updated'
+    if (updErr) {
+      console.error('[templates/sync] falha ao atualizar o template no catálogo:', safeDbError(updErr))
+      return { error: 'Falha ao gravar o template no catálogo.' }
+    }
+    return 'updated'
   }
   const { error: insErr } = await supabase.from('message_templates').insert(row)
-  return insErr ? { error: insErr.message } : 'inserted'
+  if (insErr) {
+    console.error('[templates/sync] falha ao inserir o template no catálogo:', safeDbError(insErr))
+    return { error: 'Falha ao gravar o template no catálogo.' }
+  }
+  return 'inserted'
 }

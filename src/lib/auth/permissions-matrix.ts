@@ -88,6 +88,11 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   session("me/sessions/revoke-others", "POST", "account.view"),
   session("me/mfa", "GET", "account.view"),
   session("account/permission-catalog", "GET", "members.view"),
+  // Upload de mídia por URL assinada: a permissão exigida depende da origem (inbox.reply, templates.manage, campaigns.manage, flows.edit,
+  // account.view no chat interno) e é checada na própria rota por MEDIA_PURPOSES; aqui só o piso: qualquer membro autenticado.
+  session("media/upload-url", "POST", "account.view"),
+  session("media/confirm", "POST", "account.view"),
+  session("media/delete", "POST", "account.view"),
   pg("account/members/[userId]", "PATCH", "admin", "members.manage"),
   pg("account/members/[userId]", "DELETE", "admin", "members.manage"),
   pg("account/members/[userId]/status", "POST", "admin", "members.manage"),
@@ -95,10 +100,11 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("account/members/bulk-invite", "POST", "owner", "members.bulk_invite"),
   pg("account/transfer-ownership", "POST", "owner", "ownership.transfer"),
   pg("account/roles", "GET", "viewer", "members.view"), // papel personalizado (313)
-  pg("account/roles", "POST", "owner", "roles.manage"),
-  pg("account/roles/[roleId]", "PATCH", "owner", "roles.manage"),
-  pg("account/roles/[roleId]", "DELETE", "owner", "roles.manage"),
-  pg("account/members/[userId]/role", "PUT", "owner", "roles.manage"),
+  pg("account/roles", "POST", "admin", "roles.manage"),
+  pg("account/roles/[roleId]", "PATCH", "admin", "roles.manage"),
+  pg("account/roles/[roleId]", "DELETE", "admin", "roles.manage"),
+  pg("account/roles/[roleId]/reset", "POST", "admin", "roles.manage"), // cargos (318): restaurar padrão de cargo de sistema
+  pg("account/members/[userId]/role", "PUT", "admin", "roles.manage"),
   pg("account/teams/[teamId]/members", "GET", "viewer", "teams.view"),
   pg("account/teams/[teamId]/members", "POST", "admin", "teams.manage"),
   pg("account/teams/[teamId]/members", "DELETE", "admin", "teams.manage"),
@@ -120,6 +126,9 @@ export const ROUTE_MATRIX: readonly RouteEntry[] = [
   pg("whatsapp/flows/keys/[channelId]", "POST", "admin", "channels.manage"),
   pg("whatsapp/config", "DELETE", "admin", "channels.manage"),
   pg("whatsapp/config", "PATCH", "admin", "channels.manage"),
+  pg("whatsapp/config/verify-registration", "GET", "admin", "channels.manage"), // revisão de segurança 13/10: era só sessão
+  session("whatsapp/media/[mediaId]", "GET", "channels.view"), // qualquer membro que vê conversas: a rota exige inbox.view OU conversations.scope_* (o visualizador lê conversas sem inbox.view)
+  session("whatsapp/external-urls", "GET", "account.view"), // exige sessão (era sem autenticação)
   pg("whatsapp/channel-test", "POST", "admin", "channels.manage"),
   pg("whatsapp/channel-test/templates", "GET", "admin", "channels.manage"),
   pg("whatsapp/contacts/sync-avatars", "POST", "admin", "channels.manage"),
@@ -312,6 +321,7 @@ export const PAGE_MATRIX: readonly PageEntry[] = [
   { prefix: "/contacts", roles: ["owner"], permission: "contacts.view", aligned: false, note: "página só owner; contatos são lidos por todos (G7)" },
   { prefix: "/pipelines", roles: ["owner"], permission: "pipelines.manage", aligned: false, note: "página só owner; RLS admin (G7)" },
   { prefix: "/flows", roles: ["owner", "admin"], permission: "flows.edit", aligned: true },
+  { prefix: "/automations", roles: ["owner", "admin", "supervisor", "agent"], permission: "automations.view", aligned: true, note: "decisão 9 (13/10): o visualizador não vê" },
   { prefix: "/disparador", roles: ["owner", "admin"], permission: "campaigns.manage", aligned: true },
   { prefix: "/regua", roles: ["owner", "admin", "supervisor"], permission: "billing.view", aligned: true },
   { prefix: "/ajuda", roles: ["owner"], permission: null, aligned: false, note: "sem capacidade correspondente" },

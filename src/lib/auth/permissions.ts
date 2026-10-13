@@ -38,6 +38,8 @@ export interface PermissionDef {
   dependsOn?: readonly string[];
   /** Ainda sem checagem no código atual (previsto em PRD 19/20). */
   future?: true;
+  /** Não entra em cargo personalizado nem em ajuste de cargo de sistema (ex.: roles.manage). */
+  notGrantable?: true;
 }
 
 const atLeast = (min: AccountRole): readonly AccountRole[] => ACCOUNT_ROLES.filter((r) => hasMinRole(r, min));
@@ -116,7 +118,7 @@ export const PERMISSION_CATALOG = {
   "members.bulk_invite": { label: "Convite em lote", description: "Criar vários membros de uma vez.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
   "ownership.transfer": { label: "Transferir a propriedade", description: "Passar a organização a outro membro.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
   "account.delete": { label: "Excluir a organização", description: "Excluir a organização e seus dados.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
-  "roles.manage": { label: "Gerir papéis personalizados", description: "Criar, editar, apagar e atribuir papéis personalizados.", group: "Pessoas", scope: "none", roles: ["owner"], ownerOnly: true },
+  "roles.manage": { label: "Gerir cargos", description: "Criar e editar cargos personalizados, ajustar as permissões dos cargos abaixo do seu e atribuí-los.", group: "Pessoas", scope: "none", roles: atLeast("admin"), notGrantable: true },
 
   // ── Organização ─────────────────────────────────────────
   "account.view": { label: "Ver a organização", description: "Ver nome e dados gerais da organização.", group: "Organização", scope: "none", roles: ALL },
@@ -132,6 +134,9 @@ export const PERMISSION_CATALOG = {
   // ── Chaves de leitura (RLS fase 2, migration 304): todos os papéis; as policies de SELECT de campanhas e funis passam a perguntar o catálogo (305) ──
   "campaigns.view": { label: "Ver campanhas", description: "Ler campanhas, métricas e fila de envio (leitura direta; o Inbox mostra a origem da conversa).", group: "Leitura de campanhas e funis", scope: "account", roles: ALL },
   "pipelines.view": { label: "Ver funis e negócios", description: "Ler funis, etapas e negócios (leitura direta do CRM).", group: "Leitura de campanhas e funis", scope: "account", roles: ALL },
+
+  // ── Funis (decisão do dono 13/10, migration 340): arquivar é o caminho normal (pipelines.manage); excluir em definitivo só o proprietário ──
+  "pipelines.delete": { label: "Excluir funil em definitivo", description: "Apagar um funil com etapas e negócios, sem volta (arquivar é o caminho normal).", group: "Funis", scope: "none", roles: ["owner"], ownerOnly: true, dependsOn: ["pipelines.manage"] },
 } as const satisfies Record<string, PermissionDef>;
 
 export type Permission = keyof typeof PERMISSION_CATALOG;
@@ -225,7 +230,7 @@ export const MAX_CUSTOM_ROLES = 20;
  * fora do catálogo. Mesmo valor de permission_catalog.grantable (migration 312).
  */
 export function isGrantableToCustomRole(permission: string): permission is Permission {
-  return isPermission(permission) && !DEFS[permission].ownerOnly && !DEFS[permission].future;
+  return isPermission(permission) && !DEFS[permission].ownerOnly && !DEFS[permission].future && !DEFS[permission].notGrantable;
 }
 
 /**
@@ -245,7 +250,7 @@ export function validateCustomRolePermissions(permissions: readonly string[]): R
       errors.push({ code: "owner_only", permission: key });
       continue;
     }
-    if (DEFS[key].future) {
+    if (DEFS[key].future || DEFS[key].notGrantable) {
       errors.push({ code: "not_grantable", permission: key });
       continue;
     }

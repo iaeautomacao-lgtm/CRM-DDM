@@ -106,10 +106,7 @@ export async function POST(request: Request) {
     .single()
 
   if (insertErr || !automation) {
-    return NextResponse.json(
-      { error: insertErr?.message ?? 'insert failed' },
-      { status: 500 },
-    )
+    return internalErrorResponse("automations", insertErr)
   }
 
   if (effectiveSteps && effectiveSteps.length > 0) {

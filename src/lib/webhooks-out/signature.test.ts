@@ -60,6 +60,8 @@ describe("catálogo de eventos", () => {
   it("os eventos do catálogo são exatamente os que os triggers da migration 204 emitem", () => {
     const sql = readFileSync("supabase/migrations/204_outbound_webhooks.sql", "utf8");
     const emitted = new Set([...sql.matchAll(/enqueue_webhook_event\([^,]+,\s*'([a-z_.]+)'/g)].map((m) => m[1]));
-    expect([...emitted].sort()).toEqual([...WEBHOOK_EVENTS].sort());
+    // Alertas ativos (item 5, 13/10) são emitidos pelo código (active-alerts.ts), não por trigger da 204.
+    const byCode = ["campaign.auto_paused", "channel.quality_changed", "dispatch.cron_stalled"];
+    expect([...emitted, ...byCode].sort()).toEqual([...WEBHOOK_EVENTS].sort());
   });
 });

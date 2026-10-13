@@ -370,6 +370,14 @@
       "kind": "registry"
     },
     {
+      "version": "318_roles_by_level",
+      "kind": "registry"
+    },
+    {
+      "version": "319_invitation_role_id",
+      "kind": "registry"
+    },
+    {
       "version": "320_billing_reports",
       "kind": "registry"
     },
@@ -445,11 +453,19 @@
       "kind": "registry"
     },
     {
+      "version": "337_ops_alert_dedupe",
+      "kind": "registry"
+    },
+    {
       "version": "338_dispatch_waha_rate",
       "kind": "registry"
     },
     {
       "version": "339_ai_daily_quota",
+      "kind": "registry"
+    },
+    {
+      "version": "340_pipeline_archive",
       "kind": "registry"
     },
     {
@@ -470,6 +486,18 @@
     },
     {
       "version": "349_flows_disparador_write_rls",
+      "kind": "registry"
+    },
+    {
+      "version": "350_internal_messages_media_ref",
+      "kind": "registry"
+    },
+    {
+      "version": "351_storage_close_direct_writes",
+      "kind": "registry"
+    },
+    {
+      "version": "352_pipelines_delete_owner_only",
       "kind": "registry"
     }
   ]

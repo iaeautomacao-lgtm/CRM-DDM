@@ -13,13 +13,14 @@ import { BASELINE_REAL_MIGRATIONS, BASELINE_SQL, USER_SESSIONS_290 } from "./dep
 const PRE_DEPLOY = [
   "262", "297", "298", "300", "301", "302", "302b", "303", "303b",
   "304", "305",
-  "311", "312", "313", "314", "314b", "315", "316b", "317", "320",
-  "322", "323", "324", "325", "326",
+  "311", "312", "313", "314", "314b", "315", "316b", "317", "318", "319", "320",
+  "322", "323", "324", "325", "326", "327", "328", "329",
   "330", "330b", "331b", "333", "334",
+  "335", "335b", "336", "337", "338", "339", "340", "345", "346", "347", "348", "349", "350", "352",
   "310",
 ] as const;
 /** Migrations que só rodam DEPOIS do deploy do código (o cabeçalho diz "FAZER O DEPLOY ... depois aplicar"): aplicar antes quebra o código antigo. */
-const POST_DEPLOY = ["306", "332"] as const;
+const POST_DEPLOY = ["306", "332", "351"] as const;
 export const FULL_ROUND = [...PRE_DEPLOY, ...POST_DEPLOY] as const;
 
 const DIR = "supabase/migrations";
@@ -127,7 +128,7 @@ async function exists(db: PGlite, c: Created) {
 }
 
 // ---------- rollback do cabeçalho ----------
-const SQL_START = /^(BEGIN|COMMIT|DROP|DELETE|ALTER|DO|UPDATE|CREATE|REVOKE|GRANT|END|FOR|EXECUTE|SELECT)\b/i;
+const SQL_START = /^(BEGIN|COMMIT|DROP|DELETE|ALTER|DO|UPDATE|CREATE|REVOKE|GRANT|END|FOR|EXECUTE|SELECT)\b|^(AS\s+\$\$|RETURNS\s|LANGUAGE\s|SECURITY\s+(DEFINER|INVOKER)|SET\s+search_path)/i; // 2ª parte: cabeça de CREATE FUNCTION de várias linhas ("AS $$" sem \b: "as" é artigo em prosa)
 function rollbackOf(n: string): { statements: string[]; reapply: string[] } {
   const lines = sqlOf(n).split("\n");
   const start = lines.findIndex((l) => /^--\s*ROLLBACK/i.test(l));
@@ -151,8 +152,7 @@ function rollbackOf(n: string): { statements: string[]; reapply: string[] } {
     if (open && !inDollar && !t.startsWith("(") && !t.startsWith("--")) {
       const cont = t.replace(/\s+--\s.*$/, "");
       kept.push(cont);
-      // "AS $$" na continuação abre o corpo da função: dali em diante tudo é SQL até o $$ de fechamento
-      if (((cont.match(/\$\$/g) ?? []).length % 2) === 1) inDollar = !inDollar;
+      if (((cont.match(/\$\$/g) ?? []).length % 2) === 1) inDollar = !inDollar; // "AS $$" abre o corpo da função na linha de continuação
       return;
     }
     if (t.startsWith("--")) return; // comentário dentro do bloco de rollback
@@ -270,9 +270,9 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
         for (const name of [...c.tables, ...c.functions]) {
           if (baselineExisting.get(later)!.has(`tabela ${name}`) || baselineExisting.get(later)!.has(`função ${name}`)) continue; // já existe antes da rodada
           if (own.tables.includes(name) || own.functions.includes(name)) continue;
-          // uso protegido por pré-checagem pelo nome em pg_proc (ex.: a 334 só chama apply_mfa_policy se a 310 já existir)
-          if (new RegExp(`proname\\s*=\\s*'${name}'`, "i").test(code)) continue;
-          if (new RegExp(`wacrm\\.${name}\\b`, "i").test(code)) problems.push(`${n} usa wacrm.${name}, criado só pela ${later}`);
+          // uso CONDICIONAL (só chama se a função já existe: to_regprocedure/pg_proc) não é dependência: a 310, sempre a última, cobre as tabelas
+          const guarded = new RegExp(`to_regprocedure\\('wacrm\\.${name}\\(|proname\\s*=\\s*'${name}'`, "i").test(code);
+          if (!guarded && new RegExp(`wacrm\\.${name}\\b`, "i").test(code)) problems.push(`${n} usa wacrm.${name}, criado só pela ${later}`);
         }
       }
     });
@@ -301,6 +301,18 @@ suite("rodada de deploy — PGlite sobre o schema-base da v2", () => {
     }
     expect((await db.query<{ n: number }>("SELECT count(*)::int AS n FROM wacrm.schema_migrations")).rows[0].n).toBe(before);
   }, 120_000);
+
+  // A 340 põe o DELETE de funis em pipelines.delete (só o proprietário); a 348 (RLS fase 3) roda depois e o devolvia a pipelines.manage; a 352 restaura a regra da 340.
+  it.skipIf(!ROUND.includes("352"))("no FIM da rodada, o DELETE de wacrm.pipelines só passa por has_perm('pipelines.delete') (a 348 não desfaz a 340)", async () => {
+    const r = await db.query<{ policyname: string; qual: string }>(
+      "SELECT policyname, qual FROM pg_policies WHERE schemaname = 'wacrm' AND tablename = 'pipelines' AND cmd = 'DELETE' AND permissive = 'PERMISSIVE'",
+    );
+    expect(r.rows.map((x) => x.policyname)).toEqual(["pipelines_delete"]);
+    expect(r.rows[0].qual).toContain("pipelines.delete");
+    expect(r.rows[0].qual).not.toContain("pipelines.manage");
+    expect(ROUND.indexOf("352")).toBeGreaterThan(ROUND.indexOf("348"));
+    expect(ROUND.indexOf("352")).toBeGreaterThan(ROUND.indexOf("340"));
+  });
 
   it.skipIf(!ROUND.includes("310"))("a 310 por último cobre as tabelas novas: toda tabela wacrm com RLS tem mfa_aal2_required", async () => {
     const r = await db.query<{ relname: string }>(`
@@ -370,6 +382,60 @@ suite("rodada de deploy — controle negativo: a 310 fora do fim deixa tabela no
       await db.close();
     }
   }, 60_000);
+});
+
+// A 329 tira anon (e PUBLIC) de TODAS as funções/tabelas do wacrm: não pode tirar nada de authenticated nem de service_role, e o anon só mantém peek_invitation.
+type FnPriv = { sig: string; auth: boolean; svc: boolean; anon: boolean };
+type TblPriv = { tbl: string; a_sel: boolean; a_ins: boolean; s_sel: boolean; s_ins: boolean; anon_sel: boolean };
+suite("rodada de deploy — a 329 (REVOKE do anon) não quebra authenticated, service_role nem peek_invitation", () => {
+  it.skipIf(!ROUND.includes("329"))("o que authenticated/service_role executavam e acessavam continua igual; anon só peek_invitation", async () => {
+    const db = new PGlite();
+    try {
+      await db.exec(BASELINE_SQL);
+      for (const f of BASELINE_REAL_MIGRATIONS) await db.exec(readFileSync(`${DIR}/${f}`, "utf8").replace(/NOTIFY pgrst[^;]*;/g, ""));
+      for (const n of ROUND.slice(0, ROUND.indexOf("329"))) await applyFile(db, n);
+      // peek_invitation no wacrm (se o banco vivo tiver) nasce com o padrão do Postgres (PUBLIC); a 329 devolve o EXECUTE ao anon
+      await db.exec(`CREATE OR REPLACE FUNCTION wacrm.peek_invitation(p_token_hash text) RETURNS json LANGUAGE sql AS $$ SELECT '{"ok":false}'::json $$;`);
+      const fnPriv = `SELECT p.oid::regprocedure::text AS sig,
+          has_function_privilege('authenticated', p.oid, 'EXECUTE') AS auth,
+          has_function_privilege('service_role', p.oid, 'EXECUTE') AS svc,
+          has_function_privilege('anon', p.oid, 'EXECUTE') AS anon
+        FROM pg_proc p WHERE p.pronamespace = 'wacrm'::regnamespace AND p.prokind IN ('f','p') ORDER BY 1`;
+      const tblPriv = `SELECT c.relname AS tbl,
+          has_table_privilege('authenticated', c.oid, 'SELECT') AS a_sel, has_table_privilege('authenticated', c.oid, 'INSERT') AS a_ins,
+          has_table_privilege('service_role', c.oid, 'SELECT') AS s_sel, has_table_privilege('service_role', c.oid, 'INSERT') AS s_ins,
+          has_table_privilege('anon', c.oid, 'SELECT') AS anon_sel
+        FROM pg_class c WHERE c.relnamespace = 'wacrm'::regnamespace AND c.relkind IN ('r','v','m') ORDER BY 1`;
+      const fnBefore = (await db.query<FnPriv>(fnPriv)).rows;
+      const tblBefore = (await db.query<TblPriv>(tblPriv)).rows;
+      expect(fnBefore.some((f) => f.auth), "o baseline precisa ter funções executáveis por authenticated").toBe(true);
+
+      await applyFile(db, "329");
+      await applyFile(db, "329"); // idempotente
+
+      const fnAfter = (await db.query<FnPriv>(fnPriv)).rows;
+      const tblAfter = (await db.query<TblPriv>(tblPriv)).rows;
+      const lost: string[] = [];
+      for (const b of fnBefore) {
+        const a = fnAfter.find((x) => x.sig === b.sig);
+        if (!a) continue;
+        if (b.auth && !a.auth) lost.push(`authenticated perdeu EXECUTE em ${b.sig}`);
+        if (b.svc && !a.svc) lost.push(`service_role perdeu EXECUTE em ${b.sig}`);
+        if (!b.auth && a.auth) lost.push(`authenticated GANHOU EXECUTE em ${b.sig}`);
+      }
+      for (const b of tblBefore) {
+        const a = tblAfter.find((x) => x.tbl === b.tbl)!;
+        if ((b.a_sel && !a.a_sel) || (b.a_ins && !a.a_ins)) lost.push(`authenticated perdeu acesso à tabela ${b.tbl}`);
+        if ((b.s_sel && !a.s_sel) || (b.s_ins && !a.s_ins)) lost.push(`service_role perdeu acesso à tabela ${b.tbl}`);
+      }
+      expect(lost).toEqual([]);
+      // anon: nenhuma tabela e nenhuma função, exceto peek_invitation
+      expect(tblAfter.filter((t) => t.anon_sel).map((t) => t.tbl)).toEqual([]);
+      expect(fnAfter.filter((f) => f.anon).map((f) => f.sig)).toEqual(["wacrm.peek_invitation(text)"]);
+    } finally {
+      await db.close();
+    }
+  }, 120_000);
 });
 
 // referência para quem lê o relatório: confirma que o arquivo existe quando a rodada roda

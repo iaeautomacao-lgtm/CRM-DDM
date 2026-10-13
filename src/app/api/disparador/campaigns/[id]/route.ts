@@ -1,3 +1,4 @@
+import { internalErrorResponse } from "@/lib/api/internal-error";
 import { NextResponse } from "next/server";
 import { toErrorResponse } from "@/lib/auth/account";
 import { supabaseAdmin } from "@/lib/disparador/admin-client";
@@ -133,7 +134,7 @@ export async function PATCH(
     }
 
     if (result.error) {
-      return NextResponse.json({ error: result.error.message }, { status: 500 });
+      return internalErrorResponse("campaign", result.error);
     }
     if (!result.data || result.data.length === 0) {
       return NextResponse.json(
@@ -208,7 +209,7 @@ export async function DELETE(
       .eq("id", campaignId);
 
     if (deleteError) {
-      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+      return internalErrorResponse("campaign", deleteError);
     }
 
     return NextResponse.json({ success: true });
