@@ -1,5 +1,6 @@
+import { apiFetch } from "@/lib/api-fetch";
 import { createClient } from "@/lib/supabase/client";
-import { chatMediaReference } from './chat-media';
+import { checkUploadRequest, type MediaPurpose } from "./media-validation";
 
 /**
  * Shared media-upload helper for Supabase Storage buckets that use the
@@ -63,77 +64,66 @@ export function buildMediaPath(
 }
 
 export interface UploadAccountMediaResult {
-  /** Public URL Meta can fetch at send time. */
+  /** Referência a gravar/usar: `/api/chat-media/...` (chat-media) ou URL pública (flow-media). */
   publicUrl: string;
-  /** Storage object path (account-scoped). */
+  /** Caminho do objeto no bucket (dentro da pasta da conta). */
   path: string;
 }
 
-/**
- * Upload a file to an account-scoped Storage bucket and return its public
- * URL. Throws with a user-facing message on auth / account-resolution /
- * upload failure — callers surface it via a toast.
- *
- * Size validation is the caller's responsibility (limits can differ per
- * feature); `MEDIA_MAX_BYTES` is exported for the common case.
- */
-export async function uploadAccountMedia(
-  bucket: string,
-  file: File,
-): Promise<UploadAccountMediaResult> {
-  const supabase = createClient();
-
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-  if (userErr || !user) {
-    throw new Error("Entre na sua conta para enviar um anexo.");
-  }
-
-  // Resolve account_id so the path is account-scoped (matches the
-  // bucket's RLS write policy from migration 020/023). User-scoped
-  // paths would be rejected.
-  const { data: profile, error: profileErr } = await supabase
-    .from("profiles")
-    .select("account_id")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (profileErr || !profile?.account_id) {
-    throw new Error("Não foi possível carregar sua conta.");
-  }
-
-  const path = buildMediaPath(profile.account_id as string, file.name);
-  const { error: upErr } = await supabase.storage.from(bucket).upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: file.type,
-  });
-  if (upErr) throw new Error(upErr.message);
-
-  if (bucket === 'chat-media') return { publicUrl: chatMediaReference(path), path };
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from(bucket).getPublicUrl(path);
-
-  return { publicUrl, path };
+async function readError(res: Response, fallback: string): Promise<string> {
+  const payload = (await res.json().catch(() => ({}))) as { error?: unknown };
+  return typeof payload.error === "string" && payload.error ? payload.error : fallback;
 }
 
 /**
- * Delete a previously-uploaded object. Used to GC media that was staged
- * (uploaded) but never sent — a cancelled draft or a failed Meta send —
- * so abandoned attachments don't accumulate in the public bucket. The
- * DELETE is gated by the same account-scoped RLS policy as the upload,
- * so a caller can only remove objects under their own account folder.
- *
- * Best-effort: callers fire-and-forget and swallow errors (a missed
- * delete is a storage nit, not something to surface to the user).
+ * Envia um arquivo ao Storage por URL assinada emitida pelo SERVIDOR e devolve a referência a usar. Fluxo:
+ *   1. POST /api/media/upload-url — o servidor confere permissão da origem, tipo e tamanho por tipo e devolve um caminho
+ *      dentro da pasta da conta + token de upload;
+ *   2. o navegador sobe o arquivo com o token (a sessão do usuário não escreve mais no bucket);
+ *   3. POST /api/media/confirm — o servidor revalida o objeto gravado (MIME, tamanho e magic bytes); fora do permitido,
+ *      apaga e recusa.
+ * Lança com mensagem pronta para o usuário (os chamadores mostram em toast). `purpose` define bucket e permissão.
  */
-export async function deleteAccountMedia(
-  bucket: string,
-  path: string,
-): Promise<void> {
+export async function uploadAccountMedia(purpose: MediaPurpose, file: File): Promise<UploadAccountMediaResult> {
+  // Mesma checagem do servidor, antes de gastar uma ida e volta.
+  const pre = checkUploadRequest({ mime: file.type, size: file.size });
+  if (!pre.ok) throw new Error(pre.error);
+
+  const headers = { "Content-Type": "application/json" };
+  const urlRes = await apiFetch("/api/media/upload-url", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ purpose, name: file.name, mime_type: pre.mime, size: file.size }),
+  });
+  if (!urlRes.ok) throw new Error(await readError(urlRes, "Não foi possível enviar o anexo."));
+  const target = (await urlRes.json()) as { bucket: string; path: string; upload_token: string };
+
   const supabase = createClient();
-  const { error } = await supabase.storage.from(bucket).remove([path]);
-  if (error) throw new Error(error.message);
+  const { error: upErr } = await supabase.storage
+    .from(target.bucket)
+    .uploadToSignedUrl(target.path, target.upload_token, file, { contentType: pre.mime });
+  if (upErr) throw new Error("Não foi possível enviar o anexo.");
+
+  const confirmRes = await apiFetch("/api/media/confirm", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ purpose, path: target.path }),
+  });
+  if (!confirmRes.ok) throw new Error(await readError(confirmRes, "Não foi possível verificar o anexo."));
+  const confirmed = (await confirmRes.json()) as { path: string; url: string };
+  return { publicUrl: confirmed.url, path: confirmed.path };
+}
+
+/**
+ * Descarta um anexo em rascunho (enviado e não usado): rascunho cancelado, envio que falhou. O navegador não apaga mais direto no
+ * Storage (migration 351 removeu as policies de escrita): passa por POST /api/media/delete, que só apaga objeto da própria conta
+ * criado há pouco. Best-effort: os chamadores disparam sem esperar e ignoram o erro (anexo esquecido é sujeira, não falha).
+ */
+export async function deleteAccountMedia(purpose: MediaPurpose, path: string): Promise<void> {
+  const res = await apiFetch("/api/media/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ purpose, path }),
+  });
+  if (!res.ok) throw new Error(await readError(res, "Não foi possível descartar o anexo."));
 }
