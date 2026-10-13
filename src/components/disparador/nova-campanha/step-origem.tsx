@@ -2,6 +2,8 @@
 
 import { AlertTriangle, CheckCircle2, Download, Info, Loader2, Search, Upload, Users, X } from "lucide-react";
 import { useState } from "react";
+import Link from "next/link";
+import { Can } from "@/components/auth/can";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -176,7 +178,22 @@ export function StepOrigem({
           <div role="group" aria-labelledby="nc-canais-label" className="grid max-h-56 gap-2 overflow-y-auto sm:grid-cols-2">
             {offered.length === 0 && legacySelected.length === 0 ? (
               <p className="col-span-full rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
-                {channels.length === 0 ? "Nenhum canal de WhatsApp conectado." : "Nenhum canal habilitado para esta equipe."}
+                {channels.length === 0 ? "Nenhum canal de WhatsApp conectado." : "Nenhum canal habilitado para esta equipe."}{" "}
+                {channels.length === 0 ? (
+                  <Can permission="channels.manage" fallback="Peça a um administrador para conectar um canal.">
+                    <Link href="/canais" target="_blank" rel="noopener noreferrer" className="font-medium text-primary-text underline underline-offset-2">
+                      Conectar canal
+                    </Link>
+                  </Can>
+                ) : (
+                  <Can permission="teams.manage" fallback="Peça a um administrador para habilitar o canal na equipe.">
+                    Habilite o canal na equipe em{" "}
+                    <Link href="/equipes" target="_blank" rel="noopener noreferrer" className="font-medium text-primary-text underline underline-offset-2">
+                      Equipes
+                    </Link>
+                    .
+                  </Can>
+                )}
               </p>
             ) : (
               [...offered, ...legacySelected].map((c) => {
@@ -447,7 +464,15 @@ export function StepOrigem({
           </div>
           <div role="group" aria-labelledby="nc-tags-label" className="flex max-h-24 flex-wrap gap-2 overflow-y-auto rounded-md border border-border p-2">
             {tags.length === 0 ? (
-              <span className="text-xs text-muted-foreground">Nenhuma tabulação cadastrada.</span>
+              <span className="text-xs text-muted-foreground">
+                Nenhuma tabulação cadastrada.
+                <Can permission="tags.manage">
+                  {" "}
+                  <Link href="/tabulacoes" target="_blank" rel="noopener noreferrer" className="font-medium text-primary-text underline underline-offset-2">
+                    Criar tabulação
+                  </Link>
+                </Can>
+              </span>
             ) : (
               tags
                 .filter((t) => t.name.toLowerCase().includes(tagSearch.toLowerCase()))
