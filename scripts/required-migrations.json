@@ -441,6 +441,10 @@
       "kind": "registry"
     },
     {
+      "version": "338_dispatch_waha_rate",
+      "kind": "registry"
+    },
+    {
       "version": "345_contacts_write_rls_has_perm",
       "kind": "registry"
     }
